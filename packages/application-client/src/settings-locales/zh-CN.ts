@@ -1,4 +1,10 @@
 export const settingsDict = {
+  "composer.references.external": "此后端不支持已选的原生技能或对象引用。请移除这些选择，或切回原生 Agent。",
+  "composer.workflow.retrySameHandoff": "重试将保留原交办说明，以及以下固定历史背景和附件。",
+  "composer.workflow.newHandoff": "准备另一次交接",
+  "composer.file.external": "请移除来源文件引用，或切回原生 Agent 后发送。",
+  "composer.workflow.newAssist": "准备另一次整理任务",
+  "composer.file.onSend": "发送时由当前来源读取并固定文件版本。",
   "composer.workflow.cancelAssist": "取消整理任务",
   "composer.workflow.assistCancelling": "已请求取消，等待原任务结束",
   "composer.workflow.editRetry": "编辑并刷新未受理的请求",

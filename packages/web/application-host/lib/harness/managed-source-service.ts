@@ -31,6 +31,7 @@ export interface ManagedSourceServiceOptions {
   validateLiveSource: LiveSourceResolver;
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
+  draftSourceFiles?(input: import('@varin/application-client').ThreadDraftFileOptions, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSourceFilePage>;
   draftSourceSkills?(workspaceId: string, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   serviceOperation?: ManagedSourceServiceHandler;
   readCodeExchange?(input: import('./managed-remote-types.js').ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
@@ -342,6 +343,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
       return { workspaceId: resolved.workspaceId, canonicalRoot: registration.canonicalPath, hostId: options.hostId };
     },
+    async files(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (typeof input.path !== 'string' || !input.path.trim()) throw new SourceAdmissionError('source_changed');
+      if (!options.draftSourceFiles) throw new SourceAdmissionError('source_unavailable');
+      const resolved = await documents.resolveWorkspace({ path: input.path });
+      const registration = await documents.admitWorkspaceRegistration(resolved.workspaceId, signal);
+      if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
+      return options.draftSourceFiles({ ...input, source: { resourceOwner: { kind: 'local' }, path: registration.canonicalPath } }, signal);
+    },
     async skills(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       if (typeof input.path !== 'string' || !input.path.trim()) throw new SourceAdmissionError('source_changed');
@@ -413,13 +423,13 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           if (registered.rootId !== root.rootId || typeof registered.canonicalRoot !== 'string'
             || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(root.canonicalRoot)) throw new SourceAdmissionError('source_changed');
           physicalRoot = root;
-        } else if (source.mode === 'materialized' && input.scope.kind === 'run' && !resultOnly) {
+        } else if (source.mode === 'materialized' && (input.scope.kind === 'run' || source.environment_run_id) && !resultOnly) {
           const environmentRun = source.environment_run_id ?? (input.scope.kind === 'run' ? input.scope.runId : null);
           if (!environmentRun) throw new SourceAdmissionError('source_environment_unavailable');
           const handshake = kernel.handshake ?? await kernel.start();
           const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, environmentRun);
           const previous = await actor.getOperation(opened.materializationOperationId, signal);
-          if (!input.deferMaterialization && (!previous || previous.state !== 'committed')) {
+          if (input.scope.kind === 'run' && !input.deferMaterialization && (!previous || previous.state !== 'committed')) {
             const container = await actor.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
               canonicalRoot: location.storageRoot }, signal);
             if (typeof container.rootId !== 'string') throw new SourceAdmissionError('source_environment_unavailable');
@@ -434,7 +444,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           if (typeof registered.rootId !== 'string') throw new SourceAdmissionError('source_environment_unavailable');
           physicalRoot = { hostId: options.hostId, rootId: registered.rootId, canonicalRoot };
           if (opened.physicalRoot && !isDeepStrictEqual(opened.physicalRoot, physicalRoot)) throw new SourceAdmissionError('source_changed');
-          } else if (!input.deferMaterialization) throw new SourceAdmissionError('source_environment_unavailable');
+          } else if (input.scope.kind === 'run' && !input.deferMaterialization) throw new SourceAdmissionError('source_environment_unavailable');
         }
         let native:Awaited<ReturnType<NonNullable<KernelClient['nativeWorkspaces']>['acquire']>>|undefined;
         if(source.mode==='native_workspace'&&!resultOnly){

@@ -213,6 +213,7 @@ pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &[
     "file.lease.wait",
 ];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
+    ("runtime.child.user.receipt", "branchId"),
     ("runtime.child.user.accept", "branchId"),
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),

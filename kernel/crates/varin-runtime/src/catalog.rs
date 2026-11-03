@@ -51,7 +51,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 85;
+pub(crate) const FORMAT: i64 = 86;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -1579,6 +1579,7 @@ impl Catalog {
             // may adopt only the frozen preparation through its typed owner after those
             // receipts settle; generic read-only interruption would destroy that recovery.
             if delegation_model::is_selection(&op) { continue; }
+            if op.intent["kind"] == "user_child_dispatch_v1" { user_dispatch::recover_preparation(&tx, &mut op)?; continue; }
             if inference::recover(&tx, &mut op)? {
                 continue;
             }
@@ -1795,6 +1796,9 @@ pub mod launch_content;
 
 #[path = "catalog_delegation_model.rs"]
 pub mod delegation_model;
+#[cfg(test)]
+#[path = "catalog_user_dispatch_tests.rs"]
+mod user_dispatch_tests;
 #[path = "catalog_user_dispatch.rs"]
 pub mod user_dispatch;
 #[path = "catalog_delegated.rs"]
@@ -2024,6 +2028,7 @@ pub(super) fn request_cancel_operation_in(tx: &Transaction<'_>, key: &str) -> Re
         "operation.cancel_requested",
         Value::Null,
     )?;
+    user_dispatch::cancel_preparation(tx, &mut op)?;
     Ok(op)
 }
 

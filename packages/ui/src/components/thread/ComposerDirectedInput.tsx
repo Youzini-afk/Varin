@@ -7,7 +7,7 @@ import { directedComposerKey, type ComposerRecipient } from './composerWorkflowS
 import { ComposerRecipientPicker } from './ComposerRecipientPicker';
 import { CollaborationComposer } from './CollaborationComposer';
 
-export function ComposerDirectedInput({ api, identity, draftKey, recipient, select, onSent }: { api: ThreadsAPI; identity: ThreadIdentity; draftKey: string; recipient: ComposerRecipient; select(recipient?: ComposerRecipient): void; onSent(): void }) {
+export function ComposerDirectedInput({ api, identity, draftKey, referenceScope, recipient, select, onSent }: { api: ThreadsAPI; identity: ThreadIdentity; draftKey: string; referenceScope?: string; recipient: ComposerRecipient; select(recipient?: ComposerRecipient): void; onSent(): void }) {
   const { t } = useI18n(), [picking, setPicking] = React.useState(false);
   const key = directedComposerKey(draftKey, recipient.identity);
   const draft = useThreadDraftStore(state => state.drafts[key]);
@@ -23,6 +23,6 @@ export function ComposerDirectedInput({ api, identity, draftKey, recipient, sele
     </div>
     {picking && <div className="p-3"><ComposerRecipientPicker api={api} identity={identity} onSelect={next => { select(next); setPicking(false); }} /></div>}
     <div className="px-3 pt-1"><Button type="button" size="sm" variant="ghost" disabled={Boolean(draft?.collaboration?.attempts || draft?.collaboration?.sending)} onClick={copy}>{t('composer.workflow.copyConversationText')}</Button></div>
-    <CollaborationComposer key={key} api={api} identity={identity} draftKey={key} direct={recipient.identity} members={[{ threadId: recipient.identity.threadId, name: recipient.name, agentId: '', avatar: recipient.avatar ?? null }]} onSent={onSent} loadMembers={() => {}} moreMembers={false} />
+    <CollaborationComposer key={key} api={api} identity={identity} draftKey={key} referenceScope={referenceScope} direct={recipient.identity} members={[{ threadId: recipient.identity.threadId, name: recipient.name, agentId: '', avatar: recipient.avatar ?? null }]} onSent={onSent} loadMembers={() => {}} moreMembers={false} />
   </section>;
 }

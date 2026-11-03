@@ -744,7 +744,8 @@ impl ResourceSnapshotRead {
 
 #[path = "catalog_input_resources.rs"]
 mod inputs;
-pub(super) use inputs::{bind_input, invocations, preserve, same_skill_intent, validate_raw_input};
+pub(crate) use inputs::input_text;
+pub(super) use inputs::{bind_input, bind_edited_input, invocations, preserve, same_skill_intent, validate_raw_input, validate_edited_input};
 pub use inputs::{
     retained_activations, ExplicitSkillSelectionIdentity, InputResourcePreparation, PreparedExplicitSkill, ResourceActivation,
 };

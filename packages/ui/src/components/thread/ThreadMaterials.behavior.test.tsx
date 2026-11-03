@@ -418,7 +418,7 @@ function artifactConversationFixture() {
     list: unused, create: unused, update: unused, delete: unused, markRead: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),
     readMcpInteraction: unused, respondMcpInteraction: unused, reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot, submit, enqueue: unused, editInput: unused, cancelInput: unused, sendInputNow: unused, cancelRun: unused,
-    sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }), resolve: unused },
+    sources: { files: unused, draftFiles: unused, list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }), resolve: unused },
     prepareNavigation: unused, recoverySource: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused,
     decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused,

@@ -8,6 +8,7 @@ export async function prepareConversationDownload(api: ThreadWorkflowsAPI, selec
   const filename = `conversation-${crypto.randomUUID()}.${selection.format === 'json' ? 'json' : 'md'}`;
   const file = await directory.getFileHandle(filename, { create: true });
   try {
+    if (typeof file.createWritable !== 'function') throw new Error('This browser cannot stream a local export. Open this conversation in an up-to-date browser.');
     const writable = await file.createWritable();
     await api.export(selection, writable as WritableStream<Uint8Array>, signal);
     signal?.throwIfAborted();

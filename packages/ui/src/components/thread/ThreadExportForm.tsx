@@ -1,4 +1,5 @@
 import React from 'react';
+import { composerWorkflowFailure } from './composerWorkflowState';
 import { getRuntimeEndpointGeneration, threadMemorySourceText, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -14,14 +15,14 @@ export function ThreadExportForm({ api, identity, snapshot }: { api: ThreadsAPI;
   const [history, setHistory] = React.useState(snapshot.history), [previous, setPrevious] = React.useState(snapshot.historyPage.previous);
   const [busy, setBusy] = React.useState(false), [error, setError] = React.useState<string>();
   const [download, setDownload] = React.useState<Awaited<ReturnType<typeof prepareConversationDownload>>>();
-  const controller = React.useRef<AbortController | null>(null), retained = React.useRef(download);
-  const current = () => host === getRuntimeEndpointGeneration();
-  React.useEffect(() => () => { controller.current?.abort(); void retained.current?.dispose(); }, []);
+  const controller = React.useRef<AbortController | null>(null), retained = React.useRef(download), alive = React.useRef(true);
+  const current = () => alive.current && host === getRuntimeEndpointGeneration();
+  React.useEffect(() => { alive.current = true; return () => { alive.current = false; controller.current?.abort(); void retained.current?.dispose(); }; }, []);
   const run = async (action: () => Promise<void>) => {
     if (controller.current || !current()) return;
     controller.current = new AbortController(); setBusy(true); setError(undefined);
-    try { await action(); } catch (cause) { if (current() && !controller.current?.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { controller.current = null; setBusy(false); }
+    try { await action(); } catch (cause) { if (current() && !controller.current?.signal.aborted) setError(composerWorkflowFailure(cause)); }
+    finally { controller.current = null; if (current()) setBusy(false); }
   };
   const choice = (value: string, onChange: (value: string) => void, label: string) => <label className="block space-y-1"><span>{label}</span><select aria-label={label} value={value} disabled={busy} onChange={event => onChange(event.target.value)} className="w-full rounded border bg-background p-2">
     <option value="">{t('composer.workflow.allMessages')}</option>{history.map(item => <option key={item.id} value={item.id}>{item.source} · {threadMemorySourceText(item).slice(0, 80) || item.id}</option>)}

@@ -727,7 +727,8 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                 <ThreadComposer
                   editorRef={editor}
                   value={draft.text}
-                  onChange={(text) => patch({ text })}
+                  onChange={(text, references) => patch({ text, references })}
+                  references={draft.references} backendIdentity={`${c.configurationId}:${c.id}`}
                   identityKey={key}
                   models={[]}
                   providerId=""

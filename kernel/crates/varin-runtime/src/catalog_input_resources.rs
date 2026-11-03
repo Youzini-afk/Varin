@@ -214,7 +214,12 @@ pub(crate) fn explicit_command(input: &Value) -> Option<(&str, &str)> {
     Some((name, arguments.trim_matches(|character| matches!(character, '\u{0009}'..='\u{000d}' | ' ' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))))
 }
 pub(crate) fn validate_raw_input(input: &Value) -> Result<()> {
-    crate::output::validate_user_metadata(input)?;
+    validate_raw_input_inner(input, None)
+}
+pub(crate) fn validate_edited_input(input: &Value, previous: &Value) -> Result<()> {
+    validate_raw_input_inner(input, Some(previous))
+}
+fn validate_raw_input_inner(input: &Value, previous: Option<&Value>) -> Result<()> {
     if input
         .as_object()
         .is_some_and(|object| object.contains_key("skillInvocations"))
@@ -224,9 +229,10 @@ pub(crate) fn validate_raw_input(input: &Value) -> Result<()> {
         ));
     }
     explicit_selections(input)?;
-    execution_persistence::user_input_items(
+    execution_persistence::user_input_items_with_retained_media(
         "admission",
-        &crate::output::admit_user_input("admission", input)?,
+        &crate::output::admit_user_input_with_retained_media("admission", input, previous)?,
+        previous,
     )?;
     Ok(())
 }
@@ -314,6 +320,24 @@ pub(crate) fn bind_input(
     checkpoint: Option<&context::ContextCheckpoint>,
 ) -> Result<Value> {
     validate_raw_input(input)?;
+    bind_validated_input(input, revision, preparation, checkpoint)
+}
+pub(crate) fn bind_edited_input(
+    input: &Value,
+    revision: u64,
+    preparation: Option<&InputResourcePreparation>,
+    checkpoint: Option<&context::ContextCheckpoint>,
+    previous: &Value,
+) -> Result<Value> {
+    validate_edited_input(input, previous)?;
+    bind_validated_input(input, revision, preparation, checkpoint)
+}
+fn bind_validated_input(
+    input: &Value,
+    revision: u64,
+    preparation: Option<&InputResourcePreparation>,
+    checkpoint: Option<&context::ContextCheckpoint>,
+) -> Result<Value> {
     let selections = unique_selections(input)?;
     let parsed = if selections.is_empty() {
         explicit_command(input)

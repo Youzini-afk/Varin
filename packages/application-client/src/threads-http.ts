@@ -4,7 +4,7 @@ import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 
 export class ThreadRequestError extends Error {
-  constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', detail?: string) {
+  constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', readonly detail?: string) {
     super(code === 'extension-host-unavailable' ? 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.'
       : (code === 'workspace_backend_unavailable' || code.startsWith('resource-')) && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
@@ -177,7 +177,9 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     recoverySource: input => post('recovery/source', input),
     navigate: input => post('navigate', input),
     navigationReceipt: input => post('navigation/receipt', input),
-    sources: { list: (identity, signal) => post('source/list', identity ?? {}, signal),
+    sources: { files: (identity, options, signal) => post('source/files', { ...identity, ...options }, signal),
+      draftFiles: (options, signal) => post('source/draft-files', options, signal),
+      list: (identity, signal) => post('source/list', identity ?? {}, signal),
       resolve: (identity, request, signal) => post('source/resolve', { ...identity, ...request }, signal) },
     prepareSource: (input, signal) => post('source/prepare', input, signal),
     compact: input => post('context/compact', input),

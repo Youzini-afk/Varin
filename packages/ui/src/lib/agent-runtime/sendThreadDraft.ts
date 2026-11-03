@@ -1,3 +1,4 @@
+import { composerFileSelections } from '@/components/chat/composer/submit/fileSelections';
 import { getRuntimeEndpointGeneration, registerRuntimeEndpointSwitchBlocker, type ThreadIdentity, type ThreadPrepareSource, type ThreadsAPI } from '@varin/application-client';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useThreadDraftStore, type ThreadFirstSend, type ThreadPendingInput } from '@/stores/useThreadDraftStore';
@@ -64,13 +65,14 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       if (!read().pendingInput) {
         const preparedSource = read().preparedSource ?? await prepare(identity);
         assertHost();
+        const selected = composerFileSelections(request.selectedAttachments, request.referenceScope ?? '');
         const attachments = await prepareThreadFiles(api, identity, draftKey, request.files);
         assertHost();
         const materials = read().materials.map(({ snapshotId }) => ({ snapshotId }));
         const input: ThreadPendingInput = { kind: 'submit', status: 'sending', fingerprint: request.key,
-          editorText: request.editorText, fileIds: request.files.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
+          editorText: request.editorText, fileIds: request.files.map(file => file.id), selectedAttachmentIds: request.selectedAttachments?.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
-          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references, attachments: attachments.map(({ ref }) => ({ ref })),
+          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references, attachments: [...attachments.map(({ ref }) => ({ ref })), ...selected],
             model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
@@ -86,6 +88,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
         images: current.images.filter(image => !request.images.includes(image)),
         files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
+        selectedAttachments: current.selectedAttachments?.filter(file => !original.selectedAttachmentIds?.includes(file.id)),
         materials: current.materials.filter(material => !original.input.materials?.some(item => item.snapshotId === material.snapshotId)),
       }));
       return acceptedInputId;

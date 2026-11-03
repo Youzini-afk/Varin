@@ -7,7 +7,9 @@ export type ComposerReferenceTarget =
   | { kind: 'skill'; version: string; resourceId: string; locator?: ThreadSkillLocator }
   | { kind: 'thread'; identity: ThreadIdentity }
   | { kind: 'file' | 'directory'; path: string; workspacePath: string; sourceKey?: string }
-  | { kind: 'attachment'; snapshotId: string };
+  | { kind: 'attachment'; attachment: import('@varin/protocol').Attachment }
+  | { kind: 'draft-file'; fileId: string }
+  | { kind: 'backend-command'; name: string; backend: string };
 export interface ComposerReference {
   id: string;
   from: number;

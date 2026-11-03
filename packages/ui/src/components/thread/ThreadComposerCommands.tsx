@@ -2,6 +2,8 @@ import { ComposerActionForm } from './ComposerActionForm';
 import React from 'react';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { independentFollowup } from '@/lib/followupPresentation';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
@@ -16,9 +18,9 @@ import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { BotFollowDialog } from '@/components/sections/bots/BotFollowDialog';
 
-export function useThreadComposerCommands({ api, identity, snapshot, sourcePath, disabled, onHistory, onFork, refresh, onSources }: {
+export function useThreadComposerCommands({ api, identity, snapshot, sourcePath, disabled, onHistory, onFork, refresh, onSources, act }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; sourcePath?: string; disabled?: string;
-  onHistory(): void; onFork(head: string): Promise<void>; refresh(): Promise<void>; onSources(): void;
+  onHistory(): void; onFork(head: string): Promise<void>; refresh(): Promise<void>; onSources(): void; act(work: () => Promise<unknown>): Promise<void>;
 }): Record<string, ComposerCommandAction | undefined> {
   const { t } = useI18n();
   const thread = snapshot?.thread;
@@ -46,12 +48,12 @@ export function useThreadComposerCommands({ api, identity, snapshot, sourcePath,
     delete: { disabled: nativeDisabled, content: complete => <ComposerActionForm danger description={t(count > 1 ? 'sessions.sidebar.dialogs.deleteSession.withManySubtasks' : count ? 'sessions.sidebar.dialogs.deleteSession.withOneSubtask' : 'sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: thread?.title ?? '', count })} confirm={() => updateTree('delete')} onDone={complete} /> },
     context: { run: () => { verify(); openThreadContext(target, sourcePath); } },
     usage: { content: <ThreadTokenUsage identity={target} /> },
-    tasks: api.family ? { run: () => { verify(); useUIStore.getState().openContextPanelTab(sourcePath ?? '', { mode: 'threads', thread: target, dedupeKey: `threads:${target.threadId}:${target.branchId}` }); } } : undefined,
+    tasks: api.family ? { run: () => { verify(); useUIStore.getState().openContextPanelTab(useDirectoryStore.getState().currentDirectory || sourcePath || '', { mode: 'threads', thread: target, dedupeKey: `threads:${target.threadId}:${target.branchId}` }); } } : undefined,
     goal: snapshot ? { content: <ThreadGoal api={api.goals} identity={target} goals={snapshot.goals} sourceRunId={run?.id} refresh={refresh} /> } : undefined,
-    schedule: snapshot ? { content: <ThreadFollowups api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={target}
-      run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={Boolean(disabled)} act={async work => { verify(); await work(); await refresh(); }} cancelObservation={async id => { await api.cancelOperation(id); }} /> } : undefined,
+    schedule: snapshot ? { disabled: nativeDisabled ?? (!run && !snapshot.followups.some(independentFollowup) ? t('followups.needsRun') : undefined), content: <ThreadFollowups api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={target}
+      run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={Boolean(disabled)} act={work => act(async () => { verify(); await work(); })} cancelObservation={id => act(async () => { verify(); await api.cancelOperation(id); })} /> } : undefined,
     memory: snapshot && (thread?.bot_id || snapshot.context.checkpoint?.personalization) ? { content: <ThreadMemory identity={target} botId={thread?.bot_id ?? null} basis={snapshot.context.checkpoint?.personalization} expanded /> } : undefined,
-    follow: thread && !thread.bot_id ? { content: complete => <React.Suspense fallback={<p>{t('common.loading')}</p>}><BotFollowDialog identity={target} onClose={complete} /></React.Suspense> } : undefined,
+    follow: thread && !thread.bot_id ? { content: complete => <React.Suspense fallback={<p>{t('common.loading')}</p>}><BotFollowDialog embedded identity={target} onClose={complete} /></React.Suspense> } : undefined,
     mcp: { run: () => settings('mcp-connections') },
     terminal: { run: () => { verify(); if (sourcePath) useUIStore.getState().openContextSurface(sourcePath, 'terminal'); else onSources(); } },
     pet: isDesktopShell() ? { run: () => settings('companion') } : undefined,

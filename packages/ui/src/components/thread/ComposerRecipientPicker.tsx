@@ -1,6 +1,8 @@
 import React from 'react';
+import { composerWorkflowFailure } from './composerWorkflowState';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import type { FamilyMember } from '@varin/protocol';
+import { ChildState } from '@/components/conversation/childPresentation';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -20,7 +22,7 @@ export function ComposerRecipientPicker({ api, identity, onSelect }: { api: Thre
       const page = await api.family.list({ runtime: 'agent', threadId: identity.threadId, branchId: identity.branchId }, { includeSelf: false, query, ...(next ? { cursor: next } : {}) }, controller.signal);
       if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
       setMembers(old => next ? [...old.filter(member => !page.members.some(value => value.threadId === member.threadId)), ...page.members] : page.members); setCursor(page.nextCursor ?? null);
-    } catch (cause) { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(composerWorkflowFailure(cause)); }
     finally { if (pending.current === controller) { pending.current = null; setBusy(false); } }
   }, [api, host, identity.threadId, identity.branchId, query]);
   React.useEffect(() => { void load(); return () => pending.current?.abort(); }, [load]);
@@ -32,7 +34,7 @@ export function ComposerRecipientPicker({ api, identity, onSelect }: { api: Thre
       const name = member.name || member.task || member.agentId || member.threadId;
       return <button type="button" key={`${member.threadId}:${branch.branchId}`} disabled={busy} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-accent focus-visible:ring-2"
         onClick={() => { if (host === getRuntimeEndpointGeneration()) onSelect({ identity: { runtime: 'agent', threadId: member.threadId, branchId: branch.branchId }, name: `${name}${member.branches.length > 1 ? ` · ${index + 1}` : ''}`, avatar: member.avatar }); }}>
-        <AgentAvatar identity={member.threadId} avatar={member.avatar} size={24} /><span className="min-w-0 flex-1"><span className="block truncate">{name}</span><span className="block truncate typography-micro text-muted-foreground">{member.state} · {member.threadId} · {branch.branchId}</span></span>
+        <AgentAvatar identity={member.threadId} avatar={member.avatar} size={24} /><span className="min-w-0 flex-1"><span className="block truncate">{name}</span><span className="block truncate typography-micro text-muted-foreground"><ChildState state={member.state} /> · {member.threadId} · {branch.branchId}</span></span>
       </button>;
     }))}</div>
     {busy && <p role="status">{t('common.loading')}</p>}{!busy && !members.length && !error && <p>{t('composer.workflow.noRecipients')}</p>}

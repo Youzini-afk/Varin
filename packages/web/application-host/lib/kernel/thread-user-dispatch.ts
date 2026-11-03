@@ -27,7 +27,7 @@ export function parseThreadDispatchInput(value: unknown): ThreadDispatchInput {
       || !['threadId', 'branchId', 'headId'].every(key => nonempty(reference[key])) || !Array.isArray(reference.itemIds)
       || !reference.itemIds.length || reference.itemIds.some(value => !nonempty(value)) || new Set(reference.itemIds).size !== reference.itemIds.length;
   }))) return invalid('Select exact history items and their original history position');
-  try { parseAttachmentSelections(input.attachments); } catch (error) { throw new ThreadPreAdmissionError(error); }
+  try { parseAttachmentSelections(input.attachments); } catch (error) { throw new ThreadPreAdmissionError(error, 'handoff-preparation-failed'); }
   return input as unknown as ThreadDispatchInput;
 }
 function command(input: ThreadDispatchInput): UserChildDispatchCommand {
@@ -41,6 +41,9 @@ const receipt = (value: import('./protocol.generated.js').UserChildDispatchRecei
   return { ...value, actor: { kind: 'user' } };
 };
 export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; models: ModelsService; attachments: ThreadAttachmentOwner }) {
+  // Transient scheduling only. Catalog remains the identity/receipt owner. A failed
+  // repeat must not announce "not started" while an earlier request can still commit.
+  const pending = new Map<string, Promise<void>>();
   return {
     async catalog(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadDispatchCatalog> {
       const thread = await owners.runtime.thread(identity.threadId, signal);
@@ -57,6 +60,15 @@ export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; 
     },
     async dispatch(raw: ThreadDispatchInput, signal?: AbortSignal): Promise<ThreadDispatchReceipt> {
       const input = parseThreadDispatchInput(raw), selected = command(input);
+      const identity = JSON.stringify([input.threadId, input.branchId, input.key]);
+      const previous = pending.get(identity);
+      let release!: () => void;
+      const current = new Promise<void>(resolve => { release = resolve; });
+      pending.set(identity, current);
+      await previous;
+      try {
+      // Receipt lookup itself is not an admission attempt. An unavailable lookup
+      // cannot prove that the original command was never accepted.
       const old = await owners.runtime.userChildDispatchReceipt(selected, signal);
       if (old) return receipt(old);
       let preparedAttachments: Awaited<ReturnType<ThreadAttachmentOwner['prepare']>> = [];
@@ -82,7 +94,7 @@ export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; 
         dispatched = true;
         return receipt(await owners.runtime.acceptUserChildDispatch({ ...selected, preparedAttachments, preparedAttachmentMedia }, signal));
       } catch (error) {
-        let definitelyRejected = !dispatched;
+        let definitelyRejected = !dispatched || error instanceof KernelRequestError && error.settlement === 'not_dispatched';
         if (dispatched && error instanceof KernelRequestError && error.settlement === 'response') {
           // A completed native request can be reconciled. A disconnected request may still
           // commit later, so null from an opportunistic read must not authorize another key.
@@ -93,8 +105,12 @@ export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; 
         if (definitelyRejected && preparedAttachments.length) {
           await owners.attachments.releaseUnpublished(input, operationId, targetThreadId, preparedAttachments.map(value => value.ref)).catch(() => undefined);
         }
-        if (definitelyRejected && !(error instanceof ThreadPreAdmissionError)) throw new ThreadPreAdmissionError(error);
+        if (definitelyRejected && !(error instanceof ThreadPreAdmissionError)) throw new ThreadPreAdmissionError(error, 'handoff-preparation-failed');
         throw error;
+      }
+      } finally {
+        release();
+        if (pending.get(identity) === current) pending.delete(identity);
       }
     },
   };

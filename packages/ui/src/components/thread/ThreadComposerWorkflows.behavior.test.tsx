@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
+import { ThreadRequestError, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import { ThreadRememberForm } from './ThreadRememberForm';
 import { ComposerDirectedInput } from './ComposerDirectedInput';
 import { directedComposerKey, type ComposerRecipient } from './composerWorkflowState';
@@ -49,4 +49,17 @@ it('recipient changes and cancellation preserve separate ordinary and per-recipi
   expect(send.mock.calls[1]![1]).toEqual(failed);
   expect(useThreadDraftStore.getState().drafts.ordinary).toMatchObject({ text: 'Original draft', images: [{ data: 'image' }] });
   expect(useThreadDraftStore.getState().drafts[directedComposerKey('ordinary', second.identity)]?.text).toBe('Second directed draft');
+});
+
+it('memory rejection shows the owner conflict and only unlocks after explicit refresh', async () => {
+  const detail = 'The selected memory revision changed; refresh before editing.';
+  const memoryScopes = vi.fn(async () => [{ destination: { kind: 'thread', id: identity.threadId }, revision: 8 }]);
+  const remember = vi.fn().mockRejectedValue(new ThreadRequestError(409, 'memory-conflict', undefined, detail));
+  const api = { workflows: { memoryScopes, remember } } as unknown as ThreadsAPI;
+  await act(async () => root.render(<ThreadRememberForm api={api} identity={identity} draftKey="ordinary" initialText="Preserved memory draft" />));
+  await click('composer.confirm');
+  expect(container.textContent).toContain(detail); expect(container.querySelector('textarea')?.disabled).toBe(true);
+  await click('composer.workflow.refreshMemory');
+  expect(container.querySelector('textarea')?.disabled).toBe(false); expect(memoryScopes).toHaveBeenCalledTimes(2);
+  expect(useThreadDraftStore.getState().drafts['ordinary:remember']?.text).toBe('Preserved memory draft');
 });

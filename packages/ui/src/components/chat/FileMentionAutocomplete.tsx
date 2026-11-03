@@ -1,30 +1,32 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
-import type { FamilyMember } from '@varin/protocol';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadIdentity, type ThreadSource, type ThreadDraftSkillOptions, type ThreadsAPI } from '@varin/application-client';
+import type { Attachment, FamilyMember } from '@varin/protocol';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { getResolvedWorkbenchWorkspaceId, subscribeWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
 import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
 import { activeEditorTab, listOpenResourceIds } from '@/lib/workbench/editors/groups';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { Icon } from '@/components/icon/Icon';
+import { ChildState } from '@/components/conversation/childPresentation';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
-import { useFileSearchStore, type VarinFileSearchHit } from '@/stores/useFileSearchStore';
+import { useSourceFileCandidates } from './useSourceFileCandidates';
 import { useI18n } from '@/lib/i18n';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { ComposerMenu, type ComposerMenuHandle, type ComposerMenuItem } from './composer/ComposerMenu';
 
 export type FileMentionHandle = ComposerMenuHandle;
-type FileInfo = VarinFileSearchHit & { directory?: boolean };
+export interface ComposerAttachmentCandidate { id: string; name: string; attachment?: Attachment; fileId?: string }
+type FileInfo = { path: string; relativePath: string; name: string; directory?: boolean };
 export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
-  searchQuery: string; workspacePath?: string; api?: ThreadsAPI; identity?: ThreadIdentity;
-  attachments?: Array<{ id: string; name: string; snapshotId?: string }>;
+  source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; searchQuery: string; workspacePath?: string; api?: ThreadsAPI; identity?: ThreadIdentity;
+  attachments?: readonly ComposerAttachmentCandidate[]; fileSelectionDisabled?: string;
   onFileSelect(file: FileInfo): void; onThreadSelect?(identity: ThreadIdentity, name: string): void;
-  onAttachmentSelect?(snapshotId: string, name: string): void;
+  onAttachmentSelect?(attachment: ComposerAttachmentCandidate): void;
   onClose(): void; menuId?: string; onActive?(id?: string): void;
-}>(({ searchQuery, workspacePath, api, identity, attachments = [], onFileSelect, onThreadSelect, onAttachmentSelect, onClose, menuId = 'composer-references', onActive }, ref) => {
+}>(({ searchQuery, workspacePath, api, identity, source, pendingSource, attachments = [], fileSelectionDisabled, onFileSelect, onThreadSelect, onAttachmentSelect, onClose, menuId = 'composer-references', onActive }, ref) => {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const scope = JSON.stringify([host, identity?.threadId, identity?.branchId, workspacePath]);
+  const scope = JSON.stringify([host, identity?.threadId, identity?.branchId, source, pendingSource, workspacePath]);
   const workspaceId = React.useSyncExternalStore(subscribeWorkbenchWorkspace, () => workspacePath ? getResolvedWorkbenchWorkspaceId(workspacePath) : undefined, () => undefined);
   const workbench = useEditorWorkbench(workspaceId);
   const recentFiles: FileInfo[] = React.useMemo(() => {
@@ -36,33 +38,18 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
       if (!filePath) return [];
       const relativePath = filePath.slice(workspacePath.replace(/[\\/]+$/, '').length + 1);
       if (!relativePath.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase())) return [];
-      return [{ path: filePath, name: filePath.split(/[\\/]/).at(-1) ?? filePath, relativePath }];
+      return [{ path: relativePath, name: filePath.split(/[\\/]/).at(-1) ?? filePath, relativePath }];
     });
   }, [workspacePath, workbench, searchQuery]);
   const query = useDebouncedValue(searchQuery, 150);
-  const search = useFileSearchStore(state => state.searchFiles);
-  const [limit, setLimit] = React.useState(60);
-  const [retry, refresh] = React.useReducer(value => value + 1, 0);
-  const [files, setFiles] = React.useState<{ scope: string; query: string; rows: FileInfo[]; pending: Array<'file' | 'directory'>; errors: Partial<Record<'file' | 'directory', string>> }>();
+  const [fileRetry, refreshFiles] = React.useReducer(value => value + 1, 0);
+  const [directoryRetry, refreshDirectories] = React.useReducer(value => value + 1, 0);
+  const [retry, refreshThreads] = React.useReducer(value => value + 1, 0);
+  const files = useSourceFileCandidates({ api, identity, source, pendingSource, scope, query, requestedQuery: searchQuery, type: 'file', revision: fileRetry });
+  const directories = useSourceFileCandidates({ api, identity, source, pendingSource, scope, query, requestedQuery: searchQuery, type: 'directory', revision: directoryRetry });
   const [threads, setThreads] = React.useState<{ scope: string; query: string; rows: FamilyMember[]; loading: boolean; error?: string; cursor?: string | null }>();
   const [cursor, setCursor] = React.useState<string>();
-  React.useEffect(() => { setLimit(60); setCursor(undefined); }, [searchQuery, scope]);
-  React.useEffect(() => {
-    if (!workspacePath || query !== searchQuery) return;
-    let cancelled = false;
-    setFiles(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], pending: ['file', 'directory'], errors: {} }));
-    for (const type of ['file', 'directory'] as const) void search(workspacePath, query, limit, { type }).then(rows => {
-      if (cancelled || host !== getRuntimeEndpointGeneration()) return;
-      setFiles(previous => previous?.scope !== scope || previous.query !== query ? previous : { ...previous,
-        rows: [...previous.rows.filter(item => Boolean(item.directory) !== (type === 'directory')), ...rows.map(item => ({ ...item, directory: type === 'directory' }))],
-        pending: previous.pending.filter(item => item !== type) });
-    }, cause => {
-      if (cancelled || host !== getRuntimeEndpointGeneration()) return;
-      setFiles(previous => previous?.scope !== scope || previous.query !== query ? previous : { ...previous,
-        pending: previous.pending.filter(item => item !== type), errors: { ...previous.errors, [type]: cause instanceof Error ? cause.message : String(cause) } });
-    });
-    return () => { cancelled = true; };
-  }, [workspacePath, query, searchQuery, limit, retry, scope, search, host]);
+  React.useEffect(() => { setCursor(undefined); }, [searchQuery, scope]);
   React.useEffect(() => {
     if (!api?.family || !identity || query !== searchQuery) return;
     const controller = new AbortController();
@@ -74,21 +61,21 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
     }, cause => { if (!controller.signal.aborted) setThreads(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], loading: false, error: cause instanceof Error ? cause.message : String(cause) })); });
     return () => controller.abort();
   }, [api, identity, scope, query, searchQuery, cursor, retry, host]);
-  const visibleFiles = files?.scope === scope && files.query === searchQuery ? files : undefined;
   const visibleThreads = threads?.scope === scope && threads.query === searchQuery ? threads : undefined;
   const choices = new Map<string, () => void>();
   const items: ComposerMenuItem[] = [];
-  for (const attachment of attachments.filter(item => item.snapshotId && item.name.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase()))) {
+  for (const attachment of attachments.filter(item => (item.attachment || item.fileId) && item.name.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase()))) {
     const id = `attachment:${attachment.id}`;
-    choices.set(id, () => onAttachmentSelect?.(attachment.snapshotId!, attachment.name));
+    choices.set(id, () => onAttachmentSelect?.(attachment));
     items.push({ id, group: t('composer.group.attachments'), label: attachment.name, icon: <Icon name="attachment-2" className="size-4" /> });
   }
   const rank = (name: string) => name.toLocaleLowerCase() === searchQuery.toLocaleLowerCase() ? 0 : name.toLocaleLowerCase().startsWith(searchQuery.toLocaleLowerCase()) ? 1 : 2;
-  const fileRows = [...new Map([...recentFiles, ...(visibleFiles?.rows ?? [])].map(file => [`${Boolean(file.directory)}:${file.path}`, file])).values()].sort((a, b) => rank(a.name) - rank(b.name));
+  const allFiles: FileInfo[] = [...recentFiles, ...files.rows, ...directories.rows.map(item => ({ ...item, directory: true }))];
+  const fileRows = [...new Map(allFiles.map(file => [`${Boolean(file.directory)}:${file.path}`, file])).values()].sort((a, b) => rank(a.name) - rank(b.name));
   for (const directory of [false, true]) for (const file of fileRows.filter(item => Boolean(item.directory) === directory)) {
     const id = `${directory ? 'directory' : 'file'}:${file.path}`;
-    choices.set(id, () => onFileSelect(file));
-    items.push({ id, group: t(directory ? 'composer.group.directories' : 'composer.group.files'), label: file.name, description: file.relativePath,
+    choices.set(id, () => { if (!fileSelectionDisabled) onFileSelect(file); });
+    items.push({ id, group: t(directory ? 'composer.group.directories' : 'composer.group.files'), label: file.name, description: file.relativePath, disabled: fileSelectionDisabled,
       source: workspacePath, icon: directory ? <Icon name="folder" className="size-4" /> : <FileTypeIcon filePath={file.path} className="size-4" /> });
   }
   for (const member of visibleThreads?.rows ?? []) for (const branch of member.branches) {
@@ -96,15 +83,23 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
     const name = member.name || member.agentId || member.threadId;
     choices.set(id, () => onThreadSelect?.({ runtime: 'agent', threadId: member.threadId, branchId: branch.branchId }, name));
     items.push({ id, group: t('composer.group.threads'), label: name, description: `${member.task ?? ''} · ${branch.branchId}${member.parentThreadId ? ` · ${member.parentThreadId}` : ''}`,
-      value: member.state, icon: <AgentAvatar identity={member.threadId} avatar={member.avatar} size={18} /> });
+      value: <ChildState state={member.state} />, icon: <AgentAvatar identity={member.threadId} avatar={member.avatar} size={18} /> });
   }
-  const loading = (query !== searchQuery && Boolean(workspacePath || identity)) || Boolean(visibleFiles?.pending.length) || visibleThreads?.loading;
-  const moreFiles = Boolean(visibleFiles && (['file', 'directory'] as const).some(type => visibleFiles.rows.filter(item => Boolean(item.directory) === (type === 'directory')).length >= limit));
+  const waitingForQuery = query !== searchQuery;
+  const groups = [
+    { name: t('composer.group.files'), loading: files.loading || waitingForQuery && Boolean(identity || pendingSource), error: files.error, retry: refreshFiles, more: files.more },
+    { name: t('composer.group.directories'), loading: directories.loading || waitingForQuery && Boolean(identity || pendingSource), error: directories.error, retry: refreshDirectories, more: directories.more },
+    { name: t('composer.group.threads'), loading: visibleThreads?.loading || waitingForQuery && Boolean(identity), error: visibleThreads?.error, retry: refreshThreads, more: visibleThreads?.cursor ? () => setCursor(visibleThreads.cursor!) : undefined },
+  ];
+  const loading = groups.some(group => group.loading);
   const status = <>
-    {loading && <p role="status" className="px-2 py-2 typography-micro text-muted-foreground">{t('composer.menu.loading')}</p>}
-    {[...Object.values(visibleFiles?.errors ?? {}), visibleThreads?.error].filter(Boolean).map((error, index) => <p role="alert" key={index} className="px-2 py-2 typography-meta text-destructive">{error} <button type="button" onClick={refresh}>{t('composer.menu.retry')}</button></p>)}
-    {(moreFiles || visibleThreads?.cursor) && <button type="button" className="w-full px-2 py-2 text-left typography-meta" onClick={() => { if (moreFiles) setLimit(value => value + 60); if (visibleThreads?.cursor) setCursor(visibleThreads.cursor); }}>{t('composer.menu.more')}</button>}
-    {!items.length && !loading && <p className="px-2 py-3 typography-meta text-muted-foreground">{t('chat.fileMentionAutocomplete.empty')}</p>}
+    {fileSelectionDisabled && <p role="status" className="px-2 py-2 typography-meta text-muted-foreground">{fileSelectionDisabled}</p>}
+    {groups.map(group => <React.Fragment key={group.name}>
+      {group.loading && <p role="status" className="px-2 py-2 typography-micro text-muted-foreground">{group.name} · {t('composer.menu.loading')}</p>}
+      {group.error && <p role="alert" className="px-2 py-2 typography-meta text-destructive">{group.name} · {group.error} <button type="button" onClick={group.retry}>{t('composer.menu.retry')}</button></p>}
+      {group.more && <button type="button" className="w-full px-2 py-2 text-left typography-meta" onClick={group.more}>{group.name} · {t('composer.menu.more')}</button>}
+    </React.Fragment>)}
+    {!items.length && !loading && !groups.some(group => group.error) && <p className="px-2 py-3 typography-meta text-muted-foreground">{t('chat.fileMentionAutocomplete.empty')}</p>}
   </>;
   return <ComposerMenu ref={ref} id={menuId} scope={scope} query={searchQuery} items={items} onChoose={id => choices.get(id)?.()} onClose={onClose} onActive={onActive} status={status} />;
 });

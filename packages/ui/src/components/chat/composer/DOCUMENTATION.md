@@ -28,9 +28,30 @@ selection goes through the Run owner and its desired/active selection projection
 
 ## Input composition and delivery
 
-`ThreadResources` supplies skill selection. Choosing one inserts `/skill:<name>` into the draft; the
-Host resolves the resource against the real execution checkpoint. History projects skill metadata
-separately from the unchanged user text, and `ThreadSkillMaterials` reads the original resource.
+`CommandAutocomplete` exposes the original Workbench registry and one separate skill group. Only
+explicit composer contributions appear. Extensions keep their owner/activation path and namespaced
+invocations; backend commands retain their negotiated Harness/session as an editor reference. Exact
+whole-input commands execute locally, but ordinary prose and unknown commands remain ordinary input.
+Actions consume just the active fragment after success, never the rest of the draft. Subview controls
+cannot submit the surrounding message form; they receive real focus and keep their ordinary semantics.
+
+Skill candidates come from `resources.skills` for the actual execution or `draftSkills` for an explicit
+pending source. Selection keeps resource ID, version and optional pending-source locator, not a name
+lookup. The Host validates exact owner/workspace/domain/path/content identity and freezes ordered
+multi-skill activation at native admission. Accepted submit/enqueue/continuation retries reuse the
+original frozen body and receipt, including object references and attachment selections.
+
+`FileMentionAutocomplete` reads metadata from `sources.files` / `draftFiles`, typed attachment holders,
+and the actual task-family directory. Every type has its own paging, cancellation and error state.
+Only matching-source editor files contribute recency. Source paths remain relative to the admitted
+source, including managed and fixed sources; a navigation directory never grants read access.
+
+`editor/references` maps exact UTF-16 ranges through CodeMirror changes and undo/redo. Editing the
+visible text drops the old binding; copying plain text does not transport hidden authority. File choices
+also remain in `selectedAttachments`, a visible path/ref strip independent from inline marks. Submission
+validates its captured Host/source before the original attachment owner reads bytes. Removing a mark
+does not remove that strip, and no Blob is fabricated for a path or retained ref. Only the real receipt
+clears captured selections. Native selections unsupported by an external Harness are rejected visibly.
 
 Editor attachment chips and inline comments retain their Host, Thread/branch and document revisions.
 Submission projects captured context into the input while keeping unsaved content explicitly identified.
@@ -96,3 +117,12 @@ syntax at `tokenizeMarkdown`; the CodeMirror adapter tests only document/context
 repeating the same grammar examples for each scanner, mapper and editor layer. Autocomplete has its
 own caret/paste behavior. Rendering, focus, IME, mobile keyboards and real clipboard/drop behavior still require
 a browser or shell check; type-checking alone does not establish them.
+
+## Focused verification boundaries
+
+The menu/controller, editor state mapping, source-query generations and composer routing have portable
+behavior tests. Native integration covers frozen skills/object references, attachment receipt normalization,
+and explicit User dispatch. Export, memory CAS, separate recipient drafts and handoff/model-assist tasks
+have focused owner and UI tests. Browser-only checks still require real Chromium or a product shell:
+focus/implicit form actions, geometry, interrupted exit animation, actual IME, touch scrolling and visual
+viewport changes. Linkedom event assertions do not establish those browser behaviors.

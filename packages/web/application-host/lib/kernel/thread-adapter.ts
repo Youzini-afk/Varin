@@ -133,6 +133,26 @@ export class ThreadAdapter {
   bindContextAgent(owner: ContextAgentOwner): void { this.contextAgent = owner; }
   private readContextPolicy?: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>;
   bindContextPolicy(reader: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
+  private sourceFiles?: import('./thread-source-files.js').ThreadSourceFilesOwner;
+  bindSourceFiles(owner: import('./thread-source-files.js').ThreadSourceFilesOwner): void { this.sourceFiles = owner; }
+  async draftSourceFiles(options: import('@varin/application-client').ThreadDraftFileOptions, signal?: AbortSignal) {
+    if (!this.sourceFiles) throw new Error('Source file discovery is unavailable');
+    return this.sourceFiles.draftFiles(options, signal);
+  }
+  async files(identity: ThreadIdentity, options: import('@varin/application-client').ThreadSourceFilesOptions = {}, signal?: AbortSignal) {
+    const thread = await this.requireIdentity(identity, signal);
+    const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+    const runId = branch.active_run_id ?? branch.latest_run?.id;
+    const launch = runId ? await this.runtime.launch(runId, signal) : null;
+    const original = resourceThreadSource(launch?.selection.source ?? null);
+    const source = options.source ?? original;
+    signal?.throwIfAborted();
+    if (!source) return { entries: [], nextCursor: null };
+    if (!this.sourceFiles) throw new Error('Source file discovery is unavailable');
+    const sourceRunId = original && isDeepStrictEqual({ ...source, tools: [] }, original) ? runId : undefined;
+    await this.admitSource(source, identity, sourceRunId, signal);
+    return this.sourceFiles.files(identity, source, options, signal, sourceRunId);
+  }
   private sourceDirectory?: SourceDirectory;
   private botWorkProfile?: (botId: string, signal: AbortSignal) => Promise<{ homeDir: string; model: ThreadModel } | null>;
   private readonly coldBotPreparations = new Set<string>();
@@ -426,7 +446,7 @@ export class ThreadAdapter {
   async cancelOperation(operationId: string) {
     const current = await this.runtime.operationStatus(operationId);
     await this.requireRun(current.run_id);
-    if (current.executor === 'dispatch' || current.executor === 'code_retrieval') {
+    if (current.executor === 'dispatch' || current.executor === 'code_retrieval' || current.executor === 'user_dispatch') {
       await this.runtime.cancelTree({ kind: 'child', operation_id: operationId }); return this.runtime.operationStatus(operationId);
     }
     if ((current.executor === 'wait_child' || current.executor === 'retrieval_control') && current.waiting_on?.startsWith('child-wait:')) {

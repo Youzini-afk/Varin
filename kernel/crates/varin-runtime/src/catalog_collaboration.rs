@@ -475,7 +475,7 @@ impl Catalog {
                 && old.input_ref == prepared.input_ref
                 && old.source.handoff() == handoff.as_ref()
                 && &old.launch == child_launch
-                && super::attachments::descriptors(&self.db,"dispatch",&context.operation_id)? == prepared.attachments
+                && super::attachments::descriptors(&self.db,"dispatch",origin.operation_id())? == prepared.attachments
             {
                 return Ok(old);
             }
@@ -1455,6 +1455,7 @@ struct UnacceptedChildDependencyRead {
 /// Short original identities are captured under Catalog; body reads and delegation resolution
 /// run on a worker after releasing its shared lock, just like child admission.
 pub struct UnacceptedChildDependenciesRead {
+    user_dispatches: Vec<(UnacceptedChildDependencies, Value)>,
     dispatches: Vec<UnacceptedChildDependencyRead>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
@@ -1462,6 +1463,11 @@ pub struct UnacceptedChildDependenciesRead {
 impl UnacceptedChildDependenciesRead {
     pub fn load(self) -> Result<Vec<UnacceptedChildDependencies>> {
         let mut pending = Vec::new();
+        for (mut dependencies, reference) in self.user_dispatches {
+            let binding: Option<launches::HostToolBinding> = serde_json::from_value(self.content.load(&reference)?)?;
+            dependencies.mcp_binding = binding.filter(|binding| binding.provenance.servers.values().any(|server| matches!(server.owner.resource_owner, launches::SourceResourceOwner::ManagedHost { .. })));
+            if dependencies.mcp_binding.is_some() { pending.push(dependencies); }
+        }
         for read in self.dispatches {
             let selected = read.dispatch.load()?;
             let call = read.call.load(&self.content)?;
@@ -1494,7 +1500,7 @@ impl UnacceptedChildDependenciesRead {
     }
 }
 fn unaccepted_child_dependency_owner(db: &Connection, op: &Operation) -> Result<bool> {
-    if !matches!(op.executor.as_deref(),Some(DISPATCH_TOOL|"code_retrieval"))
+    if !matches!(op.executor.as_deref(),Some(DISPATCH_TOOL|"code_retrieval"|"user_dispatch"))
         || op.phase != OperationPhase::Terminal
         || op.execution_owner.is_none()
     {
@@ -1512,8 +1518,23 @@ impl Catalog {
     /// may replace the invocation that created those dependencies.
     pub fn capture_unaccepted_child_dependencies(&self) -> Result<UnacceptedChildDependenciesRead> {
         let mut dispatches = Vec::new();
+        let mut user_dispatches = Vec::new();
         for op in read_all::<Operation>(&self.db, "operations")? {
             if !unaccepted_child_dependency_owner(&self.db, &op)? {
+                continue;
+            }
+            if op.executor.as_deref() == Some("user_dispatch") {
+                if op.intent["kind"] != "user_child_dispatch_v1" || op.intent["actor"] != json!({"kind":"user"}) || op.execution_owner != Some(ExecutorOwner::Kernel) {
+                    return Err(RuntimeError::Conflict("User handoff cleanup provenance changed".into()));
+                }
+                let reference = op.intent.get("dependenciesRef").filter(|v|v.is_object()).cloned()
+                    .ok_or_else(||RuntimeError::Invalid("User handoff cleanup binding missing".into()))?;
+                let run = self.run(&op.run_id)?;
+                user_dispatches.push((UnacceptedChildDependencies {
+                    parent_run_id: run.id, parent_thread_id: run.thread_id,
+                    operation_id: op.id, execution_owner: ExecutorOwner::Kernel,
+                    execution_epoch: op.epoch, source_pin: None, mcp_binding: None,
+                }, reference));
                 continue;
             }
             let intent = tool_content::ToolIntent::from_operation(&op)?;
@@ -1544,6 +1565,7 @@ impl Catalog {
             });
         }
         Ok(UnacceptedChildDependenciesRead {
+            user_dispatches,
             dispatches,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
@@ -1565,7 +1587,7 @@ impl Catalog {
         }
         let op: Operation = record(&tx, "operations", operation_id)?;
         if !unaccepted_child_dependency_owner(&tx, &op)?
-            || !matches!(tool_content::ToolIntent::from_operation(&op)?.call().name.as_str(),DISPATCH_TOOL|"code_retrieval")
+            || if op.executor.as_deref() == Some("user_dispatch") { op.intent["kind"] != "user_child_dispatch_v1" || op.intent["actor"] != json!({"kind":"user"}) || op.execution_owner != Some(ExecutorOwner::Kernel) } else { !matches!(tool_content::ToolIntent::from_operation(&op)?.call().name.as_str(),DISPATCH_TOOL|"code_retrieval") }
         {
             return Err(RuntimeError::Conflict(
                 "dependency cleanup no longer owns this dispatch".into(),

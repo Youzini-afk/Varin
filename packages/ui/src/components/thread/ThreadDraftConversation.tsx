@@ -1,3 +1,5 @@
+import { selectComposerFile, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
+import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { composerInputReferences } from '@/components/chat/composer/submit/references';
 import React from 'react';
 import { createExternalAgentsHttpAPI, ExternalAgentError } from '@varin/application-client';
@@ -68,6 +70,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const referenceScope = JSON.stringify([generation, draftKey, draft.sourceSelection ?? draft.workspacePath]);
   const preparation = useExternalDraftPreparation({ draftKey, host: generation, configurationId: draft.harnessId, cwd: sourcePath, name: external?.name });
   const capabilities = preparation.snapshot?.capabilities;
+  const backendIdentity = draft.harnessId ? `${draft.harnessId}:${preparation.snapshot?.conversation.id ?? 'unprepared'}` : undefined;
   const externalReady = Boolean(preparation.snapshot?.connected && capabilities && !preparation.snapshot.conversation.needsReview);
   const externalChoice = draft.harnessId ? { model: draft.externalModels?.[draft.harnessId], ...draft.externalOptions?.[draft.harnessId] } : {};
   const changeExternalChoice = (choice: ExternalSessionChoice) => {
@@ -124,7 +127,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     const drafts = items.filter(item => item.sessionKey === draftKey); return drafts.length ? [{ key, drafts }] : [];
   });
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
-  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || editorContext.length || inlineDrafts.length);
+  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.selectedAttachments?.length || editorContext.length || inlineDrafts.length);
   const acceptsImages = draft.harnessId ? capabilities?.images : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
   const sending = externalBusy || preparation.busy || draft.firstSend?.status === 'sending';
   const locked = externalBusy || preparation.busy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
@@ -153,7 +156,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     void preparation.change({ sourceSelection, workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined });
   };
   const ignorePrepared = React.useCallback(() => {}, []);
-  const sendDisabled = sending || readingFiles || !hasInput || (draft.harnessId ? !external?.enabled || !externalReady : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
+  const unsupportedReferences = Boolean(draft.harnessId && (draft.selectedAttachments?.length || draft.references?.some(reference => reference.target.kind !== 'draft-file' && !(reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity) && draft.text.slice(reference.from, reference.to) === reference.text)));
+  const sendDisabled = sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !externalReady : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -169,6 +173,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       <form className="space-y-2" onSubmit={event => {
         event.preventDefault(); if (sendDisabled || reading.current || externalSending.current) return;
         if (draft.harnessId) {
+          if (unsupportedReferences) { setError(t('composer.references.external')); return; }
           const owner = generation;
           const current = () => mounted.current && currentDraft.current === draftKey && owner === getRuntimeEndpointGeneration();
           if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
@@ -198,10 +203,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           } }).finally(() => { if (current()) { externalSending.current = false; setExternalBusy(false); } });
           return;
         }
+        try {
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
           ...composerInputReferences(draft.text, draft.references, referenceScope), editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-          images: draft.images, files: draft.files ?? [], model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
+          images: draft.images, files: draft.files ?? [], selectedAttachments: draft.selectedAttachments, referenceScope, model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
           editorContext, inlineContext,
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
         };
@@ -210,8 +216,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         void sendThreadDraft(api, draftKey, request).then(inputId => {
           if (inputId && generation === getRuntimeEndpointGeneration()) handoff.accepted(request.key, inputId);
         }, () => { handoff.cancelSubmission(request.key); });
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || preparationError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || preparationError || (!draft.harnessId && modelError) || draft.firstSend?.error}</p>}
+        {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError || preparationError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || preparationError || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError}</p>}
+        {unsupportedReferences && <p role="alert" className="chat-input-column text-sm text-destructive">{t('composer.references.external')}</p>}
         {draft.harnessId && <div className="chat-input-column space-y-3">
           {authentication && <ExternalAuthentication authentication={authentication} pending={sending} authenticate={methodId => {
             setExternalFailure(undefined); void preparation.authenticate(methodId);
@@ -239,7 +247,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-        <ThreadComposer pendingSource={draft.sourceSelection ? { resourceOwner: draft.sourceSelection.resourceOwner, path: draft.sourceSelection.path } : sourcePath ? { resourceOwner: { kind: 'local' }, path: sourcePath } : undefined} referenceScope={referenceScope} editorRef={editor} value={draft.text} onChange={(text, references) => patch({ text, references })} references={draft.references} api={api} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
+        <ThreadComposer backendIdentity={backendIdentity} onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id }))} pendingSource={draft.sourceSelection ? { resourceOwner: draft.sourceSelection.resourceOwner, path: draft.sourceSelection.path } : sourcePath ? { resourceOwner: { kind: 'local' }, path: sourcePath } : undefined} referenceScope={referenceScope} editorRef={editor} value={draft.text} onChange={(text, references) => patch({ text, references })} references={draft.references} api={api} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
           backendCommands={capabilities?.commands}
           backendControls={draft.harnessId ? <HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /> : undefined}
@@ -260,7 +268,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             <ImageAttachmentStrip images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
               onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
               onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
-            <ThreadFileDrafts files={draft.files} locked={locked} onRemove={id => patch(current => ({ files: current.files?.filter(file => file.id !== id) }))} />
+            <ComposerSelectedFiles files={draft.selectedAttachments} locked={sending} onRemove={id => removeComposerFile(draftKey, id)} />
+          <ThreadFileDrafts files={draft.files} locked={locked} onRemove={id => patch(current => ({ files: current.files?.filter(file => file.id !== id) }))} />
             {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
           </div>
         </ThreadComposer>

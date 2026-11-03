@@ -1,5 +1,5 @@
 /** The caret and its explicit fragment are the only autocomplete target. */
-import type { FileMentionAutocompleteInputSource } from '../../fileMentionAutocompleteState';
+type FileMentionAutocompleteInputSource = 'manual' | 'paste';
 
 export type AutocompleteKind = 'command' | 'mention';
 export interface AutocompleteTrigger {

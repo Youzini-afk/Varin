@@ -1856,7 +1856,12 @@ fn object_reference_retry_uses_raw_intent_without_rebuilding_accepted_context() 
     assert_eq!(stored.content["text"], prepared_input["text"]);
     assert_eq!(stored.content["referenceIntent"], raw["referenceIntent"]);
     assert_eq!(stored.content["skillInvocations"][0]["body"], "selected reference skill");
-    assert_eq!(stored.content["attachments"][0]["data_base64"], raw["attachments"][0]["data_base64"]);
+    let media: varin_runtime::output::StoredMedia = serde_json::from_value(stored.content["attachments"][0].clone()).unwrap();
+    let read = varin_runtime::output::MediaReadParams { thread_id: "thread".into(), branch_id: "main".into(),
+        holder: varin_runtime::output::OutputMediaHolder::Input { input_id: receipt.input_id.clone(), expected_revision: stored.revision },
+        part_index: 0, chunk_index: 0, expected_content_ref: media.content_ref.content_object };
+    assert_eq!(db.capture_media_read(&read).unwrap().chunk(&|| false).unwrap().bytes_base64,
+        raw["attachments"][0]["data_base64"].as_str().unwrap());
 
     for pointer in ["/references/0/path", "/referenceIntent/materials/0/snapshotId", "/skills/0/version", "/attachments/0/data_base64"] {
         let mut different = retry.clone();
@@ -1977,4 +1982,56 @@ fn pending_skill_locator_binds_exact_frozen_descriptor_and_retries_without_curre
     }
     db.cancel_input(&receipt.input_id, 1).unwrap();
     finish(&mut db, &owner);
+}
+
+#[test]
+fn queued_object_reference_edits_retain_original_images_before_partial_validation() {
+    use varin_runtime::catalog::inputs::EnqueueInput;
+    use varin_runtime::output::{MediaReadParams, OutputMediaHolder, StoredMedia};
+    use varin_runtime::InputMode;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let owner = admit(&mut db, "edit-reference-owner", "edit selected skill", None);
+    let checkpoint = db.active_context("main").unwrap().unwrap();
+    let text = "Read @task /skill:skill";
+    let input = json!({"text":text,"references":[{"kind":"thread","threadId":"other","branchId":"branch","start":5,"end":10}],
+        "referenceIntent":{"text":text,"attachmentSelections":[{"ref":"attachment:original"}],"originalImageCount":1},
+        "fileAttachments":[{"ref":"attachment:original","filename":"notes.pdf","mimeType":"application/pdf","byteLength":4}],
+        "attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}],"imageReferences":[3]});
+    let prepared = db.prepare_enqueue(EnqueueInput { key:"reference-edit".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        mode:InputMode::Boundary,input:input.clone(),configuration:None }).unwrap().load().unwrap();
+    let receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let original = db.capture_queued_input(&receipt.input_id).unwrap().load().unwrap();
+    let media: StoredMedia = serde_json::from_value(original.content["attachments"][0].clone()).unwrap();
+    let mut edit = input.clone();
+    for field in ["attachments","imageReferences","fileAttachments"] { edit.as_object_mut().unwrap().remove(field); }
+    let prepared = db.prepare_input_edit(&receipt.input_id, original.revision, edit.clone()).unwrap().load().unwrap();
+    let unchanged = db.admit_input_edit(prepared).unwrap().load().unwrap();
+    assert_eq!(unchanged.content["attachments"], original.content["attachments"]);
+    assert_eq!(unchanged.content["imageReferences"], original.content["imageReferences"]);
+    assert_eq!(unchanged.content["fileAttachments"], original.content["fileAttachments"]);
+    assert_eq!(unchanged.content["referenceIntent"], original.content["referenceIntent"]);
+    edit["skills"] = json!([{"resourceId":"skill","version":"version-edit selected skill","start":11,"end":23}]);
+    let prepared = db.prepare_input_edit(&receipt.input_id, unchanged.revision, edit.clone()).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&checkpoint, ""))).load().unwrap();
+    let selected = db.admit_input_edit(prepared).unwrap().load().unwrap();
+    assert_eq!(selected.content["skillInvocations"][0]["body"], "edit selected skill");
+    assert_eq!(selected.content["attachments"], original.content["attachments"]);
+    assert_eq!(selected.content["fileAttachments"], original.content["fileAttachments"]);
+    let read = MediaReadParams { thread_id:"thread".into(),branch_id:"main".into(),
+        holder:OutputMediaHolder::Input { input_id:receipt.input_id.clone(),expected_revision:selected.revision },
+        part_index:0,chunk_index:0,expected_content_ref:media.content_ref.content_object.clone() };
+    assert_eq!(db.capture_media_read(&read).unwrap().chunk(&|| false).unwrap().bytes_base64,"b3JpZ2luYWw=");
+    let old_read = MediaReadParams { holder:OutputMediaHolder::Input { input_id:receipt.input_id.clone(),expected_revision:original.revision },..read };
+    assert!(db.capture_media_read(&old_read).is_err());
+    let mut forged = edit.clone();
+    forged["attachments"] = original.content["attachments"].clone();
+    assert!(db.prepare_input_edit(&receipt.input_id, selected.revision, forged).unwrap().load().is_err(), "stored refs cannot enter through user media");
+    edit["referenceIntent"]["originalImageCount"] = json!(2);
+    assert!(db.prepare_input_edit(&receipt.input_id, selected.revision, edit.clone()).unwrap().load().is_err(), "retained media count is exact");
+    edit["referenceIntent"]["originalImageCount"] = json!(1);
+    assert!(db.prepare_enqueue(EnqueueInput { key:"fresh-with-missing-image".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        mode:InputMode::Boundary,input:edit,configuration:None }).unwrap().load().is_err(), "fresh input cannot claim retained images");
+    db.run(&owner.run_id).unwrap();
 }

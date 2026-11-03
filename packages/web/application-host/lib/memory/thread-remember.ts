@@ -37,7 +37,7 @@ export function createThreadRemember(options: {
     if (thread.bot_id) {
       if (destination.kind !== 'user' && (destination.kind !== 'bot' || destination.id !== thread.bot_id)) throw new KnowledgeMutationError('conflict', 'The Bot memory destination changed');
       if (typeof input.revision !== 'string') throw new KnowledgeMutationError('invalid', 'Select the current memory revision');
-      const result = await options.memory.remember(memoryOwner(destination), { content: input.content, trigger: input.trigger,
+      const result = await options.memory.remember(memoryOwner(destination), { content: input.content, ...(input.trigger === undefined ? {} : { trigger: input.trigger }),
         expectedRevision: input.revision, source: { kind: 'user-extracted', threadId: input.threadId } },
       { id: origin, intent: JSON.stringify({ destination, revision: input.revision, content: input.content, trigger: input.trigger ?? '' }) });
       return { id: result.item.id, destination, content: result.item.content, created: result.created };

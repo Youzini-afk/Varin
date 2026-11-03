@@ -2,6 +2,7 @@ import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@vari
 import { parseThreadObjectReferences } from './thread-object-input.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import { parseThreadSkills } from './thread-skill-input.js';
+import { parseThreadSourceFileOptions } from './thread-source-files.js';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
@@ -137,6 +138,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
+    'source/files': ['runtime', 'threadId', 'branchId', 'source', 'query', 'type', 'limit', 'cursor'],
+    'source/draft-files': ['source', 'query', 'type', 'limit', 'cursor'],
     'source/list': ['runtime', 'threadId', 'branchId'],
     'source/resolve': ['runtime', 'threadId', 'branchId', 'resourceOwner', 'path'],
     'source/prepare': ['resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
@@ -423,6 +426,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     const source = object(body.source);
     if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Unsupported draft source field');
     return adapter.draftSkills({ source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
+  });
+  post('source/files', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
+    ...(body.source === undefined ? {} : { source: threadSource(body.source) }) }, signal));
+  post('source/draft-files', (body, signal) => {
+    const source = object(body.source);
+    if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Pending source is malformed');
+    return adapter.draftSourceFiles({ ...parseThreadSourceFileOptions(body),
+      source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
   post('resources/skills', (body, signal) => adapter.skills(identity(body),
     body.source === undefined ? {} : { source: threadSource(body.source) }, signal));

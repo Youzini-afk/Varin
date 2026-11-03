@@ -986,7 +986,7 @@ export interface MessageGetParams {
   messageId: string;
 }
 
-export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin};
+export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin} | {kind: 'agent_report'; executionId: string; operationId: string};
 
 export interface MessageReceipt {
   messageId: string;

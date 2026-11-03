@@ -74,6 +74,13 @@ vi.mock('@/components/icon/Icon', () => ({ Icon: () => <span /> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 // Exercise the conversation's delivery/ownership behavior through the composer port.
 // CodeMirror, popup interaction and layout are exercised in the actual desktop renderer.
+function ComposerCommandFixture({ actions }: { actions: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>['commandActions'] }) {
+  const [selected, setSelected] = React.useState<string>();
+  const content = selected && actions?.[selected]?.content;
+  return <>{['schedule', 'tasks'].map(key => <button key={key} type="button" disabled={!actions?.[key] || Boolean(actions[key]?.disabled)} title={actions?.[key]?.disabled}
+    onClick={() => { const action = actions?.[key]; if (action?.run) void action.run(); else setSelected(key); }}>Composer {key}</button>)}
+    {typeof content === 'function' ? content(() => setSelected(undefined)) : content}</>;
+}
 vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>) => <div
   onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); props.onFiles([...event.dataTransfer.files]); }}>
   {props.children}
@@ -102,10 +109,11 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
     onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); props.onFiles(files); } }} />
   <button type="button" disabled={props.attachmentDisabled || props.imageDisabled} onClick={props.onAttachImages}>Attach images</button>
   <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
-  <button type="button" disabled={!props.onCompact} onClick={props.onCompact}>Generate context summary</button>
+  <button type="button" disabled={!props.onCompact} onClick={() => { void Promise.resolve(props.onCompact?.()).catch(() => {}); }}>Generate context summary</button>
   <button type="button" onClick={props.onOpenHistory}>Open conversation history</button>
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
+  <ComposerCommandFixture actions={props.commandActions} />
 </div> }));
 vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
@@ -199,7 +207,7 @@ function fixture(active = false) {
       input.mode = 'interrupt'; input.run_id = runId; input.revision = revision + 1; return input;
     }),
     contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
-    sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }),
+    sources: { files: unused, draftFiles: unused, list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }),
       resolve: async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await getRegisteredRuntimeAPIs()!.documents.resolveWorkspace({ path: request.path })).workspaceId }) },
     recoverySource: unused, prepareNavigation: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, toolCalls: async () => [], operation: unused, cancelOperation: unused, retrievalTrace: unused, retrievalFileTarget: unused, resume: unused, retryPreparation: unused, events: async () => [],
@@ -663,7 +671,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   }));
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
-  f.api.collaboration = { exchange: vi.fn(), integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
+  f.api.collaboration = { dispatchCatalog: vi.fn(), dispatch: vi.fn(), exchange: vi.fn(), integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await act(async () => {
     const details = container.querySelector<HTMLDetailsElement>('[aria-label="harness.threads.title"] details')!;
@@ -2035,7 +2043,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
     total_bytes: new TextEncoder().encode(reportBody).length, text: reportBody }));
   const cancelTree = vi.fn<NonNullable<ThreadsAPI['collaboration']>['cancelTree']>(async target => ({ target: { kind: 'thread', thread_id: target.threadId }, cursor: 15, run_count: 0, child_count: 1, process_count: 0 }));
   const unused = async (): Promise<never> => { throw new Error('unused collaboration control'); };
-  f.api.collaboration = { exchange: unused, integration: vi.fn(), continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
+  f.api.collaboration = { dispatchCatalog: vi.fn(), dispatch: vi.fn(), exchange: unused, integration: vi.fn(), continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
     readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await openOverview('threads');
@@ -3874,4 +3882,60 @@ it('localizes known terminal failures, preserves unknown owner messages, and dis
   expect(container.querySelector('[aria-label="Run cancelled"]')?.textContent).toBe('已取消');
   expect(container.querySelector('[aria-label="Run failed"]')).toBeNull();
   expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('sends a visible selected file after its inline marker was deleted and retains the exact selection on uncertain retry', async () => {
+  const f = fixture();
+  const draftKey = threadComposerKey(threadHostKey(), identity);
+  useThreadDraftStore.getState().patch(draftKey, { text: '', selectedAttachments: [{ id: 'chosen-file', host: endpoint.generation,
+    filename: 'fixed report.txt', selection: { ref: 'attachment:fixed-report' }, attachment: { ref: 'attachment:fixed-report', filename: 'fixed report.txt', mimeType: 'text/plain', byteLength: 12 } }] });
+  f.submit.mockRejectedValueOnce(new Error('lost reply'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  expect(container.textContent).toContain('fixed report.txt');
+  const send = () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await act(async () => { send(); });
+  expect(f.submit).toHaveBeenCalledTimes(1);
+  const first = f.submit.mock.calls[0]![0];
+  expect(first.text).toBe(''); expect(first.attachments).toEqual([{ ref: 'attachment:fixed-report' }]);
+  expect(useThreadDraftStore.getState().drafts[draftKey].selectedAttachments).toHaveLength(1);
+  await act(async () => { send(); });
+  expect(f.submit.mock.calls[1]![0]).toEqual(first);
+  expect(useThreadDraftStore.getState().drafts[draftKey].selectedAttachments).toEqual([]);
+});
+
+it('composer schedule uses the original action boundary for visible failure, pending guards and exact registration retry', async () => {
+  const f = fixture(true); let fail!: (error: Error) => void;
+  const register = vi.fn<ThreadsAPI['followups']['register']>().mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; })).mockResolvedValueOnce({} as never);
+  f.api.followups.register = register;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Composer schedule').click()); await act(async () => button('Schedule a follow-up').click());
+  await edit('[aria-label="Follow-up time"]', '2030-02-03T04:05:06'); await edit('[aria-label="Follow-up instruction"]', 'Review the original result.');
+  await act(async () => button('Register one-time follow-up').click());
+  expect(register).toHaveBeenCalledTimes(1); expect(button('Register one-time follow-up').disabled).toBe(true);
+  await act(async () => button('Register one-time follow-up').click()); expect(register).toHaveBeenCalledTimes(1);
+  await act(async () => fail(new Error('Original schedule request could not be confirmed')));
+  expect(container.textContent).toContain('Original schedule request could not be confirmed');
+  await act(async () => button('Retry original follow-up').click());
+  expect(register).toHaveBeenCalledTimes(2); expect(register.mock.calls[1]![0]).toEqual(register.mock.calls[0]![0]);
+});
+it('composer schedule observation cancellation uses the conversation failure boundary', async () => {
+  const f = fixture(true), followup = logFollowup();
+  followup.observation = { operation_id: 'original-observer', state: 'waiting', delivery_pending: true, delivered: false } as NonNullable<typeof followup.observation>;
+  f.view.followups = [followup];
+  const cancel = vi.fn<ThreadsAPI['cancelOperation']>().mockRejectedValue(new Error('Original observation cancellation failed')); f.api.cancelOperation = cancel;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Composer schedule').click()); await act(async () => button('End follow-up observation').click());
+  expect(cancel).toHaveBeenCalledWith('original-observer'); expect(container.textContent).toContain('Original observation cancellation failed');
+});
+it('composer tasks opens the visible sidebar without replacing its exact Thread identity and empty schedule explains the missing Run', async () => {
+  const f = fixture(); f.api.family = { list: vi.fn() } as unknown as ThreadsAPI['family'];
+  useThreadDraftStore.getState().patch(threadComposerKey('host-a', identity), { workspacePath: '/different/source' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(button('Composer schedule').disabled).toBe(true);
+  expect(button('Composer schedule').title).toBe('Send a message in this conversation before scheduling a follow-up.');
+  await act(async () => button('Composer tasks').click());
+  const panels = useUIStore.getState().contextPanelByDirectory, panel = panels['/workspace/project'];
+  expect(panel?.isOpen).toBe(true); expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)).toMatchObject({ mode: 'threads', thread: identity });
+  expect(panels['/different/source']).toBeUndefined();
 });

@@ -32,6 +32,13 @@ describe('conversation export', () => {
     expect(text).not.toContain('provider-secret'); expect(text).not.toContain('credentials');
     expect(owners.runtime.historyPage).toHaveBeenNthCalledWith(2, expect.objectContaining({ headId: 'item:3', beforeId: 'item:2' }), undefined);
   });
+  it('exports original user text, including an empty original, instead of Host augmentation', async () => {
+    const owners = fixture([item(1, 'user', { userText: 'Read @task', text: 'Read @task\ninternal locator and resource context' }),
+      item(2, 'user', { userText: '', text: 'internal attachment context' }), item(3)]);
+    const text = await collect(exportThreadConversation(owners, selection));
+    expect(JSON.parse(text).messages.map((value: { text: string }) => value.text)).toEqual(['Read @task', '', 'message 3']);
+    expect(text).not.toContain('internal');
+  });
   it('validates inclusive range membership before producing bytes or loading history bodies', async () => {
     const owners = fixture();
     const parsed = JSON.parse(await collect(exportThreadConversation(owners, { ...selection, firstItemId: 'item:2', lastItemId: 'item:2' })));

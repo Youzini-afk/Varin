@@ -7,6 +7,7 @@
 
 | 场景 | 要确认的事实 |
 | --- | --- |
+| 输入框浏览器、触屏与读屏 | 验证真实 IME、焦点、移动键盘 viewport、滑动不误选、退出动效中断及扩展子视图；portable DOM／类型检查不能代替这些环境证据 |
 | 安装包流式会话断线、重开与停止 | 原历史、usage、工具回执追平，不重复执行；旧 Run 回执不能清算新 Run |
 | 原生进程和输出 | 对应平台 shell、PTY、后代停止、回执丢失与原输出恢复；PowerShell 5.1 等具体组合独立判断 |
 | Native Workspace 挂载 | Windows WinFsp、Linux FUSE、macOS FSKit/macFUSE 分别核验实际挂载、普通进程 I/O、checkpoint/fork、缓存／可写 mmap 边界、重启重新绑定、打开句柄排空和失败卸载；组件探测成功不等于挂载或数据恢复成功 |

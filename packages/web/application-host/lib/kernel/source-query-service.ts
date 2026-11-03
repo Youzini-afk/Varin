@@ -1,5 +1,6 @@
 /** Closed source services execute against the target's real admitted Storage handle.
  * The coordinator's Run is attribution; no target Catalog Run or ToolCall is created. */
+import { querySourceFiles } from './thread-source-files.js';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -505,6 +506,16 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
       }
       case 'check_path': await metadata(signal => owner.sources.checkPath(query, operation.path, signal)); return { checked: true };
       case 'routing_workspace': return metadata(signal => owner.sources.routingWorkspace(query, signal));
+      case 'files': {
+        await owner.sources.validate(query, active);
+        let drained = false;
+        try {
+          const result = await querySourceFiles((input, config) => owner.sources.compute(query, input,
+            { ...config, onDrained: () => { drained = true; } }), { source: query.source, physicalRoot: query.physicalRoot, runId: query.runId ?? null }, operation.options, active);
+          await owner.sources.validate(query, active);
+          return result;
+        } catch (error) { if (drained) throw new ManagedSourceDrainedError(error); throw error; }
+      }
       case 'compute': {
         if (['workspaceId', 'rootId', 'branchId', 'revision', 'pinId', 'objects'].some(key => Object.hasOwn(operation.input, key))) {
           throw new Error('Source computation cannot select another resource address');

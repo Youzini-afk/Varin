@@ -1181,8 +1181,26 @@ impl Catalog {
                 thread_id.clone()
             }
             TreeCancelTarget::Child { operation_id } => {
-                let child: super::delegated::ChildRelation =
-                    record(&tx, "child_tasks", operation_id)?;
+                // User dependency retention is already cancellable before there is a child
+                // relation. Resolve this under the same transaction as real child admission,
+                // so a Host status-read race cannot stop only half of an accepted task.
+                let child: Option<super::delegated::ChildRelation> =
+                    optional_record(&tx, "child_tasks", operation_id)?;
+                let Some(child) = child else {
+                    let op: Operation = record(&tx, "operations", operation_id)?;
+                    let run: Run = record(&tx, "runs", &op.run_id)?;
+                    if op.executor.as_deref() != Some("user_dispatch") || op.intent["kind"] != "user_child_dispatch_v1" || op.handed_off {
+                        return Err(RuntimeError::NotFound(operation_id.clone()));
+                    }
+                    if expected_parent_thread_id.is_some_and(|thread|thread != run.thread_id) {
+                        return Err(RuntimeError::Invalid("handoff does not belong to the expected parent Thread".into()));
+                    }
+                    super::request_cancel_operation_in(&tx, operation_id)?;
+                    let cursor = tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |row|read_number(row,0))?;
+                    let receipt=TreeCancellationReceipt { target:target.clone(), cursor,run_count:0,child_count:0,process_count:0 };
+                    tx.commit()?;
+                    return Ok(TreeCancellationCapture {receipt,run_ids:Vec::new(),process_ids:Vec::new()});
+                };
                 if expected_parent_thread_id.is_some_and(|thread| thread != child.parent_thread_id)
                 {
                     return Err(RuntimeError::Invalid(
@@ -1247,6 +1265,12 @@ impl Catalog {
                 )?;
             }
             super::request_cancel_run_in(&tx, &run.id)?;
+            let staged = {
+                let mut statement=tx.prepare("SELECT id FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')='user_dispatch' AND json_extract(body,'$.handed_off')=0 AND json_extract(body,'$.phase')!='terminal'")?;
+                let rows=statement.query_map([&run.id],|r|r.get::<_,String>(0))?;
+                rows.collect::<std::result::Result<Vec<_>,_>>()?
+            };
+            for operation in staged {super::request_cancel_operation_in(&tx,&operation)?;}
             // Terminal source Runs can still own live process-trigger registrations. Cancel
             // those original registrations without changing the source Run's terminal fact.
             super::followups::cancel_tree_source_run(&tx, &run.id)?;

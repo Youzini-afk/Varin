@@ -349,3 +349,47 @@ describe('accepted object reference retries', () => {
     expect(f.runtime.familyList).not.toHaveBeenCalled();
   });
 });
+
+it('merges file attachments with object/skill input and replays without reading attachment owners again', async () => {
+  const f = await fixture();
+  const text = 'Read @task with /skill:review';
+  const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: 5, end: 10 }];
+  const skill = f.a.snapshot.skills.find(item => item.name === 'review')!;
+  const skills = [{ resourceId: skill.id, version: skill.reference.version, start: text.indexOf('/skill:'), end: text.length }];
+  const file = { ref: 'attachment:fixed', filename: 'image.png', mimeType: 'image/png', byteLength: 4 };
+  const prepare = vi.fn(async () => [file]);
+  const read = vi.fn(async () => ({ attachment: file, stream: (async function* () { yield Buffer.from('file'); })() }));
+  f.adapter.bindAttachments({ prepare, read } as unknown as import('./thread-attachments.js').ThreadAttachmentOwner);
+  const input = { ...identity, key: 'attachment-and-ref', text, references, skills, attachments: [{ ref: 'attachment:selected' }], images, model, expectedHead: null };
+  await f.adapter.submit(input);
+  expect(f.runtime.submit.mock.calls[0]![0]).toMatchObject({ input: { userText: text, references, skills, fileAttachments: [file],
+    referenceIntent: { text, attachmentSelections: input.attachments, originalImageCount: 1 },
+    attachments: [...attachments, { media_type: 'image/png', data_base64: Buffer.from('file').toString('base64') }] }, inputPreparation: { skills: [{ resourceId: skill.id }] } });
+  f.runtime.inputReceipt.mockResolvedValue(f.submitReceipt);
+  prepare.mockRejectedValue(new Error('Original source is unavailable'));
+  expect(await f.adapter.submit(input)).toEqual(f.submitReceipt);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(f.runtime.inputReceipt.mock.calls.at(-1)![0].input).toMatchObject({ text, attachments,
+    referenceIntent: { text, attachmentSelections: input.attachments, originalImageCount: 1 } });
+});
+
+it('keeps omitted image edits as native-owner retention, including adding a skill to unchanged object text', async () => {
+  const f = await fixture();
+  const text = 'Read @task /skill:review';
+  const referenceIntent = { text, attachmentSelections: [{ ref: 'attachment:original' }], originalImageCount: 1 };
+  const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: 5, end: 10 }];
+  const fileAttachments = [{ ref: 'attachment:original', filename: 'notes.pdf', mimeType: 'application/pdf', byteLength: 4 }];
+  f.queued.content = { text, references, referenceIntent, fileAttachments,
+    attachments: [{ media_type: 'image/png', content_ref: { content_object: 'original-media-owner' }, source: { kind: 'conversation' } }] };
+  await f.adapter.editInput(f.queued.id, 1, text);
+  const omitted = f.runtime.editInput.mock.calls[0]![0];
+  expect(omitted.content).toEqual({ text, references, referenceIntent });
+  expect(omitted.content).not.toHaveProperty('attachments');
+  const descriptor = f.a.snapshot.skills.find(skill => skill.name === 'review')!;
+  const skills = [{ resourceId: descriptor.id, version: descriptor.reference.version, start: text.indexOf('/skill:'), end: text.length }];
+  await f.adapter.editInput(f.queued.id, 1, text, undefined, undefined, skills);
+  expect(f.runtime.editInput.mock.calls[1]![0]).toMatchObject({ content: { text, references, referenceIntent, skills },
+    inputPreparation: { skills: [{ resourceId: descriptor.id }] } });
+  expect(f.runtime.editInput.mock.calls[1]![0].content).not.toHaveProperty('attachments');
+});

@@ -1,4 +1,10 @@
 export const settingsDict = {
+  "composer.references.external": "This backend cannot receive the selected native skills or object references. Remove those selections or switch back to the native Agent.",
+  "composer.workflow.retrySameHandoff": "Retry keeps the original instructions, pinned context and attachments below.",
+  "composer.workflow.newHandoff": "Prepare another handoff",
+  "composer.file.external": "Remove the source file references or switch to the native Agent before sending this draft.",
+  "composer.workflow.newAssist": "Prepare another drafting task",
+  "composer.file.onSend": "File contents are fixed by the current source when you send.",
   "composer.workflow.cancelAssist": "Cancel drafting task",
   "composer.workflow.assistCancelling": "Cancellation requested; waiting for the original task to settle",
   "composer.workflow.editRetry": "Edit and reload after rejection",

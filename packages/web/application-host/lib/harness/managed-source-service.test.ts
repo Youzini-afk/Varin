@@ -607,3 +607,28 @@ it('waits for the exact original capture response and keeps uncertain terminatio
   await expect(discarded).rejects.toThrow('writer termination is unconfirmed');
   expect(f.serviceOperation).toHaveBeenCalledTimes(1);
 });
+
+it('metadata read scopes reopen only an existing materialized environment and never create one for a completed Run', async () => {
+  const { mkdtemp, mkdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { originalMaterializationLocation } = await import('../kernel/source-launch.js');
+  const root = await mkdtemp(join(tmpdir(), 'varin-source-metadata-'));
+  try {
+    const f = fixture();
+    Object.assign(f.kernel, { handshake: { hostId: 'target', storageRoot: root } });
+    const location = await originalMaterializationLocation(root, source.workspaceId, 'finished-run');
+    await mkdir(location.targetPath, { recursive: true });
+    const getOperation = vi.fn(async () => ({ state: 'committed', result: { status: 'materialized' } }));
+    f.fileRootRegister.mockResolvedValue({ rootId: 'original-environment', canonicalRoot: location.targetPath });
+    vi.spyOn(f.kernel, 'scoped').mockReturnValue({ readBranch: f.readBranch, getOperation,
+      fileRootRegister: f.fileRootRegister, fileMaterialize: f.fileMaterialize } as never);
+    const selected = { ...request, source: { ...source, mode: 'materialized' as const, environmentRunId: 'finished-run' } };
+    expect((await f.service.bind(principal, selected)).physicalRoot).toMatchObject({ rootId: 'original-environment', canonicalRoot: location.targetPath });
+    expect(f.fileMaterialize).not.toHaveBeenCalled();
+    getOperation.mockResolvedValue(null as never);
+    expect((await f.service.bind(principal, { ...selected, source: { ...selected.source, environmentRunId: 'never-started' } })).physicalRoot).toBeNull();
+    expect(f.fileRootRegister).toHaveBeenCalledTimes(1);
+    expect(f.fileMaterialize).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

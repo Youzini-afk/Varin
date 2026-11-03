@@ -2355,7 +2355,10 @@ pub(super) fn history_input_items(
 /// original entry identity so frozen branch ranges still address the durable history head.
 /// No attachment bytes are loaded or downgraded to text here.
 pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::execution::ConversationHistory> {
-    crate::output::validate_user_metadata(input)?;
+    user_input_items_with_retained_media(id, input, None)
+}
+pub(super) fn user_input_items_with_retained_media(id: &str, input: &Value, previous: Option<&Value>) -> Result<crate::execution::ConversationHistory> {
+    crate::output::validate_user_metadata_with_retained_media(input, previous)?;
     let mut parts = Vec::new();
     if let Some(text) = input.as_str() {
         parts.push(Content::Text { text: text.into() });

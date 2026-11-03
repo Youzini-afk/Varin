@@ -8,6 +8,7 @@ export function composerInputReferences(text: string, references: readonly Compo
     if (text.slice(reference.from, reference.to) !== reference.text) continue;
     if (reference.host !== getRuntimeEndpointGeneration()) throw new Error('The referenced object belongs to a different Host. Select it again.');
     const range = { start: reference.from, end: reference.to }, target = reference.target;
+    if (target.kind === 'backend-command') throw new Error('This command was selected for an external backend. Remove it or switch back to that backend.');
     if (target.kind === 'skill') skills.push({ ...range, resourceId: target.resourceId, version: target.version, ...(target.locator ? { locator: target.locator } : {}) });
     if (target.kind === 'thread') objects.push({ ...range, kind: 'thread', threadId: target.identity.threadId, branchId: target.identity.branchId });
     if ((target.kind === 'directory' || target.kind === 'file') && sourceKey !== undefined && target.sourceKey !== sourceKey) throw new Error('The referenced file belongs to an earlier source. Select it again.');

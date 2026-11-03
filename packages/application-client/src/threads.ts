@@ -140,6 +140,10 @@ export interface ThreadResolvedSource {
   path: string;
 }
 export interface ThreadSourcesAPI {
+  /** Metadata only from the current branch Source or an explicitly prepared replacement. */
+  files(identity: ThreadIdentity, options?: import('./thread-source-files.js').ThreadSourceFilesOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
+  /** Explicit pending source discovery before Thread creation. */
+  draftFiles(options: import('./thread-source-files.js').ThreadDraftFileOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
   /** A draft may discover configured Hosts before a Thread exists; discovery grants no source access. */
   list(identity: ThreadIdentity | null, signal?: AbortSignal): Promise<ThreadSourceTargets>;
   resolve(identity: ThreadIdentity, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
@@ -360,7 +364,7 @@ export interface ThreadResourceRefresh extends ThreadIdentity {
   supportingFiles?: Array<{ skillName: string; relativePath: string }>;
 }
 export interface ThreadResourcesAPI {
-  /** Global skills before Thread creation; no project or remote-source discovery is implied. */
+  /** Global skills and an explicitly selected pending source, without creating a Thread. */
   draftSkills(options?: ThreadDraftSkillOptions, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Metadata from this branch’s prepared resources, or the explicitly admitted pending source. */
   skills(identity: ThreadIdentity, options?: { source?: ThreadSource }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;

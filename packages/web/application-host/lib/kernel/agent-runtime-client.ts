@@ -698,7 +698,7 @@ export class AgentRuntimeClient {
   userChildDispatchReceipt(input: import('./protocol.generated.js').UserChildDispatchCommand, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchReceipt | null> {
     return this.kernel.agentRuntimeRequest('runtime.child.user.receipt', input, signal);
   }
-  acceptUserChildDispatch(input: import('./protocol.generated.js').UserChildDispatchCommand, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchReceipt> {
+  acceptUserChildDispatch(input: import('./protocol.generated.js').UserChildDispatchAcceptParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.child.user.accept', input, signal);
   }
   acceptChildContinuation(input: ChildContinuationAcceptParams, signal?: AbortSignal): Promise<DelegatedExecution> {

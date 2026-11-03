@@ -22,7 +22,7 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import type { ComposerReference } from '@/components/chat/composer/editor/references';
 import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
 import type { ComposerCommandAction, ComposerCommandDraftContext, WorkbenchCommandExecutionContext } from '@/lib/commands/surface-command-types';
-import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { FileMentionAutocomplete, type ComposerAttachmentCandidate, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { resolveAutocompleteTrigger, type FileMentionAutocompleteInputSource, type AutocompleteTrigger } from '@/components/chat/composer/language/triggers';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -32,9 +32,10 @@ import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource }: {
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[]): void;
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
+  backendIdentity?: string; attachmentCandidates?: readonly ComposerAttachmentCandidate[];
   backendCommands?: Array<{ name: string; description: string; inputHint?: string }>;
   commandActions?: Record<string, ComposerCommandAction | undefined>;
   onReferenceSelect?(reference: ComposerReference): void;
@@ -87,9 +88,9 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const [activeOption, setActiveOption] = React.useState<string>();
   const menuId = React.useId();
   const dismissed = React.useRef<string | undefined>(undefined);
-  const backendInvocation = React.useRef<string | undefined>(undefined);
-  const scope = JSON.stringify([getRuntimeEndpointGeneration(), identityKey, source, pendingSource, workspacePath, referenceScope]);
+  const scope = JSON.stringify([getRuntimeEndpointGeneration(), identityKey, source, pendingSource, workspacePath, referenceScope, backendIdentity]);
   const currentIdentity = React.useRef(scope); currentIdentity.current = scope;
+  const latestDraft = React.useRef({ value, references }); latestDraft.current = { value, references };
   const closeMenu = React.useCallback(() => { dismissed.current = inputRef.current?.getValue() ?? value; setAutocomplete(null); setLayer(undefined); setCommandError(undefined); }, [value]);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const pendingHistoryTextRef = React.useRef<string | null>(null);
@@ -122,7 +123,9 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     setAutocomplete(null);
   };
   const submit = () => {
-    const exact = knownCommands.find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend' && backendInvocation.current !== value);
+    if (references?.some(reference => reference.target.kind === 'backend-command' && value.slice(reference.from, reference.to) === reference.text && (reference.target.backend !== backendIdentity || reference.host !== getRuntimeEndpointGeneration()))) { setCommandError(t('composer.scope.changed')); return; }
+    const backend = references?.some(reference => reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity && reference.host === getRuntimeEndpointGeneration() && value.slice(reference.from, reference.to) === reference.text && value.trim() === `/${reference.target.name}`);
+    const exact = !backend && knownCommands.find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
     if (exact) { void runCommand(exact, { kind: 'command', query: exact.name, from: value.indexOf('/'), to: value.trimEnd().length }); return; }
     if (sendDisabled) return;
     if (ghostSuggestion) flushSync(acceptSuggestion);
@@ -168,10 +171,10 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     closeMenu(); inputRef.current?.focus();
   }
   async function runCommand(command: CommandInfo, fragment = autocomplete) {
-    if (commandPending.current) return;
+    if (scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || commandPending.current) return;
     if (command.disabled) { setCommandError(command.disabled); return; }
     const action = command.source === 'varin' ? actions[command.name] : undefined;
-    if (action?.content) { setLayer(command); setCommandError(undefined); return; }
+    if (action?.content) { if (fragment) setAutocomplete(fragment); dismissed.current = undefined; setLayer(command); setCommandError(undefined); return; }
     const registration = registrations.find(item => item.contributionId === command.id);
     if (!registration) { setCommandError(t('composer.menu.unavailable')); return; }
     const capturedScope = scope, host = getRuntimeEndpointGeneration(), originalText = value, originalReferences = references;
@@ -180,7 +183,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
       await registration.implementation.execute(commandContext);
       if (capturedScope === currentIdentity.current && host === getRuntimeEndpointGeneration()) {
         if (inputRef.current) consumeFragment(fragment);
-        else if (fragment) onChange(originalText.slice(0, fragment.from) + originalText.slice(fragment.to), originalReferences?.filter(item => item.to <= fragment.from || item.from >= fragment.to).map(item => item.from >= fragment.to ? { ...item, from: item.from - (fragment.to - fragment.from), to: item.to - (fragment.to - fragment.from) } : item));
+        else if (fragment && latestDraft.current.value === originalText && JSON.stringify(latestDraft.current.references) === JSON.stringify(originalReferences)) onChange(originalText.slice(0, fragment.from) + originalText.slice(fragment.to), originalReferences?.filter(item => item.to <= fragment.from || item.from >= fragment.to).map(item => item.from >= fragment.to ? { ...item, from: item.from - (fragment.to - fragment.from), to: item.to - (fragment.to - fragment.from) } : item));
       }
     } catch (error) { if (capturedScope === currentIdentity.current && host === getRuntimeEndpointGeneration()) setCommandError(error instanceof Error ? error.message : String(error)); }
     finally { commandPending.current = false; setCommandBusy(false); }
@@ -214,29 +217,28 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     if (!trigger) setLayer(undefined);
   }, [autocomplete]);
   const handleCommandSelect = (command: CommandInfo, mode: 'confirm' | 'complete') => {
-    if (!autocomplete || commandBusy) return;
+    if (!autocomplete || commandBusy || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
     if (command.source === 'backend') {
-      const replacement = `/${command.name} `; backendInvocation.current = value.slice(0, autocomplete.from) + replacement + value.slice(autocomplete.to);
-      inputRef.current?.replaceRange(autocomplete.from, autocomplete.to, replacement); closeMenu(); inputRef.current?.focus(); return;
+      if (!backendIdentity) { setCommandError(t('composer.menu.unavailable')); return; }
+      inputRef.current?.insertReference(autocomplete.from, autocomplete.to, `/${command.name}`, { id: crypto.randomUUID(), host: commandContext.composer!.host, target: { kind: 'backend-command', name: command.name, backend: backendIdentity } }); closeMenu(); inputRef.current?.focus(); return;
     }
     if (command.skill) {
       inputRef.current?.insertReference(autocomplete.from, autocomplete.to, `/${command.skill.invocation}`, {
-        id: crypto.randomUUID(), host: getRuntimeEndpointGeneration(), target: { kind: 'skill', resourceId: command.skill.resourceId, version: command.skill.version, locator: command.skill.locator },
+        id: crypto.randomUUID(), host: commandContext.composer!.host, target: { kind: 'skill', resourceId: command.skill.resourceId, version: command.skill.version, locator: command.skill.locator },
       }); closeMenu(); inputRef.current?.focus(); return;
     }
     if (mode === 'complete') { inputRef.current?.replaceRange(autocomplete.from, autocomplete.to, `/${command.name} `); closeMenu(); inputRef.current?.focus(); return; }
     void runCommand(command);
   };
   const applyReference = (text: string, target: ComposerReference['target']) => {
-    if (!autocomplete) return;
-    const reference = { id: crypto.randomUUID(), host: getRuntimeEndpointGeneration(), target, from: autocomplete.from, to: autocomplete.from + text.length, text };
+    if (!autocomplete || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
+    const reference = { id: crypto.randomUUID(), host: commandContext.composer!.host, target, from: autocomplete.from, to: autocomplete.from + text.length, text };
     onReferenceSelect?.(reference);
     inputRef.current?.insertReference(autocomplete.from, autocomplete.to, text, reference);
     closeMenu(); inputRef.current?.focus();
   };
   const handleFileSelect = (file: { name: string; path: string; relativePath?: string; directory?: boolean }) => {
-    if (!workspacePath) return;
-    applyReference(`@${file.relativePath || file.name}`, { kind: file.directory ? 'directory' : 'file', path: file.path, workspacePath, sourceKey: referenceScope ?? scope });
+    applyReference(`@${file.relativePath || file.name}`, { kind: file.directory ? 'directory' : 'file', path: file.path, workspacePath: workspacePath ?? '', sourceKey: referenceScope ?? scope });
   };
   const applyHistoryText = React.useCallback((value: string) => {
     pendingHistoryTextRef.current = value;
@@ -339,6 +341,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             references={references}
             autocomplete={autocomplete && !layer ? { id: menuId, activeId: activeOption } : undefined}
             onChange={(change) => {
+              latestDraft.current = { value: change.value, references: change.references };
               if (pendingHistoryTextRef.current === change.value) {
                 pendingHistoryTextRef.current = null;
                 return;
@@ -401,8 +404,9 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
               {layer ? typeof actions[layer.name]?.content === 'function' ? (actions[layer.name]!.content as (complete: () => void, context?: ComposerCommandDraftContext) => React.ReactNode)(() => { if (scope === currentIdentity.current) consumeFragment(); }, { text: value.slice(0, autocomplete.from) + value.slice(autocomplete.to), selectedText: (() => { const selection = inputRef.current?.getSelection(); return selection ? value.slice(selection.start, selection.end) : ''; })() }) : actions[layer.name]?.content as React.ReactNode : undefined}
             </CommandAutocomplete> : null}
           {autocomplete?.kind === 'mention' ? <FileMentionAutocomplete key="mention" ref={mentionRef} searchQuery={autocomplete.query}
-            api={api} identity={identity} menuId={menuId} onActive={setActiveOption} workspacePath={workspacePath}
-            attachments={attachmentNames.map((name, index) => ({ name, id: String(index) }))}
+            api={backendControls === undefined ? api : undefined} identity={identity} source={source} pendingSource={pendingSource} menuId={menuId} onActive={setActiveOption} workspacePath={workspacePath}
+            attachments={attachmentCandidates} fileSelectionDisabled={backendControls === undefined ? undefined : t('external.attachments')}
+            onAttachmentSelect={candidate => { if (candidate.attachment) applyReference(`@${candidate.name}`, { kind: 'attachment', attachment: candidate.attachment }); else if (candidate.fileId) applyReference(`@${candidate.name}`, { kind: 'draft-file', fileId: candidate.fileId }); }}
             onThreadSelect={(target, name) => applyReference(`@${name}`, { kind: 'thread', identity: target })}
             onFileSelect={handleFileSelect} onClose={closeMenu} /> : null}
           </AnimatePresence>

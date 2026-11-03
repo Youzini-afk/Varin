@@ -533,7 +533,7 @@ pub struct ChildWaitRegistrationPreparation {
 }
 pub struct PreparedChildWaitRegistration {
     pub(super) tool_name: String,
-    pub(super) origin: ChildAdmissionOrigin,
+    pub(super) context: ToolExecutionContext,
     pub(super) child_operation_id: String,
     pub(super) operation_revision: u64,
     pub(super) intent: super::tool_content::ToolIntent,
@@ -556,7 +556,7 @@ impl ChildWaitRegistrationPreparation {
         }
         Ok(PreparedChildWaitRegistration {
             tool_name: admitted.call.name,
-            origin: ChildAdmissionOrigin::Tool(self.context),
+            context: self.context,
             child_operation_id: self.child_operation_id,
             operation_revision: self.operation.revision,
             intent,

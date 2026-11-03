@@ -3794,3 +3794,36 @@ pub(crate) fn execute_source_resource(
         )
         .map_err(|f| f.error)
 }
+
+#[cfg(test)]
+mod child_lifecycle_context_tests {
+    use super::*;
+    fn binding()->ToolBinding {
+        serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"original-grant","runId":"child-run","threadId":"child-thread","workspaceId":"original-workspace","executionWorkspaceId":"original-execution","sourceMode":"live_root","enabledTools":[]})).unwrap()
+    }
+    #[test]
+    fn lifecycle_reads_keep_actual_run_without_inventing_a_model_origin() {
+        let (sent,requests)=mpsc::channel();
+        let resources=KernelResourceClient::new(move |request| {
+            sent.send(serde_json::to_value(&request.context).unwrap()).unwrap();
+            request.reply.send(Ok(json!({"idle":true}))).map_err(|_|KernelError::Storage("test response closed".into()))
+        }, |_|Ok(()),Default::default());
+        let binding=binding();let context=ResourceExecutionContext {run_id:binding.run_id.clone(),operation_id:"user-child-execution".into(),origin:None};
+        resources.require_child_root_idle(&binding,&context,&CancellationToken::default()).unwrap();
+        resources.child_storage_receipt(&binding,&context,"original-publication","working-result",&CancellationToken::default()).unwrap();
+        for _ in 0..2 {assert_eq!(requests.recv().unwrap(),json!({"run_id":"child-run","operation_id":"user-child-execution","origin":null}));}
+        assert!(context.tool_context().is_err());
+    }
+    #[test]
+    fn lifecycle_context_cannot_invoke_file_tools_or_discard_real_tool_origin() {
+        let resources=KernelResourceClient::new(|_|panic!("unauthorized action reached resource owner"), |_|Ok(()),Default::default());
+        let context=ResourceExecutionContext {run_id:"child-run".into(),operation_id:"child".into(),origin:None};
+        let result=resources.call_resource(&binding(),&context,ResourceOperation::FileRead(FileReadArgs {
+            path:"secret".into(),offset:0,length:None,start_line:None,end_line:None,unit:None,
+        }),false,&CancellationToken::default());
+        assert!(matches!(result,Err(ResourceFailure {error:KernelError::Authorization(_),dispatched:false})));
+        let original=ToolExecutionContext {run_id:"child-run".into(),operation_id:"real-tool".into(),origin:ToolOrigin::ModelStep {request_id:"actual-request".into()}};
+        let context=ResourceExecutionContext::from(&original);
+        let restored=context.tool_context().unwrap();assert_eq!(restored.origin,original.origin);assert_eq!(restored.operation_id,original.operation_id);
+    }
+}

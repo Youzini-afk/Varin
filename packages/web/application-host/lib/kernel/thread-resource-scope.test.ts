@@ -324,7 +324,7 @@ describe('pending source skill catalog', () => {
     const snapshot = await f.candidate();
     const { createThreadSkillInputPreparer } = await import('./thread-skill-input.js');
     const prepare = createThreadSkillInputPreparer(f.scope);
-    const selection = { resourceId: candidate.resourceId, version: candidate.version, locator: candidate.locator,
+    const selection = { resourceId: candidate.resourceId, version: candidate.version, ...(candidate.locator ? { locator: candidate.locator } : {}),
       start: 7, end: 20 };
     const resources = { snapshot, source: { resource_owner: f.source.resourceOwner, mode: 'fixed_branch' as const,
       workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } };

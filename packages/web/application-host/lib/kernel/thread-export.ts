@@ -35,7 +35,7 @@ export function exportPublicMessage(item: HistoryItem, includeTools: boolean): P
   };
   if (item.source === 'user') {
     const input = object(item.content);
-    result.text = typeof item.content === 'string' ? item.content : typeof input.text === 'string' ? input.text : '';
+    result.text = typeof item.content === 'string' ? item.content : typeof input.userText === 'string' ? input.userText : typeof input.text === 'string' ? input.text : '';
     if (Array.isArray(input.attachments)) input.attachments.forEach(addMedia);
     if (Array.isArray(input.fileAttachments)) input.fileAttachments.forEach(addFile);
     return result;

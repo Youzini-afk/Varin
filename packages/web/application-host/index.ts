@@ -1,3 +1,5 @@
+import { createThreadUserDispatch } from './lib/kernel/thread-user-dispatch.js';
+import { registerThreadUserDispatchRoutes } from './lib/kernel/thread-user-dispatch-routes.js';
 import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
 import { releaseDeletedAttachmentSources } from './lib/kernel/attachment-retention.js';
 import { createThreadAttachments } from './lib/kernel/thread-attachments.js';
@@ -79,6 +81,7 @@ import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
+import { createThreadSourceFiles } from './lib/kernel/thread-source-files.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
@@ -2170,6 +2173,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     } }));
   documentSources.bindAttachments(threadAttachments);
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
+  registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
   const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
@@ -2234,6 +2238,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindNextSteps(nextSteps);
   threads.bindContextPolicy((run, signal) => contextService.presentation(run, signal));
   threads.bindSourceDirectory(sourceDirectory);
+  const threadSourceFiles = createThreadSourceFiles({ kernel: kernelClient, documents: documentsAuthority,
+    validateLiveSource: liveSources.validate, compute: kernelCompute, remote: managedSourceConsumers.files });
+  threads.bindSourceFiles(threadSourceFiles);
   threads.bindContentMaintenance(contentMaintenance.request);
   externalAgents.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
@@ -2297,6 +2304,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     executionEnvironment: () => executionEnvironment.snapshot(),
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
+    draftSourceFiles: (input, signal) => threadSourceFiles.draftFiles(input, signal),
     draftSourceSkills: (workspaceId, signal) => threadResources.draftSourceSkills!(workspaceId, signal),
     recovery: targetRecovery.handle,
     readCodeExchange: targetExchangeReader,
@@ -2493,7 +2501,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const promptToolCatalog = createPromptToolCatalog({ runtime: agentRuntime, extensions: extensionRuntime, mcp: mcpAuthority, mcpScope: resolveMcpSettingsScope });
   registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt, resourceManagement.toolCatalog);
-  registerThreadExportRoutes(app, { runtime: agentRuntime }, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  registerThreadExportRoutes(app, { runtime: agentRuntime, attachments: threadAttachments }, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerThreadRememberRoutes(app, createThreadRemember({ runtime: agentRuntime, memory: memoryService, personalization: agentPersonalization }), uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),

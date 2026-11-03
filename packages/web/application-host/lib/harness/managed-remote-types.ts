@@ -131,6 +131,7 @@ export type SourceServiceOperation =
       identity: import('@varin/application-client').ThreadIdentity; snapshot: import('../kernel/protocol.generated.js').AgentResourceSnapshot; request?: import('../kernel/protocol.generated.js').AgentResourceRequest }
   | {kind:'structure_recipe';path:string;languageId:string|null}
   | {kind:'structure_units';path:string;languageId:string|null}
+  | { kind: 'files'; options: import('@varin/application-client').ThreadSourceFileOptions }
   | { kind: 'compute'; input: Omit<KernelComputeStartParams, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'> }
   | { kind: 'original_source'; branchId: string }
   | { kind: 'child_prepare'; execution: DelegatedExecution }
@@ -191,6 +192,7 @@ export interface ManagedSourceService {
   codeExchange(principal: ManagedSourcePrincipal, input: ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;
   resolve(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<ManagedSourceResolveReceipt>;
+  files(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest & import('@varin/application-client').ThreadSourceFileOptions, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSourceFilePage>;
   skills(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   prepare(principal: ManagedSourcePrincipal, input: ManagedSourcePrepareRequest, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   bind(principal: ManagedSourcePrincipal, input: ManagedSourceBindRequest, signal?: AbortSignal): Promise<ManagedSourceBinding>;
@@ -239,6 +241,7 @@ export interface SourceServiceResults {
   resource_list: import('../agent-resources/source-reader.js').ResourceDirectoryResult;
   structure_recipe: {recipeId:string|null};
   structure_units: import('../structure/types.js').StructureUnitsResult;
+  files: import('@varin/application-client').ThreadSourceFilePage;
   compute: import('../kernel/compute-runner.js').KernelComputeResult;
   original_source: import('./working-state/types.js').WorkingOriginalSource | null;
   child_prepare: ManagedChildSourceReceipt;

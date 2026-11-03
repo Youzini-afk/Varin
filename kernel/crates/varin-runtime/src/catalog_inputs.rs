@@ -88,7 +88,7 @@ impl InputOrigin {
             | Self::ComputerRequest { .. }
             | Self::ComputerEvent { .. } => HistorySource::Environment,
             Self::Message { identity, .. }
-                if matches!(identity.actor, super::messages::MessageActor::Agent { .. }) =>
+                if !matches!(identity.actor, super::messages::MessageActor::User) =>
             {
                 HistorySource::Agent
             }

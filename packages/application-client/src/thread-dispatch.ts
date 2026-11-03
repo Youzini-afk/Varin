@@ -1,6 +1,5 @@
 import type { ThreadIdentity, ThreadThinkingLevel } from './threads.js';
-// Same original-owner selection contract as the file handoff API.
-type AttachmentSelection = { ref: string } | { path: string };
+import type { AttachmentSelection } from '@varin/protocol';
 
 /** Metadata from the original native dispatch and configured-model owners. */
 export interface ThreadDispatchCatalog {

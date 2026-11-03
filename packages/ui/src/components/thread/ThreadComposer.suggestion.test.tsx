@@ -3,12 +3,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
+import type { ComposerReference } from '@/components/chat/composer/editor/references';
 import type { WorkbenchCommandRegistration, ComposerCommandAction } from '@/lib/commands/surface-command-types';
 import type { CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { ThreadComposer } from './ThreadComposer';
 
 const editor = vi.hoisted(() => ({ props: undefined as React.ComponentProps<typeof import('@/components/chat/composer/editor/ComposerEditor').ComposerEditor> | undefined,
-  selection: { start: 0, end: 0 }, menuKey: vi.fn(), registrations: [] as WorkbenchCommandRegistration[], commandProps: undefined as { onCommandSelect(command: CommandInfo, mode: 'confirm' | 'complete'): void; onClose(): void; additionalCommands: CommandInfo[] } | undefined }));
+  selection: { start: 0, end: 0 }, menuKey: vi.fn(), registrations: [] as WorkbenchCommandRegistration[], commandProps: undefined as { onCommandSelect(command: CommandInfo, mode: 'confirm' | 'complete'): void; onClose(): void; additionalCommands: CommandInfo[]; children?: React.ReactNode } | undefined }));
 vi.mock('@/lib/commands/surface-command-registry', () => ({ useWorkbenchCommandRegistrations: () => editor.registrations }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('./useComposerHeightGlide', () => ({ useComposerHeightGlide: () => {} }));
@@ -21,17 +22,22 @@ vi.mock('./ThreadPermissionControl', () => ({ ThreadPermissionControl: () => nul
 vi.mock('@/lib/extensions/workbench-registry', () => ({ WorkbenchContributionSlot: () => null }));
 vi.mock('@/components/motion/SwapIcon', () => ({ SwapIcon: ({ children }: React.PropsWithChildren) => children }));
 vi.mock('@/components/motion/SwapText', () => ({ SwapText: () => null }));
-vi.mock('motion/react', () => ({ AnimatePresence: ({ children }: React.PropsWithChildren) => children, motion: { div: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, ...props }, ref) => <div {...props} ref={ref}>{children}</div>) } }));
+vi.mock('motion/react', () => ({ useIsPresent: () => true, AnimatePresence: ({ children }: React.PropsWithChildren) => children, motion: { div: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, ...props }, ref) => <div {...props} ref={ref}>{children}</div>) } }));
 vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: React.PropsWithChildren) => children, TooltipTrigger: ({ children }: React.PropsWithChildren) => children, TooltipContent: () => null }));
 vi.mock('@/components/ui/dropdown-menu', () => ({ DropdownMenu: ({ children }: React.PropsWithChildren) => children, DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => children, DropdownMenuContent: () => null, DropdownMenuItem: () => null }));
-vi.mock('@/components/chat/CommandAutocomplete', () => ({ CommandAutocomplete: React.forwardRef((props: NonNullable<typeof editor.commandProps>, ref) => { editor.commandProps = props; React.useEffect(() => () => { editor.commandProps = undefined; }, []); React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return null; }) }));
+vi.mock('@/components/chat/CommandAutocomplete', () => ({ CommandAutocomplete: React.forwardRef((props: NonNullable<typeof editor.commandProps>, ref) => { editor.commandProps = props; React.useEffect(() => () => { editor.commandProps = undefined; }, []); React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return props.children; }) }));
 vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocomplete: React.forwardRef((_props, ref) => { React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return null; }) }));
 // Exercise the real composer keyboard/form routing through the existing editor port.
 vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEditor: React.forwardRef<ComposerEditorHandle, NonNullable<typeof editor.props>>((props, ref) => {
   editor.props = props;
   React.useImperativeHandle(ref, () => ({
     captureInsertion: () => ({ insertText: () => {}, dispose: () => {} }),
-    insertReference: () => {}, getValue: () => props.value, getSelection: () => editor.selection,
+    insertReference: (from, to, text, reference) => {
+      const insert = `${text} `;
+      editor.selection = { start: from + insert.length, end: from + insert.length };
+      props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection,
+        references: [{ ...reference, from, to: from + text.length, text }], fromPaste: false, insertedText: insert });
+    }, getValue: () => props.value, getSelection: () => editor.selection,
     insertText: text => {
       const next = props.value.slice(0, editor.selection.start) + text + props.value.slice(editor.selection.end);
       const position = editor.selection.start + text.length; editor.selection = { start: position, end: position };
@@ -55,12 +61,18 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
-function Harness({ initial = '', workspace = true, actions, identityKey = 'original' }: { initial?: string; workspace?: boolean; actions?: Record<string, ComposerCommandAction | undefined>; identityKey?: string }) {
+function Harness({ initial = '', workspace = true, actions, identityKey = 'original', composerKey, backendIdentity, backendCommands, onDraftChange }: {
+  initial?: string; workspace?: boolean; actions?: Record<string, ComposerCommandAction | undefined>; identityKey?: string;
+  composerKey?: string; backendIdentity?: string; backendCommands?: React.ComponentProps<typeof ThreadComposer>['backendCommands'];
+  onDraftChange?(value: string): void;
+}) {
   const [value, setValue] = React.useState(initial);
+  const [references, setReferences] = React.useState<readonly ComposerReference[]>([]);
   const [suggestion, setSuggestion] = React.useState<string | undefined>('好，继续完善吧');
   return <form ref={form => { if (form) form.requestSubmit = () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }; }}
     onSubmit={event => { event.preventDefault(); sent.push(value); }}>
-    <ThreadComposer commandActions={actions} identityKey={identityKey} editorRef={null} value={value} onChange={setValue} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
+    <ThreadComposer key={composerKey} commandActions={actions} identityKey={identityKey} backendIdentity={backendIdentity} backendCommands={backendCommands}
+      editorRef={null} value={value} references={references} onChange={(next, nextReferences) => { setValue(next); setReferences(nextReferences ?? []); onDraftChange?.(next); }} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
       modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={false} retrying={false}
       onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
@@ -138,9 +150,9 @@ function command(name = 'compact'): WorkbenchCommandRegistration {
   return { contributionId: `varin.builtin.composer.${name}`, meta: { commandId: `composer.${name}`, composer: { name, group: 'context', interaction: 'action' }, icon: 'command', keywords: [], order: 1 },
     implementation: { isAvailable: context => Boolean(context.composer?.actions[name]), execute: async context => { await context.composer?.actions[name]?.run?.(); } } };
 }
-async function type(value: string, position = value.length) {
+async function type(value: string, position = value.length, references: readonly ComposerReference[] = []) {
   editor.selection = { start: position, end: position };
-  await act(async () => editor.props!.onChange({ value, selection: editor.selection, references: [], fromPaste: false, insertedText: value }));
+  await act(async () => editor.props!.onChange({ value, selection: editor.selection, references, fromPaste: false, insertedText: value }));
 }
 it('a selected application action consumes only its fragment, while Tab only completes it', async () => {
   editor.registrations = [command()]; const execute = vi.fn();
@@ -168,4 +180,65 @@ it('an old asynchronous action cannot consume a newer source draft', async () =>
   await act(async () => root.render(<Harness initial="/compact" identityKey="new-source" actions={{ compact: { run: execute } }} />));
   await type('new draft'); await act(async () => finish());
   expect(editor.props!.value).toBe('new draft'); expect(sent).toEqual([]);
+});
+
+it.each(['confirm', 'complete'] as const)('ignores an exiting menu %s callback after the source or draft changes', async mode => {
+  editor.registrations = [command()]; const execute = vi.fn();
+  const actions = { compact: { run: execute } };
+  await act(async () => root.render(<Harness identityKey="old" actions={actions} />));
+  await type('original /compact');
+  const stale = editor.commandProps!;
+  await act(async () => root.render(<Harness identityKey="new" actions={actions} />));
+  // Keep identical text: the source guard must work independently of draft equality.
+  await act(async () => stale.onCommandSelect(stale.additionalCommands[0], mode));
+  expect(editor.props!.value).toBe('original /compact'); expect(execute).not.toHaveBeenCalled();
+  await type('original /compact');
+  const beforeEdit = editor.commandProps!;
+  await type('new private draft');
+  await act(async () => beforeEdit.onCommandSelect(beforeEdit.additionalCommands[0], mode));
+  expect(editor.props!.value).toBe('new private draft'); expect(execute).not.toHaveBeenCalled(); expect(sent).toEqual([]);
+});
+
+it('opens a whole content command after Tab completion has closed its menu', async () => {
+  editor.registrations = [command('model')];
+  await act(async () => root.render(<Harness />));
+  await type('/mod');
+  await act(async () => editor.commandProps!.onCommandSelect(editor.commandProps!.additionalCommands[0], 'complete'));
+  expect(editor.props!.value).toBe('/model '); expect(editor.commandProps).toBeUndefined();
+  await key('Enter');
+  expect(container.textContent).toContain('composer.model.scope'); expect(sent).toEqual([]);
+});
+
+it.each([false, true])('completing navigation after unmount preserves the persisted draft (edited: %s)', async edited => {
+  editor.registrations = [command('new')];
+  let finish!: () => void; let persisted = '';
+  const execute = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  await act(async () => root.render(<Harness actions={{ new: { run: execute } }} onDraftChange={value => { persisted = value; }} />));
+  await type('original /new');
+  await act(async () => editor.commandProps!.onCommandSelect(editor.commandProps!.additionalCommands[0], 'confirm'));
+  expect(execute).toHaveBeenCalledTimes(1);
+  if (edited) await type('original /new later edits');
+  await act(async () => root.render(null));
+  await act(async () => finish());
+  expect(persisted).toBe(edited ? 'original /new later edits' : 'original '); expect(sent).toEqual([]);
+});
+
+it.each(['original', 'other-harness:session', undefined])('retains backend command ownership across edits and remount into %s', async destination => {
+  editor.registrations = [command()]; const execute = vi.fn();
+  const actions = { compact: { run: execute } };
+  const backendCommands = [{ name: 'compact', description: 'Harness compact' }];
+  await act(async () => root.render(<Harness actions={actions} backendIdentity="original" backendCommands={backendCommands} />));
+  await type('/comp');
+  const backend = editor.commandProps!.additionalCommands.find(item => item.source === 'backend')!;
+  await act(async () => editor.commandProps!.onCommandSelect(backend, 'confirm'));
+  expect(editor.props!.value).toBe('/compact ');
+  const selected = editor.props!.references!;
+  expect(selected[0].target).toEqual({ kind: 'backend-command', name: 'compact', backend: 'original' });
+  // The editor reports the unchanged binding when only trailing whitespace is removed.
+  await type('/compact', '/compact'.length, selected);
+  await act(async () => root.render(<Harness composerKey="remounted" actions={actions} backendIdentity={destination} backendCommands={backendCommands} />));
+  await key('Enter');
+  expect(execute).not.toHaveBeenCalled(); expect(editor.props!.value).toBe('/compact');
+  expect(sent).toEqual(destination === 'original' ? ['/compact'] : []);
+  if (destination !== 'original') expect(container.textContent).toContain('composer.scope.changed');
 });

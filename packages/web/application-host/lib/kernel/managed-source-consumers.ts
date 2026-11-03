@@ -1,3 +1,4 @@
+import type { ThreadSourceFilesOwner } from './thread-source-files.js';
 import { skillLocatorId } from './thread-skill-selection.js';
 /** Coordinator adapters retain the selected endpoint and borrow only its original resource authority. */
 import { randomUUID } from 'node:crypto';
@@ -22,6 +23,7 @@ export interface ManagedSourceConsumerOptions {
   withRunAuthority<T>(runId: string, source: ThreadSource, consume: (access: ManagedSourceAccess) => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 export function createManagedSourceConsumers(options: ManagedSourceConsumerOptions): {
+  files: ThreadSourceFilesOwner;
   threads: ThreadSourceRemoteOwner;
   resources: Pick<ThreadResourceScope, 'prepare' | 'withScope'>;
   query: ManagedSourceQueryTransport;
@@ -119,5 +121,19 @@ export function createManagedSourceConsumers(options: ManagedSourceConsumerOptio
       }, signal);
     },
   };
-  return { threads, resources, query };
+  const files: ThreadSourceFilesOwner = {
+    files: (identity, source, input, signal, runId) => {
+      // A finished Run may have retired its tool authority. Metadata borrows a
+      // fresh read scope for the same Source, retaining the actual environment.
+      const selected = source.mode === 'materialized' && !source.environmentRunId && runId ? { ...source, environmentRunId: runId } : source;
+      return withRead(identity, selected, access => service(access, { kind: 'files', options: input }, signal), { ...(signal ? { signal } : {}) });
+    },
+    async draftFiles(input, signal) {
+      if (input.source.resourceOwner.kind !== 'managed_host') throw new Error('Managed source requires its exact target owner');
+      const client = await options.registry.source(input.source.resourceOwner, signal);
+      const { source, ...query } = input;
+      return client.files({ ...query, coordinatorHostId: options.coordinatorHostId(), path: source.path }, signal);
+    },
+  };
+  return { threads, resources, query, files };
 }

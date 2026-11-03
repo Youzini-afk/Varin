@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, useIsPresent } from 'motion/react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -13,7 +13,7 @@ export interface ComposerMenuItem {
   label: string;
   description?: string;
   source?: string;
-  value?: string;
+  value?: React.ReactNode;
   disabled?: string;
   icon?: React.ReactNode;
   next?: boolean;
@@ -32,7 +32,15 @@ export const ComposerMenu = React.forwardRef<ComposerMenuHandle, {
   title?: string; onBack?(): void;
 }>(({ id, items, query, scope, onChoose, onClose, onActive, status, children, title, onBack }, ref) => {
   const { t } = useI18n();
+  const present = useIsPresent();
   const container = React.useRef<HTMLDivElement>(null);
+  const layer = React.useRef<HTMLDivElement>(null);
+  const hasLayer = Boolean(children);
+  React.useLayoutEffect(() => {
+    if (!hasLayer) return;
+    const target = layer.current?.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="0"]') ?? layer.current;
+    target?.focus();
+  }, [hasLayer, title]);
   const isMobile = useUIStore(state => state.isMobile);
   const maxHeight = useMobileAutocompleteMaxHeight(container, isMobile);
   const reduced = usePrefersReducedMotion();
@@ -53,7 +61,7 @@ export const ComposerMenu = React.forwardRef<ComposerMenuHandle, {
   }, [onClose]);
   React.useImperativeHandle(ref, () => ({ handleKeyDown(key) {
     if (key === 'Escape') { if (children && onBack) onBack(); else onClose(); return true; }
-    if (children) return false;
+    if (children) return key === 'Enter';
     if (!items.length) return false;
     if (key === 'ArrowDown' || key === 'ArrowUp') { move((index + (key === 'ArrowDown' ? 1 : -1) + items.length) % items.length); return true; }
     if (key === 'Enter' || key === 'Tab') { if (item) onChoose(item.id, key === 'Tab' ? 'complete' : 'confirm'); return true; }
@@ -62,10 +70,17 @@ export const ComposerMenu = React.forwardRef<ComposerMenuHandle, {
   return <motion.div ref={container} initial={{ opacity: 0, y: reduced ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduced ? 0 : 5 }}
     transition={reduced ? INSTANT_TRANSITION : springTransition('settle')}
     className="absolute bottom-full left-0 z-[100] mb-2 flex max-h-80 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-lg"
-    onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (children && onBack) onBack(); else onClose(); } }}
-    style={maxHeight ? { maxHeight } : undefined}>
+    onClick={event => {
+      // Domain controls were also built for standalone panels. Their default button
+      // semantics must never submit the enclosing ordinary-message form.
+      const button = event.target instanceof Element ? event.target.closest('button') : null;
+      if (hasLayer && button && (!button.getAttribute('type') || button.getAttribute('type') === 'submit')) event.preventDefault();
+    }}
+    onKeyDown={event => { if (hasLayer && event.key === 'Enter' && event.target instanceof HTMLElement && event.target.tagName === 'INPUT' && !['button', 'submit', 'reset'].includes((event.target as HTMLInputElement).type)) { event.preventDefault(); event.stopPropagation(); return; } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (children && onBack) onBack(); else onClose(); } }}
+    aria-hidden={!present || undefined} style={{ ...(maxHeight ? { maxHeight } : {}), ...(!present ? { pointerEvents: 'none' } : {}) }}>
     {children && <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2 typography-ui-label"><button type="button" onClick={onBack} aria-label={t('composer.menu.back')}>←</button><span>{title}</span></div>}
-    <div className={cn('min-h-0 overflow-y-auto overscroll-contain p-1', children && 'hidden')} id={id} role="listbox" aria-label={t('composer.menu.title')}>
+    <div className={cn('min-h-0 overflow-y-auto overscroll-contain p-1', children && 'hidden')}>
+      <div id={id} role="listbox" aria-label={t('composer.menu.title')}>
       {items.map((entry, position) => <React.Fragment key={entry.id}>
         {(position === 0 || items[position - 1].group !== entry.group) && <div className="px-2 pb-1 pt-2 typography-micro text-muted-foreground">{entry.group}</div>}
         <div id={`${id}-${encodeURIComponent(entry.id)}`} role="option" aria-selected={index === position} aria-disabled={Boolean(entry.disabled)} title={entry.disabled ?? entry.description}
@@ -82,10 +97,11 @@ export const ComposerMenu = React.forwardRef<ComposerMenuHandle, {
           {entry.next && <span aria-hidden="true">›</span>}
         </div>
       </React.Fragment>)}
+      </div>
       {status}
       {!items.length && !status && <p className="px-2 py-3 typography-meta text-muted-foreground">{t('chat.commandAutocomplete.empty')}</p>}
     </div>
-    {children && <div className="min-h-0 overflow-y-auto p-3">{children}</div>}
+    {children && <motion.div ref={layer} tabIndex={-1} key={title} initial={{ opacity: 0, x: reduced ? 0 : 5 }} animate={{ opacity: 1, x: 0 }} transition={reduced ? INSTANT_TRANSITION : springTransition('settle')} className="min-h-0 overflow-y-auto p-3">{children}</motion.div>}
     {!children && <p className="border-t border-border/50 px-3 py-1.5 typography-micro text-muted-foreground">{t('composer.menu.keys')}</p>}
   </motion.div>;
 });
