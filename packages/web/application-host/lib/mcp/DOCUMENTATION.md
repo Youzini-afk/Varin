@@ -47,6 +47,11 @@ revision CAS. Source persistence and activation are separate receipt facts: a fa
 successful save reports persisted content with unavailable activation, and a later read can retry
 observation without replaying the write. Project trust and the prohibition on project-selected user
 model accounts apply to these patches exactly as they do to complete document saves.
+Original-file reads, atomic edits and watcher target canonicalization share short process-local
+admission, held until each target handle actually closes. This prevents Windows replacement from
+colliding with the Host's own readers; independent source paths remain independent. Writers retain
+the filesystem lock and revision CAS across processes. Read-only sources need no new write
+permission, and external filesystem failures remain failures rather than conflicts or write retries.
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader

@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { HostError } from "./configuration-errors.js";
+import { withConfigurationFileAccess } from "./configuration-file-access.js";
 type ConfigWatchChangeReason = 'change' | 'rename' | 'error';
 export interface ConfigWatchTarget { kind: 'document'; path: string; scope: 'global' | 'project' }
 interface ConfigWatchSubscription { target: ConfigWatchTarget; watchId: string }
@@ -158,7 +159,9 @@ class ConfigPathWatcher {
 
   async #bind(generation: number): Promise<void> {
     const directory = await canonicalPath(await deepestExistingDirectory(this.#filePath));
-    const filePath = await canonicalPath(this.#filePath);
+    // realpath.native transiently opens the target on Windows, so it shares
+    // the same admission as source reads rather than racing an atomic save.
+    const filePath = await withConfigurationFileAccess(this.#filePath, () => canonicalPath(this.#filePath));
     if (this.#disposed || generation !== this.#generation) return;
     const relativePath = relative(directory, filePath);
     const watchedSegment = firstPathSegment(relativePath);
