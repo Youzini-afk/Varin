@@ -9,7 +9,7 @@ type ReadPage = (offset: number, length: number, options: FileContentReadOptions
  * file version and tree identities across resource Hosts. The Rust receiver
  * validates the descriptor, ranges and owners before publishing any root. */
 export async function copyRangeContent(target: Pick<KernelScopedClient, 'putBlobStream' | 'releaseBlob'>,
-  reference: string, length: number, read: ReadPage, signal?: AbortSignal): Promise<KernelPutBlobResult> {
+  reference: string, length: number, read: ReadPage, signal?: AbortSignal, operationId?: string): Promise<KernelPutBlobResult> {
   const pageSize = 256 * 1024;
   const manifests: Buffer[] = [];
   let offset = 0;
@@ -46,11 +46,11 @@ export async function copyRangeContent(target: Pick<KernelScopedClient, 'putBlob
           position = page.nextOffset; yield bytes;
         }
       })();
-      const blob = await target.putBlobStream(chunks, { operationId: `file-version-range:${randomUUID()}`, byteLength, expectedHash: hash }, signal);
+      const blob = await target.putBlobStream(chunks, { operationId: operationId ? `${operationId}:range:${hash}` : `file-version-range:${randomUUID()}`, byteLength, expectedHash: hash }, signal);
       owners.push(blob.ownerId);
     }
     const result = await target.putBlobStream((async function* () { yield descriptor; })(),
-      { operationId: `file-version:${randomUUID()}`, byteLength: descriptor.length, expectedHash: reference }, signal);
+      { operationId: operationId ? `${operationId}:descriptor` : `file-version:${randomUUID()}`, byteLength: descriptor.length, expectedHash: reference }, signal);
     if (result.hash !== reference || result.byteLength !== length) throw new Error('Transferred file version changed identity');
     return result;
   } finally {

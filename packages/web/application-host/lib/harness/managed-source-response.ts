@@ -32,6 +32,16 @@ export function decodeManagedSourceReceiptRelease(input: { operationId: string; 
 export function decodeManagedSourceResponse<Operation extends SourceServiceOperation>(operation: Operation, value: unknown): SourceServiceResponse<Operation> {
   let valid = false;
   switch (operation.kind) {
+    case 'attachment_recover':
+      if (value === null) return null as SourceServiceResponse<Operation>;
+      valid = record(value) && record(value.attachment) && value.attachment.ref === operation.ref
+        && text(value.attachment.filename) && text(value.attachment.mimeType) && Number.isSafeInteger(value.attachment.byteLength)
+        && Number(value.attachment.byteLength) >= 0 && text(value.contentHash); break;
+    case 'attachment_capture': case 'attachment_describe': valid = record(value) && record(value.attachment) && value.attachment.ref === operation.ref
+      && text(value.attachment.filename) && text(value.attachment.mimeType) && Number.isSafeInteger(value.attachment.byteLength)
+      && Number(value.attachment.byteLength) >= 0 && text(value.contentHash); break;
+    case 'attachment_read': valid = record(value) && text(value.bytesBase64) && text(value.hash) && Number.isSafeInteger(value.byteLength)
+      && Number(value.byteLength) >= 0 && value.offset === operation.offset && Number.isSafeInteger(value.nextOffset) && typeof value.eof === 'boolean'; break;
     case 'schedule': return parseScheduleReceipt(value) as SourceServiceResponse<Operation>;
     case 'mcp': valid = record(value) && typeof value.executorStopped === 'boolean'
       && (value.ok === true && value.executorStopped === true && Object.hasOwn(value, 'value')
@@ -86,7 +96,7 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
       && (operation.request.command.action !== 'preview' || value.state.problem !== undefined || record(value.state.preview)
         && value.state.preview.threadId === operation.request.binding.childThreadId
         && value.state.preview.resultRevision === operation.request.binding.result.resultRevision); break;
-    case 'check_path': case 'language_release': case 'child_release': case 'child_unaccepted_release':
+    case 'attachment_discard': case 'attachment_cleanup': case 'attachment_release': case 'check_path': case 'language_release': case 'child_release': case 'child_unaccepted_release':
       if (value === null || value === undefined || record(value)) return undefined as SourceServiceResponse<Operation>;
       break;
     // These intentionally retain the original native/domain result shape. Its

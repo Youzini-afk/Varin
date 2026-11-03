@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { Input } from '@/components/ui/input';
+import { ThreadAttachments } from './ThreadAttachments';
 import { ThreadMaterialLinks } from './ThreadMaterials';
 import type { OutputBody, OutputMediaHolder, StoredMedia } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, readThreadMedia, ThreadRequestError, subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -11,7 +12,7 @@ import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
-type Reader = Pick<ThreadsAPI, 'mediaRead'>;
+type Reader = Pick<ThreadsAPI, 'mediaRead'> & Partial<Pick<ThreadsAPI, 'attachments'>>;
 type Scope = { api: Reader; identity: ThreadIdentity; holder: OutputMediaHolder };
 
 /** Only an explicit typed part reaches the byte reader. The holder supplies authority. */
@@ -133,6 +134,7 @@ export function ThreadOutput({ api, identity, holder, output, messageId }: Scope
     <ThreadMaterialLinks data={output.data} />
     {output.parts.map((part, index) => part.kind === 'text'
       ? <MarkdownRenderer key={index} messageId={`${messageId}:${index}`} content={part.text} />
+      : part.kind === 'attachment' ? api.attachments ? <ThreadAttachments key={index} api={{ attachments: api.attachments }} identity={identity} attachments={[part.attachment]} /> : <p key={index}>{part.attachment.filename}</p>
       : <ThreadMedia key={index} api={api} identity={identity} holder={holder} media={part.media} partIndex={index} />)}
     <details><summary>Output data</summary><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(output.data, null, 2)}</pre></details>
   </div>;

@@ -9,7 +9,7 @@
 | 安装、启动和使用 | [项目 README](../.github/readme/README.zh-CN.md)、[用户文档](../packages/docs/README.zh-CN.md) |
 | 系统如何装配、谁拥有状态 | [架构](architecture.md) |
 | Agent loop、历史、请求、工具、恢复与续接 | [运行时](runtime.md) |
-| 角色、任务复用、状态收纳和代码交换 | [Agent 协作](collaboration.md) |
+| 角色、任务复用、文件交接、状态收纳和代码交换 | [Agent 协作](collaboration.md) |
 | 长期总助手、事项、后台回报与连续记忆 | [Bot](bot.md) |
 | Codex、Claude Code、Pi、ACP 的会话与派发 | [外部 Agent](external-agents.md) |
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
@@ -48,7 +48,6 @@
 
 ## 持续演进的设计
 
-- [Agent 文件与附件交接](design/agent-file-handoff.md)：设计提案；统一派发、已有任务消息和回传文件的引用、版本、读取权限与生命周期。
 - [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。
 
 - [Bot 工作台：界面、交互与动效](design/bot-ui.md)、[交互稿](design/bot-preview/index.html)：桌面主体、形象和舞台已实施（第 12 节），其余部分见原文。

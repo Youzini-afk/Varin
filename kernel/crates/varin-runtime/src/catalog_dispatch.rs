@@ -52,6 +52,8 @@ pub struct ChildCapabilityDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DispatchInput {
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub attachments: Vec<super::attachments::AttachmentSelection>,
     #[serde(default, skip_serializing_if="Option::is_none")]
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
@@ -106,10 +108,11 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
+        for attachment in &self.attachments { attachment.validate()?; }
         if self.preset.is_some() && (self.model.is_some() || self.thinking.is_some()) {
             return Err(RuntimeError::Invalid("A preset retains its own model and thinking configuration; omit preset for free model selection".into()));
         }
@@ -500,6 +503,16 @@ impl Catalog {
     }
 }
 impl ChildDispatchSelection {
+    pub fn resolve_with_attachments(&self,input:&DispatchInput,attachments:&[super::attachments::Attachment])->Result<ResolvedChildSelection> {
+        let selected = self.resolve(input)?;
+        if attachments.iter().any(|file|file.is_direct_image())
+            && !selected.profile.model_selection_required
+            && selected.model.configuration.accepts_images != Some(true) {
+            return Err(RuntimeError::Invalid("The selected child model does not declare image input support".into()));
+        }
+        Ok(selected)
+    }
+
     pub fn external_preset(&self, input: &DispatchInput) -> Result<Option<ChildPreset>> {
         input.validate()?;
         let Some(preset) = self.catalog.presets.iter().find(|p| input.preset.as_deref() == Some(p.id.as_str()) && p.external.is_some()) else { return Ok(None); };
@@ -1301,7 +1314,7 @@ impl Catalog {
                             effect: Effect::None,
                         };
                     }
-                    execution.report = Some(ChildReport {
+                    execution.report = Some(ChildReport { attachments: Vec::new(),
                         error: None,
                         outcome: Outcome::Cancelled,
                         sender_thread_id: child.child_thread_id.clone(),

@@ -89,6 +89,15 @@ fn binary_file_apply_joins_the_original_journal_and_replays_after_temporary_owne
     let recovered = storage.file_tool_receipt(&read).unwrap();
     assert_eq!(recovered["receipt"]["status"], "applied");
     assert_eq!(recovered["tool"], "office_write");
+    assert_eq!(recovered["grantId"], "actor");
+    let artifact=storage.domain_record_value("workspace",first["attachment"]["ref"].as_str().unwrap()).unwrap().unwrap();
+    assert_eq!(artifact["runId"], "run");
+    assert_eq!(serde_json::from_str::<Value>(artifact["payloadJson"].as_str().unwrap()).unwrap()["sourceGrantId"], "actor");
+    assert_eq!(serde_json::from_str::<Value>(artifact["payloadJson"].as_str().unwrap()).unwrap()["managedSource"], false);
+    let projected = crate::file_tool_reconciliation::recovered_output(&recovered["receipt"], "office-edit").unwrap();
+    assert_eq!(projected.data["attachment"], first["attachment"]);
+    assert!(matches!(&projected.parts[..], [varin_runtime::output::OutputPart::Attachment { attachment }]
+        if attachment.byte_length == after.len() as u64 && attachment.reference == first["attachment"]["ref"].as_str().unwrap()));
     read.operation_id = "stale-edit".into();
     assert_eq!(storage.file_tool_receipt(&read).unwrap()["receipt"]["status"], "conflict");
     read.thread_id = "other-thread".into();
@@ -507,4 +516,22 @@ fn native_source_scope_scan_rechecks_record_and_original_grant_owners() {
     assert_eq!(grant_json(&storage), exact);
     drop(storage);
     fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn managed_attachment_capture_intent_has_exact_native_identity() {
+    let (mut storage,root)=fixture();
+    let capture="a".repeat(64);
+    let input=json!({"operationId":"capture-intent","workspaceId":"workspace",
+        "recordId":format!("attachment.managed-capture-intent:{capture}"),"recordType":"attachment.managed-capture-intent",
+        "state":"temporary","threadId":"thread","runId":"run",
+        "payloadJson":json!({"captureId":capture,"operationId":"send","ref":"attachment:selected","path":"input.txt"}).to_string(),
+        "ownerIds":[],"references":[]});
+    invoke(&mut storage,"storage.record.put",&input).unwrap();
+    let mut changed=input.clone();changed["operationId"]=json!("mismatched-record");changed["recordId"]=json!("attachment.managed-capture-intent:other");
+    assert!(invoke(&mut storage,"storage.record.put",&changed).is_err());
+    changed=input;changed["operationId"]=json!("missing-run");changed.as_object_mut().unwrap().remove("runId");
+    assert!(invoke(&mut storage,"storage.record.put",&changed).is_err());
+    drop(storage);fs::remove_dir_all(root).unwrap();
 }

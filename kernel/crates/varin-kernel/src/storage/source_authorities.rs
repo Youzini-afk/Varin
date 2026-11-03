@@ -1535,8 +1535,13 @@ impl Storage {
                 && authority.result.scope.thread_id() == p.thread_id && authority.result.source == p.source {
                 self.require_native_source_owner(&authority)?;
                 let (reply, _) = std::sync::mpsc::channel();
-                return self.file_tool_receipt(&crate::tools::SourceEffectReceiptRead { source: p.source,
-                    run_id: p.run_id, thread_id: p.thread_id, operation_id: p.operation_id, reply });
+                let receipt=self.file_tool_receipt(&crate::tools::SourceEffectReceiptRead { source: p.source.clone(),
+                    run_id: p.run_id.clone(), thread_id: p.thread_id.clone(), operation_id: p.operation_id.clone(), reply })?;
+                // Matching user-supplied Thread/Run names is not provenance. The
+                // artifact must have been written by this original Source grant.
+                if (!receipt["grantId"].is_null() || receipt["receipt"]["attachment"].is_object())
+                    && receipt["grantId"] != authority.result.grant_id { continue; }
+                return Ok(receipt);
             }
         }
         Err(denied("File receipt has no matching original source authority"))

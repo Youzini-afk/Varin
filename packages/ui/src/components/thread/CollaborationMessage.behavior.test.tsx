@@ -67,7 +67,7 @@ const members: CollaborationMember[] = [
   { threadId: 'worker', name: 'Layout review', agentId: 'V2', avatar: null },
 ];
 const dispatch: CollaborationFeedItem = { id: 'dispatch:original', kind: 'dispatch', acceptedCursor: 1, acceptedAtMs: 1000,
-  dispatch: { operationId: 'original', executionId: 'original-execution', senderThreadId: 'parent', senderBranchId: 'original-parent-branch',
+  dispatch: { attachments: [], operationId: 'original', executionId: 'original-execution', senderThreadId: 'parent', senderBranchId: 'original-parent-branch',
     targetThreadId: 'worker', targetBranchId: 'original-worker-branch', acceptedCursor: 1, acceptedAtMs: 1000, task: 'Original delegated task', preset: 'worker' } };
 it('shows dispatch participants and the original task, with navigation bound to the original branches', async () => {
   const onMember = vi.fn();
@@ -88,7 +88,7 @@ it('shows dispatch participants and the original task, with navigation bound to 
 
 it('keeps user identity distinct from the sending Thread and shows the actual recipient', async () => {
   const item: CollaborationFeedItem = { id: 'message:user', kind: 'message', acceptedCursor: 2, acceptedAtMs: 2000,
-    message: { messageId: 'user', senderThreadId: 'parent', senderBranchId: 'original-parent-branch', targetThreadId: 'worker', targetBranchId: 'worker-branch',
+    message: { attachments: [], messageId: 'user', senderThreadId: 'parent', senderBranchId: 'original-parent-branch', targetThreadId: 'worker', targetBranchId: 'worker-branch',
       actor: { kind: 'user' }, kind: 'request', replyTo: null, acceptedCursor: 2, acceptedAtMs: 2000, text: 'Please check the result',
       state: 'queued', activation: { state: 'pending', executionId: null, holdReason: null }, replyWait: null, deliveredCursor: null, deliveredRunId: null } };
   await act(async () => root.render(<CollaborationMessage item={item} members={members} expanded={false}
@@ -101,7 +101,7 @@ it('keeps user identity distinct from the sending Thread and shows the actual re
 it('shows a final task reply from the child to its organizer and opens the original child branch', async () => {
   const onMember = vi.fn();
   const item: CollaborationFeedItem = { id: 'report:execution', kind: 'report', acceptedCursor: 3, acceptedAtMs: 3000,
-    report: { operationId: 'original', executionId: 'execution', senderThreadId: 'worker', senderBranchId: 'original-worker-branch',
+    report: { attachments: [], operationId: 'original', executionId: 'execution', senderThreadId: 'worker', senderBranchId: 'original-worker-branch',
       targetThreadId: 'parent', targetBranchId: 'original-parent-branch', acceptedCursor: 3, acceptedAtMs: 3000,
       outcome: 'succeeded', text: 'Final answer from the child' } };
   await act(async () => root.render(<CollaborationMessage item={item} members={members} expanded={false}

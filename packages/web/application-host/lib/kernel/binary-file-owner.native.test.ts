@@ -47,6 +47,10 @@ it.each<Array<['docx' | 'xlsx', OfficeCreateContent]>[number]>([
   const created = await f.write(`create-${format}`, { path: file, expectedRevision: null, bytes });
   expect(created).toMatchObject({ status: 'applied', path: file, revision: new OfficePackage(bytes).revision, byteLength: bytes.byteLength, executorStopped: true });
   expect(created.cleanupPending).toBeUndefined();
+  expect(created.attachment).toMatchObject({ filename: file, byteLength: bytes.byteLength });
+  const originalRef = created.attachment!.ref;
+  const originalRecord = await f.client.getRecord('workspace', originalRef);
+  expect(originalRecord?.references).toContainEqual({ slot: 'source', objectHash: created.revision });
   const saved = new OfficePackage(await fs.readFile(path.join(f.workspace, file)));
   expect(saved).toMatchObject({ format, revision: created.revision });
 
@@ -65,6 +69,10 @@ it.each<Array<['docx' | 'xlsx', OfficeCreateContent]>[number]>([
   expect(updated).toMatchObject({ status: 'applied', revision: new OfficePackage(edited.bytes).revision });
   const reread = new OfficePackage(await fs.readFile(path.join(f.workspace, file)));
   expect(reread.revision).toBe(updated.revision);
+  expect(updated.attachment?.ref).not.toBe(originalRef);
+  const original = await f.client.getBlob(created.revision!, { recordId: originalRef, slot: 'source' }, { offset: 0, length: bytes.byteLength });
+  expect(Buffer.from(original.bytesBase64, 'base64')).toEqual(bytes);
+  expect((await f.write(`create-${format}`, { path: file, expectedRevision: null, bytes: other })).attachment).toEqual(created.attachment);
   if (format === 'docx') expect(reread.read({ view: 'content' }).objects?.[0]?.text).toBe('Annual report');
   else expect(reread.read({ section: 'Data', range: 'A2' }).objects?.[0]).toMatchObject({ value: 4 });
 

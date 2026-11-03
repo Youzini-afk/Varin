@@ -1,5 +1,5 @@
 import { canRespondToQuestion } from './threadOperations';
-import { THINKING_LEVELS, documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
+import { THINKING_LEVELS } from '@varin/protocol';
 import { openThreadContext } from '@/lib/openThreadContext';
 import { toast } from '@/components/ui';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
@@ -43,8 +43,9 @@ import { useThreadRecovery } from './useThreadRecovery';
 import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
-import { beginImageInsertion, fileToImageAttachment, removeDraftImage } from '@/components/chat/composer/imageAttachments';
-import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
+import { removeDraftImage } from '@/components/chat/composer/imageAttachments';
+import { selectThreadFiles, prepareThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import { ThreadFileDrafts } from './ThreadAttachments';
 import { useI18n } from '@/lib/i18n';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -129,9 +130,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }), [draftKey]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
   const pdfInput = React.useRef<HTMLInputElement | null>(null);
-  const fileReadGeneration = React.useRef(0);
-  const fileRead = React.useRef<AbortController | null>(null);
-  const [readingFiles, setReadingFiles] = React.useState(false);
   const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
   const snapshotHost = React.useRef<number | undefined>(undefined);
@@ -186,11 +184,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
-    fileRead.current?.abort(); fileRead.current = null;
+    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]); setHistoryOpen(false);
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), publishProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
-    return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
+    return () => { identityGeneration.current += 1; view.close(); };
   }, [api, identity, host, handoff, historyWindow, viewScope, publishProgress]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const activityObserver = React.useRef(onActivity);
@@ -327,39 +324,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       });
     }
   };
-  const addFiles = async (files: File[]) => {
-    // DOM events can arrive twice before React publishes the disabled state. An uncertain
-    // input keeps its exact retained snapshots, so selecting again cannot retransmit them.
-    if (!files.length || readOnly || fileRead.current || pendingAction.current || pendingInput.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
-    const generation = fileReadGeneration.current;
-    const insertion = beginImageInsertion(draftKey, messageInput.current, number => t('chat.imageReference.token', { number }));
-    const controller = new AbortController(); fileRead.current = controller;
-    const current = () => !controller.signal.aborted && generation === fileReadGeneration.current
-      && host === getRuntimeEndpointGeneration() && fileRead.current === controller;
-    const isDocument = (file: File) => !!documentMimeType(file.name, file.type);
-    setReadingFiles(true); setError(undefined);
-    try {
-      if (files.some(file => !isDocument(file) && !file.type.startsWith('image/'))) throw new Error(t('chat.fileAttachment.unsupportedType'));
-      if (acceptsImages === false && files.some(file => !isDocument(file))) throw new Error('The selected model does not accept images');
-      for (const file of files) {
-        if (!current()) return;
-        if (isDocument(file)) {
-          const data = await fileToBase64(file);
-          if (!current()) return;
-          const result = await api.materials.upload(identity, { filename: file.name, mimeType: documentMimeType(file.name, file.type)!, data }, controller.signal);
-          if (!current()) return;
-          const retained = result.status === 'ok' ? result.sourceSnapshot ?? result.snapshot : undefined;
-          if (!retained?.snapshotId || !retained.document?.source) throw new Error(t('chat.fileAttachment.pdfNotRetained'));
-          const material = { snapshotId: retained.snapshotId, filename: file.name, sourceHash: retained.document.source.contentHash, format: retained.document.kind };
-          setMaterials(previous => previous.some(item => item.snapshotId === material.snapshotId) ? previous : [...previous, material]);
-        } else {
-          const image = await fileToImageAttachment(file);
-          if (!current()) return;
-          insertion.append(image);
-        }
-      }
-    } catch (value) { if (current()) setError(value instanceof Error ? value.message : t('chat.fileAttachment.toast.attachFailed')); }
-    finally { insertion.dispose(); if (current()) { fileRead.current = null; setReadingFiles(false); } }
+  const addFiles = (files: File[]) => {
+    if (!files.length || readOnly || pendingAction.current || pendingInput.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
+    selectThreadFiles(draftKey, files);
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
@@ -404,12 +371,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, preparedSource?.source, agent]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, draft.files?.map(file => file.id), providerId, modelId, thinkingLevel, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
-  const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
+  const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied
     || (images.length > 0 && acceptsImages === false)
     || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))));
-  const hasComposerInput = Boolean(text.trim() || images.length || materials.length || inlineDrafts.length || editorContext.length);
+  const hasComposerInput = Boolean(text.trim() || images.length || materials.length || draft.files?.length || inlineDrafts.length || editorContext.length);
   const sendDisabled = sendBlocked || (!draft.pendingInput && !hasComposerInput);
   const overviewKey = draftKey;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
@@ -533,11 +500,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onSendNow={active && run ? input => act(() => api.sendInputNow(input.id, input.revision, run.id)) : undefined} />}</div>
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
-      if (draft.firstSend || !botSurface && draft.identity && !run && (draft.sourceSelection || draft.pdfs?.length)) {
+      if (draft.firstSend || !botSurface && draft.identity && !run && (draft.sourceSelection || draft.files?.length)) {
         if (pending || !draft.firstSend && sendDisabled) return;
         const settings = useUIStore.getState();
         const request = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending' as const, editorText: text, text: projectedText,
-          images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), workspacePath,
+          images: requestImages, files: draft.files ?? [], model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), workspacePath,
           sourceSelection: draft.sourceSelection, editorContext, inlineContext,
           ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
         tapHaptic();
@@ -547,7 +514,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         }, () => { handoff.cancelSubmission(request.key); });
         return;
       }
-      if (sendDisabled || fileRead.current) return;
+      if (sendDisabled) return;
       tapHaptic();
       const generation = identityGeneration.current;
       const sourceRect = handoff.captureDraft();
@@ -565,8 +532,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
             if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
             setPreparedSource(sourceForInput);
           }
+          const files = draft.files ?? [];
+          const retained = await prepareThreadFiles(api, identity, draftKey, files);
+          if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
           const key = crypto.randomUUID();
-          const attachments = materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {};
+          const attachments = { ...(materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {}),
+            ...(retained.length ? { attachments: retained.map(({ ref }) => ({ ref })) } : {}) };
           const submit = { ...identity, key, text: projectedText, images: requestImages, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
           const queued = { ...identity, key, text: projectedText, images: requestImages, ...attachments, mode: inputMode };
           const continuation = { ...identity, key, text: projectedText, images: requestImages, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
@@ -574,7 +545,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           const goalSettings = useUIStore.getState();
           const goal = !botSurface && draft.goalArmed && !active && !delegated && text.trim() ? { goalObjective: text.trim(),
             ...(goalSettings.sessionGoalDefaultBudgetEnabled ? { goalBudget: goalSettings.sessionGoalDefaultBudget } : {}) } : {};
-          pendingInput.current = { fingerprint, editorText: text, editorContext, inlineContext, preparedSource: sourceForInput, ...goal, status: 'sending', ...(active ? { kind: 'enqueue' as const, input: queued }
+          pendingInput.current = { fingerprint, editorText: text, fileIds: files.map(file => file.id), editorContext, inlineContext, preparedSource: sourceForInput, ...goal, status: 'sending', ...(active ? { kind: 'enqueue' as const, input: queued }
             : delegated ? { kind: 'continue' as const, input: continuation } : { kind: 'submit' as const, input: submit }) };
         }
         const original = pendingInput.current;
@@ -590,6 +561,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           text: current.text === original.editorText ? '' : current.text,
           ...(current.text === original.editorText ? { imageReferenceSequence: 0 } : {}),
           images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
+          files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
           materials: current.materials.filter(material => !(original.input.materials ?? []).some(item => item.snapshotId === material.snapshotId)),
         } : {});
         if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
@@ -617,7 +589,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">{t('chat.model.imagesUnsupported')}</p>}
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
-      <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')}
+      <input ref={pdfInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')}
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       {!botSurface && <AutoReviewBanner identity={identity} />}
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
@@ -632,14 +604,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         editorRef={messageInput} value={text} onChange={setText} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
-        modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
-        imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : nextStep.text && text.length === 0 && !hasComposerInput ? sendBlocked : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
+        modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
+        imageDisabled={false} sendDisabled={draft.firstSend ? pending : nextStep.text && text.length === 0 && !hasComposerInput ? sendBlocked : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
         onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
         goalArmed={!botSurface && draft.goalArmed} onGoal={botSurface ? undefined : () => {
           if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('goals');
           else if (!draft.pendingInput) useThreadDraftStore.getState().patch(draftKey, { goalArmed: !draft.goalArmed });
         }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
-        attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename)]}
+        attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         onWorkspace={botSurface ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
         workspacePath={preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
@@ -660,8 +632,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onRemove={pending || draft.pendingInput || draft.firstSend ? undefined : index => removeDraftImage(draftKey, index)} />
       <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.firstSend || draft.pendingInput)}
         onRemove={snapshotId => { if (!pendingAction.current && !pendingInput.current) setMaterials(current => current.filter(material => material.snapshotId !== snapshotId)); }} />
-      {draft.pdfs?.map(pdf => <span key={pdf.id} className="inline-flex rounded border px-2 py-1 text-sm">{pdf.filename}</span>)}
-      {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
+      <ThreadFileDrafts files={draft.files} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} onRemove={id => useThreadDraftStore.getState().patch(draftKey, current => ({ files: current.files?.filter(file => file.id !== id) }))} />
         </div>
       </ThreadComposer>
       <div className="chat-input-column flex gap-2">

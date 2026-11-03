@@ -1620,7 +1620,7 @@ impl Catalog {
                         Content::Media { .. } => true,
                         Content::Output { output } => output.parts.iter().any(|part| match part {
                             crate::output::OutputPart::Text { text } => !text.trim().is_empty(),
-                            crate::output::OutputPart::Media { .. } => true,
+                            crate::output::OutputPart::Media { .. } | crate::output::OutputPart::Attachment { .. } => true,
                         }),
                         _ => false,
                     }) {
@@ -2366,7 +2366,7 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
         })?;
         if object
             .keys()
-            .any(|key| key != "text" && key != "attachments" && key != "imageReferences" && key != "skillInvocations" && key != "sentTime")
+            .any(|key| key != "fileAttachments" && key != "text" && key != "attachments" && key != "imageReferences" && key != "skillInvocations" && key != "sentTime")
         {
             return Err(RuntimeError::Invalid(
                 "unsupported user input field; content was not accepted".into(),
@@ -2381,6 +2381,10 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
                     })?
                     .into(),
             });
+        }
+        for attachment in super::attachments::input_attachments(input)? {
+            parts.push(Content::Output { output: crate::output::OutputBody { data: Value::Null,
+                parts: vec![crate::output::OutputPart::Attachment { attachment }] } });
         }
         let image_references = crate::output::image_references(input)?;
         if let Some(attachments) = object.get("attachments") {

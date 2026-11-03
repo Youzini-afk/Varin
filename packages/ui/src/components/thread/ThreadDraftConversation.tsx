@@ -6,7 +6,6 @@ import { ExternalSessionControls } from './ExternalSessionControls';
 import { externalSessionInput, type ExternalSessionChoice } from './externalSessionChoice';
 import { ExternalAuthentication } from './ExternalAuthentication';
 import { useExternalDraftPreparation } from './useExternalDraftPreparation';
-import { documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
@@ -18,8 +17,9 @@ import { WorkOverviewControl } from './WorkOverviewControl';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
-import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
-import { beginImageInsertion, fileToImageAttachment, removeDraftImage } from '@/components/chat/composer/imageAttachments';
+import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
+import { ThreadFileDrafts } from './ThreadAttachments';
+import { removeDraftImage } from '@/components/chat/composer/imageAttachments';
 import { ActiveEditorSuggestion } from '@/components/conversation/ActiveEditorSuggestion';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -122,7 +122,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     const drafts = items.filter(item => item.sessionKey === draftKey); return drafts.length ? [{ key, drafts }] : [];
   });
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
-  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.pdfs?.length || editorContext.length || inlineDrafts.length);
+  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || editorContext.length || inlineDrafts.length);
   const acceptsImages = draft.harnessId ? capabilities?.images : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
   const sending = externalBusy || preparation.busy || draft.firstSend?.status === 'sending';
   const locked = externalBusy || preparation.busy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
@@ -133,25 +133,18 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
-    if (!files.length || reading.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
+    const latest = useThreadDraftStore.getState().drafts[draftKey];
+    if (!files.length || reading.current || latest?.firstSend || latest?.externalInput || externalSending.current || preparation.busy) return;
     const token = {};
     const current = () => mounted.current && currentDraft.current === draftKey && generation === getRuntimeEndpointGeneration() && reading.current === token;
-    const insertion = beginImageInsertion(draftKey, editor.current, number => t('chat.imageReference.token', { number }));
     reading.current = token; setReadingFiles(true); setError(undefined);
     try {
       for (const file of files) {
-        const mimeType = documentMimeType(file.name, file.type);
-        if (mimeType) {
-          const data = await fileToBase64(file); if (!current()) return;
-          patch(value => ({ pdfs: [...(value.pdfs ?? []), { id: crypto.randomUUID(), filename: file.name, data, mimeType }] }));
-        } else if (file.type.startsWith('image/')) {
-          if (acceptsImages === false) throw new Error(t('chat.model.imagesUnsupported'));
-          const image = await fileToImageAttachment(file); if (!current()) return;
-          insertion.append(image);
-        } else throw new Error(t('chat.fileAttachment.unsupportedType'));
+        if (!current()) return;
+        selectThreadFiles(draftKey, [file]);
       }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { insertion.dispose(); if (current()) { reading.current = null; setReadingFiles(false); } }
+    finally { if (current()) { reading.current = null; setReadingFiles(false); } }
   };
   const sourceChanged = (sourceSelection: DraftSourceSelection) => {
     if (externalSending.current) return;
@@ -176,14 +169,18 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         if (draft.harnessId) {
           const owner = generation;
           const current = () => mounted.current && currentDraft.current === draftKey && owner === getRuntimeEndpointGeneration();
-          if (draft.pdfs?.length) { setError(t('external.attachments')); return; }
           if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
-          const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), ...externalSessionInput(externalChoice, capabilities) };
-          patch({ externalInput: request }); externalSending.current = true; setExternalBusy(true); setError(undefined); setExternalFailure(undefined);
+          externalSending.current = true; setExternalBusy(true); setError(undefined); setExternalFailure(undefined);
           void (async () => {
             const externalApi = createExternalAgentsHttpAPI(owner);
             const conversation = preparation.snapshot!.conversation;
             if (draft.externalConversationHost !== owner || conversation.id !== draft.externalConversationId) throw new Error(t('external.prepareHint'));
+            const attachments = draft.externalInput ? [] : await prepareDraftFiles(draftKey, draft.files ?? [], `external:${conversation.id}`,
+              (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
+            if (!current()) return;
+            const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
+              images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(externalChoice, capabilities) };
+            patch({ externalInput: request });
             await externalApi.send(conversation.id, request.key, request);
             if (!current()) return;
             await useExternalAgentStore.getState().refresh();
@@ -202,7 +199,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
           editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-          images: draft.images, pdfs: draft.pdfs ?? [], model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
+          images: draft.images, files: draft.files ?? [], model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
           editorContext, inlineContext,
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
         };
@@ -238,20 +235,20 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             onCommand={text => { patch({ text: `${draft.text}${draft.text ? '\n' : ''}${text}` }); editor.current?.focus(); }} />}
         </div>}
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
-        <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
+        <input ref={pdfInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
           backendControls={draft.harnessId ? <HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /> : undefined}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
-          modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}
+          modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={false}
           sendDisabled={sendDisabled} pending={sending} active={false} retrying={locked} hasInput={hasInput}
           onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}
           onWorkspace={() => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}
           workspacePath={!draft.sourceSelection || draft.sourceSelection.resourceOwner.kind === 'local' ? sourcePath : undefined}
-          attachmentNames={draft.pdfs?.map(item => item.filename) ?? []} skills={[]}>
+          attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
           <div className="space-y-2 px-3 empty:hidden">
             {sourcePath && <ActiveEditorSuggestion threadKey={draftKey} />}
             <EditorContextAttachmentChips threadKey={draftKey} />
@@ -260,8 +257,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             <ImageAttachmentStrip images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
               onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
               onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
-            {draft.pdfs?.map(pdf => <Button key={pdf.id} type="button" variant="outline" size="sm" disabled={locked} aria-label={t('chat.fileAttachment.actions.removeNamed', { name: pdf.filename })}
-              onClick={() => patch({ pdfs: draft.pdfs?.filter(item => item.id !== pdf.id) })}>{pdf.filename} ×</Button>)}
+            <ThreadFileDrafts files={draft.files} locked={locked} onRemove={id => patch(current => ({ files: current.files?.filter(file => file.id !== id) }))} />
             {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
           </div>
         </ThreadComposer>

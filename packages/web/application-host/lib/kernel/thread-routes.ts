@@ -1,4 +1,4 @@
-import { THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
+import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
@@ -125,7 +125,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials', 'clientTime'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials', 'attachments', 'clientTime'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
@@ -159,12 +159,12 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
+    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
-    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode', 'clientTime'],
+    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'mode', 'clientTime'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     'input/send-now': ['inputId', 'expectedRevision', 'expectedRunId'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
@@ -311,9 +311,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('messages/send', (body, signal) => {
     const request = object(body.request);
-    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text'].includes(key))) throw new Error('Invalid message field');
+    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments'].includes(key))) throw new Error('Invalid message field');
     if ((request.kind !== 'inform' && request.kind !== 'request') || typeof request.text !== 'string') throw new Error('Invalid message content');
     return adapter.sendMessage(identity(body), { key: text(request.key), kind: request.kind, text: request.text,
+      ...(request.attachments === undefined ? {} : { attachments: parseAttachmentSelections(request.attachments)! }),
       ...(request.targetThreadId === undefined ? {} : { targetThreadId: text(request.targetThreadId) }),
       ...(request.targetBranchId === undefined ? {} : { targetBranchId: text(request.targetBranchId) }),
       ...(request.replyTo === undefined ? {} : { replyTo: text(request.replyTo) }) }, signal);
@@ -362,12 +363,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       if (typeof body.text !== 'string') throw new Error('Input text is required');
       const images = parseThreadImages(body.images);
       const materials = parseThreadMaterials(body.materials);
+      const attachments = parseAttachmentSelections(body.attachments);
       return { ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
         ...(body.name===undefined?{}:{name:text(body.name)}),
         ...(body.sourceAgent===undefined?{}:{sourceAgent:text(body.sourceAgent)}),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
-        ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }) };
+        ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }) };
     });
     return adapter.continueChild(input, signal);
   });
@@ -482,8 +484,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     const input = inputBeforeAdmission(() => {
       const images = parseThreadImages(body.images);
       const materials = parseThreadMaterials(body.materials);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
-      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
+      const attachments = parseAttachmentSelections(body.attachments);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
+      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
@@ -534,8 +537,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
       const images = parseThreadImages(body.images);
       const materials = parseThreadMaterials(body.materials);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
-      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
+      const attachments = parseAttachmentSelections(body.attachments);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
+      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
     });
     return adapter.enqueue(input);

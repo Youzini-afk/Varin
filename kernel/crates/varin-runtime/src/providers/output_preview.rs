@@ -213,7 +213,7 @@ pub(super) fn bounded_output(
     }];
     sizes.extend(output.parts.iter().map(|part| match part {
         OutputPart::Text { text } => text.len(),
-        OutputPart::Media { .. } => 0,
+        OutputPart::Media { .. } | OutputPart::Attachment { .. } => 0,
     }));
     let original_bytes = sizes.iter().sum::<usize>();
     if original_bytes <= budget && snippet_limit.is_none() {
@@ -236,7 +236,7 @@ pub(super) fn bounded_output(
             OutputPart::Text { text } => OutputPart::Text {
                 text: projection.text(text, budgets[i + 1], &format!("/parts/{i}/text"), false),
             },
-            OutputPart::Media { .. } => part.clone(),
+            OutputPart::Media { .. } | OutputPart::Attachment { .. } => part.clone(),
         })
         .collect::<Vec<_>>();
     if projection.omitted.is_empty() {

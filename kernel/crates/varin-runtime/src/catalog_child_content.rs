@@ -6,6 +6,8 @@ use collaboration::{
 };
 
 pub struct ChildAdmissionPreparation {
+    attachments: Vec<super::attachments::Attachment>,
+    attachment_media: Vec<crate::output::ResolvedMedia>,
     context: ToolExecutionContext,
     input: DispatchInput,
     handoff: Option<ChildSourceHandoff>,
@@ -16,6 +18,8 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) attachments: Vec<super::attachments::Attachment>,
+    pub(super) attachment_input_ref: Option<Value>,
     pub(super) model_selection_required: bool,
     pub(super) project:Option<super::dispatch::ChildProjectSource>,
     pub(super) source_path:Option<String>,
@@ -39,10 +43,14 @@ pub struct PreparedChildAdmission {
     _publication: crate::content::ContentPublication,
 }
 impl ChildAdmissionPreparation {
+    pub fn with_attachments(mut self, attachments: Vec<super::attachments::Attachment>) -> Self { self.attachments=attachments; self }
+    pub fn with_attachment_media(mut self, media: Vec<crate::output::ResolvedMedia>) -> Self { self.attachment_media=media; self }
+
     pub fn load(self) -> Result<PreparedChildAdmission> {
         self.input.validate()?;
+        super::attachments::validate_prepared(&self.input.attachments,&self.attachments)?;
         let original = self.invocation.load_for(self.input.inherit_context)?;
-        let resolved = original.resolve(&self.input)?;
+        let resolved = original.resolve_with_attachments(&self.input,&self.attachments)?;
         if resolved.frozen_reference != self.launch.frozen_reference
             || resolved.profile != self.launch.selected_profile
             || !super::usage_ledger::same_configuration(&serde_json::to_value(&resolved.model.configuration)?, &self.launch.configuration)
@@ -133,7 +141,13 @@ impl ChildAdmissionPreparation {
                 items: self.content.save_items(&history)?,
             })
         } else { None };
+        let attachment_input_ref = if self.attachments.is_empty() { None } else {
+            Some(self.content.save_user_history(&format!("child-input:{}",self.context.operation_id),
+                &super::attachments::incoming_input(&self.input.task,&self.attachments,&self.attachment_media))?)
+        };
         Ok(PreparedChildAdmission {
+            attachments: self.attachments,
+            attachment_input_ref,
             model_selection_required: resolved.profile.model_selection_required,
             project:original.project(&self.input)?,
             source_path:self.input.source_path.clone().filter(|p|p!="."),
@@ -260,6 +274,7 @@ impl Catalog {
     ) -> Result<ChildAdmissionPreparation> {
         let invocation = self.capture_child_dispatch_invocation(context)?;
         Ok(ChildAdmissionPreparation {
+            attachments: Vec::new(), attachment_media: Vec::new(),
             context: context.clone(),
             input,
             handoff,
@@ -330,6 +345,7 @@ impl Catalog {
 }
 
 pub struct ChildReportRead {
+    delivered_attachments: Vec<super::attachments::Attachment>,
     execution_id: String,
     operation_id: String,
     item_id: String,
@@ -348,8 +364,10 @@ impl ChildReportRead {
         offset: usize,
         max_bytes: usize,
         item: HistoryItem,
+        delivered_attachments: Vec<super::attachments::Attachment>,
     ) -> Self {
         Self {
+            delivered_attachments,
             execution_id: execution_id.into(),
             operation_id: operation_id.into(),
             item_id: item_id.into(),
@@ -416,6 +434,14 @@ impl ChildReportRead {
             .load_stored_history_payload(&self.item.content, cancelled)?;
         let conversation: crate::execution::ConversationItem<crate::output::StoredMedia> =
             serde_json::from_value(body)?;
+        let mut attachments:Vec<super::attachments::Attachment> = match &conversation.content {
+            crate::execution::Content::Output { output } => output.parts.iter().filter_map(|part| match part {
+                crate::output::OutputPart::Attachment { attachment } => Some(attachment.clone()), _ => None,
+            }).collect(), _ => Vec::new(),
+        };
+        for attachment in self.delivered_attachments {
+            if !attachments.iter().any(|file|file.reference==attachment.reference){attachments.push(attachment);}
+        }
         let (format, text) = match conversation.content {
             crate::execution::Content::Text { text } => {
                 (collaboration::ChildReportFormat::Text, text)
@@ -474,6 +500,7 @@ impl ChildReportRead {
             return Err(RuntimeError::DispatchCancelled);
         }
         Ok(collaboration::ChildReportPage {
+            attachments,
             format,
             execution_id: self.execution_id,
             operation_id: self.operation_id,

@@ -1,4 +1,6 @@
 import React from 'react';
+import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
+import { ThreadAttachments } from './ThreadAttachments';
 import type { MessageFeedEntry } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
@@ -52,7 +54,8 @@ export function CollaborationMessageBody({ id, text, expanded, onExpandedChange 
   </div>;
 }
 
-export function CollaborationMessage({ item, members, original, expanded, onExpandedChange, onMember, onReply, onCopy, onExchange }: {
+export function CollaborationMessage({ api, identity, item, members, original, expanded, onExpandedChange, onMember, onReply, onCopy, onExchange }: {
+  api?: ThreadsAPI; identity?: ThreadIdentity;
   item: CollaborationFeedItem; members: CollaborationMember[]; original?: MessageFeedEntry;
   expanded: boolean; onExpandedChange(open: boolean): void;
   onMember(threadId: string, branchId: string): void;
@@ -113,6 +116,7 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
             </div>}
             {exchange && message ? <CollaborationExchangeCard message={message} onOpen={() => onExchange(message)} />
               : text && <CollaborationMessageBody id={item.id} text={text} expanded={expanded} onExpandedChange={onExpandedChange} />}
+            {api && identity && <ThreadAttachments api={api} identity={identity} attachments={record.attachments} />}
             {item.kind === 'dispatch' && <div className="collaboration-dispatch-footer">
               <button type="button" onClick={() => onMember(targetId, targetBranch)}>
                 {t('collaboration.openAgent')}<Icon name="arrow-right-s" className="size-3.5" />

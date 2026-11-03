@@ -92,7 +92,7 @@ impl ToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::FileRead => {
-                "Read a bounded UTF-8 range from the admitted source. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
+                "Read an immutable attachment by ref, or a bounded UTF-8 range from the admitted source by path. For binary attachments the original bytes are returned as base64. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
             }
             Self::FileList => "List paths in the admitted source with bounded pagination.",
             Self::FileSearch => "Search text in the admitted source and return bounded matches.",
@@ -548,6 +548,9 @@ impl ResourceOperation {
                 }
             }
             Self::FileMutation(mutation) => {
+                if mutation.path().starts_with("attachment:") {
+                    return Err(ExecutionError::new("immutable_attachment", "This is a delivered file version. Choose a writable output path instead of modifying the attachment in place."));
+                }
                 normalize_separators(match mutation {
                     TextMutation::Write(args) => &mut args.path,
                     TextMutation::Edit(args) => &mut args.path,
@@ -1815,8 +1818,8 @@ impl KernelToolExecutor {
             .into_iter()
             .zip(enabled)
             .map(|(schema, kind)| match kind {
-                ToolKind::FileRead
-                | ToolKind::FileList
+                ToolKind::FileRead => crate::run_tools::BuiltinSchema::child(schema,varin_runtime::catalog::dispatch::ChildSourceRequirement::None,&[Worker,Retrieval]),
+                ToolKind::FileList
                 | ToolKind::FileSearch
                 | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::child(
                     schema,
@@ -1847,7 +1850,7 @@ impl KernelToolExecutor {
         enabled_tools
             .iter()
             .map(|kind| ToolSchema {
-                requirements: Some(kind.requirements()),
+                requirements: if *kind == ToolKind::FileRead { None } else { Some(kind.requirements()) },
                 description: kind.description().into(),
                 output_schema: None,
                 metadata: None,
@@ -2593,7 +2596,11 @@ impl KernelToolExecutor {
                 } else {
                     Effect::None
                 },
-                content: result.into(),
+                content: {
+                    let parts=result.get("attachment").cloned().and_then(|attachment|serde_json::from_value(attachment).ok())
+                        .map(|attachment|vec![varin_runtime::output::OutputPart::Attachment{attachment}]).unwrap_or_default();
+                    varin_runtime::output::OutputBody{data:result,parts}
+                },
             } },
             Ok(mut result) => { if let Some((mode,encoding)) = output_options { crate::process::text::project(&mut result, &mode, encoding.as_deref()); } ToolCompletion::Result {
                 outcome: Outcome::Succeeded,

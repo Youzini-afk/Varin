@@ -47,6 +47,7 @@ struct Output<'a> {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Part<'a> {
+    Attachment { attachment: &'a crate::catalog::attachments::Attachment },
     Text { text: &'a str },
     Media { media: StoredMedia },
 }
@@ -104,6 +105,7 @@ impl Projection<'_> {
                 .map(|part| {
                     Ok(match part {
                         OutputPart::Text { text } => Part::Text { text },
+                        OutputPart::Attachment { attachment } => Part::Attachment { attachment },
                         OutputPart::Media { media } => Part::Media {
                             media: self.media(media)?,
                         },

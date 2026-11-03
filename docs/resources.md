@@ -11,6 +11,31 @@
 [进程](../packages/web/application-host/lib/process/DOCUMENTATION.md)、
 [Recovery](../packages/web/application-host/lib/recovery/DOCUMENTATION.md)。
 
+## 固定附件与读取
+
+附件是原 owner 固定版本的读取句柄，不是外部可用的下载 URL，也不等同于文件 hash、Source 或目录权限。
+Host 的 `thread-attachments` 解析用户上传、现有材料及真实文件回执，Rust Storage 保管不可变对象与 domain record，
+Catalog 只保存消息、派发、历史和报告中的 typed 关系。文件正文不经过 Catalog JSON，也不为交付预先调用摘要模型。
+
+普通上传以二进制流保存原件，不设格式白名单。跨 owner 复制复用已有范围内容传输，验证 hash、长度及 descriptor 依赖；
+接收端保留完成后才能发布交付。同 owner 转发复用对象并新增准确的收件关系，未知文件类型与空文件都保持原字节。
+实时路径只捕获选中的文件；`file.capture` 的 `retentionRecordId` 把一致读取回执与对象保留同时提交，
+丢失响应后先恢复该回执。原生文件写入在原效果事务里发布实际写入版本的附件引用，不再读取可能已变化的路径。
+
+`file_read({ref})` 可在无项目、无 Source 的会话读取已获准附件；路径读取仍需要原来源授权。
+文档及 Office 工具直接按引用读取原件。`resource_read` 的附件 `content` 视图分页读字节，`path` 视图按需准备一个只读文件，
+不物化整个目录、不更改原件权限、不使用可写硬链接。需要修改时显式选择输出位置。
+
+执行路径记录绑定当前 Kernel generation、准确对象和实际 Run 或外部会话。Rust worker 在控制循环外复制并核验文件，
+Storage 独立保留该对象；关闭面板、取消观察或协调 Host 重启都不是实际进程退出的证据。
+释放路径前核验原进程树已停止，发现文件被替换或修改时保留现场并报告错误，不递归删除未知内容。
+路径缓存可回收而稳定附件身份继续存在；实际 Host 离线或未完成准备时返回具体错误，不以协调机路径代替。
+
+附件随接收历史及明确转发关系保留。删除原会话或源文件不影响存活接收者；线程删除清理其材料关系和临时捕获，
+共享对象由原 Storage 可达性回收。新发送不扫描正文建立权限，旧格式的历史材料关系仅在 Catalog 升级时转换一次。
+未发布准备只有在原操作明确失败或取消、未产生交付且实际读取／传输已停止后才释放。远端 Host 重启后，
+缺少原请求停止证据的准备继续保留，待原 Source 合法退休和线程清理确认；不能把空的内存请求表或网络断开当作停止。
+
 ## 来源选择
 
 Agent Thread API 显式选择来源 owner、mode 和内容。本地与 managed-host 是不同的带判别字段 owner。

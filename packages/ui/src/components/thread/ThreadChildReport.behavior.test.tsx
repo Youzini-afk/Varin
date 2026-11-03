@@ -21,7 +21,7 @@ const body = JSON.stringify({ data: { count: 2, kind: 'media', data_base64: 'opa
 ] });
 const cut = body.indexOf('before') + 3;
 const firstText = body.slice(0, cut); const secondText = body.slice(cut);
-const first: ChildReportPage = { format: 'output_body', operation_id: 'dispatch', execution_id: 'execution-original', item_id: 'report-original',
+const first: ChildReportPage = { attachments: [], format: 'output_body', operation_id: 'dispatch', execution_id: 'execution-original', item_id: 'report-original',
   offset: 0, next_offset: new TextEncoder().encode(firstText).length, total_bytes: new TextEncoder().encode(body).length, text: firstText };
 const last: ChildReportPage = { ...first, offset: first.next_offset!, next_offset: null, text: secondText };
 function fixture() {

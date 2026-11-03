@@ -154,6 +154,43 @@ impl Storage {
             Ok(())
         };
         match record_type {
+            "attachment.file" => {
+                state_in(&["temporary", "released"])?;
+                let attachment: varin_runtime::catalog::attachments::Attachment = serde_json::from_value(payload["attachment"].clone())?;
+                attachment.validate().map_err(|error|KernelError::Operation(error.to_string()))?;
+                if !super::file_content::valid_reference(required("contentHash")?) {
+                    return Err(KernelError::Operation("Attachment object identity is invalid".into()));
+                }
+            }
+            "attachment.managed-capture-intent" => {
+                state_in(&["temporary", "released"])?;
+                let capture=required("captureId")?;
+                if capture.len()!=64 || !capture.bytes().all(|byte|byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    || record_id!=format!("attachment.managed-capture-intent:{capture}")
+                    || !required("ref")?.starts_with("attachment:") || required("ref")?.len()<=11
+                    || object.len()!=4 {
+                    return Err(KernelError::Operation("Managed capture intent identity is invalid".into()));
+                }
+                required("operationId")?; required("path")?;
+            }
+            "attachment.import" => {
+                state_in(&["preparing","ready"])?;
+                for field in ["principalId","coordinatorHostId","authorityId","threadId","runId","operationId"] {required(field)?;}
+                let attachment:varin_runtime::catalog::attachments::Attachment=serde_json::from_value(payload["attachment"].clone())?;
+                attachment.validate().map_err(|error|KernelError::Operation(error.to_string()))?;
+                if !super::file_content::valid_reference(required("contentHash")?)
+                    || (state=="ready" && (!super::file_content::valid_reference(required("objectHash")?) || payload["byteLength"].as_u64().is_none()))
+                    || (state=="preparing" && (payload.get("objectHash").is_some() || payload.get("byteLength").is_some())) {
+                    return Err(KernelError::Operation("Attachment import identity is invalid".into()));
+                }
+            }
+            "attachment.delivery" => {
+                state_in(&["temporary", "released"])?;
+                required("fromThreadId")?; required("toThreadId")?; required("operationId")?;
+                if !payload["attachmentRefs"].as_array().is_some_and(|refs| !refs.is_empty() && refs.iter().all(|reference|reference.as_str().is_some_and(|reference|reference.starts_with("attachment:") && reference.len()>11))) {
+                    return Err(KernelError::Operation("Attachment delivery requires its exact references".into()));
+                }
+            }
             "recovery.checkpoint" => {
                 same("id", record_id)?;
                 same("workspaceId", workspace_id)?;
@@ -846,6 +883,10 @@ impl Storage {
             "retrieval.receipt",
             "retrieval.evidence",
             "web.snapshot",
+            "attachment.file",
+            "attachment.delivery",
+            "attachment.import",
+            "attachment.managed-capture-intent",
             "material.collection",
             "material.grant",
             "agent.source-view",
@@ -952,6 +993,19 @@ impl Storage {
             .get("references")
             .and_then(Value::as_array)
             .ok_or_else(|| KernelError::Operation("record references are required".to_string()))?;
+        if record_type=="attachment.managed-capture-intent" {
+            if ["threadId","runId"].iter().any(|field|params_value[*field].as_str().is_none_or(|value|value.trim().is_empty()))
+                || !references.is_empty() {
+                return Err(KernelError::Authorization("Managed capture intent requires its original Thread and Run".into()));
+            }
+        }
+        if record_type=="attachment.import" {
+            if ["threadId","runId"].iter().any(|field| params_value[*field]!=payload[*field])
+                || (state=="ready" && (references.len()!=1 || references[0]["slot"]!="source" || references[0]["objectHash"]!=payload["objectHash"]))
+                || (state=="preparing" && !references.is_empty()) {
+                return Err(KernelError::Authorization("Attachment import must retain its exact object and original consumer".into()));
+            }
+        }
         let owner_ids = params_value
             .get("ownerIds")
             .and_then(Value::as_array)

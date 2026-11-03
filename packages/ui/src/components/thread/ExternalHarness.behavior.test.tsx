@@ -86,6 +86,8 @@ function fixture() {
   const views = new Map<string, ExternalConversationSnapshot>([['prepared', snapshot()]]);
   let listener: ((event: ExternalObservation) => void) | undefined;
   const api = {
+    uploadAttachment: vi.fn<ExternalAgentsAPI['uploadAttachment']>(async (_id, file) => ({ ref: 'attachment:external-original', filename: file.filename, mimeType: file.mimeType, byteLength: file.data.size })),
+    readAttachment: vi.fn<ExternalAgentsAPI['readAttachment']>(async () => new Blob(['original'])),
     create: vi.fn<ExternalAgentsAPI['create']>(async () => structuredClone(views.get('prepared')!.conversation)),
     connect: vi.fn<ExternalAgentsAPI['connect']>(async id => { const view = views.get(id)!; view.connected = true; view.capabilities = capabilities(); view.observationRevision++; return capabilities(); }),
     authenticate: vi.fn<ExternalAgentsAPI['authenticate']>(async id => { const view = views.get(id)!; view.connected = true; view.capabilities = capabilities(); view.observationRevision++; return capabilities(); }),
@@ -396,4 +398,27 @@ it('does not promise a live model retry for a connection-scoped SDK catalog', as
   expect(container.textContent).toContain('SDK catalog unavailable');
   expect(container.textContent).not.toContain('Retry model discovery');
   expect(retry).not.toHaveBeenCalled();
+});
+
+
+it('preserves external binary selections on preparation failure and retries without sending a partial input', async () => {
+  const { api } = fixture();
+  api.uploadAttachment.mockRejectedValueOnce(new Error('remote owner unavailable'));
+  await renderDraft(); await click('Prepare connection');
+  await act(async () => useThreadDraftStore.getState().patch('draft', { text: '' }));
+  const file = new File([new Uint8Array([0, 255, 7])], 'model.bin');
+  await act(async () => {
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"]:not([accept])')!;
+    Object.defineProperty(picker, 'files', { value: [file] }); picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+  });
+  expect(button('Send').disabled).toBe(false);
+  await submit();
+  expect(api.send).not.toHaveBeenCalled();
+  expect(useThreadDraftStore.getState().drafts.draft.files?.[0]?.status).toBe('failed');
+  expect(container.textContent).toContain('model.bin: remote owner unavailable');
+  const original = api.uploadAttachment.mock.calls[0]![1];
+  await submit();
+  expect(api.uploadAttachment.mock.calls[1]![1]).toEqual(original);
+  expect(api.uploadAttachment.mock.calls[1]![1].data).toBe(file);
+  expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: '', attachments: [{ ref: 'attachment:external-original' }] }));
 });

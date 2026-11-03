@@ -101,7 +101,7 @@ impl ChildReportPreparation {
                                         crate::output::OutputPart::Text { text } => {
                                             !text.trim().is_empty()
                                         }
-                                        crate::output::OutputPart::Media { .. } => true,
+                                        crate::output::OutputPart::Media { .. } | crate::output::OutputPart::Attachment { .. } => true,
                                     })) =>
                         {
                             history_ids.push(item.id)
@@ -116,7 +116,7 @@ impl ChildReportPreparation {
                     RunState::Completed if !history_ids.is_empty() => Outcome::Succeeded,
                     _ => Outcome::Failed,
                 };
-                let report = ChildReport {
+                let report = ChildReport { attachments: super::attachments::reported(&snapshot,&run.id,&child.parent_thread_id)?,
                     error: None,
                     outcome,
                     sender_thread_id: child.child_thread_id.clone(),

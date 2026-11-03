@@ -4,6 +4,27 @@ use serde_json::{Value, json};
 use varin_runtime::{Effect, ExecutorOwner, ExternalReceipt, Outcome, execution::ToolInvocation, supervisor::RunSupervisor};
 fn error(value: impl std::fmt::Display) -> KernelError { KernelError::Operation(value.to_string()) }
 
+/// Project the original file receipt without dropping its fixed artifact when
+/// the Host response was lost. The native write remains the only byte owner.
+pub(crate) fn recovered_output(file: &Value, operation_id: &str) -> Result<varin_runtime::output::OutputBody, KernelError> {
+    let applied = match file["status"].as_str() { Some("applied") => true, Some("conflict") => false,
+        _ => return Err(error("File receipt is not settled")) };
+    let state: Value = serde_json::from_str(file["stateJson"].as_str().ok_or_else(|| error("File state is missing"))?)?;
+    let mut data = json!({"status":if applied{"applied"}else{"conflict"},"path":file["path"],"operationId":operation_id,
+        "revision":state["objectHash"],"byteLength":state["byteLength"],"executorStopped":true,"fileJournal":true});
+    let mut parts = Vec::new();
+    if let Some(value) = file.get("attachment") {
+        let attachment: varin_runtime::catalog::attachments::Attachment = serde_json::from_value(value.clone())?;
+        attachment.validate().map_err(error)?;
+        if !applied || state["kind"] != "regular-file" || state["byteLength"].as_u64() != Some(attachment.byte_length) {
+            return Err(error("File artifact differs from its original receipt"));
+        }
+        data["attachment"] = value.clone();
+        parts.push(varin_runtime::output::OutputPart::Attachment { attachment });
+    }
+    Ok(varin_runtime::output::OutputBody { data, parts })
+}
+
 pub(crate) fn reconcile(runtime: &RunSupervisor, resources: &KernelResourceClient, binding: Option<&ToolBinding>,
     operation_id: &str, expected_owner: Option<&ExecutorOwner>) -> Result<bool, KernelError> {
     let owner = runtime.catalog();
@@ -35,11 +56,9 @@ pub(crate) fn reconcile(runtime: &RunSupervisor, resources: &KernelResourceClien
     if saved["tool"] != invocation.call.name { return Err(KernelError::Authorization("The file receipt belongs to another tool".into())); }
     let file = &saved["receipt"];
     let applied = match file["status"].as_str() { Some("applied") => true, Some("conflict") => false, _ => return Ok(false) };
-    let state: Value = serde_json::from_str(file["stateJson"].as_str().ok_or_else(|| error("File state is missing"))?)?;
     let effect = if applied { Effect::Confirmed } else { Effect::None };
     let outcome = if applied { Outcome::Succeeded } else { Outcome::Failed };
-    let result = json!({"status":if applied{"applied"}else{"conflict"},"path":file["path"],"operationId":operation.id,
-        "revision":state["objectHash"],"byteLength":state["byteLength"],"executorStopped":true,"fileJournal":true});
+    let result = recovered_output(file, &operation.id)?;
     let execution_owner = operation.execution_owner.as_ref().unwrap();
     let ExecutorOwner::External { epoch, .. } = execution_owner else { unreachable!() };
     let receipt = match previous {
@@ -47,7 +66,7 @@ pub(crate) fn reconcile(runtime: &RunSupervisor, resources: &KernelResourceClien
             if previous.effect != effect || previous.outcome != outcome { return Err(error("The confirmed file receipt changed")); }
             previous
         }
-        _ => ExternalReceipt { executor: invocation.call.name, identity: operation.id.clone(), epoch: epoch.clone(), outcome, effect, result: result.into() },
+        _ => ExternalReceipt { executor: invocation.call.name, identity: operation.id.clone(), epoch: epoch.clone(), outcome, effect, result },
     };
     let preparation = owner.lock().map_err(error)?.prepare_result_content();
     let prepared = preparation.write_external_receipt(receipt).map_err(error)?;

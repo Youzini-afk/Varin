@@ -199,6 +199,8 @@ pub struct ToolAssociation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
+    #[serde(default)]
+    pub attachments: Vec<super::attachments::Attachment>,
     pub id: String,
     pub parent_id: Option<String>,
     pub sequence: u64,
@@ -230,6 +232,8 @@ pub struct ReadPage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemPage {
+    #[serde(default)]
+    pub attachments: Vec<super::attachments::Attachment>,
     pub thread_id: String,
     pub branch_id: String,
     pub run_id: Option<String>,
@@ -1072,6 +1076,7 @@ impl FamilyRead {
             let body_truncated = end < serialized.len();
             let tool = self.association(&db, item, &body, cancel)?;
             items.push(HistoryEntry {
+                attachments:super::attachments::history_attachments(&body,item.source)?,
                 id: item.id.clone(),
                 parent_id: item.parent.clone(),
                 sequence: *sequence,
@@ -1233,6 +1238,7 @@ impl FamilyRead {
         let end = utf8_end(&text, offset, request.max_bytes.unwrap_or(65536))?;
         self.finish(cancel)?;
         Ok(ItemPage {
+            attachments:super::attachments::history_attachments(&body,item.source)?,
             anchor: self.sign(&anchor)?,
             thread_id: anchor.thread,
             branch_id: anchor.branch,
@@ -1288,8 +1294,16 @@ impl FamilyRead {
                 ("json", Value::String(text[offset..end].into()), end, text.len())
             }
         };
+        let typed:crate::output::OutputBody<crate::output::StoredMedia>=serde_json::from_value(output.clone())?;
+        let selected_parts:Vec<_>=if request.pointer.is_empty() {typed.parts.iter().collect()}
+            else if request.pointer=="/parts" {typed.parts.iter().skip(offset).take(end-offset).collect()}
+            else if let Some(index)=request.pointer.strip_prefix("/parts/").and_then(|path|path.split('/').next()).and_then(|index|index.parse::<usize>().ok()) {typed.parts.get(index).into_iter().collect()}
+            else {Vec::new()};
+        let attachments:Vec<_>=selected_parts.into_iter().filter_map(|part|match part {
+            crate::output::OutputPart::Attachment{attachment}=>Some(attachment.clone()),_=>None,
+        }).collect();
         self.finish(cancel)?;
-        let mut page = json!({"threadId":anchor.thread,"branchId":anchor.branch,"runId":anchor.run,
+        let mut page = json!({"attachments":attachments,"threadId":anchor.thread,"branchId":anchor.branch,"runId":anchor.run,
             "headId":anchor.head,"anchor":self.sign(&anchor)?,"itemId":request.item_id,"pointer":request.pointer,
             "format":format,"value":value,"offset":offset,"nextOffset":(end < total).then_some(end)});
         page[if format == "records" { "totalItems" } else { "totalBytes" }] = total.into();

@@ -1,11 +1,22 @@
 import type { IncomingMedia, OutputPart } from './nested-tools.generated.js';
 
-/** The producer boundary carries bytes only. Storage identities and provenance are owner-authored. */
+/** Media bytes and symbolic file references are checked here; only the original resource owner grants reads. */
 export function parseIncomingOutputPart(value: unknown): OutputPart<IncomingMedia> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid output part');
   const part = value as Record<string, unknown>;
   if (part.kind === 'text' && typeof part.text === 'string' && Object.keys(part).every(key => key === 'kind' || key === 'text')) {
     return { kind: 'text', text: part.text };
+  }
+  if (part.kind === 'attachment' && Object.keys(part).every(key => key === 'kind' || key === 'attachment')
+    && part.attachment && typeof part.attachment === 'object' && !Array.isArray(part.attachment)) {
+    const file = part.attachment as Record<string, unknown>;
+    if (Object.keys(file).every(key => ['ref', 'filename', 'mimeType', 'byteLength'].includes(key))
+      && typeof file.ref === 'string' && file.ref.trim() && !file.ref.includes('\0')
+      && typeof file.filename === 'string' && file.filename.trim() && !file.filename.includes('\0')
+      && typeof file.mimeType === 'string' && /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(file.mimeType)
+      && typeof file.byteLength === 'number' && Number.isSafeInteger(file.byteLength) && file.byteLength >= 0) {
+      return { kind: 'attachment', attachment: { ref: file.ref, filename: file.filename, mimeType: file.mimeType, byteLength: file.byteLength } };
+    }
   }
   if (part.kind === 'media' && Object.keys(part).every(key => key === 'kind' || key === 'media') && part.media && typeof part.media === 'object' && !Array.isArray(part.media)) {
     const media = part.media as Record<string, unknown>;

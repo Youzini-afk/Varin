@@ -286,3 +286,15 @@ Choose focused cases for the changed owner. Native components, controlled provid
 real OS processes, installed products and physical remote machines establish different facts.
 A pass in one category is not evidence that the others ran. See [development](../docs/development.md)
 for commands and CI selection.
+
+## Fixed file attachments
+
+`storage/object_views.rs` owns one-file read-only execution views. Worker I/O does not hold the
+Storage actor, and files are copied rather than hard-linked to immutable object storage. Each view
+retains the exact source record, current generation and actual Run or external consumer; release
+waits for real process exit and preserves unexpected or modified files.
+
+`file.capture` may atomically retain its exact receipt with `retentionRecordId`. Native file-write
+receipts publish typed attachment references in the original effect transaction. `file_read` accepts
+an authorized reference even without a physical Source, while path reads keep their original grant
+checks. `resource_read` exposes content and execution-path views through the frozen resource owner.

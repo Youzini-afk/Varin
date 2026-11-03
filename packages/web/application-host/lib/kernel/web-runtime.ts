@@ -304,7 +304,15 @@ export function createWebRuntime(options: WebRuntimeOptions) {
             : await readMaterial(input as unknown as DocumentReadRequest,
               context(owner, config, call.signal), options.documentSources?.tool(invocation));
         if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
-        return receipt(result);
+        const completed = receipt(result);
+        if ('status' in result && result.status === 'ok') {
+          const original = result.sourceSnapshot ?? result.snapshot;
+          if (original?.document?.source && options.documentSources) {
+            const attachment = await options.documentSources.attachment(invocation, original.snapshotId, call.signal);
+            if (attachment && completed.completion.kind === 'result') completed.completion.content.parts.push({ kind: 'attachment', attachment });
+          }
+        }
+        return completed;
       } catch (error) {
         if (error instanceof MaterialCollectionMutationError) return { executor_stopped: error.effect !== 'unknown',
           completion: { kind: 'result', outcome: error.effect === 'unknown' ? 'indeterminate' : 'failed', effect: error.effect,

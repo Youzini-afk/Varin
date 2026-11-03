@@ -7,11 +7,11 @@ import type { MessageHandoff } from '../conversation/messageHandoff';
 export function useFirstMessagePreview(draftKey: string, hasHistory: boolean, handoff: MessageHandoff) {
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const request = draft.firstSend ?? draft.firstMessageReceipt;
-  const key = request?.key, text = request?.text, images = request?.images;
+  const key = request?.key, text = request?.text, images = request?.images, files = request?.files;
   const message = React.useMemo<ChatUserMessage | undefined>(() => key ? {
-    role: 'user', timestamp: Date.now(),
+    role: 'user', timestamp: Date.now(), pendingFiles: files?.map(file => ({ filename: file.filename, byteLength: file.data.size })),
     content: [{ type: 'text', text: text ?? '' }, ...(images ?? []).map(image => ({ type: 'image' as const, ...image }))],
-  } : undefined, [key, text, images]);
+  } : undefined, [key, text, images, files]);
   React.useLayoutEffect(() => {
     if (!hasHistory && key && message) handoff.preview(key, message.timestamp);
   }, [handoff, hasHistory, key, message]);

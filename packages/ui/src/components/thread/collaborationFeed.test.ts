@@ -5,7 +5,7 @@ import { CollaborationFeed } from './collaborationFeed';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
 const message = (id: number): MessageFeedEntry => ({
-  messageId: `message-${id}`,
+  attachments: [], messageId: `message-${id}`,
   senderThreadId: 'worker',
   senderBranchId: 'worker-branch',
   targetThreadId: 'reviewer',
@@ -134,7 +134,7 @@ it('does not publish an old page after its panel closes', async () => {
 
 it('merges original dispatches with messages, including dispatch-only delta pages without replaying old entries', async () => {
   const f = fixture();
-  const dispatch = (id: number): MessageFeedDispatch => ({ operationId: `dispatch-${id}`, executionId: `execution-${id}`,
+  const dispatch = (id: number): MessageFeedDispatch => ({ attachments: [], operationId: `dispatch-${id}`, executionId: `execution-${id}`,
     senderThreadId: 'root', senderBranchId: 'original-root-branch', targetThreadId: 'worker', targetBranchId: 'original-worker-branch',
     acceptedCursor: id, acceptedAtMs: id + 1, task: `Original task ${id}`, preset: 'worker' });
   f.dispatches.push(dispatch(0));
@@ -155,7 +155,7 @@ it('merges original dispatches with messages, including dispatch-only delta page
 
 it('reads new report-only pages on completion and retains separate replies from later executions', async () => {
   const f = fixture();
-  const report = (id: number): MessageFeedReport => ({ operationId: 'original-dispatch', executionId: `execution-${id}`,
+  const report = (id: number): MessageFeedReport => ({ attachments: [], operationId: 'original-dispatch', executionId: `execution-${id}`,
     senderThreadId: 'worker', senderBranchId: 'worker-branch', targetThreadId: 'root', targetBranchId: 'original-root-branch',
     acceptedCursor: id, acceptedAtMs: id, text: `Final reply ${id}`, outcome: 'succeeded' });
   f.reports.push(report(0));

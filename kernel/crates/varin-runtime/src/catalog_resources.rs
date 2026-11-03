@@ -131,6 +131,13 @@ pub struct ContextResources {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ResourceRequest {
+    #[serde(rename = "attachment")]
+    Attachment {
+        #[serde(rename = "ref")] reference: String,
+        view: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")] offset: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")] limit: Option<u64>,
+    },
     #[serde(rename = "ui")]
     Ui {
         #[serde(rename = "ref")]
@@ -562,13 +569,64 @@ impl Catalog {
         })
     }
 }
+/// Return only the resource selector carried by the retained original tool call.
+/// Attachment producers/readers use the same frozen default checkpoint, but do
+/// not acquire a skill activation or permission to read a different file here.
+/// Their typed executor and original attachment owner still authorize the effect.
+fn snapshot_consumer(call:&crate::execution::ToolCall)->Result<Option<ResourceRequest>> {
+    let denied=||RuntimeError::Conflict("resource snapshot differs from its frozen consumer".into());
+    match (call.name.as_str(),call.schema_version.as_str()) {
+        ("resource_read","3"|"4")=> {
+            let request:ResourceRequest=serde_json::from_value(call.arguments.clone())?;
+            if let ResourceRequest::Attachment {reference,view,offset,limit}=&request {
+                if call.schema_version!="4" || reference.trim().is_empty()
+                    || !matches!(view.as_str(),"path"|"content") || (view=="path" && (offset.is_some() || limit.is_some())) {return Err(denied());}
+            }
+            Ok(Some(request))
+        }
+        ("file_read","1")=> {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct File {#[serde(rename="ref")] reference:String,offset:Option<u64>,length:Option<u64>}
+            let read:File=serde_json::from_value(call.arguments.clone())?;
+            super::attachments::AttachmentSelection::Ref {reference:read.reference}.validate()?;
+            let _=(read.offset,read.length);
+            Ok(None)
+        }
+        ("send","5")=> {
+            let input:super::messages::MessageInput=serde_json::from_value(call.arguments.clone())?;
+            input.validate()?;
+            if input.attachments.is_empty() {return Err(denied());}
+            Ok(None)
+        }
+        ("dispatch","8")=> {
+            let input=super::dispatch::DispatchInput::from_tool_call(&call.name,&call.arguments)?;
+            if input.attachments.is_empty() {return Err(denied());}
+            Ok(None)
+        }
+        ("read_thread","2")=> {
+            // The family owner parses and executes this exact admitted query
+            // before asking for access to its returned typed attachment parts.
+            // Only history/output queries produce such parts, not runs/media.
+            let Some(args)=call.arguments.as_object() else {return Err(denied())};
+            if args.keys().any(|key|!matches!(key.as_str(),"threadId"|"branchId"|"runId"|"anchor"|"cursor"|"query"))
+                || !matches!(args.get("query").and_then(|query|query.get("kind")).and_then(Value::as_str),Some("recent"|"range"|"search"|"item"|"output")) {return Err(denied());}
+            Ok(None)
+        }
+        ("child_report","3")=> {
+            let Some(args)=call.arguments.as_object() else {return Err(denied())};
+            if args.keys().any(|key|!matches!(key.as_str(),"operationId"|"executionId"|"itemId"|"offset"|"maxBytes"))
+                || ["operationId","itemId"].iter().any(|key|args.get(*key).and_then(Value::as_str).is_none_or(str::is_empty)) {return Err(denied());}
+            Ok(None)
+        }
+        _=>Err(denied()),
+    }
+}
 impl ResourceSnapshotRead {
     pub fn load(self) -> Result<ContextResources> {
         let checkpoint_id = self.checkpoint.id.clone();
         let invocation = self.invocation.load()?;
-        if invocation.call.name != "resource_read"
-            || invocation.call.schema_version != "3"
-            || !invocation.tools.iter().any(|schema| {
+        if !invocation.tools.iter().any(|schema| {
                 schema.name == invocation.call.name
                     && schema.version == invocation.call.schema_version
             })
@@ -577,10 +635,10 @@ impl ResourceSnapshotRead {
                 "resource snapshot differs from its frozen invocation".into(),
             ));
         }
+        let request = snapshot_consumer(&invocation.call)?;
         let default_checkpoint = invocation.frozen.resource_checkpoint_id;
         let bindings = invocation.frozen.resource_activations;
-        let request = serde_json::from_value::<ResourceRequest>(invocation.call.arguments)?;
-        if request.activation_id() != self.activation_id.as_deref() {
+        if request.as_ref().and_then(ResourceRequest::activation_id) != self.activation_id.as_deref() {
             return Err(RuntimeError::Conflict(
                 "resource selector differs from the original tool call".into(),
             ));
@@ -595,7 +653,7 @@ impl ResourceSnapshotRead {
                     )
                 })?;
             if binding.resource_checkpoint_id != checkpoint_id
-                || Some(binding.resource_id.as_str()) != request.resource_id()
+                || Some(binding.resource_id.as_str()) != request.as_ref().and_then(ResourceRequest::resource_id)
                 || bindings
                     .iter()
                     .filter(|binding| binding.activation_id == id)

@@ -102,10 +102,11 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { requirements: None, name:"resource_read".into(),version:"3".into(),
-        description:"Read a skill, its bundle file, admitted instructions, or interactive content (kind ui). UI views: summary, source (file and optional line range), state, screen, structure. ui: selects source; ui-view: observes that connected client; ui-snapshot: and ui-selection: retain a fixed observation. UI offset/limit are UTF-8 bytes; use returned next for a fixed continuation. Skill activationId selects its retained original version; otherwise use the invocation's frozen catalog.".into(),
+    ToolSchema { requirements: None, name:"resource_read".into(),version:"4".into(),
+        description:"Read a skill, its bundle file, admitted instructions, an attached file, or interactive content (kind ui). For kind attachment use ref and view:path to prepare one fixed read-only file in the actual execution environment, or view:content for a bounded byte/text page. Do not pass the opaque ref to shell commands. UI views: summary, source (file and optional line range), state, screen, structure. ui: selects source; ui-view: observes that connected client; ui-snapshot: and ui-selection: retain a fixed observation. UI offset/limit are UTF-8 bytes; use returned next for a fixed continuation. Skill activationId selects its retained original version; otherwise use the invocation's frozen catalog.".into(),
         output_schema:None,metadata:None,
         schema:json!({"type":"object","oneOf":[
+            {"type":"object","properties":{"kind":{"const":"attachment"},"ref":{"type":"string","minLength":1},"view":{"enum":["path","content"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":0}},"required":["kind","ref","view"],"additionalProperties":false},
             {"type":"object","properties":{"kind":{"const":"skill"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."}},"required":["kind","resourceId"],"additionalProperties":false},
             {"type":"object","properties":{"kind":{"const":"skill-resource"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."},"relativePath":{"type":"string"}},"required":["kind","resourceId","relativePath"],"additionalProperties":false},
             {"type":"object","properties":{"kind":{"const":"instruction-scope"},"targetPath":{"type":"string"},"targetType":{"type":"string","enum":["file","directory"]}},"required":["kind","targetPath"],"additionalProperties":false},
@@ -116,7 +117,7 @@ pub(crate) fn schema() -> ToolSchema {
 fn contract() -> ToolContract {
     ToolContract {
         name: "resource_read".into(),
-        schema_version: "3".into(),
+        schema_version: "4".into(),
         read_only: true,
         completion: CompletionKind::Result,
         lifetime: Lifetime::Run,
@@ -128,7 +129,7 @@ fn request(
     context: &FrozenToolContext,
 ) -> Result<ResourceRequest, ExecutionError> {
     if call.name != "resource_read"
-        || call.schema_version != "3"
+        || call.schema_version != "4"
         || !context.tools.contains(&schema())
     {
         return Err(failed("resource schema is not bound"));
@@ -138,6 +139,11 @@ fn request(
     if matches!(&request,ResourceRequest::Skill{resource_id,..}|ResourceRequest::SkillResource{resource_id,..} if resource_id.is_empty())
     {
         return Err(failed("resource ID is required"));
+    }
+    if let ResourceRequest::Attachment{reference,view,offset,limit}=&request {
+        if reference.trim().is_empty() || !matches!(view.as_str(),"path"|"content") || (view=="path" && (offset.is_some() || limit.is_some())) {
+            return Err(failed("attachment requires a reference and path or content view; ranges belong to content"));
+        }
     }
     checkpoint(&request, context)?;
     Ok(request)
@@ -377,7 +383,7 @@ impl PreparedToolCall for ResourceCall {
                     Outcome::Failed
                 },
                 effect: Effect::None,
-                content: json!({"status":if cancel.is_cancelled() || error.code == "resource_cancelled" {"cancelled"}else{"unavailable"},"reason":"The selected resource read could not complete"}).into(),
+                content: json!({"status":if cancel.is_cancelled() || error.code == "resource_cancelled" {"cancelled"}else{"unavailable"},"reason":error.message,"error":error}).into(),
             },
         };
         ToolExecutionReceipt::local(completion, contract)

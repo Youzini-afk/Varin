@@ -13,6 +13,8 @@ import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@vari
 import type { AgentProfilesAPI, ThreadAgentChoice } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
+import { parseAttachmentSelections, type AttachmentSelection } from '@varin/protocol';
+import type { ThreadAttachmentOwner } from './thread-attachments.js';
 import { threadInput } from './thread-images.js';
 import { messageSentTime } from './thread-message-time.js';
 import type { MessageTimeObservation, MessageTimeSettings } from '@varin/protocol';
@@ -65,6 +67,8 @@ export class ThreadAdapter {
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
   private inputMaterials?: ThreadInputMaterials;
+  private attachments?: ThreadAttachmentOwner;
+  bindAttachments(owner: ThreadAttachmentOwner): void { this.attachments = owner; }
   private requestContentMaintenance?: () => void;
   bindContentMaintenance(request: () => void): void { this.requestContentMaintenance = request; }
   private titles?: import('../model-text/thread-titles.js').ThreadTitleService;
@@ -90,9 +94,22 @@ export class ThreadAdapter {
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private messageTime?: () => Promise<MessageTimeSettings>;
   bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
-  private async prepareInput(input: ThreadIdentity & { text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; clientTime?: MessageTimeObservation }, signal?: AbortSignal) {
+  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; clientTime?: MessageTimeObservation }, signal?: AbortSignal, acceptsImages = true) {
     const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
+    const attachments = parseAttachmentSelections(input.attachments) ?? [];
+    if (this.attachments && (attachments.length || selected?.length)) {
+      const fileAttachments = await this.attachments.prepare(input, [...attachments, ...(selected ?? []).map(material => ({ ref: material.snapshotId }))], `user-input:${input.key}`, input.threadId, signal);
+      const images = [...input.images ?? []];
+      if (acceptsImages) for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+        const source = await this.attachments.read(input, attachment.ref, signal);
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of source.stream) chunks.push(chunk);
+        images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64') });
+      }
+      return { ...threadInput(input.text, images.length ? images : input.images), fileAttachments, ...(sentTime ? { sentTime } : {}) };
+    }
+    if (attachments.length) throw new Error('Thread attachment admission is unavailable');
     if (!selected?.length) return { ...threadInput(input.text, input.images), ...(sentTime ? { sentTime } : {}) };
     if (!this.inputMaterials) throw new Error('Thread material admission is unavailable');
     const materials = await this.inputMaterials(input, selected, signal);
@@ -373,9 +390,39 @@ export class ThreadAdapter {
     const child=await this.runtime.child(operationId,signal);
     return this.fileTarget({runtime:'agent',threadId:child.child_thread_id,branchId:child.child_branch_id,itemId,path},signal);
   }
-  async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal) {
+  async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
-    return this.runtime.sendMessage({ ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+    const selections = parseAttachmentSelections(request.attachments);
+    if (!selections?.length) return this.runtime.sendMessage({ ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+    if (!this.attachments) throw new Error('Thread attachment admission is unavailable');
+    let targetThreadId = request.targetThreadId;
+    if (!targetThreadId && request.replyTo) {
+      const replied = await this.runtime.getMessage({ threadId: identity.threadId, branchId: identity.branchId, messageId: request.replyTo }, signal);
+      targetThreadId = replied.senderThreadId === identity.threadId ? replied.targetThreadId : replied.senderThreadId;
+    }
+    if (!targetThreadId) throw new Error('Select the attachment recipient');
+    const [sender, target, recipient] = await Promise.all([this.runtime.familyList({ callerThreadId: identity.threadId }, signal), this.runtime.familyList({ callerThreadId: targetThreadId }, signal), this.runtime.thread(targetThreadId, signal)]);
+    if (recipient.deleted_at_ms != null || request.targetBranchId && !recipient.branches.some(branch => branch.branch_id === request.targetBranchId)) throw new Error('The attachment recipient branch is no longer available');
+    if (sender.rootThreadId !== target.rootThreadId) throw new Error('The attachment recipient is outside this task family');
+    const preparedAttachments = await this.attachments.prepare(identity, selections, `user-message:${request.key}`, targetThreadId, signal);
+    let dispatched = false;
+    try {
+      const preparedAttachmentMedia = [];
+      for (const attachment of preparedAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+        const original = await this.attachments.read(identity, attachment.ref, signal);
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of original.stream) chunks.push(chunk);
+        preparedAttachmentMedia.push({ media_type: attachment.mimeType, data_base64: Buffer.concat(chunks).toString('base64') });
+      }
+      dispatched = true;
+      return await this.runtime.sendMessage({ ...request, preparedAttachments, preparedAttachmentMedia, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+    } catch (error) {
+      if (!dispatched || error instanceof KernelRequestError) {
+        try { await this.attachments.releaseUnpublished(identity, `user-message:${request.key}`, targetThreadId, preparedAttachments.map(item => item.ref)); }
+        catch { /* Preserve the fixed preparation until its accepted state can be established. */ }
+      }
+      throw error;
+    }
   }
   async listMessages(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
@@ -784,7 +831,7 @@ export class ThreadAdapter {
       try {
         this.assertImagesSupported(input.images, model.configuration);
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          expectedHead: input.expectedHead, input: await this.prepareInput(input), configuration: model.configuration,
+          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, model.configuration.acceptsImages !== false), configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: input.source ? {
             resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
             ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{nativeScope:input.source.nativeScope}:{}),branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
@@ -876,7 +923,7 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
+  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);
@@ -894,7 +941,7 @@ export class ThreadAdapter {
         if (!previous) throw new Error('An initial model selection is required');
         this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
         const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          mode: input.mode, input: await this.prepareInput(input) };
+          mode: input.mode, input: await this.prepareInput(input, undefined, (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false) };
         let inputPreparation: InputResourcePreparation | undefined;
         if (parseExplicitSkillCommand(input.text)) {
           const existing = await this.runtime.enqueueReceipt(command);

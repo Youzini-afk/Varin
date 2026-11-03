@@ -118,6 +118,12 @@ mounts validate before publication; closure, replacement, and render failure fen
 Host confirms durable selection, local mount cleanup cannot claim the catalog or an external effect
 rolled back. Detailed lifecycle mechanics belong to the extension packages.
 
+Conversation file selection keeps original Blobs in the in-memory draft until the authenticated owner
+returns fixed typed references. The same preparation helper serves native, external and collaboration
+inputs; file bytes do not enter JSON model input. Preparation failures retain the full selection, while
+uncertain sends keep exact accepted-intent keys. Typed file actions stay visible outside collapsed
+message text and use their enclosing conversation's binary reader. Unknown formats remain downloadable.
+
 ## Motion
 
 The product uses four springs and two tweens from `lib/motion/tokens.ts`:

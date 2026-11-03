@@ -358,7 +358,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             }}
             onPaste={(event) => {
               const files = event.clipboardData ? [...event.clipboardData.files] : [];
-              if (!files.some((file) => file.type.startsWith('image/'))) return;
+              if (!files.length || attachmentDisabled) return;
               event.preventDefault();
               onFiles(files);
             }}
@@ -442,7 +442,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                     {t('chat.fileAttachment.actions.chooseImages')}
                   </DropdownMenuItem>
                   <DropdownMenuItem disabled={attachmentDisabled} onClick={onAttachPdfs} className="gap-2.5 py-1.5">
-                    <Icon name="file-pdf" className="size-4" />{t('chat.fileAttachment.actions.attachPdfs')}
+                    <Icon name="file" className="size-4" />{t('chat.attachments.choose')}
                   </DropdownMenuItem>
                   {onOpenHistory && <DropdownMenuItem onClick={onOpenHistory}><Icon name="git-branch" className="size-4" />{t('chat.timeline.title')}</DropdownMenuItem>}
                   <DropdownMenuItem onClick={toggleExpandedInput} className="gap-2.5 py-1.5">

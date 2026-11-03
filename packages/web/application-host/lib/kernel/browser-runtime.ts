@@ -72,7 +72,8 @@ export function createBrowserRuntime(options: {
           let cleanupPending = false;
           if (written.status === 'applied') try { await browser.releaseDownload(pageId, String(input.downloadId)); } catch { cleanupPending = true; }
           return { executor_stopped: written.executorStopped, completion: { kind: 'result', outcome: written.status === 'applied' ? 'succeeded' : written.status === 'conflict' ? 'failed' : 'indeterminate',
-            effect: written.status === 'applied' ? 'confirmed' : written.status === 'conflict' ? 'none' : 'unknown', content: { data: parseVarinToolJson({ ...written, ...(cleanupPending ? { cleanupPending: true } : {}) }), parts: [] } } };
+            effect: written.status === 'applied' ? 'confirmed' : written.status === 'conflict' ? 'none' : 'unknown', content: { data: parseVarinToolJson({ ...written, ...(cleanupPending ? { cleanupPending: true } : {}) }),
+              parts: written.attachment ? [{ kind: 'attachment', attachment: written.attachment }] : [] } } };
         }
         const context = await materialContext(invocation, call.signal);
         if (input.action === 'read') {

@@ -1,3 +1,4 @@
+import type { Attachment, AttachmentSelection } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import {
   getRuntimeEndpointGeneration,
@@ -59,6 +60,8 @@ export interface ExternalAgentModel {
 export interface ExternalAgentCapabilities {
   resume: boolean;
   images: boolean;
+  /** Input routes implemented by the actual local harness adapter. */
+  files?: 'paths' | 'resource_links';
   steering: boolean;
   models: ExternalAgentModel[];
   modelsError?: string | undefined;
@@ -104,6 +107,7 @@ export type ExternalTurnStatus =
   | 'cancelled'
   | 'interrupted';
 export interface ExternalInput {
+  attachments?: AttachmentSelection[];
   config?: Record<string, string>;
   text: string;
   images?: Array<{ data: string; mimeType: string }>;
@@ -130,6 +134,7 @@ export interface ExternalTurn {
   };
 }
 export type ExternalItem = {
+  attachments?: Attachment[];
   senderThreadId?: string;
   id: string;
   turnId: string;
@@ -256,6 +261,8 @@ export interface ExternalAgentsAPI {
   }): Promise<ExternalConversation>;
   read(id: string, before?: number, signal?: AbortSignal): Promise<ExternalConversationSnapshot>;
   send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn>;
+  uploadAttachment(id: string, request: { key: string; filename: string; mimeType: string; data: Blob }, signal?: AbortSignal): Promise<Attachment>;
+  readAttachment(id: string, ref: string, signal?: AbortSignal): Promise<Blob>;
   connect(id: string, signal?: AbortSignal): Promise<ExternalAgentCapabilities>;
   authenticate(id: string, methodId: string): Promise<ExternalAgentCapabilities>;
   continueConversation(id: string): Promise<void>;
@@ -324,11 +331,34 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
           text: input.text,
           ...(input.config === undefined ? {} : { config: input.config }),
           ...(input.images === undefined ? {} : { images: input.images }),
+          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinking ? { thinking: input.thinking } : {}),
           ...(input.mode ? { mode: input.mode } : {}),
         },
       }),
+    async uploadAttachment(id, input, signal) {
+      if (generation !== getRuntimeEndpointGeneration()) throw new ExternalAgentError('host_changed', 'Application Host changed', 409);
+      const response = await runtimeFetch('/api/external-agents/attachments/upload', {
+        method: 'POST', query: { id, key: input.key, filename: input.filename, mimeType: input.mimeType, byteLength: String(input.data.size) },
+        headers: { 'Content-Type': 'application/octet-stream' }, body: input.data, ...(signal ? { signal } : {}),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new ExternalAgentError(result.code ?? 'attachment_upload', result.error ?? 'File upload failed', response.status);
+      if (generation !== getRuntimeEndpointGeneration()) throw new ExternalAgentError('host_changed', 'Application Host changed', 409);
+      return result as Attachment;
+    },
+    async readAttachment(id, ref, signal) {
+      if (generation !== getRuntimeEndpointGeneration()) throw new ExternalAgentError('host_changed', 'Application Host changed', 409);
+      const response = await runtimeFetch('/api/external-agents/attachments/read', { query: { id, ref }, ...(signal ? { signal } : {}) });
+      if (!response.ok) {
+        const result = await response.json();
+        throw new ExternalAgentError(result.code ?? 'attachment_read', result.error ?? 'File is unavailable', response.status);
+      }
+      const blob = await response.blob();
+      if (generation !== getRuntimeEndpointGeneration()) throw new ExternalAgentError('host_changed', 'Application Host changed', 409);
+      return blob;
+    },
     connect: (id, signal) => request('connect', { id }, signal),
     authenticate: (id, methodId) => request('authenticate', { id, methodId }),
     continueConversation: (id) => request('continue', { id }),

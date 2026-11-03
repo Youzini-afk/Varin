@@ -318,6 +318,7 @@ fn assert_media_request(view: &RequestView, wire: &Value) {
                 .iter()
                 .map(|part| match part {
                     OutputPart::Media { .. } => "image".to_string(),
+                    OutputPart::Attachment { attachment } => attachment.reference.clone(),
                     OutputPart::Text { text } => text.clone(),
                 })
                 .collect();

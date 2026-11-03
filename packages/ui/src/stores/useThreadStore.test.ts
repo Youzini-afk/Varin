@@ -10,6 +10,7 @@ vi.mock('@varin/application-client', async original => ({ ...await original<type
 }));
 import { bindThreadStore, threadHostKey, threadIdentityKey, threadComposerKey, useThreadStore } from './useThreadStore';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from './useThreadDraftStore';
+import { selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread-a', branchId: 'main-a' };
 const summary = (patch: Partial<ThreadSummary> = {}): ThreadSummary => ({
@@ -121,7 +122,10 @@ it('sends a first input only once, preserves later typing, and retries unknown a
   useThreadDraftStore.getState().patch(key, { text: 'Original question' });
   const submit = vi.fn().mockRejectedValueOnce(new Error('response lost'));
   f.api.submit = submit;
-  const request = { key: 'first-message', text: 'Original question', editorText: 'Original question', images: [], pdfs: [],
+  const files = selectThreadFiles(key, [new File([new Uint8Array([0, 255, 9])], 'first.bin')]);
+  const upload = vi.fn<ThreadsAPI['attachments']['upload']>().mockResolvedValue({ ref: 'attachment:first-file', filename: 'first.bin', mimeType: 'application/octet-stream', byteLength: 3 });
+  f.api.attachments = { upload, read: vi.fn() };
+  const request = { key: 'first-message', text: 'Original question', editorText: 'Original question', images: [], files,
     model: { providerId: 'account', modelId: 'model' }, editorContext: [], inlineContext: [], status: 'sending' as const };
   await expect(sendThreadDraft(f.api, key, request)).rejects.toThrow('response lost');
   expect(useThreadDraftStore.getState().drafts[key].pendingInput?.status).toBe('unknown');
@@ -132,6 +136,9 @@ it('sends a first input only once, preserves later typing, and retries unknown a
   expect(duplicate).toBe(retry);
   accepted.resolve({ run_id: 'run', input_id: 'input' }); await retry;
   expect(f.api.create).toHaveBeenCalledTimes(1);
+  expect(upload).toHaveBeenCalledExactlyOnceWith(identity, expect.objectContaining({ data: files[0]!.data, key: files[0]!.id }), undefined);
+  expect(submit.mock.calls.every(([input]) => JSON.stringify(input.attachments) === JSON.stringify([{ ref: 'attachment:first-file' }]))).toBe(true);
+  expect(useThreadDraftStore.getState().drafts[key].files).toEqual([]);
   expect(submit.mock.calls.map(call => call[0])).toEqual([expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' }),
     expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' })]);
   expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'Follow-up being typed', firstSend: undefined, pendingInput: undefined });

@@ -543,6 +543,7 @@ export function createAgentResourceAuthority() {
         }
         return { status: 'ready', kind: request.kind, descriptor, file: { reference: result.reference, content: result.content } };
       }
+      if (request.kind === 'attachment') return bindingFailure(snapshot, request.ref, 'unavailable', 'Attachment reads belong to their original material owner');
       let directory: string;
       try {
         const target = relativeResourcePath(request.targetPath);

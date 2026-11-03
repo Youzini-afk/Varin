@@ -74,7 +74,7 @@ it.each(['inform', 'request'] as const)('carries exact User %s acceptance throug
   f.facts.reply = { messages: [], nextCursor: 'fixed-received-cursor' };
   expect(await f.api.list(identity, { direction: 'incoming', cursor: 'fixed-received-cursor', limit: 2 })).toEqual(f.facts.reply);
   expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.list', { direction: 'incoming', cursor: 'fixed-received-cursor', limit: 2, threadId: identity.threadId, branchId: identity.branchId }]);
-  const original: MessageView = { ...accepted, messageId: 'received-message', senderThreadId: target.targetThreadId, senderBranchId: target.targetBranchId,
+  const original: MessageView = { ...accepted, attachments: [], messageId: 'received-message', senderThreadId: target.targetThreadId, senderBranchId: target.targetBranchId,
     targetThreadId: identity.threadId, targetBranchId: identity.branchId,
     actor: { kind: 'agent', runId: 'sender-run', operationId: 'sender-operation', origin: { kind: 'policy_action', action_id: 'sender-action', node_id: 'sender-node' } },
     state: 'queued', activation: kind === 'inform' ? { state: 'passive' } : { state: 'pending', executionId: null, holdReason: 'preparing' },

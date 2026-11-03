@@ -33,8 +33,8 @@ const edits = array({ oneOf: [
   object({ action: { const: 'add_sheet' }, name: text }, ['action', 'name']),
   object({ action: { const: 'move_shape' }, objectId: text, ...geometry }, ['action', 'objectId']),
 ] });
-const source: JsonObject = { path: text, snapshotId: text };
-const exactlyOneSource = { oneOf: [{ required: ['path'], not: { required: ['snapshotId'] } }, { required: ['snapshotId'], not: { required: ['path'] } }] };
+const source: JsonObject = { path: text, snapshotId: text, ref: text };
+const exactlyOneSource = { oneOf: [{ required: ['path'] }, { required: ['snapshotId'] }, { required: ['ref'] }] };
 const declaration = (method: string, description: string, inputSchema: JsonObject, operation: 'read' | 'effect' = 'read', physical = false): VarinExtensionServiceProvision => ({
   id: `varin.office.${method}`, version: 1,
   tool: { name: `office_${method}`, description, inputSchema, operation, completion: 'result', outputSchema: { type: 'object' },
@@ -52,7 +52,7 @@ const declaration = (method: string, description: string, inputSchema: JsonObjec
 });
 
 export const OFFICE_TOOL_DECLARATIONS = [
-  declaration('read', 'Read DOCX, XLSX or PPTX structure from a source-relative path or a fixed snapshotId. Overview lists sections; content returns paragraphs, cells, shapes and notes with revision-bound object IDs. Select a section, objectId, worksheet range or query; offset/limit continue results. Formulas and cached values are distinct; a stored cache is not a new calculation. Use document_read for PDF pages.', {
+  declaration('read', 'Read DOCX, XLSX or PPTX structure from a fixed attachment ref, source-relative path or fixed snapshotId. Overview lists sections; content returns paragraphs, cells, shapes and notes with revision-bound object IDs. Select a section, objectId, worksheet range or query; offset/limit continue results. Formulas and cached values are distinct; a stored cache is not a new calculation. Use document_read for PDF pages.', {
     ...object({ ...source, view: { enum: ['overview', 'content', 'find'] }, section: text, objectId: text, range: text, query: text, offset: integer, limit: { type: 'integer', minimum: 1 } }), ...exactlyOneSource,
   }),
   declaration('write', 'Create an editable Office file or edit an existing revision in place. edit requires expectedRevision from office_read; object IDs belong to that revision. Text edits preserve surrounding runs and unrelated package parts. Worksheet edits clear stale formula caches and request recalculation; office_export through LibreOffice performs actual recalculation. PPTX coordinates are inches, DOCX font sizes are points. create only writes a missing path; replace explicitly replaces a known revision with new content.', { $defs:{content:create,edits}, oneOf: [
@@ -63,11 +63,12 @@ export const OFFICE_TOOL_DECLARATIONS = [
   declaration('render', 'Render real Office pages through the Host’s available LibreOffice engine and return a PDF snapshot or actual page images. Reuse the returned PDF snapshotId with document_read for additional pages. Rendering availability is independent of structure reading and local edits; office_environment reports the installed engine.', {
     ...object({ ...source, page: { type: 'integer', minimum: 1 }, scale: positive }), ...exactlyOneSource,
   }),
-  declaration('export', 'Convert an input Office file (sourcePath or snapshotId, exactly one) using LibreOffice and save it to the separate output destination path. Exporting XLSX to XLSX also recalculates formulas. expectedRevision is required to replace an existing destination; omitting it creates a new file. The result identifies the engine and the committed file revision.', { ...object({
+  declaration('export', 'Convert an input Office file (ref, sourcePath or snapshotId, exactly one) using LibreOffice and save it to the separate output destination path. Exporting XLSX to XLSX also recalculates formulas. expectedRevision is required to replace an existing destination; omitting it creates a new file. The result identifies the engine and the committed file revision.', { ...object({
+    ref: { ...text, description: 'Input fixed attachment reference.' },
     sourcePath: { ...text, description: 'Input source-relative file path; choose sourcePath or snapshotId.' },
     snapshotId: { ...text, description: 'Input snapshot; choose snapshotId or sourcePath.' },
     path: { ...text, description: 'Output destination file path, distinct from the input sourcePath or snapshotId.' },
     expectedRevision: text, format: { enum: ['pdf', 'docx', 'xlsx', 'pptx', 'csv'] },
-  }, ['path', 'format']), oneOf: [{ required: ['sourcePath'], not: { required: ['snapshotId'] } }, { required: ['snapshotId'], not: { required: ['sourcePath'] } }] } as JsonObject, 'effect', true),
+  }, ['path', 'format']), oneOf: [{ required: ['sourcePath'] }, { required: ['snapshotId'] }, { required: ['ref'] }] } as JsonObject, 'effect', true),
   declaration('environment', 'Inspect the reusable Office environment: available format operations, bundled library module paths for JavaScript work, and the actual local LibreOffice renderer. Advanced application operations are available through computer_office on supported connected desktops; process and script tools remain usable for tasks beyond these format operations.', object({})),
 ] as const;

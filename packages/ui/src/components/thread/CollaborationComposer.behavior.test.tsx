@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { CollaborationComposer } from './CollaborationComposer';
+import { selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 const rootIdentity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
@@ -38,7 +39,9 @@ it('retains exact recipient branches and retries only unconfirmed recipients wit
       ReturnType<NonNullable<ThreadsAPI['messages']>['send']>
     >;
   });
-  const api = { messages: { send } } as unknown as ThreadsAPI;
+  const upload = vi.fn<ThreadsAPI['attachments']['upload']>().mockResolvedValue({ ref: 'attachment:partial-original', filename: 'payload.zip', mimeType: 'application/zip', byteLength: 3 });
+  const api = { messages: { send }, attachments: { upload } } as unknown as ThreadsAPI;
+  selectThreadFiles('group', [new File(['zip'], 'payload.zip')]);
   useThreadDraftStore
     .getState()
     .patch('group', { text: 'Check the selected worktree', collaboration: { targets: [rootIdentity, target] } });
@@ -61,6 +64,8 @@ it('retains exact recipient branches and retries only unconfirmed recipients wit
     [rootIdentity, 'worker', 'worktree-branch'],
   ]);
   const original = send.mock.calls[1]![1];
+  expect(original.attachments).toEqual([{ ref: 'attachment:partial-original' }]);
+  expect(useThreadDraftStore.getState().drafts.group.files).toHaveLength(1);
   expect(container.querySelector<HTMLTextAreaElement>('textarea')!.disabled).toBe(true);
   // A remounted panel reads the same draft attempt, rather than constructing another command.
   await act(async () => {
@@ -69,6 +74,31 @@ it('retains exact recipient branches and retries only unconfirmed recipients wit
   await act(async () => render());
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="chat.messages.retry"]')!.click());
   expect(send).toHaveBeenCalledTimes(3);
+  expect(upload).toHaveBeenCalledOnce();
+  expect(useThreadDraftStore.getState().drafts.group.files).toEqual([]);
   expect(send.mock.calls[2]![1]).toEqual(original);
   expect(useThreadDraftStore.getState().drafts.group?.text).toBe('');
+});
+
+it('prepares binary attachments once and sends attachment-only messages to every selected recipient', async () => {
+  const send = vi.fn<NonNullable<ThreadsAPI['messages']>['send']>().mockResolvedValue({ messageId: 'accepted' } as never);
+  let complete!: (value: import('@varin/protocol').Attachment) => void;
+  const upload = vi.fn<ThreadsAPI['attachments']['upload']>().mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  const api = { messages: { send }, attachments: { upload } } as unknown as ThreadsAPI;
+  useThreadDraftStore.getState().patch('files', { collaboration: { targets: [rootIdentity, target] } });
+  await act(async () => root.render(<CollaborationComposer api={api} identity={rootIdentity} draftKey="files" members={[]} onSent={() => {}} moreMembers={false} loadMembers={() => {}} />));
+  const file = new File([new Uint8Array([0, 255, 3])], 'original.weird');
+  await act(async () => {
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, 'files', { value: [file] }); picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="collaboration.send"]')!.click());
+  expect(upload).toHaveBeenCalledOnce(); expect(send).not.toHaveBeenCalled();
+  expect(upload.mock.calls[0]![1].data).toBe(file);
+  expect(container.textContent).toContain('chat.attachments.preparing');
+  await act(async () => complete({ ref: 'attachment:fixed', filename: file.name, mimeType: 'application/octet-stream', byteLength: file.size }));
+  expect(send.mock.calls.map(([, request]) => ({ text: request.text, attachments: request.attachments, target: request.targetThreadId }))).toEqual([
+    { text: '', attachments: [{ ref: 'attachment:fixed' }], target: 'root' }, { text: '', attachments: [{ ref: 'attachment:fixed' }], target: 'worker' },
+  ]);
+  expect(useThreadDraftStore.getState().drafts.files.files).toEqual([]);
 });

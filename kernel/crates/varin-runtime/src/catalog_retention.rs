@@ -268,6 +268,7 @@ impl Catalog {
         for table in &tables {
             removed += tx.execute(&format!("DELETE FROM {} WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name=?1)", quoted(table)), [table])?;
         }
+        attachments::retire(&tx)?;
         // Heads are not SQL foreign keys. Only retired branches can have lost their final head.
         tx.execute("UPDATE branches SET head=NULL,active_run=NULL WHERE thread_id IN (SELECT id FROM thread_gc_threads) AND head IS NOT NULL AND NOT EXISTS(SELECT 1 FROM history WHERE id=branches.head)", [])?;
         tx.execute_batch("DELETE FROM thread_gc_threads; DELETE FROM thread_gc_runs; DELETE FROM thread_gc_rows; DELETE FROM thread_gc_owners;")?;

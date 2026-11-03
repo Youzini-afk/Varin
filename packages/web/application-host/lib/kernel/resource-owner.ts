@@ -1,17 +1,24 @@
 import { createAgentResourceAuthority, type AgentResourceRead } from '../agent-resources/authority.js';
 import type { ResourceFailureStatus } from '../agent-resources/source-reader.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { AgentResourceRequest, ResourceSnapshotParams } from './protocol.generated.js';
+import type { AttachmentSelection, AgentResourceRequest, ResourceSnapshotParams } from './protocol.generated.js';
 import { resourceThreadSource } from './thread-context.js';
 import { ResourceScopeError, type ThreadResourceScope } from './thread-resource-scope.js';
 import type { InteractiveUiRuntime } from '../interactive-ui/runtime.js';
+import { HarnessServiceError } from '../harness/service-error.js';
+import type { ThreadAttachmentOwner } from './thread-attachments.js';
 import { UiContentError } from '../interactive-ui/store.js';
 
-export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest }
+export type AttachmentOwnerRequest =
+  | { kind: 'attachment_prepare'; operationId: string; targetThreadId: string; targetBranchId?: string; attachments: AttachmentSelection[] }
+  | { kind: 'attachment_report'; refs: string[]; sourceThreadId?: string; sourceBranchId?: string }
+  | { kind: 'attachment_release'; operationId: string; targetThreadId: string; targetBranchId?: string }
+  | { kind: 'attachment'; ref: string; view?: 'path' | 'content' | 'bytes'; offset?: number; limit?: number };
+export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest | AttachmentOwnerRequest }
 export type ResourceToolResult = (AgentResourceRead | ({ status: 'ready' } & Record<string, unknown>)) & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;
 export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string, code?: string): ResourceToolResult {
-  const target = query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
+  const target = query?.request.kind === 'attachment' ? query.request.ref : query?.request.kind === 'attachment_prepare' || query?.request.kind === 'attachment_release' || query?.request.kind === 'attachment_report' ? '' : query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
     : query?.request.kind === 'skill-resource' ? query.request.relativePath : query?.request.resourceId ?? '';
   return { status, reason, ...(code ? { code } : {}), domainId: 'agent-resources', viewId: snapshotId ?? query?.resourceCheckpointId ?? 'unbound', path: target,
     ...(snapshotId ? { snapshotId } : {}), ...(query ? { resourceCheckpointId: query.resourceCheckpointId } : {}) };
@@ -21,12 +28,30 @@ export function createResourceOwner(options: {
   runtime: Pick<AgentRuntimeClient, 'run' | 'resourceSnapshot'>;
   resources: ThreadResourceScope;
   ui?: InteractiveUiRuntime;
+  attachments?: ThreadAttachmentOwner;
 }): ResourceOwner {
   const authority = createAgentResourceAuthority();
   return async (query, signal) => {
     let snapshotId: string | undefined;
     try {
       signal.throwIfAborted();
+      if (query.request.kind === 'attachment_prepare' || query.request.kind === 'attachment_release' || query.request.kind === 'attachment_report' || query.request.kind === 'attachment') {
+        if (!options.attachments) return resourceQueryFailure('unavailable', 'The original attachment owner is unavailable', query);
+        if (query.request.kind === 'attachment_report') return { status: 'ready', ...await options.attachments.reportQuery({ ...query, request: query.request }, signal) };
+        if (query.request.kind === 'attachment_release') { await options.attachments.releaseQuery({ ...query, request: query.request }, signal); return { status: 'ready', released: true }; }
+        if (query.request.kind === 'attachment_prepare') return { status: 'ready', attachments: await options.attachments.prepareQuery({ ...query, request: query.request }, signal) };
+        const frozen = await options.runtime.resourceSnapshot({ runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId }, signal);
+        const run = await options.runtime.run(query.runId, signal);
+        const identity = { runtime: 'agent' as const, threadId: run.thread_id, branchId: run.branch_id };
+        const request = query.request;
+        if (request.view === 'path') return { status: 'ready', ...await options.attachments.path(identity, request.ref, query.runId, signal, frozen.source) };
+        const chunk = await options.attachments.readChunk(identity, request.ref, request.offset, request.limit, signal);
+        if (request.view === 'content') {
+          try { return { status: 'ready', attachment: chunk.attachment, content: { text: new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(chunk.bytesBase64, 'base64')), offset: chunk.offset, nextOffset: chunk.nextOffset, byteLength: chunk.attachment.byteLength, eof: chunk.eof } }; }
+          catch { return { status: 'ready', attachment: chunk.attachment, content: { bytesBase64: chunk.bytesBase64, offset: chunk.offset, nextOffset: chunk.nextOffset, byteLength: chunk.attachment.byteLength, eof: chunk.eof } }; }
+        }
+        return { status: 'ready', ...chunk };
+      }
       if (query.request.kind === 'ui') {
         // Original Catalog invocation/checkpoint validation still precedes this domain read.
         await options.runtime.resourceSnapshot({ runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId }, signal);
@@ -57,6 +82,7 @@ export function createResourceOwner(options: {
       if (current.cancel_requested || ['completed', 'failed', 'cancelled'].includes(current.state)) return resourceQueryFailure('cancelled', 'Resource Run is closed', query, snapshotId);
       return { ...result, snapshotId, resourceCheckpointId: query.resourceCheckpointId };
     } catch (error) {
+      if (error instanceof HarnessServiceError) return resourceQueryFailure(error.harnessCode === 'forbidden' ? 'denied' : error.harnessCode === 'not-found' ? 'missing' : error.harnessCode === 'invalid-params' ? 'invalid' : 'unavailable', error.message, query);
       if (error instanceof UiContentError) return resourceQueryFailure(error.status === 404 ? 'missing' : error.status === 409 ? 'stale' : error.status === 400 ? 'invalid' : 'unavailable', error.message, query, snapshotId, error.code);
       if (signal.aborted) return resourceQueryFailure('cancelled', 'Resource query was cancelled', query, snapshotId);
       const failure = error instanceof ResourceScopeError ? error.failure : undefined;

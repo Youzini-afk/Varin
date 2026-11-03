@@ -1,6 +1,8 @@
 /** Format engines transform bytes; native Storage owns conditional writes and recovery. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { parseIncomingOutputPart } from '@varin/extension-contract';
+import type { Attachment } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient, KernelScopedClient } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
@@ -26,13 +28,23 @@ export interface BinaryFileWriteResult {
   executorStopped: boolean;
   fileJournal: true;
   cleanupPending?: boolean;
+  attachment?: Attachment;
 }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const resultFrom = (value: unknown, path: string, operationId: string): BinaryFileWriteResult | undefined => {
   if (!object(value) || !['applied', 'conflict'].includes(String(value.status)) || typeof value.stateJson !== 'string') return undefined;
   const state = JSON.parse(value.stateJson) as KernelBranchState;
+  let attachment: Attachment | undefined;
+  if (value.attachment !== undefined) {
+    try {
+      const part = parseIncomingOutputPart({ kind: 'attachment', attachment: value.attachment });
+      if (part.kind !== 'attachment' || value.status !== 'applied' || state.kind !== 'regular-file'
+        || part.attachment.byteLength !== state.byteLength) return undefined;
+      attachment = part.attachment;
+    } catch { return undefined; }
+  }
   return { status: value.status as 'applied' | 'conflict', path, operationId, executorStopped: true, fileJournal: true,
-    ...(state.kind === 'regular-file' ? { revision: state.objectHash, byteLength: state.byteLength } : {}) };
+    ...(state.kind === 'regular-file' ? { revision: state.objectHash, byteLength: state.byteLength } : {}), ...(attachment ? { attachment } : {}) };
 };
 
 /** Shared by the local Host and an explicitly admitted remote source Host. */

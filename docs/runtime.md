@@ -131,7 +131,8 @@ Thread、branch 的小型身份记录和删除回执保留，支持稳定身份�
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 与独立格式 82 → 83 → 84；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 → 85 与独立格式 82 → 83 → 84 → 85；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
+84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
 78 → 79 初始化外部 Agent 结构，79 → 80 初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
 80 → 81 初始化 Zone2 捕获结构，81 → 83 为原历史引用增加稀疏文本范围索引；82 → 83 保留既有索引并补齐 Zone2。索引供[派发模型选择](collaboration.md#自由派发与模型选择)按原身份读取有限原文；不复制正文或媒体。
 82/83 的打开预检查扫描用户及助手历史的引用元数据，确认索引对象存在；具体索引结构在读取时校验，不在请求路径补造索引。

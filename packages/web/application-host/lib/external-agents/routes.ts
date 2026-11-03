@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { Express, RequestHandler } from 'express';
 import {
   ExternalAgentError,
@@ -26,6 +28,45 @@ export function registerExternalAgentRoutes(
   service: ExternalAgentsService,
   requireAuth: RequestHandler,
 ) {
+  app.post('/api/external-agents/attachments/upload', requireAuth, async (req, res) => {
+    const controller = new AbortController();
+    const close = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', close);
+    try {
+      if (req.headers['content-type']?.split(';')[0] !== 'application/octet-stream') throw new ExternalAgentError('invalid_attachment', 'Send original file bytes as an octet stream');
+      const byteLength = Number(req.query.byteLength);
+      if (!Number.isSafeInteger(byteLength) || byteLength < 0) throw new ExternalAgentError('invalid_attachment', 'A valid original byte length is required');
+      const attachment = await service.uploadAttachment(string(req.query.id), {
+        key: string(req.query.key), filename: string(req.query.filename),
+        mimeType: string(req.query.mimeType), byteLength,
+      }, req, controller.signal);
+      res.json(attachment);
+    } catch (error) {
+      if (res.headersSent && !res.destroyed) { res.destroy(); return; }
+      if (!res.headersSent && !res.destroyed) res.status(error instanceof ExternalAgentError ? error.status : 400).json({
+        code: error instanceof ExternalAgentError ? error.code : 'attachment_upload', error: error instanceof Error ? error.message : String(error),
+      });
+    } finally { res.off('close', close); }
+  });
+  app.get('/api/external-agents/attachments/read', requireAuth, async (req, res) => {
+    const controller = new AbortController();
+    const close = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', close);
+    try {
+      const { attachment, stream } = await service.readAttachment(string(req.query.id), string(req.query.ref), controller.signal);
+      res.setHeader('Content-Type', attachment.mimeType);
+      res.setHeader('Content-Length', String(attachment.byteLength));
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store');
+      await pipeline(Readable.from(stream), res, { signal: controller.signal });
+    } catch (error) {
+      if (res.headersSent && !res.destroyed) { res.destroy(); return; }
+      if (!res.headersSent && !res.destroyed) res.status(error instanceof ExternalAgentError ? error.status : 400).json({
+        code: error instanceof ExternalAgentError ? error.code : 'attachment_read', error: error instanceof Error ? error.message : String(error),
+      });
+    } finally { res.off('close', close); }
+  });
   const fields: Record<string, string[]> = {
     settings: [],
     configure: ['value', 'expectedRevision', 'key'],

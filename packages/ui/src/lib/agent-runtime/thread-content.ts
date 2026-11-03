@@ -1,10 +1,11 @@
-import type { OutputBody, StoredMedia } from '@varin/protocol';
+import type { Attachment, OutputBody, StoredMedia } from '@varin/protocol';
 
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 export type ThreadContentPart =
   | { kind: 'text'; text: string }
   | { kind: 'media'; media: StoredMedia; partIndex: number; imageReference?: number }
   | { kind: 'output'; output: OutputBody }
+  | { kind: 'attachment'; attachment: Attachment }
   | { kind: 'data'; data: unknown }
   | { kind: 'status'; text: string };
 
@@ -13,11 +14,16 @@ function isMedia(value: unknown): value is StoredMedia {
   return typeof media?.media_type === 'string' && typeof record(media.content_ref)?.content_object === 'string'
     && typeof record(media.source)?.kind === 'string';
 }
+export function isAttachment(value: unknown): value is Attachment {
+  const file = record(value);
+  return typeof file?.ref === 'string' && file.ref.startsWith('attachment:') && typeof file.filename === 'string'
+    && typeof file.mimeType === 'string' && typeof file.byteLength === 'number' && Number.isSafeInteger(file.byteLength) && file.byteLength >= 0;
+}
 function isOutput(value: unknown): value is OutputBody {
   const output = record(value);
   return !!output && Object.hasOwn(output, 'data') && Array.isArray(output.parts) && output.parts.every(part => {
     const value = record(part);
-    return value?.kind === 'text' ? typeof value.text === 'string' : value?.kind === 'media' && isMedia(value.media);
+    return value?.kind === 'text' ? typeof value.text === 'string' : value?.kind === 'attachment' ? isAttachment(value.attachment) : value?.kind === 'media' && isMedia(value.media);
   });
 }
 /** Only call at an explicitly declared output-body boundary, never to infer a JSON value's kind. */
@@ -40,6 +46,11 @@ export function inputParts(content: unknown): ThreadContentPart[] {
     else value.attachments.forEach((media, partIndex) => parts.push(isMedia(media) ? { kind: 'media', media, partIndex,
       ...(Array.isArray(value.imageReferences) ? { imageReference: value.imageReferences[partIndex] as number } : {}) }
       : { kind: 'status', text: 'Input media is unavailable. Refresh this conversation.' }));
+  }
+  if (value.fileAttachments !== undefined) {
+    if (!Array.isArray(value.fileAttachments)) parts.push({ kind: 'status', text: 'Input attachments are invalid. Refresh this conversation.' });
+    else for (const attachment of value.fileAttachments) parts.push(isAttachment(attachment)
+      ? { kind: 'attachment', attachment } : { kind: 'status', text: 'Input attachment is unavailable. Refresh this conversation.' });
   }
   return parts;
 }

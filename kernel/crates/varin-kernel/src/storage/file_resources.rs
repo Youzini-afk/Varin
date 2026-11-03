@@ -55,10 +55,10 @@ impl Storage {
             || target["threadId"] != read.thread_id || target["runId"] != read.run_id || target["workspaceId"] != source.workspace_id
             || target["executionWorkspaceId"] != source.execution_workspace_id || target["sourceMode"] != serde_json::to_value(source.mode)?
             || target["canonicalRoot"].as_str() != expected_root.to_str() || target["rootId"] != root_id
-            || !matches!(identity["__recoveryTool"].as_str(), Some("office_write" | "office_export" | "browser_files")) {
+            || !matches!(identity["__recoveryTool"].as_str(), Some("file_write" | "file_edit" | "office_write" | "office_export" | "browser_files")) {
             return Err(KernelError::Authorization("File receipt differs from its original Run, source or tool".into()));
         }
-        Ok(json!({"state":state,"tool":identity["__recoveryTool"],"turn":turn,"receipt":if state=="committed"{body.clone()}else{Value::Null}}))
+        Ok(json!({"state":state,"grantId":identity.get("__artifactGrantId").or_else(||identity.get("__nativeGrantId")),"tool":identity["__recoveryTool"],"turn":turn,"receipt":if state=="committed"{body.clone()}else{Value::Null}}))
     }
 }
 
@@ -72,7 +72,7 @@ pub(super) fn file_params_value(params_value: &Value) -> Value {
 
 fn public_file_result(mut result: Value) -> Value {
     if let Some(object) = result.as_object_mut() {
-        object.remove("__recoveryTurn"); object.remove("__recoveryTool");
+        object.remove("__recoveryTurn"); object.remove("__recoveryTool"); object.remove("__artifactGrantId");
     }
     result
 }
@@ -82,7 +82,11 @@ fn file_operation_identity(params_value: &Value) -> Result<(Value, String), Kern
     if let Some(object) = identity.as_object_mut() {
         object.remove("leaseId");
     }
-    let hash = hash_json(&identity)?;
+    // The first writer owns artifact provenance; an already admitted operation
+    // may be observed with a new grant without changing its original arguments.
+    let mut arguments = identity.clone();
+    if let Some(object) = arguments.as_object_mut() { object.remove("__artifactGrantId"); }
+    let hash = hash_json(&arguments)?;
     Ok((identity, hash))
 }
 
@@ -96,6 +100,7 @@ pub(super) fn parse_file_params<T: DeserializeOwned>(
         object.remove("__nativeRequestHash");
         object.remove("__nativeGrantId");
         object.remove("__nativeEpoch");
+        object.remove("__artifactGrantId");
         object.remove("__recoveryTurn");
         object.remove("__recoveryBeforeOwner");
         object.remove("__recoveryTool");
@@ -663,6 +668,39 @@ impl Storage {
         }
     }
 
+    /// The receipt's exact original version is retained in the same transaction
+    /// as file.apply. A later write never retargets this artifact to a path.
+    fn retain_file_artifact(&self, operation:&str, intent:&Value, result:&Value)
+        -> Result<Option<varin_runtime::catalog::attachments::Attachment>,KernelError> {
+        if result["status"]!="applied" {return Ok(None);}
+        let turn=&intent["__recoveryTurn"];
+        let (Some(workspace),Some(thread),Some(path),Some(raw_state))=(turn["workspaceId"].as_str(),turn["conversation"]["threadId"].as_str(),intent["path"].as_str(),intent["targetJson"].as_str()) else {return Ok(None);};
+        if !matches!(intent["__recoveryTool"].as_str(),Some("file_write"|"file_edit"|"office_write"|"office_export"|"browser_files")) {return Ok(None);}
+        let state:FileState=serde_json::from_str(raw_state)?;
+        let FileState::RegularFile{object_hash,byte_length,..}=state else {return Ok(None);};
+        let reference=format!("attachment:operation_{}",base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(operation.as_bytes()));
+        let filename=path.rsplit('/').next().filter(|name|!name.is_empty()).ok_or_else(||KernelError::Storage("File artifact name missing".into()))?;
+        let mime=if matches!(intent["__recoveryTool"].as_str(),Some("file_write"|"file_edit")) {"text/plain"} else {match filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str(){
+            "png"=>"image/png","jpg"|"jpeg"=>"image/jpeg","gif"=>"image/gif","webp"=>"image/webp","svg"=>"image/svg+xml",
+            "txt"|"md"=>"text/plain","csv"=>"text/csv","html"|"htm"=>"text/html","json"=>"application/json",
+            "pdf"=>"application/pdf","docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","pptx"=>"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            _=>"application/octet-stream"}};
+        let attachment=varin_runtime::catalog::attachments::Attachment{reference:reference.clone(),filename:filename.into(),mime_type:mime.into(),byte_length};
+        let grant_id=intent.get("__artifactGrantId").or_else(||intent.get("__nativeGrantId")).and_then(Value::as_str)
+            .ok_or_else(||KernelError::Storage("File artifact has no original writer grant".into()))?;
+        let payload=json!({"attachment":attachment,"contentHash":object_hash,"operationId":operation,"sourceGrantId":grant_id,"managedSource":self.source_authority_for_grant(grant_id)?.is_some()});
+        if let Some(previous)=self.domain_record_value(workspace,&reference)? {
+            if previous["threadId"]!=thread || previous["payloadJson"].as_str()!=Some(serde_json::to_string(&payload)?.as_str()) {
+                return Err(KernelError::Storage("File artifact identity changed during receipt recovery".into()));
+            }
+        } else {
+            self.conn.execute("INSERT INTO domain_records(workspace_id,record_id,record_type,state,thread_id,run_id,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'attachment.file','temporary',?3,?6,1,?4,?5,?5)",params![workspace,reference,thread,payload.to_string(),now_ms(),turn["runId"].as_str()])?;
+            self.conn.execute("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,'source',?3)",params![workspace,reference,object_hash])?;
+        }
+        Ok(Some(attachment))
+    }
+
     pub(super) fn finish_file_operation(
         &mut self,
         operation_id: &str,
@@ -687,7 +725,7 @@ impl Storage {
         let journal_intent = intent.as_ref().map(|value| serde_json::from_str::<Value>(value)).transpose()?.and_then(|value| value.get("intent").cloned());
         if let Some(intent) = intent {
             let envelope: Value = serde_json::from_str(&intent)?;
-            for field in ["__nativeRequestHash", "__nativeGrantId", "__nativeEpoch"] {
+            for field in ["__nativeRequestHash", "__nativeGrantId", "__nativeEpoch", "__artifactGrantId"] {
                 if let Some(identity) = envelope["intent"][field].as_str() {
                     durable_result[field] = json!(identity);
                 }
@@ -695,13 +733,16 @@ impl Storage {
             // Keep the native journal identity with this operation's own receipt.
             // A later write to the same checkpoint path can replace the current
             // after-image, but must not erase the original external tool outcome.
-            if envelope["intent"]["journalBinding"].is_object() {
+            if envelope["intent"]["__recoveryTurn"].is_object() {
                 durable_result["__recoveryTurn"] = envelope["intent"]["__recoveryTurn"].clone();
                 durable_result["__recoveryTool"] = envelope["intent"]["__recoveryTool"].clone();
             }
         }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
+            if let Some(intent)=&journal_intent {
+                if let Some(attachment)=self.retain_file_artifact(operation_id,intent,result)? {durable_result["attachment"]=json!(attachment);}
+            }
             self.operation_finish(operation_id, &durable_result)?;
             if let Some(intent)=&journal_intent { self.journal_file_receipt(operation_id,intent,result)?; }
             if let (Some(owner_id), Some(workspace_id)) = (owner_id, workspace_id) {
