@@ -284,6 +284,19 @@ mod windows {
         }
     }
     pub fn empty(scope: &ProcessScope) -> Result<bool, String> {
+        // Job membership/accounting can advance during process rundown. The
+        // original admitted object must be signaled even if a query already
+        // reports zero members; neither PID disappearance nor an exit code is
+        // a substitute for this retained kernel-object receipt.
+        match unsafe { WaitForSingleObject(scope.original_process.as_raw_handle(), 0) } {
+            WAIT_OBJECT_0 => {}
+            WAIT_TIMEOUT => {
+                #[cfg(test)]
+                trace_unsignaled(scope.original_process.as_raw_handle(), true);
+                return Ok(false);
+            }
+            _ => return Err("Original managed process termination is unknown".into()),
+        }
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         let result = unsafe {
             QueryInformationJobObject(
@@ -347,16 +360,7 @@ mod windows {
                     .filter(|pid| *pid != 0)
                     .ok_or("Managed Job member identity is invalid")?;
                 if pid == scope.original_pid {
-                    match unsafe { WaitForSingleObject(scope.original_process.as_raw_handle(), 0) }
-                    {
-                        WAIT_OBJECT_0 => continue,
-                        WAIT_TIMEOUT => {
-                            #[cfg(test)]
-                            trace_unsignaled(scope.original_process.as_raw_handle(), true);
-                            return Ok(false);
-                        }
-                        _ => return Err("Original managed process termination is unknown".into()),
-                    }
+                    continue;
                 }
                 let handle = unsafe {
                     OpenProcess(
@@ -413,9 +417,9 @@ mod windows {
     #[cfg(test)]
     fn trace_unsignaled(handle: std::os::windows::io::RawHandle, original: bool) {
         let mut code = 0;
-        let readable = unsafe {
-            windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut code)
-        } != 0;
+        let readable =
+            unsafe { windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut code) }
+                != 0;
         // Process role and OS exit status only. Never print command lines,
         // environment, application data or inherited pipe contents.
         eprintln!(
@@ -454,7 +458,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-            assert!(ended.clean && ended.success, "Original Job receipt: {ended:?}");
+            assert!(
+                ended.clean && ended.success,
+                "Original Job receipt: {ended:?}"
+            );
             assert!(scope.empty().unwrap());
             drop(retained);
         }

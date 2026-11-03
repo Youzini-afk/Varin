@@ -71,10 +71,6 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
             "Smoke data directory must be a new child of the native temporary directory".into(),
         );
     }
-    let entries: Vec<_> = fs::read_dir(&data_dir)
-        .map_err(|_| "Smoke directory cannot be inspected")?
-        .collect::<Result<_, _>>()
-        .map_err(|_| "Smoke directory entries cannot be inspected")?;
     if !fs::symlink_metadata(data_dir.join("smoke-request.json"))
         .map_err(|_| "Smoke marker cannot be inspected")?.is_file() {
         return Err("Smoke request must be a regular file".into());
@@ -123,8 +119,14 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
             || ["native-drain", "legacy-native-migration"].iter().any(|name| !cases.iter().any(|case| case["name"] == *name)) {
             return Err("Previous fixture did not confirm successful native migration and drain".into());
         }
-    } else if entries.len() != 1 || entries[0].file_name() != "smoke-request.json" {
-        return Err("Smoke directory must contain only its request marker".into());
+    } else {
+        let entries = fs::read_dir(&data_dir)
+            .map_err(|_| "Smoke directory cannot be inspected")?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Smoke directory entries cannot be inspected")?;
+        if entries.len() != 1 || entries[0].file_name() != "smoke-request.json" {
+            return Err("Smoke directory must contain only its request marker".into());
+        }
     }
     let protocol_warm = match marker.get("protocolActivation") {
         None => false,
@@ -275,8 +277,19 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
             let value=&result["result"]["value"];
             if value["ready"]==true&&value["document"]=="complete"&&crate::desktop::smoke_renderer_ready(&app){
                 let toolkit=toolkit()?;
+                let window=app.get_webview_window("main").ok_or("Original application window is missing")?;
+                // Exercise the same original-window restoration used by Dock
+                // and second-instance activation, without reloading its page.
+                main.request("Runtime.evaluate",json!({"expression":"window.__varinSmokeReactivation=crypto.randomUUID()","returnByValue":true})).await?;
+                let before=main.request("Runtime.evaluate",json!({"expression":"window.__varinSmokeReactivation","returnByValue":true})).await?;
+                window.hide().map_err(|_|"Original application window could not hide")?;
+                if crate::desktop::show_last_conversation(&app)?!="main"||!window.is_visible().map_err(|_|"Restored visibility is unknown")? {
+                    return Err("Reactivation did not restore the original conversation window".into());
+                }
+                let after=main.request("Runtime.evaluate",json!({"expression":"window.__varinSmokeReactivation","returnByValue":true})).await?;
+                if before["result"]["value"]!=after["result"]["value"] { return Err("Window reactivation replaced the original document".into()); }
                 ready(&request)?;
-                return Ok(json!({"renderer":value,"toolkit":toolkit,"bootTarget":bootstrap["bootOutcome"]["target"],"bootStatus":bootstrap["bootOutcome"]["status"]}))
+                return Ok(json!({"renderer":value,"toolkit":toolkit,"originalWindowRestored":true,"bootTarget":bootstrap["bootOutcome"]["target"],"bootStatus":bootstrap["bootOutcome"]["status"]}))
             }
             if Instant::now()>deadline{return Err("The packaged application did not complete a real bridge round trip".into())}
             tokio::time::sleep(Duration::from_millis(50)).await;

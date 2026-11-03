@@ -32,6 +32,7 @@ struct Surface {
     version: String,
     pending: Pending,
     closed: watch::Receiver<bool>,
+    document: watch::Sender<()>,
     revision: Arc<AtomicU64>,
 }
 #[derive(Clone)]
@@ -181,6 +182,8 @@ impl CompanionWindows {
                             crate::cdp::Session::from_owned(
                                 surface.window.as_ref().clone(),
                                 surface.pending.clone(),
+                                surface.closed.clone(),
+                                surface.document.clone(),
                             ),
                         )
                     })
@@ -496,6 +499,8 @@ impl CompanionWindows {
         }
         let pending: Pending = Arc::default();
         let (close_send, closed) = watch::channel(false);
+        let (document, _) = watch::channel(());
+        let renderer_document = document.clone();
         let close_owner = self.clone();
         let close_pending = pending.clone();
         let close_label = label.clone();
@@ -521,6 +526,7 @@ impl CompanionWindows {
         let renderer_pending = pending.clone();
         builder = builder.on_frame_event(move |event| {
             if matches!(event.kind, FrameEventKind::RendererTerminated) {
+                renderer_document.send_replace(());
                 for (_, request) in renderer_pending.lock().unwrap().drain() {
                     let _ =
                         request.send(Err("Companion renderer stopped; outcome is unknown".into()));
@@ -551,6 +557,7 @@ impl CompanionWindows {
             version,
             pending: pending.clone(),
             closed,
+            document,
             revision: Arc::new(AtomicU64::new(0)),
         };
         if let Err(error) = self.registry.publish(key, surface.clone()) {
@@ -561,6 +568,7 @@ impl CompanionWindows {
             return Err(error);
         }
         let initialize = (|| -> Result<(), String> {
+            crate::computer::protect_new_windows(&self.app)?;
             self.set_bounds(&window, &args["bounds"])?;
             native(window.on_dev_tools_protocol(move |message| {
                 if let DevToolsProtocol::Message(bytes) = message {
@@ -628,7 +636,8 @@ impl CompanionWindows {
         Ok(())
     }
     async fn evaluate(surface: &Surface, source: &str) -> Reply {
-        let mut closed = surface.closed.clone();
+        let document = surface.document.subscribe();
+        let closed = surface.closed.clone();
         if *closed.borrow() {
             return Err("Companion renderer is closed".into());
         }
@@ -640,27 +649,28 @@ impl CompanionWindows {
             .map_err(|_| "Companion renderer unavailable")?
             .insert(id, send);
         let message = json!({"id":id,"method":"Runtime.evaluate","params":{"expression":source,"awaitPromise":true,"returnByValue":true}});
-        if surface
-            .window
-            .send_dev_tools_message(
-                &serde_json::to_vec(&message).map_err(|_| "Companion request invalid")?,
-            )
-            .is_err()
+        if *closed.borrow()
+            || document.has_changed().unwrap_or(true)
+            || surface
+                .window
+                .send_dev_tools_message(
+                    &serde_json::to_vec(&message).map_err(|_| "Companion request invalid")?,
+                )
+                .is_err()
         {
             surface.pending.lock().unwrap().remove(&id);
             return Err("Companion dispatch could not be observed; outcome is unknown".into());
         }
         // Close may race the pending-map insertion, after the callback already
         // drained it. The retained close receipt also settles that late waiter.
-        let result = tokio::select! {
-            biased;
-            _ = async {
-                while !*closed.borrow_and_update() {
-                    if closed.changed().await.is_err() { break; }
-                }
-            } => Err("Companion closed before its response; outcome is unknown".to_owned()),
-            result = receive => result.map_err(|_| "Companion renderer response was lost; outcome is unknown".to_owned())?,
-        };
+        let result = crate::cdp_settlement::settle(
+            receive,
+            crate::cdp_settlement::wait_original(
+                crate::cdp_settlement::wait_closed(closed),
+                document,
+            ),
+        )
+        .await;
         surface
             .pending
             .lock()

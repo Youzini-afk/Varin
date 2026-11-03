@@ -2,9 +2,52 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { discoverCef, engineInventory } from './build-candidate.mjs';
 import { pinnedCefLicense } from './cef-license.mjs';
+
+test('the pinned Tauri CLI prepares release builds without rewriting committed manifests', async t => {
+  if (spawnSync('cargo', ['--version'], { windowsHide: true }).status !== 0) {
+    t.skip('The CLI preparation check requires Cargo metadata, but does not compile or download dependencies');
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tauri-prepare-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.resolve(import.meta.dirname, '../src-tauri'), native = path.join(root, 'src-tauri');
+  await fs.mkdir(path.join(native, 'src'), { recursive: true });
+  await fs.mkdir(path.join(root, 'frontend'));
+  await fs.writeFile(path.join(root, 'frontend/index.html'), '<!doctype html><title>Prepare</title>');
+  const originals = new Map();
+  for (const name of ['Cargo.toml', 'Cargo.lock', 'tauri.conf.json', 'build.rs']) {
+    const bytes = await fs.readFile(path.join(source, name));
+    originals.set(name, bytes);
+    await fs.writeFile(path.join(native, name), bytes);
+  }
+  await fs.cp(path.join(source, 'vendor'), path.join(native, 'vendor'), { recursive: true });
+  await fs.writeFile(path.join(native, 'src/main.rs'), 'fn main() {}\n');
+  await fs.writeFile(path.join(native, 'src/lib.rs'), '');
+  // The actual CLI owns preparation and feature normalization. Node replaces
+  // only the compiler, and a receipt proves preparation reached that boundary.
+  await fs.writeFile(path.join(native, 'build'), `require('node:fs').writeFileSync('runner.json', JSON.stringify(process.argv.slice(2))); process.exit(86);\n`);
+  const require = createRequire(new URL('../package.json', import.meta.url));
+  const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js');
+  const result = spawnSync(process.execPath, [cli, 'build', '--no-bundle', '--ci', '--features', 'desktop',
+    '--runner', process.execPath, '--config', JSON.stringify({ build: { frontendDist: '../frontend' }, bundle: { active: false, resources: [] } })], {
+    cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000,
+    env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_HOME: path.join(root, 'cargo-home'), CARGO_TARGET_DIR: path.join(root, 'target') },
+  });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0, 'The preparation probe must stop before a real native build');
+  const runner = await fs.readFile(path.join(native, 'runner.json'), 'utf8').catch(error => {
+    throw new Error(`CLI did not reach the no-build runner: ${result.stdout}\n${result.stderr}`, { cause: error });
+  });
+  assert.ok(JSON.parse(runner).includes('--release'));
+  for (const [name, original] of originals) {
+    assert.deepEqual(await fs.readFile(path.join(native, name)), original, `${name} changed during CLI preparation`);
+  }
+});
 
 test('retains the pinned CEF license when the upstream downloader omits it and rejects drift', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-cef-license-'));

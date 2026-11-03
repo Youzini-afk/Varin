@@ -120,6 +120,9 @@ impl NativeMenus {
             .ok()
             .and_then(|s| s.popup_target.clone().or_else(|| s.focused.clone()))
     }
+    pub fn last_conversation_window(&self) -> Option<String> {
+        self.state.lock().ok().and_then(|state| state.focused.clone())
+    }
     /// Called only for registered conversation windows, not browsers or overlays.
     pub fn focus_window(&self, app: &AppHandle, label: &str) {
         let handle = app.clone();

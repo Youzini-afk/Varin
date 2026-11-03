@@ -2,6 +2,8 @@
 mod browser;
 #[cfg(feature = "desktop")]
 mod cdp;
+#[cfg(any(feature = "desktop", test))]
+mod cdp_settlement;
 #[cfg(feature = "desktop")]
 mod companion;
 #[cfg(any(feature = "desktop", test))]
@@ -55,6 +57,8 @@ pub mod update_metadata;
 pub mod updater;
 
 pub mod desktop_lock;
+#[cfg(any(feature = "desktop", test))]
+mod preengine_activation;
 
 pub mod native_presentation;
 
@@ -75,3 +79,6 @@ mod dialogs;
 
 #[cfg(feature = "desktop")]
 mod benchmark;
+
+#[cfg(any(feature = "desktop", test))]
+mod computer_registry;

@@ -89,7 +89,9 @@ impl Lease {
                 return Err(error);
             }
             match fs::rename(&candidate, &root) {
-                Ok(()) => return Ok(Self { root, record, boot }),
+                Ok(()) => {
+                    return Ok(Self { root, record, boot });
+                }
                 Err(_) => {
                     let _ = fs::remove_dir_all(&candidate);
                 }
@@ -151,6 +153,25 @@ fn read_record(root: &Path) -> Result<Record, String> {
         return Err("Desktop lease owner record is invalid".into());
     }
     Ok(record)
+}
+
+/// Locate an already running shell without granting ownership of its data.
+/// Activation additionally binds its endpoint to this original process object.
+pub(crate) fn verified_live_tauri_owner(data: &Path) -> Result<Record, String> {
+    let root = data
+        .canonicalize()
+        .map_err(|_| "Desktop data directory is unavailable")?
+        .join(".desktop-session.lock");
+    let owner = read_record(&root)?;
+    require_current_boot(&root, &owner)?;
+    if owner.shell != "tauri" || !process_alive(owner.pid)? {
+        return Err("The original Tauri desktop owner is not running".into());
+    }
+    let current = read_record(&root)?;
+    if current.token != owner.token || current.pid != owner.pid || current.shell != owner.shell {
+        return Err("Desktop activation ownership changed".into());
+    }
+    Ok(owner)
 }
 // Keep owner.json and scope schema 1 compatible with the transition exporter.
 // This sidecar is committed inside the candidate directory before publication.
@@ -325,11 +346,13 @@ fn process_alive(pid: u32) -> Result<bool, String> {
 #[cfg(windows)]
 fn process_alive(pid: u32) -> Result<bool, String> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError},
-        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        Foundation::{
+            CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
     };
     unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
         if process.is_null() {
             return if GetLastError() == ERROR_INVALID_PARAMETER {
                 Ok(false)
@@ -337,13 +360,14 @@ fn process_alive(pid: u32) -> Result<bool, String> {
                 Err("Desktop owner process state is unknown".into())
             };
         }
-        let mut code = 0;
-        let ok = GetExitCodeProcess(process, &mut code);
+        // An assigned exit code is not a signaled process object. In addition,
+        // 259 is a valid application exit code, not proof of a live executor.
+        let state = WaitForSingleObject(process, 0);
         CloseHandle(process);
-        if ok == 0 {
-            Err("Desktop owner process state is unknown".into())
-        } else {
-            Ok(code == 259)
+        match state {
+            WAIT_OBJECT_0 => Ok(false),
+            WAIT_TIMEOUT => Ok(true),
+            _ => Err("Desktop owner process state is unknown".into()),
         }
     }
 }
@@ -374,7 +398,7 @@ impl ScopeLease {
             .join(".desktop-session.lock");
         let owner = read_record(&root)?;
         require_current_boot(&root, &owner)?;
-        if owner.pid != std::process::id() || owner.shell != "tauri" {
+        if owner.shell != "tauri" || owner.pid != std::process::id() {
             return Err("Managed service does not own the original desktop lease".into());
         }
         let scopes = root.join("scopes");
@@ -563,6 +587,81 @@ fn scopes_ended(root: &Path, owner: &Record) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_lookup_accepts_only_the_original_live_tauri_owner() {
+        let data = tempfile::tempdir().unwrap();
+        let lease = Lease::acquire(data.path()).unwrap();
+        let owner = verified_live_tauri_owner(data.path()).unwrap();
+        assert_eq!(owner.pid, std::process::id());
+        assert_eq!(owner.token, lease.record.token);
+        let mut foreign = lease.record();
+        foreign.shell = "electron".into();
+        fs::write(
+            lease.root.join("owner.json"),
+            serde_json::to_vec(&foreign).unwrap(),
+        )
+        .unwrap();
+        assert!(verified_live_tauri_owner(data.path()).is_err());
+        fs::write(
+            lease.root.join("owner.json"),
+            serde_json::to_vec(&owner).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    #[ignore = "private subprocess fixture"]
+    fn foreign_scope_fixture() {
+        let data = std::env::var_os("VARIN_TEST_SCOPE_ROOT").expect("fixture data directory");
+        assert!(ScopeLease::prepare(Path::new(&data)).is_err());
+    }
+
+    #[test]
+    fn child_process_cannot_extend_the_original_shell_scope() {
+        let data = tempfile::tempdir().unwrap();
+        let lease = Lease::acquire(data.path()).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "desktop_lock::tests::foreign_scope_fixture",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("VARIN_TEST_SCOPE_ROOT", data.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        lease.verify().unwrap();
+        assert!(!lease.root.join("scopes").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess entry for original Windows process-object test"]
+    fn process_exit_fixture() {
+        std::process::exit(259);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn signaled_process_is_dead_even_when_its_exit_code_is_still_active() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "desktop_lock::tests::process_exit_fixture",
+                "--ignored",
+                "--nocapture",
+            ])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert_eq!(child.wait().unwrap().code(), Some(259));
+        // Retain the actual process handle, so this PID cannot be recycled.
+        assert!(!process_alive(pid).unwrap());
+        assert!(process_alive(std::process::id()).unwrap());
+    }
+
     fn identity() -> BootIdentity {
         BootIdentity {
             host_uuid: uuid::Uuid::new_v4().to_string(),

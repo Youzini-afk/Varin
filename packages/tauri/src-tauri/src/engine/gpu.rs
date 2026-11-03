@@ -45,10 +45,12 @@ impl Surface {
                 // and its original native window. Neither handle is replaced.
                 unsafe {
                     instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                        raw_display_handle: window
-                            .display_handle()
-                            .map_err(|e| e.to_string())?
-                            .as_raw(),
+                        raw_display_handle: Some(
+                            window
+                                .display_handle()
+                                .map_err(|e| e.to_string())?
+                                .as_raw(),
+                        ),
                         raw_window_handle: metal_host.raw_handle(),
                     })
                 }

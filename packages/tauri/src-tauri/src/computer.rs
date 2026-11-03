@@ -2,7 +2,14 @@
 //! Fixed control links call the original Host with its private holder identity.
 //! Only Windows has the original capture-safe desktop overlays; other platforms
 //! retain the shared viewer presentation, never pretend these overlays are safe.
-use crate::{engine::offscreen, host::HostProcess, native_menu::text};
+#[cfg(windows)]
+use crate::computer_registry::{CaptureProtection, WindowGenerations};
+use crate::{
+    computer_registry::{OwnerId, Receipts, RendererPhase},
+    engine::offscreen,
+    host::HostProcess,
+    native_menu::text,
+};
 use base64::Engine as _;
 use serde_json::{Value, json};
 use std::{
@@ -22,11 +29,15 @@ use tauri_runtime_cef::{
     WebviewWindowBuilderCefExt, allocate_devtools_message_id,
 };
 use tokio::sync::{mpsc, oneshot, watch};
+#[cfg(windows)]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetPropW, GetWindowDisplayAffinity, SetPropW, SetWindowDisplayAffinity,
+};
 
 const FEEDBACK_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/computer-feedback.html"));
 const CONTROLS_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/computer-controls.html"));
 type Reply = Result<Value, String>;
-type Pending = Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>>;
+type Pending = Arc<Mutex<Receipts<oneshot::Sender<Reply>>>>;
 
 enum Message {
     Event(String, Value),
@@ -43,16 +54,24 @@ pub struct ComputerPresentation {
     failure: Arc<Mutex<Option<String>>>,
     disposed: Arc<AtomicBool>,
     close_result: Arc<tokio::sync::Mutex<Option<Result<(), String>>>>,
+    completion: watch::Receiver<Option<Result<(), String>>>,
 }
 impl ComputerPresentation {
     pub fn new(app: AppHandle, process: HostProcess, data_dir: PathBuf) -> Self {
+        // Permanent for this App lifetime. Concurrent services share leases;
+        // disposing one service must never unmanage state used by another.
+        #[cfg(windows)]
+        app.manage(CaptureRegistry::default());
+        let identity = OwnerId(uuid::Uuid::new_v4().to_string());
         let (send, receive) = mpsc::channel(128);
+        let (completion, observed_completion) = watch::channel(None);
         let owner = Self {
             app: app.clone(),
             send: send.clone(),
             failure: Arc::default(),
             disposed: Arc::default(),
             close_result: Arc::default(),
+            completion: observed_completion,
         };
         let mut state = Presentation {
             app,
@@ -63,13 +82,15 @@ impl ComputerPresentation {
             control: Value::Null,
             locale: "en".into(),
             busy: false,
+            disposing: false,
             command_sequence: 0,
             error: String::new(),
             controls: None,
             feedback: HashMap::new(),
             generation: Arc::new(AtomicU64::new(0)),
-            protected: HashMap::new(),
+            identity,
             failure: owner.failure.clone(),
+            completion,
         };
         let disposed = owner.disposed.clone();
         tauri::async_runtime::spawn(async move {
@@ -118,6 +139,13 @@ impl ComputerPresentation {
         if let Some(result) = completed.as_ref() {
             return result.clone();
         }
+        // The original caller may have stopped observing while native cleanup
+        // continued. Its authoritative completion belongs to the actor, not to
+        // that dropped oneshot receiver.
+        if matches!(&*self.completion.borrow(), Some(Ok(()))) {
+            *completed = Some(Ok(()));
+            return Ok(());
+        }
         self.disposed.store(true, Ordering::Release);
         let (send, receive) = oneshot::channel();
         let result = if self.send.send(Message::Dispose(send)).await.is_err() {
@@ -127,7 +155,16 @@ impl ComputerPresentation {
                 .await
                 .unwrap_or_else(|_| Err("Computer overlay termination is unknown".into()))
         };
-        *completed = Some(result.clone());
+        let result = if matches!(&*self.completion.borrow(), Some(Ok(()))) {
+            Ok(())
+        } else {
+            result
+        };
+        // A failed close request does not retire the original surfaces. The
+        // actor keeps them and a later cleanup may retry those same handles.
+        if result.is_ok() {
+            *completed = Some(result.clone());
+        }
         result
     }
 }
@@ -135,8 +172,7 @@ impl ComputerPresentation {
 #[derive(Clone)]
 struct Surface {
     window: WebviewWindow,
-    // 0 loading, 1 ready, 2 renderer failed, 3 actual CEF browser closed.
-    readiness: watch::Sender<u8>,
+    readiness: watch::Sender<RendererPhase>,
     pending: Pending,
     tail: Arc<tokio::sync::Mutex<()>>,
     sequence: Arc<AtomicU64>,
@@ -146,9 +182,11 @@ impl Surface {
         let mut readiness = self.readiness.subscribe();
         loop {
             match *readiness.borrow_and_update() {
-                1 => break,
-                2 | 3 => return Err("Computer presentation renderer is unavailable".into()),
-                _ => {}
+                RendererPhase::Ready => break,
+                RendererPhase::Terminated | RendererPhase::Closed => {
+                    return Err("Computer presentation renderer is unavailable".into());
+                }
+                RendererPhase::Loading => {}
             }
             readiness
                 .changed()
@@ -157,25 +195,37 @@ impl Surface {
         }
         let id = allocate_devtools_message_id().map_err(|e| e.to_string())?;
         let (send, receive) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, send);
+        // Readiness observation is not admission: close/termination may have
+        // happened since the await. Admission and terminal draining share one
+        // mutex, so neither ordering can strand a newly inserted receipt.
+        self.pending
+            .lock()
+            .unwrap()
+            .admit(id, send)
+            .map_err(|_| "Computer presentation renderer is unavailable")?;
         let message = json!({"id":id,"method":"Runtime.evaluate","params":{
             "expression":script,"awaitPromise":true,"returnByValue":true}})
         .to_string();
         if let Err(error) = self.window.send_dev_tools_message(message.as_bytes()) {
-            self.pending.lock().unwrap().remove(&id);
+            self.pending.lock().unwrap().remove(id);
             return Err(error.to_string());
         }
         receive
             .await
             .map_err(|_| "Computer presentation receipt was lost")?
     }
-    async fn close(self) -> Result<(), String> {
-        if *self.readiness.borrow() == 3 {
+    async fn close(&self) -> Result<(), String> {
+        if *self.readiness.borrow() == RendererPhase::Closed {
             return Ok(());
         }
         let mut observed = self.readiness.subscribe();
-        self.window.close().map_err(|e| e.to_string())?;
-        while *observed.borrow_and_update() != 3 {
+        if let Err(error) = self.window.close() {
+            // The original close callback may have won the race with dispatch.
+            if *observed.borrow() != RendererPhase::Closed {
+                return Err(error.to_string());
+            }
+        }
+        while *observed.borrow_and_update() != RendererPhase::Closed {
             observed
                 .changed()
                 .await
@@ -193,22 +243,33 @@ struct Presentation {
     control: Value,
     locale: String,
     busy: bool,
+    disposing: bool,
     command_sequence: u64,
     error: String,
     controls: Option<Surface>,
     feedback: HashMap<String, Surface>,
     generation: Arc<AtomicU64>,
-    protected: HashMap<String, (usize, u32)>,
+    identity: OwnerId,
     failure: Arc<Mutex<Option<String>>>,
+    completion: watch::Sender<Option<Result<(), String>>>,
 }
 impl Presentation {
     async fn run(&mut self, mut receive: mpsc::Receiver<Message>) {
         while let Some(message) = receive.recv().await {
+            if self.disposing && !matches!(&message, Message::Dispose(_)) {
+                continue;
+            }
             let result = match message {
                 Message::Dispose(reply) => {
+                    self.disposing = true;
                     let result = self.dispose().await;
+                    let ended = result.is_ok();
+                    self.completion.send_replace(Some(result.clone()));
                     let _ = reply.send(result);
-                    break;
+                    if ended {
+                        break;
+                    }
+                    continue;
                 }
                 Message::Locale(locale) => {
                     self.locale = locale;
@@ -312,7 +373,8 @@ impl Presentation {
             return Ok(());
         }
         if self.controls.is_none() {
-            self.controls = Some(self.surface("computer-controls", CONTROLS_HTML, true)?);
+            self.controls =
+                Some(self.surface(&self.identity.controls_label(), CONTROLS_HTML, true)?);
             let surface = self.controls.as_ref().unwrap();
             let monitor = self
                 .app
@@ -459,10 +521,11 @@ impl Presentation {
             self.generation.fetch_add(1, Ordering::AcqRel);
         }
         for key in obsolete {
-            if let Some(surface) = self.feedback.remove(&key) {
+            if let Some(surface) = self.feedback.get(&key).cloned() {
                 surface.sequence.fetch_add(1, Ordering::AcqRel);
                 surface.window.hide().map_err(|e| e.to_string())?;
                 surface.close().await?;
+                self.feedback.remove(&key);
             }
         }
         for monitor in monitors {
@@ -578,10 +641,11 @@ impl Presentation {
         );
         let initial_url =
             url::Url::parse(&initial).map_err(|_| "Computer presentation URL is invalid")?;
-        let (readiness, _) = watch::channel(0);
+        let (readiness, _) = watch::channel(RendererPhase::Loading);
         let loaded = readiness.clone();
         let failed = readiness.clone();
-        let pending: Pending = Arc::default();
+        let pending: Pending = Arc::new(Mutex::new(Receipts::new()));
+        let loaded_pending = pending.clone();
         let closed_pending = pending.clone();
         let failed_pending = pending.clone();
         let closed = readiness.clone();
@@ -630,13 +694,18 @@ impl Presentation {
                     if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                         && payload.url().scheme() == "data"
                     {
-                        loaded.send_replace(1);
+                        let mut receipts = loaded_pending.lock().unwrap();
+                        if receipts.ready() {
+                            loaded.send_replace(receipts.phase());
+                        }
                     }
                 })
                 .on_frame_event(move |event| {
                     if matches!(event.kind, FrameEventKind::RendererTerminated) {
-                        failed.send_replace(2);
-                        for (_, reply) in failed_pending.lock().unwrap().drain() {
+                        let mut receipts = failed_pending.lock().unwrap();
+                        let replies = receipts.finish(RendererPhase::Terminated);
+                        failed.send_replace(receipts.phase());
+                        for reply in replies {
                             let _ = reply.send(Err(
                                 "Computer renderer terminated before its receipt".into(),
                             ));
@@ -650,8 +719,10 @@ impl Presentation {
             .ok_or("Computer presentation requires CEF")?;
         attrs.native_only = true;
         attrs.native_close_handler = Some(Arc::new(move || {
-            closed.send_replace(3);
-            for (_, reply) in closed_pending.lock().unwrap().drain() {
+            let mut receipts = closed_pending.lock().unwrap();
+            let replies = receipts.finish(RendererPhase::Closed);
+            closed.send_replace(receipts.phase());
+            for reply in replies {
                 let _ = reply.send(Err(
                     "Computer presentation closed before rendering was confirmed".into(),
                 ));
@@ -673,7 +744,7 @@ impl Presentation {
                     result,
                 } = message
                 {
-                    if let Some(reply) = results.lock().unwrap().remove(&message_id) {
+                    if let Some(reply) = results.lock().unwrap().remove(message_id) {
                         let result = serde_json::from_slice::<Value>(&result)
                             .map_err(|_| "Computer presentation result is malformed".to_owned());
                         let result = if success {
@@ -701,60 +772,182 @@ impl Presentation {
         })
     }
     fn protect(&mut self, active: bool) -> Result<(), String> {
-        #[cfg(windows)]
-        {
-            if active {
-                for (label, window) in self.app.windows() {
-                    if self.protected.contains_key(&label) {
-                        continue;
-                    }
-                    let handle = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
-                    let previous = capture_affinity(handle)?;
-                    set_capture_affinity(handle, 0x11)?; // WDA_EXCLUDEFROMCAPTURE
-                    self.protected.insert(label, (handle, previous));
-                }
-            } else {
-                let mut failure = None;
-                for (label, (handle, previous)) in std::mem::take(&mut self.protected) {
-                    // Never restore a newly created window that recycled a label.
-                    if self
-                        .app
-                        .get_window(&label)
-                        .and_then(|w| w.hwnd().ok())
-                        .is_some_and(|h| h.0 as usize == handle)
-                    {
-                        if let Err(error) = set_capture_affinity(handle, previous) {
-                            self.protected.insert(label, (handle, previous));
-                            failure.get_or_insert(error);
-                        }
-                    }
-                }
-                if let Some(error) = failure {
-                    return Err(error);
-                }
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = active;
-        }
-        Ok(())
+        update_capture(&self.app, Some((self.identity.clone(), active)))
     }
     async fn dispose(&mut self) -> Result<(), String> {
         self.clear_feedback();
-        let mut error = self.protect(false).err();
-        let mut surfaces: Vec<_> = self.feedback.drain().map(|(_, surface)| surface).collect();
-        if let Some(surface) = self.controls.take() {
-            surfaces.push(surface);
-        }
-        for surface in surfaces {
-            if let Err(cause) = surface.close().await {
-                error.get_or_insert(cause);
+        let mut error = None;
+        let surfaces: Vec<_> = self
+            .feedback
+            .iter()
+            .map(|(key, surface)| (key.clone(), surface.clone()))
+            .collect();
+        for (key, surface) in surfaces {
+            match surface.close().await {
+                Ok(()) => {
+                    self.feedback.remove(&key);
+                }
+                Err(cause) => {
+                    error.get_or_insert(cause);
+                }
             }
+        }
+        if let Some(surface) = &self.controls {
+            match surface.close().await {
+                Ok(()) => {
+                    self.controls = None;
+                }
+                Err(cause) => {
+                    error.get_or_insert(cause);
+                }
+            }
+        }
+        // Unknown overlay termination retains the owner lease. A different
+        // service cannot infer that this owner's protected presentation stopped.
+        if error.is_none() {
+            error = self.protect(false).err();
         }
         match error {
             Some(error) => Err(error),
             None => Ok(()),
+        }
+    }
+}
+
+/// Call while a newly built window is still hidden. Any existing Computer Use
+/// owner protects it before its first pixels are shown. This does not acquire
+/// or release any owner's lease.
+pub fn protect_new_windows(app: &AppHandle) -> Result<(), String> {
+    update_capture(app, None)
+}
+
+fn update_capture(app: &AppHandle, owner: Option<(OwnerId, bool)>) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let Some(registry) = app.try_state::<CaptureRegistry>() else {
+            return Ok(());
+        };
+        let registry = registry.inner().clone();
+        let target = app.clone();
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        // The selected CEF runtime executes this inline if already on its main
+        // thread. Keeping identity checks and native effects on that thread
+        // prevents a destroy/reuse between verification and an HWND mutation.
+        app.run_on_main_thread(move || {
+            let result = registry.refresh(&target, owner);
+            let _ = send.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+        receive
+            .recv()
+            .map_err(|_| "Computer capture protection outcome is unknown")?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, owner);
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+#[derive(Clone)]
+struct CaptureRegistry(Arc<Mutex<NativeCaptures>>);
+#[cfg(windows)]
+struct NativeCaptures {
+    leases: CaptureProtection,
+    windows: WindowGenerations,
+    // An app-private Win32 property belongs to the actual HWND incarnation.
+    // Windows removes it on destruction, even if a label and HWND are reused
+    // before a delayed Tauri Destroyed callback reaches this registry.
+    property: Vec<u16>,
+}
+#[cfg(windows)]
+impl Default for CaptureRegistry {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(NativeCaptures {
+            leases: CaptureProtection::default(),
+            windows: WindowGenerations::default(),
+            property: format!("Varin.Computer.Capture.{}\0", uuid::Uuid::new_v4())
+                .encode_utf16()
+                .collect(),
+        })))
+    }
+}
+#[cfg(windows)]
+impl CaptureRegistry {
+    /// Only called on the main thread, including for owner release. The
+    /// registry survives owners and retains unsuccessful original restores.
+    fn refresh(&self, app: &AppHandle, owner: Option<(OwnerId, bool)>) -> Result<(), String> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Computer capture registry unavailable")?;
+        if let Some((owner, active)) = owner {
+            state.leases.set_active(&owner, active);
+        }
+        if state.leases.active() {
+            let mut failure = None;
+            for (label, window) in app.windows() {
+                let result = (|| -> Result<(), String> {
+                    let handle = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
+                    let existing =
+                        unsafe { GetPropW(handle as *mut _, state.property.as_ptr()) } as usize;
+                    let NativeCaptures {
+                        windows, property, ..
+                    } = &mut *state;
+                    let (key, fresh) = windows.observe(label, handle, existing, |generation| {
+                        if unsafe {
+                            SetPropW(handle as *mut _, property.as_ptr(), generation as *mut _)
+                        } == 0
+                        {
+                            Err("Original capture window identity could not be retained".into())
+                        } else {
+                            Ok(())
+                        }
+                    })?;
+                    if fresh {
+                        let registry = self.clone();
+                        let original = key.clone();
+                        window.on_window_event(move |event| {
+                            if matches!(event, tauri::WindowEvent::Destroyed) {
+                                if let Ok(mut state) = registry.0.lock() {
+                                    if state.windows.closed(&original) {
+                                        state.leases.closed(&original);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    state.leases.protect(
+                        key,
+                        || capture_affinity(handle),
+                        |value| set_capture_affinity(handle, value),
+                    )
+                })();
+                if let Err(error) = result {
+                    failure.get_or_insert(error);
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        } else {
+            let NativeCaptures {
+                leases,
+                property,
+                windows,
+                ..
+            } = &mut *state;
+            leases.restore(|key, previous| {
+                let marker = unsafe { GetPropW(key.handle as *mut _, property.as_ptr()) } as usize;
+                if !windows.current(key, marker) {
+                    // Neither disappearance from app.windows nor a replacement
+                    // proves original termination. Only its Destroyed callback
+                    // removes this record; never mutate a replacement HWND.
+                    return Err(
+                        "Original capture window termination or identity is unconfirmed".into(),
+                    );
+                }
+                set_capture_affinity(key.handle, previous)
+            })
         }
     }
 }
@@ -820,12 +1013,6 @@ pub fn window_handles(app: &AppHandle) -> Result<Vec<u64>, String> {
         let _ = app;
         Ok(Vec::new())
     }
-}
-#[cfg(windows)]
-#[link(name = "user32")]
-unsafe extern "system" {
-    fn GetWindowDisplayAffinity(window: *mut std::ffi::c_void, affinity: *mut u32) -> i32;
-    fn SetWindowDisplayAffinity(window: *mut std::ffi::c_void, affinity: u32) -> i32;
 }
 #[cfg(windows)]
 fn capture_affinity(handle: usize) -> Result<u32, String> {

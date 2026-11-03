@@ -213,6 +213,7 @@ fn create_window(
     } else {
         path.into()
     };
+    let show = label != "main" || app.state::<DesktopState>().boot.borrow().is_some();
     let popup_app = app.clone();
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(target.into()))
         .title(if role == "mini-chat" {
@@ -233,7 +234,7 @@ fn create_window(
             if role == "mini-chat" { 480. } else { 520. },
         )
         .decorations(cfg!(target_os = "macos"))
-        .visible(label != "main" || app.state::<DesktopState>().boot.borrow().is_some())
+        .visible(false)
         .on_new_window(move |url, _| {
             if external_url(&json!(url.as_str())).is_ok() {
                 let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
@@ -437,6 +438,25 @@ fn create_window(
         }
         _ => {}
     });
+    // New windows must inherit every active Computer Use capture lease before
+    // their first visible pixels, not through a later queued refresh event.
+    let prepared = crate::computer::protect_new_windows(app).and_then(|_| {
+        if show {
+            native(window.show())
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = prepared {
+        let view = window.as_ref().clone();
+        tauri::async_runtime::spawn(async move {
+            // Keep the registered original until actual CEF/native destruction.
+            if let Err(error) = close.request(&view).await {
+                eprintln!("Hidden window cleanup is unconfirmed: {error}");
+            }
+        });
+        return Err(error);
+    }
     refresh_desktop_state(app);
     Ok(())
 }
@@ -1601,6 +1621,26 @@ pub fn run() {
             return;
         }
     };
+    // Own the data before CEF initializes its global cache or any profile.
+    let context = tauri::generate_context!();
+    let lease = match crate::desktop_lock::Lease::acquire(&data_dir) {
+        Ok(lease) => lease,
+        Err(error) => {
+            // Warm activation reaches the verified first instance without
+            // opening another engine or weakening the cross-shell data lease.
+            if crate::preengine_activation::forward_to_owner(&data_dir, &context.config().identifier).is_ok() {
+                return;
+            }
+            eprintln!("{error}");
+            return;
+        }
+    };
+    if let Err(error) = crate::preengine_activation::publish(&data_dir, &lease) {
+        eprintln!("{error}");
+        return;
+    }
+    let owned_lease=OnceLock::new();
+    if owned_lease.set(lease).is_err(){return;}
     let builder = tauri::Builder::default()
         .manage(crate::native_menu::NativeMenus::new())
         .manage(crate::power::PowerManager::default())
@@ -1610,7 +1650,7 @@ pub fn run() {
         .on_menu_event(|app, event| crate::native_menu::dispatch(app, event.id.as_ref()))
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             queue_deep_links(app, args, "single-instance");
-            show_main(app)
+            let _ = show_last_conversation(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -1623,7 +1663,7 @@ pub fn run() {
         .manage(DesktopState {
             runtime: OnceLock::new(),
             settings: settings::Owner::default(),
-            lease: OnceLock::new(),
+            lease: owned_lease,
             data_dir,
             smoke: smoke.clone(),
             benchmark: benchmark.clone(),
@@ -1661,12 +1701,6 @@ pub fn run() {
                 None
             }
             .unwrap_or(app.path().resource_dir()?.join("runtime"));
-            let lease = crate::desktop_lock::Lease::acquire(&app.state::<DesktopState>().data_dir)
-                .map_err(std::io::Error::other)?;
-            app.state::<DesktopState>()
-                .lease
-                .set(lease)
-                .map_err(|_| std::io::Error::other("Desktop data lease is already assigned"))?;
             if app
                 .state::<crate::native_notifications::NativeNotifications>()
                 .install(app.handle())
@@ -1683,7 +1717,7 @@ pub fn run() {
             Ok(())
         });
     let app = match crate::engine::configure(crate::companion::register_asset_protocol(builder))
-        .build(tauri::generate_context!())
+        .build(context)
     {
         Ok(app) => app,
         Err(_) => {
@@ -1699,6 +1733,10 @@ pub fn run() {
         }
     };
     app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = &event {
+            let _ = show_last_conversation(app);
+        }
         if let tauri::RunEvent::Opened { urls } = &event {
             queue_deep_links(
                 app,
@@ -2035,6 +2073,7 @@ async fn restart_local_host(app: &AppHandle, previous: &HostProcess) -> Result<(
 pub(crate) async fn bootstrap_for_window(app: &AppHandle, label: &str) -> Reply {
     app.state::<DesktopState>().bootstrap(label).await
 }
+
 pub(crate) fn register_application_window(
     app: &AppHandle,
     label: &str,
@@ -2068,6 +2107,39 @@ pub(crate) fn register_application_window(
             },
         );
     Ok(())
+}
+
+/// Reactivation restores an existing conversation, including a hidden or
+/// minimized Mini Chat. Companion/control windows never become the fallback.
+pub(crate) fn show_last_conversation(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<DesktopState>();
+    if state.quitting.load(Ordering::Acquire) {
+        return Err("Desktop shutdown is already in progress".into());
+    }
+    let mut windows = state.windows.lock()
+        .map_err(|_| "Window registry unavailable")?
+        .iter()
+        .filter(|(_, record)| record.close.as_ref().is_some_and(|close| !close.closed()))
+        .filter_map(|(label, _)| app.get_webview_window(label))
+        .collect::<Vec<_>>();
+    windows.sort_by(|a, b| a.label().cmp(b.label()));
+    let remembered = app.state::<crate::native_menu::NativeMenus>().last_conversation_window();
+    let target = remembered.as_ref()
+        .and_then(|label| windows.iter().find(|window| window.label() == label))
+        .or_else(|| windows.iter().find(|window| {
+            window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false)
+        }))
+        .or_else(|| windows.first());
+    if let Some(window) = target {
+        native(window.show())?;
+        native(window.unminimize())?;
+        native(window.set_focus())?;
+        return Ok(window.label().to_owned());
+    }
+    show_main(app);
+    app.get_webview_window("main")
+        .map(|_| "main".to_owned())
+        .ok_or("The conversation window could not be restored".into())
 }
 
 pub(crate) fn show_main(app: &AppHandle) {

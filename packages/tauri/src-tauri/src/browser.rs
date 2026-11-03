@@ -30,6 +30,7 @@ struct NativePage {
     viewport: Arc<Mutex<Value>>,
     pending: Pending,
     closed: tokio::sync::watch::Sender<bool>,
+    document: tokio::sync::watch::Sender<()>,
     presentation: Arc<Mutex<Option<(String, String)>>>,
     presentation_revision: Arc<AtomicU64>,
     presentation_args: Arc<Mutex<Option<Value>>>,
@@ -374,6 +375,8 @@ impl BrowserViews {
                             crate::cdp::Session::from_owned(
                                 page.view.clone(),
                                 page.pending.clone(),
+                                page.closed.subscribe(),
+                                page.document.clone(),
                             ),
                         )
                     })
@@ -725,6 +728,8 @@ impl BrowserViews {
         let viewport = Arc::new(Mutex::new(json!({"width":1280,"height":800,"scale":1})));
         let pending: Pending = Arc::default();
         let (closed, _) = tokio::sync::watch::channel(false);
+        let (document, _) = tokio::sync::watch::channel(());
+        let crashed_document = document.clone();
         let observer = self.clone();
         let observed_id = id.to_owned();
         let observed_state = state.clone();
@@ -755,7 +760,7 @@ impl BrowserViews {
                 match event.kind{
                     FrameEventKind::AddressChanged{url}|FrameEventKind::DocumentCommitted{url} if event.is_main=>current["url"]=json!(url.as_str()),
                     FrameEventKind::LoadingStateChanged{is_loading}=>current["loading"]=json!(is_loading),
-                    FrameEventKind::RendererTerminated=>{drop(current);for(_,reply)in crashed_pending.lock().unwrap().drain(){let _=reply.send(Err("Browser renderer terminated; effect outcome is unknown".into()));}observer.event(json!({"pageId":observed_id,"kind":"crashed","reason":"Chromium renderer terminated; no effects were replayed"}));return;}
+                    FrameEventKind::RendererTerminated=>{drop(current);crashed_document.send_replace(());for(_,reply)in crashed_pending.lock().unwrap().drain(){let _=reply.send(Err("Browser renderer terminated; effect outcome is unknown".into()));}observer.event(json!({"pageId":observed_id,"kind":"crashed","reason":"Chromium renderer terminated; no effects were replayed"}));return;}
                     _=>return
                 }
                 observer.event(json!({"pageId":observed_id,"kind":"changed","state":current.clone()}));
@@ -806,6 +811,7 @@ impl BrowserViews {
             viewport,
             pending: pending.clone(),
             closed,
+            document,
             presentation: Arc::default(),
             presentation_revision: Arc::default(),
             presentation_args: Arc::default(),
@@ -861,6 +867,10 @@ impl BrowserViews {
         params: Value,
         session: Option<&str>,
     ) -> Reply {
+        let document = page.document.subscribe();
+        if page.closing.load(Ordering::Acquire) || *page.closed.borrow() {
+            return Err("The original browser page is closing or closed".into());
+        }
         // Browser/Target lifecycle remains under this native owner. A nested frame
         // session can be controlled, but cannot be used to create arbitrary tabs.
         if matches!(
@@ -884,19 +894,31 @@ impl BrowserViews {
         if let Some(session) = session {
             message["sessionId"] = json!(session);
         }
-        if page
-            .view
-            .send_dev_tools_message(
-                &serde_json::to_vec(&message).map_err(|_| "CDP request malformed")?,
-            )
-            .is_err()
+        if *page.closed.borrow()
+            || document.has_changed().unwrap_or(true)
+            || page
+                .view
+                .send_dev_tools_message(
+                    &serde_json::to_vec(&message).map_err(|_| "CDP request malformed")?,
+                )
+                .is_err()
         {
             page.pending.lock().unwrap().remove(&id);
             return Err("Browser command could not be observed; effect outcome is unknown".into());
         }
-        receive
-            .await
-            .map_err(|_| "Browser response lost; effect outcome is unknown".to_owned())?
+        let result = crate::cdp_settlement::settle(
+            receive,
+            crate::cdp_settlement::wait_original(
+                crate::cdp_settlement::wait_closed(page.closed.subscribe()),
+                document,
+            ),
+        )
+        .await;
+        page.pending
+            .lock()
+            .map_err(|_| "Browser transport unavailable")?
+            .remove(&id);
+        result
     }
     async fn download(&self, method: &str, args: Value) -> Reply {
         let id = required(&args, "downloadId")?.to_owned();
