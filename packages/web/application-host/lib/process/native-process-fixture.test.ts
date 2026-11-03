@@ -181,3 +181,15 @@ it('isolates observer failures and continues forwarding later stages', async () 
   expect(resources.close).toHaveBeenCalledOnce();
   expect(fs.existsSync(createdRoot())).toBe(false);
 });
+
+
+it('opts into delayed file diagnostics without enabling immediate stage traffic', async () => {
+  const fixture = createNativeProcessTestHarness(undefined, { stalledProcessDiagnostics: true });
+  try {
+    await fixture.get();
+    const options = resources.createClient.mock.calls[0]![0] as KernelClientOptions;
+    expect(options.env).toEqual({ VARIN_PROCESS_TRACE: 'stalled' });
+    expect(options.spawnProcess).toBeUndefined();
+    expect(resources.spawn).not.toHaveBeenCalled();
+  } finally { await fixture.dispose(); }
+});

@@ -107,7 +107,16 @@ impl Launch {
         let guardian = Arc::new(Mutex::new(guardian));
         let containment = Arc::new(containment);
         let input = Arc::new(Mutex::new(Some(input)));
+        let stalled_trace = (std::env::var("VARIN_PROCESS_TRACE").as_deref() == Ok("stalled")).then(|| {
+            let path = PathBuf::from(config["receiptPath"].as_str().expect("validated receipt path")).with_extension("kernel.trace");
+            let process_id = process_id.clone();
+            stalled_trace::StalledTrace::start(move |stages| {
+                let snapshot = json!({"processId":process_id,"role":"kernel","stages":stages});
+                let _ = std::fs::write(path, snapshot.to_string());
+            })
+        });
         let control = Arc::new(ProcessControl {
+            stalled_trace: stalled_trace.clone(),
             shared: shared.clone(),
             guardian: guardian.clone(),
             containment: containment.clone(),
@@ -140,7 +149,10 @@ impl Launch {
             // This is the first message; the guardian cannot spawn before it.
             let result = write_frame(&mut stdin, &config).and_then(|_| {
                 for event in input_rx {
+                    let stop = event["type"] == "stop";
+                    if stop { if let Some(trace) = &stalled_trace { trace.mark("stop-write-started"); } }
                     write_frame(&mut stdin, &event)?;
+                    if stop { if let Some(trace) = &stalled_trace { trace.mark("stop-written"); } }
                 }
                 Ok(())
             });

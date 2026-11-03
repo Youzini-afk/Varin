@@ -55,6 +55,7 @@ function observeProcessDiagnostics(child: ChildProcess, observe: (event: NativeP
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
 export function createNativeProcessTestHarness(authority?: DocumentAuthority, options: {
   onProcessDiagnostic?: (event: NativeProcessDiagnostic) => void;
+  stalledProcessDiagnostics?: boolean;
 } = {}) {
   let initialized: Promise<{
     service: ReturnType<typeof createKernelProcessService>;
@@ -79,6 +80,7 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
       const buildVersion = (JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
       const observeDiagnostic = options.onProcessDiagnostic;
       const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false,
+        ...(options.stalledProcessDiagnostics ? { env: { VARIN_PROCESS_TRACE: 'stalled' } } : {}),
         ...(observeDiagnostic ? {
           env: { VARIN_PROCESS_TRACE: '1' },
           spawnProcess: ((command: string, args: string[], spawnOptions: Parameters<typeof nodeSpawn>[2]) => {

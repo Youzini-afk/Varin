@@ -94,9 +94,17 @@ struct Diagnostic {
     process_id: String,
     kernel_epoch: String,
     started: Instant,
+    stalled: Option<Arc<super::stalled_trace::StalledTrace>>,
 }
 fn trace(diagnostic: &Option<Diagnostic>, stage: &'static str) {
     if let Some(diagnostic) = diagnostic {
+        if let Some(stalled) = &diagnostic.stalled {
+            stalled.mark(stage);
+            if stage == "stop-received" { stalled.arm(); }
+            return;
+        }
+        // Additional probe-only lane markers never enter ordinary immediate tracing.
+        if !diagnostic_stage(stage) { return; }
         let _ = send(&diagnostic.output, json!({
             "type":"diagnostic", "processId":diagnostic.process_id,
             "kernelEpoch":diagnostic.kernel_epoch, "guardianPid":std::process::id(),
@@ -263,12 +271,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         serde_json::from_slice(&frame)?
     };
-    let diagnostic = (std::env::var("VARIN_PROCESS_TRACE").as_deref() == Ok("1"))
+    let trace_mode = std::env::var("VARIN_PROCESS_TRACE").ok();
+    let diagnostic = matches!(trace_mode.as_deref(), Some("1" | "stalled"))
         .then(|| Diagnostic {
             output: output.clone(),
             process_id: config.process_id.clone(),
             kernel_epoch: config.kernel_epoch.clone(),
             started: Instant::now(),
+            stalled: (trace_mode.as_deref() == Some("stalled")).then(|| {
+                let path = config.receipt_path.with_extension("guardian.trace");
+                let kernel_stall = config.receipt_path.with_extension("kernel.trace");
+                let process_id = config.process_id.clone();
+                // The original kernel publishes this marker only after its stop
+                // stalls. It also reveals a guardian blocked before stop-received.
+                super::stalled_trace::StalledTrace::start_with_trigger(move || kernel_stall.exists(), move |stages| {
+                    let snapshot = json!({"processId":process_id,"role":"guardian","stages":stages});
+                    let _ = std::fs::write(path, snapshot.to_string());
+                })
+            }),
         });
     #[cfg(windows)]
     let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
@@ -311,10 +331,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut buffer = [0u8; 16384];
             let mut delivering = true;
             loop {
-                match reader.read(&mut buffer) {
+                trace(&diagnostic, "output-read-started");
+                let read = reader.read(&mut buffer);
+                trace(&diagnostic, "output-read-returned");
+                match read {
                     Ok(0) => break,
                     Ok(n) => {
-                        if delivering && send_data(&data_output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err() {
+                        trace(&diagnostic, "output-send-started");
+                        let failed = delivering && send_data(&data_output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err();
+                        trace(&diagnostic, "output-send-returned");
+                        if failed {
                             STOP.store(2, Ordering::Release);
                             delivering = false;
                             let _ = send(&output, json!({"type":"output-error", "channel":channel}));
@@ -334,9 +360,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (input_tx, input_rx) = mpsc::sync_channel::<Value>(1);
     let input_output = output.clone();
     let input_receipt_path = config.receipt_path.clone();
+    let input_diagnostic = diagnostic.clone();
     let input_worker = thread::spawn(move || {
         let mut input = input;
         let mut active: Option<(InteractionReceipt, u64)> = None;
+        trace(&input_diagnostic, "input-idle");
         for value in input_rx {
             if value["type"] == "finish" {
                 if let Some((mut receipt, chunk)) = active.take() {
@@ -362,11 +390,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     id.reason = Some(
                         "process tree stopped before the remaining input or EOF was sent".into(),
                     );
+                    trace(&input_diagnostic, "input-receipt-started");
                     publish_interaction_receipt(&input_receipt_path, &mut receipt);
+                    trace(&input_diagnostic, "input-receipt-returned");
+                    trace(&input_diagnostic, "input-send-started");
                     let _ = send(
                         &input_output,
                         json!({"type":"interaction","receipt":receipt,"chunk":chunk}),
                     );
+                    trace(&input_diagnostic, "input-send-returned");
                 }
                 return;
             }
@@ -404,7 +436,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some(writer) => {
                         let mut offset = 0;
                         while offset < bytes.len() {
-                            match writer.write(&bytes[offset..]) {
+                            trace(&input_diagnostic, "input-write-started");
+                            let write = writer.write(&bytes[offset..]);
+                            trace(&input_diagnostic, "input-write-returned");
+                            match write {
                                 Ok(0) => {
                                     error = Some("process stdin write made no progress".into());
                                     break;
@@ -426,7 +461,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         if error.is_none() {
-                            if let Err(e) = writer.flush() {
+                            trace(&input_diagnostic, "input-flush-started");
+                            let flushed = writer.flush();
+                            trace(&input_diagnostic, "input-flush-returned");
+                            if let Err(e) = flushed {
                                 error = Some(e.to_string());
                             }
                         }
@@ -473,12 +511,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     InteractionState::NotApplied
                 };
+                trace(&input_diagnostic, "input-receipt-started");
                 publish_interaction_receipt(&input_receipt_path, receipt);
+                trace(&input_diagnostic, "input-receipt-returned");
             }
+            trace(&input_diagnostic, "input-send-started");
             if send(&input_output,json!({"type":if finished{"interaction"}else{"input-chunk"},"receipt":receipt,"chunk":chunk})).is_err(){return;}
+            trace(&input_diagnostic, "input-send-returned");
             if finished {
                 active = None;
             }
+            trace(&input_diagnostic, "input-idle");
         }
     });
     let control_input = input_tx.clone();
@@ -490,7 +533,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let control_job = job.clone();
     thread::spawn(move || {
         let mut input = io::stdin().lock();
-        while let Ok(Some(frame)) = read_frame(&mut input) {
+        loop {
+            trace(&control_diagnostic, "control-read-started");
+            let frame = read_frame(&mut input);
+            trace(&control_diagnostic, "control-read-returned");
+            let Ok(Some(frame)) = frame else { break; };
             let Ok(value) = serde_json::from_slice::<Value>(&frame) else {
                 break;
             };
@@ -551,6 +598,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         pixel_width: 0,
                         pixel_height: 0,
                     };
+                    trace(&control_diagnostic, "control-resize-started");
                     match control_master.lock() {
                         Ok(master) => match master.as_ref() {
                             None => {
@@ -573,6 +621,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             receipt = receipt.unknown("PTY master owner failed", false);
                         }
                     }
+                    trace(&control_diagnostic, "control-resize-returned");
                     publish_interaction_receipt(&control_receipt_path, &mut receipt);
                     if send(
                         &control_output,
@@ -614,9 +663,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(windows)]
                 {
                     let _ = force;
+                    trace(&diagnostic, "target-kill-started");
                     child.kill()?;
                     // portable-pty accepting kill is not an observed OS exit.
-                    if !stop_applied {
+                    if !stop_applied || diagnostic.as_ref().is_some_and(|value| value.stalled.is_some()) {
                         trace(&diagnostic, "target-kill-returned");
                     }
                     stop_applied = true;
@@ -696,6 +746,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     for reader in readers.drain(..) {
         let _ = reader.join();
     }
+    if let Some(trace) = diagnostic.as_ref().and_then(|value| value.stalled.as_ref()) { trace.finish(); }
     // Process-local input threads die here. The main binary exits immediately.
     Ok(())
 }
