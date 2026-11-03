@@ -9,6 +9,36 @@ mod admission;
 mod fixture;
 use admission::InputAdmission;
 
+fn assembly(runtime:Arc<RunSupervisor>)->(RunAssembly,mpsc::Receiver<Value>) {
+    let (output, frames) = mpsc::sync_channel(64);
+    let credentials = crate::credential_bridge::CredentialBridge::new(output.clone());
+    credentials.initialize("child-test").unwrap();
+    let bridge = crate::host_tools::ToolBridge::new(output.clone().into());
+    bridge.initialize("child-test");
+    let assembly = RunAssembly {
+        runtime: runtime.clone(),
+        resources: crate::tools::KernelResourceClient::new(
+            |_| Err(KernelError::Operation("unrequested source effect".into())),
+            |_| Ok(()),
+            Default::default(),
+        ),
+        credentials: credentials.clone(),
+        language: crate::language::LanguageBridge::new(output.clone()),
+        memory: crate::host_query::OwnerChannel::new("memory", output.clone()),
+        context: crate::host_query::OwnerChannel::new("context", output.clone()),
+        resource: crate::host_query::OwnerChannel::new("resource", output.clone()),
+        plan: crate::plan_bridge::PlanBridge::new(output.clone()),
+        policy: crate::policy::PolicyBridge::new(output.clone()),
+        models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
+        tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
+        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
+        epoch: "child-test".into(),
+    };
+    assembly.policy.initialize("child-test");
+    assembly.policy.set_catalog(runtime.catalog());
+    (assembly,frames)
+}
+
 #[test]
 fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_owner() {
     let mut f = fixture::Fixture::new_host_child(false, None, vec!["helper".into()]);
@@ -38,32 +68,7 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
     let launch = f.db.launch_intent(&run.id).unwrap().unwrap().selection;
     let root = f.root.clone();
     let runtime = Arc::new(RunSupervisor::new(f.db));
-    let (output, frames) = mpsc::sync_channel(64);
-    let credentials = crate::credential_bridge::CredentialBridge::new(output.clone());
-    credentials.initialize("child-test").unwrap();
-    let bridge = crate::host_tools::ToolBridge::new(output.clone().into());
-    bridge.initialize("child-test");
-    let assembly = RunAssembly {
-        runtime: runtime.clone(),
-        resources: crate::tools::KernelResourceClient::new(
-            |_| Err(KernelError::Operation("unrequested source effect".into())),
-            |_| Ok(()),
-            Default::default(),
-        ),
-        credentials: credentials.clone(),
-        language: crate::language::LanguageBridge::new(output.clone()),
-        memory: crate::host_query::OwnerChannel::new("memory", output.clone()),
-        context: crate::host_query::OwnerChannel::new("context", output.clone()),
-        resource: crate::host_query::OwnerChannel::new("resource", output.clone()),
-        plan: crate::plan_bridge::PlanBridge::new(output.clone()),
-        policy: crate::policy::PolicyBridge::new(output.clone()),
-        models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
-        tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
-        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
-        epoch: "child-test".into(),
-    };
-    assembly.policy.initialize("child-test");
-    assembly.policy.set_catalog(runtime.catalog());
+    let (assembly,frames)=assembly(runtime.clone());
     let params = json!({"runId":run.id,"credentialScope":launch.credential_scope,
         "toolBinding":{"resourceOwner":{"kind":"local"},"grantId":"child-source-grant","runId":run.id,"threadId":run.thread_id,
             "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,
@@ -168,4 +173,27 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
     drop(assembly);
     drop(runtime);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn hybrid_file_read_can_be_selected_without_granting_a_source() {
+    let root=std::env::temp_dir().join(format!("source-free-reader-{}",uuid::Uuid::new_v4()));
+    let mut catalog=varin_runtime::Catalog::open(&root).unwrap();
+    catalog.create_thread("thread","branch").unwrap();
+    let receipt=catalog.submit(&varin_runtime::SubmitInput {key:"input".into(),thread_id:"thread".into(),branch_id:"branch".into(),expected_head:None,
+        input:json!("Read an attachment"),configuration:json!({"providerFamily":"openai-responses","endpoint":"https://fixture.invalid/responses","allowAnonymous":true,"model":"fixture","configurationGeneration":1})}).unwrap();
+    let run=catalog.run(&receipt.run_id).unwrap();
+    let runtime=Arc::new(RunSupervisor::new(catalog));
+    let (assembly,_frames)=assembly(runtime.clone());
+    let prepare=|tools:Value| {
+        let params=RunPreparation::new(serde_json::from_value(json!({"runId":run.id})).unwrap(),&run).unwrap();
+        let selected=serde_json::from_value(json!({"runId":run.id,"source":null,"enabledTools":tools})).unwrap();
+        assembly.prepare(params,Some(selected),||false)
+    };
+    assert!(prepare(json!(["file_read","file_write"])).is_err(),"source-free selection must not authorize mutations");
+    let PreparedLaunch::Selection(selected)=prepare(json!(["file_read"])).unwrap() else {panic!("selection receipt required")};
+    assert!(selected["selection"]["source"].is_null());
+    assert!(selected["selection"]["tools"].as_array().unwrap().iter().any(|tool|tool["name"]=="file_read"));
+    drop(assembly);drop(runtime);std::fs::remove_dir_all(root).unwrap();
 }

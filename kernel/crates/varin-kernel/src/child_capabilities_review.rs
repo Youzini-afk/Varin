@@ -436,19 +436,27 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
         input.work_mode = Some(ChildWorkMode::ReadOnly);
         assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
         input.work_mode = None;
+        input.tools = Some(vec!["file_read".into()]);
+        let (_, tools) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert!(tools.iter().any(|tool| tool.name == "file_read"));
         input.tools = Some(if member == ChildPresetDefault::Worker {
-            vec!["file_read".into(), "process_spawn".into()]
+            vec!["file_read".into(), "file_write".into(), "process_spawn".into()]
         } else {
-            vec!["file_read".into()]
+            vec!["file_read".into(), "file_list".into()]
         });
         let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
         assert!(error.message.contains("exceed the frozen delegation"), "{error}");
         input.tools = None;
         selected.catalog.presets[index].tools_source = ChildPresetToolsSource::Explicit;
-        assert!(crate::collaboration::resolve_selection(&selected, &input)
-            .unwrap_err()
-            .message
-            .contains("file_read"));
+        let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
+        assert!(error.message.contains("file_list"), "{error}");
+        assert!(!error.message.contains("file_read"), "attachment reads do not require a Source: {error}");
+        if member == ChildPresetDefault::Worker {
+            input.tools = Some(vec!["file_write".into()]);
+            let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
+            assert!(error.message.contains("require a file source: file_write"), "{error}");
+            input.tools = None;
+        }
     }
     input.preset = None;
     input.tools = Some(vec!["helper".into()]);

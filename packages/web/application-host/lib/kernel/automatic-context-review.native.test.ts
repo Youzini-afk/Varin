@@ -39,8 +39,11 @@ it.each([
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-automatic-context-'));
   cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
   const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
+  const contextWindowTokens=block?12000:24000;
+  const reserveRatio=128/contextWindowTokens;
+  const seedContextWindowTokens=48000;
   await fs.writeFile(path.join(agentDir,'agent-settings.json'),JSON.stringify({compaction:{enabled:true,reserveRatio:0.1,keepRecentTokens:1000,
-    modelOverrides:{'fixture/fixture-model':{reserveRatio:128/(block?12000:24000),keepRecentTokens:96}}},harness:{context:{backgroundPreparation:false,preparationWaterline:0.5}}}));
+    modelOverrides:{'fixture/fixture-model':{reserveRatio,keepRecentTokens:96}}},harness:{context:{backgroundPreparation:false,preparationWaterline:0.5}}}));
   const projectRoot=path.join(root,'untrusted-project');await fs.mkdir(path.join(projectRoot,'.varin'),{recursive:true});
   await fs.writeFile(path.join(projectRoot,'.varin','settings.json'),'untrusted invalid configuration must not be read');
   const main:Array<{body:Record<string,unknown>;response:ServerResponse}>=[];
@@ -70,12 +73,16 @@ it.each([
   const context={effectiveSystemPrompt:'BASE_SYSTEM_V1',instructionSources:['fixture:base'],memoryCheckpoint:null};
   const prepare=Object.assign(async()=>context,{main:async()=>context}) as ContextPreparer;
   const policies:ContextPolicySnapshot[]=[];
+  const inputEstimates=new Map<string,number>();
   const installOwner=()=>{
     const service=new ContextService(runtime,prepare,async(run)=>{
     const policy=await readContextPolicy({settings: await new AgentSettingsService(agentDir, () => false).snapshot(projectRoot),projectRoot,modelId:'fixture-model',providerId:'fixture',contextWindowTokens:(run.configuration as {contextWindowTokens:number}).contextWindowTokens});
     policies.push(policy);return {policy,scope:{threadId:run.thread_id}};
     },async runId=>{await runtime.startRun(runId);},null);
-    kernel.setContextOwner(service);return service;
+    kernel.setContextOwner({query(query,signal){
+      if(query.action==='prepare' && query.observation) inputEstimates.set(query.runId,query.observation.estimatedTokens);
+      return service.query(query,signal);
+    },close(){service.close();}});return service;
   };
   installOwner();
   let publicationEntered=false;
@@ -87,16 +94,20 @@ it.each([
     };
   }
   const configuration={providerId:'fixture',providerFamily:'openai-responses',model:'fixture-model',endpoint:`http://127.0.0.1:${address.port}/responses`,allowAnonymous:true,
-    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens:block?12000:24000,retry:{enabled:retry===true,initialDelayMs:0}};
+    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens,retry:{enabled:retry===true,initialDelayMs:0}};
   const threadId='thread:automatic-context',branchId='branch:automatic-context';
   await runtime.createThread(threadId,branchId);
   const originalText='OLD_EVIDENCE '.repeat(4200);
-  // Seed the source in a window which actually fits its tokenized request. The
-  // second Run then exercises the selected blocking/background capacity.
-  const first=await runtime.submit({key:'first',threadId,branchId,expectedHead:null,input:{text:originalText},configuration:{...configuration,contextWindowTokens:24000},initialContext:context});
+  // Seed with ample room for both history and the real builtin tool schemas.
+  // Only the second Run exercises the selected blocking/background capacity.
+  const first=await runtime.submit({key:'first',threadId,branchId,expectedHead:null,input:{text:originalText},configuration:{...configuration,contextWindowTokens:seedContextWindowTokens},initialContext:context});
   await runtime.startRun(first.run_id);
-  await expect.poll(async()=>(await runtime.run(first.run_id)).state).toBe('completed');
-  expect(policies[0]).toMatchObject({enabled:true,reserveTokens:block?256:128,keepRecentTokens:96});
+  await expect.poll(async()=>({state:(await runtime.run(first.run_id)).state,mainRequests:main.length,summaryRequests:summaries.length,
+    estimatedTokens:inputEstimates.get(first.run_id)})).toMatchObject({state:'completed',mainRequests:1,summaryRequests:0});
+  const seedReserveTokens=Math.ceil(seedContextWindowTokens*reserveRatio);
+  expect(policies[0]).toMatchObject({enabled:true,reserveTokens:seedReserveTokens,keepRecentTokens:96});
+  expect(inputEstimates.get(first.run_id)).toBeLessThanOrEqual(seedContextWindowTokens-seedReserveTokens);
+  expect(await runtime.contextJobs(branchId)).toEqual([]);
   const original=await runtime.history(branchId);
   const before=await runtime.context(branchId);
   {
