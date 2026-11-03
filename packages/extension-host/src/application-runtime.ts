@@ -122,6 +122,7 @@ export class ApplicationExtensionRuntime {
   readonly #serviceUnsubscribe: () => void;
   #revision = 0;
   readonly #mutations = new Set<Promise<void>>();
+  readonly #reads = new Set<Promise<void>>();
   readonly #builtinPreparations = new Map<string, Promise<void>>();
   readonly #surfaceLeases = new Map<string, { principal: string; owner: VarinSurfaceServiceInvocationLease['owner'];
     services: Map<string, { pin: HostServicePin; serviceId: string; version: number }>; revoke(): void }>();
@@ -189,34 +190,38 @@ export class ApplicationExtensionRuntime {
     return this.state();
   }
 
-  async state(): Promise<VarinExtensionHostStateSnapshot> {
-    for (;;) {
-      const before = this.#revision;
-      const catalog = await this.catalog.snapshot();
-      const services = this.services.getSnapshot();
-      const routing = await this.routing.read();
-      const workbench = await this.workbench.read();
-      const after = this.#revision;
-      if (before === after) return { catalog, revision: after, routing, services, workbench };
-    }
+  state(): Promise<VarinExtensionHostStateSnapshot> {
+    return this.#read(async () => {
+      for (;;) {
+        const before = this.#revision;
+        const catalog = await this.catalog.snapshot();
+        const services = this.services.getSnapshot();
+        const routing = await this.routing.read();
+        const workbench = await this.workbench.read();
+        const after = this.#revision;
+        if (before === after) return { catalog, revision: after, routing, services, workbench };
+      }
+    });
   }
 
-  async queryContracts(requestValue: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope = {}, signal?: AbortSignal): Promise<VarinRuntimeContractResult> {
-    const request = parseVarinRuntimeContractRequest(requestValue);
-    signal?.throwIfAborted();
-    // Only this explicit branch reads immutable package bytes, outside lifecycle/control admission.
-    if (request.kind === 'source') return this.packages.readSource(request, signal);
-    // list/describe remain pure metadata reads: no package preparation or provider activation.
-    for (;;) {
+  queryContracts(requestValue: VarinRuntimeContractRequest | unknown, scope: VarinRuntimeContractScope = {}, signal?: AbortSignal): Promise<VarinRuntimeContractResult> {
+    return this.#read(async () => {
+      const request = parseVarinRuntimeContractRequest(requestValue);
       signal?.throwIfAborted();
-      const revision = this.#revision;
-      const catalog = await this.catalog.snapshot();
-      const services = this.services.getSnapshot();
-      const routing = await this.routing.read();
-      const workbench = await this.workbench.snapshot();
-      if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope,
-        owner => this.supervisor.getRetainedArtifactIdentity(owner), owner => this.supervisor.getRetainedComposition(owner));
-    }
+      // Only this explicit branch reads immutable package bytes, outside lifecycle mutation/control critical sections.
+      if (request.kind === 'source') return this.packages.readSource(request, signal);
+      // list/describe remain pure metadata reads: no package preparation or provider activation.
+      for (;;) {
+        signal?.throwIfAborted();
+        const revision = this.#revision;
+        const catalog = await this.catalog.snapshot();
+        const services = this.services.getSnapshot();
+        const routing = await this.routing.read();
+        const workbench = await this.workbench.snapshot();
+        if (revision === this.#revision) return queryRuntimeContracts({ catalog, services, routing, workbench, revision }, request, scope,
+          owner => this.supervisor.getRetainedArtifactIdentity(owner), owner => this.supervisor.getRetainedComposition(owner));
+      }
+    });
   }
 
   /** A stable preparation-cache token only outside original lifecycle mutations. It never
@@ -874,7 +879,7 @@ export class ApplicationExtensionRuntime {
     // Close supervisor admission and cancel unpublished workers before waiting for callers.
     const shutdown = this.supervisor.shutdown();
     this.#stop = (async () => {
-      const results = await Promise.allSettled([shutdown, ...this.#mutations]);
+      const results = await Promise.allSettled([shutdown, ...this.#mutations, ...this.#reads]);
       this.#serviceUnsubscribe();
       this.#publish();
       this.#listeners.clear();
@@ -900,6 +905,20 @@ export class ApplicationExtensionRuntime {
     finally {
       if (this.#builtinPreparations.get(extensionId) === preparation) this.#builtinPreparations.delete(extensionId);
     }
+  }
+
+  /** Metadata readers still own filesystem locks and may finish a profile migration. A cancelled
+   * observation does not stop that work; shutdown closes admission and joins its actual promise. */
+  #read<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#stopped) return Promise.reject(new Error("Application extension runtime is stopped"));
+    const result = Promise.resolve().then(() => {
+      if (this.#stopped) throw new Error("Application extension runtime is stopped");
+      return operation();
+    });
+    const settled = result.then(() => undefined, () => undefined);
+    this.#reads.add(settled);
+    void settled.then(() => this.#reads.delete(settled));
+    return result;
   }
 
   #mutate<T>(operation: () => Promise<T>): Promise<T> {

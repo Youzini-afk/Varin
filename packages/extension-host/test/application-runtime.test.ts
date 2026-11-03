@@ -830,3 +830,35 @@ test("an original pinned generation cannot refresh, open or overwrite a successo
     assert.equal((await runtime.storage.read({ extensionId, scope: "application", key: "state" })).document.schemaVersion, 2);
   } finally { pin?.release(); binding?.release(); await runtime.stop(); }
 });
+
+
+test("shutdown drains original state and contract storage readers before releasing the Host", async () => {
+  for (const mode of ["state", "contracts"] as const) {
+    const dataDir = await temporaryDirectory(`varin-runtime-reader-drain-${mode}-`);
+    const runtime = await ApplicationExtensionRuntime.create({ dataDir, varinVersion,
+      brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)) });
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const read = runtime.storage.read.bind(runtime.storage);
+    let held = false;
+    runtime.storage.read = async address => {
+      if (!held) { held = true; enter(); await barrier; }
+      return read(address);
+    };
+    const reading = mode === "state" ? runtime.state() : runtime.queryContracts({ action: "list", kind: "service" });
+    await entered;
+    let stopped = false;
+    const stopping = runtime.stop().then(() => { stopped = true; });
+    try {
+      // Drain the ready task queue while the real storage reader remains at its explicit gate.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(stopped, false, "shutdown must retain the actual read, not only mutating requests");
+      await assert.rejects(runtime.state(), /stopped/);
+      await assert.rejects(runtime.queryContracts({ action: "list", kind: "service" }), /stopped/);
+      release(); await reading; await stopping;
+      assert.equal(stopped, true);
+      await rm(dataDir, { recursive: true, force: true });
+    } finally { release(); await Promise.allSettled([reading, stopping]); }
+  }
+});
