@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
-import {transitionInstallerConfiguration,sandboxedAppImageLauncher} from './package.mjs';
+import {transitionInstallerConfiguration,sandboxedAppImageLauncher,prepareWindowsInstallerResources} from './package.mjs';
 import {newerVersion} from './release.mjs';
 test('transition NSIS retains installed identity, custom UI, components and explicit retention',()=>{
  const config=transitionInstallerConfiguration({platform:'win32',architecture:'arm64',output:'/tmp/varin-fixture',signed:true});
@@ -16,6 +16,24 @@ test('transition NSIS retains installed identity, custom UI, components and expl
 test('both shell versions must advance, never reinstall or downgrade themselves',()=>{
  assert.equal(newerVersion('1.2.4','1.2.3'),true);assert.equal(newerVersion('1.2.3','1.2.3'),false);assert.equal(newerVersion('1.2.3','2.0.0'),false);
  assert.throws(()=>newerVersion('1.2.3-rc.1','1.2.3'),/canonical/);
+});
+test('native Windows payload provides the real NSIS finalizer resource destination without redirects',async t=>{
+ const {createRequire}=await import('node:module');const r=createRequire(new URL('../../electron/package.json',import.meta.url));
+ const library=createRequire(createRequire(r.resolve('electron-builder')).resolve('app-builder-lib'));
+ const {copyFile}=library('builder-util');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-nsis-resources-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const payload=path.join(root,'payload'),staged=path.join(root,'staged-elevate.exe');await fs.mkdir(payload);await fs.writeFile(staged,'synthetic signed-helper bytes');
+ const destination=path.join(payload,'resources','elevate.exe');
+ await assert.rejects(copyFile(staged,destination,false),error=>error.code==='ENOENT');
+ assert.equal(await prepareWindowsInstallerResources(payload),path.join(await fs.realpath(payload),'resources'));
+ await copyFile(staged,destination,false);assert.deepEqual(await fs.readFile(destination),await fs.readFile(staged));
+ await prepareWindowsInstallerResources(payload);assert.deepEqual(await fs.readFile(destination),await fs.readFile(staged));
+ await fs.rm(path.join(payload,'resources'),{recursive:true});await fs.writeFile(path.join(payload,'resources'),'not a directory');
+ await assert.rejects(prepareWindowsInstallerResources(payload),/redirected/);await fs.unlink(path.join(payload,'resources'));
+ if(process.platform!=='win32'){
+  const outside=path.join(root,'outside');await fs.mkdir(outside);await fs.symlink(outside,path.join(payload,'resources'));
+  await assert.rejects(prepareWindowsInstallerResources(payload),/redirected/);assert.deepEqual(await fs.readdir(outside),[]);
+ }
 });
 test('AppImage keeps integration but never disables Chromium sandbox even when namespaces are unavailable',{skip:process.platform==='win32'},async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-apprun-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));

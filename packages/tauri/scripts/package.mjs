@@ -39,6 +39,16 @@ export function transitionInstallerConfiguration({platform,architecture,output,s
   if(signed&&platform==='darwin')config.mac.identity=process.env.APPLE_SIGNING_IDENTITY;
   return config;
 }
+export async function prepareWindowsInstallerResources(directory){
+  if(!(await fs.lstat(directory)).isDirectory())throw new Error('Windows installer payload must be a real directory');
+  const resources=path.join(await fs.realpath(directory),'resources');
+  try{await fs.mkdir(resources);}catch(error){if(error.code!=='EEXIST')throw error;}
+  if(!(await fs.lstat(resources)).isDirectory())throw new Error('Windows installer resources cannot be redirected');
+  // NSIS stages/signs the official elevate.exe into its own archive, then its
+  // finalizer copies those same bytes here without creating parent directories.
+  // CEF has no Electron resources directory, so prepare only that owned folder.
+  return resources;
+}
 export async function brandWindowsBootstrap(directory, version) {
   const receipt = await verifyWindowsBootstrap(directory);
   if (receipt.signing) throw new Error('Brand the bootstrap before signing; never rewrite a signed generation');
@@ -113,6 +123,7 @@ export async function packageTransition({directory,output,platform=process.platf
   const{runtime}=await verifyNativePayload(directory,{platform,architecture,version,mode});
   if(platform==='win32'){
     if(!engineDirectory)throw new Error('Windows installer requires the verified sandbox bootstrap generation');
+    await prepareWindowsInstallerResources(directory);
     const engine=await verifyWindowsBootstrap(engineDirectory);
     if(engine.architecture!==architecture)throw new Error('Windows engine architecture mismatch');
     await brandWindowsBootstrap(engineDirectory, version);
