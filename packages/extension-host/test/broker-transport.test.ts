@@ -6,6 +6,42 @@ import test from "node:test";
 import { ChildBrokeredHostTransport } from "../src/broker-supervisor.js";
 import { HostServiceRegistry } from "../src/service-registry.js";
 
+for (const intentional of [false, true]) {
+  test(`${intentional ? "forced" : "unexpected"} exit before readiness is observed before the first request`, async () => {
+    const crashes: Error[] = [];
+    let killed = false;
+    const child = Object.assign(new EventEmitter(), {
+      pid: 12345,
+      connected: true,
+      kill() { killed = true; return true; },
+      send() { assert.fail("an unready broker must not receive requests"); },
+    });
+    const transport = new ChildBrokeredHostTransport({
+      brokerScript: "unused-fixture",
+      forkProcess: (() => child as unknown as ChildProcess) as typeof fork,
+      onCrash: (error) => { crashes.push(error); },
+      requestFromChild: async () => null,
+    });
+    if (intentional) transport.forceTerminate();
+    child.connected = false;
+    child.emit("exit", null, "SIGKILL");
+    // Preparation can still be awaiting storage when the broker exits. Cross a turn
+    // without any request observer so an unowned readiness rejection fails this test.
+    await setImmediate();
+    assert.equal(killed, intentional);
+    assert.equal(crashes.length, intentional ? 0 : 1);
+    let readinessError: unknown;
+    await assert.rejects(transport.request("activate"), (error: unknown) => {
+      readinessError = error;
+      assert.match(String(error), /Brokered Host process exited \(SIGKILL\)/);
+      if (!intentional) assert.equal(error, crashes[0]);
+      return true;
+    });
+    await assert.rejects(transport.request("activate"), (error: unknown) => error === readinessError);
+    assert.deepEqual(await transport.terminate(), { processExited: true, cleanup: "unconfirmed" });
+  });
+}
+
 for (const failure of ["callback", "throw"] as const) {
   test(`failed cancellation delivery (${failure}) cannot drain a live provider`, async () => {
     let requestId = "";

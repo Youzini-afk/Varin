@@ -115,6 +115,17 @@ impl Fixture {
         tx.commit().unwrap();
         fixture
     }
+    fn v83() -> Self {
+        let fixture = Self::v81();
+        let content = crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
+        let mut raw = fixture.raw();
+        let indexes = prepare_history_indexes(&raw, &content).unwrap();
+        let tx = raw.transaction().unwrap();
+        install_history_indexes(&tx, &indexes).unwrap();
+        tx.pragma_update(None, "user_version", 83).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
     fn raw(&self) -> Connection {
         Connection::open(self.0.join("conversation.sqlite")).unwrap()
     }
@@ -659,4 +670,28 @@ fn catalog_upgrade_v80_initializes_capture_owner_without_rewriting_original_bodi
         0
     );
     assert_eq!(catalog.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=80 AND json_extract(data,'$.to')=?1",[FORMAT],|r|r.get::<_,i64>(0)).unwrap(),1);
+}
+
+#[test]
+fn catalog_upgrade_v83_fixes_historical_default_driver_without_rewriting_effects() {
+    let fixture=Fixture::v83();
+    let mut raw=fixture.raw();
+    let before_operation:String=raw.query_row("SELECT body FROM operations WHERE id='effect'",[],|row|row.get(0)).unwrap();
+    let before_run:String=raw.query_row("SELECT body FROM runs WHERE id='run'",[],|row|row.get(0)).unwrap();
+    let before_history:String=raw.query_row("SELECT body FROM history WHERE id='history'",[],|row|row.get(0)).unwrap();
+    let before_model:String=raw.query_row("SELECT body FROM model_steps WHERE id='settled'",[],|row|row.get(0)).unwrap();
+    let content=crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
+    apply(&mut raw,83,&content).unwrap();
+    assert_eq!(inspect_catalog_format(&raw).unwrap(),FORMAT);
+    let original=driver::metadata(&raw,"run").unwrap().unwrap();
+    assert_eq!(original.selection,crate::driver::DriverSelection::default());
+    assert_eq!(original.started_epoch,None);
+    assert_eq!(original.execution_revision,0);
+    assert_eq!(raw.query_row("SELECT body FROM model_steps WHERE id='settled'",[],|row|row.get::<_,String>(0)).unwrap(),before_model);
+    assert_eq!(raw.query_row("SELECT count(*) FROM model_steps WHERE driver_id IS NOT NULL",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(raw.query_row("SELECT body FROM operations WHERE id='effect'",[],|row|row.get::<_,String>(0)).unwrap(),before_operation);
+    assert_eq!(raw.query_row("SELECT body FROM runs WHERE id='run'",[],|row|row.get::<_,String>(0)).unwrap(),before_run);
+    assert_eq!(raw.query_row("SELECT body FROM history WHERE id='history'",[],|row|row.get::<_,String>(0)).unwrap(),before_history);
+    assert_eq!(raw.query_row("SELECT count(*) FROM driver_calls",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(raw.query_row("SELECT count(*) FROM driver_checkpoints",[],|row|row.get::<_,i64>(0)).unwrap(),0);
 }

@@ -25,6 +25,7 @@ struct CollectionRoots {
     references: Vec<Reference>,
     requests: Vec<Value>,
     graphs: Vec<Value>,
+    driver_contexts: Vec<Value>,
     dispatches: Vec<Value>,
 }
 struct CollectorLease {
@@ -213,6 +214,7 @@ impl ContentCollection {
             mut references,
             requests,
             graphs,
+            driver_contexts,
             mut dispatches,
         } = references;
         // These bodies are read only after the SQLite snapshot has closed. Follow only typed
@@ -236,6 +238,14 @@ impl ContentCollection {
                         dispatches.push(reference.clone());
                     }
                 }
+            }
+        }
+        for context in driver_contexts {
+            self.check()?;
+            let frozen: crate::execution::FrozenToolContext =
+                serde_json::from_value(self.load_body(&context)?)?;
+            if let Some(reference) = frozen.child_dispatch {
+                dispatches.push(reference);
             }
         }
         let mut seen_dispatches = HashSet::new();
@@ -368,6 +378,9 @@ impl ContentCollection {
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.state_ref') FROM driver_checkpoints UNION ALL SELECT json_extract(body,'$.frozen_ref') FROM driver_calls UNION ALL SELECT json_extract(body,'$.call.arguments_ref') FROM driver_calls UNION ALL SELECT json_extract(body,'$.dispatch_history') FROM driver_calls WHERE json_extract(body,'$.dispatch_history') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.pre_dispatch_completion.reason_ref') FROM driver_calls WHERE json_extract(body,'$.pre_dispatch_completion.kind')='not_dispatched' UNION ALL SELECT json_extract(body,'$.pre_dispatch_completion.error_ref') FROM driver_calls WHERE json_extract(body,'$.pre_dispatch_completion.error_ref') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.driver_models') m UNION ALL SELECT json_extract(m.value,'$.body') FROM delegated_executions d,json_each(d.body,'$.launch.driver_models') m");
         roots.push_str(" UNION ALL SELECT recipe FROM context_jobs");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.tools_ref') FROM run_launches
@@ -468,6 +481,7 @@ impl ContentCollection {
         let graphs = capture(
             "SELECT json_extract(body,'$.intent.body_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='policy_tool_graph_v1'",
         )?;
+        let driver_contexts = capture("SELECT json_extract(body,'$.frozen_ref') FROM driver_calls")?;
         let dispatches = capture(
             "SELECT json_extract(body,'$.dispatch_context_ref') FROM run_launches WHERE json_extract(body,'$.dispatch_context_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.dispatch_context_ref') FROM child_tasks",
         )?;
@@ -475,6 +489,7 @@ impl ContentCollection {
             references,
             requests,
             graphs,
+            driver_contexts,
             dispatches,
         })
     }

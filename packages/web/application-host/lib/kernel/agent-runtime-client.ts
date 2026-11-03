@@ -18,6 +18,8 @@ import type { PolicyModelPreparer } from './policy-models.js';
 import { waitWithSignal } from '../cancellation.js';
 import { waitForModelBinding } from './model-binding-lifetime.js';
 import type { AgentPolicyLease, AgentPolicyBinding, AgentPolicyArtifactBinding } from './agent-policy.js';
+import type { AgentDriverLease, AgentDriverPreparer } from './agent-driver.js';
+import type { DriverBinding, DriverSelection } from './protocol.generated.js';
 import type {
   McpToolLease,
 } from './tool-bridge.js';
@@ -206,6 +208,7 @@ export class AgentRuntimeClient {
     private readonly resolveLiveSource?: LiveSourceResolver,
     private readonly prepareExtensionOwner?: ExtensionToolPreparer,
     private readonly sourceRegistration?: (workspaceId: string, signal?: AbortSignal) => Promise<unknown>,
+    private readonly prepareDriverOwner?: AgentDriverPreparer,
   ) {
     kernel.subscribeExit(() => {
       for (const runId of this.policyObservations.keys()) this.closePolicyObservation(runId);
@@ -1565,15 +1568,17 @@ export class AgentRuntimeClient {
       void this.refreshPolicy(scope.runId, first).catch(() => undefined);
     }, state.controller.signal);
   }
-  private async preparePolicyCredentials(runId: string, threadId: string, generation: number, lease: AgentPolicyLease,
-    signal: AbortSignal, savedCapabilities?: readonly PolicyModelCapability[]): Promise<{ lease: AgentPolicyLease; models: PolicyModelCapability[] }> {
-    const roles = lease.binding.artifact.modelRoles;
+  private async prepareRoleCredentials<T extends AgentPolicyLease | AgentDriverLease>(runId: string, threadId: string, generation: number, lease: T,
+    signal: AbortSignal, savedCapabilities?: readonly PolicyModelCapability[], bindingNamespace: 'policy' | 'driver' = 'policy'): Promise<{ lease: T; models: PolicyModelCapability[] }> {
+    const declared = lease.binding.artifact.modelRoles;
+    if (declared.some(role => role !== 'agentPlanning')) throw new Error('Requested model role is unavailable');
+    const roles = declared as readonly 'agentPlanning'[];
     if (roles.length && !this.preparePolicyModels) throw new Error('Planning model preparation is unavailable');
     const releasePrepared = (models: Awaited<ReturnType<PolicyModelPreparer>>) => {
       for (const entry of models) entry.credentialOwner?.release();
     };
     const prepared = this.preparePolicyModels ? await waitForModelBinding(this.preparePolicyModels({ threadId, generation,
-      requestedModelRoles: roles, ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), releasePrepared, signal) : [];
+      requestedModelRoles: roles, ...(bindingNamespace === 'driver' ? { bindingNamespace } : {}), ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), releasePrepared, signal) : [];
     const registered: Array<{ bindingId: string; epoch: string | null }> = [];
     const releaseCredentials = () => {
       for (const entry of registered) if (this.kernel.kernelEpoch === entry.epoch) this.kernel.unregisterCredentialOwner(runId, entry.bindingId);
@@ -1670,7 +1675,7 @@ export class AgentRuntimeClient {
       if (target.kind === 'extension' && (!lease || !isDeepStrictEqual(lease.binding.artifact, target.artifact))) throw new Error('policy_exact_binding_unavailable');
       let binding: AgentPolicyBinding | null = null, models: PolicyModelCapability[] = [];
       if (lease) {
-        const prepared = await this.preparePolicyCredentials(runId, scope.threadId, selected.generation, lease, signal);
+        const prepared = await this.prepareRoleCredentials(runId, scope.threadId, selected.generation, lease, signal);
         lease = prepared.lease; models = prepared.models;
         signal.throwIfAborted();
         const retained = lease;
@@ -1778,7 +1783,7 @@ export class AgentRuntimeClient {
         this.observePolicy(scope); return undefined;
       }
       if (!saved) saved = await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, signal);
-      const prepared = await this.preparePolicyCredentials(runId, run.thread_id, generation, lease, signal,
+      const prepared = await this.prepareRoleCredentials(runId, run.thread_id, generation, lease, signal,
         required ? saved.selection.policy_models : undefined);
       lease = prepared.lease;
       await this.kernel.agentRuntimeRequest('runtime.launch.policy.prepare', { runId, identity: lease.binding.artifact.identity,
@@ -1789,6 +1794,55 @@ export class AgentRuntimeClient {
       this.observePolicy(scope);
       return binding;
     } finally { lease?.release(); preparation.release(); }
+  }
+
+  /** Freeze one driver at original Run admission; setting changes only affect new Runs.
+   * Restore uses the saved artifact and prepared model bindings, never current routing. */
+  async prepareDriver(runId: string, signal: AbortSignal,
+    credentialScope?: Awaited<ReturnType<ExistingHostCredentialOwner['scope']>>): Promise<DriverBinding | undefined> {
+    let saved = await this.launch(runId, signal);
+    if (saved?.selection.policy.name === 'context_compaction') return undefined;
+    const existing = this.kernel.driverBinding(runId);
+    if (existing) return existing;
+    const required = saved?.selection.driver.kind === 'extension' ? saved.selection.driver.artifact : undefined;
+    if (!this.prepareDriverOwner) {
+      if (required) throw new Error('The saved Run requires its original driver owner');
+      return undefined;
+    }
+    if (saved && !saved.driver_preparable && !required) return undefined;
+    const run = await this.run(runId, signal);
+    if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for driver preparation');
+    if (!saved) saved = await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, signal);
+    const admitted = await this.contextScope(runId, signal);
+    let lease: AgentDriverLease | undefined;
+    try {
+      lease = await this.prepareDriverOwner({ userId: 'default', threadId: run.thread_id, runtimeId: runId,
+        ...(admitted?.projectId ? { projectId: admitted.projectId } : {}),
+        ...(saved.selection.source ? { workspaceId: saved.selection.source.workspace_id } : {}),
+        ...(required ? { requiredBinding: required } : {}) }, signal);
+      if (!lease && required) throw new Error('The original Run driver is unavailable');
+      let models: PolicyModelCapability[] = [];
+      if (lease) {
+        // A Run's driver is immutable in this contract; namespace 0 is not a policy
+        // generation and cannot collide with a future policy replacement's credentials.
+        const prepared = await this.prepareRoleCredentials(runId, run.thread_id, 0, lease, signal,
+          required ? saved.selection.driver_models : undefined, 'driver');
+        lease = prepared.lease; models = prepared.models;
+      }
+      const selection: DriverSelection = lease ? { kind: 'extension', artifact: lease.binding.artifact }
+        : { kind: 'builtin', name: 'varin.default', version: '1' };
+      await this.kernel.agentRuntimeRequest('runtime.launch.driver.prepare', { runId, selection, models }, signal);
+      signal.throwIfAborted();
+      if (!lease) return undefined;
+      const concurrent = this.kernel.driverBinding(runId);
+      if (concurrent) {
+        if (!isDeepStrictEqual(concurrent.artifact, lease.binding.artifact)) throw new Error('Run driver admission changed');
+        return concurrent;
+      }
+      const binding = await this.kernel.registerDriverOwner(runId, lease);
+      lease = undefined;
+      return binding;
+    } finally { lease?.release(); }
   }
 
   private async admitStartingSource(runId: string, signal: AbortSignal): Promise<void> {
@@ -1806,7 +1860,8 @@ export class AgentRuntimeClient {
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
       const delegatedChild = await this.childExecutionForRun(runId, signal);
-      const policyBinding = await this.preparePolicy(runId, signal);
+      const driverBinding = await this.prepareDriver(runId, signal);
+      const policyBinding = driverBinding ? undefined : await this.preparePolicy(runId, signal);
       const mcpBinding = this.kernel.mcpLiveBinding(runId);
       const extensionBindings = await this.prepareExtensions(runId, signal);
       try {
@@ -1822,10 +1877,14 @@ export class AgentRuntimeClient {
             runId,
             ...(extensionBindings.length ? { extensionBindings } : {}),
             ...(policyBinding ? { policyBinding } : {}),
+            ...(driverBinding ? { driverBinding } : {}),
             ...(mcpBinding ? { mcpBinding } : {}),
             ...(toolBinding === undefined ? {} : { toolBinding }),
           },
           signal,
+          // The caller may stop observing after native admission. Keep original owners
+          // until the start acknowledgement settles; abort is not a failed admission.
+          { settleCancellation: true },
         );
         this.startedTools(runId);
         if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
@@ -1854,11 +1913,8 @@ export class AgentRuntimeClient {
       );
       const credentialEpoch = this.kernel.kernelEpoch;
       try {
-        const policyBinding = await this.preparePolicy(
-          runId,
-          signal,
-          credentialScope,
-        );
+        const driverBinding = await this.prepareDriver(runId, signal, credentialScope);
+        const policyBinding = driverBinding ? undefined : await this.preparePolicy(runId, signal, credentialScope);
         const mcpBinding = this.kernel.mcpLiveBinding(runId);
         const extensionBindings = await this.prepareExtensions(runId, signal);
         await this.reconcileMemory(runId, signal);
@@ -1874,10 +1930,14 @@ export class AgentRuntimeClient {
             ...(extensionBindings.length ? { extensionBindings } : {}),
             credentialScope,
             ...(policyBinding ? { policyBinding } : {}),
+            ...(driverBinding ? { driverBinding } : {}),
             ...(mcpBinding ? { mcpBinding } : {}),
             ...(toolBinding === undefined ? {} : { toolBinding }),
           },
           signal,
+          // The caller may stop observing after native admission. Keep original owners
+          // until the start acknowledgement settles; abort is not a failed admission.
+          { settleCancellation: true },
         );
         this.startedTools(runId);
         if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
@@ -1942,12 +2002,15 @@ export class AgentRuntimeClient {
       Run,
       'runtime.run.inspect'
     >('runtime.run.inspect', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+    // Terminal admission is not callback stop. The original run_assembly exit sends
+    // actual releases after a live driver callback and its accepted RPCs have drained.
+    if (['completed', 'failed', 'cancelled'].includes(run.state) && !this.kernel.isRunDriverInvoking(runId)) {
       this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);
       this.kernel.unregisterToolOwners(runId);
       this.kernel.releaseRunPolicyOwners(runId);
+      this.kernel.releaseRunDriverOwner(runId);
     }
     return run;
   }
@@ -1975,12 +2038,15 @@ export class AgentRuntimeClient {
       RunCancellationReceipt,
       'runtime.run.cancel'
     >('runtime.run.cancel', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+    // Terminal admission is not callback stop. The original run_assembly exit sends
+    // actual releases after a live driver callback and its accepted RPCs have drained.
+    if (['completed', 'failed', 'cancelled'].includes(run.state) && !this.kernel.isRunDriverInvoking(runId)) {
       this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);
       this.kernel.unregisterToolOwners(runId);
       this.kernel.releaseRunPolicyOwners(runId);
+      this.kernel.releaseRunDriverOwner(runId);
     }
     return run;
   }

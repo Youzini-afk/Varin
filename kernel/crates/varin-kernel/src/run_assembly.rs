@@ -21,6 +21,7 @@ pub(crate) struct RunAssembly {
     pub resource: crate::host_query::OwnerChannel,
     pub plan: crate::plan_bridge::PlanBridge,
     pub policy: crate::policy::PolicyBridge,
+    pub driver: crate::driver_bridge::DriverBridge,
     pub models: Arc<crate::run_models::RunModels>,
     pub tools: Arc<crate::run_tools::RunTools>,
     pub responses: crate::transport::Sender,
@@ -218,6 +219,17 @@ impl RunAssembly {
             .transpose()
             .map_err(domain)?
             .unwrap_or(varin_runtime::catalog::policy_switch::PolicyTarget::Default);
+        let driver_selection = policy_launch.as_ref().map(|launch|launch.metadata.selection.driver.clone()).unwrap_or_default();
+        let custom_driver = matches!(driver_selection, varin_runtime::driver::DriverSelection::Extension { .. });
+        if is_context_job && (custom_driver || p.driver_binding.is_some()) { return Err(KernelError::Authorization("context jobs retain their original builtin execution".into())); }
+        match (driver_selection.clone(), p.driver_binding) {
+            (varin_runtime::driver::DriverSelection::Builtin { .. }, None) => (),
+            (varin_runtime::driver::DriverSelection::Extension { artifact }, Some(binding)) if artifact == binding.artifact => {
+                start.driver = self.driver.driver(binding).map_err(|e|KernelError::Authorization(e.to_string()))?;
+            }
+            _ => return Err(KernelError::Authorization("Run requires its exact original live driver binding".into())),
+        }
+        if custom_driver && p.policy_binding.is_some() { return Err(KernelError::Protocol("custom drivers do not execute policy callbacks".into())); }
         if let Some(binding) = p.policy_binding {
             if binding.generation < 0
                 || binding.generation as u64 != policy_generation
@@ -238,7 +250,7 @@ impl RunAssembly {
                     binding.artifact,
                 )
                 .map_err(|e| KernelError::Authorization(e.to_string()))?;
-        } else if matches!(
+        } else if !custom_driver && matches!(
             policy_target,
             varin_runtime::catalog::policy_switch::PolicyTarget::Extension { .. }
         ) {
@@ -246,7 +258,7 @@ impl RunAssembly {
                 "committed policy artifact requires its exact live binding".into(),
             ));
         }
-        if !is_context_job {
+        if !is_context_job && !custom_driver {
             // Policy ownership is per Run, including accepted children. Delegated tool/source
             // authority remains independently frozen by the child directory below.
             start.policy = policy_bridge
@@ -502,6 +514,9 @@ impl RunAssembly {
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_launch(&p.run_id)
             .map_err(domain)?;
+        let driver_models = policy_read.as_ref().map(|read| read.load_driver_models()).transpose().map_err(domain)?.unwrap_or_default();
+        // Dormant policy metadata remains part of the frozen launch even when the
+        // independent driver never executes that policy or obtains its credentials.
         let policy_models = policy_read
             .map(|read| read.load_policy_models())
             .transpose()
@@ -512,7 +527,7 @@ impl RunAssembly {
                 "context jobs cannot acquire planning capabilities".into(),
             ));
         }
-        if !is_context_job {
+        if !is_context_job && !custom_driver {
             let mut models = std::collections::BTreeMap::new();
             for capability in &policy_models {
                 if capability.status != varin_runtime::execution::PolicyModelStatus::Available {
@@ -546,12 +561,25 @@ impl RunAssembly {
                 .wrap_models(&p.run_id, start.provider)
                 .map_err(|e| KernelError::Operation(e.to_string()))?;
         }
+        if custom_driver {
+            let mut models = std::collections::BTreeMap::new();
+            for capability in &driver_models {
+                if capability.status != varin_runtime::execution::PolicyModelStatus::Available { continue; }
+                let bound = bind_policy_model(&p.run_id, capability, &credential_bridge)?;
+                if capability.binding.as_ref() != Some(&bound.binding) { return Err(KernelError::Authorization("driver model differs from its original binding".into())); }
+                models.insert(capability.capability_id.clone(), varin_runtime::execution::BoundPolicyModel { capability:capability.clone(),provider:bound.provider });
+            }
+            start.provider=Arc::new(varin_runtime::execution::WithPolicyModels { primary:start.provider,capabilities:driver_models.clone(),models });
+        }
         {
             let mut selection = varin_runtime::catalog::launches::LaunchSelection::from_binding(
                 &start.binding,
-                start.policy.identity(),
+                if custom_driver { policy_launch.as_ref().expect("custom driver has an original launch").metadata.selection.policy.clone() } else { start.policy.identity() },
                 launch_source,
             );
+            selection.driver = driver_selection;
+            selection.driver_models = driver_models;
+
             selection.mcp_binding = mcp_binding;
             selection.extension_bindings = extension_bindings;
             selection.credential_scope = selected_credential_scope;
@@ -625,6 +653,7 @@ impl RunAssembly {
         let models = self.models.clone();
         let tools = self.tools.clone();
         let policy = self.policy.clone();
+        let driver = self.driver.clone();
         thread::spawn(move || {
             let _ = handle.wait();
             let terminal = catalog
@@ -636,6 +665,7 @@ impl RunAssembly {
                 models.release(&run_id);
                 tools.release(&run_id);
                 policy.release(&run_id);
+                driver.release(&run_id);
             }
         });
     }

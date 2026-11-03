@@ -186,7 +186,7 @@ impl Catalog {
             seed(&tx, table, "branch_id IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))")?;
         }
         seed(&tx, "runs", "id IN (SELECT id FROM thread_gc_runs)")?;
-        for table in ["operations", "model_steps", "model_selections", "policy_checkpoints", "policy_selections", "waits", "bot_run_holds", "context_jobs", "context_job_nodes", "context_job_steps", "resumptions"] {
+        for table in ["run_drivers", "driver_checkpoints", "driver_calls", "operations", "model_steps", "model_selections", "policy_checkpoints", "policy_selections", "waits", "bot_run_holds", "context_jobs", "context_job_nodes", "context_job_steps", "resumptions"] {
             owned(&tx, table, &format!("SELECT rowid AS row_id,run_id FROM {table}"))?;
         }
         owned(&tx, "context_observation_captures", "SELECT rowid AS row_id,source_run_id AS run_id FROM context_observation_captures")?;
@@ -224,12 +224,13 @@ impl Catalog {
             OR subject IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))
             OR subject IN (SELECT id FROM thread_gc_runs)
             OR subject IN (SELECT id FROM operations WHERE run_id IN (SELECT id FROM thread_gc_runs))
+            OR subject IN (SELECT id FROM driver_calls WHERE run_id IN (SELECT id FROM thread_gc_runs))
             OR subject IN (SELECT id FROM model_steps WHERE run_id IN (SELECT id FROM thread_gc_runs))
             OR subject IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue')))")?;
         seed(&tx, "deliveries", "state='\"committed\"' AND fact_cursor IN (SELECT row_id FROM thread_gc_rows WHERE table_name='events')")?;
         // Shared history also keeps the original command and event receipts for its Run.
         owned(&tx, "commands", "SELECT rowid AS row_id,coalesce(json_extract(receipt,'$.run_id'),json_extract(receipt,'$.runId')) AS run_id FROM commands")?;
-        owned(&tx, "events", "SELECT e.rowid AS row_id,r.id AS run_id FROM events e JOIN runs r ON r.id=e.subject UNION SELECT e.rowid AS row_id,o.run_id FROM events e JOIN operations o ON o.id=e.subject UNION SELECT e.rowid AS row_id,m.run_id FROM events e JOIN model_steps m ON m.id=e.subject")?;
+        owned(&tx, "events", "SELECT e.rowid AS row_id,r.id AS run_id FROM events e JOIN runs r ON r.id=e.subject UNION SELECT e.rowid AS row_id,o.run_id FROM events e JOIN operations o ON o.id=e.subject UNION SELECT e.rowid AS row_id,m.run_id FROM events e JOIN model_steps m ON m.id=e.subject UNION SELECT e.rowid AS row_id,d.run_id FROM events e JOIN driver_calls d ON d.id=e.subject")?;
 
         // A branch can share an older Thread's head before it has appended any history of its own.
         tx.execute_batch("WITH RECURSIVE retained(id) AS (

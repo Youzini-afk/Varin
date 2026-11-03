@@ -81,16 +81,17 @@ export class HostCompositionRestoreError extends Error {
 /** Product owners retain their established failure codes and the typed original
  * composition cause; a failed restore must not become a fresh execution choice. */
 export class HostBindingRestoreError extends Error {
-  readonly code: "extension_tool_exact_binding_unavailable" | "policy_exact_binding_unavailable" | "model-configuration-changed";
+  readonly code: "extension_tool_exact_binding_unavailable" | "policy_exact_binding_unavailable" | "model-configuration-changed" | "run_driver_exact_binding_unavailable";
 
   constructor(
-    readonly kind: "tool" | "policy" | "model",
+    readonly kind: "tool" | "policy" | "model" | "driver",
     readonly reason: "binding_changed" | "service_version_unsupported" | "implementation_unavailable",
     readonly reference: string,
     options?: ErrorOptions,
   ) {
     const code = kind === "tool" ? "extension_tool_exact_binding_unavailable"
-      : kind === "policy" ? "policy_exact_binding_unavailable" : "model-configuration-changed";
+      : kind === "policy" ? "policy_exact_binding_unavailable"
+      : kind === "driver" ? "run_driver_exact_binding_unavailable" : "model-configuration-changed";
     const detail = options?.cause instanceof HostCompositionRestoreError ? options.cause.message
       : "Inspect the original extension version, service contract and configuration. "
         + "The accepted work will not be retargeted or replayed with the current implementation.";

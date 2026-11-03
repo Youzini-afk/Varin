@@ -29,6 +29,51 @@ Thread 是持久工作与对话身份；HistoryBranch 是一条历史祖先路�
 标识实际工作，后者可以比工具返回活得更久。Source 标识资源视图及其 Host 所有者。
 系统 PID、MCP session 和 provider response ID 只是外部关联，不能替代这些本地身份。
 
+## 可替换的执行循环
+
+`RunSupervisor` 通过 `RunDriver` 调用本次选定的算法。`DefaultRunDriver` 保留原 Rust
+`ExecutionEngine` 及 `policy@4` 行为；`varin.agent.driver@1` 则允许可信 Host 扩展直接组织
+并行模型、动态工具、独立上下文和交付，不经过闭集 PolicyAction 解释器。外部 Harness 仍沿自己的
+会话协议运行，不为形式统一伪造原生 Run。
+
+设置中的“扩展 → Services → 执行循环”复用现有 service routing。用户默认与实际执行 Source 的工作区
+可以分别选择；安装一个 driver 不会自动选中它，显式不可用选择不 fallback。选择只作用于新受理的 Run。
+Catalog 固定原 artifact、配置、composition、模型角色和恢复合同；普通更换设置不改写既有 Run。
+
+Host 只为原 callback 建立 Run/内核 epoch/instance 的临时调用 scope，原生 owner 再核验实际 Run epoch。
+扩展不能通过 JSON 传入另一个 Run、Operation 或凭据来获取权限。公开原语为：
+
+- `model` 自由接收上下文、补充指令和原目录工具子集，创建真实 ModelStep；不同稳定 ID 可以并行。
+  默认循环仍保留自己的单活模型约束。driver 内部模型结果是独立回执，不自动拼成虚假的串行对话。
+- `tool` 经原 InvocationRunner、工具权限和资源 owner 受理；请求被拒、真实效果、Job 移交与 executor stop
+  保持区别。重复稳定 ID 核对原输入并读原回执，不能重发未知效果。异步工具的 JobAccepted 是原调用的
+  完成回执，不会被后台结果覆盖；后续状态与输出经原领域读取工具（如 `question_status`、`process_read`）或 Inbox 读取。
+- `context` 显式消费原 Inbox，并重新编译当前指令、资源与工具视图；不建立第二条输入队列。
+  原 Agent/Bot 指令已经在编译后的 history 中，不把来源标识当作系统提示词。
+- `wait` 订阅原 Catalog 事件后重读本 Run 事实，以 cursor 等待活动变化；`after:null` 只取基线。
+  `work` 选择返回的原工作回执，不过滤唤醒原因。自行根据返回条件继续等待是事件驱动，不是轮询。
+- `cancel` 只向本实例所指原模型/工具提交停止意图；`receipt` 读原事实；`deliver` 才提交用户可见输出。
+  `checkpoint` 在原 Catalog/ContentStore 中追加私有状态和本 Run 的真实工作引用。
+- `finish` 在仍活的 callback 内尝试原子终结。它真正提交原 Catalog 完成/失败事务，不是先检查再提交。
+  `input_pending` 或 `work_pending` 保持原 scope 可用，由作者消费新输入或等待真实工作后决定下一步；
+  `committed` 才关闭新原语。最后一次 `context()` 不能消除其后到达输入的竞态。
+
+算法正常完成/失败须先得到 `finish` 的提交回执，再结束 callback；单独返回 `complete` 不授予终结权。
+逻辑终态不等于 callback 已停：Host 终态轮询不能抢先卸掉仍活的原 driver/凭据/工具，原 worker 实际退出后才释放。
+callback 结束关闭新调用，并唤醒遗留的观察等待，再排空已受理模型和工具。
+私有 closing 通知不是 executor-stopped 回执。普通 provider 退休保留原 pin；撤权立即禁止新能力并请求
+原 Run 停止。旧内核退出但原 Host callback 尚未结束时，不能在新 epoch 并行启动同一 Run 的恢复。
+可信 Host 代码仍不是 OS sandbox；Varin 的 capability 与资源合同不声称拦截任意直接系统调用。
+
+恢复声明为 `none` 或确切 schema 的 `checkpoint`，后者必须实现独立 `resume` callback。
+恢复只重建原仍受信且未撤权的 composition，读取原 checkpoint 和模型/工具回执；不调用当前默认算法、
+不把 `run` 重跑当作 `resume`。当前不提供跨 artifact/schema 的自动迁移或活动 Run 原地换算法。
+旧格式 Run 在原存储事务中固定为历史内置 driver，而非打开应用时的新默认选择。卸载扩展不删除 Run 证据。
+
+第二种算法见[parallel-driver](../examples/extensions/parallel-driver/README.md)：两个独立模型并行，
+较早分支立即执行真实只读工具，汇合后显式消费期间的新输入，再用独立上下文综合并交付。
+这是一种作者算法，不是平台强制的阶段或工作流。
+
 ## 模式、工具披露与协作
 
 `general`、`code`、`research`、`office` 分别表示通用、Coding、科研和办公。未显式指定的新会话默认通用；
@@ -86,11 +131,12 @@ Thread、branch 的小型身份记录和删除回执保留，支持稳定身份�
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 与独立格式 82 → 83；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 与独立格式 82 → 83 → 84；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
 78 → 79 初始化外部 Agent 结构，79 → 80 初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
 80 → 81 初始化 Zone2 捕获结构，81 → 83 为原历史引用增加稀疏文本范围索引；82 → 83 保留既有索引并补齐 Zone2。索引供[派发模型选择](collaboration.md#自由派发与模型选择)按原身份读取有限原文；不复制正文或媒体。
 82/83 的打开预检查扫描用户及助手历史的引用元数据，确认索引对象存在；具体索引结构在读取时校验，不在请求路径补造索引。
 这项打开检查随历史条目数增长，不读取正文或媒体；升级旧格式时的一次性索引构建则需要读取原存储正文。
+83 → 84 固定旧 Run 的历史内置 driver、初始化 driver checkpoint/调用记录，并只放开明确 driver 模型的并行索引；不改写旧模型或效果正文。
 转换、版本号和 `catalog.upgraded` 事件一起提交，随后才推进 epoch、恢复执行；正文对象和历史回执保持原样，
 已派发的效果不能因升级而重放。转换未提交时由 SQLite 回滚，下次打开重新升级，不另存完整数据库副本。
 未知、新于当前或结构损坏的内部格式明确失败并保留数据，不能像处理缓存一样重建用户历史。
@@ -109,8 +155,9 @@ Run 从 accepted/preparing/runnable 进入生成、工具执行或等待，最�
 准备资源。只有本次选定工作依赖的能力需要准备，不设“全部服务就绪”的全局门槛。
 
 模型准备固定语义上下文、实际 provider 请求、模型/连接身份、工具 schema 和执行绑定。
-`RequestPrepared` 与 `ModelDispatched` 是先后独立的持久事实。模型输出、不可变历史及
-未结算工具调用一起按预期 head 提交；基于旧 head 准备的请求不能发布到新历史上。
+`RequestPrepared` 与 `ModelDispatched` 是先后独立的持久事实。默认循环的模型输出、不可变历史及
+未结算工具调用一起按预期 head 提交；基于旧 head 准备的请求不能发布到新历史上。driver 的模型结果则保留为独立原始回执，
+由显式 `deliver` 在原分支 owner 上追加输出，不把多个并行请求伪装成同一个历史提交。
 
 Run 结束前应结算前台调用，或保存明确的后台移交回执。模型 final 文本不证明进程、子任务、
 Computer 动作或远端 Job 已停止。Operation 的 call/Run/Thread/environment 寿命由合同

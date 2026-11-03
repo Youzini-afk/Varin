@@ -659,6 +659,7 @@ grant_id: "parent".into(),
         enabled_tools: BTreeSet::from([ToolKind::FileRead]),
     };
     let launch = LaunchSelection {
+        driver: Default::default(), driver_models: vec![],
         agent: None,
         child_dispatch: Some(catalog),
         connection_identity: model.connection_identity().unwrap(),

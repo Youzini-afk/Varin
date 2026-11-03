@@ -293,6 +293,7 @@ impl RecoveryRangeRead {
                     false,
                 )?;
                 let range = match root.origin {
+                    crate::execution::ToolOrigin::Driver { invocation_id } => super::driver::driver_call_metadata(&db, &invocation_id)?.history_range,
                     crate::execution::ToolOrigin::ModelStep { request_id } => {
                         let step: ModelStep = record(&db, "model_steps", &request_id)?;
                         let snapshot: crate::execution::RequestSnapshot =

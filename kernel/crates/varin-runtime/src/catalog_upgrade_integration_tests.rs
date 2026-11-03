@@ -109,7 +109,7 @@ fn genuine_v81_capture_and_import_assets_keep_original_receipts_digests_and_depe
     // bytes, projection body, cursor, receipt or source identity is manufactured.
     let raw = fixture.raw();
     context_observations::check_format(&raw).unwrap();
-    raw.execute_batch("BEGIN;UPDATE history SET body=json_remove(body,'$.content.history_text','$.content.history_call_id');UPDATE input_history_content SET body=json_remove(body,'$.history_text','$.history_call_id');PRAGMA user_version=81;COMMIT;").unwrap();
+    raw.execute_batch("BEGIN;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE history SET body=json_remove(body,'$.content.history_text','$.content.history_call_id');UPDATE input_history_content SET body=json_remove(body,'$.history_text','$.history_call_id');PRAGMA user_version=81;COMMIT;").unwrap();
     let captures = rows(&raw, "context_observation_captures");
     let imports = rows(&raw, "context_observation_imports");
     let schema = zone2_objects(&raw);
@@ -123,7 +123,7 @@ fn genuine_v81_capture_and_import_assets_keep_original_receipts_digests_and_depe
     drop(raw);
     let bodies = fixture.bodies();
     let mut db = Catalog::open(&fixture.0).unwrap();
-    assert_eq!(inspect_catalog_format(&db.db).unwrap(), 83);
+    assert_eq!(inspect_catalog_format(&db.db).unwrap(), FORMAT);
     assert_eq!(rows(&db.db, "context_observation_captures"), captures);
     assert_eq!(rows(&db.db, "context_observation_imports"), imports);
     assert_eq!(zone2_objects(&db.db), schema);
@@ -204,7 +204,7 @@ fn genuine_v81_capture_and_import_assets_keep_original_receipts_digests_and_depe
         .unwrap(),
         [receipt]
     );
-    assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=81 AND json_extract(data,'$.to')=83",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+    assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=81 AND json_extract(data,'$.to')=84",[],|r|r.get::<_,i64>(0)).unwrap(),1);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn standalone_v82_adds_only_zone2_and_preserves_indexed_references_byte_for_byte
     drop(raw);
     let bodies = fixture.bodies();
     let db = Catalog::open(&fixture.0).unwrap();
-    assert_eq!(inspect_catalog_format(&db.db).unwrap(), 83);
+    assert_eq!(inspect_catalog_format(&db.db).unwrap(), FORMAT);
     assert_eq!(metadata_epoch(&db.db), epoch + 1);
     assert_eq!(zone2_objects(&db.db).len(), 4);
     assert_eq!(rows(&db.db, "history"), history);
@@ -271,7 +271,7 @@ fn combined_conversion_rolls_back_every_released_layout_before_recovery() {
         drop(raw);
         let bodies = fixture.bodies();
         assert!(
-            matches!(Catalog::open(&fixture.0),Err(RuntimeError::Upgrade {from:actual,to:83,..}) if actual==from)
+            matches!(Catalog::open(&fixture.0),Err(RuntimeError::Upgrade {from:actual,to,..}) if actual==from && to==FORMAT)
         );
         let raw = fixture.raw();
         assert_eq!(inspect_catalog_format(&raw).unwrap(), from);
@@ -284,7 +284,7 @@ fn combined_conversion_rolls_back_every_released_layout_before_recovery() {
         drop(raw);
         assert_eq!(
             inspect_catalog_format(&Catalog::open(&fixture.0).unwrap().db).unwrap(),
-            83
+            FORMAT
         );
     }
 }
@@ -328,14 +328,14 @@ fn mismatched_layouts_and_unknown_versions_are_rejected_without_repair() {
 
 #[test]
 fn missing_null_or_scalar_current_history_indexes_fail_before_writable_open() {
-    for version in [82, 83] {
+    for version in [82, FORMAT] {
         for edit in [
             "json_remove(body,'$.content.history_text')",
             "json_set(body,'$.content.history_text',NULL)",
             "json_set(body,'$.content.history_text',7)",
         ] {
             let fixture = Fixture::v82();
-            if version == 83 {
+            if version == FORMAT {
                 drop(Catalog::open(&fixture.0).unwrap());
             }
             let raw = fixture.raw();
@@ -384,10 +384,10 @@ fn malformed_current_index_object_fails_original_history_read_without_repair() {
 
 #[test]
 fn both_zone2_generations_reject_missing_identity_and_foreign_key_guards() {
-    for version in [81, 83] {
+    for version in [81, FORMAT] {
         for foreign_key in [false, true] {
             let fixture = Fixture::v81();
-            if version == 83 {
+            if version == FORMAT {
                 drop(Catalog::open(&fixture.0).unwrap());
             }
             let raw = fixture.raw();

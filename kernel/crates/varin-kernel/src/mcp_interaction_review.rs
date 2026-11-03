@@ -290,6 +290,7 @@ fn original_http_elicitation_uses_public_user_responses_and_preserves_original_r
         .start(
             &receipt.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {
@@ -544,6 +545,7 @@ fn original_stdio_task_interactions_survive_parent_completion_and_fence_task_can
         .start(
             &receipt.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {
@@ -816,6 +818,7 @@ fn source_less_child_and_installed_nested_interactions_use_exact_public_thread_a
         .start(
             &run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(NestedModel {
@@ -1014,6 +1017,7 @@ impl InteractionExecution {
             .start(
                 &receipt.run_id,
                 RunStart {
+                    driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                     binding,
                     policy_state: Value::Null,
                     provider: Arc::new(Model {

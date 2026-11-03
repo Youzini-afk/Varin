@@ -160,7 +160,7 @@ impl Review {
             policy: crate::policy::PolicyBridge::new(output.clone()),
             models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
             tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge.clone()),
-            responses: output.into(),
+            driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
             epoch: EPOCH.into(),
         };
         assembly.context.initialize(EPOCH);

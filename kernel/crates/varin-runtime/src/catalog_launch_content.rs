@@ -16,6 +16,10 @@ pub struct PolicyModelReference {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelectionMetadata {
+    #[serde(default)]
+    pub driver: crate::driver::DriverSelection,
+    #[serde(default)]
+    pub driver_models: Vec<PolicyModelReference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<launches::AgentSelection>,
     pub child_dispatch_ref: Option<Value>,
@@ -118,7 +122,10 @@ impl LaunchSelectionMetadata {
             .map(|binding| content.save(&serde_json::to_value(binding)?))
             .transpose()?;
         let policy_models = stage_policy_models(content, &selection.policy_models)?;
+        let driver_models = stage_policy_models(content, &selection.driver_models)?;
         Ok(Self {
+            driver: selection.driver,
+            driver_models,
             agent: selection.agent,
             child_dispatch_ref: selection
                 .child_dispatch
@@ -155,6 +162,8 @@ impl LaunchSelectionMetadata {
     }
     fn load_selection(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
         let selection = LaunchSelection {
+            driver: self.driver.clone(),
+            driver_models: self.load_driver_models(content)?,
             agent: self.agent.clone(),
             child_dispatch: self
                 .child_dispatch_ref
@@ -185,6 +194,15 @@ impl LaunchSelectionMetadata {
             source: self.source,
         };
         Ok(selection)
+    }
+    pub(super) fn load_driver_models(&self, content: &crate::content::ContentStore) -> Result<Vec<PolicyModelCapability>> {
+        self.driver_models.iter().map(|reference| {
+            let model: PolicyModelCapability = serde_json::from_value(content.load(&reference.body)?)?;
+            if model.capability_id != reference.capability_id {
+                return Err(RuntimeError::Invalid("driver model differs from its retained identity".into()));
+            }
+            Ok(model)
+        }).collect()
     }
     pub(super) fn load_policy_models(
         &self,
@@ -223,6 +241,7 @@ pub(super) fn stage_policy_models(
 pub struct LaunchRead {
     startable: bool,
     policy_preparable: bool,
+    driver_preparable: bool,
     pause: Option<super::policy_control::PolicyPauseRead>,
     pub metadata: LaunchMetadata,
     content: crate::content::ContentStore,
@@ -238,6 +257,7 @@ impl LaunchRead {
             policy_target: self.metadata.policy_target.load(&self.content)?,
             startable: self.startable,
             policy_preparable: self.policy_preparable,
+            driver_preparable: self.driver_preparable,
             pause: self
                 .pause
                 .map(|pause| pause.load(&self.content))
@@ -250,6 +270,9 @@ impl LaunchRead {
             preparation_failure: self.metadata.preparation_failure,
             preparation_failure_detail: self.metadata.preparation_failure_detail,
         })
+    }
+    pub fn load_driver_models(&self) -> Result<Vec<PolicyModelCapability>> {
+        self.metadata.selection.load_driver_models(&self.content)
     }
     pub fn load_policy_models(self) -> Result<Vec<PolicyModelCapability>> {
         self.metadata.selection.load_policy_models(&self.content)
@@ -856,6 +879,7 @@ impl Catalog {
     }
     pub(super) fn launch_read(&self, metadata: LaunchMetadata) -> Result<LaunchRead> {
         Ok(LaunchRead {
+            driver_preparable: super::driver::preparable(&self.db, &metadata.run_id, &metadata)?,
             startable: self.run_startable(&metadata.run_id)?,
             policy_preparable: super::launches::policy_preparable(
                 &self.db,

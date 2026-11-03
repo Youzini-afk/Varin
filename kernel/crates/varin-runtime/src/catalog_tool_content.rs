@@ -562,6 +562,12 @@ pub(super) fn require_job_invocation(
         ));
     }
     let expected: String = match &context.origin {
+        ToolOrigin::Driver { invocation_id } => {
+            let original = super::driver::driver_call_metadata(db, invocation_id)?;
+            if original.run_id != run.id || original.epoch != run.epoch { return Err(RuntimeError::Conflict("driver invocation epoch changed".into())); }
+            super::driver::require_driver(db, &run.id, &original.driver_id)?;
+            encode(&original.call)?
+        }
         ToolOrigin::NestedCall { .. } => {
             root_tool_context(db, context, true)?;
             return Ok(admitted);
@@ -607,6 +613,7 @@ pub(super) fn require_job_invocation(
 /// A captured invocation's immutable caller binding. Loading never holds Catalog.
 #[derive(Clone)]
 enum InvocationOwner {
+    Driver { metadata: super::driver::DriverCallMetadata },
     Model {
         step: ModelStep,
     },
@@ -663,6 +670,15 @@ impl ToolInvocationRead {
             InvocationCall::Live(call) => call.as_ref().clone(),
         };
         let (history_range, frozen, owner_epoch) = match &self.owner {
+            InvocationOwner::Driver { metadata } => {
+                let mut frozen: crate::execution::FrozenToolContext = serde_json::from_value(self.content.load(&metadata.frozen_ref)?)?;
+                if frozen.run_id != self.context.run_id || frozen.origin != self.root.origin
+                    || metadata.history_range.branch_id != self.branch_id {
+                    return Err(RuntimeError::Conflict("driver invocation frozen binding changed".into()));
+                }
+                frozen.origin = self.context.origin.clone();
+                (metadata.history_range.clone(), frozen, metadata.epoch)
+            }
             InvocationOwner::Model { step } => {
                 let snapshot: RequestSnapshot = self.content.load_snapshot(&step.request)?;
                 if snapshot.view.run_id != self.context.run_id
@@ -764,6 +780,12 @@ impl Catalog {
             call_id.into()
         };
         let (owner, root_call) = match &root.origin {
+            ToolOrigin::Driver { invocation_id } => {
+                let metadata = super::driver::driver_call_metadata(&self.db, invocation_id)?;
+                if metadata.run_id != run.id || metadata.call.call_id != root_call_id { return Err(RuntimeError::Conflict("driver invocation owner changed".into())); }
+                super::driver::require_driver(&self.db, &run.id, &metadata.driver_id)?;
+                (InvocationOwner::Driver { metadata: metadata.clone() }, metadata.call)
+            }
             ToolOrigin::ModelStep { request_id } => {
                 let step = self.model_step_metadata(request_id)?;
                 if step.run_id != run.id {
@@ -851,6 +873,11 @@ impl Catalog {
             return Err(RuntimeError::Conflict("invocation branch changed".into()));
         }
         match &snapshot.owner {
+            InvocationOwner::Driver { metadata } => {
+                let current = super::driver::driver_call_metadata(&self.db, &metadata.id)?;
+                super::driver::require_driver(&self.db, &run.id, &metadata.driver_id)?;
+                if &current != metadata || (live && current.epoch != run.epoch) { return Err(RuntimeError::Conflict("original driver invocation changed".into())); }
+            }
             InvocationOwner::Model { step } => {
                 let current = self.model_step_metadata(&step.id)?;
                 if current.run_id != run.id

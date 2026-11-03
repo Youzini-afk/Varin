@@ -67,10 +67,11 @@ export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'med
 
 export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
 
-export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
+export type ToolOrigin = {kind:'driver';invocation_id:string} | {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
 /** Canonical invocation identity shared by all public/Host consumers. */
 export function toolOperationId(origin: ToolOrigin, callId: string): string {
   switch (origin.kind) {
+    case 'driver': return origin.invocation_id;
     case 'model_step': return `${origin.request_id}:tool:${callId}`;
     case 'policy_action': return `${origin.action_id}:node:${origin.node_id}`;
     case 'nested_call': return `nested:${new TextEncoder().encode(origin.parent_operation_id).length}:${origin.parent_operation_id}:${callId}`;
@@ -80,6 +81,6 @@ export function validToolOrigin(value: unknown): value is ToolOrigin {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   const text = (key: string) => typeof v[key] === 'string' && (v[key] as string).length > 0;
-  const keys = v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
+  const keys = v.kind === 'driver' ? ['kind', 'invocation_id'] : v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
   return keys.length > 0 && Object.keys(v).length === keys.length && Object.keys(v).every(key => keys.includes(key)) && keys.every(key => key === 'kind' || text(key));
 }

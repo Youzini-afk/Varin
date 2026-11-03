@@ -211,6 +211,7 @@ fn execute(
         .start(
             run,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding: binding(&f.runtime, run),
                 policy_state: Value::Null,
                 provider: Arc::new(Script {

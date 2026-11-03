@@ -21,7 +21,7 @@ function execution(): DelegatedExecution {
     launch: { credential_scope: { authority: 'original', reference: 'credential', generation: 1, account: 'original' }, child_dispatch: null,
       connection_identity: 'original', provider_family: 'fixture', model: 'pinned-model', configuration_generation: 1, tool_schema_generation: 1,
       tools: [{ name: 'file_read', version: '1', description: 'Read', schema: {}, output_schema: null, metadata: null }], policy: { name: 'default', version: '1' },
-      mcp_binding: null, extension_bindings: [], policy_models: [], source: null }, policy_target: { kind: 'default' },
+      mcp_binding: null, extension_bindings: [], driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], source: null }, policy_target: { kind: 'default' },
     source_basis: { kind: 'working_result', source, root: 'fixed-result-root', provenance: { consistency: 'fixed-root', root: 'fixed-result-root' },
       result: { publication_id: 'old-publication', workspace_id: 'workspace', branch_id: 'old-result', result_revision: 7, root: 'fixed-result-root', base_root: 'old-base', record_id: 'old-result-record' } },
     source: null, code_result: { kind: 'pending' }, state: 'preparing', revision: 1, cursor: 7, receipt: null, report: null, terminal_head: null,

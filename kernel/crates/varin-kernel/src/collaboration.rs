@@ -464,6 +464,8 @@ impl ToolExecutor for CollaborationTools {
                         cancel,
                     ).map_err(staged("host_retention"))?;
                     let launch = varin_runtime::catalog::launches::LaunchSelection {
+            driver: varin_runtime::driver::DriverSelection::default(),
+            driver_models: Vec::new(),
                         agent: None,
                         child_dispatch: Some(selected.catalog.clone()),
                         extension_bindings: resolved.extension_bindings.clone(),

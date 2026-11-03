@@ -1412,6 +1412,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let plan_bridge = crate::plan_bridge::PlanBridge::new(response_tx.clone());
     let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
     let policy_bridge = crate::policy::PolicyBridge::new(response_tx.clone());
+    let driver_bridge = crate::driver_bridge::DriverBridge::new(response_tx.clone());
     let source_bridge=crate::host_query::OwnerChannel::new("source-resource",response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
     let subscriptions =
@@ -1652,6 +1653,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_bridge.clone(),
         plan_bridge.clone(),
         policy_bridge.clone(),
+        driver_bridge.clone(),
         response_tx.clone(),
         move |id| {
             if let Ok(mut active) = agent_cancellations.lock() {
@@ -1677,6 +1679,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_file_observation = file_observation_bridge.clone();
     let worker_plan = plan_bridge.clone();
     let worker_policy = policy_bridge.clone();
+    let worker_driver = driver_bridge.clone();
     let worker_source=source_bridge.clone();
     let worker_response_tx = response_tx.clone();
     let worker_writer_failed = writer_failed.clone();
@@ -2423,6 +2426,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_file_observation.initialize(epoch);
                     worker_plan.initialize(epoch);
                     worker_policy.initialize(epoch);
+                    worker_driver.initialize(epoch);
                     worker_source.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() {
                         let output = worker_response_tx.clone();
@@ -2615,6 +2619,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             policy_bridge.receive(request);
             continue;
         }
+        if matches!(request.get("kind").and_then(Value::as_str),Some("agent-driver-response" | "agent-driver-closing")) { driver_bridge.receive(request); continue; }
         if request.get("kind").and_then(Value::as_str)==Some("source-process-terminal") {if let Ok(frame)=serde_json::from_value(request){let _=agent_tx.send(crate::agent_runtime::Command::SourceProcessTerminal(frame));}continue;}
         if request.get("kind").and_then(Value::as_str)==Some("source-resource-response") {source_bridge.receive(request);continue;}
         if request.get("kind").and_then(Value::as_str) == Some("plan-response") {
@@ -2932,6 +2937,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     file_observation_bridge.close();
     plan_bridge.close();
     policy_bridge.close();
+    driver_bridge.close();
     source_bridge.close();
     subscriptions.shutdown();
     let _ = subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);

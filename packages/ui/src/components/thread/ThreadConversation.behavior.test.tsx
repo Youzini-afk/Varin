@@ -1738,6 +1738,31 @@ it('answers a policy-node question explicitly, keeps the draft on failure and di
   expect(answer).toHaveBeenCalledTimes(2);
 });
 
+it('answers an original driver question while its same loop remains runnable', async () => {
+  const f = fixture(true); pauseView(f.view);
+  f.view.activeRun!.state = 'runnable'; f.view.activeRun!.waiting_on = null;
+  f.view.launch!.pause = null; f.view.launch!.requires_rebind = false;
+  f.view.launch!.selection.driver = { kind: 'extension', artifact: { providerKey: 'questions:host:varin.agent.driver@1', extensionId: 'questions', extensionVersion: '1', serviceId: 'varin.agent.driver', serviceVersion: 1, artifactIntegrity: 'original', composition: { schemaVersion: 1, root: 'original', nodes: [] }, configurationIdentity: 'original', identity: { name: 'questions', version: '1' }, modelRoles: [], recovery: 'none', checkpointSchema: null } };
+  const operation: ThreadSnapshot['operations'][number] = { id: 'original-driver-question', run_id: f.view.activeRun!.id, epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:original-driver-question', intent: { kind: 'tool', origin: { kind: 'driver', invocation_id: 'original-driver-question' }, call: { arguments: { questions: [{ id: 'choice', question: 'Continue this original loop?', options: [{ id: 'yes', label: 'Yes' }] }] } } }, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'original-driver-question', phase: 'awaiting_user', effect: 'none', lifetime: 'thread' }, execution_owner: null };
+  f.view.operations = [operation];
+  f.api.answerQuestion = vi.fn(async () => { f.view.operations[0] = { ...operation, phase: 'terminal', outcome: 'succeeded' }; return f.view.operations[0]!; });
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.querySelector<HTMLInputElement>('input[type=radio]')!.disabled).toBe(false);
+  await act(async () => { container.querySelector<HTMLInputElement>('input[type=radio]')!.click(); });
+  await submitForm(document.querySelector<HTMLFormElement>('form.thread-question-form')!);
+  expect(f.api.answerQuestion).toHaveBeenCalledExactlyOnceWith({ ...identity, operationId: operation.id, answers: [{ questionId: 'choice', selectedOptionIds: ['yes'], text: '', skipped: false }] });
+  expect(f.view.activeRun!.state).toBe('runnable');
+});
+
+it('does not grant a runnable default loop the driver question interaction boundary', async () => {
+  const f = fixture(true); pauseView(f.view); f.view.launch!.pause = null;
+  f.view.activeRun!.state = 'runnable'; f.view.activeRun!.waiting_on = null;
+  f.view.operations = [{ id: 'not-yet-parked', run_id: f.view.activeRun!.id, epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:not-yet-parked', intent: { call: { arguments: { questions: [{ id: 'choice', question: 'Default must reach its original boundary', options: [{ id: 'yes', label: 'Yes' }] }] } } }, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'not-yet-parked', phase: 'awaiting_user', effect: 'none', lifetime: 'thread' }, execution_owner: null }];
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.querySelector<HTMLInputElement>('input[type=radio]')!.disabled).toBe(true);
+  expect(button('chat.questionCard.submit').disabled).toBe(true);
+});
+
 it('keeps a sibling branch question non-actionable while viewing an earlier conversation fork', async () => {
   const f = fixture();
   const fork = { ...identity, branchId: 'earlier-fork-branch' };
@@ -1829,9 +1854,9 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s and submits th
 
 function pauseView(view: ThreadSnapshot, waitId = 'wait:policy-one') {
   view.activeRun!.state = 'waiting'; view.activeRun!.waiting_on = waitId;
-  view.launch = { run_id: view.activeRun!.id, revision: 1, policy_generation: 0, policy_preparable: false, policy_target: { kind: 'default' }, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
+  view.launch = { run_id: view.activeRun!.id, revision: 1, policy_generation: 0, policy_preparable: false, driver_preparable: false, policy_target: { kind: 'default' }, startable: false, requires_rebind: true, bound_epoch: null, preparation_failure: null,
     pause: { action_id: `action:${waitId}`, wait_id: waitId, reason: 'Review the first delivered result.' },
-    selection: { extension_bindings: [], child_dispatch: null, policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
+    selection: { extension_bindings: [], child_dispatch: null, driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], mcp_binding: null, credential_scope: null, connection_identity: 'fixture', provider_family: 'fixture', model: 'fixture',
       configuration_generation: 1, tool_schema_generation: 1, tools: [], policy: { name: 'fixture', version: '1' }, source: null } };
   view.operations = [{ id: view.launch.pause!.action_id, run_id: view.activeRun!.id, epoch: 1, revision: 1,
     phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,

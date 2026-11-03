@@ -268,6 +268,7 @@ grant_id: "search".into(),
     };
     let mut start = crate::questions::configure(
         varin_runtime::supervisor::RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             context_preparation: Arc::new(NoopContextPreparation),
             binding: input.binding.clone(),
             policy_state: Value::Null,

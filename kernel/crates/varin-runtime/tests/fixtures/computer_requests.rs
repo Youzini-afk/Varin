@@ -412,7 +412,7 @@ pub fn settle_call(db: &mut Catalog, context: &ToolExecutionContext, completion:
             db.settle_policy_node(&context.run_id, epoch, action_id, node_id, &completion)
                 .unwrap();
         }
-        ToolOrigin::NestedCall { .. } => {
+        ToolOrigin::NestedCall { .. } | ToolOrigin::Driver { .. } => {
             unreachable!("this Computer request fixture creates only model and policy origins")
         }
     }

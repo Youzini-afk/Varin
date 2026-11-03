@@ -15,7 +15,7 @@ export const PLATFORM_TEST_INCLUDE = [
 export const PLATFORM_NATIVE_INCLUDE = [
   'application-host/lib/*.native.test.ts',
   'application-host/lib/{documents,storage,recovery,terminal,lsp,knowledge,external-agents,agent-resources,computer}/**/*.native.test.ts',
-  'application-host/lib/kernel/{kernel-process,kernel-transport*,process-*,file-*,binary-file-*,storage-*,*source*,permission-*}.native.test.ts',
+  'application-host/lib/kernel/{kernel-process,kernel-transport*,process-*,file-*,binary-file-*,storage-*,*source*,permission-*,*driver*}.native.test.ts',
 ];
 
 export default defineConfig({

@@ -717,6 +717,7 @@ export * from "./context-budget.js";
 export * from "./context-compaction.js";
 
 export * from "./agent-policy.js";
+export * from "./agent-driver.js";
 
 export * from "./run-activity.js";
 

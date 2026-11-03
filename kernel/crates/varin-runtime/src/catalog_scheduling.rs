@@ -39,6 +39,13 @@ impl Catalog {
             ));
         }
         let (identity, settled) = match origin {
+            ToolOrigin::Driver { invocation_id } => {
+                let original = super::driver::driver_call_metadata(&self.db, invocation_id)?;
+                if original.run_id != run_id || original.epoch != epoch || original.call.call_id != call_id { return Err(RuntimeError::Conflict("driver admission identity changed".into())); }
+                super::driver::require_driver(&self.db, run_id, &original.driver_id)?;
+                let settled = optional_record::<Operation>(&self.db, "operations", invocation_id)?.is_some_and(|op| op.call_completion.is_some());
+                (invocation_id.clone(), settled)
+            }
             ToolOrigin::NestedCall { .. } => {
                 let context = crate::execution::ToolExecutionContext {
                     run_id: run_id.into(),

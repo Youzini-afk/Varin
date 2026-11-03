@@ -77,3 +77,45 @@ fn nested_body_credit_retains_the_original_pending_cancellation_and_terminal_own
     active.lock().unwrap().remove("outer");
     assert_eq!(active.lock().unwrap().len(), 2);
 }
+
+#[test]
+fn driver_body_credit_preserves_original_requests_and_cancellation_until_actual_responses() {
+    for method in [
+        "runtime.driver.model",
+        "runtime.driver.tool",
+        "runtime.driver.wait",
+    ] {
+        let active = Mutex::new(
+            (0..KERNEL_REQUEST_WINDOW)
+                .map(|index| (format!("original-{index}"), request(false)))
+                .collect::<HashMap<_, _>>(),
+        );
+        let (send, receive) = mpsc::sync_channel(KERNEL_REQUEST_WINDOW);
+        let responses = crate::transport::Sender::from(send);
+        for index in 0..KERNEL_REQUEST_WINDOW {
+            let id = format!("original-{index}");
+            release_request_credit(&active, &responses, &id, method);
+            let released = receive.recv().unwrap();
+            assert_eq!(released["id"], id);
+            assert_eq!(released["method"], method);
+        }
+        let mut requests = active.lock().unwrap();
+        assert_eq!(requests.len(), KERNEL_REQUEST_WINDOW);
+        assert!(requests.values().all(|request| request.wire_lane.is_none()));
+        requests["original-0"].cancel();
+        assert!(requests["original-0"].token.load(Ordering::Acquire));
+        requests.insert("original-scope-cancel".into(), request(false));
+        assert_eq!(
+            requests
+                .values()
+                .filter(|request| request.wire_lane.is_some())
+                .count(),
+            1
+        );
+        assert_eq!(
+            requests.len(),
+            KERNEL_REQUEST_WINDOW + 1,
+            "credit release never deletes the original effect/observation owner"
+        );
+    }
+}

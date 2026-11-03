@@ -32,9 +32,9 @@ function fixture(child = false) {
   cleanups.push(() => bridge.close());
   const selection: PolicySelections = { active: { generation: 0, target: { kind: 'extension', artifact: current }, identity: current.identity, activation_cursor: null }, desired: null };
   const run: Run = { id: runId, thread_id: child ? 'thread:child' : 'thread:original', branch_id: 'branch', state: 'waiting', waiting_on: 'wait', revision: 1, epoch: 1, configuration: {}, cancel_requested: false };
-  const launch: LaunchIntent = { policy_preparable: false, policy_generation: 0, policy_target: selection.active.target, run_id: run.id,
+  const launch: LaunchIntent = { driver_preparable: false, policy_preparable: false, policy_generation: 0, policy_target: selection.active.target, run_id: run.id,
     revision: 1, startable: false, requires_rebind: false, bound_epoch: 1, preparation_failure: null, pause: { action_id: 'pause', wait_id: 'wait', reason: 'Explicit resume required' },
-    selection: { policy: current.identity, child_dispatch: null, policy_models: [], extension_bindings: [], mcp_binding: null, credential_scope: null, connection_identity: 'model', provider_family: 'model',
+    selection: { policy: current.identity, child_dispatch: null, driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], extension_bindings: [], mcp_binding: null, credential_scope: null, connection_identity: 'model', provider_family: 'model',
       model: 'model', configuration_generation: 1, tool_schema_generation: 1, tools: [], source: null } };
   let counter = 0, generation = 0, loseReady = false;
   let heldDecision: { name: string; work: () => Promise<VarinAgentPolicyDecision> } | undefined;
@@ -72,6 +72,7 @@ function fixture(child = false) {
     policyBinding: (run: string, generation: number) => bridge.binding(run, generation),
     unregisterPolicyOwner: (run: string, generation: number) => bridge.unregister(run, generation),
     releaseRunPolicyOwners: (run: string) => bridge.releaseRun(run),
+    releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     async agentRuntimeRequest(method: string, params: unknown) {
       requests.push({ method, params: structuredClone(params) });
       if (method === 'runtime.run.inspect') return structuredClone(run);

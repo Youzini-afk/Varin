@@ -538,6 +538,10 @@ pub struct AgentSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
+    #[serde(default)]
+    pub driver: crate::driver::DriverSelection,
+    #[serde(default)]
+    pub driver_models: Vec<PolicyModelCapability>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentSelection>,
     pub child_dispatch: Option<super::dispatch::ChildDispatchCatalog>,
@@ -564,6 +568,8 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            driver: crate::driver::DriverSelection::default(),
+            driver_models: Vec::new(),
             agent: None,
             child_dispatch: None,
             extension_bindings: Vec::new(),
@@ -597,6 +603,8 @@ impl LaunchSelection {
     /// A delegated child intent retains the parent's handoff while its own source is
     /// Pending. Its actual Run must still pass `validate` after the source becomes Ready.
     pub(super) fn validate_structure(&self) -> Result<()> {
+        self.driver.validate().map_err(|error| RuntimeError::Invalid(error.to_string()))?;
+        validate_policy_models(&self.driver_models)?;
         if self.agent.as_ref().is_some_and(|agent| !matches!(agent.work_focus.as_str(), "general" | "code" | "research" | "office")) {
             return Err(RuntimeError::Invalid("unknown Agent work focus".into()));
         }
@@ -740,6 +748,7 @@ pub struct LaunchIntent {
     pub policy_target: super::policy_switch::PolicyTarget,
     pub startable: bool,
     pub policy_preparable: bool,
+    pub driver_preparable: bool,
     pub pause: Option<super::policy_control::PolicyPauseInfo>,
     #[serde(default)]
     pub preparation_failure: Option<String>,
@@ -862,7 +871,9 @@ impl Catalog {
             [run_id],
             |row| row.get(0),
         )?;
-        if run.cancel_requested
+        if prepared.selection.driver != launch.selection.driver
+            || prepared.selection.driver_models != launch.selection.driver_models
+            || run.cancel_requested
             || run.state.terminal()
             || launch.bound_epoch.is_some()
             || steps != 0
@@ -950,6 +961,11 @@ impl Catalog {
         }
         if let Some(source) = selection.source.as_ref() {
             validate_environment_source(&tx, &run.thread_id, source)?;
+        }
+        if let Some(original) = super::driver::metadata(&tx, run_id)? {
+            if original.selection != selection.driver {
+                return Err(RuntimeError::Conflict("launch cannot replace the original Run driver".into()));
+            }
         }
         let previous: Option<LaunchMetadata> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {

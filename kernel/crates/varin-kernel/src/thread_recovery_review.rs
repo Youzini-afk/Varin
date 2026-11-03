@@ -212,7 +212,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         policy,
         models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
         tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
-        responses: output.into(),
+        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
         epoch: "epoch".into(),
     };
     assembly.memory.initialize("epoch");

@@ -71,7 +71,7 @@ fn run_investigation(stop:bool) {
     let (tools,_files)=crate::tools::reliability_review::source_reader(&receipt.run_id,&child.child_thread_id);
     let root=f.root.clone();let runtime=RunSupervisor::new(f.db);
     let (send,receive)=std::sync::mpsc::sync_channel(1);
-    let handle=runtime.start(&receipt.run_id,varin_runtime::supervisor::RunStart{context_preparation:Arc::new(NoopContextPreparation),
+    let handle=runtime.start(&receipt.run_id,varin_runtime::supervisor::RunStart{driver: Arc::new(varin_runtime::driver::DefaultRunDriver),context_preparation:Arc::new(NoopContextPreparation),
         binding,policy_state:Value::Null,provider:Arc::new(Investigate{pause:stop.then_some(send)}),tools:Arc::new(tools),policy:Arc::new(DefaultAgentPolicy),progress:ProgressSink::default()}).unwrap();
     if stop {
         receive.recv_timeout(std::time::Duration::from_secs(10)).unwrap();

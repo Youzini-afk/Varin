@@ -21,6 +21,7 @@ fn denied(value: &str) -> KernelError {
 pub(crate) fn invocation(operation: &Operation) -> Result<ToolInvocation, KernelError> {
     let invocation: ToolInvocation = serde_json::from_value(operation.intent.clone())?;
     let origin_valid = match &invocation.origin {
+        varin_runtime::execution::ToolOrigin::Driver { invocation_id } => !invocation_id.is_empty(),
         varin_runtime::execution::ToolOrigin::ModelStep { request_id } => !request_id.is_empty(),
         varin_runtime::execution::ToolOrigin::PolicyAction { action_id, node_id } => {
             !action_id.is_empty() && !node_id.is_empty() && node_id == &invocation.call.call_id

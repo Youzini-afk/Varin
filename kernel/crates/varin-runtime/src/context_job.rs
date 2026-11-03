@@ -584,6 +584,8 @@ pub fn text_compaction_launch(
             )
         })?;
     Ok(crate::catalog::launches::LaunchSelection {
+        driver: crate::driver::DriverSelection::default(),
+        driver_models: Vec::new(),
         agent: None,
         child_dispatch: None,
         policy_models: Vec::new(),
@@ -604,6 +606,7 @@ pub fn text_compaction_launch(
 }
 pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelection) -> RunStart {
     RunStart {
+        driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
         context_preparation: Arc::new(NoopContextPreparation),
         binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,

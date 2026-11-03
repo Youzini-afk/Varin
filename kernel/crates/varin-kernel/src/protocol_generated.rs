@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 76;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 78;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -106,6 +106,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.driver.finish",
     "runtime.context.observations.importSources",
     "runtime.context.observations.capture",
     "runtime.context.observations.receipt",
@@ -203,6 +204,9 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &[
+    "runtime.driver.model",
+    "runtime.driver.tool",
+    "runtime.driver.wait",
     "process.write",
     "process.resize",
     "runtime.tools.invoke",
@@ -218,6 +222,15 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.sendNow", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.driver.finish",
+    "runtime.driver.wait",
+    "runtime.driver.context",
+    "runtime.driver.cancel",
+    "runtime.driver.model",
+    "runtime.driver.tool",
+    "runtime.driver.checkpoint",
+    "runtime.driver.deliver",
+    "runtime.driver.receipt",
     "runtime.context.observations.capture",
     "runtime.context.observations.import",
     "runtime.context.observations.admit",
@@ -1452,12 +1465,84 @@ pub(crate) struct PolicyFailParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RunStartParams {
+    pub(crate) driver_binding: Option<varin_runtime::driver::DriverBinding>,
     pub(crate) extension_bindings: Option<Vec<LiveExtensionToolBinding>>,
     pub(crate) policy_binding: Option<AgentPolicyBinding>,
     pub(crate) mcp_binding: Option<LiveMcpBinding>,
     pub(crate) run_id: String,
     pub(crate) tool_binding: Option<Value>,
     pub(crate) credential_scope: Option<CredentialScope>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverPrepareParams {
+    pub(crate) run_id: String,
+    pub(crate) selection: varin_runtime::driver::DriverSelection,
+    pub(crate) models: Vec<varin_runtime::execution::PolicyModelCapability>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverModelParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverModelInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverToolParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverToolInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverCheckpointParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverCheckpointInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverDeliveryParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverDeliveryInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverReceiptParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverReceiptInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverContextParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverContextInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverFinishParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverFinishInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverWaitParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverWaitInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverCancelParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverCancelInput,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1522,6 +1607,7 @@ pub(crate) struct KernelTokenizerLeaseParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AdmissionInspectParams {
+    pub(crate) driver_invocation_id: Option<String>,
     pub(crate) parent_operation_id: Option<String>,
     pub(crate) run_id: String,
     pub(crate) owner_generation: i64,
@@ -4666,6 +4752,40 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.run.start" => serde_json::from_value::<RunStartParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.launch.driver.prepare" => {
+            serde_json::from_value::<DriverPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.driver.model" => serde_json::from_value::<DriverModelParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.tool" => serde_json::from_value::<DriverToolParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.checkpoint" => {
+            serde_json::from_value::<DriverCheckpointParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.driver.deliver" => serde_json::from_value::<DriverDeliveryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.receipt" => serde_json::from_value::<DriverReceiptParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.context" => serde_json::from_value::<DriverContextParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.finish" => serde_json::from_value::<DriverFinishParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.wait" => serde_json::from_value::<DriverWaitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.cancel" => serde_json::from_value::<DriverCancelParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.model.select" => serde_json::from_value::<ModelSelectParams>(params.clone())

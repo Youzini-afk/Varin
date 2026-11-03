@@ -163,6 +163,7 @@ impl Fixture {
         tools: Arc<dyn ToolExecutor>,
     ) -> mpsc::Receiver<Result<ExecutionReport, ExecutionError>> {
         let mut start = RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             binding: self.binding.clone(),
             policy_state: Value::Null,
             policy: self.policy.clone(),

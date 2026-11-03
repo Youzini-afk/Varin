@@ -371,6 +371,32 @@ test('routing mutations preserve ordered and unavailable members through refresh
   stopVarinExtensionCatalog();
 });
 
+test('driver routing captures scope and the original Host before queue dispatch, never writing the choice to a replacement Host', async () => {
+  let current = snapshot();
+  const writes: VarinExtensionServiceRoutingRuleUpdateRequest[] = [];
+  const api = { hostState: async () => current, waitForHostState: () => new Promise(() => undefined),
+    upsertServiceRoutingRule: async (request: VarinExtensionServiceRoutingRuleUpdateRequest) => {
+      writes.push(request); current.routing.document.rules = [request.rule]; return current.routing;
+    } };
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: api } } });
+  const { setVarinExtensionServiceRoute, startVarinExtensionCatalog, stopVarinExtensionCatalog } = await import('./catalog-store');
+  await startVarinExtensionCatalog();
+  const scope = { workspaceId: 'native-workspace-original' };
+  const first = setVarinExtensionServiceRoute('varin.agent.driver', 1, scope, ['varin.builtin.agent-driver'], hostId);
+  scope.workspaceId = 'mutated-navigation-folder';
+  await first;
+  expect(writes[0]!.rule.scope).toEqual({ workspaceId: 'native-workspace-original' });
+  const pending = setVarinExtensionServiceRoute('varin.agent.driver', 1, scope, ['third-party:host:varin.agent.driver@1'], hostId);
+  current = { ...current, catalog: { ...current.catalog, hostId: 'replacement-host' } };
+  await expect(pending).rejects.toThrow('Host changed');
+  expect(writes).toHaveLength(1);
+  const queued = setVarinExtensionServiceRoute('varin.agent.driver', 1, scope, ['varin.builtin.agent-driver'], hostId);
+  (window as unknown as { __VARIN_RUNTIME_APIS__: { extensions: unknown } }).__VARIN_RUNTIME_APIS__.extensions = { ...api };
+  await expect(queued).rejects.toThrow('Runtime changed');
+  expect(writes).toHaveLength(1);
+  stopVarinExtensionCatalog();
+});
+
 test('accepted restart intent is not reported as failed because the Host disconnects before a refresh', async () => {
   const current = snapshot();
   let reads = 0;

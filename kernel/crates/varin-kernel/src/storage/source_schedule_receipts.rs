@@ -174,6 +174,7 @@ impl Storage {
                     .invocation
                     .ok_or_else(|| denied("Original schedule invocation is required"))?;
                 let origin_valid = match &invocation.origin {
+                    ToolOrigin::Driver { invocation_id } => !invocation_id.is_empty(),
                     ToolOrigin::ModelStep { request_id } => !request_id.is_empty(),
                     ToolOrigin::PolicyAction { action_id, node_id } => {
                         !action_id.is_empty()

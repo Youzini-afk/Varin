@@ -884,6 +884,7 @@ mod engines {
             .start(
                 &run_id,
                 RunStart {
+                    driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                     context_preparation: Arc::new(NoopContextPreparation),
                     binding: i.binding,
                     policy_state: Value::Null,

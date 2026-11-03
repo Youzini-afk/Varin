@@ -120,7 +120,7 @@ impl ControlCommands {
         thread::spawn(move || {
             for run in &capture.run_ids {
                 if let Ok(run) = runtime.cancel(run) {
-                    if run.state.terminal() {
+                    if run.state.terminal() && matches!(runtime.start_available(&run.id), Ok(true)) {
                         models.release(&run.id);
                         tools.release(&run.id);
                     }
@@ -251,7 +251,9 @@ impl ControlCommands {
                 let run = runtime
                     .cancel(&p.run_id)
                     .map_err(|e| KernelError::Operation(e.to_string()))?;
-                if run.state.terminal() {
+                // This overlay checks the original worker/drain, not durable Run
+                // eligibility. A committed driver outcome can precede callback exit.
+                if run.state.terminal() && runtime.start_available(&run.id).map_err(|e| KernelError::Operation(e.to_string()))? {
                     self.models.release(&run.id);
                     self.tools.release(&run.id);
                 }

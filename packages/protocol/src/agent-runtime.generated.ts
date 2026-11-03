@@ -73,6 +73,74 @@ export interface CodeRetrievalCompletion {
 
 export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:"direct"}|{mode:"proxy";url:string} }
 
+export type DriverRecovery = 'none' | 'checkpoint';
+
+export interface DriverArtifact {providerKey:string;extensionId:string;extensionVersion:string;serviceId:'varin.agent.driver';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;identity:LaunchPolicy;modelRoles:string[];recovery:DriverRecovery;checkpointSchema:string|null}
+
+export type DriverSelection = {kind:'builtin';name:'varin.default';version:'1'} | {kind:'extension';artifact:DriverArtifact};
+
+export interface DriverBinding {reference:string;artifact:DriverArtifact}
+
+export interface DriverModelInput {id:string;capabilityId:string|null;history:ModelConversationItem[];instructions:string[];tools:string[]}
+
+export interface DriverModelFailure {code:string;message:string;tool_name?:string|null;retry_after_ms:number|null;provider_request_id:string|null}
+
+export interface DriverModelItem {id:string;content:ModelContent;opaque:ModelOpaqueItem|null}
+
+export interface DriverModelReceipt {id:string;requestId:string;outcome:'completed'|'interrupted'|'failed'|'cancelled';items:DriverModelItem[];usage:ModelUsageReceipt;finishReason:FinishReason|null;failure:DriverModelFailure|null}
+
+export interface DriverToolInput {id:string;name:string;arguments:unknown}
+
+export interface DriverToolReceipt {id:string;operationId:string;completion:ModelToolCompletion;executorStopped:boolean}
+
+export interface DriverCheckpointInput {expectedRevision:number;schema:string;state:unknown;operations:string[]}
+
+export interface DriverCheckpoint {revision:number;schema:string;state:unknown;operations:string[]}
+
+export interface DriverDeliveryInput {id:string;text:string}
+
+export interface DriverDeliveryReceipt {id:string;historyId:string}
+
+export interface DriverReceiptInput {id:string;kind:'model'|'tool'|'delivery'}
+
+export type DriverReceipt = {kind:'model';id:string;requestId:string;state:'prepared'|'dispatched'|'completed'|'not_dispatched'|'interrupted'|'failed'|'cancelled';receipt:DriverModelReceipt|null} | {kind:'tool';id:string;operationId:string;phase:'accepted'|'queued'|'preparing'|'running'|'waiting'|'terminal'|null;receipt:DriverToolReceipt|null} | {kind:'delivery';id:string;historyId:string};
+
+export interface DriverRunInput {runId:string;epoch:number;mode:'start'|'resume';history:ModelConversationItem[];tools:LaunchTool[];models:Array<{capabilityId:string;status:'available'|'disabled'|'unconfigured'|'invalid'|'unavailable'}>;checkpoint:DriverCheckpoint|null;receipts:DriverReceipt[]}
+
+export type DriverTerminalOutcome = {kind:'complete'} | {kind:'fail';error:ExecutionError};
+
+export interface DriverFinishInput {outcome:DriverTerminalOutcome}
+
+export type DriverFinishReceipt = {kind:'committed';state:'completed'|'failed'} | {kind:'input_pending'} | {kind:'work_pending'};
+
+export type DriverRunOutcome = {kind:'complete'} | {kind:'pause';reason:string} | {kind:'fail';error:ExecutionError};
+
+export type DriverContextInput = Record<string,never>;
+
+export interface DriverContextReceipt {history:ModelConversationItem[];tools:LaunchTool[];inputIds:string[];activating:boolean}
+
+export interface DriverCancelInput {kind:'model'|'tool';id:string}
+
+export interface DriverCancelReceipt {requested:boolean;receipt:DriverReceipt|null}
+
+export interface DriverWaitInput {after:number|null;work:DriverReceiptInput[]}
+
+export interface DriverWaitReceipt {cursor:number;inputPending:boolean;receipts:DriverReceipt[]}
+
+export interface ModelOpaqueItem { connection_identity:string; family:string; adapter_version:string; value:unknown }
+
+export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }
+
+export type ModelToolCompletion = {kind:'not_dispatched';reason:string;error?:ExecutionError} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
+
+export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};
+
+export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
+
+export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }
+
+export type FinishReason = 'stop'|'tool_calls'|'length'|'content_filter';
+
 export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
 
 export interface BotActivityInput {
@@ -1642,7 +1710,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 76; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 78; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -1962,6 +2030,8 @@ export interface ToolReadyParams {
 }
 
 export interface LaunchSelection {
+  driver: DriverSelection;
+  driver_models: PolicyModelCapability[];
   agent?: AgentSelection;
   extension_bindings: ExtensionToolBinding[];
   policy_models: PolicyModelCapability[];
@@ -1979,6 +2049,7 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  driver_preparable: boolean;
   policy_preparable: boolean;
   policy_generation: number;
   policy_target: PolicyTarget;
@@ -2048,10 +2119,11 @@ export interface QueuedInput {
   cursor: number;
 }
 
-export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
+export type ToolOrigin = {kind:'driver';invocation_id:string} | {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
 /** Canonical invocation identity shared by all public/Host consumers. */
 export function toolOperationId(origin: ToolOrigin, callId: string): string {
   switch (origin.kind) {
+    case 'driver': return origin.invocation_id;
     case 'model_step': return `${origin.request_id}:tool:${callId}`;
     case 'policy_action': return `${origin.action_id}:node:${origin.node_id}`;
     case 'nested_call': return `nested:${new TextEncoder().encode(origin.parent_operation_id).length}:${origin.parent_operation_id}:${callId}`;
@@ -2061,7 +2133,7 @@ export function validToolOrigin(value: unknown): value is ToolOrigin {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   const text = (key: string) => typeof v[key] === 'string' && (v[key] as string).length > 0;
-  const keys = v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
+  const keys = v.kind === 'driver' ? ['kind', 'invocation_id'] : v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
   return keys.length > 0 && Object.keys(v).length === keys.length && Object.keys(v).every(key => keys.includes(key)) && keys.every(key => key === 'kind' || text(key));
 }
 
@@ -2208,6 +2280,7 @@ export interface RunModelSelections {
 }
 
 export interface RunStartParams {
+  driverBinding?: DriverBinding;
   extensionBindings?: LiveExtensionToolBinding[];
   policyBinding?: AgentPolicyBinding;
   mcpBinding?: LiveMcpBinding;
@@ -2556,6 +2629,7 @@ export interface ObserverDeliveryParams {
 }
 
 export interface AdmissionInspectParams {
+  driverInvocationId?: string;
   parentOperationId?: string;
   runId: string;
   ownerGeneration: number;

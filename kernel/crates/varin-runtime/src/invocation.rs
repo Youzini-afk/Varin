@@ -2,7 +2,7 @@
 use super::*;
 use crate::nested_tools::NestedExecutionScope;
 
-pub(super) struct InvocationRunner<P: ?Sized> {
+pub(crate) struct InvocationRunner<P: ?Sized> {
     pub persistence: Arc<P>,
     pub run_id: String,
     pub epoch: u64,
@@ -216,6 +216,14 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
         scope: &NestedExecutionScope,
         parent_cancel: &CancellationToken,
     ) -> Result<ToolExecutionReceipt, ExecutionError> {
+        self.execute_call(context, call, scope, parent_cancel, false)
+    }
+    /// Driver calls and nested calls share the exact permission, resource, dispatch and
+    /// receipt lifecycle. Only their already-admitted caller authority differs.
+    pub(crate) fn execute_call(
+        &self, context: ToolExecutionContext, call: Arc<ToolCall>, scope: &NestedExecutionScope,
+        parent_cancel: &CancellationToken, force_durable: bool,
+    ) -> Result<ToolExecutionReceipt, ExecutionError> {
         let cancel = parent_cancel.child(&context.operation_id);
         scope.run_cancel.alias_child(&context.operation_id, &cancel);
         let mut frozen = scope.frozen.as_ref().clone();
@@ -274,7 +282,7 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
             ));
         }
         reservation.resolve(&contract.resources)?;
-        let durable = bound.requires_operation() || !contract.read_only
+        let durable = force_durable || bound.requires_operation() || !contract.read_only
             || contract.completion == CompletionKind::Job
             || !matches!(bound.executor_owner(), ExecutorOwner::Kernel);
         let tool = AdmittedTool {

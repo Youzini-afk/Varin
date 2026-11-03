@@ -214,6 +214,7 @@ fn fixture(root: &std::path::Path, policy: &Policy) -> (Catalog, String, Request
 }
 fn start(binding: RequestBinding, provider: Arc<Provider>, policy: Arc<Policy>) -> RunStart {
     RunStart {
+        driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
         binding,
         provider,
         policy,

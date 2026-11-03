@@ -180,6 +180,7 @@ fn execute_with_policy(
         .start(
             &receipt.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {
@@ -899,7 +900,7 @@ fn source_less_child_installed_nested_resource_observers_keep_their_real_origins
         .head(&child.child_branch_id)
         .unwrap();
     let views = Arc::new(Mutex::new(Vec::new()));
-    let execution=runtime.start(&run_id,RunStart{binding,policy_state:Value::Null,
+    let execution=runtime.start(&run_id,RunStart{driver: Arc::new(varin_runtime::driver::DefaultRunDriver),binding,policy_state:Value::Null,
         provider:Arc::new(Model{calls:vec![("direct-resource".into(),name.clone(),args("fixture://child-direct")),
             ("outer-resource".into(),outer.name,json!({"callId":"nested-resource","name":name,"arguments":args("fixture://child-nested")}))],views:views.clone()}),
         tools:executor,policy,context_preparation:Arc::new(crate::child_capabilities::BindingPreparation {inner:Arc::new(NoopContextPreparation),catalog:runtime.catalog()}),progress:ProgressSink::default()}).unwrap();

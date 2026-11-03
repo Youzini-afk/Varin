@@ -60,7 +60,7 @@ function fixture() {
   });
   const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, agentRuntimeRequest: requests,
     beginRunPreparation: () => ({ signal: new AbortController().signal, release() {} }),
-    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {},
+    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
   } as unknown as KernelClient);
   const models = { resolveModel: vi.fn(async () => ({ configuration: {} as ModelSessionConfiguration, credentialOwner: {
     scope: async () => ({ reference: 'scope', authority: 'fixture', account: 'account', generation: 1 }),

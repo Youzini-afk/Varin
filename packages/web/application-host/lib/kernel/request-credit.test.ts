@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
+import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 
 /** Real client admission/cancellation with only the transport replaced by an in-memory fixture. */
@@ -23,6 +23,36 @@ function fixture() {
   return { client, owner, sent, request, release, finish };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+it('driver finish reaches its bounded response owner even when observer requests fill the ordinary window', async () => {
+  const f = fixture();
+  const observers = Array.from({ length: KERNEL_REQUEST_WINDOW }, () => f.request('runtime.driver.wait'));
+  await tick(); expect(f.sent).toHaveLength(KERNEL_REQUEST_WINDOW);
+  const finish = f.request('runtime.driver.finish'); await tick();
+  expect(f.sent[KERNEL_REQUEST_WINDOW]).toMatchObject({ lane: 'data', frame: { method: 'runtime.driver.finish' } });
+  f.finish(KERNEL_REQUEST_WINDOW); await finish;
+  expect(f.owner.pending.size, 'finish receipt cannot pretend original observers have stopped').toBe(KERNEL_REQUEST_WINDOW);
+  for (let index = 0; index < KERNEL_REQUEST_WINDOW; index++) f.finish(index);
+  await Promise.all(observers); await f.owner.whenRequestsIdle();
+});
+
+it.each(['model', 'tool', 'wait'])('admitted driver %s work releases only wire credit so original cancel can enter without losing pending receipts', async method => {
+  const f = fixture(); let settled = 0;
+  const originals = Array.from({ length: KERNEL_REQUEST_WINDOW }, () => f.request(`runtime.driver.${method}`).then(() => { settled++; }));
+  await tick();
+  const cancel = f.request('runtime.driver.cancel'); await tick();
+  expect(f.sent).toHaveLength(KERNEL_REQUEST_WINDOW);
+  for (let index = 0; index < KERNEL_REQUEST_WINDOW; index++) f.release(index);
+  await tick();
+  expect(f.sent[KERNEL_REQUEST_WINDOW]).toMatchObject({ lane: 'data', frame: { method: 'runtime.driver.cancel' } });
+  expect(settled).toBe(0);
+  expect(f.owner.pending.size).toBe(KERNEL_REQUEST_WINDOW + 1);
+  f.finish(KERNEL_REQUEST_WINDOW); await cancel;
+  let drained = false; const drainage = f.owner.whenRequestsIdle().then(() => { drained = true; });
+  await tick(); expect(drained).toBe(false);
+  for (let index = 0; index < KERNEL_REQUEST_WINDOW; index++) f.finish(index);
+  await Promise.all([...originals, drainage]); expect(settled).toBe(KERNEL_REQUEST_WINDOW);
+});
 
 it('releases only body admission credit while original input receipts and cancellation stay owned', async () => {
   const f = fixture();

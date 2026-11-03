@@ -239,6 +239,10 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       this.#child.on("message", onMessage);
       this.#child.once("error", rejectReady);
     });
+    // The process may exit while its owner is preparing storage, before the first
+    // request observes readiness. Own that rejection for the transport lifetime,
+    // while retaining the original rejected promise for every later request.
+    void this.#ready.catch(() => undefined);
     this.#child.on("message", (value) => { void this.#onMessage(value as BrokerMessage); });
     this.#child.once("exit", (code, signal) => {
       resolveExited();

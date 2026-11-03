@@ -439,6 +439,7 @@ pub struct RequestView<M = ResolvedMedia> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestOrigin {
+    Driver { driver_id: String, operation_id: String, input_identity: String },
     AuxiliaryInference {
         operation_id: String,
         parent_operation_id: String,
@@ -1026,6 +1027,7 @@ pub struct ToolExecutionContext {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolOrigin {
+    Driver { invocation_id: String },
     ModelStep { request_id: String },
     PolicyAction { action_id: String, node_id: String },
     NestedCall { parent_operation_id: String },
@@ -1033,6 +1035,7 @@ pub enum ToolOrigin {
 impl ToolOrigin {
     pub fn operation_id(&self, call_id: &str) -> String {
         match self {
+            Self::Driver { invocation_id } => invocation_id.clone(),
             Self::ModelStep { request_id } => format!("{request_id}:tool:{call_id}"),
             Self::PolicyAction { action_id, node_id } => format!("{action_id}:node:{node_id}"),
             Self::NestedCall {
@@ -1972,7 +1975,7 @@ impl ContextPreparation for NoopContextPreparation {
 }
 
 #[path = "invocation.rs"]
-mod invocation;
+pub(crate) mod invocation;
 pub use crate::nested_tools::{NestedToolInput, NestedToolReceipt};
 
 pub struct ExecutionEngine<P: ?Sized, M: ?Sized, T: ?Sized, A: ?Sized> {
@@ -3065,61 +3068,7 @@ impl<
         UsageReceipt,
         Result<FinishReason, ModelFailure>,
     ) {
-        let mut items = Vec::new();
-        let mut deltas = Vec::new();
-        let mut usage = UsageReceipt::default();
-        let mut phase = None;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut emit = |event| {
-                if cancel.is_cancelled() && !matches!(event, ProviderEvent::Usage { .. }) {
-                    return Err(ExecutionError::new(
-                        "cancelled",
-                        "model generation cancelled",
-                    ));
-                }
-                let observed = match &event {
-                    ProviderEvent::ReasoningDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Reasoning)),
-                    ProviderEvent::TextDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Output)),
-                    ProviderEvent::ToolArgumentsDelta { delta, .. } if !delta.is_empty() => Some(Some(GenerationPhase::ToolCall)),
-                    ProviderEvent::ToolCallStarted { request_id, .. } if request_id == &snapshot.view.request_id => Some(Some(GenerationPhase::ToolCall)),
-                    ProviderEvent::ItemCompleted { .. } => Some(None),
-                    _ => None,
-                };
-                if let Some(next) = observed {
-                    if next != phase {
-                        self.persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, next);
-                        phase = next;
-                    }
-                }
-                match &event {
-                    ProviderEvent::ItemCompleted { item } => items.push(item.clone()),
-                    ProviderEvent::Usage { receipt } => usage = receipt.clone(),
-                    ProviderEvent::TextDelta { .. } | ProviderEvent::ReasoningDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } | ProviderEvent::ToolCallStarted { .. } => {
-                        deltas.push(event.clone())
-                    }
-                }
-                self.progress.emit(run_id, &snapshot.view.request_id, ExecutionEvent::Provider(event));
-                Ok(())
-            };
-            match selected {
-                Some(provider) => provider.generate(snapshot, cancel, &mut emit),
-                None => self.provider.generate(snapshot, cancel, &mut emit),
-            }
-        }))
-        .unwrap_or_else(|_| {
-            Err(ModelFailure {
-                tool_name: None,
-                code: "provider_panicked".into(),
-                message: "provider worker panicked after dispatch".into(),
-                retry_after_ms: None,
-                provider_request_id: None,
-            })
-        });
-        // Covers normal completion, transport failure, cooperative cancellation and panic.
-        if phase.is_some() {
-            self.persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, None);
-        }
-        (items, deltas, usage, result)
+        generate_model(self.persistence.as_ref(), self.provider.as_ref(), &self.progress, run_id, owner_generation, snapshot, cancel, selected)
     }
 
     pub(crate) fn execute_batch(
@@ -3697,3 +3646,65 @@ pub(crate) fn validate_history_pairs(history: &[Arc<ConversationItem>]) -> Resul
 #[cfg(test)]
 #[path = "execution_tests.rs"]
 mod tests;
+
+/// Shared provider execution primitive; contains no policy decision or loop scheduling.
+pub(crate) fn generate_model<P: Persistence + ?Sized, M: ModelProvider + ?Sized>(
+    persistence: &P, provider: &M, progress: &ProgressSink, run_id: &str, owner_generation: u64,
+    snapshot: &RequestSnapshot, cancel: &CancellationToken, selected: Option<&dyn ModelProvider>,
+) -> (Vec<ProviderItem>, Vec<ProviderEvent>, UsageReceipt, Result<FinishReason, ModelFailure>) {
+        let mut items = Vec::new();
+        let mut deltas = Vec::new();
+        let mut usage = UsageReceipt::default();
+        let mut phase = None;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut emit = |event| {
+                if cancel.is_cancelled() && !matches!(event, ProviderEvent::Usage { .. }) {
+                    return Err(ExecutionError::new(
+                        "cancelled",
+                        "model generation cancelled",
+                    ));
+                }
+                let observed = match &event {
+                    ProviderEvent::ReasoningDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Reasoning)),
+                    ProviderEvent::TextDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Output)),
+                    ProviderEvent::ToolArgumentsDelta { delta, .. } if !delta.is_empty() => Some(Some(GenerationPhase::ToolCall)),
+                    ProviderEvent::ToolCallStarted { request_id, .. } if request_id == &snapshot.view.request_id => Some(Some(GenerationPhase::ToolCall)),
+                    ProviderEvent::ItemCompleted { .. } => Some(None),
+                    _ => None,
+                };
+                if let Some(next) = observed {
+                    if next != phase {
+                        persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, next);
+                        phase = next;
+                    }
+                }
+                match &event {
+                    ProviderEvent::ItemCompleted { item } => items.push(item.clone()),
+                    ProviderEvent::Usage { receipt } => usage = receipt.clone(),
+                    ProviderEvent::TextDelta { .. } | ProviderEvent::ReasoningDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } | ProviderEvent::ToolCallStarted { .. } => {
+                        deltas.push(event.clone())
+                    }
+                }
+                progress.emit(run_id, &snapshot.view.request_id, ExecutionEvent::Provider(event));
+                Ok(())
+            };
+            match selected {
+                Some(provider) => provider.generate(snapshot, cancel, &mut emit),
+                None => provider.generate(snapshot, cancel, &mut emit),
+            }
+        }))
+        .unwrap_or_else(|_| {
+            Err(ModelFailure {
+                tool_name: None,
+                code: "provider_panicked".into(),
+                message: "provider worker panicked after dispatch".into(),
+                retry_after_ms: None,
+                provider_request_id: None,
+            })
+        });
+        // Covers normal completion, transport failure, cooperative cancellation and panic.
+        if phase.is_some() {
+            persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, None);
+        }
+        (items, deltas, usage, result)
+}

@@ -59,6 +59,7 @@ import {
 } from '@varin/extension-contract';
 import { serviceRoutingComposition, serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
 import { ServiceRoutingControl } from './ServiceRoutingControl';
+import { AgentDriverRoutingSection } from './AgentDriverRoutingSection';
 import {
   applyWorkbenchProfile,
   removeWorkbenchProfile,
@@ -585,7 +586,7 @@ const ServiceRoutingSection: React.FC = () => {
       providers.length > 1 || providers.some((provider) => provider.descriptor.contract?.composition === 'ordered')
     )).map(([key]) => key),
     ...snapshot.routing.document.rules.map((rule) => `${rule.serviceId}@${rule.version}`),
-  ]);
+  ].filter(key => !key.startsWith('varin.agent.driver@')));
   if (serviceKeys.size === 0) return null;
 
   const editableScope = scopeKind === 'workspace' && currentDirectory
@@ -1387,7 +1388,7 @@ export const ExtensionsPage: React.FC = () => {
       </SettingsSection>
       <ExtensionInstallSection />
       </div>
-      <div className="settings-tab-panel" hidden={tab !== 'services'}><ServiceRoutingSection /></div>
+      <div className="settings-tab-panel" hidden={tab !== 'services'}><AgentDriverRoutingSection /><ServiceRoutingSection /></div>
       <div className="settings-tab-panel" hidden={tab !== 'workbench'}><WorkbenchProfileSection /></div>
     </SettingsPageLayout>
   );

@@ -42,7 +42,7 @@ function fixture() {
     if (failure) throw new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: original media identity changed' });
     return { media, partIndex: Number(params.partIndex), chunkIndex: Number(params.chunkIndex), chunkCount: 1, totalBytes: 3, bytesBase64: 'AQID' } satisfies MediaReadChunk;
   });
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
+  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; }, agentRuntimeRequest: requests } as unknown as KernelClient);
   const adapter = new ThreadAdapter(runtime, { resolveModel: vi.fn(), rebindModel: vi.fn() }, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();
   const app = { post: (path: string, ...chain: RequestHandler[]) => routes.set(path, chain), get() {} } as unknown as Express;

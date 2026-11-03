@@ -464,6 +464,7 @@ fn original_mcp_content_resources_prompts_reach_model_permissions_and_persisted_
         .start(
             &run,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {

@@ -28,6 +28,7 @@ pub(super) fn apply(
                     }
                 });
             let purpose = match &view.origin {
+                RequestOrigin::Driver { .. } => "run-driver",
                 RequestOrigin::AuxiliaryInference { purpose, .. }
                 | RequestOrigin::PolicyModelJob { purpose, .. } => purpose.as_str(),
                 RequestOrigin::McpSampling { .. } => "mcp-sampling",

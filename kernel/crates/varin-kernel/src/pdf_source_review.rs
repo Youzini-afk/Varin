@@ -255,6 +255,7 @@ fn document_only_native_sources_and_artifacts_reach_public_pdf_reader_and_reopen
             .start(
                 &submitted.run_id,
                 RunStart {
+                    driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                     binding,
                     policy_state: Value::Null,
                     provider: Arc::new(Model {

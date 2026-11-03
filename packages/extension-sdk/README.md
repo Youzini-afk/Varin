@@ -240,3 +240,70 @@ only to the provider's declared exact HTTPS token endpoints. The existing creden
 persistence and single-flight refresh. Ordinary replacement preserves captured refresh implementations;
 canceling a waiter does not release their real callback. See the [custom text/SSE codec
 example](../../examples/extensions/model-protocol/README.md).
+
+## Replaceable Run drivers
+
+`provideAgentDriver(context, implementation)` registers `varin.agent.driver@1`, an actual
+execution algorithm independent of the default loop and `policy@4`. Declare
+`VARIN_AGENT_DRIVER_SERVICE` and the Host capability `VARIN_AGENT_DRIVER_CAPABILITY`
+(`runtime.driver`) in the manifest. Identity, configuration, model roles and recovery support
+are captured by `describe`; installation alone does not select the driver.
+
+`run(input, context, configuration)` receives detached, recursively frozen native Run input.
+Use `context.driver.model`, `tool`, `context`, `wait`, `cancel`, `checkpoint`, `deliver` and `receipt`; their DTOs are
+generated from the native protocol, not a second SDK wire schema. Calls can overlap and model
+requests carry independent `ModelConversationItem[]` histories. `capabilityId: null` uses the
+original primary model; the currently supported additional role is `agentPlanning`. All
+credentials, admitted tool schemas, permissions, resources and execution receipts stay with
+their original owners. Stable work IDs identify original work; after an uncertain response,
+inspect its receipt rather than dispatching new work under another ID.
+
+`context.driver.context()` consumes currently available input from the original Run Inbox and
+returns freshly compiled history, the current admitted `tools` cut, consumed
+`inputIds` and `activating`. Choose your own refresh
+or re-planning points; it is not a blocking wait, polling scheduler or second input queue.
+Use `context.driver.wait({ after: null, work: [] })` to read the original Run event baseline,
+then pass its `cursor` as `after` to await activity in the original Run without polling.
+`work` contains known original model/tool/delivery identities; unknown work is rejected.
+It selects which receipt snapshots to return, not which events may wake the call. Even `work: []`
+may wake on that Run's own delivery or other activity. If the desired condition is not yet true,
+wait again with the returned cursor; this is an event-driven wait, not a sleep/poll loop.
+`inputPending` does not consume input: call `context()` when the algorithm chooses to replan.
+`context.driver.cancel({ kind: 'model' | 'tool', id })` targets work admitted by this original
+instance. Its `requested` flag is cancellation intent; the accompanying receipt may still show
+running/unknown work. Neither cancel nor a rejected observation proves an executor has stopped.
+
+A tool's `job_accepted` receipt is its original acceptance, not a terminal success. Observe its
+original identity with `wait`/`receipt`, then read results through that domain's admitted tools
+(for example `question_status`, `process_read` or `retrieval_control`) or refresh original history
+with `context()`. There is no invented universal result tool. A driver can remain active while an
+`ask_user` question awaits its authenticated answer; this does not grant any tool permissions.
+Complete only after answering or explicitly cancelling your pending questions.
+
+The helper uses the **service call's** capability client, never an activation-global client or
+a mutable `currentRun`. Run/epoch fields in the observation are not authority; the Host binds
+an opaque original instance that SDK authors cannot supply. Retaining the client after return
+does not retain its authority. Cancellation blocks new calls but does not erase a receipt from
+already-dispatched work. Algorithm return is not proof that those executors stopped.
+
+Declare `recovery: 'none', checkpointSchema: null` when restart is unsupported. Checkpoint
+drivers require an exact schema and a separate `resume` callback; the SDK rejects missing or
+mismatched recovery instead of calling `run` again. Current selection changes do not rebind old
+Runs. Trusted Host code is not an OS sandbox, and a driver capability grant is not unrestricted
+tool approval. See the [parallel driver](../../examples/extensions/parallel-driver/README.md)
+for an executable multi-branch author example.
+
+### Atomic driver completion
+
+Before returning `complete` or `fail`, call `context.driver.finish({ outcome })` while the original
+callback is still live. `committed` is the original Catalog terminal transaction, not a preflight.
+`input_pending` and `work_pending` leave the same callback able to consume `context()` or await
+`wait()` and choose its next action. Authors must first join the primitive promises they launched;
+`work_pending` does not mean any next event proves settlement, especially for unknown external effects.
+When waiting on durable work, read the original baseline before the finish attempt so events cannot
+be lost between refusal and subscription. A final context refresh alone cannot prevent new input from
+arriving afterward. The SDK never reruns the algorithm automatically to hide this conflict.
+
+After `committed`, no new primitive calls are admitted. Return from the callback to let its actual
+work drain; logical completion does not authorize early release of the original callback, provider,
+credentials or tool owners. A later callback error cannot rewrite the committed execution result.

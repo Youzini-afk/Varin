@@ -111,7 +111,7 @@ fn text_description_preview_create_and_reopen_run_never_bind_an_adapter_or_crede
         policy: crate::policy::PolicyBridge::new(output.clone()),
         models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
         tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
-        responses: output.into(),
+        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
         epoch: "text-test".into(),
     };
     assembly.policy.initialize("text-test");

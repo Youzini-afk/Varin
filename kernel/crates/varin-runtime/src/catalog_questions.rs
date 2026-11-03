@@ -51,7 +51,36 @@ impl QuestionAnswerPreparation {
     }
 }
 
+/// Questions retain their real tool/Run owner. A replaceable driver may remain active
+/// and schedule other work while this one original question waits for user input.
+fn driver_question_owner(db: &Connection, op: &Operation, run: &Run) -> Result<bool> {
+    let intent = super::tool_content::ToolIntent::from_operation(op)?;
+    let root = super::tool_content::root_tool_context(
+        db,
+        &crate::execution::ToolExecutionContext {
+            run_id: run.id.clone(),
+            operation_id: op.id.clone(),
+            origin: intent.origin().clone(),
+        },
+        false,
+    )?;
+    let crate::execution::ToolOrigin::Driver { invocation_id } = root.origin else {
+        return Ok(false);
+    };
+    let original = super::driver::driver_call_metadata(db, &invocation_id)?;
+    if original.run_id != run.id {
+        return Err(RuntimeError::Conflict("question driver belongs to another Run".into()));
+    }
+    let driver = super::driver::require_driver(db, &run.id, &original.driver_id)?;
+    Ok(matches!(driver.selection, crate::driver::DriverSelection::Extension { .. }))
+}
+
 impl Catalog {
+    pub fn question_has_driver_owner(&self, operation_id: &str) -> Result<bool> {
+        let operation = self.operation(operation_id)?;
+        if operation.executor.as_deref() != Some(QUESTION_TOOL) { return Ok(false); }
+        driver_question_owner(&self.db, &operation, &self.run(&operation.run_id)?)
+    }
     pub fn open_question(
         &mut self,
         context: &crate::execution::ToolExecutionContext,
@@ -208,11 +237,14 @@ impl Catalog {
             .clone()
             .ok_or_else(|| RuntimeError::Conflict("question is not ready".into()))?;
         let mut wait: Wait = record(&tx, "waits", &wait_id)?;
+        let driver_owned = driver_question_owner(&tx, &op, &run)?;
         if !op.handed_off
             || (op.cancel_requested && outcome != Outcome::Cancelled)
             || run.cancel_requested
-            || run.state != RunState::Waiting
-            || run.waiting_on.as_deref() != Some(&wait_id)
+            || run.state.terminal()
+            || (!driver_owned
+                && (run.state != RunState::Waiting
+                    || run.waiting_on.as_deref() != Some(&wait_id)))
             || wait.cancelled
             || !super::result_content::job_acceptance_consumed(&tx, &op)?
         {
@@ -262,21 +294,23 @@ impl Catalog {
         )?;
         wait.trigger_cursor = Some(cursor);
         put(&tx, "waits", &wait_id, &wait)?;
-        Self::enqueue_resume(&tx, &wait, cursor)?;
-        tx.execute(
-            "UPDATE resumptions SET claimed=?2,acknowledged=1 WHERE wait_id=?1",
-            params![wait_id, sql_number(run.epoch)?],
-        )?;
-        if let Some(mut launch) =
-            optional_record::<super::launch_content::LaunchMetadata>(&tx, "run_launches", &run.id)?
-        {
-            launch.bound_epoch = None;
-            launch.requires_rebind = true;
-            launch.revision += 1;
-            put(&tx, "run_launches", &run.id, &launch)?;
+        if !driver_owned {
+            Self::enqueue_resume(&tx, &wait, cursor)?;
+            tx.execute(
+                "UPDATE resumptions SET claimed=?2,acknowledged=1 WHERE wait_id=?1",
+                params![wait_id, sql_number(run.epoch)?],
+            )?;
+            if let Some(mut launch) =
+                optional_record::<super::launch_content::LaunchMetadata>(&tx, "run_launches", &run.id)?
+            {
+                launch.bound_epoch = None;
+                launch.requires_rebind = true;
+                launch.revision += 1;
+                put(&tx, "run_launches", &run.id, &launch)?;
+            }
+            run.state = RunState::Runnable;
+            run.waiting_on = None;
         }
-        run.state = RunState::Runnable;
-        run.waiting_on = None;
         run.revision += 1;
         put(&tx, "runs", &run.id, &run)?;
         event(
@@ -455,16 +489,16 @@ impl Catalog {
 }
 
 /// An admitted ask_user is actionable only once its Job acceptance was consumed and
-/// its original Run owns the matching wait. Opening/settling is not a user question.
+/// its original Run owns the matching wait, or its original driver is still nonterminal.
+/// Opening/settling is not a user question; driver liveness grants no new permissions.
 pub(super) fn attention(db: &Connection, op: &Operation, run: &Run, epoch: u64) -> Result<bool> {
     if op.executor.as_deref() != Some(QUESTION_TOOL) || op.run_id != run.id
         || op.epoch != epoch || run.epoch != epoch || op.phase != OperationPhase::Waiting
-        || !op.handed_off || op.cancel_requested || run.cancel_requested
-        || run.state != RunState::Waiting {
+        || !op.handed_off || op.cancel_requested || run.cancel_requested || run.state.terminal() {
         return Ok(false);
     }
     let Some(wait_id) = op.waiting_on.as_deref() else { return Ok(false); };
-    if run.waiting_on.as_deref() != Some(wait_id) { return Ok(false); }
+    if !driver_question_owner(db, op, run)? && (run.state != RunState::Waiting || run.waiting_on.as_deref() != Some(wait_id)) { return Ok(false); }
     let active: Option<String> = db.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |r| r.get(0))?;
     if active.as_deref() != Some(&run.id) { return Ok(false); }
     let wait: Wait = record(db, "waits", wait_id)?;

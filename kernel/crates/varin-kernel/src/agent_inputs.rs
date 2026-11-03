@@ -202,6 +202,8 @@ pub(super) fn selected_launch(
         ));
     }
     Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+            driver: varin_runtime::driver::DriverSelection::default(),
+            driver_models: Vec::new(),
         agent: selected.agent,
         child_dispatch: selected.child_dispatch,
         extension_bindings: Vec::new(),

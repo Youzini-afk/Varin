@@ -75,7 +75,7 @@ function routeFixture() {
     }
   });
   const runtime = new AgentRuntimeClient({ subscribeExit: () => () => {}, onToolReleased: () => () => {},
-    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {},
+    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     agentRuntimeRequest: requests } as unknown as KernelClient);
   const models = { resolveModel: vi.fn(), rebindModel: vi.fn() };
   const adapter = new ThreadAdapter(runtime, models, vi.fn(), vi.fn());
@@ -186,7 +186,7 @@ async function sourceReleaseFixture() {
     call_id: 'call:dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId, project_id: null,
     trigger: { kind: 'dispatch' }, input: { task: 'Read the original source' }, configuration: {},
     selected_profile: { preset_id: null, catalog_identity: null, work_mode: 'read_only', tools: [], instructions: '' },
-    launch: { credential_scope: null, child_dispatch: null, policy_models: [], mcp_binding: null, extension_bindings: [],
+    launch: { credential_scope: null, child_dispatch: null, driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], mcp_binding: null, extension_bindings: [],
       connection_identity: 'original', provider_family: 'original', model: 'original', configuration_generation: 1,
       tool_schema_generation: 1, tools: [], policy: { name: 'default', version: '1' }, source },
     policy_target: { kind: 'default' }, source_basis: null,
@@ -259,7 +259,7 @@ async function sourceReleaseFixture() {
       expect(input.handoffOperationId).toBe('handoff:original'); return { grantId: 'grant:release-original' };
     }),
     scoped: () => ({ unpinBranch: unpin }), revokeGrant: vi.fn(async () => {}), retireRunGrants: retire,
-    releaseLanguageSource: vi.fn(async () => {}), cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {},
+    releaseLanguageSource: vi.fn(async () => {}), cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
   } as unknown as KernelClient;
   const runtime = new AgentRuntimeClient(kernel);
   const errors: unknown[] = [];
