@@ -559,6 +559,7 @@ mod tests {
     }
 
     fn race_command(role: &str) -> std::process::Command {
+        use std::os::windows::process::CommandExt;
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
         command
             .args([
@@ -568,6 +569,7 @@ mod tests {
                 "--nocapture",
             ])
             .env("VARIN_SCOPE_RACE_ROLE", role)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW, including fixture descendants
             .stdin(Stdio::null())
             .stdout(Stdio::null());
         command
@@ -697,6 +699,11 @@ mod tests {
             assert!(
                 ids.contains(&ancestor_pid),
                 "First snapshot must include live A"
+            );
+            assert!(
+                ids.iter()
+                    .all(|pid| *pid == scope.original_pid || *pid == ancestor_pid),
+                "The race fixture requires only the pinned root and A in its first snapshot"
             );
             assert_eq!(
                 unsafe { WaitForSingleObject(ancestor.as_raw_handle(), 0) },
