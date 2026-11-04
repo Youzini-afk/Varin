@@ -39,7 +39,7 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
   const subject = toolSubject(call, data, t, targets);
   const content = toolText(data.content) || toolText(toolRecord(data.note).content);
   const objectResult = result?.details !== undefined && Object.keys(data).length > 0;
-  const purposeContent = workToolContent(call, data, t, cwd, conversation);
+  const purposeContent = workToolContent(call, data, t, conversation);
   return <ToolDisclosure id={'tool:' + call.id} initiallyExpanded={memory && Boolean(purposeContent || content)} className={'tool-work-record group ' + (plan ? 'tool-plan-record' : memory ? 'tool-memory-record' : '')}>
     <summary className="tool-work-heading"><Icon name={plan ? 'list-check-2' : memory ? 'brain' : settings ? 'settings-3'
       : call.name === 'retrieval_control' ? 'binoculars' : call.name.includes('child') ? 'group' : call.name === 'ask_user' || call.name === 'question_status' ? 'question' : 'file-list-2'} className="size-3.5 shrink-0" />

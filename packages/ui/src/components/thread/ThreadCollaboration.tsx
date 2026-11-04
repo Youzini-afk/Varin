@@ -29,6 +29,7 @@ import { useThreadStore, threadHostKey, threadComposerKey } from "@/stores/useTh
 import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 import { openThreadFromNavigation } from "@/lib/agent-runtime/threadNavigation";
 import { ChildState } from "../conversation/childPresentation";
+import { ChildNavigationContext } from "../conversation/childNavigation";
 import {
   CollaborationFeed,
   type CollaborationMember,
@@ -215,6 +216,10 @@ function CollaborationRoomContent({
       },
     );
   }, [feed, identity.threadId, identity.branchId, host]);
+  const childNavigation = React.useMemo(() => ({
+    label: t('chat.tools.viewConversation'),
+    open: (child: ThreadIdentity) => openMember(child.threadId, child.branchId),
+  }), [openMember, t]);
   const memberNavigation = React.useRef<string | undefined>(undefined);
   React.useEffect(() => {
     if (!initialMember) return;
@@ -601,13 +606,15 @@ function CollaborationRoomContent({
               </p>
             }
           >
-            <CollaborationConversation
-              key={`${selection.identity.threadId}:${selection.identity.branchId}`}
-              api={api}
-              identity={selection.identity}
-              host={host}
-              onQuote={quote}
-            />
+            <ChildNavigationContext.Provider value={childNavigation}>
+              <CollaborationConversation
+                key={`${selection.identity.threadId}:${selection.identity.branchId}`}
+                api={api}
+                identity={selection.identity}
+                host={host}
+                onQuote={quote}
+              />
+            </ChildNavigationContext.Provider>
           </React.Suspense>
         )}
         <CollaborationComposer

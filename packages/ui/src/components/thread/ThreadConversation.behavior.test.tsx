@@ -3934,7 +3934,7 @@ it('composer schedule observation cancellation uses the conversation failure bou
   await act(async () => button('Composer schedule').click()); await act(async () => button('End follow-up observation').click());
   expect(cancel).toHaveBeenCalledWith('original-observer'); expect(container.textContent).toContain('Original observation cancellation failed');
 });
-it('composer tasks opens the visible sidebar without replacing its exact Thread identity and empty schedule explains the missing Run', async () => {
+it('composer tasks opens the collaboration surface in the navigation workspace and empty schedule explains the missing Run', async () => {
   const f = fixture(); f.api.family = { list: vi.fn() } as unknown as ThreadsAPI['family'];
   useThreadDraftStore.getState().patch(threadComposerKey('host-a', identity), { workspacePath: '/different/source' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
@@ -3942,6 +3942,7 @@ it('composer tasks opens the visible sidebar without replacing its exact Thread 
   expect(button('Composer schedule').title).toBe('Send a message in this conversation before scheduling a follow-up.');
   await act(async () => button('Composer tasks').click());
   const panels = useUIStore.getState().contextPanelByDirectory, panel = panels['/workspace/project'];
-  expect(panel?.isOpen).toBe(true); expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)).toMatchObject({ mode: 'threads', thread: identity });
+  expect(panel?.isOpen).toBe(true); expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)).toMatchObject({ mode: 'threads' });
+  expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)?.thread).toBeUndefined();
   expect(panels['/different/source']).toBeUndefined();
 });

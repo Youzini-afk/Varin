@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { ConversationContext, type ConversationPresentation } from './ConversationContext';
 import { ToolDisclosureScope } from './ToolDisclosure';
 import { ChatDelegation } from './ChatDelegation';
@@ -13,13 +14,22 @@ import type { ThreadSummary } from '@varin/protocol';
 
 let root: Root, container: HTMLElement;
 let originalThreads: ThreadSummary[];
+let originalSelection: ReturnType<typeof useThreadStore.getState>['selectedIdentity'];
+let originalDirectory: string;
 beforeEach(() => {
   originalThreads = useThreadStore.getState().threads;
+  originalSelection = useThreadStore.getState().selectedIdentity;
+  originalDirectory = useDirectoryStore.getState().currentDirectory;
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
   for (const [key, value] of Object.entries({ window, document: window.document, HTMLElement: window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(key, value);
   container = window.document.getElementById('root')!; root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); useThreadStore.setState({ threads: originalThreads }); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  await act(async () => root.unmount());
+  useThreadStore.setState({ threads: originalThreads, selectedIdentity: originalSelection });
+  useDirectoryStore.setState({ currentDirectory: originalDirectory });
+  vi.restoreAllMocks(); vi.unstubAllGlobals();
+});
 
 it('opens the exact delegated branch, cancels only its original operation, and retains disclosure choice', async () => {
   const cancelOperation = vi.fn(async () => {});
@@ -30,6 +40,8 @@ it('opens the exact delegated branch, cancels only its original operation, and r
       execution: { execution_id: 'original-operation', name: 'Source audit', child_thread_id: 'child', child_branch_id: 'original-branch',
         state: 'running', code_result: { kind: 'no_changes' } } } } as unknown as ChatToolExecutionState;
   const identity = { runtime: 'agent' as const, threadId: 'parent', branchId: 'parent-branch' };
+  useThreadStore.setState({ selectedIdentity: identity });
+  useDirectoryStore.setState({ currentDirectory: '/navigation-workspace' });
   const presentation = { identity, api: { cancelOperation }, toolExecutions: {} } as unknown as ConversationPresentation;
   const render = async (visible = true) => act(async () => root.render(<I18nProvider><ConversationContext.Provider value={presentation}>
     <ToolDisclosureScope sessionId="delegation-actions">{visible && <ChatDelegation call={{ type: 'toolCall', id: 'dispatch', name: 'dispatch', arguments: { task: 'Read source' } }}
@@ -42,7 +54,7 @@ it('opens the exact delegated branch, cancels only its original operation, and r
   await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new window.Event('toggle')); });
   const button = (text: string) => [...container.querySelectorAll('button')].find(node => node.textContent?.includes(text))!;
   await act(async () => button('View conversation').click());
-  expect(navigate).toHaveBeenCalledWith('/workspace', { mode: 'threads', thread: identity, member: { runtime: 'agent', threadId: 'child', branchId: 'original-branch' } });
+  expect(navigate).toHaveBeenCalledWith('/navigation-workspace', { mode: 'threads', thread: identity, member: { runtime: 'agent', threadId: 'child', branchId: 'original-branch' } });
   await act(async () => button('Stop task').click());
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith('original-operation');
   expect(container.textContent).toContain('Stopping');

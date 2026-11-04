@@ -4,7 +4,7 @@ import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { useUIStore } from '@/stores/useUIStore';
+import { openCollaborationMember } from '@/lib/openCollaborationMember';
 import type { useI18n } from '@/lib/i18n';
 import type { ConversationPresentation } from './ConversationContext';
 import type { ChatToolCall } from './types';
@@ -20,7 +20,7 @@ const valueText = (value: unknown) => typeof value === 'string' ? value : value 
 
 /** Read the owner's recorded objects. Requested mutations never stand in for committed results. */
 export function workToolContent(call: ChatToolCall, data: Record<string, unknown>, t: ReturnType<typeof useI18n>['t'],
-  cwd: string, conversation: ConversationPresentation | null): React.ReactNode {
+  conversation: ConversationPresentation | null): React.ReactNode {
   const args = toolRecord(call.arguments);
   if (call.name === 'retrieval_control' && typeof data.state === 'string') {
     const message = toolRecord(data.latestAssistantMessage), action = toolRecord(data.latestAction);
@@ -124,7 +124,7 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
         <p className="typography-micro text-muted-foreground">{toolText(member.task)}</p></div>
       <span className="typography-micro text-muted-foreground">{toolText(member.state)}</span>
       {conversation && threadId && branchId && branches.length === 1 && <button type="button" className="tool-thread-open" title={t('chat.tools.viewConversation')}
-        onClick={() => useUIStore.getState().openContextPanelTab(cwd, { mode: 'threads', thread: conversation.identity, member: { runtime: 'agent', threadId, branchId } })}><Icon name="external-link" className="size-3.5" /></button>}
+        onClick={() => openCollaborationMember(conversation.identity, { runtime: 'agent', threadId, branchId })}><Icon name="external-link" className="size-3.5" /></button>}
     </div>;
   })}</div>;
   if (call.name === 'read_thread') {

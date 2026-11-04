@@ -59,6 +59,28 @@ describe('useUIStore context panel tabs', () => {
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.readOnly).toBe(false);
   });
+
+  test('restores a collaboration panel without restoring an old room or member', () => {
+    const directory = '/repo';
+    const thread = { runtime: 'agent' as const, threadId: 'old-thread', branchId: 'main' };
+    const member = { ...thread, threadId: 'old-child' };
+    const store = useUIStore.getState();
+    store.openContextPanelTab(directory, { mode: 'threads', thread, member });
+    store.openContextPanelTab(directory, { mode: 'diff' });
+    const current = useUIStore.getState();
+    const panel = current.contextPanelByDirectory[directory]!;
+    const legacy = { ...panel.tabs[0]!, id: 'threads:old-thread', dedupeKey: 'old-thread' };
+    const restored = useUIStore.persist.getOptions().merge!({
+      contextPanelByDirectory: {
+        [directory]: { ...panel, activeTabId: legacy.id, tabs: [legacy, ...panel.tabs] },
+      },
+    }, current).contextPanelByDirectory[directory]!;
+    expect(restored.activeTabId).toBe('threads');
+    const rooms = restored.tabs.filter(tab => tab.mode === 'threads');
+    expect(rooms).toHaveLength(1);
+    expect(rooms[0]?.thread).toBeUndefined();
+    expect(rooms[0]?.member).toBeUndefined();
+  });
 });
 
 describe('useUIStore openContextSurface', () => {

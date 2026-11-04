@@ -204,7 +204,7 @@ const normalizeContextPanelTabDedupeKey = (
   targetPath: string | null,
   dedupeKey: string | null | undefined,
 ): string => {
-  if (mode === 'diff') {
+  if (mode === 'diff' || mode === 'threads') {
     return mode;
   }
 
@@ -265,7 +265,7 @@ const clampContextPanelTabs = (tabs: ContextPanelTab[], maxTabs: number, activeT
   return tabs.filter((tab) => !removeSet.has(tab.id));
 };
 
-const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
+const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): ContextPanelTab[] => {
   if (!Array.isArray(tabs)) {
     return [];
   }
@@ -313,11 +313,12 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     seen.add(id);
+    const restoreRoom = restoringLayout && candidate.mode === 'threads';
     result.push({
       id,
       mode: candidate.mode,
-      ...(candidate.thread ? { thread: candidate.thread } : {}),
-      ...(candidate.member ? { member: candidate.member } : {}),
+      ...(!restoreRoom && candidate.thread ? { thread: candidate.thread } : {}),
+      ...(!restoreRoom && candidate.member ? { member: candidate.member } : {}),
       ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
       ...(typeof candidate.materialLine === 'number' && Number.isSafeInteger(candidate.materialLine) && candidate.materialLine >= 1 ? { materialLine: candidate.materialLine } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
@@ -2237,11 +2238,13 @@ export const useUIStore = create<UIStore>()(
             ...saved,
             contextPanelByDirectory: Object.fromEntries(
               Object.entries(saved.contextPanelByDirectory ?? current.contextPanelByDirectory).map(([directory, panel]) => {
-                const tabs = sanitizeContextPanelTabs(panel?.tabs);
+                const tabs = sanitizeContextPanelTabs(panel?.tabs, true);
+                const savedTabId = panel?.activeTabId ?? null;
+                const activeTabId = typeof savedTabId === 'string' && savedTabId.startsWith('threads:') ? 'threads' : savedTabId;
                 return [directory, {
                   ...panel,
                   tabs,
-                  activeTabId: resolveActiveContextPanelTabID(tabs, panel?.activeTabId ?? null),
+                  activeTabId: resolveActiveContextPanelTabID(tabs, activeTabId),
                   isOpen: Boolean(panel?.isOpen && tabs.length),
                 }];
               }),

@@ -4,8 +4,8 @@ import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { useUIStore } from '@/stores/useUIStore';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { openCollaborationMember } from '@/lib/openCollaborationMember';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
@@ -19,7 +19,7 @@ import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAg
 import { ExternalDelegationMessage } from '../thread/ExternalDelegates';
 import { ChildNavigationContext } from './childNavigation';
 
-export function ChatDelegation({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
+export function ChatDelegation({ call, execution, result, status, generating, output, details }: ToolViewProps) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
   const args = toolRecord(call.arguments), receipt = toolRecord(result?.details ?? execution?.result);
@@ -68,9 +68,9 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   const childNavigation = React.useContext(ChildNavigationContext);
   const open = () => {
     if (!conversation || !threadId || !branchId) return;
-    if (childNavigation) { childNavigation.open({ runtime: 'agent', threadId, branchId }); return; }
-    useUIStore.getState().openContextPanelTab(cwd, { mode: 'threads', thread: conversation.identity,
-      member: { runtime: 'agent', threadId, branchId } });
+    const member = { runtime: 'agent' as const, threadId, branchId };
+    if (childNavigation) { childNavigation.open(member); return; }
+    openCollaborationMember(conversation.identity, member);
   };
   const cancel = async () => {
     if (!conversation || !operationId || stopping) return;
