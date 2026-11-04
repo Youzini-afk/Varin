@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, writeFile, rm, chmod, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createInterface } from 'node:readline';
 import { createProcessCollector, parseLinuxStat, parseLinuxPss, parseDrmFdinfo, summarizeDrmClients, ProcessTreeTracker, parseNativeProcessTable } from './benchmark-processes.mjs';
 
 const statText = ({ pid = 100, parentPid = 1, start = '1000', user = 25, system = 12, name = 'node', state = 'S' } = {}) => {
@@ -242,86 +241,149 @@ test('Windows counters retain the original launch handle FILETIME without roundi
 
 const treeProgram = String.raw`
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
-const mode = process.argv[2];
+import { appendFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+const [mode, directory] = process.argv.slice(2);
+const report = (event, fields = {}) => appendFileSync(join(directory, mode + '.jsonl'), JSON.stringify({ event, mode, pid: process.pid, ...fields }) + '\n');
+process.on('exit', code => report('exit', { code }));
+process.on('uncaughtExceptionMonitor', error => report('failure', { code: error.code ?? null }));
 const allocations = [Buffer.alloc(4 * 1024 * 1024, 1)];
-setInterval(() => { const until = performance.now() + 5; while (performance.now() < until) allocations[0][0] ^= 1; }, 20);
-let child;
+let grew = false;
+setInterval(() => {
+  if (existsSync(join(directory, mode + '.exit'))) process.exit(0);
+  if (!grew && existsSync(join(directory, mode + '.grow'))) {
+    allocations.push(Buffer.alloc(24 * 1024 * 1024, 7)); grew = true; report('grew');
+  }
+  const until = performance.now() + 5;
+  while (performance.now() < until) allocations[0][0] ^= 1;
+}, 20);
+// Every generation reads its own fixed control files. A middle process exiting
+// must not control a surviving leaf's stdin pipe or output channel lifetime.
 if (mode !== 'leaf') {
-  child = spawn(process.execPath, [import.meta.filename, mode === 'root' ? 'middle' : 'leaf'], { stdio: ['pipe', 'pipe', 'inherit'] });
-  child.stdout.pipe(process.stdout);
+  // libuv places non-detached Windows children in a per-parent job with
+  // KILL_ON_JOB_CLOSE. Detach these fixture children so parent exit does not
+  // kill the leaf whose continued OS identity this test is meant to observe.
+  // The actual spawn ancestry and explicit file-controlled exit remain intact.
+  // https://github.com/nodejs/node/blob/v24.22.2/deps/uv/src/win/process.c#L69-L97
+  const child = spawn(process.execPath, [import.meta.filename, mode === 'root' ? 'middle' : 'leaf', directory], {
+    detached: process.platform === 'win32', stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  child.on('error', error => { report('spawn-failure', { code: error.code ?? null }); process.exit(1); });
 }
-console.log(JSON.stringify({ event: 'ready', mode, pid: process.pid }));
-createInterface({ input: process.stdin }).on('line', line => {
-  if (line === 'grow') { allocations.push(Buffer.alloc(24 * 1024 * 1024, 7)); child?.stdin.write('grow\n'); console.log(JSON.stringify({ event: 'grew', mode, pid: process.pid })); }
-  if (line === 'exit-middle' && mode === 'root') child.stdin.write('exit\n');
-  if (line === 'exit') process.exit(0);
-});
+report('ready');
+setTimeout(() => { report('timeout'); process.exit(1); }, 90000).unref();
 `;
 
 test('real Node root/child/grandchild: CPU and memory growth, exit and retained reparenting', { skip: !['linux', 'darwin', 'win32'].includes(process.platform), timeout: process.platform === 'win32' ? 60000 : 20000 }, async t => {
-  const directory = await fixture(t), script = join(directory, 'tree.mjs');
+  const directory = await mkdtemp(join(tmpdir(), 'varin-proc-tree-')), script = join(directory, 'tree.mjs');
+  const modes = ['root', 'middle', 'leaf'];
   await writeFile(script, treeProgram);
   // Compile/setup happens before launch, as in the desktop A/B runner.
   const collector = await createProcessCollector();
-  const root = spawn(process.execPath, [script, 'root'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  const observed = [], stderr = [];
-  const lines = createInterface({ input: root.stdout });
-  lines.on('line', line => observed.push(JSON.parse(line)));
+  const root = spawn(process.execPath, [script, 'root', directory], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const stderr = [];
   root.stderr.on('data', bytes => stderr.push(bytes.toString()));
   const closed = once(root, 'close'), exitedRoot = once(root, 'exit');
-  const cleanup = new Set([root.pid]);
+  const command = (mode, name) => writeFile(join(directory, `${mode}.${name}`), '');
+  const events = async () => (await Promise.all(modes.map(async mode => {
+    try {
+      // Read only complete records if an append is in flight.
+      return (await readFile(join(directory, `${mode}.jsonl`), 'utf8')).split('\n').slice(0, -1).map(line => JSON.parse(line));
+    } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  }))).flat();
+  let phase = 'startup', lastSample;
   t.after(async () => {
-    for (const event of observed) cleanup.add(event.pid);
-    for (const pid of [...cleanup].reverse()) { try { process.kill(pid, 'SIGKILL'); } catch {} }
-    await closed; await collector.close(); lines.close();
+    let cleanupTimer;
+    try {
+      await Promise.all(modes.map(mode => command(mode, 'exit')));
+      await Promise.race([closed, new Promise((_, reject) => {
+        cleanupTimer = setTimeout(() => reject(new Error('Process fixture exit is unconfirmed; its control directory is retained')), 15000);
+      })]);
+      const observed = await events();
+      // Neither an empty sample nor the root's exit alone proves this fixture's
+      // descendants stopped. Require every generation's own exit receipt too.
+      for (const mode of modes) {
+        const ready = observed.find(event => event.mode === mode && event.event === 'ready');
+        assert(ready && observed.some(event => event.mode === mode && event.pid === ready.pid && event.event === 'exit'),
+          `The ${mode} fixture exit is unconfirmed; its control directory is retained`);
+      }
+      await rm(directory, { recursive: true, force: true });
+    } catch (error) {
+      t.diagnostic(`Process fixture control directory retained: ${directory}`);
+      throw error;
+    } finally { clearTimeout(cleanupTimer); await collector.close(); }
   });
   const waitFor = async predicate => {
     const deadline = Date.now() + 8000;
-    while (!predicate()) { if (Date.now() > deadline) throw new Error(`Process fixture timed out: ${stderr.join('')}`); await delay(20); }
+    while (!predicate(await events())) {
+      if (Date.now() > deadline) throw new Error(`Process fixture timed out in ${phase}: ${stderr.join('')}`);
+      await delay(20);
+    }
   };
-  await collector.setRoot(root.pid);
-  await waitFor(() => observed.filter(event => event.event === 'ready').length === 3);
-  const pids = Object.fromEntries(observed.filter(event => event.event === 'ready').map(event => [event.mode, event.pid]));
-  Object.values(pids).forEach(pid => cleanup.add(pid));
-  const first = await collector.sample();
-  assert.deepEqual(new Set(first.processes.map(row => row.pid)), new Set(Object.values(pids)));
-  assert.equal(first.coverage.processCountersComplete, true);
-  if (process.platform === 'linux') assert.equal(collector.metadata.clockTicksPerSecond > 0, true);
-  if (process.platform === 'darwin') { assert(collector.metadata.machTimebase.numer > 0); assert(collector.metadata.machTimebase.denom > 0); }
-  for (const row of first.processes) { assert(row.memoryBytes > 0); assert(row.handles > 0); assert(row.cpuTimeMs >= 0); }
-  root.stdin.write('grow\n');
-  await waitFor(() => observed.filter(event => event.event === 'grew').length === 3);
-  await delay(150);
-  const second = await collector.sample();
-  assert(second.monotonicMs > first.monotonicMs);
-  for (const row of second.processes) {
-    const before = first.processes.find(prior => prior.pid === row.pid);
-    assert.equal(row.startIdentity, before.startIdentity);
-    assert(row.cpuTimeMs > before.cpuTimeMs, 'busy workload must increase cumulative self CPU');
-    assert(row.memoryBytes > before.memoryBytes + 16 * 1024 * 1024, 'touched private allocation must grow the OS memory metric');
+  const sample = async () => (lastSample = await collector.sample());
+  try {
+    await collector.setRoot(root.pid);
+    await waitFor(observed => observed.filter(event => event.event === 'ready').length === 3);
+    const pids = Object.fromEntries((await events()).filter(event => event.event === 'ready').map(event => [event.mode, event.pid]));
+    const first = await sample();
+    assert.deepEqual(new Set(first.processes.map(row => row.pid)), new Set(Object.values(pids)));
+    assert.equal(first.coverage.processCountersComplete, true);
+    assert.equal(first.processes.find(row => row.pid === pids.middle).parentPid, pids.root);
+    assert.equal(first.processes.find(row => row.pid === pids.leaf).parentPid, pids.middle);
+    if (process.platform === 'linux') assert.equal(collector.metadata.clockTicksPerSecond > 0, true);
+    if (process.platform === 'darwin') { assert(collector.metadata.machTimebase.numer > 0); assert(collector.metadata.machTimebase.denom > 0); }
+    for (const row of first.processes) { assert(row.memoryBytes > 0); assert(row.handles > 0); assert(row.cpuTimeMs >= 0); }
+    phase = 'growth';
+    await Promise.all(modes.map(mode => command(mode, 'grow')));
+    await waitFor(observed => observed.filter(event => event.event === 'grew').length === 3);
+    await delay(150);
+    const second = await sample();
+    assert(second.monotonicMs > first.monotonicMs);
+    assert.equal(second.coverage.processCountersComplete, true);
+    assert.deepEqual(second.processes.map(row => row.pid), first.processes.map(row => row.pid));
+    for (const row of second.processes) {
+      const before = first.processes.find(prior => prior.pid === row.pid);
+      assert.equal(row.startIdentity, before.startIdentity);
+      assert(row.cpuTimeMs > before.cpuTimeMs, 'busy workload must increase cumulative self CPU');
+      assert(row.memoryBytes > before.memoryBytes + 16 * 1024 * 1024, 'touched private allocation must grow the OS memory metric');
+    }
+    phase = 'middle exit';
+    await command('middle', 'exit');
+    await waitFor(observed => observed.some(event => event.mode === 'middle' && event.event === 'exit' && event.code === 0));
+    let reparented;
+    const deadline = Date.now() + 5000;
+    do { await delay(40); reparented = await sample(); }
+    while (Date.now() < deadline && !reparented.processes.some(row => row.pid === pids.leaf && (process.platform === 'win32' ? !reparented.processes.some(other => other.pid === pids.middle) : row.parentPid !== pids.middle)));
+    const leaf = reparented.processes.find(row => row.pid === pids.leaf);
+    assert(leaf && (process.platform === 'win32' || leaf.parentPid !== pids.middle));
+    assert.equal(leaf.startIdentity, first.processes.find(row => row.pid === pids.leaf).startIdentity);
+    assert(!reparented.processes.some(row => row.pid === pids.middle));
+    assert.equal(reparented.coverage.processCountersComplete, true);
+    assert.equal((await events()).some(event => event.mode === 'leaf' && event.event === 'exit'), false);
+    phase = 'root exit';
+    await command('root', 'exit');
+    await exitedRoot;
+    const surviving = await sample();
+    assert.equal(surviving.coverage.rootState, 'exited');
+    assert.equal(surviving.coverage.processCountersComplete, true);
+    assert.equal(surviving.processes.find(row => row.pid === pids.leaf)?.startIdentity, leaf.startIdentity);
+    phase = 'leaf exit';
+    await command('leaf', 'exit');
+    await waitFor(observed => observed.some(event => event.mode === 'leaf' && event.event === 'exit' && event.code === 0));
+    let ended;
+    const exitDeadline = Date.now() + 5000;
+    do { await delay(30); ended = await sample(); } while (ended.processes.length && Date.now() < exitDeadline);
+    assert.deepEqual(ended.processes, []);
+    assert.equal(ended.coverage.rootState, 'exited');
+    assert.equal(ended.coverage.processCountersComplete, true);
+    assert((await events()).filter(event => event.event === 'exit').every(event => event.code === 0));
+    t.diagnostic(JSON.stringify({ evidence: 'native collector smoke only, not product A/B', processCount: first.processes.length,
+      memoryMetric: collector.memoryMetric, cpuDeltaMs: second.processes.map(row => row.cpuTimeMs - first.processes.find(prior => prior.pid === row.pid).cpuTimeMs),
+      memoryGrowthBytes: second.processes.map(row => row.memoryBytes - first.processes.find(prior => prior.pid === row.pid).memoryBytes),
+      sampleDurationMs: [first.sampleDurationMs, second.sampleDurationMs], gpuBytes: first.gpuBytes,
+      gpuCoverage: first.coverage.issues.filter(item => item.scope === 'gpu') }));
+  } catch (error) {
+    t.diagnostic(JSON.stringify({ phase, events: await events(), lastSample, stderr: stderr.join('') }));
+    throw error;
   }
-  root.stdin.write('exit-middle\n');
-  let reparented;
-  const deadline = Date.now() + 5000;
-  do { await delay(40); reparented = await collector.sample(); }
-  while (Date.now() < deadline && !reparented.processes.some(row => row.pid === pids.leaf && (process.platform === 'win32' ? !reparented.processes.some(other => other.pid === pids.middle) : row.parentPid !== pids.middle)));
-  const leaf = reparented.processes.find(row => row.pid === pids.leaf);
-  assert(leaf && (process.platform === 'win32' || leaf.parentPid !== pids.middle));
-  assert(!reparented.processes.some(row => row.pid === pids.middle));
-  root.stdin.write('exit\n');
-  await exitedRoot;
-  const surviving = await collector.sample();
-  assert.equal(surviving.coverage.rootState, 'exited');
-  assert(surviving.processes.some(row => row.pid === pids.leaf));
-  process.kill(pids.leaf, 'SIGKILL');
-  let ended;
-  do { await delay(30); ended = await collector.sample(); } while (ended.processes.length && Date.now() < deadline + 3000);
-  assert.deepEqual(ended.processes, []);
-  assert.equal(ended.coverage.rootState, 'exited');
-  t.diagnostic(JSON.stringify({ evidence: 'native collector smoke only, not product A/B', processCount: first.processes.length,
-    memoryMetric: collector.memoryMetric, cpuDeltaMs: second.processes.map(row => row.cpuTimeMs - first.processes.find(prior => prior.pid === row.pid).cpuTimeMs),
-    memoryGrowthBytes: second.processes.map(row => row.memoryBytes - first.processes.find(prior => prior.pid === row.pid).memoryBytes),
-    sampleDurationMs: [first.sampleDurationMs, second.sampleDurationMs], gpuBytes: first.gpuBytes,
-    gpuCoverage: first.coverage.issues.filter(item => item.scope === 'gpu') }));
 });

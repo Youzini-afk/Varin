@@ -99,10 +99,59 @@ test('application output cannot forge private ownership receipts', native, async
   assert.equal(result.rootExit.code, 7);
 });
 
-test('complete launch environment is not overlaid with guardian secrets', native, async () => {
-  const owner = await launchScript(`if(Object.keys(process.env).some(key=>key!=='ONLY_CHILD_VALUE')) process.exit(9);`, [], { env: { ONLY_CHILD_VALUE: 'present' } });
-  const result = await owner.settle();
-  assert.equal(result.clean, true);
+test('complete launch environment is not overlaid with guardian secrets', native, async t => {
+  const canary = `VARIN_OWNER_TEST_CANARY_${randomUUID().replaceAll('-', '_')}`;
+  assert.equal(Object.hasOwn(process.env, canary), false);
+  process.env[canary] = 'synthetic-guardian-only';
+  async function inspectEnvironment(env) {
+    const root = await fixture(), report = path.join(root, 'environment-probe.json');
+    let owner;
+    try {
+      // Compare every explicitly supplied value and reject every other key.
+      // Record only fixed booleans, never arbitrary environment names or values.
+      owner = await launchScript(`const keys=Object.keys(process.env),expected=JSON.parse(process.argv[3]);
+const report={scriptStarted:true,suppliedValuesMatch:Object.keys(expected).every(key=>process.env[key]===expected[key]),
+guardianCanaryPresent:Object.hasOwn(process.env,process.argv[2]),
+unexpectedKeysPresent:keys.some(key=>!Object.hasOwn(expected,key)),
+systemRootPresent:keys.some(key=>key.toUpperCase()==='SYSTEMROOT'),
+systemDrivePresent:keys.some(key=>key.toUpperCase()==='SYSTEMDRIVE'),
+otherUnexpectedKeysPresent:keys.some(key=>!['ONLY_CHILD_VALUE','SYSTEMROOT','SYSTEMDRIVE'].includes(key.toUpperCase()))};
+require('fs').writeFileSync(process.argv[1],JSON.stringify(report));
+if(report.unexpectedKeysPresent) process.exitCode=9;
+else if(!report.suppliedValuesMatch) process.exitCode=10;`, [report, canary, JSON.stringify(env)], { env });
+      const result = await owner.settle();
+      const probe = await fs.readFile(report, 'utf8').then(JSON.parse, error => {
+        if (error.code !== 'ENOENT') throw error;
+        return { probeReportMissing: true };
+      });
+      return { clean: result.clean, rootExit: result.rootExit, ownershipDrainConfirmed: result.ownershipDrainConfirmed, forced: result.forced, probe };
+    } catch (error) {
+      owner ??= error.owner;
+      throw error;
+    } finally { await cleanFixture(root, owner); }
+  }
+  try {
+    const env = { ONLY_CHILD_VALUE: 'present' };
+    let withoutSystemRoot;
+    if (process.platform === 'win32') {
+      // Node's Winsock initialization requires SYSTEMROOT. The caller supplies
+      // it explicitly; the native owner must not add this or any other key.
+      // https://github.com/nodejs/node/blob/v24.22.2/deps/uv/src/win/process.c
+      const systemRoot = process.env.SYSTEMROOT;
+      assert.equal(typeof systemRoot === 'string' && systemRoot.length > 0, true, 'Windows Node fixture requires an explicit SYSTEMROOT');
+      // This incomplete input is diagnostic only, never an isolation pass gate.
+      withoutSystemRoot = await inspectEnvironment(env);
+      env.SYSTEMROOT = systemRoot;
+    }
+    const result = await inspectEnvironment(env);
+    const diagnostic = JSON.stringify({ suppliedEnvironment: result, withoutSystemRoot });
+    if (process.platform === 'win32') t.diagnostic(diagnostic);
+    assert.equal(result.clean, true, diagnostic);
+    assert.deepEqual(result.probe, { scriptStarted: true, suppliedValuesMatch: true, guardianCanaryPresent: false,
+      unexpectedKeysPresent: false, systemRootPresent: process.platform === 'win32', systemDrivePresent: false, otherUnexpectedKeysPresent: false }, diagnostic);
+  } finally {
+    delete process.env[canary];
+  }
 });
 
 test('immediate double fork and nested subreaper remain owned', linux, async () => {
