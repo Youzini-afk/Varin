@@ -758,7 +758,14 @@ export class ThreadAdapter {
   async navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }, signal?: AbortSignal) {
     await this.requireIdentity(input);
     const { runtime: _, ...command } = input;
-    return this.runtime.navigate(command, signal);
+    if (await this.runtime.navigationReceipt({ threadId: input.threadId, branchId: input.branchId, key: input.key }, signal)) {
+      return this.runtime.navigate(command, signal);
+    }
+    const target = `preserved:navigation:${Buffer.byteLength(input.branchId)}:${input.branchId}:${input.key}`;
+    const preservedPlan = !input.undoOf && input.expectedHeadId && input.expectedHeadId !== input.targetHeadId
+      && this.plans && await this.plans.supports(input)
+      ? await this.plans.capture(input, input.expectedHeadId, target, signal) : undefined;
+    return this.runtime.navigate({ ...command, ...(preservedPlan ? { preservedPlan } : {}) }, signal);
   }
   async navigationReceipt(input: ThreadIdentity & { key: string }, signal?: AbortSignal) {
     await this.requireIdentity(input);
@@ -1262,12 +1269,21 @@ export class ThreadAdapter {
     return operation;
   }
 
-  async historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
+  async historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
     await this.requireIdentity(identity);
     return this.readHistoryPage(identity.branchId, cursor, signal);
   }
 
   private historyNavigationReader?: HistoryRunNavigationReader;
+  async conversationTree(identity: ThreadIdentity, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.conversationTree({ threadId: identity.threadId, branchId: identity.branchId }, signal);
+  }
+  async treePreview(identity: ThreadIdentity, range: { firstItemId: string; lastItemId: string; query?: string }, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return (this.historyNavigationReader ??= new HistoryRunNavigationReader(this.runtime))
+      .treePreview(identity.branchId, range, signal);
+  }
   async historyRuns(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal) {
     await this.requireIdentity(identity);
     return (this.historyNavigationReader ??= new HistoryRunNavigationReader(this.runtime)).read(identity.branchId, cursor.headId, signal);

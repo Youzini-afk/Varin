@@ -1205,6 +1205,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
         expected_head_id: db.head("main").unwrap(),
         target_head_id: None,
         undo_of: None,
+        preserved_plan: None,
     };
     let navigation = db.prepare_navigation(command).unwrap().load().unwrap();
     db.commit_navigation(navigation).unwrap();

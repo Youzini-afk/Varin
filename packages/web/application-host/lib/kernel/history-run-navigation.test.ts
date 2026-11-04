@@ -26,3 +26,24 @@ it('indexes whole Runs without bodies, extends the index and validates a cached 
   expect((await reader.read('branch', '100')).runs).toEqual([{ runId: 'first', firstItemId: '0', lastItemId: '100' }]);
   await expect(reader.read('branch', '449')).rejects.toThrow('no longer on this branch');
 });
+
+it('previews one tree segment without hydrating tool results and searches beyond the excerpt', async () => {
+  const references: HistoryReference[] = ['user', 'assistant', 'tool', 'assistant'].map((source, index) => ({
+    id: String(index), parent: index ? String(index - 1) : null, thread_id: 'thread', run_id: 'run',
+    source: source as HistoryReference['source'], content_ref: `ref:${index}`,
+  }));
+  const historyPage = vi.fn(async () => ({ head: '3', previous: null, items: references }));
+  const historyItem = vi.fn(async (reference: HistoryReference) => ({ ...reference, provider: null,
+    content: reference.source === 'user' ? { text: 'User request' }
+      : { content: { kind: 'text', text: reference.id === '1' ? `${'x'.repeat(500)}needle` : 'Final answer' } },
+  }));
+  const reader = new HistoryRunNavigationReader({ historyPage, historyItem });
+  expect(await reader.treePreview('branch', { firstItemId: '0', lastItemId: '3' }))
+    .toEqual({ user: 'User request', assistant: 'Final answer', activity: 'Final answer' });
+  expect(historyItem.mock.calls.map(([item]) => item.id)).toEqual(['3', '0']);
+  historyItem.mockClear();
+  const result = await reader.treePreview('branch', { firstItemId: '0', lastItemId: '3', query: 'needle' });
+  expect(result.matched).toBe(true);
+  expect(result.assistant).toContain('needle');
+  expect(historyItem.mock.calls.some(([item]) => item.source === 'tool')).toBe(false);
+});

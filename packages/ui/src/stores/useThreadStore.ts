@@ -103,7 +103,9 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
   async resolveThread(target) {
     requireAPI(); const owner = binding;
     let thread = get().threads.find(thread => thread.thread_id === target.threadId);
-    if (!thread) { await get().loadCatalog(); thread = get().threads.find(thread => thread.thread_id === target.threadId); }
+    if (!thread || target.branchId && !thread.branches.some(branch => branch.branch_id === target.branchId)) {
+      await get().loadCatalog(); thread = get().threads.find(thread => thread.thread_id === target.threadId);
+    }
     if (owner !== binding) throw new Error('Conversation navigation was superseded');
     if (!thread) throw new Error('Conversation is unavailable on this Host');
     const identity = resolveCatalogIdentity(get().hostKey, thread, target);

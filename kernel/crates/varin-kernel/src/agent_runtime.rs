@@ -1420,7 +1420,12 @@ pub(crate) fn spawn(
                                         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
                                     }
                                     let p: NavigationParams = serde_json::from_value(params)?;
-                                    let command = varin_runtime::catalog::navigation::NavigationCommand { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id, expected_head_id:p.expected_head_id.0, target_head_id:p.target_head_id.0, undo_of:p.undo_of };
+                                    let preserved_plan = p.preserved_plan.map(|value| varin_runtime::catalog::plan::PlanForkCapture {
+                                        source_thread_id: value.source_thread_id, source_branch_id: value.source_branch_id,
+                                        target_branch_id: value.target_branch_id, head_id: value.head_id.0,
+                                        inherited_ref: value.inherited_ref.0, captured_ref: value.captured_ref.0,
+                                    });
+                                    let command = varin_runtime::catalog::navigation::NavigationCommand { key:p.key, thread_id:p.thread_id, branch_id:p.branch_id, expected_head_id:p.expected_head_id.0, target_head_id:p.target_head_id.0, undo_of:p.undo_of, preserved_plan };
                                     let preparation = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_navigation(command).map_err(domain)?;
                                     let prepared = preparation.load().map_err(domain)?;
                                     let _order = input_commands::await_input_order(order)?;
@@ -2379,6 +2384,25 @@ pub(crate) fn spawn(
                                 done(&response_id); let _ = response_sender.send(response);
                             })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
                             deferred = true; return Ok(Value::Null);
+                        }
+                        if method == "runtime.thread.tree" {
+                            let p: ConversationTreeParams = serde_json::from_value(params)?;
+                            let read = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_conversation_tree(&p.thread_id, &p.branch_id).map_err(domain)?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)
+                                    .and_then(|tree| serde_json::to_value(tree).map_err(Into::into));
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
                         if method == "runtime.history.page" {
                             let p: HistoryPageParams = serde_json::from_value(params)?;

@@ -1854,6 +1854,8 @@ pub mod observations;
 
 #[path = "catalog_history.rs"]
 pub mod history_views;
+#[path = "catalog_conversation_tree.rs"]
+pub mod conversation_tree;
 #[path = "catalog_media.rs"]
 pub mod media;
 

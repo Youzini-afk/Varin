@@ -26,7 +26,7 @@ import { captureDialogOrigin } from '@/lib/motion/dialogOrigin';
 export type { MotionPreference } from '@/lib/motion/preference';
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
-export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
+export type ContextPanelMode = 'tree' | 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live' | 'dialogue';
@@ -296,7 +296,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui' && candidate.mode !== 'material') {
+    if (candidate.mode !== 'tree' && candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui' && candidate.mode !== 'material') {
       continue;
     }
 
@@ -1040,9 +1040,6 @@ export const useUIStore = create<UIStore>()(
         // Explicit child-page requests continue to target their exact mode.
         openContextSurface: (directory, mode) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
 
           const state = get();
           const panelState = state.contextPanelByDirectory[normalizedDirectory];
@@ -1078,9 +1075,6 @@ export const useUIStore = create<UIStore>()(
 
         openContextPanelTab: (directory, tab) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
@@ -1239,7 +1233,7 @@ export const useUIStore = create<UIStore>()(
         setActiveContextPanelTab: (directory, tabID) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedTabID = (tabID || '').trim();
-          if (!normalizedDirectory || !normalizedTabID) {
+          if (!normalizedTabID) {
             return;
           }
 
@@ -1275,7 +1269,7 @@ export const useUIStore = create<UIStore>()(
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedActiveTabID = (activeTabID || '').trim();
           const normalizedOverTabID = (overTabID || '').trim();
-          if (!normalizedDirectory || !normalizedActiveTabID || !normalizedOverTabID) {
+          if (!normalizedActiveTabID || !normalizedOverTabID) {
             return;
           }
 
@@ -1303,7 +1297,7 @@ export const useUIStore = create<UIStore>()(
         closeContextPanelTab: (directory, tabID) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedTabID = (tabID || '').trim();
-          if (!normalizedDirectory || !normalizedTabID) {
+          if (!normalizedTabID) {
             return;
           }
 
@@ -1329,9 +1323,6 @@ export const useUIStore = create<UIStore>()(
 
         closeContextPanel: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
@@ -1353,7 +1344,6 @@ export const useUIStore = create<UIStore>()(
 
         toggleContextPanel: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) return;
           const state = get();
           const current = state.contextPanelByDirectory[normalizedDirectory];
           if (current?.isOpen) {
@@ -1370,9 +1360,6 @@ export const useUIStore = create<UIStore>()(
 
         toggleContextPanelExpanded: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
@@ -1391,9 +1378,6 @@ export const useUIStore = create<UIStore>()(
 
         setContextPanelWidth: (directory, mode, width) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];

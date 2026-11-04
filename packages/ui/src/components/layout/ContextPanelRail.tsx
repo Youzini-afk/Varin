@@ -126,7 +126,7 @@ export const ContextPanelRail: React.FC = () => {
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
 
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useUIStore((state) => state.contextPanelByDirectory[directoryKey]);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
@@ -172,10 +172,6 @@ export const ContextPanelRail: React.FC = () => {
 
     setContextRailOrder(arrayMove(orderedIds, fromIndex, toIndex));
   }, [setContextRailOrder]);
-
-  if (!directoryKey) {
-    return null;
-  }
 
   return (
     <nav

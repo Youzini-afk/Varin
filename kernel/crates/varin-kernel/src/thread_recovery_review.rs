@@ -360,6 +360,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         expected_head_id: db.head("main").unwrap(),
         target_head_id: None,
         undo_of: None,
+        preserved_plan: None,
     };
     let preparation = db.prepare_navigation(command).unwrap();
     drop(db);

@@ -13,6 +13,8 @@ pub struct NavigationCommand {
     /// Only the exact original receipt may authorize returning to a removed descendant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undo_of: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preserved_plan: Option<plan::PlanForkCapture>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -55,11 +57,22 @@ pub struct PreparedNavigation {
     command: NavigationCommand,
     epoch: u64,
     checkpoint: Option<(context::CheckpointMetadata, Value)>,
+    preserved_checkpoint: Option<(context::CheckpointMetadata, Value)>,
     previous: Option<NavigationReceipt>,
     _publication: crate::content::ContentPublication,
 }
 fn command_key(branch: &str, key: &str) -> String {
     format!("navigation:{}:{branch}:{key}", branch.len())
+}
+fn preserved_branch(command: &NavigationCommand) -> String {
+    format!("preserved:{}", command_key(&command.branch_id, &command.key))
+}
+fn intent(command: &NavigationCommand) -> Result<Value> {
+    let mut value = serde_json::to_value(command)?;
+    // The plan capture is derived during preparation. Retries retain the user
+    // command identity even after the source plan/context has advanced.
+    value.as_object_mut().unwrap().remove("preservedPlan");
+    Ok(value)
 }
 fn receipt(db: &Connection, branch: &str, key: &str) -> Result<Option<(Value, NavigationReceipt)>> {
     let row: Option<(String, String)> = db
@@ -79,7 +92,7 @@ fn receipt(db: &Connection, branch: &str, key: &str) -> Result<Option<(Value, Na
 }
 fn existing(db: &Connection, command: &NavigationCommand) -> Result<Option<NavigationReceipt>> {
     if let Some((original, mut result)) = receipt(db, &command.branch_id, &command.key)? {
-        if original != crate::content::ContentStore::reference(&serde_json::to_value(command)?)? {
+        if original != crate::content::ContentStore::reference(&intent(command)?)? {
             return Err(RuntimeError::Conflict(
                 "navigation key has different input".into(),
             ));
@@ -198,6 +211,17 @@ impl Catalog {
             ));
         }
         let previous = existing(&self.db, &command)?;
+        if let Some(capture) = &command.preserved_plan {
+            let source = self.plan_view(&command.branch_id, command.expected_head_id.as_deref())?;
+            if command.undo_of.is_some() || capture.source_thread_id != command.thread_id
+                || capture.source_branch_id != command.branch_id
+                || capture.target_branch_id != preserved_branch(&command)
+                || capture.head_id != command.expected_head_id
+                || capture.inherited_ref != source.inherited_ref
+            {
+                return Err(RuntimeError::Conflict("preserved plan differs from the navigation source".into()));
+            }
+        }
         if previous.is_none()
             && idle(&self.db, &command.thread_id, &command.branch_id)? != command.expected_head_id
         {
@@ -224,6 +248,7 @@ impl Catalog {
             command,
             epoch,
             checkpoint,
+            preserved_checkpoint,
             previous,
             _publication,
         } = prepared;
@@ -245,6 +270,26 @@ impl Catalog {
             return Err(RuntimeError::Conflict(
                 "navigation expected head changed".into(),
             ));
+        }
+        // Retain the old route in the same transaction as moving its head. The
+        // immutable history and content stay shared, including after more input.
+        if command.undo_of.is_none() && command.expected_head_id.is_some()
+            && command.expected_head_id != command.target_head_id
+        {
+            let target = preserved_branch(&command);
+            tx.execute("INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
+                params![target, command.thread_id, command.expected_head_id])?;
+            tx.execute("INSERT INTO memory_states(branch_id,body) SELECT ?1,body FROM memory_states WHERE branch_id=?2",
+                params![target, command.branch_id])?;
+            if let Some((metadata, reference)) = preserved_checkpoint {
+                context::publish_metadata(&tx, &metadata, &reference)?;
+            }
+            let mut creation = json!({
+                "source": command.branch_id, "head": command.expected_head_id,
+                "reason": "navigation", "navigationKey": command.key,
+            });
+            if let Some(capture) = &command.preserved_plan { creation["planCapture"] = serde_json::to_value(capture)?; }
+            event(&tx, &target, 1, "branch.created", creation)?;
         }
         if let Some((checkpoint, reference)) = checkpoint {
             context::publish_metadata(&tx, &checkpoint, &reference)?;
@@ -292,7 +337,7 @@ impl Catalog {
             params![
                 command_key(&command.branch_id, &command.key),
                 encode(&crate::content::ContentStore::reference(
-                    &serde_json::to_value(&command)?
+                    &intent(&command)?
                 )?)?,
                 encode(&result)?
             ],
@@ -361,12 +406,13 @@ impl NavigationPreparation {
                 command,
                 epoch,
                 checkpoint: None,
+                preserved_checkpoint: None,
                 previous,
                 _publication,
             });
         }
         let db = history_views::current_history_owner(&database, epoch)?;
-        content.save(&serde_json::to_value(&command)?)?;
+        content.save(&intent(&command)?)?;
         if let Some(undo) = &command.undo_of {
             let (_, original) = receipt(&db, &command.branch_id, undo)?
                 .ok_or_else(|| RuntimeError::NotFound("original navigation receipt".into()))?;
@@ -400,9 +446,22 @@ impl NavigationPreparation {
             &content, remaining,
         )?)
         .map_err(|e| RuntimeError::Invalid(e.to_string()))?;
+        let mut preserved_checkpoint = None;
         let checkpoint = checkpoint
             .map(|read| -> Result<_> {
                 let mut value = read.load()?;
+                if command.undo_of.is_none() && command.expected_head_id.is_some()
+                    && command.expected_head_id != command.target_head_id
+                {
+                    let mut saved = value.clone();
+                    saved.proposal.branch_id = preserved_branch(&command);
+                    saved.id = format!("preserved-context:{}", command_key(&command.branch_id, &command.key));
+                    saved.proposal.key = saved.id.clone();
+                    saved.proposal.expected_revision = 0;
+                    saved.revision = 1;
+                    let reference = saved.save(&content)?;
+                    preserved_checkpoint = Some((context::CheckpointMetadata::from(&saved), reference));
+                }
                 value.proposal.expected_revision = value.revision;
                 value.revision += 1;
                 value.id = format!(
@@ -438,6 +497,7 @@ impl NavigationPreparation {
             command,
             epoch,
             checkpoint,
+            preserved_checkpoint,
             previous,
             _publication,
         })

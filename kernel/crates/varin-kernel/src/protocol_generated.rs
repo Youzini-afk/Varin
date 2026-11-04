@@ -1150,6 +1150,7 @@ pub(crate) struct NavigationParams {
     pub(crate) expected_head_id: RequiredNullable<String>,
     pub(crate) target_head_id: RequiredNullable<String>,
     pub(crate) undo_of: Option<String>,
+    pub(crate) preserved_plan: Option<PlanForkCaptureParams>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1257,6 +1258,13 @@ pub(crate) struct HistoryPageParams {
     pub(crate) before_id: Option<String>,
     pub(crate) after_id: Option<String>,
     pub(crate) limit: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConversationTreeParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4692,6 +4700,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.history.page" => serde_json::from_value::<HistoryPageParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.tree" => serde_json::from_value::<ConversationTreeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.history.body" => serde_json::from_value::<HistoryBodyParams>(params.clone())

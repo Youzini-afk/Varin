@@ -37,6 +37,7 @@ fn original_navigation_receipt_is_cas_bound_and_survives_new_history() {
         expected_head_id: second.clone(),
         target_head_id: first.clone(),
         undo_of: None,
+        preserved_plan: None,
     };
     let prepared = db
         .prepare_navigation(command.clone())
@@ -47,12 +48,21 @@ fn original_navigation_receipt_is_cas_bound_and_survives_new_history() {
     assert!(!receipt.already_applied);
     assert_eq!(db.head("main").unwrap(), first);
     let third = submit(&mut db, "third");
+    let tree = db.capture_conversation_tree("thread", "main").unwrap().load(&|| false).unwrap();
+    assert_eq!(tree.routes.len(), 2);
+    let preserved = tree.routes.iter().find(|route| route.preserved).unwrap();
+    assert_eq!(preserved.head_id, second);
+    assert_eq!(db.history(&preserved.branch_id).unwrap().last().unwrap().content["text"], "second");
+    assert_eq!(tree.nodes.len(), 3, "the common prefix appears only once");
+    assert_eq!(tree.nodes[1].parent_id, tree.nodes[2].parent_id);
     let prepared = db
         .prepare_navigation(command.clone())
         .unwrap()
         .load()
         .unwrap();
     assert!(db.commit_navigation(prepared).unwrap().already_applied);
+    assert_eq!(db.capture_conversation_tree("thread", "main").unwrap().load(&|| false).unwrap().routes.len(), 2,
+        "an uncertain retry must not preserve the route twice");
     assert_eq!(
         db.head("main").unwrap(),
         third,
@@ -95,6 +105,9 @@ fn original_navigation_receipt_is_cas_bound_and_survives_new_history() {
     assert_eq!(db.head("main").unwrap(), second);
     drop(db);
     let db = Catalog::open(&path).unwrap();
+    let tree = db.capture_conversation_tree("thread", "main").unwrap().load(&|| false).unwrap();
+    assert_eq!(tree.routes.iter().filter(|route| route.preserved).count(), 2);
+    assert!(tree.nodes.iter().any(|node| Some(&node.last_item_id) == second.as_ref()));
     assert_eq!(
         db.latest_navigation_receipt("thread", "main")
             .unwrap()

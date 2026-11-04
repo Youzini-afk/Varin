@@ -12,6 +12,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useTimelineViewStore } from './timelineViewStore';
+import { useConversationTreeStore } from '@/stores/useConversationTreeStore';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   DEFAULT_CHAT_TIMELINE_VIEW,
@@ -982,10 +983,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     }
   }, [props.sessionId, takeManualOwnership, handleReturnToLatest, t]);
 
-  return (
-    <ToolTargetScope entries={props.entries} executions={props.toolExecutions}>
-    <ChatToolDisclosureScope key={props.sessionId} sessionId={props.sessionId}><ChatContextMenu {...props} projection={projection}
-      onRevealEntry={async (entryId) => {
+  const revealEntry = async (entryId: string) => {
         const source = props.entries.find((entry) => entry.id === entryId);
         const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
         const dialogueBlock = dialogueMessages ? blocks.items.find(block => block.kind === 'dialogue'
@@ -1036,7 +1034,30 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         const inset = sticky && !sticky.contains(element) ? sticky.getBoundingClientRect().height : 0;
         await list.scrollToOffset({ animated: false, offset: Math.max(0,
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - CHAT_TIMELINE_ANCHOR_OFFSET_PX) });
-      }}>
+  };
+  const revealEntryRef = React.useRef(revealEntry); revealEntryRef.current = revealEntry;
+  const treeNavigation = useConversationTreeStore(state => state.navigation[props.sessionId]);
+  const hasNavigation = Boolean(props.navigation);
+  React.useEffect(() => {
+    if (treeNavigation?.kind !== 'reveal' || !hasNavigation || !scrollViewport) return;
+    const controller = new AbortController();
+    takeManualOwnership();
+    void (async () => {
+      await navigationRef.current?.ensureItem(treeNavigation.entryId, controller.signal);
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (controller.signal.aborted) return;
+      await revealEntryRef.current(treeNavigation.entryId);
+    })().catch(cause => {
+      if (!controller.signal.aborted) toast.error(cause instanceof Error ? cause.message : t('chat.history.unavailable'));
+    }).finally(() => {
+      if (!controller.signal.aborted) useConversationTreeStore.getState().consume(props.sessionId, treeNavigation.token);
+    });
+    return () => controller.abort();
+  }, [treeNavigation, props.sessionId, hasNavigation, scrollViewport, takeManualOwnership, t]);
+
+  return (
+    <ToolTargetScope entries={props.entries} executions={props.toolExecutions}>
+    <ChatToolDisclosureScope key={props.sessionId} sessionId={props.sessionId}><ChatContextMenu {...props} projection={projection} onRevealEntry={revealEntry}>
     <div ref={surfaceRef} className="conversation-timeline-surface relative flex min-h-0 flex-1">
       {promptNavigatorEnabled && props.navigation ? <ChatTurnNavigator ref={turnNavigatorRef} runs={props.navigation.runs}
         initialRunId={props.navigation.runs.at(-1)?.runId} readPreview={readRunPreview} onSelect={selectRun} /> : null}

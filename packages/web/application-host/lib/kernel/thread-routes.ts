@@ -179,6 +179,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'goal/control': ['runtime', 'threadId', 'branchId', 'goalId', 'expectedRevision', 'action'],
     'goal/list': ['runtime', 'threadId', 'branchId'],
     'plan/read': ['runtime', 'threadId', 'branchId'],
+    tree: ['runtime', 'threadId', 'branchId'],
+    'tree/preview': ['runtime', 'threadId', 'branchId', 'firstItemId', 'lastItemId', 'query'],
     'plan/update': ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'expectedRef', 'content'],
     'recovery/source': ['runtime', 'threadId', 'branchId', 'entryId'],
     'navigation/prepare': ['runtime', 'threadId', 'branchId', 'entryId'],
@@ -516,6 +518,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('create', body => adapter.create(text(body.key)));
   post('recovery/source', (body, signal) => adapter.recoverySource({ ...identity(body), entryId: text(body.entryId) }, signal));
   post('navigation/prepare', (body, signal) => adapter.prepareNavigation({ ...identity(body), entryId: text(body.entryId) }, signal));
+  post('tree', (body, signal) => adapter.conversationTree(identity(body), signal));
+  post('tree/preview', (body, signal) => adapter.treePreview(identity(body), { firstItemId: text(body.firstItemId), lastItemId: text(body.lastItemId), ...(body.query === undefined ? {} : { query: text(body.query) }) }, signal));
   post('navigation/receipt', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
   post('navigate', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
@@ -556,7 +560,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return adapter.submit(input);
   });
-  post('history/page', (body, signal) => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
+  post('history/page', (body, signal) => adapter.historyPage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
   post('history/runs', (body, signal) => adapter.historyRuns(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
   post('history/run-preview', (body, signal) => adapter.historyRunPreview(identity(body), { headId: text(body.headId), runId: text(body.runId) }, signal));
   post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));

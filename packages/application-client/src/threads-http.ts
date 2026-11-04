@@ -53,6 +53,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return value;
   };
   return {
+    conversationTree: (identity, signal) => post('tree', identity, signal),
+    treePreview: (identity, range, signal) => post('tree/preview', { ...identity, ...range }, signal),
     workflows: {
       memoryScopes: (identity, signal) => post('memory/scopes', identity, signal),
       remember: input => post('memory/remember', input),

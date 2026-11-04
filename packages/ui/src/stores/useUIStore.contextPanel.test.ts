@@ -7,6 +7,19 @@ beforeEach(() => {
 });
 
 describe('useUIStore context panel tabs', () => {
+  test('opens and restores a conversation tree without a project directory', () => {
+    const identity = { runtime: 'agent' as const, threadId: 'chat-only', branchId: 'main' };
+    const store = useUIStore.getState();
+    store.openContextPanelTab('', { mode: 'tree', thread: identity });
+    expect(useUIStore.getState().contextPanelByDirectory['']).toMatchObject({ isOpen: true, activeTabId: 'tree' });
+    store.toggleContextPanelExpanded('');
+    expect(useUIStore.getState().contextPanelByDirectory['']?.expanded).toBe(true);
+    store.closeContextPanel('');
+    store.setActiveContextPanelTab('', 'tree');
+    expect(useUIStore.getState().contextPanelByDirectory['']?.tabs[0]?.thread).toEqual(identity);
+    store.closeContextPanelTab('', 'tree');
+    expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(false);
+  });
   test('restores supported tabs and discards the retired preview surface', () => {
     const directory = '/repo';
     useUIStore.getState().openContextBrowser(directory, 'http://localhost:3000');

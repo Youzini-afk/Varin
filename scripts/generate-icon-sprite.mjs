@@ -21,6 +21,10 @@ const remixPath = resolve(dirname(uiRequire.resolve("@remixicon/react")), "index
 const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 
 const customIconData = new Map([
+  [
+    "conversation-tree",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3" width="8" height="5" rx="1.5"/><path d="M7.5 8v10m0-6h8a3 3 0 0 1 3 3v3"/><circle cx="7.5" cy="20" r="2"/><circle cx="18.5" cy="20" r="2"/></g>`,
+  ],
   // Workbench navigation glyphs share a 1.8px rounded stroke and clear small-size silhouettes.
   [
     "workbench-agent",

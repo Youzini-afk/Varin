@@ -23,8 +23,6 @@ export const ContextPanelControls: React.FC = () => {
   const panelLabel = t(panelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel');
   const buttonClass = 'workbench-icon-button app-region-no-drag flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-  if (!directoryKey) return null;
-
   return <div className="app-region-no-drag flex shrink-0 items-center gap-0.5">
     <Tooltip>
       <TooltipTrigger asChild>

@@ -35,6 +35,8 @@ vi.mock('@/lib/bots', async original => ({
   deleteBot: vi.fn(),
 }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: {} }) }));
+vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: () => <aside data-conversation-tree="true" /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -144,7 +146,7 @@ describe('Bot workbench', () => {
     state.open.mockReset();
     state.openWork.mockReset().mockResolvedValue(undefined);
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general' });
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {} });
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -158,6 +160,17 @@ describe('Bot workbench', () => {
     await click('sessions.sidebar.footer.actions.settings');
     expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
     expect(useUIStore.getState().settingsPage).toBe('appearance');
+  });
+  it('opens the current Bot conversation tree without a project and keeps its exit mounted', async () => {
+    await render();
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="chat.tree.title"]')!;
+    expect(toggle).not.toBeNull();
+    await act(async () => toggle.click());
+    expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(true);
+    expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
+    await act(async () => toggle.click());
+    expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(false);
+    expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
   });
 
   it('keeps a staged candidate inert and leaves the ordinary conversation hidden', async () => {

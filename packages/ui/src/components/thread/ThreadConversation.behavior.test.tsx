@@ -197,7 +197,7 @@ function fixture(active = false) {
   });
   const listeners = new Set<Parameters<ThreadsAPI['observe']>[1]>();
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { conversationTree: unused, treePreview: unused, attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -3466,14 +3466,20 @@ it('thread recovery restores the owner-selected head and original image draft, t
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.fork).not.toHaveBeenCalled(); expect(f.api.goals.start).not.toHaveBeenCalled();
 });
 
-it('thread recovery retains assistant content and current draft while respecting the owner-selected boundary', async () => {
+it('conversation tree recovery retains assistant content and the current draft at the owner-selected boundary', async () => {
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'Keep this draft');
   await act(async () => button('Open conversation history').click());
-  const assistant = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(value => value.textContent?.includes('Retained assistant answer'))!;
-  await act(async () => assistant.dispatchEvent(new window.Event('dblclick', { bubbles: true })));
+  const panel = Object.values(useUIStore.getState().contextPanelByDirectory).find(panel => panel.tabs.some(tab => tab.mode === 'tree'));
+  expect(panel?.tabs.find(tab => tab.mode === 'tree')?.thread).toEqual(identity);
+  expect(f.prepareNavigation).not.toHaveBeenCalled();
+  const { useConversationTreeStore } = await import('@/stores/useConversationTreeStore');
+  const { threadComposerKey, threadHostKey } = await import('@/stores/useThreadStore');
+  await act(async () => useConversationTreeStore.getState().request(threadComposerKey(threadHostKey(), identity), {
+    kind: 'recover', entryId: f.assistant.id, runId: f.assistant.run_id,
+  }));
   expect(f.prepareNavigation).toHaveBeenCalledWith({ ...identity, entryId: f.assistant.id });
   expect(container.querySelectorAll('article')).toHaveLength(1);
   expect(container.textContent).toContain('Retained assistant answer');

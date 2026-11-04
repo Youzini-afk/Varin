@@ -49,6 +49,7 @@ const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/P
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
 const ThreadFamilyPanel = lazyWithChunkRecovery(() => import('./ThreadFamilyPanel').then(module => ({ default: module.ThreadFamilyPanel })));
+const ConversationTreePanel = lazyWithChunkRecovery(() => import('../thread/ConversationTreePanel').then(module => ({ default: module.ConversationTreePanel })));
 const MaterialReaderPanel = lazyWithChunkRecovery(() => import('./MaterialReaderPanel').then(module => ({ default: module.MaterialReaderPanel })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 1;
@@ -113,6 +114,7 @@ const getModeLabel = (
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'threads') return t('collaboration.title');
+  if (mode === 'tree') return t('chat.tree.title');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
@@ -186,6 +188,7 @@ const getTabLabel = (
 const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'material') return <Icon name="book-2" className="h-3.5 w-3.5" />;
   if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
+  if (tab.mode === 'tree') return <Icon name="conversation-tree" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -391,7 +394,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
   return `${value.slice(0, maxChars - 3)}...`;
 };
 
-export const ContextPanel: React.FC = () => {
+export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[] }> = ({ surfaceModes }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -421,7 +424,7 @@ export const ContextPanel: React.FC = () => {
     useUIStore.getState().openContextPanelTab(directoryKey, { mode: 'git' });
   }, [directoryKey, gitDirectoryScopeKey, setRightSidebarGitDirectory]);
 
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useUIStore((state) => state.contextPanelByDirectory[directoryKey]);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -436,8 +439,10 @@ export const ContextPanel: React.FC = () => {
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const contextRailOrder = useUIStore(state => state.contextRailOrder);
   const planModeEnabled = useFeatureFlagsStore(state => state.planModeEnabled);
-  const surfaces = React.useMemo(() => availableContextSurfaces(contextRailOrder, tabs, planModeEnabled), [contextRailOrder, tabs, planModeEnabled]);
-  const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const surfaces = React.useMemo(() => availableContextSurfaces(contextRailOrder, tabs, planModeEnabled)
+    .filter(surface => !surfaceModes || surfaceModes.includes(surface.mode)), [contextRailOrder, tabs, planModeEnabled, surfaceModes]);
+  const selectedTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const activeTab = selectedTab && (!surfaceModes || surfaceModes.includes(selectedTab.mode)) ? selectedTab : null;
   const gitPageMode = activeTab?.mode === 'git' || activeTab?.mode === 'pr' || activeTab?.mode === 'diff'
     ? activeTab.mode : null;
   const activeGitDirectory = activeTab?.mode === 'git' ? gitDirectory : activeTab?.targetDirectory ?? gitDirectory;
@@ -541,7 +546,7 @@ export const ContextPanel: React.FC = () => {
   }, []);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
-    if (!isOpen || isExpanded || !directoryKey) {
+    if (!isOpen || isExpanded) {
       return;
     }
 
@@ -567,7 +572,7 @@ export const ContextPanel: React.FC = () => {
       resizeFollowTimerRef.current = null;
     }
     document.documentElement.style.cursor = '';
-    if (directoryKey && activeModeForWidth) {
+    if (activeModeForWidth) {
       setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
     }
     setIsResizing(false);
@@ -629,16 +634,10 @@ export const ContextPanel: React.FC = () => {
   }, [isResizing]);
 
   const handleClose = React.useCallback(() => {
-    if (!directoryKey) {
-      return;
-    }
     closeContextPanel(directoryKey);
   }, [closeContextPanel, directoryKey]);
 
   const handleToggleExpanded = React.useCallback(() => {
-    if (!directoryKey) {
-      return;
-    }
     toggleContextPanelExpanded(directoryKey);
   }, [directoryKey, toggleContextPanelExpanded]);
 
@@ -843,6 +842,8 @@ export const ContextPanel: React.FC = () => {
         ? <ContextPanelContent active={isOpen} identity={activeTab?.thread} jobRunId={activeTab?.targetPath ?? undefined} readOnly={activeTab?.readOnly} />
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel active={isOpen} identity={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
+        : activeTab?.mode === 'tree'
+            ? <ConversationTreePanel active={isOpen} identity={activeTab.thread} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
             ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'material' && activeTab.targetPath && activeTab.thread
@@ -916,21 +917,12 @@ export const ContextPanel: React.FC = () => {
           items={tabItems}
           activeId={activeTab?.id ?? null}
           onSelect={(tabID) => {
-            if (!directoryKey) {
-              return;
-            }
             setActiveContextPanelTab(directoryKey, tabID);
           }}
           onClose={(tabID) => {
-            if (!directoryKey) {
-              return;
-            }
             closeContextPanelTab(directoryKey, tabID);
           }}
           onReorder={(activeTabID, overTabID) => {
-            if (!directoryKey) {
-              return;
-            }
             reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
           }}
           layoutMode="scrollable"

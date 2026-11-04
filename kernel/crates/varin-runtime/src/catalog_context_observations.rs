@@ -790,6 +790,7 @@ mod tests {
                 expected_head_id: Some(first.input_id),
                 target_head_id: None,
                 undo_of: None,
+                preserved_plan: None,
             })
             .unwrap()
             .load()

@@ -208,6 +208,25 @@ export interface ThreadHistoryRuns {
   head: string | null;
   runs: ThreadHistoryRun[];
 }
+/** Shared history topology. Node IDs stay stable as an active turn grows. */
+export interface ThreadConversationTree {
+  threadId: string;
+  mainBranchId: string;
+  routes: Array<{ branchId: string; headId: string | null; nodeId: string | null;
+    sourceBranchId: string | null; forkHeadId: string | null; preserved: boolean; activeRunId: string | null }>;
+  nodes: ThreadConversationTreeNode[];
+  children: Array<{ nodeId: string | null; runId: string; threadId: string; branchId: string; name: string; avatar: string | null }>;
+}
+export interface ThreadConversationTreeNode {
+  id: string;
+  parentId: string | null;
+  runId: string;
+  firstItemId: string;
+  lastItemId: string;
+  branchId: string;
+  itemCount: number;
+}
+export interface ThreadTreePreview { user: string; assistant: string; activity: string; matched?: boolean }
 /** Original model receipts through the displayed history cut, once per ended Run. */
 export interface ThreadRunUsage {
   runId: string;
@@ -573,8 +592,10 @@ export interface ThreadsAPI {
   sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */
   mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
-  historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage>;
+  historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage>;
   historyRuns(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal): Promise<ThreadHistoryRuns>;
+  conversationTree(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadConversationTree>;
+  treePreview(identity: ThreadIdentity, range: { firstItemId: string; lastItemId: string; query?: string }, signal?: AbortSignal): Promise<ThreadTreePreview>;
   historyRunPreview(identity: ThreadIdentity, cursor: { headId: string; runId: string }, signal?: AbortSignal): Promise<string>;
   /** Secondary read; history bodies never wait for a whole Run's usage scan. */
   historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadRunUsage[]>;

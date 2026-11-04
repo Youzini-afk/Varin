@@ -2095,11 +2095,13 @@ export class AgentRuntimeClient {
     params: HistoryPageParams,
     signal?: AbortSignal,
   ): Promise<HistoryPage> {
-    return this.kernel.agentRuntimeRequest(
-      'runtime.history.page',
-      params,
-      signal,
-    );
+    return this.kernel.agentRuntimeRequest('runtime.history.page', params, signal);
+  }
+  conversationTree(
+    params: import('./protocol.generated.js').ConversationTreeParams,
+    signal?: AbortSignal,
+  ): Promise<import('@varin/application-client').ThreadConversationTree> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.tree', params, signal);
   }
   /** Rehydrate only a body already held by the original Operation. The hash remains an equality check. */
   async inlineCompletion(operation: Operation, signal?: AbortSignal): Promise<OperationCallCompletion<IncomingMedia>> {

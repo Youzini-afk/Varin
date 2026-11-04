@@ -2056,6 +2056,7 @@ fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
                     expected_head_id: Some(terminal_head.clone()),
                     target_head_id: navigation_head.clone(),
                     undo_of: None,
+                    preserved_plan: None,
                 })
                 .unwrap()
                 .load()

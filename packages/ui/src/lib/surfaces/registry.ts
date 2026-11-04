@@ -3,6 +3,7 @@ import type { I18nKey } from '@/lib/i18n';
 import type { ContextPanelMode } from '@/stores/useUIStore';
 
 export type ContextSurfaceId =
+  | 'tree'
   | 'material'
   | 'editor'
   | 'git'
@@ -44,6 +45,7 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
+  { id: 'tree', mode: 'tree', icon: 'conversation-tree', labelKey: 'chat.tree.title', descriptionKey: 'chat.tree.description', availability: 'always', defaultWidthFraction: 0.32 },
   { id: 'material', mode: 'material', icon: 'book-2', labelKey: 'chat.tools.materials', descriptionKey: 'chat.tools.readSource', availability: 'has-content', defaultWidthFraction: 0.38 },
   { id: 'ui', mode: 'ui', icon: 'window', labelKey: 'ui.content.title', descriptionKey: 'ui.content.title', availability: 'has-content', defaultWidthFraction: 0.55 },
   {

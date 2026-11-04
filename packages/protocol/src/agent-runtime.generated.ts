@@ -1623,6 +1623,7 @@ export interface NavigationParams {
   expectedHeadId: string | null;
   targetHeadId: string | null;
   undoOf?: string;
+  preservedPlan?: PlanForkCaptureParams;
 }
 
 export interface NavigationReceiptParams {
@@ -1645,6 +1646,11 @@ export interface NavigationReceipt {
   previousHeadId: string | null;
   headId: string | null;
   alreadyApplied: boolean;
+}
+
+export interface ConversationTreeParams {
+  threadId: string;
+  branchId: string;
 }
 
 export interface HistoryPageParams {

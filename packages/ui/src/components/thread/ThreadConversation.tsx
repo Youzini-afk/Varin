@@ -11,7 +11,11 @@ import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
 import { MessageHandoff } from '../conversation/messageHandoff';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
-import { ChatTreeDialog } from '../conversation/ChatTreeDialog';
+import { openConversationTree } from '@/lib/openConversationTree';
+import { useBotNavigation } from '@/lib/bots';
+import { currentWorkbenchProfileId } from '@/lib/agent-runtime/threadNavigation';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
+import { useConversationTreeStore } from '@/stores/useConversationTreeStore';
 import { ConversationSurface } from '../conversation/ConversationSurface';
 import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { ReferenceNavigationContext, type ReferenceNavigation } from '../conversation/ReferenceNavigation';
@@ -181,7 +185,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const loadError = loadFailure?.scope === viewScope ? loadFailure.message : undefined;
   const loadingTitle = useThreadStore(state => state.threads.find(thread => thread.thread_id === identity.threadId)?.title);
   const resourceFailure = React.useRef<{ snapshotId: string | null; message: string } | null>(null);
-  const [historyOpen, setHistoryOpen] = React.useState(false);
   const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
@@ -189,7 +192,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]); setHistoryOpen(false);
+    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]);
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), publishProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; view.close(); };
@@ -402,12 +405,30 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [questionReveal, setQuestionReveal] = React.useState(0);
   const [questionOperation, setQuestionOperation] = React.useState<string>();
   const permissions = React.useRef<HTMLDivElement>(null);
-  const showOverview = (section: OverviewPeekSection) => {
+  const showOverview = React.useCallback((section: OverviewPeekSection) => {
     if (section === 'context') { openThreadContext(identity, initialWorkspacePath, undefined, readOnly); return; }
     if (botSurface) return;
     setFocusedOverview({ owner: contentOwner, section });
     disclosure(overviewKey, 'overview', true);
-  };
+  }, [identity, initialWorkspacePath, readOnly, botSurface, contentOwner, disclosure, overviewKey]);
+  const treeNavigation = useConversationTreeStore(state => state.navigation[draftKey]);
+  React.useEffect(() => () => {
+    queueMicrotask(() => {
+      const selected = botSurface && currentWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID
+        ? useBotNavigation.getState().entry : useThreadStore.getState().selectedIdentity;
+      if (host === getRuntimeEndpointGeneration() && selected
+          && threadComposerKey(threadHostKey(), selected) === draftKey) return;
+      const command = useConversationTreeStore.getState().navigation[draftKey];
+      if (command) useConversationTreeStore.getState().consume(draftKey, command.token);
+    });
+  }, [draftKey, host, botSurface]);
+  React.useEffect(() => {
+    if (treeNavigation?.kind !== 'recover' || !snapshot || history.connecting) return;
+    useConversationTreeStore.getState().consume(draftKey, treeNavigation.token);
+    if (readOnly || active || pending || draft.pendingInput) { toast.error(t('chat.tree.recoveryBusy')); return; }
+    showOverview('recovery');
+    void recovery.recover(treeNavigation.entryId);
+  }, [treeNavigation, draftKey, snapshot, history.connecting, readOnly, active, pending, draft.pendingInput, recovery, showOverview, t]);
   const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
@@ -416,7 +437,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
     : !launch?.selection.source ? workspacePath : undefined;
   const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath, act,
-    disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => setHistoryOpen(true), onFork: head => forkFrom(head, true),
+    disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => openConversationTree(identity), onFork: head => forkFrom(head, true),
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
   const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),
     refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
@@ -456,13 +477,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <div ref={scrollbarTrack} className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-main relative min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-content flex h-full min-h-0 min-w-0 flex-col">
+    {botSurface && !readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}
     {run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
       {runFailure && <p className="break-words">{runFailureMessage(runFailure, t)}</p>}
     </div>}
     {run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
-    {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
-      onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('recovery'); void recovery.recover(entry.id); }} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     {snapshot && loadError && <p role="alert" className="mx-auto w-full max-w-3xl break-words px-4 py-2 text-sm text-destructive">{loadError}</p>}
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message || loadError)} loadingLabel={[loadingTitle, t('common.loading')].filter(Boolean).join(' · ')}>
@@ -612,7 +632,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       {!botSurface && <AutoReviewBanner identity={identity} />}
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-      <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+      <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => openConversationTree(identity)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
         permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
           ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
           : workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}

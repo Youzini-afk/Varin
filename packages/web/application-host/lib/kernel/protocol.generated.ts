@@ -163,6 +163,7 @@ export type KernelMethod =
   | "runtime.memory.reconcile"
   | "runtime.plan.reconcile"
   | "runtime.history.page"
+  | "runtime.thread.tree"
   | "runtime.history.body"
   | "runtime.output.media.read"
   | "runtime.thread.operations.active"
@@ -2816,6 +2817,7 @@ export interface NavigationParams {
   expectedHeadId: string | null;
   targetHeadId: string | null;
   undoOf?: string;
+  preservedPlan?: PlanForkCaptureParams;
 }
 
 export interface NavigationReceiptParams {
@@ -2838,6 +2840,11 @@ export interface NavigationReceipt {
   previousHeadId: string | null;
   headId: string | null;
   alreadyApplied: boolean;
+}
+
+export interface ConversationTreeParams {
+  threadId: string;
+  branchId: string;
 }
 
 export interface HistoryPageParams {
@@ -7009,6 +7016,7 @@ export type KernelMethodParams = {
   "runtime.memory.reconcile": RunParams;
   "runtime.plan.reconcile": RunParams;
   "runtime.history.page": HistoryPageParams;
+  "runtime.thread.tree": ConversationTreeParams;
   "runtime.history.body": HistoryBodyParams;
   "runtime.output.media.read": MediaReadParams;
   "runtime.thread.operations.active": ThreadOperationsParams;
@@ -8677,6 +8685,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.history.page";
       params: HistoryPageParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.tree";
+      params: ConversationTreeParams;
       epoch?: string;
       grantId?: string;
     }

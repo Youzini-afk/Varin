@@ -3,6 +3,10 @@ import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import type { BotMatter } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, type BotSession, type ThreadIdentity } from '@varin/application-client';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { openConversationTree } from '@/lib/openConversationTree';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -44,6 +48,9 @@ import { BotNavigator } from './BotNavigator';
 import { BotPanel, BotPanelBody } from './BotPanel';
 
 const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
+const ContextPanel = React.lazy(() => import('@/components/layout/ContextPanel').then(module => ({ default: module.ContextPanel })));
+const ConversationTreePanel = React.lazy(() => import('@/components/thread/ConversationTreePanel').then(module => ({ default: module.ConversationTreePanel })));
+const TREE_SURFACES = ['tree'] as const;
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 /** How long the state line names a team moment (§5.7.3). */
@@ -117,6 +124,12 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
 
 const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { t } = useI18n();
+  const directory = normalizeContextPanelDirectoryKey(useEffectiveDirectory() ?? '');
+  const contextPanel = useUIStore(state => state.contextPanelByDirectory[directory]);
+  const treeTab = contextPanel?.isOpen ? contextPanel.tabs.find(tab => tab.id === contextPanel.activeTabId && tab.mode === 'tree') : undefined;
+  const [treeMounted, setTreeMounted] = React.useState(Boolean(treeTab));
+  React.useEffect(() => { if (treeTab) setTreeMounted(true); }, [treeTab]);
+  const closeTree = () => useUIStore.getState().closeContextPanel(directory);
   const { isMobile } = useDeviceInfo();
   const { threads, bots: botsAPI } = useRuntimeAPIs();
   const navigation = useBotNavigation();
@@ -511,7 +524,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const togglePanel = () => { if (floating) setNarrowPanelOpen(open => !open); else setPanelOpen(!panelOpen); };
   const panelLabel = t(panelVisible ? 'bot.panel.close' : 'bot.panel.open');
-  const panelControl = isMobile ? undefined : <Tooltip>
+  const panelControl = isMobile ? undefined : <>
+    {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
+      className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+      onClick={() => treeTab ? closeTree() : openConversationTree(selectedEntry)}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
+    <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" aria-label={panelLabel} aria-expanded={panelVisible} onClick={togglePanel}
         className="workbench-icon-button app-region-no-drag relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -520,7 +537,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       </button>
     </TooltipTrigger>
     <TooltipContent side="bottom">{panelLabel}</TooltipContent>
-  </Tooltip>;
+  </Tooltip></>;
 
   const navigator = () => <BotNavigator bots={bots} selectedId={selectedId} sessions={sessionsWithWork} current={ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
@@ -570,12 +587,18 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       refresh();
     }} /> : null}
     {details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
+    {isMobile && <Dialog open={Boolean(treeTab)} onOpenChange={open => { if (!open) closeTree(); }}>
+      <DialogContent className="flex h-[85dvh] max-w-full flex-col gap-0 p-0"><DialogHeader className="px-4 py-3"><DialogTitle>{t('chat.tree.title')}</DialogTitle></DialogHeader>
+        <div className="min-h-0 flex-1"><React.Suspense fallback={null}><ConversationTreePanel identity={treeTab?.thread} active={Boolean(treeTab)} /></React.Suspense></div>
+      </DialogContent>
+    </Dialog>}
   </div>;
 
   const secondaryPanel = (placement: 'docked' | 'drawer') => placement === 'drawer'
     ? <div className="flex h-full min-h-0 flex-col bg-background">{panelModel ? <BotPanelBody model={panelModel} /> : null}</div>
-    : <BotPanel model={panelModel} open={panelVisible && panelModel !== null} floating={floating}
-      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }} />;
+    : <><BotPanel model={panelModel} open={!treeTab && panelVisible && panelModel !== null} floating={floating}
+      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }} />
+      {treeMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel surfaceModes={TREE_SURFACES} /></React.Suspense>}</>;
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}

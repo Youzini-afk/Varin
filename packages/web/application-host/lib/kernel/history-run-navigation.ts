@@ -1,4 +1,4 @@
-import type { ThreadHistoryRuns } from '@varin/application-client';
+import type { ThreadHistoryRuns, ThreadTreePreview } from '@varin/application-client';
 import type { HistoryItem, HistoryReference } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 
@@ -51,12 +51,46 @@ export class HistoryRunNavigationReader {
     ]);
     return response && previewText(response) || question && previewText(question) || response && previewText(response, true) || '';
   }
+
+  async treePreview(branchId: string, range: { firstItemId: string; lastItemId: string; query?: string }, signal?: AbortSignal): Promise<ThreadTreePreview> {
+    const query = range.query?.trim().toLocaleLowerCase();
+    const result: ThreadTreePreview = { user: '', assistant: '', activity: '', ...(query ? { matched: false } : {}) };
+    const excerpt = (value: string, length: number) => {
+      const match = query ? value.toLocaleLowerCase().indexOf(query) : -1;
+      if (match >= 0) result.matched = true;
+      const start = Math.max(0, match - 50);
+      return `${start ? '…' : ''}${Array.from(value.slice(start, start + length * 2)).slice(0, length).join('')}`;
+    };
+    let beforeId: string | undefined;
+    let complete = false;
+    while (!complete) {
+      const page = await this.runtime.historyPage({ branchId, headId: range.lastItemId, ...(beforeId ? { beforeId } : {}), limit: 64 }, signal);
+      if (!page.items.length) throw new Error('Conversation tree range is unavailable');
+      for (const reference of page.items.slice().reverse()) {
+        signal?.throwIfAborted();
+        if (reference.source === 'user' || reference.source === 'agent' && !result.user) {
+          const item = await this.runtime.historyItem(reference, signal);
+          result.user = excerpt(previewText(item), 240);
+        } else if (reference.source === 'assistant' && (!result.assistant || query)) {
+          const item = await this.runtime.historyItem(reference, signal);
+          const text = previewText(item);
+          const matched = query && text.toLocaleLowerCase().includes(query);
+          if (!result.assistant || matched) result.assistant = excerpt(text, 320);
+          result.activity ||= excerpt(previewText(item, true), 160);
+        }
+        if (reference.id === range.firstItemId) { complete = true; break; }
+      }
+      if (!complete && !page.previous) throw new Error('Conversation tree range is unavailable');
+      beforeId = page.previous ?? undefined;
+    }
+    return result;
+  }
 }
 
 function previewText(item: HistoryItem, activity = false): string {
   if (typeof item.content === 'string') return item.content;
-  const envelope = item.content as { text?: string; content?: { kind?: string; text?: string; call?: { name?: string } } } | null;
-  if (item.source === 'user') return envelope?.text ?? '';
+  const envelope = item.content as { text?: string; userText?: string; content?: { kind?: string; text?: string; call?: { name?: string } } } | null;
+  if (item.source === 'user') return envelope?.userText ?? envelope?.text ?? '';
   const content = envelope?.content;
   return content?.kind === 'text' ? content.text ?? '' : activity && content?.kind === 'tool_call' ? content.call?.name ?? '' : '';
 }
