@@ -12,9 +12,11 @@ pub(crate) struct Broker {
 struct Pending {
     source: String,
     source_document: String,
+    source_runtime_epoch: String,
     target: String,
     authority: WorkbenchAuthorityKey,
     target_document: Option<String>,
+    target_runtime_epoch: Option<String>,
     bytes: usize,
     deadline: std::time::Instant,
     transfer: Value,
@@ -116,9 +118,11 @@ impl Broker {
             Pending {
                 source: source.into(),
                 source_document: source_record.document_nonce.clone(),
+                source_runtime_epoch: source_record.runtime_epoch.clone(),
                 target: target.into(),
                 authority,
                 target_document: None,
+                target_runtime_epoch: None,
                 bytes,
                 deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
                 transfer,
@@ -131,14 +135,15 @@ impl Broker {
         if std::time::Instant::now() >= pending.deadline {
             return Err("Draft acknowledgment timed out; acceptance is unknown".into());
         }
-        for (label, document) in [
-            (&pending.source, Some(&pending.source_document)),
-            (&pending.target, pending.target_document.as_ref()),
+        for (label, document, epoch) in [
+            (&pending.source, Some(&pending.source_document), Some(&pending.source_runtime_epoch)),
+            (&pending.target, pending.target_document.as_ref(), pending.target_runtime_epoch.as_ref()),
         ] {
             let record = windows
                 .get(label)
                 .ok_or("Draft transfer window closed; acceptance is unknown")?;
-            if document.is_some_and(|nonce| nonce != &record.document_nonce) {
+            if document.is_some_and(|nonce| nonce != &record.document_nonce)
+                || epoch.is_some_and(|epoch| epoch != &record.runtime_epoch) {
                 return Err("Draft transfer document changed; acceptance is unknown".into());
             }
             if record
@@ -173,6 +178,7 @@ impl Broker {
             return Err("Draft transfer was already delivered".into());
         }
         pending.target_document = Some(record.document_nonce.clone());
+        pending.target_runtime_epoch = Some(record.runtime_epoch.clone());
         let bootstrap = record.bootstrap.as_ref().unwrap();
         Ok(Some(
             json!({"transferId":id,"apiBaseUrl":bootstrap["apiBaseUrl"],"relayHostId":bootstrap["relayHostId"],"transfer":pending.transfer.take()}),
@@ -252,7 +258,7 @@ mod tests {
     use tokio::sync::watch;
     fn windows() -> HashMap<String, WindowRecord<(), ()>> {
         ["mini-1", "main", "workbench-other"].into_iter().map(|label| (label.into(), WindowRecord {
-            mini_thread: None, document_nonce: format!("{label}-document"), renderer_ready: true,
+            mini_thread: None, document_nonce: format!("{label}-document"), runtime_epoch: format!("{label}-epoch"), renderer_ready: true,
             navigation: vec![], native_ready: watch::channel(Some(Ok(false))).0,
             origin: url::Url::parse("http://tauri.localhost").unwrap(),
             bootstrap: Some(json!({"apiBaseUrl":"https://host.example","relayHostId":"relay-1","clientToken":"secret","requestHeaders":{}})), close: Some(()), cdp: None,
@@ -478,6 +484,40 @@ mod tests {
         assert!(delivered.get("requestHeaders").is_none());
         assert!(!delivered.to_string().contains("Bearer secret"));
         broker.reconcile(&windows);
+        broker.complete(&windows, "main", &id, true, None).unwrap();
+        assert!(receipt.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn delivered_drafts_cancel_on_same_authority_source_or_target_revision_changes() {
+        for label in ["mini-1", "main"] {
+            let mut windows = windows();
+            let mut broker = Broker::default();
+            let (id, receipt) = broker.admit(&windows, "mini-1", "main", transfer()).unwrap();
+            broker.delivery(&windows, "main", &id).unwrap();
+            crate::window_registry::begin_runtime_revision(windows.get_mut(label).unwrap());
+            broker.reconcile(&windows);
+            assert!(receipt.await.unwrap().is_err());
+            assert!(broker.complete(&windows, "main", &id, true, None).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn undelivered_draft_waits_for_the_targets_current_runtime_receipt() {
+        let mut windows = windows();
+        windows.get_mut("main").unwrap().renderer_ready = false;
+        let mut broker = Broker::default();
+        let (id, mut receipt) = broker.admit(&windows, "mini-1", "main", transfer()).unwrap();
+        let target = windows.get_mut("main").unwrap();
+        let document = target.document_nonce.clone();
+        let old_epoch = target.runtime_epoch.clone();
+        let current_epoch = crate::window_registry::begin_runtime_revision(target);
+        assert!(crate::window_registry::ready_navigation(target, &document, &old_epoch).is_err());
+        broker.reconcile(&windows);
+        assert!(matches!(receipt.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        assert!(broker.delivery(&windows, "main", &id).is_err());
+        crate::window_registry::ready_navigation(windows.get_mut("main").unwrap(), &document, &current_epoch).unwrap();
+        assert!(broker.delivery(&windows, "main", &id).unwrap().is_some());
         broker.complete(&windows, "main", &id, true, None).unwrap();
         assert!(receipt.await.unwrap().is_ok());
     }

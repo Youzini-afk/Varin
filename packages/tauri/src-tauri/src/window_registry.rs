@@ -10,6 +10,7 @@ use url::Url;
 pub(crate) struct WindowRecord<C, D> {
     pub mini_thread: Option<(String, String)>,
     pub document_nonce: String,
+    pub runtime_epoch: String,
     pub renderer_ready: bool,
     pub navigation: Vec<Value>,
     pub native_ready: watch::Sender<Option<Result<bool, String>>>,
@@ -28,22 +29,43 @@ pub(crate) struct WorkbenchAuthorityKey([u8; 32]);
 /// creation serialization must not silently retarget it to a later connection.
 pub(crate) struct WorkbenchInvocation {
     document: String,
+    runtime_epoch: String,
     authority: Option<WorkbenchAuthorityKey>,
 }
 impl WorkbenchInvocation {
     pub fn capture<C, D>(record: &WindowRecord<C, D>) -> Result<Self, String> {
         Ok(Self {
             document: record.document_nonce.clone(),
+            runtime_epoch: record.runtime_epoch.clone(),
             authority: invocation_authority(record.bootstrap.as_ref().ok_or("Window bootstrap is not ready")?)?,
         })
     }
     pub fn require_current<C, D>(&self, record: &WindowRecord<C, D>) -> Result<(), String> {
-        if record.document_nonce != self.document || record.bootstrap.as_ref()
+        if record.document_nonce != self.document || record.runtime_epoch != self.runtime_epoch || record.bootstrap.as_ref()
             .is_none_or(|value| !invocation_authority(value).is_ok_and(|key| key == self.authority)) {
             return Err("The original window document or connection authority changed; the command was not retargeted".into());
         }
         Ok(())
     }
+}
+
+/// Private transport metadata proves the renderer's intended runtime receipt,
+/// including when IPC is processed after a newer runtime update has arrived.
+pub(crate) fn admit_runtime_command<C, D>(
+    windows: &HashMap<String, WindowRecord<C, D>>, label: &str, command: &str,
+    document: Option<&str>, epoch: Option<&str>,
+) -> Result<Option<WorkbenchInvocation>, String> {
+    let scoped = command.starts_with("desktop_browser_") || matches!(command,
+        "desktop_transfer_draft" | "desktop_complete_draft_transfer" | "desktop_focus_main_window"
+        | "desktop_new_window" | "desktop_new_window_at_url" | "desktop_new_window_for_host"
+        | "desktop_open_draft_mini_chat_window" | "desktop_open_thread_mini_chat_window"
+        | "desktop_notify" | "desktop_tray_update" | "desktop_web_render");
+    if !scoped { return Ok(None); }
+    let record = windows.get(label).ok_or("Window is closed")?;
+    if document != Some(record.document_nonce.as_str()) || epoch != Some(record.runtime_epoch.as_str()) {
+        return Err("The command's original runtime receipt is missing or stale".into());
+    }
+    WorkbenchInvocation::capture(record).map(Some)
 }
 
 fn invocation_authority(bootstrap: &Value) -> Result<Option<WorkbenchAuthorityKey>, String> {
@@ -210,11 +232,41 @@ pub(crate) fn queue_navigation<C, D>(
         action["relayHostId"] = bootstrap["relayHostId"].clone();
     }
     if record.renderer_ready {
+        bind_navigation(record, &mut action);
         Ok(Some(action))
     } else {
         record.navigation.push(action);
         Ok(None)
     }
+}
+
+fn bind_navigation<C, D>(record: &WindowRecord<C, D>, action: &mut Value) {
+    action["_nativeDocumentNonce"] = json!(record.document_nonce);
+    action["_nativeRuntimeEpoch"] = json!(record.runtime_epoch);
+}
+
+pub(crate) fn begin_runtime_revision<C, D>(record: &mut WindowRecord<C, D>) -> String {
+    record.runtime_epoch = uuid::Uuid::new_v4().to_string();
+    record.renderer_ready = false;
+    record.runtime_epoch.clone()
+}
+
+pub(crate) fn ready_navigation<C, D>(record: &mut WindowRecord<C, D>, document: &str, epoch: &str) -> Result<Vec<Value>, String> {
+    if record.document_nonce != document || record.runtime_epoch != epoch {
+        return Err("The original application runtime receipt was replaced".into());
+    }
+    record.renderer_ready = true;
+    let mut queued = std::mem::take(&mut record.navigation);
+    for action in &mut queued { bind_navigation(record, action); }
+    Ok(queued)
+}
+
+pub(crate) fn require_navigation_delivery<C, D>(record: &WindowRecord<C, D>, action: &Value) -> Result<(), String> {
+    if !record.renderer_ready || action["_nativeDocumentNonce"] != record.document_nonce
+        || action["_nativeRuntimeEpoch"] != record.runtime_epoch {
+        return Err("The navigation runtime receipt changed before delivery".into());
+    }
+    Ok(())
 }
 
 /// An old queued intent cannot cross a credential/tenant switch, even when the
@@ -284,6 +336,7 @@ mod tests {
         WindowRecord {
             mini_thread: None,
             document_nonce: uuid::Uuid::new_v4().to_string(),
+                runtime_epoch: uuid::Uuid::new_v4().to_string(),
             renderer_ready: true,
             navigation: Vec::new(),
             native_ready: watch::channel(Some(Ok(false))).0,
@@ -435,12 +488,13 @@ mod tests {
 
     #[tokio::test]
     async fn commands_waiting_for_creation_or_bootstrap_cannot_change_their_original_authority() {
-        for change in ["document", "endpoint", "relay", "token", "headers"] {
+        for change in ["document", "epoch", "endpoint", "relay", "token", "headers"] {
             let mut caller = record("https://original.example", "original-secret", "tenant-one");
             let invocation = WorkbenchInvocation::capture(&caller).unwrap();
             tokio::task::yield_now().await; // A creation/readiness wait lets the caller switch.
             match change {
                 "document" => caller.document_nonce = "new-document".into(),
+                "epoch" => { begin_runtime_revision(&mut caller); },
                 "endpoint" => caller.bootstrap.as_mut().unwrap()["apiBaseUrl"] = json!("https://new.example"),
                 "relay" => caller.bootstrap.as_mut().unwrap()["relayHostId"] = json!("other-relay"),
                 "token" => caller.bootstrap.as_mut().unwrap()["clientToken"] = json!("other-secret"),
@@ -465,6 +519,55 @@ mod tests {
         assert!(workbench_authority_key(caller.bootstrap.as_ref().unwrap()).is_err());
         caller.bootstrap.as_mut().unwrap()["apiBaseUrl"] = json!("https://chosen.example");
         assert!(invocation.require_current(&caller).is_err());
+    }
+
+    #[test]
+    fn an_old_runtime_command_arriving_after_a_new_report_cannot_admit_any_navigation() {
+        let mut windows = windows();
+        let source = windows["main"].bootstrap.clone().unwrap();
+        let document = windows["main"].document_nonce.clone();
+        let original_epoch = windows["main"].runtime_epoch.clone();
+        let current_epoch = begin_runtime_revision(windows.get_mut("main").unwrap());
+        for command in ["desktop_transfer_draft", "desktop_focus_main_window", "desktop_open_thread_mini_chat_window", "desktop_browser_status"] {
+            let delayed = admit_runtime_command(&windows, "main", command, Some(&document), Some(&original_epoch))
+                .and_then(|invocation| {
+                    assert!(invocation.is_some());
+                    queue_navigation(&mut windows, "main", &source, json!({"type":"new-thread","directory":"/old-context"}))
+                });
+            assert!(delayed.is_err(), "{command}");
+            assert!(windows["main"].navigation.is_empty());
+            assert!(admit_runtime_command(&windows, "main", command, None, None).is_err());
+            assert!(admit_runtime_command(&windows, "main", command, Some("wrong-document"), Some(&current_epoch)).is_err());
+        }
+        let current = admit_runtime_command(&windows, "main", "desktop_transfer_draft", Some(&document), Some(&current_epoch)).unwrap().unwrap();
+        assert!(current.require_current(&windows["main"]).is_ok());
+        // Chrome/recovery controls do not inherit a Host and remain available.
+        assert!(admit_runtime_command(&windows, "main", "desktop_close_current_window", None, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn ready_receipts_and_drained_navigation_are_bound_to_the_exact_runtime_epoch() {
+        let mut windows = windows();
+        let original = windows["main"].bootstrap.clone().unwrap();
+        windows.get_mut("main").unwrap().renderer_ready = false;
+        queue_navigation(&mut windows, "main", &original, json!({"type":"new-thread","directory":"/original"})).unwrap();
+        let target = windows.get_mut("main").unwrap();
+        let document = target.document_nonce.clone();
+        let old_epoch = target.runtime_epoch.clone();
+        let epoch = begin_runtime_revision(target); // Same authority, newer successful report.
+        assert_ne!(epoch, old_epoch);
+        assert!(ready_navigation(target, &document, &old_epoch).is_err());
+        assert_eq!(target.navigation.len(), 1);
+        let actions = ready_navigation(target, &document, &epoch).unwrap();
+        assert_eq!(actions.len(), 1);
+        assert!(require_navigation_delivery(target, &actions[0]).is_ok());
+        let newer = begin_runtime_revision(target);
+        assert!(!target.renderer_ready);
+        assert!(ready_navigation(target, "wrong-document", &newer).is_err());
+        assert!(ready_navigation(target, &document, &newer).unwrap().is_empty());
+        // Even after a new ready receipt, an action removed from the old queue
+        // cannot be stamped with the new context just before native emission.
+        assert!(require_navigation_delivery(target, &actions[0]).is_err());
     }
 
     #[test]
