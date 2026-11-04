@@ -45,18 +45,6 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
-  { id: 'tree', mode: 'tree', icon: 'conversation-tree', labelKey: 'chat.tree.title', descriptionKey: 'chat.tree.description', availability: 'always', defaultWidthFraction: 0.32 },
-  { id: 'material', mode: 'material', icon: 'book-2', labelKey: 'chat.tools.materials', descriptionKey: 'chat.tools.readSource', availability: 'has-content', defaultWidthFraction: 0.38 },
-  { id: 'ui', mode: 'ui', icon: 'window', labelKey: 'ui.content.title', descriptionKey: 'ui.content.title', availability: 'has-content', defaultWidthFraction: 0.55 },
-  {
-    id: 'threads',
-    mode: 'threads',
-    icon: 'chat-1',
-    labelKey: 'collaboration.title',
-    descriptionKey: 'collaboration.description',
-    defaultWidthFraction: 0.45,
-    availability: 'always',
-  },
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
@@ -67,6 +55,16 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'threads',
+    mode: 'threads',
+    icon: 'chat-1',
+    labelKey: 'collaboration.title',
+    descriptionKey: 'collaboration.description',
+    defaultWidthFraction: 0.45,
+    availability: 'always',
+  },
+  { id: 'tree', mode: 'tree', icon: 'conversation-tree', labelKey: 'chat.tree.title', descriptionKey: 'chat.tree.description', availability: 'always', defaultWidthFraction: 0.32 },
+  {
     id: 'recovery',
     descriptionKey: 'contextRail.surface.recovery.description',
     defaultWidthFraction: 0.4,
@@ -75,6 +73,8 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     labelKey: 'contextPanel.mode.recovery',
     availability: 'always',
   },
+  { id: 'material', mode: 'material', icon: 'book-2', labelKey: 'chat.tools.materials', descriptionKey: 'chat.tools.readSource', availability: 'has-content', defaultWidthFraction: 0.38 },
+  { id: 'ui', mode: 'ui', icon: 'window', labelKey: 'ui.content.title', descriptionKey: 'ui.content.title', availability: 'has-content', defaultWidthFraction: 0.55 },
   {
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
