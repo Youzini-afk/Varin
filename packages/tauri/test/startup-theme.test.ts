@@ -11,7 +11,7 @@ const native = { mode: 'dark', splash: {
 for (const page of ['index.html', 'mini-chat.html']) {
   const html = readFileSync(new URL(`../../web/${page}`, import.meta.url), 'utf8');
   const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
-    .map(match => match[1]).find(source => source.includes("localStorage.getItem('varin.theme.v1')"))!;
+    .map(match => match[1]).find(source => source?.includes("localStorage.getItem('varin.theme.v1')"));
   assert.ok(script, `${page} must have its production prepaint script`);
   const paint = (options: { stored?: string; native?: unknown; dark?: boolean; denied?: boolean } = {}) => {
     const classes: string[] = [], attributes = new Map<string, string>(), styles = new Map<string, string>();
