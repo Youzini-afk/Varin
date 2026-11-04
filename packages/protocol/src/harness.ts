@@ -150,6 +150,11 @@ export type FetchResult =
     rendered: boolean;
     /** Content-pinned snapshot when the Host material store is wired. */
     snapshot?: WebSnapshotRef;
+    /** Stable link to this observed text and its displayed original range. */
+    citation?: string;
+    /** Ready-to-use links for disjoint question/find selections in the same observation. */
+    passageCitations?: Array<{ startLine: number; endLine: number; citation: string }>;
+    attachmentRef?: string;
     /** Fetch succeeded, but durable material publication failed. No snapshot is claimed. */
     snapshotError?: { message: string; code?: string };
     /** Original material reference, unaffected by a new text/structure analysis. */
@@ -159,7 +164,7 @@ export type FetchResult =
     textStatus?: 'not-requested' | 'available' | 'no-text' | 'failed' | 'unavailable';
     detail?: string;
     /** Exact continuation on the retained source, including Office object pagination. */
-    nextRead?: import('./harness-web.js').DocumentReadRequest;
+    nextRead?: import('./harness-web.js').WebFetchRequest;
     office?: import('./office.js').OfficeReadResult;
     rendering?: { engine: string; version: string };
     pageImages?: DocumentPageImage[];
@@ -170,6 +175,12 @@ export type FetchResult =
     /** When a position selector was applied, the one-based line range of the
      * returned markdown inside the fixed body. */
     range?: { startLine: number; endLine: number; totalLines: number };
+    /** Original ranges for disjoint question/find selections. */
+    ranges?: import('./harness-web.js').WebTextRange[];
+    selection?: import('./harness-web.js').WebPageSelection;
+    completeness?: import('./harness-web.js').WebAcquisition & {
+      display: { status: "complete" | "partial"; totalLines: number; ranges: import('./harness-web.js').WebTextRange[] };
+    };
     /** A real rendered page image, returned only when a caller asks for it. */
     pageImage?: {
       page: number;
@@ -215,13 +226,24 @@ export type FetchErrorClass =
   | "cancelled"
   | "unknown";
 
+export type SearchContentKind = "search-description" | "provider-excerpt" | "generated-summary" | "paper-metadata" | "unknown";
+
 export interface SearchResultItem {
+  source?: import("./web-sources.js").WebSourceReference;
+  sourceError?: string;
   title: string;
   url: string;
   snippet: string;
   publishedAt?: string;
-  /** Provider-returned summary or abstract text, when the adapter supplies one. */
+  updatedAt?: string;
+  author?: string;
+  contentKind?: SearchContentKind;
+  /** Unmodified provider excerpts, distinct from generated summaries. */
+  excerpts?: string[];
   summary?: string;
+  summaryKind?: "generated-summary" | "paper-abstract" | "unknown";
+  /** Actual observations, including duplicate discoveries across queries. */
+  provenance?: Array<{ connectionId: string; providerId: string; query: string; objective?: string; retrievedAt: number }>;
 }
 
 /** A bounded display page, independent of the size of its source file. */

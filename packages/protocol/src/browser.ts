@@ -86,9 +86,31 @@ export type BrowserEvent =
   | { kind: 'download'; download: BrowserDownload }
   | { kind: 'dialog'; pageId: string; type: string; message: string; defaultPrompt?: string };
 
+/** A read-only temporary rendering resource owned by the actual BrowserOwner.
+ * All page HTTP requests are fulfilled by the admitted Host egress callback;
+ * there is no independent browser network authority. */
+export interface BrowserRenderRequest {
+  url: string;
+  threadId: string;
+  maxBytes: number;
+  signal?: AbortSignal;
+  fetch(request: { url: string; method: "GET" | "HEAD"; headers: Record<string, string> }, signal: AbortSignal): Promise<{
+    status: number;
+    headers: Record<string, string | string[]>;
+    body: Uint8Array;
+  }>;
+}
+export interface BrowserRenderResult {
+  html: string;
+  finalUrl: string;
+  truncated?: boolean;
+  blockedRequests: number;
+}
+
 /** Trusted embedding port. Files are transferred by the Host's original resource owner. */
 export interface BrowserOwner {
   readonly browserId: string;
+  renderPage?(request: BrowserRenderRequest): Promise<BrowserRenderResult>;
   list(): Promise<BrowserPage[]>;
   open(input: { url: string; pageId?: string; retained?: boolean }, scope: { threadId?: string; signal?: AbortSignal }): Promise<BrowserPage>;
   read(input: BrowserReadRequest, signal?: AbortSignal): Promise<BrowserObservation>;

@@ -185,6 +185,39 @@ impl Originals {
             .map(|index| self.history[index].clone())
             .collect())
     }
+    /// Preserve only sources actually cited in the new summary, using descriptors
+    /// from the original typed material. Text cannot invent an attachment or owner.
+    pub(crate) fn select_with_sources(&self, ids: &[String], summary: &str) -> Result<ConversationHistory, RuntimeError> {
+        fn files(item: &ConversationItem) -> Vec<crate::catalog::attachments::Attachment> {
+            let output = match &item.content {
+                Content::Output { output } => Some(output),
+                Content::ToolResult { result } => match &result.completion {
+                    ToolCompletion::Result { content, .. } => Some(content),
+                    ToolCompletion::JobAccepted { content, .. } => content.as_ref(),
+                    _ => None,
+                },
+                _ => None,
+            };
+            output.map(|output| output.parts.iter().filter_map(|part| match part {
+                crate::output::OutputPart::Attachment { attachment } => Some(attachment.clone()), _ => None,
+            }).collect()).unwrap_or_default()
+        }
+        let mut selected = self.select(ids)?;
+        let known: Vec<_> = self.history.iter().flat_map(|item| files(item)).collect();
+        let retained: BTreeSet<_> = selected.iter().flat_map(|item| files(item)).map(|file| file.reference).collect();
+        for attachment in crate::catalog::attachments::cited_materials(&[summary.to_owned()], &known) {
+            if retained.contains(&attachment.reference) { continue; }
+            selected.push(std::sync::Arc::new(ConversationItem {
+                id: format!("retained-source:{}", attachment.reference),
+                provenance: Provenance::ExternalData { source: "retained-source-citation".into() },
+                resource_activation: None, opaque: None,
+                content: Content::Output { output: crate::output::OutputBody {
+                    data: Value::Null, parts: vec![crate::output::OutputPart::Attachment { attachment }],
+                } },
+            }));
+        }
+        Ok(selected)
+    }
     pub(crate) fn carry(&self, text: &str) -> Result<String, RuntimeError> {
         let selection = Selection::parse(text)?;
         let items = self.select(&selection.retain)?;
@@ -342,4 +375,24 @@ mod tests {
         );
         assert!(originals.select(&["foreign-item".into()]).is_err());
     }
+    #[test]
+    fn summary_source_citations_keep_only_acquired_typed_descriptors_for_inheritance() {
+        let attachment = crate::catalog::attachments::Attachment {
+            reference: format!("attachment:material_{}", hex::encode("snap-acquired")), filename: "Source".into(),
+            mime_type: "text/plain".into(), byte_length: 12,
+        };
+        let history = vec![Arc::new(ConversationItem {
+            id: "original-source".into(), provenance: Provenance::ExternalData { source: "websearch".into() }, resource_activation: None, opaque: None,
+            content: Content::Output { output: crate::output::OutputBody { data: Value::Null,
+                parts: vec![crate::output::OutputPart::Attachment { attachment: attachment.clone() }] } },
+        })];
+        let originals = Originals::new(history, TokenCounter::default());
+        let kept = originals.select_with_sources(&[], "Finding [source](varin-material://snap-acquired?startLine=1) [unknown](varin-material://snap-unknown)").unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(conversation_background(&kept), kept);
+        let repeated = Originals::new(kept.clone(), TokenCounter::default()).select_with_sources(&[], "Still [source](varin-material://snap-acquired)").unwrap();
+        assert_eq!(repeated, kept);
+        assert!(originals.select_with_sources(&[], "snap-acquired, https://example.com").unwrap().is_empty());
+    }
+
 }

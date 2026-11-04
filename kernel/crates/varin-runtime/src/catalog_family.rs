@@ -1076,7 +1076,7 @@ impl FamilyRead {
             let body_truncated = end < serialized.len();
             let tool = self.association(&db, item, &body, cancel)?;
             items.push(HistoryEntry {
-                attachments:super::attachments::history_attachments(&body,item.source)?,
+                attachments:super::attachments::history_attachments_with_report(&db,item,&body)?,
                 id: item.id.clone(),
                 parent_id: item.parent.clone(),
                 sequence: *sequence,
@@ -1232,13 +1232,14 @@ impl FamilyRead {
     pub fn item(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<ItemPage> {
         let (anchor, item) = self.original_item(request.run_id.as_deref(), request.anchor.as_deref(), &request.item_id, cancel)?;
         let (body, _) = self.semantic(&item, cancel)?;
+        let attachments = super::attachments::history_attachments_with_report(&self.open(cancel)?, &item, &body)?;
         check(cancel)?;
         let text = serde_json::to_string(&body)?;
         let offset = request.offset.unwrap_or(0);
         let end = utf8_end(&text, offset, request.max_bytes.unwrap_or(65536))?;
         self.finish(cancel)?;
         Ok(ItemPage {
-            attachments:super::attachments::history_attachments(&body,item.source)?,
+            attachments,
             anchor: self.sign(&anchor)?,
             thread_id: anchor.thread,
             branch_id: anchor.branch,

@@ -385,3 +385,49 @@ fn unsupported_image_format_stays_a_file_without_a_false_vision_requirement() {
         file.mime_type=mime.into();assert!(file.is_direct_image());
     }
 }
+
+#[test]
+fn source_citations_select_only_retained_typed_materials() {
+    let source = file(&format!("attachment:material_{}", hex::encode("snap-known")));
+    let other = file("attachment:unrelated");
+    let text = "Known [evidence](varin-material://snap-known?startLine=2&endLine=4), unknown [fake](varin-material://snap-private), ordinary https://example.com and snap-known sha256-deadbeef".to_owned();
+    assert_eq!(cited_materials(&[text.clone()], &[source.clone(), other, source.clone()]), vec![source.clone()]);
+    assert!(cited_materials(&[text], &[]).is_empty());
+    assert!(cited_materials(&["snap-known attachment:material_736e61702d6b6e6f776e".into()], &[source.clone()]).is_empty());
+    assert!(cited_materials(&["varin-material://snap-known/foreign".into()], &[source]).is_empty());
+}
+
+#[test]
+fn final_source_report_retains_only_acquired_citations_after_child_deletion() {
+    use super::super::user_dispatch_tests::{Fixture, start_child};
+    let mut fixture = Fixture::new_in_bot();
+    let child = fixture.accept();
+    let child = start_child(&mut fixture.db, child);
+    let targeted = fixture.db.capture_material_retention(Some(&child.child_thread_id), &[]).unwrap().load().unwrap();
+    assert_eq!(targeted.threads.len(), 1);
+    assert_eq!(targeted.threads[0].root_thread_id, child.parent_thread_id);
+    let run = fixture.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
+    fixture.db.transition_run(&run.id, fixture.db.epoch(), run.revision, RunState::Runnable).unwrap();
+    let source = file(&format!("attachment:material_{}", hex::encode("snap-evidence")));
+    let head = fixture.db.head(&run.branch_id).unwrap();
+    let observed = fixture.db.append_history(&run.id, fixture.db.epoch(), head.as_deref(), HistorySource::Tool,
+        json!({"id":"search-source","provenance":{"kind":"external_data","source":"websearch"},"content":{"kind":"output","output":{
+            "data":null,"parts":[{"kind":"attachment","attachment":source}]}},"opaque":null}), None).unwrap();
+    let answer = fixture.db.append_history(&run.id, fixture.db.epoch(), Some(&observed.id), HistorySource::Assistant,
+        json!({"id":"answer","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"Verified [source](varin-material://snap-evidence?startLine=1). Unknown [source](varin-material://snap-private)."},"opaque":null}), None).unwrap();
+    let run = fixture.db.run(&run.id).unwrap();
+    fixture.db.transition_run(&run.id, fixture.db.epoch(), run.revision, RunState::Completed).unwrap();
+    for prepared in fixture.db.capture_child_reports().unwrap().load().unwrap() { fixture.db.admit_child_report(prepared).unwrap(); }
+    let report = fixture.db.read_child_report(&child.operation_id, &answer.id, 0, 4096).unwrap();
+    assert_eq!(report.attachments, vec![source.clone()]);
+    let history_page = fixture.db.capture_family_read(&child.parent_thread_id, Some(&child.child_thread_id), Some(&child.child_branch_id)).unwrap()
+        .item(serde_json::from_value(json!({"itemId":answer.id,"maxBytes":1})).unwrap(), &|| false).unwrap();
+    assert_eq!(history_page.attachments, vec![source.clone()]);
+
+    let plan = fixture.db.capture_material_retention(None, &[]).unwrap().load().unwrap();
+    assert!(plan.attachments.iter().any(|edge| edge.holder_kind == "report" && edge.thread_id == child.parent_thread_id && edge.attachments == vec![source.clone()]));
+    let revision = fixture.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
+    fixture.db.delete_thread(&threads::ThreadDelete { thread_id: child.child_thread_id.clone(), key: "delete-source-worker".into(), expected_revision: revision }).unwrap();
+    let plan = fixture.db.capture_material_retention(None, &[child.child_thread_id.clone()]).unwrap().load().unwrap();
+    assert!(plan.attachments.iter().any(|edge| edge.thread_id == child.parent_thread_id && edge.attachments == vec![source.clone()]));
+}

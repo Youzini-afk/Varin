@@ -30,6 +30,9 @@ export interface ScholarlyAuthor {
 }
 
 export interface ScholarlyPaper {
+  /** Retained metadata observation; never evidence that the paper was downloaded. */
+  source?: import('./web-sources.js').WebSourceReference;
+  sourceError?: string;
   provider: ScholarlyProvider;
   id: string;
   title: string;

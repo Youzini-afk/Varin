@@ -189,7 +189,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 model: provider.requestModelId ?? binding.modelId,
                 state: { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) },
                 questions: input.questions, signal: combined, fetchImpl,
-                ...(purpose === 'delegation-model-selection' ? { adaptiveReadout: false } : {}) });
+                ...(['delegation-model-selection', 'web-selection', 'web-reading'].includes(purpose) ? { adaptiveReadout: false } : {}) });
               if (combined.aborted) throw new DecisionInferenceFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
               const { usage: _usage, ...answers } = result;
               const projected = { ...observed(), ...answers };

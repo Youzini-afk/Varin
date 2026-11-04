@@ -98,6 +98,88 @@ export interface HarnessWebSearchSettings {
   credentialRef?: string;
 }
 
+/** Current, credential-free search connection configuration. Missing configuration
+ * uses the product's anonymous defaults; an explicit empty list enables none. */
+export interface HarnessWebSearchConnection extends HarnessWebSearchSettings {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description?: string;
+}
+
+export interface HarnessWebSearchConfiguration {
+  connections: HarnessWebSearchConnection[];
+  defaultConnectionId?: string;
+  fallbackConnectionIds: string[];
+  enabled?: boolean;
+  smartSelection?: boolean;
+}
+
+/** Normalize supported legacy assets once at the settings boundary. Never turn
+ * malformed or explicitly disabled configuration into the anonymous default. */
+export function parseHarnessWebSearchSettings(value: unknown): HarnessWebSearchConfiguration | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const adapter = (entry: unknown): HarnessWebSearchSettings | null => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const item = entry as Record<string, unknown>;
+    const provider = item.provider;
+    if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng") return null;
+    if (["endpoint", "credentialRef"].some(key => item[key] !== undefined && typeof item[key] !== "string")) return null;
+    const endpoint = typeof item.endpoint === "string" ? item.endpoint.trim() : "";
+    const credentialRef = typeof item.credentialRef === "string" ? item.credentialRef.trim() : "";
+    return { provider, ...(endpoint ? { endpoint } : {}), ...(credentialRef ? { credentialRef } : {}) };
+  };
+  if (!("connections" in input)) {
+    const legacy = adapter(input);
+    if (!legacy) return null;
+    const id = `configured-${legacy.provider}`;
+    return { connections: [{ ...legacy, id, name: legacy.provider, enabled: true }], defaultConnectionId: id, fallbackConnectionIds: [] };
+  }
+  if (!Array.isArray(input.connections)
+    || (input.enabled !== undefined && typeof input.enabled !== "boolean")
+    || (input.smartSelection !== undefined && typeof input.smartSelection !== "boolean")
+    || (input.defaultConnectionId !== undefined && typeof input.defaultConnectionId !== "string")
+    || !Array.isArray(input.fallbackConnectionIds) || !input.fallbackConnectionIds.every(id => typeof id === "string")) return null;
+  const connections: HarnessWebSearchConnection[] = [];
+  const ids = new Set<string>();
+  for (const entry of input.connections) {
+    const parsed = adapter(entry);
+    if (!parsed) return null;
+    const item = entry as Record<string, unknown>;
+    if (typeof item.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(item.id)
+      || ids.has(item.id) || typeof item.name !== "string" || !item.name.trim()
+      || typeof item.enabled !== "boolean" || (item.description !== undefined && typeof item.description !== "string")) return null;
+    ids.add(item.id);
+    connections.push({ ...parsed, id: item.id, name: item.name.trim(), enabled: item.enabled,
+      ...(typeof item.description === "string" && item.description.trim() ? { description: item.description.trim() } : {}) });
+  }
+  const defaultConnectionId = typeof input.defaultConnectionId === "string" ? input.defaultConnectionId : undefined;
+  const fallbackConnectionIds = [...new Set(input.fallbackConnectionIds as string[])];
+  if ((defaultConnectionId !== undefined && !ids.has(defaultConnectionId)) || fallbackConnectionIds.some(id => !ids.has(id))) return null;
+  return { connections, ...(defaultConnectionId === undefined ? {} : { defaultConnectionId }), fallbackConnectionIds,
+    ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
+    ...(typeof input.smartSelection === "boolean" ? { smartSelection: input.smartSelection } : {}) };
+}
+
+/** Search ranking/exclusion defaults, never a network-access authorization. */
+export interface HarnessWebSourcePreferences {
+  preferredDomains?: string[];
+  excludedDomains?: string[];
+}
+export function parseHarnessWebSourcePreferences(value: unknown): HarnessWebSourcePreferences | null {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const result: HarnessWebSourcePreferences = {};
+  for (const key of ["preferredDomains", "excludedDomains"] as const) {
+    if (input[key] === undefined) continue;
+    if (!Array.isArray(input[key]) || !(input[key] as unknown[]).every(domain => typeof domain === "string" && /^[a-z0-9\p{L}](?:[a-z0-9\p{L}.-]*[a-z0-9\p{L}])?$/iu.test(domain.trim()))) return null;
+    result[key] = [...new Set((input[key] as string[]).map(domain => domain.trim().toLowerCase()))];
+  }
+  return result;
+}
+
 export interface HarnessWebDomainPolicy {
   /** Undefined means unrestricted; an explicit empty array means allow none. */
   allow?: string[];
@@ -347,7 +429,9 @@ export interface HarnessSettings {
   worktree?: HarnessWorktreeSettings;
   web?: {
     render?: boolean;
-    search?: HarnessWebSearchSettings;
+    readingAssistance?: boolean;
+    sourcePreferences?: HarnessWebSourcePreferences;
+    search?: HarnessWebSearchSettings | HarnessWebSearchConfiguration;
     domains?: Partial<HarnessWebDomainPolicy>;
   };
   permissions?: {
@@ -365,6 +449,7 @@ export type HarnessModelRole =
   | "worker"
   | "verifier"
   | "reader"
+  | "webSelection"
   | "nextStep"
   | "permissionJudge"
   | "researchInvestigation"
@@ -577,7 +662,11 @@ export function mergeHarnessSettings(
           web: {
             // Search provider/credential and renderer access are user-owned.
             ...(user.web?.render === undefined ? {} : { render: user.web.render }),
-            ...(user.web?.search ? { search: { ...user.web.search } } : {}),
+            ...(user.web?.readingAssistance === undefined ? {} : { readingAssistance: user.web.readingAssistance }),
+            ...(user.web?.search ? { search: parseHarnessWebSearchSettings(user.web.search) ?? { ...user.web.search } } : {}),
+            ...(user.web?.sourcePreferences || workspace.web?.sourcePreferences ? {
+              sourcePreferences: { ...user.web?.sourcePreferences, ...workspace.web?.sourcePreferences },
+            } : {}),
             // Workspace policy may only add blocks or narrow the allow-set.
             domains: mergeHarnessWebDomainPolicy(user.web?.domains, workspace.web?.domains),
           },

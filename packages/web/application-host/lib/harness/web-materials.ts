@@ -11,6 +11,8 @@ const MATERIAL_GRANT_RECORD_TYPE = "material.grant";
 const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
 
 export interface WebSnapshotDraft {
+  /** Actual acquisition time supplied by the original producer, including cache reuse. */
+  fetchedAt?: number;
   sourceUrl: string;
   finalUrl: string;
   contentType?: string;
@@ -21,6 +23,8 @@ export interface WebSnapshotDraft {
   /** Detected structure of this exact body (pages/headings/tables/figures). */
   structure?: WebSnapshotRef["structure"];
   document?: WebSnapshotRef["document"];
+  provenance?: NonNullable<WebSnapshotRef["provenance"]>;
+  acquisition?: NonNullable<WebSnapshotRef["acquisition"]>;
 }
 
 export interface WebSnapshotContent {
@@ -82,6 +86,8 @@ export const createWebMaterialStore = (
     authority: WebMaterialAuthority,
     options: {
       forceNew?: boolean;
+      /** Stable original operation identity for direct indexed capture, not a reader grant. */
+      observationId?: string;
       source?: { bytes: Buffer; contentType: string };
     } = {},
   ): Promise<WebSnapshotRef> => serializer.runSerialized(workspaceId, () => kernelContext(
@@ -93,6 +99,7 @@ export const createWebMaterialStore = (
         throw new Error("Web snapshot authority does not match its owning workspace");
       }
       const contentHash = hashBytes(body);
+      if (draft.fetchedAt !== undefined && (!Number.isFinite(draft.fetchedAt) || draft.fetchedAt < 0)) throw new Error("Invalid source observation time");
       const sourceDescriptor = options.source
         ? {
             contentHash: hashBytes(options.source.bytes),
@@ -111,8 +118,20 @@ export const createWebMaterialStore = (
       // foreign record would make another Run depend on the first Run's
       // cleanup lifecycle. The body object is still content-addressed and is
       // reused by the new record.
-      if (!options.forceNew) {
-        for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE })) {
+      // New tool observations already have an operation identity. Address their
+      // exact record directly instead of enumerating this Thread's source history.
+      const fixedSnapshotId = !options.forceNew && options.observationId
+        ? `snap-${createHash("sha256").update(JSON.stringify([workspaceId, authority.threadId, options.observationId, draft, contentHash, sourceDescriptor])).digest("hex")}` : undefined;
+      if (fixedSnapshotId) {
+        const record = await context.records.get(recordIdFor(fixedSnapshotId));
+        if (record) {
+          const previous = parseSnapshotPayload(record.payloadJson);
+          if (record.state === "released" || record.threadId !== authority.threadId || record.recordType !== WEB_SNAPSHOT_RECORD_TYPE || !previous
+            || previous.contentHash !== contentHash) throw new Error("The original source observation is no longer available");
+          return previous;
+        }
+      } else if (!options.forceNew) {
+        for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE, threadId: authority.threadId })) {
           if (record.workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
           if (record.state === "released") continue;
           if (record.threadId !== authority.threadId) continue;
@@ -128,20 +147,22 @@ export const createWebMaterialStore = (
             && payload.document?.parser === document?.parser
             && payload.document?.source?.contentHash === document?.source?.contentHash
             && payload.document?.sourceSnapshotId === document?.sourceSnapshotId
-            && payload.document?.analysis?.id === document?.analysis?.id) {
+            && payload.document?.analysis?.id === document?.analysis?.id
+            && JSON.stringify(payload.provenance) === JSON.stringify(draft.provenance)
+            && JSON.stringify(payload.acquisition) === JSON.stringify(draft.acquisition)) {
             return payload;
           }
         }
       }
       const object = await store.putObject(body);
-      const snapshotId = `snap-${randomUUID()}`;
+      const snapshotId = fixedSnapshotId ?? `snap-${randomUUID()}`;
       const recordId = recordIdFor(snapshotId);
       const sourceObject = options.source ? await store.putObject(options.source.bytes) : undefined;
       const ref: WebSnapshotRef = {
         snapshotId,
         sourceUrl: draft.sourceUrl,
         finalUrl: draft.finalUrl,
-        fetchedAt: now(),
+        fetchedAt: draft.fetchedAt ?? now(),
         contentHash,
         representation: draft.representation,
         byteLength: object.byteLength,
@@ -150,6 +171,8 @@ export const createWebMaterialStore = (
         ...(draft.title ? { title: draft.title } : {}),
         ...(draft.structure ? { structure: draft.structure } : {}),
         ...(document ? { document } : {}),
+        ...(draft.provenance ? { provenance: draft.provenance } : {}),
+        ...(draft.acquisition ? { acquisition: draft.acquisition } : {}),
       };
       const ownerId = store.ownerIdForObject?.(object.hash);
       const sourceOwnerId = sourceObject ? store.ownerIdForObject?.(sourceObject.hash) : undefined;
@@ -222,6 +245,14 @@ export const createWebMaterialStore = (
               } catch {
                 // A malformed collection record grants nothing.
               }
+            }
+            for (const delivery of await context.records.list({ recordType: 'attachment.delivery', threadId: authority.threadId })) {
+              if (delivery.state === 'released' || delivery.threadId !== authority.threadId) continue;
+              try {
+                const value = JSON.parse(delivery.payloadJson) as { toThreadId?: unknown; snapshotIds?: unknown };
+                if (value.toThreadId === authority.threadId && Array.isArray(value.snapshotIds) && value.snapshotIds.includes(snapshotId)
+                  && delivery.references.some(reference => reference.objectHash === parseSnapshotPayload(record.payloadJson)?.contentHash)) return true;
+              } catch { /* Malformed envelopes grant nothing. */ }
             }
             for (const candidate of [...await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE }),
               ...await context.records.list({ recordType: 'material.inheritance' })]) {

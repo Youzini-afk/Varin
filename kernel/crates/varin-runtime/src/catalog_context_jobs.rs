@@ -1487,7 +1487,7 @@ impl ContextJobPublication {
         let retained = recipe.originals.as_ref().map(|reference| -> Result<_> {
             let counter = recipe.continuation_tokenizer.clone();
             let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter.clone());
-            let items = originals.select(&selection.retain)?;
+            let items = originals.select_with_sources(&selection.retain, &selection.summary)?;
             crate::execution::validate_history_pairs(&items)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
             let estimated_tokens = counter.count(&selection.summary)

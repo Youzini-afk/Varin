@@ -276,3 +276,34 @@ it('reconciles an unpublished delivery after lost observation only when the orig
   await expect(f.owner.read(child, attachment.ref)).rejects.toThrow('has not received');
   expect(await collected((await f.owner.read(root, attachment.ref)).stream)).toEqual(Buffer.from('original'));
 });
+
+it('delivers fixed source citations through existing attachments and retains them after sender deletion', async () => {
+  const f = fixture(), scope = threadMaterialScope(root.threadId);
+  const authority = (threadId: string) => ({ kind: 'thread' as const, owningWorkspaceId: scope, threadId });
+  const snapshot = await f.materials.put(scope, { sourceUrl: 'https://example.com/source', finalUrl: 'https://example.com/source', representation: 'search-observation-v1',
+    provenance: { kind: 'search-result', providerId: 'provider', contentKind: 'provider-excerpt' } }, Buffer.from('fixed original excerpt'), authority(child.threadId));
+  const href = `varin-material://${snapshot.snapshotId}?contentHash=${snapshot.contentHash}&startLine=1&endLine=1`;
+  await expect(f.owner.prepare(root, [{ ref: href }], 'forged', peer.threadId)).rejects.toThrow('not readable');
+  const [attachment] = await f.owner.prepare(child, [{ ref: href }], 'report-source', root.threadId);
+  expect(attachment!.ref).toMatch(/^attachment:material_/);
+  expect((await f.reopen().read(scope, snapshot.snapshotId, authority(root.threadId)))?.body.toString()).toBe('fixed original excerpt');
+  await f.owner.prepare(root, [{ ref: attachment!.ref }], 'forward-source', peer.threadId);
+  await f.lifecycle.releaseThreadMaterials(scope, [child.threadId, root.threadId]);
+  expect((await f.reopen().read(scope, snapshot.snapshotId, authority(peer.threadId)))?.body.toString()).toBe('fixed original excerpt');
+  await expect(f.owner.prepare(peer, [{ ref: href.replace(snapshot.contentHash, `sha256-${'0'.repeat(64)}`) }], 'changed', peer.threadId)).rejects.toThrow('revision changed');
+  await f.lifecycle.releaseThreadMaterials(scope, all.map(identity => identity.threadId));
+  expect(await f.materials.read(scope, snapshot.snapshotId, authority(peer.threadId))).toBeNull();
+});
+
+it('lazily admits only Catalog-proven final source report references', async () => {
+  const f = fixture(), scope = threadMaterialScope(root.threadId), authority = { kind: 'thread' as const, owningWorkspaceId: scope, threadId: child.threadId };
+  const snapshot = await f.materials.put(scope, { sourceUrl: 'https://example.com/report', finalUrl: 'https://example.com/report', representation: 'markdown' }, Buffer.from('report evidence'), authority);
+  const [attachment] = await f.owner.prepare(child, [{ ref: snapshot.snapshotId }], 'capture-source', child.threadId);
+  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [],
+    threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }],
+    attachments: [{ holderKind: 'report', holderId: 'execution', threadId: root.threadId, branchId: root.branchId,
+      sourceThreadId: child.threadId, sourceBranchId: child.branchId, attachments: [attachment!] }] });
+  await f.owner.retainMaterial(root, snapshot.snapshotId);
+  expect((await f.materials.read(scope, snapshot.snapshotId, { ...authority, threadId: root.threadId }))?.body.toString()).toBe('report evidence');
+  await expect(f.owner.retainMaterial(peer, snapshot.snapshotId)).rejects.toThrow('has not received');
+});

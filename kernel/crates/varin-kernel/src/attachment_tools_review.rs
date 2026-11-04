@@ -235,3 +235,12 @@ fn failed_unpublished_delivery_releases_only_its_original_target_relation() {
     drop(catalog);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn typed_source_selection_requires_the_exact_prepared_material_identity() {
+    let reference = "varin-material://snap-original?startLine=3&endLine=5";
+    let canonical = varin_runtime::catalog::attachments::material_attachment_reference(reference).unwrap();
+    let selected = vec![AttachmentSelection::Ref { reference: reference.into() }];
+    assert!(prepared_response(json!({"status":"ready","attachments":[attachment(&canonical,"text/plain",4)]}), &context(), &selected).is_ok());
+    assert!(prepared_response(json!({"status":"ready","attachments":[attachment("attachment:other","text/plain",4)]}), &context(), &selected).is_err());
+}

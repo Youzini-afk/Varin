@@ -54,3 +54,14 @@ it('commits global settings independently of an unreadable project and marks eff
   expect((await settings.read()).revision).toBe(saved.globalRevision);
   await expect(settings.update({ cwd: project, scope: 'project', expectedRevision: 'unknown', set: {}, remove: [] })).rejects.toThrow();
 });
+
+it('normalizes legacy search on the first real owner save without changing its credential or raw read revision', async () => {
+  const { root, settings } = await fixture();
+  const legacy = { provider: 'brave', endpoint: 'https://search.example/api', credentialRef: 'old-reference' };
+  await writeFile(join(root, 'agent-settings.json'), JSON.stringify({ harness: { web: { search: legacy } } }));
+  const before = await settings.read(); expect(before.document).toMatchObject({ harness: { web: { search: legacy } } });
+  expect((await settings.harness()).web?.search).toMatchObject({ connections: [{ id: 'configured-brave', credentialRef: 'old-reference' }] });
+  const saved = await settings.update({ scope: 'global', expectedRevision: before.revision, set: { titleUpdateInterval: 2 }, remove: [] });
+  expect(saved.global).toMatchObject({ harness: { web: { search: { connections: [{ id: 'configured-brave', provider: 'brave', endpoint: legacy.endpoint, credentialRef: legacy.credentialRef, enabled: true }], defaultConnectionId: 'configured-brave', fallbackConnectionIds: [] } } } });
+  expect((await new AgentSettingsService(root, () => false).read()).document).toEqual(saved.global);
+});

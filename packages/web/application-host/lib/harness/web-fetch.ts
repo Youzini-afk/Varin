@@ -1,8 +1,10 @@
-import { selectWebPageText } from "@varin/protocol";
-import type { FetchResult, HarnessWebDomainPolicy, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
+import { TextDecoder } from "node:util";
+import { selectWebPageText, rankWebPagePassages, validateWebPassageRanges, webPageBlocks, webPageEndLine } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, WebFetchRequest, WebReadPosition, WebSnapshotStructure, WebAcquisition, WebTextRange, WebPageSelection, WebPassageCandidate, WebPassageRange, WebSnapshotRef, BrowserRenderRequest, BrowserRenderResult } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { EGRESS_TIMEOUT, EgressError, type EgressRuntime } from "./egress.js";
 import type { WebMaterialStore, WebMaterialAuthority } from "./web-materials.js";
+import type { AlternateDocumentReader } from "./document-material.js";
 import { createDocumentReader, type DocumentReader, type DocumentReaderContext } from "./document-reading.js";
 
 export interface SsrfPolicy {
@@ -12,12 +14,29 @@ export interface SsrfPolicy {
 
 export type DomainPolicy = HarnessWebDomainPolicy;
 
+export type WebPassageSelectionResult = WebPassageRange[] | null | {
+  ranges?: WebPassageRange[];
+  reason?: string;
+  assistance?: WebPageSelection["assistance"];
+};
+export type WebPassageSelector = (input: {
+  question: string;
+  markdown: string;
+  structure?: WebSnapshotStructure;
+  candidates: WebPassageCandidate[];
+  source?: Pick<WebSnapshotRef, "snapshotId" | "contentHash" | "sourceUrl" | "title">;
+  signal?: AbortSignal;
+}) => Promise<WebPassageSelectionResult>;
+
 export interface WebFetchDeps {
   ssrf: SsrfPolicy;
   /** Outbound egress authority; absent keeps the legacy bare-fetch path. */
   egress?: EgressRuntime;
   domainPolicy?: (workspaceId: string) => DomainPolicy;
-  renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
+  renderer?: (request: BrowserRenderRequest) => Promise<BrowserRenderResult>;
+  rendererId?: string;
+  selectPassages?: WebPassageSelector;
+  alternateDocumentReader?: AlternateDocumentReader;
   cacheTtlMs?: number;
   maxBytes?: number;
   /** Durable snapshot store; when absent fetches still deliver content but mint no snapshotId. */
@@ -37,6 +56,10 @@ export interface FetchContext {
   workspaceId: string;
   authority: WebMaterialAuthority;
   render?: boolean;
+  /** Frozen trusted Host configuration, never inferred from renderer presence. */
+  allowRenderFallback?: boolean;
+  selectPassages?: WebPassageSelector;
+  alternateDocumentReader?: AlternateDocumentReader;
   domainPolicy?: DomainPolicy;
   signal?: AbortSignal;
   /** A caller-requested refresh must create a new snapshot record even when
@@ -59,7 +82,26 @@ const MAX_REDIRECTS = 5;
 export function createWebFetch(deps: WebFetchDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error("maxBytes must be a positive byte limit");
+  if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0) throw new Error("cacheTtlMs must be non-negative");
   const cache = new Map<string, CacheEntry>();
+  let disposed = false;
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  const pruneCache = (): void => {
+    if (expiryTimer) clearTimeout(expiryTimer);
+    expiryTimer = undefined;
+    const now = Date.now();
+    for (const [key, entry] of cache) if (entry.expiresAt <= now) cache.delete(key);
+    if (disposed || !cache.size) return;
+    const next = Math.min(...[...cache.values()].map(entry => entry.expiresAt));
+    expiryTimer = setTimeout(pruneCache, Math.max(1, next - now));
+    expiryTimer.unref?.();
+  };
+  const cacheResult = (key: string, entry: CacheEntry): void => {
+    if (disposed || cacheTtlMs <= 0) return;
+    cache.set(key, entry);
+    pruneCache();
+  };
   /** Ties in-flight delivery to the exact response, even if another request
    * overwrites the URL cache before this caller resumes. */
   const sourceBytesForResult = new WeakMap<Extract<FetchResult, { status: "ok" }>, Buffer>();
@@ -102,10 +144,10 @@ export function createWebFetch(deps: WebFetchDeps) {
     return { blocked: false };
   };
 
-  const extractContent = async (html: string, contentType: string): Promise<{ markdown: string; title?: string }> => {
+  const extractContent = async (html: string, contentType: string): Promise<{ markdown: string; title?: string; extraction: WebAcquisition["extraction"] }> => {
     // For text/* content, pass through directly
     if (contentType.startsWith("text/plain") || contentType.startsWith("text/csv") || contentType.startsWith("text/yaml")) {
-      return { markdown: html };
+      return { markdown: html, extraction: { status: "complete" } };
     }
 
     // For HTML, use readability + turndown
@@ -114,10 +156,10 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
 
     // For other content types, return raw
-    return { markdown: html };
+    return { markdown: html, extraction: { status: "complete" } };
   };
 
-  const extractHtmlContent = async (html: string): Promise<{ markdown: string; title?: string }> => {
+  const extractHtmlContent = async (html: string): Promise<{ markdown: string; title?: string; extraction: WebAcquisition["extraction"] }> => {
     try {
       // linkedom provides a DOM implementation compatible with @mozilla/readability
       const { parseHTML } = await import("linkedom");
@@ -128,6 +170,8 @@ export function createWebFetch(deps: WebFetchDeps) {
       // their text, links and headings through the same Markdown converter.
       for (const node of document.querySelectorAll("script, style, template")) node.remove();
       const bodyHtml = document.querySelector("body")?.innerHTML ?? document.toString();
+      const structured = document.querySelector("main, article")?.innerHTML;
+      const technical = Boolean(document.querySelector("pre, table"));
 
       const { Readability } = await import("@mozilla/readability");
       const Turndown = (await import("turndown")).default;
@@ -136,16 +180,32 @@ export function createWebFetch(deps: WebFetchDeps) {
       const article = reader.parse();
 
       const turndown = new Turndown({ headingStyle: "atx", codeBlockStyle: "fenced" });
-      const markdown = turndown.turndown(article?.content || bodyHtml);
+      // Keep simple tables as GFM and complex spanning-cell tables as HTML so
+      // their relationships are not silently flattened into unrelated text.
+      turndown.addRule("source-table", {
+        filter: "table",
+        replacement: (_content, node) => {
+          const table = node as unknown as { outerHTML: string; querySelectorAll(selector: string): ArrayLike<{ querySelectorAll(selector: string): ArrayLike<{ textContent: string | null; innerHTML: string; tagName: string; getAttribute(name: string): string | null }> }> };
+          const rows = Array.from(table.querySelectorAll("tr")).map(row => Array.from(row.querySelectorAll("th, td")));
+          if (!rows.length) return "";
+          if (rows.some(row => row.some(cell => Number(cell.getAttribute("colspan") ?? 1) > 1 || Number(cell.getAttribute("rowspan") ?? 1) > 1))) return `\n\n${table.outerHTML}\n\n`;
+          const width = Math.max(...rows.map(row => row.length));
+          const textRows = rows.map(row => `| ${Array.from({ length: width }, (_, index) => (row[index] ? turndown.turndown(row[index]!.innerHTML) : "").trim().replace(/\|/g, "\\|").replace(/\s*\n\s*/g, "<br> ")).join(" | ")} |`);
+          if (!rows[0]!.some(cell => cell.tagName.toLowerCase() === "th")) textRows.unshift(`| ${Array(width).fill("").join(" | ")} |`);
+          textRows.splice(1, 0, `| ${Array(width).fill("---").join(" | ")} |`);
+          return `\n\n${textRows.join("\n")}\n\n`;
+        },
+      });
+      const markdown = turndown.turndown(technical ? structured || bodyHtml : article?.content || bodyHtml);
       const title = article?.title || pageTitle;
-      return { markdown, ...(title !== undefined ? { title } : {}) };
+      return { markdown, extraction: { status: "unknown", detail: "HTML main-content extraction; coverage outside the retained representation is not guaranteed." }, ...(title !== undefined ? { title } : {}) };
     } catch {
       // Fallback: strip HTML tags
       const text = html.replace(/<(head|script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
         .replace(/<[^>]*>/g, "").trim();
       const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
       const title = titleMatch?.[1]?.trim();
-      return { markdown: text, ...(title !== undefined ? { title } : {}) };
+      return { markdown: text, extraction: { status: "partial", detail: "HTML parser failed; fallback text may omit structure and content." }, ...(title !== undefined ? { title } : {}) };
     }
   };
 
@@ -166,6 +226,23 @@ export function createWebFetch(deps: WebFetchDeps) {
     let index = 0;
     while (index < lines.length) {
       const line = lines[index] ?? "";
+      const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+      if (fence) {
+        index += 1;
+        while (index < lines.length) {
+          const close = /^\s*(`{3,}|~{3,})\s*$/.exec(lines[index]!);
+          index += 1;
+          if (close && close[1]![0] === fence[1]![0] && close[1]!.length >= fence[1]!.length) break;
+        }
+        continue;
+      }
+      if (/^\s*<table(?:\s|>)/i.test(line)) {
+        const startLine = index + 1;
+        while (index < lines.length && !/<\/table>/i.test(lines[index]!)) index += 1;
+        tables.push({ startLine, endLine: Math.min(lines.length, index + 1) });
+        index += 1;
+        continue;
+      }
       const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
       if (heading?.[1] && heading[2]) headings.push({ title: heading[2], level: heading[1].length, line: index + 1 });
       const image = /!\[([^\]]*)\]\([^)]*\)/.exec(line);
@@ -250,15 +327,127 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
   };
 
-  const selectText = (markdown: string, structure: WebSnapshotStructure | undefined, request: WebFetchRequest, snapshotId: string):
-    { body: string; range?: { startLine: number; endLine: number; totalLines: number } } | FetchResult => {
-    const selected = request.position ? resolvePosition(markdown, structure, request.position, snapshotId) : { body: markdown };
-    if (!("body" in selected) || request.find === undefined) return selected;
-    const range = "range" in selected ? selected.range : undefined;
-    // Find reads the fixed whole body and restricts its search to the selected
-    // range. Numbered matches remain positions in that body, never in a slice.
-    return { ...selected, body: selectWebPageText(markdown, { find: request.find,
-      ...(range ? { start_line: range.startLine, end_line: range.endLine } : {}) }) };
+  type Selection = {
+    body: string;
+    range?: WebTextRange;
+    ranges: WebTextRange[];
+    selection: WebPageSelection;
+    nextRead?: WebFetchRequest;
+  };
+  const selectText = async (markdown: string, structure: WebSnapshotStructure | undefined, request: WebFetchRequest, snapshotId: string, ctx: FetchContext, source?: WebSnapshotRef): Promise<Selection | FetchResult> => {
+    const lines = markdown.split("\n");
+    const totalLines = lines.length;
+    const maxLines = request.maxLines ?? 160;
+    const wholeRange = { startLine: 1, endLine: totalLines, totalLines };
+    const selected = request.position ? resolvePosition(markdown, structure, request.position, snapshotId) : { body: markdown, range: wholeRange };
+    if (!("body" in selected)) return selected;
+    const range = selected.range;
+    if (request.find !== undefined) {
+      const matching = new Set<number>();
+      for (let index = range.startLine - 1; index < range.endLine; index += 1) {
+        if (!lines[index]!.toLowerCase().includes(request.find.toLowerCase())) continue;
+        for (let context = Math.max(range.startLine, index - 2); context <= Math.min(range.endLine, index + 4); context += 1) matching.add(context);
+      }
+      const ranges = validateWebPassageRanges([...matching].map(line => ({ startLine: line, endLine: line })), totalLines) ?? [];
+      return { body: selectWebPageText(markdown, { find: request.find, start_line: range.startLine, end_line: range.endLine }),
+        ...(request.position ? { range } : {}), ranges: ranges.map(value => ({ ...value, totalLines })),
+        selection: { method: "literal", matched: ranges.length > 0, searchedRange: range } };
+    }
+    if (request.question?.trim() && !request.position) {
+      const candidates = rankWebPagePassages(markdown, request.question);
+      const blocks = webPageBlocks(markdown);
+      const chosen: WebPassageRange[] = [];
+      let usedLines = 0;
+      let usedCharacters = 0;
+      for (const candidate of candidates) {
+        // Defaults are an output budget, not a relevance threshold or a refusal.
+        if (chosen.length && (chosen.length >= 6 || usedLines + candidate.endLine - candidate.startLine + 1 > maxLines || usedCharacters + candidate.text.length > 24_000)) continue;
+        chosen.push(candidate);
+        usedLines += candidate.endLine - candidate.startLine + 1;
+        usedCharacters += candidate.text.length;
+      }
+      let ranges = validateWebPassageRanges(chosen, totalLines) ?? [];
+      let method: WebPageSelection["method"] = "question";
+      let detail: string | undefined;
+      let assistance: WebPageSelection["assistance"];
+      const helper = ctx.selectPassages ?? deps.selectPassages;
+      if (helper) {
+        try {
+          ctx.signal?.throwIfAborted();
+          const proposed = await helper({ question: request.question, markdown, ...(structure ? { structure } : {}),
+            candidates: candidates.slice(0, 24), ...(source ? { source: { snapshotId: source.snapshotId, contentHash: source.contentHash, sourceUrl: source.sourceUrl, ...(source.title ? { title: source.title } : {}) } } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+          ctx.signal?.throwIfAborted();
+          const response = proposed && !Array.isArray(proposed) ? proposed : undefined;
+          const validated = validateWebPassageRanges(response ? response.ranges : proposed, totalLines);
+          assistance = response?.assistance;
+          detail = response?.reason;
+          if (validated) { ranges = validated; method = "helper"; }
+          else {
+            detail ??= "Reading assistance supplied no valid source ranges; deterministic passage selection was used.";
+            if (assistance) assistance = { ...assistance, status: "fallback" };
+          }
+        } catch (error) {
+          if (ctx.signal?.aborted) throw ctx.signal.reason ?? error;
+          if (error && typeof error === "object" && "code" in error && error.code === "web-assistance-indeterminate") throw error;
+          detail = "Reading assistance was unavailable; deterministic passage selection was used.";
+        }
+      }
+      // Expand to paragraph/table/code boundaries and include the nearest heading.
+      // Explanations stay outside these original ranges.
+      const expanded: WebPassageRange[] = [];
+      for (const range of ranges) {
+        const first = blocks.find(block => block.startLine <= range.startLine && block.endLine >= range.startLine);
+        const last = blocks.find(block => block.startLine <= range.endLine && block.endLine >= range.endLine);
+        expanded.push({ startLine: first?.startLine ?? range.startLine, endLine: last?.endLine ?? range.endLine });
+        const headingPath: NonNullable<WebSnapshotStructure["headings"]> = [];
+        for (const heading of structure?.headings ?? []) {
+          if (heading.line > range.startLine) break;
+          while (headingPath.length && headingPath.at(-1)!.level >= heading.level) headingPath.pop();
+          headingPath.push(heading);
+        }
+        for (const heading of headingPath) expanded.push({ startLine: heading.line, endLine: heading.line });
+        const firstIndex = blocks.indexOf(first!);
+        const lastIndex = blocks.indexOf(last!);
+        for (const neighbor of [blocks[firstIndex - 1], blocks[lastIndex + 1]]) {
+          if (!neighbor) continue;
+          const text = lines.slice(neighbor.startLine - 1, neighbor.endLine).join("\n");
+          if (/^\s*(?:[>*-]\s*)?(?:(?:only|unless|if|except|note|warning|caution|required|do not)\b|仅|只有|除非|如果|注意|警告|限制|前提|条件|不适用|不要|不应|不得)/i.test(text)) expanded.push(neighbor);
+        }
+      }
+      const bounded: WebPassageRange[] = [];
+      let count = 0;
+      for (const range of validateWebPassageRanges(expanded, totalLines) ?? []) {
+        if (count >= maxLines) break;
+        const endLine = webPageEndLine(markdown, range.startLine, maxLines - count, range.endLine);
+        bounded.push({ startLine: range.startLine, endLine });
+        count += endLine - range.startLine + 1;
+      }
+      ranges = bounded;
+      return { body: ranges.length ? ranges.map(value => lines.slice(value.startLine - 1, value.endLine).join("\n")).join("\n\n…\n\n")
+        : `No relevant passages found in lines 1–${totalLines}. Inspect the headings or continue reading the retained source.`,
+        ranges: ranges.map(value => ({ ...value, totalLines })),
+        selection: { method, question: request.question, matched: ranges.length > 0, searchedRange: wholeRange, ...(detail ? { detail } : {}), ...(assistance ? { assistance } : {}) },
+        ...(snapshotId ? { nextRead: { snapshotId, position: { kind: "lines", startLine: 1 }, maxLines } as WebFetchRequest } : {}) };
+    }
+    const endLine = webPageEndLine(markdown, range.startLine, maxLines, range.endLine);
+    const shown = { ...range, endLine };
+    return { body: lines.slice(shown.startLine - 1, endLine).join("\n"), range: shown, ranges: [shown],
+      selection: { method: request.position ? "range" : "page", matched: true },
+      ...(snapshotId && endLine < range.endLine ? { nextRead: { snapshotId,
+        position: { kind: "lines", startLine: endLine + 1, ...(request.position ? { endLine: range.endLine } : {}) }, maxLines } as WebFetchRequest } : {}) };
+  };
+
+  const projectSelection = (result: Extract<FetchResult, { status: "ok" }>, selected: Selection): Extract<FetchResult, { status: "ok" }> => {
+    const { range: _range, ranges: _ranges, nextRead: _nextRead, ...rest } = result;
+    const totalLines = result.markdown.split("\n").length;
+    const acquisition = result.completeness ?? result.snapshot?.acquisition ?? {
+      download: { status: "unknown" as const, receivedBytes: result.bytes, retainedBytes: result.bytes },
+      extraction: { status: "unknown" as const },
+    };
+    return { ...rest, markdown: selected.body, ranges: selected.ranges, selection: selected.selection,
+      ...(selected.range ? { range: selected.range } : {}), ...(selected.nextRead ? { nextRead: selected.nextRead } : {}),
+      completeness: { download: acquisition.download, extraction: acquisition.extraction, display: { totalLines, ranges: selected.ranges,
+        status: selected.ranges.length === 1 && selected.ranges[0]!.startLine === 1 && selected.ranges[0]!.endLine === totalLines ? "complete" : "partial" } } };
   };
 
   const detectEmptyShell = (html: string, markdown: string, render: boolean): boolean => {
@@ -293,6 +482,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           representation,
           ...(content.rendered ? { rendered: true } : {}),
           structure,
+          ...(content.completeness ? { acquisition: { download: content.completeness.download, extraction: content.completeness.extraction } } : {}),
         },
         Buffer.from(content.markdown, "utf8"),
         ctx.authority,
@@ -342,6 +532,87 @@ export function createWebFetch(deps: WebFetchDeps) {
     });
   };
 
+  /** Read bounded transport bytes for every content type. Chunk boundaries and
+   * Content-Length cannot turn byte limits into character limits. */
+  const readBytes = async (response: Response, signal: AbortSignal, expectBody = true,
+    budget?: { remaining: number; receivedBytes: number; retainedBytes: number }): Promise<{ bytes: Buffer; download: WebAcquisition["download"] }> => {
+    const header = response.headers.get("content-length");
+    const expectedBytes = expectBody && header !== null && /^\d+$/.test(header) ? Number(header) : undefined;
+    let receivedBytes = 0;
+    let retainedBytes = 0;
+    let complete = true;
+    const chunks: Buffer[] = [];
+    const accept = (chunk: Uint8Array): void => {
+      receivedBytes += chunk.byteLength;
+      const keep = Math.min(chunk.byteLength, Math.max(0, maxBytes - retainedBytes), budget?.remaining ?? Infinity);
+      if (budget) { budget.receivedBytes += chunk.byteLength; budget.retainedBytes += keep; budget.remaining -= keep; }
+      if (keep) chunks.push(Buffer.from(chunk.subarray(0, keep)));
+      retainedBytes += keep;
+      if (keep < chunk.byteLength) complete = false;
+    };
+    if (response.body) {
+      const reader = response.body.getReader();
+      let cancel: Promise<void> | undefined;
+      const stop = (): void => { cancel ??= reader.cancel(signal.reason).catch(() => undefined); };
+      signal.addEventListener("abort", stop, { once: true });
+      try {
+        signal.throwIfAborted();
+        while (complete) {
+          const { done, value } = await reader.read();
+          signal.throwIfAborted();
+          if (done) break;
+          if (value) accept(value);
+        }
+        if (!complete) { cancel ??= reader.cancel().catch(() => undefined); await cancel; }
+      } finally {
+        signal.removeEventListener("abort", stop);
+        if (signal.aborted) stop();
+        if (cancel) await cancel;
+        reader.releaseLock();
+      }
+    } else {
+      // Some host transports expose only a complete body. Counting and slicing
+      // still use bytes, never UTF-16 string length.
+      const bytes = typeof response.arrayBuffer === "function"
+        ? Buffer.from(await awaitAbortable(response.arrayBuffer(), signal))
+        : Buffer.from(await awaitAbortable(response.text(), signal), "utf8");
+      accept(bytes);
+    }
+    if (expectedBytes !== undefined && !response.headers.get("content-encoding") && receivedBytes < expectedBytes) complete = false;
+    return { bytes: Buffer.concat(chunks, retainedBytes), download: { status: complete ? "complete" : "partial",
+      receivedBytes, retainedBytes, limitBytes: maxBytes, ...(expectedBytes !== undefined ? { expectedBytes } : {}) } };
+  };
+  const decodeText = (bytes: Buffer, contentType: string, complete: boolean): { text: string; lossy: boolean } => {
+    const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] ?? "utf-8";
+    let decoder: TextDecoder;
+    let lossy = false;
+    try { decoder = new TextDecoder(charset, { fatal: true }); }
+    catch { decoder = new TextDecoder("utf-8", { fatal: true }); lossy = true; }
+    // Streaming decode deliberately does not flush a partial trailing multibyte
+    // character. Invalid internal bytes remain an explicit extraction failure.
+    try { return { text: decoder.decode(bytes, { stream: !complete }), lossy }; }
+    catch {
+      let fallback: TextDecoder;
+      try { fallback = new TextDecoder(charset); } catch { fallback = new TextDecoder("utf-8"); }
+      return { text: fallback.decode(bytes, { stream: !complete }), lossy: true };
+    }
+  };
+  const documentType = (contentType: string, url: string): "pdf" | "office" | null => {
+    const mime = contentType.split(";", 1)[0]!.trim().toLowerCase();
+    if (mime === "application/pdf") return "pdf";
+    if (["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation"].includes(mime)) return "office";
+    if (mime === "application/octet-stream") {
+      const path = new URL(url).pathname;
+      if (/\.pdf$/i.test(path)) return "pdf";
+      if (/\.(docx|xlsx|pptx)$/i.test(path)) return "office";
+    }
+    return null;
+  };
+  const completeDisplay = (markdown: string) => {
+    const totalLines = markdown.split("\n").length;
+    return { status: "complete" as const, totalLines, ranges: [{ startLine: 1, endLine: totalLines, totalLines }] };
+  };
+
   const performFetch = async (
     url: string, ctx: FetchContext, cacheKey: string,
     outbound?: Awaited<ReturnType<EgressRuntime['prepare']>>,
@@ -350,7 +621,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       // Shared producers cache content only. Material ownership belongs to each
       // live caller's delivery, never to the first caller captured by this job.
       ctx.signal?.throwIfAborted();
-      cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
+      cacheResult(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
       return content;
     };
 
@@ -395,7 +666,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         }
         if (controller.signal.aborted && controller.signal.reason === EGRESS_TIMEOUT) {
           const result: FetchResult = { status: "failed", url, reason: "request timed out", errorClass: "timeout" };
-          cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+          cacheResult(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
           finishRequest();
           return result;
         }
@@ -408,7 +679,7 @@ export function createWebFetch(deps: WebFetchDeps) {
             return { status: "blocked", url, reason: "scheme" };
           }
           const result: FetchResult = { status: "failed", url, reason: error.message, errorClass: error.kind };
-          cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+          cacheResult(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
           return result;
         }
         const result: FetchResult = {
@@ -417,7 +688,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           reason: error instanceof Error ? error.message : "fetch failed",
           errorClass: "unknown",
         };
-        if (!ctx.signal?.aborted) cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+        if (!ctx.signal?.aborted) cacheResult(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
         finishRequest();
         return result;
       }
@@ -425,6 +696,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       try {
       // Handle redirects
       if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel();
         const location = response.headers.get("location");
         if (!location) {
           finishRequest();
@@ -449,139 +721,111 @@ export function createWebFetch(deps: WebFetchDeps) {
       }
 
       if (!response.ok) {
+        await response.body?.cancel();
         const result: FetchResult = {
           status: "failed",
           url,
           reason: `HTTP ${response.status}`,
           errorClass: response.status === 407 ? "proxy-auth" : "http",
         };
-        cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+        cacheResult(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
         finishRequest();
         return result;
       }
 
-      // Success — extract content
       const contentType = response.headers.get("content-type") ?? "text/plain";
-      const contentLength = Number(response.headers.get("content-length") ?? 0);
-
-      if (ctx.render && !deps.renderer && !contentType.includes("application/pdf")) {
-        finishRequest();
-        return { status: "renderer-unavailable", url, reason: "unsupported" };
+      const documentKind = documentType(contentType, currentUrl);
+      const renderPage = async (): Promise<FetchResult> => {
+        if (!deps.renderer) return { status: "renderer-unavailable", url, reason: "unsupported" };
+        const budget = { remaining: maxBytes, receivedBytes: 0, retainedBytes: 0 };
+        let incomplete = false;
+        const rendered = await awaitAbortable(deps.renderer({ url: currentUrl, threadId: ctx.authority.threadId, maxBytes,
+          signal: controller.signal,
+          fetch: async (request, ownerSignal) => {
+            if (budget.remaining === 0 && request.method !== "HEAD") { incomplete = true; throw new Error("Rendered page reached its aggregate download budget"); }
+            const target = request.url;
+            if (checkDomainPolicy(target, ctx.workspaceId, ctx.domainPolicy).blocked) throw new Error("Rendered request denied by the domain policy");
+            const check = await deps.ssrf.check(target);
+            if (check.blocked) throw new Error(`Rendered request blocked: ${check.reason ?? "private-network"}`);
+            const signal = AbortSignal.any([controller.signal, ownerSignal]);
+            signal.throwIfAborted();
+            // The original route is frozen for every resource and redirect.
+            const fetched = outbound ? await outbound.fetch(target, { method: request.method, headers: request.headers, signal, redirect: "manual" })
+              : await fetch(target, { method: request.method, headers: request.headers, signal, redirect: "manual" });
+            const body = await readBytes(fetched, signal, request.method !== "HEAD", budget);
+            if (body.download.status !== "complete") { incomplete = true; throw new Error("Rendered resource exceeded the configured download limit or ended early"); }
+            const headers: Record<string, string | string[]> = Object.fromEntries(fetched.headers);
+            // Fetch already decoded the representation. Do not ask Chromium to
+            // decode it twice or trust the encoded Content-Length.
+            delete headers["content-encoding"];
+            delete headers["content-length"];
+            delete headers["transfer-encoding"];
+            const cookies = fetched.headers.getSetCookie?.();
+            if (cookies?.length) headers["set-cookie"] = cookies;
+            return { status: fetched.status, headers, body: body.bytes };
+          },
+        }), controller.signal);
+        const finalCheck = await deps.ssrf.check(rendered.finalUrl);
+        if (finalCheck.blocked) return { status: "blocked", url: rendered.finalUrl, reason: finalCheck.reason ?? "private-network" };
+        if (checkDomainPolicy(rendered.finalUrl, ctx.workspaceId, ctx.domainPolicy).blocked) return { status: "blocked", url: rendered.finalUrl, reason: "domain-blocked" };
+        const htmlBytes = Buffer.from(rendered.html, "utf8");
+        const truncated = rendered.truncated || htmlBytes.length > maxBytes;
+        const html = decodeText(htmlBytes.subarray(0, maxBytes), "text/html;charset=utf-8", !truncated).text;
+        const { markdown, title, extraction } = await extractContent(html, "text/html");
+        controller.signal.throwIfAborted();
+        const partial = incomplete || truncated || rendered.blockedRequests > 0;
+        return finishOk({ status: "ok", url, finalUrl: rendered.finalUrl, contentType: "text/html", markdown,
+          bytes: Math.min(htmlBytes.length, maxBytes), fromCache: false, rendered: true,
+          ...(title ? { title } : {}), completeness: {
+            download: { status: incomplete || rendered.blockedRequests ? "partial" : "complete", receivedBytes: budget.receivedBytes, retainedBytes: budget.retainedBytes, limitBytes: maxBytes },
+            extraction: partial ? { status: "partial", detail: "The read-only renderer omitted blocked/failed resources or reached its aggregate download/DOM size limit. Browser Use is available for interactive pages." }
+              : { ...extraction, detail: "DOM captured by the actual BrowserOwner through Host egress. Workers, frames, non-GET requests and direct browser network access are disabled." },
+            display: completeDisplay(markdown),
+          } });
+      };
+      if (ctx.render && !documentKind) {
+        await response.body?.cancel();
+        return await renderPage();
       }
-
-      // If render requested, use renderer
-      if (ctx.render && deps.renderer && !contentType.includes("application/pdf")) {
-        try {
-          const html = await awaitAbortable(deps.renderer(currentUrl, controller.signal), controller.signal);
-          controller.signal.throwIfAborted();
-          const { markdown, title } = await extractContent(html, "text/html");
-          const content: Extract<FetchResult, { status: "ok" }> = {
-            status: "ok",
-            url,
-            finalUrl: currentUrl,
-            contentType,
-            markdown,
-            bytes: markdown.length,
-            fromCache: false,
-            rendered: true,
-            ...(title ? { title } : {}),
-          };
-          finishRequest();
-          return finishOk(content);
-        } catch (error) {
-          finishRequest();
-          if (ctx.signal?.aborted) {
-            throw ctx.signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
-          }
-          return {
-            status: "failed",
-            url,
-            reason: `renderer failed: ${error instanceof Error ? error.message : "unknown"}`,
-          };
-        }
-      }
-
-      // Check content type for PDF
-      if (contentType.includes("application/pdf")) {
-        const arrayBuffer = await awaitAbortable(response.arrayBuffer(), controller.signal);
-        if (arrayBuffer.byteLength > maxBytes) {
-          finishRequest();
-          return {
-            status: "failed",
-            url,
-            reason: `PDF exceeds max size (${arrayBuffer.byteLength} > ${maxBytes})`,
-          };
-        }
-        const sourceBytes = Buffer.from(arrayBuffer);
-        // The shared network operation owns bytes only. Each authorized waiter
-        // pins its source record before any document analysis begins.
+      const acquired = await readBytes(response, controller.signal);
+      if (documentKind) {
+        if (acquired.download.status !== "complete") return { status: "failed", url,
+          reason: acquired.download.receivedBytes > maxBytes
+            ? `Document exceeds the configured download limit (${maxBytes} bytes); incomplete bytes were not sent to the document parser.`
+            : "Document transfer ended before its declared length; incomplete bytes were not sent to the document parser." };
+        // The network producer retains bytes only. Each live caller separately
+        // authorizes its original material and invokes the existing reader.
         const result: Extract<FetchResult, { status: "ok" }> = {
           status: "ok", url, finalUrl: currentUrl, contentType, markdown: "",
-          bytes: sourceBytes.byteLength, fromCache: false, rendered: false,
+          bytes: acquired.bytes.byteLength, fromCache: false, rendered: false,
+          completeness: { download: acquired.download, extraction: { status: "unknown", detail: "Document analysis has not run." }, display: completeDisplay("") },
         };
-        sourceBytesForResult.set(result, sourceBytes);
-        cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs, sourceBytes });
-        finishRequest();
+        sourceBytesForResult.set(result, acquired.bytes);
+        cacheResult(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs, sourceBytes: acquired.bytes });
         return result;
       }
-
-      // Read body with size limit
-      let text: string;
-      if (contentLength > maxBytes) {
-        // Read only up to maxBytes
-        const reader = response.body?.getReader();
-        if (!reader) {
-          finishRequest();
-          return { status: "failed", url, reason: "no response body" };
-        }
-        const chunks: Uint8Array[] = [];
-        let totalSize = 0;
-        while (totalSize < maxBytes) {
-          controller.signal.throwIfAborted();
-          const { done, value } = await awaitAbortable(reader.read(), controller.signal);
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            totalSize += value.length;
-          }
-        }
-        await reader.cancel();
-        const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
-        text = buffer.toString("utf-8");
-      } else {
-        text = await awaitAbortable(response.text(), controller.signal);
-        if (text.length > maxBytes) {
-          text = text.slice(0, maxBytes);
-        }
-      }
-
-      // Extract content
-      const { markdown, title } = await extractContent(text, contentType);
+      const decoded = decodeText(acquired.bytes, contentType, acquired.download.status === "complete");
+      const text = decoded.text;
+      const { markdown, title, extraction } = await extractContent(text, contentType);
       controller.signal.throwIfAborted();
-
-      // Check for empty shell
       if (detectEmptyShell(text, markdown, ctx.render ?? false)) {
-        finishRequest();
-        return {
-          status: "empty-shell",
-          url,
-          hint: "The HTML contains scripts but no readable body content. If content requires JavaScript, retry with render: true on a Host with web rendering enabled.",
-        };
+        if (ctx.allowRenderFallback && deps.renderer) return await renderPage();
+        return { status: "empty-shell", url,
+          hint: ctx.allowRenderFallback
+            ? "JavaScript rendering is enabled, but this Host has no BrowserOwner. Continue on a Host with a configured renderer."
+            : "The HTML contains scripts but no readable body content. Enable web rendering on this Host to use its BrowserOwner." };
       }
-
-      const content: Extract<FetchResult, { status: "ok" }> = {
-        status: "ok",
-        url,
-        finalUrl: currentUrl,
-        contentType,
-        markdown,
-        bytes: markdown.length,
-        fromCache: false,
-        rendered: false,
-        ...(title ? { title } : {}),
-      };
-      finishRequest();
-      return finishOk(content);
+      return finishOk({ status: "ok", url, finalUrl: currentUrl, contentType, markdown,
+        bytes: acquired.download.retainedBytes, fromCache: false, rendered: false,
+        ...(title ? { title } : {}), completeness: { download: acquired.download,
+          extraction: acquired.download.status === "partial" ? { status: "partial", detail: "The configured download limit truncated the input; missing content cannot be recovered by display pagination." }
+            : decoded.lossy ? { status: "partial", detail: "The response had invalid bytes or an unsupported charset; decoded text may contain replacement characters." } : extraction,
+          display: completeDisplay(markdown) } });
+      } catch (error) {
+        if (ctx.signal?.aborted) throw ctx.signal.reason ?? error;
+        return { status: "failed", url,
+          reason: controller.signal.reason === EGRESS_TIMEOUT ? "request timed out" : error instanceof Error ? error.message : "content reading failed",
+          errorClass: controller.signal.reason === EGRESS_TIMEOUT ? "timeout" : "unknown" };
       } finally {
         finishRequest();
       }
@@ -603,27 +847,46 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (!found) return { status: "snapshot-missing", snapshotId };
     const policyCheck = checkDomainPolicy(found.ref.finalUrl, ctx.workspaceId, ctx.domainPolicy);
     if (policyCheck.blocked) return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
+    if (found.ref.document && found.ref.document.kind !== "pdf") {
+      const reader = ctx.alternateDocumentReader ?? deps.alternateDocumentReader;
+      const result = await reader?.({ ...request, snapshotId }, documentContext(ctx));
+      return result ?? { status: "failed", url: found.ref.finalUrl, reason: "The Office document reader is unavailable" };
+    }
     if (found.ref.document?.kind === "pdf") {
       if (!documentReader) return { status: "failed", url: found.ref.finalUrl, reason: "PDF reader is unavailable" };
       const result = await documentReader.read({ ...request, snapshotId }, documentContext(ctx));
-      return result.status === "ok" ? { ...result, fromCache: true } : result;
+      if (result.status !== "ok") return result;
+      if (request.question && !request.position && request.find === undefined && result.markdown) {
+        const selected = await selectText(result.markdown, result.structure ?? result.snapshot?.structure, request, result.snapshot?.snapshotId ?? snapshotId, ctx, result.snapshot);
+        if ("body" in selected) return projectSelection({ ...result, fromCache: true }, selected);
+      }
+      return { ...result, fromCache: true };
     }
     if (request.view === "page-image") return { status: "page-image-unavailable", snapshotId,
       ...(request.page !== undefined ? { page: request.page } : {}), reason: "snapshot is not a PDF" };
-    const selected = selectText(found.body.toString("utf8"), found.ref.structure, request, snapshotId);
+    const selected = await selectText(found.body.toString("utf8"), found.ref.structure, request, snapshotId, ctx, found.ref);
     if (!("body" in selected)) return selected;
-    return {
+    return projectSelection({
       status: "ok", url: found.ref.sourceUrl, finalUrl: found.ref.finalUrl,
       contentType: found.ref.contentType ?? "text/markdown",
       ...(found.ref.title ? { title: found.ref.title } : {}),
-      markdown: selected.body, bytes: found.body.byteLength, fromCache: true, rendered: found.ref.rendered === true,
+      markdown: found.body.toString("utf8"), bytes: found.ref.acquisition?.download.retainedBytes ?? found.body.byteLength, fromCache: true, rendered: found.ref.rendered === true,
       snapshot: found.ref, ...(found.ref.structure ? { structure: found.ref.structure } : {}),
-      ...(selected.range ? { range: selected.range } : {}),
-    };
+    }, selected);
   };
 
   const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
     const request: WebFetchRequest = typeof input === "string" ? { url: input } : input;
+    ctx.signal?.throwIfAborted();
+    pruneCache();
+    if (request.maxLines !== undefined && (!Number.isSafeInteger(request.maxLines) || request.maxLines < 1)) return { status: "failed", url: request.url ?? "", reason: "maxLines must be a positive integer" };
+    if (request.question !== undefined && (typeof request.question !== "string" || !request.question.trim())) return { status: "failed", url: request.url ?? "", reason: "question must be a non-empty string" };
+    ctx = { ...ctx, ...(request.render !== undefined ? { render: request.render } : {}),
+      ...(request.render === false ? { allowRenderFallback: false } : {}) };
+    if (request.position?.kind === "lines" && (!Number.isSafeInteger(request.position.startLine) || request.position.startLine < 1
+      || request.position.endLine !== undefined && (!Number.isSafeInteger(request.position.endLine) || request.position.endLine < 1))) {
+      return { status: "failed", url: request.url ?? "", reason: "Line positions must be positive integers" };
+    }
     if (request.position?.kind === "lines" && request.position.endLine !== undefined
       && request.position.endLine < request.position.startLine) {
       return { status: "failed", url: request.url ?? "", reason: "endLine must be greater than or equal to startLine" };
@@ -647,18 +910,18 @@ export function createWebFetch(deps: WebFetchDeps) {
       return { status: "blocked", url, reason: ssrfCheck.reason ?? "private-network" };
     }
 
-    const positionSlice = (result: FetchResult): FetchResult => {
+    const positionSlice = async (result: FetchResult): Promise<FetchResult> => {
       if (result.status !== "ok") return result;
-      const sliced = selectText(
+      const sliced = await selectText(
         result.markdown,
         result.structure ?? result.snapshot?.structure,
         request,
         result.snapshot?.snapshotId ?? "",
+        ctx,
+        result.snapshot,
       );
       if (!("body" in sliced)) return sliced;
-      const { range: _replacedRange, ...rest } = result;
-      return { ...rest, markdown: sliced.body, bytes: request.position ? sliced.body.length : result.bytes,
-        ...(sliced.range ? { range: sliced.range } : {}) };
+      return projectSelection(result, sliced);
     };
 
     const applyView = (result: FetchResult): FetchResult => request.view === "page-image" && result.status === "ok"
@@ -666,14 +929,28 @@ export function createWebFetch(deps: WebFetchDeps) {
         ...(request.page !== undefined ? { page: request.page } : {}), reason: "snapshot is not a PDF" }
       : result;
 
-    const pdfRequest = { ...request, view: request.view ?? "text" } as const;
-    const deliverPdf = async (result: Extract<FetchResult, { status: "ok" }>, sourceBytes: Buffer, forceNew: boolean, fromCache: boolean): Promise<FetchResult> => {
-      if (!documentReader) return { status: "failed", url, reason: "PDF reader is unavailable" };
-      const resolved = await documentReader.ingest({ source: sourceBytes, sourceUrl: url, finalUrl: result.finalUrl,
-        contentType: result.contentType, ...(forceNew ? { forceNew: true } : {}) }, documentContext(ctx), pdfRequest);
-      return resolved.status === "ok"
-        ? { ...resolved, fromCache }
-        : resolved;
+    const documentRequest = { ...request, view: request.view ?? "text" } as const;
+    const deliverDocument = async (result: Extract<FetchResult, { status: "ok" }>, sourceBytes: Buffer, forceNew: boolean, fromCache: boolean): Promise<FetchResult> => {
+      const captured = { source: sourceBytes, sourceUrl: url, finalUrl: result.finalUrl,
+        contentType: result.contentType, ...(forceNew ? { forceNew: true } : {}) };
+      const kind = documentType(result.contentType, result.finalUrl);
+      const resolved = kind === "pdf"
+        ? await documentReader?.ingest(captured, documentContext(ctx), documentRequest)
+        : await (ctx.alternateDocumentReader ?? deps.alternateDocumentReader)?.(documentRequest, documentContext(ctx), captured);
+      if (!resolved) return { status: "failed", url, reason: kind === "pdf" ? "PDF reader is unavailable" : "The Office document reader is unavailable" };
+      if (resolved.status !== "ok") return resolved;
+      const analysis = resolved.analysis ?? resolved.snapshot?.document?.analysis;
+      const complete = { ...resolved, fromCache, completeness: {
+        download: result.completeness!.download,
+        extraction: { status: analysis?.status === "partial" || analysis?.status === "unavailable" ? "partial" as const : "unknown" as const,
+          detail: "Document extraction coverage is described by its retained analysis, page scope and unparsed structure." },
+        display: resolved.completeness?.display ?? completeDisplay(resolved.markdown),
+      } };
+      if (request.question && !request.position && request.find === undefined && resolved.markdown && kind === "pdf") {
+        const selected = await selectText(resolved.markdown, resolved.structure ?? resolved.snapshot?.structure, request, resolved.snapshot?.snapshotId ?? "", ctx, resolved.snapshot);
+        return "body" in selected ? projectSelection(complete, selected) : selected;
+      }
+      return complete;
     };
 
     // Cached bytes are reusable only after this workspace and request have
@@ -681,8 +958,13 @@ export function createWebFetch(deps: WebFetchDeps) {
     // fingerprint is frozen for this request — a proxy↔direct policy change
     // must not serve bytes fetched through the other path.
     const outbound = await deps.egress?.prepare(url);
-    const cacheKey = `${url}:${ctx.render ?? false}:${outbound?.policy.fingerprint ?? "legacy"}`;
-    if (!request.refresh) {
+    // A browser can carry authentication even when the URL is public. Never
+    // implicitly transfer its rendered observation through another Thread's
+    // transient cache. Public anonymous network bytes can still be shared.
+    const browserScope = ctx.render || ctx.allowRenderFallback
+      ? `${ctx.authority.owningWorkspaceId}:${ctx.authority.threadId}` : "public";
+    const cacheKey = JSON.stringify([url, ctx.render ?? false, ctx.allowRenderFallback ?? false, browserScope, deps.rendererId ?? "none", outbound?.policy.fingerprint ?? "legacy"]);
+    if (!request.refresh && !ctx.render && !ctx.allowRenderFallback) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         if (cached.result.status === "ok") {
@@ -690,9 +972,9 @@ export function createWebFetch(deps: WebFetchDeps) {
           if (cachedPolicyCheck.blocked) {
             return { status: "blocked", url: cached.result.finalUrl, reason: "domain-blocked" };
           }
-          if (cached.sourceBytes) return deliverPdf(cached.result, cached.sourceBytes, false, true);
+          if (cached.sourceBytes) return deliverDocument(cached.result, cached.sourceBytes, false, true);
           const rebound = await attachSnapshot({ ...cached.result, fromCache: true }, { ...ctx, forceNewSnapshot: false });
-          return applyView(positionSlice(rebound));
+          return applyView(await positionSlice(rebound));
         }
         return cached.result;
       }
@@ -705,9 +987,9 @@ export function createWebFetch(deps: WebFetchDeps) {
       // Thread. Rebind the content snapshot to this caller's
       // authority while reusing the content-addressed body.
       const sourceBytes = sourceBytesForResult.get(result);
-      if (sourceBytes) return deliverPdf(result, sourceBytes, forceNewSnapshot, false);
+      if (sourceBytes) return deliverDocument(result, sourceBytes, forceNewSnapshot, false);
       const rebound = await attachSnapshot(result, { ...ctx, forceNewSnapshot });
-      return applyView(positionSlice(rebound));
+      return applyView(await positionSlice(rebound));
     };
 
     // A refresh is intentionally a fresh request: it bypasses both the
@@ -732,8 +1014,32 @@ export function createWebFetch(deps: WebFetchDeps) {
     return deliver(await joinShared(shared, ctx.signal));
   };
 
+  const operations = new Set<{ controller: AbortController; promise: Promise<FetchResult> }>();
   return {
-    fetch: fetchUrl,
+    fetch(input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> {
+      if (disposed) return Promise.resolve({ status: "failed", url: typeof input === "string" ? input : input.url ?? "", reason: "Web fetch service is closed" });
+      const controller = new AbortController();
+      const abort = () => controller.abort(ctx.signal?.reason);
+      if (ctx.signal?.aborted) abort();
+      else ctx.signal?.addEventListener("abort", abort, { once: true });
+      const operation = { controller, promise: Promise.resolve(null as unknown as FetchResult) };
+      operation.promise = fetchUrl(input, { ...ctx, signal: controller.signal }).finally(() => {
+        ctx.signal?.removeEventListener("abort", abort);
+        operations.delete(operation);
+      });
+      operations.add(operation);
+      return operation.promise;
+    },
+    /** Abort original producers and retain ownership until body readers,
+     * optional helpers and material commits have actually settled. */
+    async dispose(): Promise<void> {
+      disposed = true;
+      if (expiryTimer) clearTimeout(expiryTimer);
+      expiryTimer = undefined;
+      for (const operation of operations) operation.controller.abort(new DOMException("Web fetch service closed", "AbortError"));
+      await Promise.allSettled([...operations].map(operation => operation.promise));
+      cache.clear();
+    },
     cache,
     inflight,
   };

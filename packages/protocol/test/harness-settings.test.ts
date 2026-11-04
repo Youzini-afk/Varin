@@ -296,7 +296,10 @@ describe("harness settings", () => {
         domains: { allow: ["docs.example.com", "outside.test"], block: ["ads.example.com"] },
       },
     });
-    assert.deepEqual(merged.web?.search, { provider: "brave", credentialRef: "brave-search" });
+    assert.deepEqual(merged.web?.search, {
+      connections: [{ id: "configured-brave", name: "brave", provider: "brave", enabled: true, credentialRef: "brave-search" }],
+      defaultConnectionId: "configured-brave", fallbackConnectionIds: [],
+    });
     assert.equal(merged.web?.render, false);
     assert.deepEqual(merged.web?.domains, {
       allow: ["docs.example.com"],

@@ -1621,13 +1621,6 @@ const spawnLocalServer = async () => {
     attachSignals: false,
     exitOnShutdown: false,
     apiOnly: false,
-    renderWebPage: async (url, signal) => {
-      const result = await renderDesktopWebPage(url, signal ? { signal } : {});
-      if (!result.html) {
-        throw new Error(result.timedOut ? 'Web render timed out' : 'Web render failed');
-      }
-      return result.html;
-    },
     openFilesystemPath: async (targetPath) => {
       const errorMessage = await shell.openPath(targetPath);
       if (errorMessage) throw new Error(errorMessage);

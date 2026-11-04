@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import type { OfficeFormat } from '@varin/protocol';
 import type { ManagedSpawn } from '../process/types.js';
 import { executableExists, runOwnedCommand, type ProcessDirectoryState } from '../process/run-command.js';
+import { openOfficeArchive } from './archive-budget.js';
 
 export type OfficeExportFormat = OfficeFormat | 'pdf' | 'csv';
 export class OfficeRenderFailure extends Error {
@@ -39,6 +40,8 @@ export function createOfficeRenderer(options: { spawn: ManagedSpawn; temporaryRo
       };
     },
     async convert(bytes: Buffer, sourceFormat: OfficeFormat, format: OfficeExportFormat, signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      openOfficeArchive(bytes).validateAll();
       signal?.throwIfAborted();
       const command = await executable();
       if (!command) throw new Error('LibreOffice is unavailable on this Host; office_environment shows available format and application paths');

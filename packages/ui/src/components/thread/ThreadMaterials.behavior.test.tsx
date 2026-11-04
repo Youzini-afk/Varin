@@ -522,3 +522,38 @@ it('rejects late research PDF region responses after Thread or Host change witho
     expect(mocks.addRegion).not.toHaveBeenCalled();
   }
 });
+
+it('opens saved search sources as text, verifies the revision and keeps continuation on the original snapshot', async () => {
+  const snapshot = { snapshotId: 'snap-web', sourceUrl: 'https://example.test/original', finalUrl: 'https://example.test/original',
+    fetchedAt: 1000, contentHash: `sha256-${'a'.repeat(64)}`, representation: 'search-observation-v1', byteLength: 12, title: 'Saved discovery',
+    provenance: { kind: 'search-result' as const, providerId: 'provider', contentKind: 'provider-excerpt' as const, publishedAt: '2020-01-01' } };
+  const read = vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => ({ status: 'ok', url: snapshot.sourceUrl, finalUrl: snapshot.finalUrl, contentType: 'text/plain', bytes: snapshot.byteLength, fromCache: true, rendered: false, snapshot,
+    markdown: request.position?.kind === 'lines' && request.position.startLine > 1 ? 'Fixed continuation' : 'Original provider excerpt',
+    nextRead: { snapshotId: snapshot.snapshotId, position: { kind: 'lines', startLine: 201, endLine: 400 } } }));
+  await render({ read }, identity, { items: [{ results: [{ source: { snapshot } }] }] });
+  await click('Saved discovery');
+  expect(container.textContent).toContain('material.searchObservation');
+  expect(container.textContent).toContain('Original provider excerpt');
+  expect(container.textContent).toContain('2020-01-01');
+  await click('chat.tools.quotePassage');
+  const draft = Object.values(useThreadDraftStore.getState().drafts).find(value => value.text.includes('Original provider excerpt'));
+  expect(draft?.text).toContain(`[Saved discovery](varin-material://snap-web?contentHash=${snapshot.contentHash})`);
+  expect(draft?.text).toContain('> Original provider excerpt');
+  await click('material.continueSource');
+  expect(container.textContent).toContain('Fixed continuation');
+  expect(read.mock.calls.at(-1)?.[1]).toMatchObject({ snapshotId: 'snap-web', position: { kind: 'lines', startLine: 201 } });
+  expect(read.mock.calls.every(([owner]) => owner.threadId === identity.threadId)).toBe(true);
+  expect(container.querySelector('a[target="_blank"]')?.getAttribute('href')).toBe(snapshot.finalUrl);
+  await click('Close material');
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('does not show a web source whose retained revision differs from its citation', async () => {
+  const snapshot = { snapshotId: 'snap-web', sourceUrl: 'https://example.test/original', finalUrl: 'https://example.test/original', fetchedAt: 1000,
+    contentHash: `sha256-${'a'.repeat(64)}`, representation: 'markdown', byteLength: 5, title: 'Source revision' };
+  const read = vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => ({ status: 'ok', url: snapshot.sourceUrl, finalUrl: snapshot.finalUrl, contentType: 'text/plain', bytes: snapshot.byteLength, fromCache: true, rendered: false,
+    snapshot: { ...snapshot, contentHash: request.view === 'overview' ? snapshot.contentHash : `sha256-${'b'.repeat(64)}` }, markdown: 'Wrong revision' }));
+  await render({ read }, identity, { status: 'ok', snapshot }); await click('Source revision');
+  expect(container.textContent).toContain('material.sourceRevisionMismatch');
+  expect(container.textContent).not.toContain('Wrong revision');
+});

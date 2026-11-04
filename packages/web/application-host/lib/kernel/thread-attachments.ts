@@ -2,7 +2,7 @@
  * record, upload receipt and prepared execution path; Catalog owns delivery. */
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { attachmentMimeType, parseAttachmentSelections, type Attachment, type AttachmentSelection } from '@varin/protocol';
+import { attachmentMimeType, materialAttachmentRef, parseWebSourceCitation, parseAttachmentSelections, type Attachment, type AttachmentSelection } from '@varin/protocol';
 import type { ExternalConversation, ThreadIdentity } from '@varin/application-client';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient, KernelScopedClient, KernelBlobReadSource } from './kernel-client.js';
@@ -33,7 +33,7 @@ const filename = (value: string) => {
   return value;
 };
 interface Scope { workspaceId: string; threadId: string }
-interface StoredAttachment { attachment: Attachment; contentHash: string; selection?: AttachmentSelection; operationId?: string }
+interface StoredAttachment { attachment: Attachment; contentHash: string; selection?: AttachmentSelection; operationId?: string; materials?: Array<{ snapshotId: string; contentHash: string; sourceHash?: string }> }
 type RecordValue = Awaited<ReturnType<KernelStorageContext['records']['get']>>;
 export interface AttachmentUpload { key: string; filename: string; mimeType: string; byteLength: number }
 export interface AttachmentRead { attachment: Attachment; stream: AsyncIterable<Uint8Array> }
@@ -107,7 +107,8 @@ export function createThreadAttachments(options: {
   const write = async (context: KernelStorageContext, scope: Scope, value: StoredAttachment, ownerIds: string[] = []) => {
     await context.records.put({ operationId: `retain:${value.attachment.ref}`, recordId: value.attachment.ref,
       recordType: ATTACHMENT_FILE, state: 'temporary', threadId: scope.threadId, payloadJson: JSON.stringify(value), ownerIds,
-      references: [{ slot: 'source', objectHash: value.contentHash }] });
+      references: [{ slot: 'source', objectHash: value.contentHash }, ...(value.materials ?? []).flatMap((material, index) => [
+        { slot: `material:${index}:body`, objectHash: material.contentHash }, ...(material.sourceHash ? [{ slot: `material:${index}:source`, objectHash: material.sourceHash }] : [])])] });
     return value.attachment;
   };
   const chunks = async function* (client: KernelScopedClient, hash: string, byteLength: number, source: KernelBlobReadSource, signal?: AbortSignal) {
@@ -208,14 +209,23 @@ export function createThreadAttachments(options: {
         } finally { await options.kernel.revokeGrant(grant.grantId); }
       }
       // Legacy document IDs are resolved by their original ACL, never scanned from prose.
-      const material = await options.materials.read(scope.workspaceId, selection.ref, { kind: 'thread', owningWorkspaceId: scope.workspaceId, threadId: scope.threadId }, { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) });
+      const citation = parseWebSourceCitation(selection.ref);
+      if (selection.ref.startsWith('varin-material://') && !citation) throw new HarnessServiceError('invalid-params', 'The source citation is invalid');
+      const material = await options.materials.read(scope.workspaceId, citation?.snapshotId ?? selection.ref, { kind: 'thread', owningWorkspaceId: scope.workspaceId, threadId: scope.threadId }, { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) });
       if (!material) throw new HarnessServiceError('forbidden', 'The selected material is not readable by this Thread');
+      if (citation?.contentHash && citation.contentHash !== material.ref.contentHash) throw new HarnessServiceError('conflict', 'The source citation revision changed');
+      const retainedMaterials: NonNullable<StoredAttachment['materials']> = [{ snapshotId: material.ref.snapshotId, contentHash: material.ref.contentHash, ...(material.ref.document?.source ? { sourceHash: material.ref.document.source.contentHash } : {}) }];
+      if (material.ref.document?.sourceSnapshotId && material.ref.document.sourceSnapshotId !== material.ref.snapshotId) {
+        const original = await options.materials.read(scope.workspaceId, material.ref.document.sourceSnapshotId, { kind: 'thread', owningWorkspaceId: scope.workspaceId, threadId: scope.threadId }, { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) });
+        if (!original) throw new HarnessServiceError('forbidden', 'The original source snapshot is not readable');
+        retainedMaterials.push({ snapshotId: original.ref.snapshotId, contentHash: original.ref.contentHash, ...(original.ref.document?.source ? { sourceHash: original.ref.document.source.contentHash } : {}) });
+      }
       const source = material.ref.document?.source ?? { contentHash: material.ref.contentHash, byteLength: material.ref.byteLength, contentType: material.ref.contentType ?? 'text/plain' };
-      const ref = `attachment:${digest([scope.threadId, material.ref.snapshotId])}`;
+      const ref = materialAttachmentRef(material.ref.snapshotId);
       return inScope(scope, 'attachment-write', async context => {
         const previous = await context.records.get(ref);
         if (previous && previous.state !== 'released') return stored(previous).attachment;
-        return write(context, scope, { attachment: { ref, filename: path.basename((material.ref.title ?? 'document').replaceAll('\\', '/')).split('').filter(character => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127).join('') || 'document', mimeType: source.contentType, byteLength: source.byteLength }, contentHash: source.contentHash });
+        return write(context, scope, { attachment: { ref, filename: path.basename((material.ref.title ?? 'document').replaceAll('\\', '/')).split('').filter(character => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127).join('') || 'document', mimeType: source.contentType, byteLength: source.byteLength }, contentHash: source.contentHash, materials: retainedMaterials });
       });
     }
     const ref = `attachment:${digest([scope.threadId, operationId, index])}`;
@@ -361,7 +371,15 @@ export function createThreadAttachments(options: {
     // Recipient owns the relation: deleting the original sender cannot revoke delivery.
     await inScope({ ...scope, threadId: targetThreadId }, 'attachment-write', async context => {
       const id = `attachment-delivery:${digest([scope.threadId, operationId, targetThreadId])}`;
-      const payloadJson = JSON.stringify({ fromThreadId: scope.threadId, toThreadId: targetThreadId, attachmentRefs: attachments.map(item => item.ref), operationId });
+      const sources = [];
+      for (const attachment of attachments) {
+        const record = await context.records.get(attachment.ref);
+        if (!record || record.state === 'released') throw new HarnessServiceError('unavailable', 'A prepared attachment was released before delivery');
+        sources.push(stored(record));
+      }
+      const snapshotIds = [...new Set(sources.flatMap(source => (source.materials ?? []).map(material => material.snapshotId)))];
+      const payloadJson = JSON.stringify({ fromThreadId: scope.threadId, toThreadId: targetThreadId, attachmentRefs: attachments.map(item => item.ref), operationId,
+        ...(snapshotIds.length ? { snapshotIds } : {}) });
       const existing = await context.records.get(id);
       if (existing) {
         if (existing.payloadJson !== payloadJson) throw new HarnessServiceError('conflict', 'The attachment delivery retry changed its original intent');
@@ -371,7 +389,12 @@ export function createThreadAttachments(options: {
       for (const [index, attachment] of attachments.entries()) {
         const record = await context.records.get(attachment.ref);
         if (!record || record.state === 'released') throw new HarnessServiceError('unavailable', 'A prepared attachment was released before delivery');
-        references.push({ slot: `attachment:${index}`, objectHash: stored(record).contentHash });
+        const source = stored(record);
+        references.push({ slot: `attachment:${index}`, objectHash: source.contentHash });
+        for (const [materialIndex, material] of (source.materials ?? []).entries()) {
+          references.push({ slot: `attachment:${index}:material:${materialIndex}:body`, objectHash: material.contentHash });
+          if (material.sourceHash) references.push({ slot: `attachment:${index}:material:${materialIndex}:source`, objectHash: material.sourceHash });
+        }
       }
       await context.records.put({ operationId: existing ? `retain:${id}:${existing.recordRevision}` : `retain:${id}`, recordId: id, recordType: ATTACHMENT_DELIVERY,
         ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}), state: 'temporary', threadId: targetThreadId, payloadJson, references });
@@ -465,6 +488,13 @@ export function createThreadAttachments(options: {
       });
       }, signal);
     },
+    async retainMaterial(identity: ThreadIdentity, snapshotId: string, signal?: AbortSignal) {
+      const scope = await scopeFor(identity, signal);
+      return nativeActivity(identity, scope, async () => {
+        if (await options.materials.read(scope.workspaceId, snapshotId, { kind: 'thread', owningWorkspaceId: scope.workspaceId, threadId: scope.threadId }, { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) })) return;
+        await capture(scope, { ref: materialAttachmentRef(snapshotId) }, `source-read:${snapshotId}`, 0, undefined, signal);
+      }, signal);
+    },
     retain: retainPlan,
     async reconcilePreparations(plan: MaterialRetention, signal?: AbortSignal) {
       const retained = new Set(plan.attachments.flatMap(edge => edge.attachments.map(item => item.ref)));
@@ -552,7 +582,7 @@ export function createThreadAttachments(options: {
     async prepareQuery(query: AttachmentPreparationQuery, signal: AbortSignal) {
       const frozen = await options.runtime.resourceSnapshot({ runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId }, signal);
       const run = await options.runtime.run(query.runId, signal);
-      if (query.request.attachments.some(item => typeof item.ref === 'string' && !item.ref.startsWith('attachment:'))) throw new HarnessServiceError('invalid-params', 'Use the canonical attachment reference returned by the original file or document tool');
+      if (query.request.attachments.some(item => typeof item.ref === 'string' && !item.ref.startsWith('attachment:') && !parseWebSourceCitation(item.ref))) throw new HarnessServiceError('invalid-params', 'Use the canonical attachment reference returned by the original file or document tool');
       const identity = { runtime: 'agent' as const, threadId: run.thread_id, branchId: run.branch_id }, scope = await scopeFor(identity, signal);
       try { return await nativeActivity(identity, scope, () => prepare(scope, query.request.attachments,
         query.request.operationId, query.request.targetThreadId, query.runId, signal, frozen.source), signal); }

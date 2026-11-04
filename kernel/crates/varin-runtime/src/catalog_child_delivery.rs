@@ -71,15 +71,22 @@ impl ChildReportPreparation {
                 let head = terminal_history_head(&snapshot, &run)?;
                 let mut ancestor = head.clone();
                 let mut history_ids = Vec::new();
+                let mut material_descriptors = Vec::new();
+                if let Some(inherited) = &child.inherited_context {
+                    let history: Vec<ConversationItem<crate::output::StoredMedia>> = serde_json::from_value(self.content.load(&inherited.items)?)?;
+                    for item in history {
+                        material_descriptors.extend(super::attachments::history_attachments(&serde_json::to_value(item)?, HistorySource::Assistant)?);
+                    }
+                }
+                let mut report_texts = Vec::new();
                 while let Some(id) = ancestor {
                     let metadata: HistoryItem = record(&snapshot, "history", &id)?;
                     ancestor = metadata.parent.clone();
-                    if metadata.run_id != run.id {
-                        continue;
-                    }
                     let (body, _) = self
                         .content
                         .load_stored_history_payload(&metadata.content, &|| false)?;
+                    material_descriptors.extend(super::attachments::history_attachments(&body, metadata.source)?);
+                    if metadata.run_id != run.id { continue; }
                     let item = metadata;
                     let Ok(conversation) = serde_json::from_value::<
                         ConversationItem<crate::output::StoredMedia>,
@@ -92,6 +99,7 @@ impl ChildReportPreparation {
                                 && item.source == HistorySource::Assistant
                                 && !text.trim().is_empty() =>
                         {
+                            report_texts.push(text);
                             history_ids.push(item.id)
                         }
                         Content::Output { output }
@@ -104,6 +112,9 @@ impl ChildReportPreparation {
                                         crate::output::OutputPart::Media { .. } | crate::output::OutputPart::Attachment { .. } => true,
                                     })) =>
                         {
+                            report_texts.extend(output.parts.iter().filter_map(|part| match part {
+                                crate::output::OutputPart::Text { text } => Some(text.clone()), _ => None,
+                            }));
                             history_ids.push(item.id)
                         }
                         _ => (),
@@ -116,7 +127,11 @@ impl ChildReportPreparation {
                     RunState::Completed if !history_ids.is_empty() => Outcome::Succeeded,
                     _ => Outcome::Failed,
                 };
-                let report = ChildReport { attachments: super::attachments::reported(&snapshot,&run.id,&child.parent_thread_id)?,
+                let mut attachments = super::attachments::reported(&snapshot, &run.id, &child.parent_thread_id)?;
+                for attachment in super::attachments::cited_materials(&report_texts, &material_descriptors) {
+                    if !attachments.iter().any(|item| item.reference == attachment.reference) { attachments.push(attachment); }
+                }
+                let report = ChildReport { attachments,
                     error: None,
                     outcome,
                     sender_thread_id: child.child_thread_id.clone(),

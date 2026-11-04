@@ -5,8 +5,9 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import type { Accessibility, Browser, CDPSession, Dialog, ElementHandle, Frame, KeyInput, Page, SerializedAXNode } from 'puppeteer-core';
 import { BrowserExecutionError } from '@varin/protocol';
-import type { BrowserAction, BrowserActionResult, BrowserDownload, BrowserElement, BrowserEvent, BrowserObservation, BrowserOwner, BrowserPage, BrowserReadRequest } from '@varin/protocol';
+import type { BrowserAction, BrowserActionResult, BrowserDownload, BrowserElement, BrowserEvent, BrowserObservation, BrowserOwner, BrowserPage, BrowserReadRequest, BrowserRenderRequest, BrowserRenderResult } from '@varin/protocol';
 import { ElectronPageTransport } from './browser-transport.js';
+import { captureBrowserPage, createCaptureNetworkFence } from './browser-web-capture.js';
 
 type Reference = { node: SerializedAXNode; frame: Frame };
 type CoordinateObservation = { navigation: number; viewport: string; scroll: string };
@@ -16,6 +17,7 @@ type OwnedPage = {
   refs: Map<string, Reference>; refKeys: Map<string, string>; frameIds: WeakMap<Frame, string>;
   observations: Map<string, CoordinateObservation>; navigation: number; queue: Promise<unknown>;
   actions: Set<AbortController>; agentPaused: boolean; activeAction?: string; dialog?: Dialog; crashed?: string;
+  captureOnly?: boolean;
   inputAcknowledgements: Set<Promise<unknown>>;
   pendingScripts: Set<Promise<void>>;
   presentation?: { window: BrowserWindow; viewId: string }; uploadDirectories: Set<string>;
@@ -36,6 +38,8 @@ export class ElectronBrowserOwner implements BrowserOwner {
   private readonly presentationWindows = new WeakSet<BrowserWindow>();
   private readonly closedPages = new Set<string>();
   private disposed = false;
+  private readonly captureSessions: Electron.Session[] = [];
+  private readonly captures = new Set<{ threadId: string; controller: AbortController; promise: Promise<BrowserRenderResult> }>();
   private scratchReady?: Promise<void>;
   constructor(private readonly options: { scratchDirectory: string; partition?: string }) {
     this.browserSession = session.fromPartition(options.partition ?? 'persist:varin-browser');
@@ -56,21 +60,21 @@ export class ElectronBrowserOwner implements BrowserOwner {
       ...(entry.pendingScripts.size ? { scriptPending: true } : {}),
       ...(entry.dialog ? { dialog: { type: entry.dialog.type(), message: entry.dialog.message(), defaultPrompt: entry.dialog.defaultValue() } } : {}) };
   }
-  private changed(entry: OwnedPage) { if (this.pages.has(entry.id)) this.emit({ kind: 'page', page: this.state(entry) }); }
+  private changed(entry: OwnedPage) { if (!entry.captureOnly && this.pages.has(entry.id)) this.emit({ kind: 'page', page: this.state(entry) }); }
   private require(pageId: string) {
     const entry = this.pages.get(pageId);
     if (!entry || entry.view.webContents.isDestroyed()) throw new Error('browser_page_closed: This page no longer exists. Use browser_tabs to select an available page.');
     if (entry.crashed) throw new Error(`browser_page_crashed: ${entry.crashed}. Reload this page before continuing.`);
     return entry;
   }
-  async list() { return [...this.pages.values()].map(entry => this.state(entry)); }
+  async list() { return [...this.pages.values()].filter(entry => !entry.captureOnly).map(entry => this.state(entry)); }
   retainForThread(pageId: string, threadId: string) { this.require(pageId).threads.add(threadId); }
   private url(value: string) {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:' && value !== 'about:blank') throw new Error('This browser accepts HTTP(S) pages and about:blank; local files use the file owner.');
     return url.href;
   }
-  private async create(id: string): Promise<OwnedPage> {
+  private async create(id: string, captureSession?: Electron.Session): Promise<OwnedPage> {
     if (this.disposed) throw new Error('The browser owner has stopped');
     if (this.closedPages.has(id)) throw new Error('browser_page_closed: Open a new browser page to continue.');
     const existing = this.pages.get(id); if (existing) return existing;
@@ -88,7 +92,7 @@ export class ElectronBrowserOwner implements BrowserOwner {
           }
         }
       })());
-      const view = new WebContentsView({ webPreferences: { session: this.browserSession, sandbox: true, contextIsolation: true,
+      const view = new WebContentsView({ webPreferences: { session: captureSession ?? this.browserSession, sandbox: true, contextIsolation: true,
         nodeIntegration: false, backgroundThrottling: false, webSecurity: true } });
       view.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
       this.parking.contentView.addChildView(view);
@@ -103,7 +107,7 @@ export class ElectronBrowserOwner implements BrowserOwner {
         // use their actual signal; no hidden library timer truncates a long operation.
         page.setDefaultTimeout(0); page.setDefaultNavigationTimeout(0);
         const entry: OwnedPage = { id, view, browser, page, threads: new Set(), retained: false, refs: new Map(), refKeys: new Map(),
-          frameIds: new WeakMap(), observations: new Map(), navigation: 0, queue: Promise.resolve(), actions: new Set(), inputAcknowledgements: new Set(), pendingScripts: new Set(), agentPaused: false, uploadDirectories: new Set() };
+          frameIds: new WeakMap(), observations: new Map(), navigation: 0, queue: Promise.resolve(), actions: new Set(), inputAcknowledgements: new Set(), pendingScripts: new Set(), agentPaused: false, uploadDirectories: new Set(), captureOnly: Boolean(captureSession) };
         this.pages.set(id, entry);
         const changed = () => this.changed(entry);
         view.webContents.on('did-start-loading', changed); view.webContents.on('did-stop-loading', changed);
@@ -116,9 +120,9 @@ export class ElectronBrowserOwner implements BrowserOwner {
           entry.refKeys.clear(); entry.navigation++; entry.observations.clear(); changed();
         });
         page.on('framedetached', frame => { for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref); });
-        page.on('dialog', dialog => { entry.dialog = dialog; changed(); this.emit({ kind: 'dialog', pageId: id, type: dialog.type(), message: dialog.message(), defaultPrompt: dialog.defaultValue() }); });
+        page.on('dialog', dialog => { if (entry.captureOnly) { void dialog.dismiss().catch(() => undefined); return; } entry.dialog = dialog; changed(); this.emit({ kind: 'dialog', pageId: id, type: dialog.type(), message: dialog.message(), defaultPrompt: dialog.defaultValue() }); });
         view.webContents.on('render-process-gone', (_event, details) => { entry.crashed = details.reason; changed(); });
-        view.webContents.once('destroyed', () => { this.pages.delete(id); this.emit({ kind: 'closed', pageId: id }); });
+        view.webContents.once('destroyed', () => { this.pages.delete(id); if (!entry.captureOnly) this.emit({ kind: 'closed', pageId: id }); });
         // Keep popup navigation inside this owned page, preserving existing embedded-browser behavior.
         view.webContents.setWindowOpenHandler(({ url }) => {
           try { void view.webContents.loadURL(this.url(url)).catch(() => undefined); } catch { /* unsupported external scheme */ }
@@ -143,6 +147,72 @@ export class ElectronBrowserOwner implements BrowserOwner {
     return this.state(entry);
     } catch (error) { throw error instanceof BrowserExecutionError && !started ? error : new BrowserExecutionError(error, started ? 'unknown' : 'none'); }
   }
+  /** Read-only render uses this owner's identity, but no second persistent
+   * browser profile. Unbrokered network paths fail closed in its temporary
+   * session; cookies are seeded only for the requested origin. */
+  renderPage(input: BrowserRenderRequest): Promise<BrowserRenderResult> {
+    if (this.disposed) return Promise.reject(new Error('The browser owner has stopped'));
+    const controller = new AbortController();
+    const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+    const capture = { threadId: input.threadId, controller, promise: this.capturePage({ ...input, signal }) };
+    this.captures.add(capture);
+    return capture.promise.finally(() => this.captures.delete(capture));
+  }
+  private async capturePage(input: BrowserRenderRequest): Promise<BrowserRenderResult> {
+    input.signal?.throwIfAborted();
+    if (this.disposed) throw new Error('The browser owner has stopped');
+    const target = this.url(input.url);
+    const controller = new AbortController();
+    const abort = () => controller.abort(input.signal?.reason);
+    if (input.signal?.aborted) abort();
+    else input.signal?.addEventListener('abort', abort, { once: true });
+    let fence: Awaited<ReturnType<typeof createCaptureNetworkFence>> | undefined;
+    let captureSession: Electron.Session | undefined;
+    let entry: OwnedPage | undefined;
+    let closing: Promise<void> | undefined;
+    const close = () => closing ??= Promise.resolve().then(async () => {
+      controller.abort(new DOMException('Browser capture released', 'AbortError'));
+      if (entry) await this.close(entry.id);
+    });
+    try {
+      fence = await createCaptureNetworkFence();
+      captureSession = this.captureSessions.pop() ?? session.fromPartition(`varin-read-${randomUUID()}`, { cache: false });
+      controller.signal.throwIfAborted();
+      await captureSession.setProxy({ mode: 'fixed_servers', proxyRules: fence.proxyRules, proxyBypassRules: '<-loopback>' });
+      captureSession.setPermissionRequestHandler((_contents, _permission, respond) => respond(false));
+      captureSession.setPermissionCheckHandler(() => false);
+      for (const cookie of await this.browserSession.cookies.get({ url: target })) {
+        controller.signal.throwIfAborted();
+        if (cookie.secure && !target.startsWith('https:')) continue;
+        await captureSession.cookies.set({ url: target, name: cookie.name, value: cookie.value,
+          ...(cookie.domain ? { domain: cookie.domain } : {}), ...(cookie.path ? { path: cookie.path } : {}),
+          ...(cookie.secure !== undefined ? { secure: cookie.secure } : {}), ...(cookie.httpOnly !== undefined ? { httpOnly: cookie.httpOnly } : {}), sameSite: cookie.sameSite,
+          ...(cookie.expirationDate !== undefined ? { expirationDate: cookie.expirationDate } : {}) });
+      }
+      entry = await this.create(randomUUID(), captureSession);
+      entry.threads.add(input.threadId);
+      entry.actions.add(controller);
+      entry.view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+      entry.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      const result = await captureBrowserPage(input, { page: entry.page, signal: controller.signal, close,
+        cookies: async url => (await captureSession!.cookies.get({ url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; '),
+      });
+      return { ...result, blockedRequests: result.blockedRequests + fence.blocked() };
+    } finally {
+      input.signal?.removeEventListener('abort', abort);
+      try { await close(); }
+      finally {
+        try {
+          if (captureSession) {
+            await captureSession.closeAllConnections();
+            await captureSession.clearStorageData();
+            if (!this.disposed) this.captureSessions.push(captureSession);
+          }
+        } finally { await fence?.close(); }
+      }
+    }
+  }
+
   /** Called by a trusted local UI. Reopening a mounted page never reloads its URL. */
   async present(input: { pageId: string; viewId: string; url: string; bounds: Electron.Rectangle; visible: boolean }, window: BrowserWindow) {
     const existing = this.pages.get(input.pageId);
@@ -542,13 +612,19 @@ export class ElectronBrowserOwner implements BrowserOwner {
     await Promise.allSettled([...entry.inputAcknowledgements]);
     for (const download of await this.downloads(pageId)) await this.releaseDownload(pageId, download.downloadId);
     for (const directory of entry.uploadDirectories) await rm(directory, { recursive: true, force: true });
-    this.emit({ kind: 'closed', pageId });
+    if (!entry.captureOnly) this.emit({ kind: 'closed', pageId });
   }
   async releaseThread(threadId: string) {
+    const captures = [...this.captures].filter(capture => capture.threadId === threadId);
+    for (const capture of captures) capture.controller.abort(new Error('The rendering Thread was released'));
+    await Promise.allSettled(captures.map(capture => capture.promise));
     for (const entry of this.pages.values()) if (entry.threads.delete(threadId) && !entry.threads.size && !entry.retained) await this.close(entry.id);
   }
   async dispose() {
     this.disposed = true; this.browserSession.removeListener('will-download', this.willDownload);
+    for (const capture of this.captures) capture.controller.abort(new Error('The browser owner has stopped'));
+    await Promise.allSettled([...this.captures].map(capture => capture.promise));
+    await Promise.allSettled(this.captureSessions.splice(0).map(async session => { await session.closeAllConnections(); await session.clearStorageData(); }));
     await Promise.allSettled([...this.creating.values()]);
     for (const pageId of [...this.pages.keys()]) await this.close(pageId);
     if (this.parkingWindow && !this.parkingWindow.isDestroyed()) this.parkingWindow.destroy();

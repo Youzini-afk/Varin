@@ -47,6 +47,7 @@ import { ModelsService } from './lib/models/service.js';
 import { registerModelRoutes } from './lib/models/routes.js';
 import { registerUsageRoutes } from './lib/models/usage-routes.js';
 import { registerModelTestRoute } from './lib/models/test-route.js';
+import { createWebRetrievalAssistance } from './lib/kernel/web-retrieval-assistance.js';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
 import { createOfficeRuntime, OFFICE_CAPABILITY } from './lib/kernel/office-runtime.js';
 import { createBrowserRuntime, BROWSER_CAPABILITY } from './lib/kernel/browser-runtime.js';
@@ -1391,7 +1392,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ssrf: ssrfPolicy,
     egress: egressRuntime,
     documentReader,
-    ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
+    ...(options.browser?.renderPage ? { renderer: request => options.browser!.renderPage!(request), rendererId: options.browser.browserId } : {}),
     materials: materialStore,
   });
   // Scholarly APIs share the same egress authority — proxies and SSRF
@@ -2046,7 +2047,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return modelsService.settings.snapshot(root);
     },
   });
-  webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
+  const webRetrievalAssistance = createWebRetrievalAssistance({ kernel: kernelClient, models: modelAuthority, authority: modelsService,
+    inference: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
+      readRetrySettings: () => modelsService.readGlobalInferenceSettings().then(value => value.retry),
+      onError: () => console.error('[Web] Original retrieval assistance receipt requires attention') } });
+  webRuntimeOwner.current = createWebRuntime({ assistance: webRetrievalAssistance, runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
     alternateDocumentReader: officeReader.document,
     collections: materialCollectionsService,
     documentSources,
@@ -2057,6 +2062,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   researchDiscoveryOwner.current = createResearchDiscoveryRuntime({ service: researchSearchService,
+    retainSources: webRuntimeOwner.current.retainScholarlySources,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return modelsService.settings.snapshot(root);
@@ -2504,6 +2510,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerWebSearchCredentialRoutes(app, {
     readAuth: serviceCredentials.read, saveAuth: serviceCredentials.save, removeAuth: serviceCredentials.remove,
+    readSearchSettings: () => modelsService.settings.harness().then(value => value.web?.search),
+    searchFetch: egressRuntime.fetch as typeof globalThis.fetch,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
 
@@ -3145,6 +3153,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('localKnowledgeComponent.dispose', () => localKnowledgeComponent.dispose());
       await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
       await shutdown.run('delegationModels.close', () => delegationModels.close());
+      await shutdown.run('webRuntime.close', () => webRuntimeOwner.current?.close());
+      await shutdown.run('webRetrievalAssistance.close', () => webRetrievalAssistance.close());
+      await shutdown.run('webFetch.dispose', () => webFetchService.dispose());
       await shutdown.run('semanticInference.close', () => semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.

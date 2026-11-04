@@ -175,30 +175,96 @@ Bot knowledge-vector 仍有独立用途，使用 `vectors/embedding-owner.ts`、
 
 ## Web、学术与文档材料
 
-发现返回来源引用与逐项状态；provider failure/fallback 可见，snippet 不冒充全文。Host egress 管目标策略、redirect、
-DNS/proxy/TLS 和取消，外部 URL 仍是不可信输入。
+### 搜索连接与实际筛选
 
-Web snapshot 和本地文档捕获保留原件、来源、reader scope 与 revision。提取文本、outline/table/figure 与 page image 是同一材料
-的不同视图。PDF 文本不能证明视觉忠实，页面读取交付真正 typed image。刷新 URL 产生新观察，不改写已引用来源。
+没有显式搜索配置时，工具准备与执行都启用产品提供的匿名 Exa MCP，失败才沿默认 Parallel MCP
+备用路线继续。明确关闭、空连接列表、配置错误和缺失凭据分别表达，不恢复匿名默认来掩盖错误。
+用户连接保存稳定 ID、名称、适配器、端点、凭据引用、说明和启用状态；同一服务可以有多个账号或实例。
+默认与备用顺序独立配置。旧单渠道设置读取时归一化，首次保存写连接结构，保留原凭据引用。
 
-模型 `document_read` 只给 path、snapshotId 或 artifact 时，PDF 与 Office 都默认读取正文；内部上传/材料登记仍可只取元数据。
-显式 `view:overview` 保持概览，返回有效 view、`textStatus:not-requested` 和携原 snapshotId 的 `nextRead`。
-Office 保留 section/object/range/query 选择和原对象身份，分页携实际 nextOffset 与选择条件续读；通用 view 与 Office view
-冲突时说明参数问题。工具输出预算截断继续使用原 `read_thread` 结果引用及精确偏移，不重新捕获原件。
-空正文按尚未请求、没有文字、解析失败或组件不可用表达实际状态；没有文本层时不自动启用 OCR。
+`websearch` 的 `objective` 是本次目标，与 `query` / `queries` 同时提供时不另发一条目标搜索。
+只有目标时可直接搜索。`action:connections` 只返回可用连接及真实能力，不发网络请求。
+`connectionId` 精确选择一个连接且不自动换渠道；`connectionIds` 显式进行互补搜索。
+自动模式沿启用的默认和备用路线执行，零命中不是故障。批量项保留各自结果、失败、渠道和实际尝试。
 
-原生输入的 PDF upload 经过 ThreadMaterials 作用域校验，用 documentReader 与 MaterialStore 保留原始字节。
-submit、三种 enqueue 与 child continuation 冻结已授权 snapshot 的来源信息，`document_read` 继续读取同一原件；
-浏览器只传原始文件，既不提取正文，也不把任意 snapshot ID 变成访问授权。
+适配器将域名、时间、语言与地区条件传到实际支持的接口，同时对可确定的域名范围做结果核验。
+`appliedFilters` 说明上游参数、查询操作符、结果过滤或排序，以及日期的真实依据。
+`strictFilters` 拒绝不能满足的条件；普通偏好可返回结果，但说明未满足项。
+全局和可信项目的来源偏好与网络 allow/block 权限分别保存；当次偏好可覆盖，网络权限不能由搜索参数放宽。
 
-材料集合保存引用和显式跨任务 share grant，知道他人 material ID 不等于有权限。读取/模型选材重查原 grant；来源失败不变空文档。
-集合关键词搜索覆盖成员标题、可读快照标题、来源 URL／文件名、论文标识和正文，结果注明 `title`、`source` 或 `body`。
-只有正文命中才携带行号；没有正文的论文条目也可以按标题或 DOI 找到。集合范围与来源授权在检索前核验。
-artifact、collection、log follow-up 使用原发布事实和耐久 occurrence。
+连接测试只运行已保存的连接，用其原凭据 owner 和 Host egress，显示实际测试时间及错误。
+配置完整性不冒充连通性。匿名入口有供应商免费使用边界；独立连接用于用户自己的账号和自托管实例。
+当前集成 Exa、Parallel 匿名入口及 Brave、Exa、Tavily、Jina、SearXNG 适配器，不把普通模型对话当作联网渠道。
 
-实现位于 `harness/web-search.ts`、`web-fetch.ts`、`web-materials.ts`、`research-search.ts`、`document-reading.ts`、
-`material-read-service.ts`、`material-collections.ts`。Native adapter 在 `kernel/web-runtime.ts`、`document-sources.ts`
-及材料 owner；工具 adapter 不再建一层材料缓存。
+### 原文、问题与获取完整性
+
+`webfetch` 接受 URL、固定 snapshot 或 `ref` 引用，可附 `question`，也可指定行、章节、元素或精确查找。
+短文直接返回；默认长文按正文页展示，`maxLines` 调整展示目标，`nextRead` 继续同一份材料。
+问题选段使用词项、中文及混合语言切分、标题和技术符号定位原文，返回精确范围、结构和选择依据。
+代码、表格和列表沿提取表示保留。找不到匹配时说明范围，保留结构及普通续读，不生成替代原文。
+
+普通获取优先使用 Host egress。显式启用渲染后，可请求实际 BrowserOwner 渲染或在空正文时回退。
+Electron 使用同一 BrowserOwner 的目标站点身份，临时隔离页面只经原 Host 网络回调取得 GET/HEAD 资源；
+每个资源和重定向重新核验域名与 SSRF，跨 origin 不转发 cookies/认证。直接 Chromium 网络由拒绝代理封闭，
+禁用 worker、frame、弹窗、表单、非 GET/HEAD 和独立 socket。需要这些交互的页面应使用 Browser Use。
+渲染省略资源时标记部分提取；不为网页阅读另建持久登录仓库。没有 BrowserOwner 的 Host 明确返回不可用。
+
+下载字节、提取覆盖与当前展示各有完整性状态。UTF-8 跨块解码按实际字节保留；下载截断不是显示分页。
+已取得部分页面可作为部分观察保存，刷新取得新观察，不改写旧引用。PDF/Office 路由到原文档 owner，
+部分下载不交给二进制解析器。Office 解压另有 Host 资源预算：默认单 part 32 MiB、每次 package 累计
+128 MiB、10,000 entries，可由 `VARIN_OFFICE_MAX_ENTRY_BYTES`、`VARIN_OFFICE_MAX_INFLATED_BYTES`、
+`VARIN_OFFICE_MAX_ENTRIES` 调整。ZIP 结构和实际展开量均校验，渲染前检查全包；不发布截断 XML，
+仍保留能读取的概览和其他部分。
+
+### 来源、引用与继续调查
+
+每个搜索命中保留固定的供应商观察，不把搜索描述、页面摘录、生成摘要或未知内容混为全文。
+`research_search` 保留论文身份、关系分页和元数据快照；摘要与开放下载位置都不表示已读论文。
+观察包含实际 provider/connection、查询、抓取时间、已知发布日期/作者、表示版本及内容 hash。
+长摘录只在当前工具页缩略；完整已观察内容由原 Rust Storage 材料 owner 保存，不建立搜索旁路数据库。
+
+`source.citation` / 网页 `citation` 使用 `varin-material://` 固定 snapshot、revision 和可选行范围。
+不连续选段各自返回 `passageCitations`。正文点击引用读取当时的材料，可展开上下文、继续原文、引用到提问草稿
+和打开原网页；日期分别显示观察时间与发布日期。
+原始网页消失不改变已保存观察。引用字符串只是定位，读取仍经过原 Thread 材料权限。
+工具输出附带原生 typed material descriptor，`attachmentRef` 可用于派发和消息的显式附件。
+最终报告和压缩摘要只延续已经取得的 typed 来源，不从任意 URL、hash 或正文中的伪造 ID 授权。
+接收者、分支与历史保留关系保护其来源；发送方删除不使接收方证据失效，最后真实引用释放后沿原 owner 回收。
+准备交付失败时保留已有搜索/阅读结果并报告来源状态，不能宣称接收者已获访问权。
+
+持续调查直接复用现有调研 Agent、续聊、后台任务和消息。工具说明能力与来源性质，不固定调查轮次或模型链。
+材料集合保存用户选择的引用和显式跨任务 share grant。集合搜索覆盖标题、来源、论文标识和正文；
+只有正文命中携行号。来源失败不变成空文档，刷新、收藏与局部补查沿既有工具和授权完成。
+
+### 可选辅助与执行寿命
+
+智能渠道选择和问题阅读辅助默认关闭，分别使用配置的普通 LLM 或 typed decision 模型。
+渠道选择只在自动模式存在多个合适连接时运行；精确指定或单一连接直接执行。
+阅读辅助只选已有候选的原文范围，程序验证并重新读取，不把生成文字作为原文。
+岗位模型、思考配置和调用预算独立，实际用量沿原推理请求与 receipt 记录。
+确定失败时回到默认路线或确定性选段并说明原因；实际执行停止未确认时返回未知，不自动重发可能计费请求。
+
+搜索缓存绑定完整请求、连接配置和凭据身份；获取缓存绑定方式、Thread/浏览器访问范围与网络策略。
+刷新绕过旧观察。相同请求共享生产者，单个观察者退出不停止其他消费者；最后消费者取消后等待实际生产者排空。
+过期记录定时清除，Host 关闭取消并排空缓存工作和辅助请求。短期缓存寿命与已引用材料的历史保留分别管理。
+
+### 文档视图与验证边界
+
+Web snapshot 和本地文档捕获保留原件、来源、reader scope 与 revision。PDF 文本、结构与页面图像是同一原件的
+不同视图；文本不能证明视觉忠实，页面读取交付真正 typed image。`document_read` 只有来源时默认读取正文；
+显式 `view:overview` 保持概览并返回携原 snapshot 的 `nextRead`。Office 保留 section/object/range/query 和实际
+nextOffset；没有文字、尚未请求、解析失败与组件不可用分开表达，不自动启用 OCR。
+
+原生输入 PDF/Office upload 经过 ThreadMaterials 校验，保留原始字节。submit、enqueue 与 child continuation
+冻结已授权材料；前端只传原件，不提取正文，也不能凭 snapshot ID 获得权限。
+
+固定响应覆盖适配、筛选、回退、取消和辅助失败；原生测试覆盖 typed 引用、报告、压缩、分支、删除与重启。
+真实匿名查询只证明当时的连通性与结果，不能替代供应商质量/延迟或辅助模型的成本比较。
+Electron 实机登录页面、完整交互和不同平台仍需在对应环境验收。
+
+入口：`harness/web-search.ts`、`web-fetch.ts`、`web-sources.ts`、`web-materials.ts`、`research-search.ts`、
+`document-reading.ts`、`material-read-service.ts`、`material-collections.ts`；native 接线位于 `kernel/web-runtime.ts`、
+`web-retrieval-assistance.ts`、`document-sources.ts` 及原协作/附件 owner。工具 adapter 不另建材料缓存。
 
 ## 普通 Agent 笔记与 Bot 知识
 

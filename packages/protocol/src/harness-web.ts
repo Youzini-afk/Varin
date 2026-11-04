@@ -241,6 +241,32 @@ export type WebReadPosition =
   | { kind: "element"; element: "table" | "figure" | "formula"; index: number }
   | { kind: "appendix" };
 
+/** Exact one-based lines in a fixed extracted body, never a generated summary. */
+export interface WebTextRange { startLine: number; endLine: number; totalLines: number }
+
+/** Acquisition facts belong to the observation, independently of a display page. */
+export interface WebAcquisition {
+  download: {
+    status: "complete" | "partial" | "unknown";
+    /** Decoded transport-body bytes received before stopping, not character count. */
+    receivedBytes: number;
+    retainedBytes: number;
+    limitBytes?: number;
+    expectedBytes?: number;
+  };
+  extraction: { status: "complete" | "partial" | "unknown"; detail?: string };
+}
+
+export interface WebPageSelection {
+  method: "question" | "helper" | "literal" | "range" | "page";
+  matched: boolean;
+  question?: string;
+  /** Scope actually searched, including when no relevant passage was found. */
+  searchedRange?: WebTextRange;
+  detail?: string;
+  assistance?: { status: "selected" | "fallback"; purpose: string; providerId?: string; modelId?: string; inputTokens?: number; outputTokens?: number };
+}
+
 export interface WebSnapshotRef {
   snapshotId: string;
   /** The URL originally requested (pre-redirect). */
@@ -255,6 +281,8 @@ export interface WebSnapshotRef {
   contentType?: string;
   rendered?: boolean;
   title?: string;
+  acquisition?: WebAcquisition;
+  provenance?: import("./web-sources.js").WebSourceProvenance;
   structure?: WebSnapshotStructure;
   document?: WebSnapshotDocument;
 }
@@ -355,8 +383,62 @@ export interface MaterialsCollectionResult {
   message?: string;
 }
 
+export type WebSearchFailureKind = "not-configured" | "disabled" | "unsupported" | "authentication" | "rate-limited" | "network" | "protocol" | "cancelled" | "unknown";
+
+export interface WebSearchFailure {
+  kind: WebSearchFailureKind;
+  message: string;
+  httpStatus?: number;
+  retryAfterMs?: number;
+}
+
+export interface WebSearchAttempt {
+  connectionId: string;
+  providerId: string;
+  status: "ok" | "empty" | "failed" | "unsupported" | "unavailable";
+  failure?: WebSearchFailure;
+}
+
+export interface WebSearchAppliedFilter {
+  field: "allowedDomains" | "blockedDomains" | "preferredDomains" | "recency" | "language" | "region";
+  method: "native" | "operator" | "post-filter" | "guidance" | "ranking" | "unsupported";
+  /** Basis refers to provider semantics, not inferred publication dates. */
+  basis?: "published" | "modified" | "provider-defined";
+  verified?: boolean;
+  detail?: string;
+}
+
+export interface WebSearchConnectionInfo {
+  id: string;
+  name: string;
+  providerId: string;
+  description?: string;
+  enabled: boolean;
+  available: boolean;
+  detail?: string;
+  capabilities: WebSearchProviderCapabilities;
+}
+
+export interface WebSearchProviderCapabilities {
+  pagination: "offset" | "page" | false;
+  objective?: boolean;
+  domains?: "native" | "operator" | "post-filter";
+  recency?: "native" | "guidance" | "unsupported";
+  language?: "native" | "guidance" | "unsupported";
+  region?: "native" | "guidance" | "unsupported";
+  excerpts?: boolean;
+}
+
 export interface WebSearchItem {
   kind: "query" | "objective" | "url" | "page";
+  objective?: string;
+  connectionId?: string;
+  providerId?: string;
+  retrievedAt?: number;
+  fromCache?: boolean;
+  attempts?: WebSearchAttempt[];
+  appliedFilters?: WebSearchAppliedFilter[];
+  failure?: WebSearchFailure;
   /** Echo of the requested item for correlation. */
   query?: string;
   url?: string;
@@ -379,13 +461,28 @@ export interface WebSearchCapabilities {
 }
 
 export interface WebSearchResult {
+  /** Compatibility summary: `mixed` when multiple providers answered. */
   providerId: string;
+  objective?: string;
+  /** URL-deduplicated view; original per-query observations remain in items. */
+  results?: SearchResultItem[];
+  connections?: WebSearchConnectionInfo[];
   capabilities: WebSearchCapabilities;
   items: WebSearchItem[];
   notices?: string[];
 }
 
 export interface WebSearchRequest {
+  action?: "search" | "connections";
+  preferredDomains?: string[];
+  /** Exact selection disables automatic fallback. */
+  connectionId?: string;
+  /** Explicit complementary searches; each connection keeps its own outcome. */
+  connectionIds?: string[];
+  language?: string;
+  region?: string;
+  strictFilters?: boolean;
+  refresh?: boolean;
   query?: string;
   objective?: string;
   queries?: string[];
@@ -398,6 +495,10 @@ export interface WebSearchRequest {
 }
 
 export interface WebFetchRequest extends Omit<DocumentReadRequest, "path" | "artifact"> {
+  /** Select relevant original passages; explicit position/find selectors take precedence. */
+  question?: string;
+  /** Display-page line budget, not a download limit. Defaults to 160 lines. */
+  maxLines?: number;
   url?: string;
   snapshotId?: string;
   /** Bypass the short-lived response cache and mint a fresh snapshot. */
@@ -416,6 +517,13 @@ export interface WebSearchCursorPayload {
   v: 1;
   /** Provider id that minted the cursor. */
   p: string;
+  /** Connection/configuration that actually supplied this page. */
+  c?: string;
+  config?: string;
+  objective?: string;
+  language?: string;
+  region?: string;
+  strictFilters?: boolean;
   /** Original query/objective text. */
   q: string;
   /** Pagination mechanism the provider actually supports. */
@@ -424,6 +532,7 @@ export interface WebSearchCursorPayload {
   n: number;
   allow?: string[];
   block?: string[];
+  prefer?: string[];
   recency?: "day" | "week" | "month" | "year";
   limit?: number;
 }
@@ -466,14 +575,26 @@ export const parseSearchCursor = (raw: string): WebSearchCursorPayload | null =>
       Array.isArray(entry) && entry.every((item) => typeof item === "string") ? entry as string[] : undefined
     );
     const recency = payload.recency;
+    if (["c", "config", "objective", "language", "region"].some(key => payload[key] !== undefined && (typeof payload[key] !== "string" || !payload[key]))) return null;
+    if (payload.strictFilters !== undefined && typeof payload.strictFilters !== "boolean") return null;
+    if ((payload.allow !== undefined && !list(payload.allow)) || (payload.block !== undefined && !list(payload.block)) || (payload.prefer !== undefined && !list(payload.prefer))) return null;
+    if (recency !== undefined && recency !== "day" && recency !== "week" && recency !== "month" && recency !== "year") return null;
+    if (payload.limit !== undefined && (typeof payload.limit !== "number" || !Number.isSafeInteger(payload.limit) || payload.limit < 1)) return null;
     return {
       v: 1,
       p: payload.p,
       q: payload.q,
+      ...(typeof payload.c === "string" ? { c: payload.c } : {}),
+      ...(typeof payload.config === "string" ? { config: payload.config } : {}),
+      ...(typeof payload.objective === "string" ? { objective: payload.objective } : {}),
+      ...(typeof payload.language === "string" ? { language: payload.language } : {}),
+      ...(typeof payload.region === "string" ? { region: payload.region } : {}),
+      ...(typeof payload.strictFilters === "boolean" ? { strictFilters: payload.strictFilters } : {}),
       k: payload.k,
       n: payload.n,
       ...(payload.allow !== undefined ? { allow: list(payload.allow) ?? [] } : {}),
       ...(payload.block !== undefined ? { block: list(payload.block) ?? [] } : {}),
+      ...(payload.prefer !== undefined ? { prefer: list(payload.prefer) ?? [] } : {}),
       ...(recency === "day" || recency === "week" || recency === "month" || recency === "year" ? { recency } : {}),
       ...(typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) && payload.limit > 0
         ? { limit: payload.limit }

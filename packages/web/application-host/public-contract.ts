@@ -43,8 +43,6 @@ export interface StartWebUiServerOptions {
   port?: number | undefined;
   /** The embedding process owns a real stop and clean-process relaunch. */
   restartApplicationHost?: (() => Promise<void>) | undefined;
-  /** Trusted desktop-only offscreen renderer used by harness.web.render. */
-  renderWebPage?: ((url: string, signal?: AbortSignal) => Promise<string>) | undefined;
   /** Real embedded pages shared by the local user and tool invocations. */
   browser?: import('@varin/protocol').BrowserOwner | undefined;
   tryCfTunnel?: boolean | undefined;
