@@ -523,25 +523,56 @@ pub async fn prepare(
         let status = child.wait().await;
         drop(child);
         let settled = scope.0.settle_after_node_exit(&status).await;
-        if let Some(error) = cleanup_error {
-            return Err(error);
-        }
-        let settled = settled?;
-        if !settled.clean || !settled.success {
-            return Err("Legacy exporter did not confirm clean process-scope termination".into());
-        }
-        Ok::<_, String>(())
+        let scope_ended = settled.is_ok();
+        let result = match settled {
+            Err(error) => Err(error),
+            Ok(_) if cleanup_error.is_some() => Err(cleanup_error.unwrap()),
+            Ok(settled) if !settled.clean || !settled.success => {
+                Err("Legacy exporter did not finish successfully".into())
+            }
+            Ok(_) => Ok(()),
+        };
+        (scope_ended, result)
     };
-    let (status, app_close) = tokio::join!(process_cleanup, async {
-        if let Some(page) = application.as_ref() {
-            page.close().await
-        } else {
-            Ok(())
+    let (process, app_close) = tokio::join!(
+        admission.finish_on_shutdown(process_cleanup, || scope.0.terminate()),
+        async {
+            if let Some(page) = application.as_ref() {
+                page.close().await
+            } else {
+                Ok(())
+            }
         }
-    });
+    );
+    let ((scope_ended, mut status), interrupted) = process;
+    let mut unconfirmed = Vec::new();
+    if !scope_ended {
+        unconfirmed.push(format!(
+            "Original application migration process termination is unconfirmed: {}",
+            status.as_ref().unwrap_err()
+        ));
+    }
+    let page_ended = application.as_ref().is_none_or(|page| page.close.closed());
+    if !page_ended {
+        unconfirmed.push(format!(
+            "Original application migration page closure is unconfirmed: {}",
+            app_close.as_ref().err().map(String::as_str).unwrap_or("missing close receipt")
+        ));
+    }
+    if !unconfirmed.is_empty() {
+        for error in &unconfirmed {
+            admission.retain_cleanup_failure(error.clone());
+        }
+        return Err(unconfirmed.join("; "));
+    }
+    if let Some(interrupted) = interrupted {
+        // Even if termination subsequently succeeds, Quit interrupted the
+        // successful exporter handshake. Never commit a successful migration.
+        status = status.and(interrupted).and(Err("Desktop shutdown interrupted application migration".into()));
+    }
     app_close?;
-    let receipt = outcome?;
     status?;
+    let receipt = outcome?;
     lease.verify()?;
     settings
         .call(

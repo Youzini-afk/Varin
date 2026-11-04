@@ -5,10 +5,11 @@
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct State {
     accepting: bool,
     active: usize,
+    cleanup_failures: Vec<String>,
 }
 struct Inner {
     state: Mutex<State>,
@@ -23,15 +24,26 @@ impl Default for Owner {
         let state = State {
             accepting: true,
             active: 0,
+            cleanup_failures: Vec::new(),
         };
         Self(Arc::new(Inner {
-            state: Mutex::new(state),
+            state: Mutex::new(state.clone()),
             changed: watch::channel(state).0,
         }))
     }
 }
 impl Owner {
     pub(crate) fn enter(&self) -> Result<Permit, String> {
+        self.admit(false)
+    }
+
+    // An unconfirmed original resource blocks execution, not the error window
+    // that explains it. Presentation still obeys an in-progress shutdown gate.
+    pub(crate) fn enter_presentation(&self) -> Result<Permit, String> {
+        self.admit(true)
+    }
+
+    fn admit(&self, presentation: bool) -> Result<Permit, String> {
         let mut state = self
             .0
             .state
@@ -40,11 +52,14 @@ impl Owner {
         if !state.accepting {
             return Err("Desktop is shutting down".into());
         }
+        if !presentation && !state.cleanup_failures.is_empty() {
+            return Err(state.cleanup_failures.join("; "));
+        }
         state.active = state
             .active
             .checked_add(1)
             .ok_or("Desktop admission overflow")?;
-        self.0.changed.send_replace(*state);
+        self.0.changed.send_replace(state.clone());
         Ok(Permit(self.clone()))
     }
 
@@ -58,12 +73,19 @@ impl Owner {
                 .lock()
                 .map_err(|_| "Desktop admission is unavailable")?;
             state.accepting = false;
-            self.0.changed.send_replace(*state);
+            self.0.changed.send_replace(state.clone());
         }
         let mut changed = self.0.changed.subscribe();
         loop {
-            if changed.borrow_and_update().active == 0 {
-                return Ok(());
+            {
+                let state = changed.borrow_and_update();
+                if state.active == 0 {
+                    return if state.cleanup_failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(state.cleanup_failures.join("; "))
+                    };
+                }
             }
             changed
                 .changed()
@@ -82,11 +104,42 @@ impl Owner {
             return Err("Desktop admission is still draining".into());
         }
         state.accepting = true;
-        self.0.changed.send_replace(*state);
+        self.0.changed.send_replace(state.clone());
         Ok(())
     }
 }
 impl Permit {
+    pub(crate) fn retain_cleanup_failure(&self, error: String) {
+        let mut state = self
+            .0
+            .0
+            .state
+            .lock()
+            .expect("Desktop admission is unavailable");
+        if !state.cleanup_failures.contains(&error) {
+            state.cleanup_failures.push(error);
+        }
+        self.0.0.changed.send_replace(state.clone());
+    }
+
+    /// Interrupt the original owner, but never drop its completion future.
+    /// The caller must still distinguish observed termination from success.
+    pub(crate) async fn finish_on_shutdown<T>(
+        &self,
+        operation: impl std::future::Future<Output = T>,
+        interrupt: impl FnOnce() -> Result<(), String>,
+    ) -> (T, Option<Result<(), String>>) {
+        tokio::pin!(operation);
+        tokio::select! {
+            biased;
+            result = &mut operation => (result, None),
+            _ = self.cancelled() => {
+                let interrupted = interrupt();
+                (operation.await, Some(interrupted))
+            },
+        }
+    }
+
     /// An admitted migration can stop waiting for private-reader input when
     /// Quit closes admission, then finish its original cleanup before release.
     pub(crate) async fn until_shutdown<T>(
@@ -123,7 +176,7 @@ impl Drop for Permit {
             .lock()
             .expect("Desktop admission is unavailable");
         state.active -= 1;
-        self.0.0.changed.send_replace(*state);
+        self.0.0.changed.send_replace(state.clone());
     }
 }
 
@@ -250,5 +303,69 @@ mod tests {
         let wait = tokio::spawn(async move { draining.shutdown().await });
         drop(permit);
         wait.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn completion_waits_after_interrupting_a_stalled_eof_reader() {
+        use tokio::io::AsyncReadExt;
+        let owner = Owner::default();
+        let permit = owner.enter().unwrap();
+        let (mut reader, writer) = tokio::io::duplex(16);
+        let (reaped, reaping) = oneshot::channel();
+        let (interrupted, interruption) = oneshot::channel();
+        let cleanup = tokio::spawn(async move {
+            let operation = async {
+                assert_eq!(reader.read(&mut [0]).await.unwrap(), 0);
+                reaping.await.unwrap();
+                "original-scope-ended"
+            };
+            let (result, requested) = permit
+                .finish_on_shutdown(operation, move || {
+                    // Models the original scope's termination closing its pipe.
+                    drop(writer);
+                    interrupted.send(()).unwrap();
+                    Ok(())
+                })
+                .await;
+            assert_eq!(result, "original-scope-ended");
+            assert!(matches!(requested, Some(Ok(()))));
+        });
+        let draining = owner.clone();
+        let shutdown = tokio::spawn(async move { draining.shutdown().await });
+        interruption.await.unwrap();
+        assert!(
+            !shutdown.is_finished(),
+            "EOF or accepted terminate is not completion"
+        );
+        reaped.send(()).unwrap();
+        cleanup.await.unwrap();
+        shutdown.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn unknown_cleanup_blocks_shutdown_and_execution_but_allows_error_presentation() {
+        let owner = Owner::default();
+        let original = owner.enter().unwrap();
+        original
+            .retain_cleanup_failure("Original migration process termination is unconfirmed".into());
+        drop(original);
+        assert!(
+            owner
+                .shutdown()
+                .await
+                .unwrap_err()
+                .contains("migration process")
+        );
+        owner.resume().unwrap();
+        assert!(
+            owner.enter().is_err(),
+            "cannot create new execution beside an unknown original"
+        );
+        let recovery = owner.enter_presentation().unwrap();
+        drop(recovery);
+        assert!(
+            owner.shutdown().await.is_err(),
+            "RAII release must not erase the failure"
+        );
     }
 }

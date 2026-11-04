@@ -195,7 +195,7 @@ fn create_window(
 ) -> Result<(), String> {
     // Hold through native construction and registry publication, not the
     // asynchronously prepared renderer/native-ready callbacks.
-    let _admission = app.state::<DesktopState>().admission.enter()?;
+    let _admission = app.state::<DesktopState>().admission.enter_presentation()?;
     let bootstrap = bootstrap.map(|mut value| {
         value["windowRole"] = json!(role);
         value
@@ -608,20 +608,8 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         }
     }
     if !ready {
-        // Recovery is a new resource admission, while failure settlement below
-        // must still unblock existing documents when Quit already closed it.
-        if let Ok(_recovery) = state.admission.enter() {
-            if app.get_webview_window("main").is_none()
-                && create_window(&app, "main", "main", None, None).is_err()
-            {
-                eprintln!("Varin startup recovery window could not be created");
-            }
-            let _ = state.activation_restores.ready();
-            let _ = dispatch_activation_restore(&app);
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-            }
-        }
+        // Settle existing waiters even when Quit has closed admission. Error
+        // window creation is retried after boot publication / admission reopen.
         if let Ok(windows) = state.windows.lock() {
             for window in windows.values() {
                 if window.native_ready.borrow().is_none() {
@@ -637,6 +625,7 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         }
     }
     state.boot.send_replace(Some(result.clone()));
+    restore_startup_failure(&app);
     if !ready && !state.quitting.load(Ordering::Acquire) && app.get_webview_window("main").is_none() {
         // Native window creation itself failed; there is no surface to recover.
         // Use the existing guarded shutdown instead of remaining invisibly alive.
@@ -1587,6 +1576,32 @@ async fn close_workbench_window(
     result
 }
 
+fn restore_startup_failure(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    let error = match state.boot.borrow().as_ref() {
+        Some(Err(error)) => error.clone(),
+        _ => return,
+    };
+    let Ok(_recovery) = state.admission.enter_presentation() else { return; };
+    if app.get_webview_window("main").is_none()
+        && create_window(app, "main", "main", None, None).is_err()
+    {
+        eprintln!("Varin startup recovery window could not be created");
+    }
+    if let Ok(windows) = state.windows.lock() {
+        for window in windows.values() {
+            if window.native_ready.borrow().is_none() {
+                window.native_ready.send_replace(Some(Err(error.clone())));
+            }
+        }
+    }
+    let _ = state.activation_restores.ready();
+    let _ = dispatch_activation_restore(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+    }
+}
+
 async fn drain(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<DesktopState>();
     if state.quitting.swap(true, Ordering::SeqCst) {
@@ -1703,6 +1718,9 @@ async fn drain(app: &AppHandle) -> Result<(), String> {
         state.settings.resume();
         state.admission.resume()?;
         state.quitting.store(false, Ordering::Release);
+        // Either this retry or initialize's post-publication retry sees both
+        // an open presentation gate and the recorded boot failure.
+        restore_startup_failure(app);
     }
     result
 }
