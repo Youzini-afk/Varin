@@ -9,7 +9,7 @@ export const PLATFORM_TEST_INCLUDE = [
   'cli/**/*.test.ts',
   // Shared Host plumbing includes watcher canonicalization, shutdown and updates.
   'application-host/lib/*.test.ts',
-  'application-host/lib/{client-auth,ui-auth,service-credentials,documents,fs,process,terminal,workspace,git,github,mcp,platform,knowledge,lsp,computer,external-agents,agent-resources,connections,tunnels,relay}/**/*.test.ts',
+  'application-host/lib/{client-auth,ui-auth,service-credentials,documents,fs,process,terminal,workspace,git,github,mcp,platform,knowledge,memory,lsp,computer,external-agents,agent-resources,connections,tunnels,relay}/**/*.test.ts',
 ];
 
 export const PLATFORM_NATIVE_INCLUDE = [

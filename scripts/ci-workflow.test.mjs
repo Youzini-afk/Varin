@@ -83,6 +83,8 @@ test('owner/dependency/build input decisions include the actual downstream bound
     ...['configuration-watch.ts', 'package-manager.ts', 'cloudflare-tunnel.ts'].map(helper =>
       [`packages/web/application-host/lib/${helper}`, ['native', 'production', 'windows', 'macos'], ['rust', 'android']]),
     ['packages/web/application-host/lib/mcp/sources.ts', ['native', 'production', 'windows', 'macos'], []],
+    ...['thread-remember.ts', 'thread-remember.test.ts'].map(owner =>
+      [`packages/web/application-host/lib/memory/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container', 'full']]),
     ['kernel/crates/varin-runtime/src/catalog.rs', ['native', 'rust', 'windows', 'macos', 'production', 'container'], []],
     ['packages/workspace-driver/macos/Volume.swift', ['rust', 'native', 'macos', 'container'], []],
     ['packages/mobile/android/app/build.gradle', ['frontend', 'android'], ['native', 'container']],
@@ -162,7 +164,7 @@ test('platform discovery keeps native teardown, storage, observation and file-CA
   }
   const portable = paths(discover('packages/web/vitest.platform.config.ts'));
   for (const suffix of ['mcp/settings.test.ts', 'connections/ssh-manager.test.ts',
-    'tunnels/executable-search.test.ts', 'relay/host-lock.test.ts', 'cli/cli.test.ts']) {
+    'tunnels/executable-search.test.ts', 'relay/host-lock.test.ts', 'memory/thread-remember.test.ts', 'cli/cli.test.ts']) {
     assert.ok(portable.some(file => file.endsWith(suffix)), suffix);
   }
   const commonHostTests = fs.readdirSync(path.join(root, 'packages/web/application-host/lib'))
