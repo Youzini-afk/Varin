@@ -162,8 +162,9 @@ test('desktop launcher uses its verified generation and cannot request a product
   assert.equal(invocation.env.VARIN_DESKTOP_RUNTIME_DIR, directory);
   assert.ok(invocation.args.includes('--debug'));
   assert.ok(invocation.args.includes('--no-bundle'));
-  const config = JSON.parse(invocation.args.at(-1));
-  assert.equal(config.build.frontendDist, path.join(directory, 'frontend'));
+  const config = JSON.parse(invocation.args[invocation.args.indexOf('--config') + 1]);
+  assert.equal(URL.canParse(config.build.frontendDist), false);
+  assert.equal(await fs.realpath(config.build.frontendDist), await fs.realpath(path.join(directory, 'frontend')));
   assert.deepEqual(config.bundle.resources, []);
   await assert.rejects(desktopInvocation('release', directory), /production distribution/);
   await write('frontend/index.html', 'altered');

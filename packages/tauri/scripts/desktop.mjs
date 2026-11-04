@@ -8,6 +8,7 @@ import { stageWindowsBootstrap, discoverWindowsCef } from './windows-bootstrap.m
 import { fileURLToPath } from 'node:url';
 import { stageDesktopRuntime, defaultRuntimeDirectory } from './stage-desktop.mjs';
 import { verifyRuntimeManifest } from './runtime-manifest.mjs';
+import { frontendDist } from './frontend-dist.mjs';
 
 const packageRoot = path.resolve(import.meta.dirname, '..');
 
@@ -18,7 +19,7 @@ export async function desktopInvocation(command, directory) {
   // These commands never install or publish. No runtime resources are bundled;
   // a debug runtime comes
   // from its explicit, verified generation, never a shared mutable resource link.
-  const config = { build: { frontendDist: path.join(directory, 'frontend') }, bundle: { active: false, resources: [] } };
+  const config = { build: { frontendDist: frontendDist(directory) }, bundle: { active: false, resources: [] } };
   const require = createRequire(path.join(packageRoot, 'package.json'));
   const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js');
   return { executable: process.execPath, args: desktopArguments(command, cli, config, process.platform),

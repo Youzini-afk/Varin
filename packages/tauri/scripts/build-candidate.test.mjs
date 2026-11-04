@@ -49,7 +49,8 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   const prepared = JSON.parse(runner);
   assert.ok(prepared.args.includes('--release'));
   assert.deepEqual(prepared.config.bundle.resources, process.platform==='darwin'?[]:{ [runtime + path.sep]: 'runtime/' });
-  assert.equal(prepared.config.build.frontendDist, path.join(runtime, 'frontend'));
+  assert.equal(URL.canParse(prepared.config.build.frontendDist), false);
+  assert.equal(await fs.realpath(prepared.config.build.frontendDist), await fs.realpath(path.join(runtime, 'frontend')));
   for (const [name, original] of originals) {
     assert.deepEqual(await fs.readFile(path.join(native, name)), original, `${name} changed during CLI preparation`);
   }

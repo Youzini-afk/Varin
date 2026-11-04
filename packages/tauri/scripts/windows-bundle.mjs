@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyRuntimeManifest, sha256 } from './runtime-manifest.mjs';
 import { verifyWindowsBootstrap, windowsBundleResources, installBootstrapForBundle } from './windows-bootstrap.mjs';
+import { frontendDist } from './frontend-dist.mjs';
 
 const packageRoot = path.resolve(import.meta.dirname, '..');
 
@@ -18,7 +19,7 @@ export function windowsBundleArguments({ cli, runtime, resources, bundles = ['ns
   // to the release pipeline, after all included binaries have been finalized.
   return [cli, 'bundle', '--debug', '--no-binary-patching', '--no-sign', '--ci', '--bundles', ...bundles,
     ...(target ? ['--target', target] : []),
-    '--config', JSON.stringify({ build: { frontendDist: path.join(runtime, 'frontend') }, bundle: { active: true, resources: [], cef: { embed: false } } }),
+    '--config', JSON.stringify({ build: { frontendDist: frontendDist(runtime) }, bundle: { active: true, resources: [], cef: { embed: false } } }),
     '--config', JSON.stringify({ bundle: { resources } })];
 }
 

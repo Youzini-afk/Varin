@@ -11,6 +11,7 @@ import {packageTransition} from './package.mjs';
 import {recordArtifact,tauriSignFile} from './release.mjs';
 import {debianConfiguration,inspectDebian,verifyDebianCefFiles} from './linux-debian.mjs';
 import {pinnedCefLicense} from './cef-license.mjs';
+import {frontendDist} from './frontend-dist.mjs';
 const repository=path.resolve(import.meta.dirname,'../../..'),packageRoot=path.resolve(import.meta.dirname,'..');
 const lock=JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json',import.meta.url),'utf8'));
 const require=createRequire(path.join(packageRoot,'package.json'));
@@ -23,7 +24,7 @@ export function candidateConfiguration(runtime,platform=process.platform){
   // this one overlay supplies the exact immutable candidate generation.
   // macOS framework aliases are directory symlinks, which the pinned CLI's
   // generic resource walker omits. Copy the sealed runtime after app bundling.
-  return{build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:platform==='darwin'?[]:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
+  return{build:{frontendDist:frontendDist(runtime)},bundle:{active:true,resources:platform==='darwin'?[]:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
 }
 export async function copyMacosRuntime(runtime,app){
   const destination=path.join(app,'Contents/Resources/runtime');
