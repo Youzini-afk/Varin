@@ -50,6 +50,7 @@ struct DesktopState {
     preferences: Mutex<Value>,
     startup_theme: OnceLock<Value>,
     admission: crate::desktop_admission::Owner,
+    startup_recovery: crate::desktop_admission::SingleFlight,
     sequence: AtomicU64,
     quitting: AtomicBool,
     started_enabled: AtomicBool,
@@ -1583,6 +1584,9 @@ fn restore_startup_failure(app: &AppHandle) {
         _ => return,
     };
     let Ok(_recovery) = state.admission.enter_presentation() else { return; };
+    // Acquire only after presentation is admitted. A failed attempt while the
+    // gate is closed must not suppress the post-reopen retry from drain.
+    let Some(_flight) = state.startup_recovery.enter() else { return; };
     if app.get_webview_window("main").is_none()
         && create_window(app, "main", "main", None, None).is_err()
     {
@@ -1817,6 +1821,7 @@ pub fn run() {
             preferences: Mutex::new(json!({})),
             startup_theme: OnceLock::new(),
             admission: crate::desktop_admission::Owner::default(),
+            startup_recovery: crate::desktop_admission::SingleFlight::default(),
             sequence: AtomicU64::new(1),
             quitting: AtomicBool::new(false),
             started_enabled: AtomicBool::new(false),
@@ -2313,6 +2318,11 @@ pub(crate) fn show_last_conversation(app: &AppHandle) -> Result<String, String> 
 
 pub(crate) fn show_main(app: &AppHandle) {
     let state = app.state::<DesktopState>();
+    let failed = matches!(&*state.boot.borrow(), Some(Err(_)));
+    if failed {
+        restore_startup_failure(app);
+        return;
+    }
     if state.boot.borrow().is_none() && app.get_webview_window("main").is_none() {
         // Startup alone creates the first conversation after its presentation is
         // known. Early OS activation must not create a competing default page.

@@ -2,7 +2,10 @@
 //! preparation through registry publication (or original-owner cleanup), never
 //! Host/renderer readiness. Closing admission and acquiring a permit share one
 //! lock; shutdown waits for admitted work before it snapshots resource owners.
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::sync::watch;
 
 #[derive(Clone)]
@@ -18,6 +21,25 @@ struct Inner {
 #[derive(Clone)]
 pub(crate) struct Owner(Arc<Inner>);
 pub(crate) struct Permit(Owner);
+
+/// A non-blocking presentation owner. Never hold a mutex across a native window
+/// builder that may synchronously call back onto the application's main thread.
+#[derive(Default)]
+pub(crate) struct SingleFlight(AtomicBool);
+pub(crate) struct Flight<'a>(&'a AtomicBool);
+impl SingleFlight {
+    pub(crate) fn enter(&self) -> Option<Flight<'_>> {
+        self.0
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Flight(&self.0))
+    }
+}
+impl Drop for Flight<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 impl Default for Owner {
     fn default() -> Self {
@@ -373,6 +395,36 @@ mod tests {
         assert!(
             owner.shutdown().await.is_err(),
             "RAII release must not erase the failure"
+        );
+    }
+
+    #[test]
+    fn recovery_build_has_one_owner_and_releases_on_error() {
+        use std::sync::mpsc;
+        let flight = Arc::new(SingleFlight::default());
+        let builds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (entered, in_builder) = mpsc::channel();
+        let (finish, completion) = mpsc::channel();
+        let owner = flight.clone();
+        let published = builds.clone();
+        let first = std::thread::spawn(move || -> Result<(), &'static str> {
+            let _flight = owner.enter().unwrap();
+            published.fetch_add(1, Ordering::Relaxed);
+            entered.send(()).unwrap();
+            completion.recv().unwrap();
+            Err("native construction failed")
+        });
+        in_builder.recv().unwrap();
+        assert!(
+            flight.enter().is_none(),
+            "the other recovery caller cannot replace main's ledger"
+        );
+        assert_eq!(builds.load(Ordering::Relaxed), 1);
+        finish.send(()).unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(
+            flight.enter().is_some(),
+            "an early error releases the single-flight owner"
         );
     }
 }
