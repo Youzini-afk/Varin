@@ -756,6 +756,13 @@ impl<T: UserEvent> WinitCefApp<T> {
       .create_window(native_attrs)
       .map_err(|e| Error::CreateWindow(Box::new(e)))?;
 
+    #[cfg(target_os = "macos")]
+    if !attrs.focusable {
+      // NSPanel hides on application deactivation by default. These inert
+      // overlays must remain visible while the user controls another app.
+      crate::platform::macos::nswindow(window.as_ref()).setHidesOnDeactivate(false);
+    }
+
     #[cfg(any(
       target_os = "linux",
       target_os = "dragonfly",
