@@ -153,6 +153,18 @@ it('default admitted search preserves objective semantics and returns a readable
   expect(data.results).toBeUndefined();
   const read = await web.user.read({ runtime: 'agent', threadId: 'thread', branchId: 'branch' }, { snapshotId: source.snapshot.snapshotId });
   expect(read).toMatchObject({ status: 'ok', markdown: '原始公告中的有效证据。' });
+  const longSource = await opened.materials.put(workspaceId, { sourceUrl: 'https://example.test/long', finalUrl: 'https://example.test/long', representation: 'raw-text' },
+    Buffer.from(Array.from({ length: 90 }, (_, index) => [10, 50].includes(index) ? 'Exact evidence' : 'Context line').join('\n')), authority);
+  const passages = await web.user.read({ runtime: 'agent', threadId: 'thread', branchId: 'branch' }, { snapshotId: longSource.snapshotId, find: 'Exact evidence' });
+  if (passages.status !== 'ok') throw new Error('Source passages unavailable');
+  expect(passages.passageCitations).toHaveLength(2);
+  for (const passage of passages.passageCitations!) {
+    const url = new URL(passage.citation);
+    expect(url.hostname).toBe(longSource.snapshotId);
+    expect(url.searchParams.get('contentHash')).toBe(longSource.contentHash);
+    expect(Number(url.searchParams.get('startLine'))).toBe(passage.startLine);
+    expect(Number(url.searchParams.get('endLine'))).toBe(passage.endLine);
+  }
   const denied = await web.user.read({ runtime: 'agent', threadId: 'unshared', branchId: 'branch' }, { snapshotId: source.snapshot.snapshotId });
   expect(denied.status).not.toBe('ok');
   await web.close();

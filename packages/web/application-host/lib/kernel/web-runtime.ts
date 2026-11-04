@@ -49,6 +49,8 @@ const sourceCitation = (result: FetchResult): FetchResult => {
   }
   return { ...result, citation: formatWebSourceCitation({ snapshotId: snapshot.snapshotId, contentHash: snapshot.contentHash,
     ...(result.range && result.range.endLine >= result.range.startLine ? { startLine: result.range.startLine, endLine: result.range.endLine } : {}) }),
+    ...(result.ranges && result.ranges.length > 1 ? { passageCitations: result.ranges.map(({ startLine, endLine }) => ({ startLine, endLine,
+      citation: formatWebSourceCitation({ snapshotId: snapshot.snapshotId, contentHash: snapshot.contentHash, startLine, endLine }) })) } : {}),
     attachmentRef: materialAttachmentRef(snapshot.snapshotId) };
 };
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');

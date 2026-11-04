@@ -81,7 +81,8 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
       {selection.matched === false && <p className="typography-meta text-muted-foreground">{t('chat.tools.noPassages')}</p>}
       {typeof overview.pageCount === 'number' && <p className="typography-meta">{t('chat.tools.documentPages', { count: overview.pageCount })}</p>}
       {typeof range.startLine === 'number' && typeof range.endLine === 'number' && <p className="typography-micro text-muted-foreground">L{range.startLine}–L{range.endLine}{typeof range.totalLines === 'number' ? ' / ' + range.totalLines : ''}</p>}
-      {list(data.ranges).length > 1 && <p className="typography-micro text-muted-foreground">{list(data.ranges).map(selected => `L${selected.startLine}–L${selected.endLine}`).join(' · ')}</p>}
+      {list(data.passageCitations).length > 0 ? <MarkdownRenderer content={list(data.passageCitations).map(selected => `[L${selected.startLine}–L${selected.endLine}](${toolText(selected.citation)})`).join(' · ')} messageId={call.id + ':passages'} variant="tool" enableFileReferences={false} />
+        : list(data.ranges).length > 1 && <p className="typography-micro text-muted-foreground">{list(data.ranges).map(selected => `L${selected.startLine}–L${selected.endLine}`).join(' · ')}</p>}
       {typeof data.citation === 'string' && <MarkdownRenderer content={`[${t('chat.tools.pinnedSource')}](${data.citation})`} messageId={call.id + ':citation'} variant="tool" enableFileReferences={false} />}
       {list(data.findHits).map((hit, index) => <div key={index} className="tool-document-match"><span className="typography-micro text-muted-foreground">{t('chat.tools.page', { page: typeof hit.page === 'number' ? hit.page : '' })}</span><p className="typography-meta">{toolText(hit.snippet)}</p></div>)}
       {Boolean(data.nextRead) && <p className="typography-micro text-muted-foreground">{t('chat.tools.moreSourceContent')}</p>}

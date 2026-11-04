@@ -152,6 +152,8 @@ export type FetchResult =
     snapshot?: WebSnapshotRef;
     /** Stable link to this observed text and its displayed original range. */
     citation?: string;
+    /** Ready-to-use links for disjoint question/find selections in the same observation. */
+    passageCitations?: Array<{ startLine: number; endLine: number; citation: string }>;
     attachmentRef?: string;
     /** Fetch succeeded, but durable material publication failed. No snapshot is claimed. */
     snapshotError?: { message: string; code?: string };

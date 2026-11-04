@@ -224,7 +224,8 @@ Electron 使用同一 BrowserOwner 的目标站点身份，临时隔离页面只
 长摘录只在当前工具页缩略；完整已观察内容由原 Rust Storage 材料 owner 保存，不建立搜索旁路数据库。
 
 `source.citation` / 网页 `citation` 使用 `varin-material://` 固定 snapshot、revision 和可选行范围。
-正文点击引用读取当时的材料，可展开上下文、继续原文和打开原网页；日期分别显示观察时间与发布日期。
+不连续选段各自返回 `passageCitations`。正文点击引用读取当时的材料，可展开上下文、继续原文、引用到提问草稿
+和打开原网页；日期分别显示观察时间与发布日期。
 原始网页消失不改变已保存观察。引用字符串只是定位，读取仍经过原 Thread 材料权限。
 工具输出附带原生 typed material descriptor，`attachmentRef` 可用于派发和消息的显式附件。
 最终报告和压缩摘要只延续已经取得的 typed 来源，不从任意 URL、hash 或正文中的伪造 ID 授权。
