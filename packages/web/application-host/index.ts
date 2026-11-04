@@ -2214,10 +2214,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, resource_owner: { kind: 'local' as const } })),
       externalAgents: () => externalAgents.settings(),
       settings: () => modelsService.readGlobalInferenceSettings(),
-      projectWorkFocus: async projectId => {
-        const focus = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === projectId)?.defaultWorkFocus;
-        return focus === 'code' || focus === 'research' ? focus : undefined;
-      },
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });

@@ -302,8 +302,8 @@ pub(crate) fn discovery(
     let presets = selected.catalog.presets.iter().map(|preset| {
         if let Some(external)=&preset.external {
             return json!({"id":preset.id,"name":preset.name,"description":preset.description,"backend":external.harness,
-                "tools_source":"external_harness","work_modes":["shared","isolated_write"],"unavailable":preset.unavailable,
-                "selection":"Uses its own configured model and tools. Omit tools. Its conversationId accepts send; each request returns an operationId for child_status, child_report and wait_child."});
+                "tools_source":"external_harness","work_modes":["shared","isolated_write"],"work_focus":preset.work_focus,"unavailable":preset.unavailable,
+                "selection":"Uses its own configured model, tools and modes. Omit tools and workFocus. Its conversationId accepts send; each request returns an operationId for child_status, child_report and wait_child."});
         }
         let tools = selected.preset_tools(preset);
         let failure = preset.unavailable.clone().or_else(|| {
@@ -312,9 +312,11 @@ pub(crate) fn discovery(
             else if !selected.unavailable_source_tools(&tools).is_empty() { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "source_required".into(), capabilities: selected.unavailable_source_tools(&tools) }) }
             else if preset.inherit_base.as_ref().is_some_and(|base| base != &selected.frozen.parent_model) { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "inheritance_basis_changed".into(), capabilities: Vec::new() }) } else { None }
         });
-        json!({"id":preset.id,"name":preset.name,"description":preset.description,"tools":tools,"tools_source":preset.tools_source,"unavailable":failure})
+        json!({"id":preset.id,"name":preset.name,"description":preset.description,"tools":tools,"tools_source":preset.tools_source,"work_focus":preset.work_focus,"unavailable":failure})
     }).collect::<Vec<_>>();
     json!({"kind":"child_dispatch_configuration","catalog_identity":selected.catalog.identity,"normal":{"allowed_delegation":normal,"unavailable":selected.catalog.normal_unavailable,"default_unavailable":normal_failure,"selection":"Without tools, the full delegation is selected. Explicit tools may narrow it; unsupported selected tools are rejected."},"presets":presets,
+        "work_focus":{"default":selected.frozen.work_focus.as_deref().unwrap_or("general"),"available":varin_runtime::catalog::launches::WORK_FOCUS_IDS,
+            "selection":"dispatch.workFocus selects native tool disclosure and the target scope for presets. Omit to inherit the caller's focus. A preset's empty work_focus list means all focuses. This does not expand tool permissions or change workMode."},
         "work_modes":{"shared":"default: works in the selected source's actual files; permitted changes apply there immediately","isolated_write":"works on an independent copy of the selected source; changes return through the code exchange","read_only":"reads the selected source without file-changing tools"},
         "source_notice":"Source-dependent tools require an actual selected file source. Select a source or narrow tools to source-independent capabilities. A process cwd is not an OS sandbox. Model final reports and process lifetime are independent."})
 }

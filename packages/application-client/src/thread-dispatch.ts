@@ -1,5 +1,5 @@
 import type { ThreadIdentity, ThreadThinkingLevel } from './threads.js';
-import type { AttachmentSelection } from '@varin/protocol';
+import type { AttachmentSelection, WorkFocusId } from '@varin/protocol';
 
 /** Metadata from the original native dispatch and configured-model owners. */
 export interface ThreadDispatchCatalog {
@@ -21,6 +21,8 @@ export interface ThreadDispatchInput extends ThreadIdentity {
   /** null explicitly selects no file source. It never silently inherits a worktree. */
   projectId: string | null;
   workMode: 'shared' | 'read_only' | 'isolated_write';
+  /** Omission inherits the original dispatching Run's work focus. */
+  workFocus?: WorkFocusId;
   background?: Array<{ threadId: string; branchId: string; headId: string; itemIds: string[] }>;
   attachments?: AttachmentSelection[];
 }

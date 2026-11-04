@@ -623,6 +623,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         identity: "original-settings-selection".into(),
         normal_unavailable: None,
         presets: vec![ChildPreset {
+            work_focus: Vec::new(),
             external: None,
             description: None,
             avatar: None,

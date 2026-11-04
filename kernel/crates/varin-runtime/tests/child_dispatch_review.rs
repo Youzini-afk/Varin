@@ -15,6 +15,65 @@ mod fixture;
 use fixture::Fixture;
 
 #[test]
+fn child_work_focus_is_frozen_at_admission_and_inherited_by_recursive_dispatch_after_reopen() {
+    use varin_runtime::catalog::{dispatch::ChildModelBinding, launches::AgentSelection};
+    for (parent, requested, expected) in [
+        (None, None, "general"),
+        (None, Some("office"), "office"),
+        (Some("code"), Some("research"), "research"),
+        (Some("research"), None, "research"),
+        (Some("office"), Some("general"), "general"),
+        (Some("research"), Some("code"), "code"),
+    ] {
+        let schema = |name: &str| ToolSchema { name: name.into(), version: "1".into(),
+            description: String::new(), schema: json!({"type":"object"}),
+            requirements: None, output_schema: None, metadata: None };
+        let mut f = Fixture::new_parent_custom(7, schema("file_read"), schema("dispatch"),
+            false, false, false, |input, launch| {
+                input.tools = None;
+                input.work_focus = requested.map(str::to_owned);
+                launch.agent = parent.map(|focus| AgentSelection {
+                    profile_id: None, name: None, work_focus: focus.into(), tools: None,
+                });
+            });
+        let selection = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+        let resolved = selection.resolve(&f.input).unwrap();
+        f.launch.agent = resolved.agent.clone();
+        f.launch.tools = selection.frozen.allowed_delegation.clone();
+        let original_tools = resolved.profile.tools.clone();
+        drop(selection);
+        let child = f.accept();
+        let view = f.db.capture_child_read(child.clone()).load().unwrap();
+        assert_eq!(view.input.work_focus.as_deref(), requested);
+        assert_eq!(child.launch.agent.as_ref().map(|agent| agent.work_focus.as_str()).unwrap_or("general"), expected);
+        assert_eq!(view.selected_profile.tools, original_tools);
+        let (source, proposal, basis) = child_context(&child);
+        let ready = f.db.prepare_child(&child.operation_id, source, proposal, basis).unwrap();
+        let run_id = ready.receipt.as_ref().unwrap().run_id.clone();
+        let launch = f.db.launch_intent(&run_id).unwrap().unwrap().selection;
+        assert_eq!(launch.agent, child.launch.agent);
+        let prepared = f.db.prepare_child_dispatch_binding(&run_id, ChildModelBinding {
+            configuration: serde_json::from_value(f.db.run(&run_id).unwrap().configuration).unwrap(),
+            credential_scope: launch.credential_scope.clone(),
+        }, launch.tool_schema_generation, launch.tools.clone()).unwrap().load().unwrap();
+        let reference = f.db.bind_child_dispatch(&run_id, prepared).unwrap().unwrap();
+        let root = f.root.clone();
+        drop(f.db);
+        f.db = Catalog::open(&root).unwrap();
+        assert_eq!(f.db.child_task(&child.operation_id).unwrap().launch.agent, launch.agent);
+        let nested = f.db.capture_child_dispatch(&reference).load().unwrap();
+        let mut input = f.input.clone();
+        input.work_focus = None;
+        let inherited = nested.resolve(&input).unwrap();
+        assert_eq!(inherited.agent.as_ref().map(|agent| agent.work_focus.as_str()).unwrap_or("general"), expected);
+        assert_eq!(inherited.profile.tools, original_tools);
+        drop(nested);
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn media_history_allows_independent_inherited_and_retrieval_children_after_reopen() {
     for (inherit, retrieval) in [(false, false), (true, false), (false, true)] {
         let mut f = Fixture::new_with_media(inherit, retrieval);
@@ -2211,10 +2270,10 @@ fn legacy_material_inheritance_is_converted_once_without_reinterpreting_new_pros
 fn failed_attachment_preparations_retain_exact_remote_call_until_safe_owner_cleanup() {
     use sha2::{Digest, Sha256};
     use varin_runtime::catalog::attachments::{Attachment, AttachmentSelection};
-    for effect in [Effect::None, Effect::Unknown] {
+    for (version, effect) in [("8", Effect::None), ("9", Effect::None), ("9", Effect::Unknown)] {
         let schema = |name: &str, version: &str| ToolSchema { requirements: None, name: name.into(), version: version.into(),
             description: String::new(), schema: json!({"type":"object"}), output_schema: None, metadata: None };
-        let mut f = Fixture::new_parent_custom(7, schema("file_read", "1"), schema("dispatch", "8"), false, false, false, |input, launch| {
+        let mut f = Fixture::new_parent_custom(7, schema("file_read", "1"), schema("dispatch", version), false, false, false, |input, launch| {
             input.attachments = vec![AttachmentSelection::Path { path: "fixed.csv".into() }, AttachmentSelection::Ref { reference: "attachment:already-owned".into() }];
             launch.source.as_mut().unwrap().resource_owner = serde_json::from_value(json!({"kind":"managed_host","hostId":"original","connectionId":"connection","endpointIdentity":"endpoint"})).unwrap();
         });
@@ -2226,7 +2285,7 @@ fn failed_attachment_preparations_retain_exact_remote_call_until_safe_owner_clea
         f.db.commit_execution(&run.id, f.db.epoch(), &ExecutionRecord::ToolBatchCommitted {
             request_id: "parent-request".into(), results: vec![ToolResult { request_id: "parent-request".into(),
                 call_id: "dispatch-call".into(), completion: f.db.capture_call_completion(&f.context.operation_id).unwrap().load().unwrap() }] }).unwrap();
-        let malformed = f.admit_policy_call(ToolCall { call_id: "malformed-attachment".into(), name: "dispatch".into(), schema_version: "8".into(),
+        let malformed = f.admit_policy_call(ToolCall { call_id: "malformed-attachment".into(), name: "dispatch".into(), schema_version: version.into(),
             arguments: json!({"task":"invalid selection must not block cleanup","attachments":{"path":"not-an-array"}}) });
         f.db.commit_execution(&run.id, f.db.epoch(), &ExecutionRecord::ToolSettled { executor_stopped: true, context: malformed,
             completion: ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content: json!({"error":"Attachments must be an array"}).into() } }).unwrap();

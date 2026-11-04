@@ -599,7 +599,7 @@ fn snapshot_consumer(call:&crate::execution::ToolCall)->Result<Option<ResourceRe
             if input.attachments.is_empty() {return Err(denied());}
             Ok(None)
         }
-        ("dispatch","8")=> {
+        ("dispatch","8"|"9")=> {
             let input=super::dispatch::DispatchInput::from_tool_call(&call.name,&call.arguments)?;
             if input.attachments.is_empty() {return Err(denied());}
             Ok(None)
