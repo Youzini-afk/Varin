@@ -16,7 +16,7 @@ afterEach(() => {
 async function setup() {
   const target = Object.assign(new EventTarget(), { document: { documentElement: { toggleAttribute() { } } }, location: { href: 'http://tauri.localhost/', origin: 'http://tauri.localhost' } }) as unknown as DesktopBootstrapTarget;
   Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
-  let value: TauriDesktopBootstrap = { version: 1, runtime: 'tauri', localPage: true, platform: 'linux', arch: 'x64', windowRole: 'main', localOrigin: 'http://127.0.0.1:19001', apiBaseUrl: 'http://127.0.0.1:19001', clientToken: 'old-token', requestHeaders: {}, homeDirectory: '/home/example', relayHostId: '', macosMajor: 0, macVibrancy: false, trayEnabled: true, bootOutcome: { target: 'local', status: 'ok' } };
+  let value: TauriDesktopBootstrap = { version: 1, runtime: 'tauri', localPage: true, platform: 'linux', arch: 'x64', windowRole: 'main', frontendMigrationOwner: true, localOrigin: 'http://127.0.0.1:19001', apiBaseUrl: 'http://127.0.0.1:19001', clientToken: 'old-token', requestHeaders: {}, homeDirectory: '/home/example', relayHostId: '', macosMajor: 0, macVibrancy: false, trayEnabled: true, bootOutcome: { target: 'local', status: 'ok' } };
   let listener!: (payload: unknown) => void;
   const calls: string[] = [];
   const transport: DesktopNativeTransport = { async invoke<T>(command: string, args?: Record<string, unknown>) { calls.push(command); if (command === 'varin_invoke' && args?.command === 'desktop_local_client_token_get') return 'old-token' as T; return value as T; }, async listen(handler) { listener = handler; return () => { listener = () => { }; }; } };

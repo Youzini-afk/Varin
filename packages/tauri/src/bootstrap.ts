@@ -19,6 +19,8 @@ export type TauriDesktopBootstrap = Omit<PreloadBootstrapLocalPayload, 'requestH
   platform: 'win32' | 'darwin' | 'linux';
   arch: string;
   windowRole: DesktopWindowRole;
+  /** Native window identity, independent of the shared workbench role. */
+  frontendMigrationOwner: boolean;
   bootOutcome: DesktopBootOutcome;
   documentNonce?: string;
 };
@@ -51,6 +53,7 @@ const readBootstrap = (value: unknown): TauriDesktopBootstrap | null => {
   if (!data || data.version !== 1 || data.runtime !== 'tauri' || data.localPage !== true
     || !['win32', 'darwin', 'linux'].includes(String(data.platform))
     || !['main', 'mini-chat', 'companion', 'companion-scene', 'companion-stool'].includes(String(data.windowRole))
+    || typeof data.frontendMigrationOwner !== 'boolean'
     || !['localOrigin', 'apiBaseUrl', 'clientToken', 'homeDirectory', 'relayHostId', 'arch'].every(key => typeof data[key] === 'string')
     || typeof data.macosMajor !== 'number' || !Number.isFinite(data.macosMajor)
     || typeof data.macVibrancy !== 'boolean' || typeof data.trayEnabled !== 'boolean'
@@ -71,7 +74,9 @@ export async function installTauriDesktop(
   // Scene/stool surfaces remain decorative: no Host APIs, bearer, home or native bridge.
   if (bootstrap.windowRole === 'companion-scene' || bootstrap.windowRole === 'companion-stool') return null;
 
-  if (bootstrap.windowRole === 'main' && target.localStorage && target.crypto?.subtle) await importDesktopFrontendState(target.localStorage, transport, target.crypto.subtle);
+  if (bootstrap.frontendMigrationOwner && target.localStorage && target.crypto?.subtle) {
+    await importDesktopFrontendState(target.localStorage, transport, target.crypto.subtle);
+  }
 
   let disposed = false;
   let initialized!: () => void;

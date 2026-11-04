@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash, webcrypto } from 'node:crypto';
+import { exportDesktopFrontendEntries, FRONTEND_MIGRATION_MARKER_KEY } from '@varin/application-client/desktop';
 import { createTauriDesktopBridge, DesktopBridgeError, type DesktopNativeTransport } from '../src/bridge.js';
 import { installTauriDesktop, initializeTauriDesktop, type DesktopBootstrapTarget, type TauriDesktopBootstrap } from '../src/bootstrap.js';
 
@@ -28,6 +30,7 @@ const bootstrap = (overrides: Partial<TauriDesktopBootstrap> = {}): TauriDesktop
   platform: 'linux',
   arch: 'x64',
   windowRole: 'main',
+  frontendMigrationOwner: true,
   localOrigin: 'http://127.0.0.1:19001',
   apiBaseUrl: 'https://selected-host.example',
   clientToken: 'remote-window-token',
@@ -45,6 +48,60 @@ const bootstrap = (overrides: Partial<TauriDesktopBootstrap> = {}): TauriDesktop
 const makeWindow = (): DesktopBootstrapTarget => Object.assign(new EventTarget(), {
   document: { documentElement: { toggleAttribute: () => {} } },
 }) as unknown as DesktopBootstrapTarget;
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>();
+  get length() { return this.values.size; }
+  clear() { this.values.clear(); }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  removeItem(key: string) { this.values.delete(key); }
+  setItem(key: string, value: string) { this.values.set(key, value); }
+}
+
+test('only the native migration owner imports before installing any workbench bridge', async () => {
+  const storage = new MemoryStorage();
+  const payload = exportDesktopFrontendEntries([['lastDirectory', '/preserved-project']]);
+  const stage = { schema: 1, id: 'original-preferences', sourceOrigin: 'varin-ui://app', sourceVersion: '1',
+    stage: 'staged', payload, digest: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+  for (const label of ['main', 'workbench-1', 'workbench-2', 'mini-chat-1']) {
+    const target = Object.assign(makeWindow(), { localStorage: storage, crypto: webcrypto as unknown as Crypto });
+    const owner = label === 'main';
+    const port = new NativePort((command, args) => {
+      if (command === 'varin_bootstrap') return bootstrap({
+        windowRole: label.startsWith('mini-chat') ? 'mini-chat' : 'main', frontendMigrationOwner: owner,
+      });
+      if (command === 'varin_frontend_migration') {
+        // Exercise the real native authorization boundary with the DOM services
+        // available in production, instead of silently skipping the import.
+        assert.equal(label, 'main', 'secondary workbenches cannot call the migration owner');
+        assert.equal(target.__VARIN_DESKTOP__, undefined, 'consumers must wait for the original import');
+        return args?.action === 'read' ? JSON.stringify(stage) : null;
+      }
+      return null;
+    });
+    const dispose = await installTauriDesktop(target, port);
+    assert.ok(target.__VARIN_DESKTOP__, `${label} installs its own bridge`);
+    assert.equal(storage.getItem('lastDirectory'), '/preserved-project');
+    assert.ok(storage.getItem(FRONTEND_MIGRATION_MARKER_KEY));
+    assert.equal(port.calls.filter(call => call.command === 'varin_frontend_migration').length, owner ? 2 : 0);
+    dispose?.();
+  }
+});
+
+test('failed owner import leaves the original preferences unacknowledged and no partial bridge', async () => {
+  const target = Object.assign(makeWindow(), { localStorage: new MemoryStorage(), crypto: webcrypto as unknown as Crypto });
+  const port = new NativePort(command => {
+    if (command === 'varin_bootstrap') return bootstrap();
+    throw new Error('Preference export is unavailable');
+  });
+  await assert.rejects(installTauriDesktop(target, port), /Preference export is unavailable/);
+  assert.equal(target.__VARIN_DESKTOP__, undefined);
+  assert.equal(target.__VARIN_CLIENT_TOKEN__, undefined);
+  assert.equal(target.localStorage.length, 0);
+  assert.equal(port.subscriptions, 0);
+  assert.deepEqual(port.calls.map(call => call.command), ['varin_bootstrap', 'varin_frontend_migration']);
+});
 
 test('the shared bridge preserves command results and all special entry points', async () => {
   const selected = { path: '/chosen/report.pdf', outsideFileGrant: 'grant-one', expiresAt: 123 };

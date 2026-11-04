@@ -668,7 +668,11 @@ async fn initialize(app: AppHandle, root: PathBuf) {
 #[tauri::command]
 async fn varin_bootstrap(webview: Webview, state: State<'_, DesktopState>) -> Reply {
     state.authorize(&webview)?;
-    state.bootstrap(webview.label()).await
+    let mut bootstrap = state.bootstrap(webview.label()).await?;
+    // All workbenches share the main presentation role, but only this native
+    // identity owns the one-time import into their shared application origin.
+    bootstrap["frontendMigrationOwner"] = json!(webview.label() == "main");
+    Ok(bootstrap)
 }
 #[tauri::command]
 async fn varin_invoke(
