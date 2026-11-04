@@ -220,7 +220,8 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
   const changed = submitted.initialContext!;
   expect(submitted.expectedContextCheckpoint).toBe(saved.id);
   expect(submitted.launch).toMatchObject({ inheritSource: false, source: { workspaceId: 'new-workspace', branchId: 'new-source', revision: 2 }, childDispatch: frozenProfiles });
-  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ modelOwner: expect.objectContaining({ retain: expect.any(Function) }), parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope }, projectId: 'admitted-project' });
+  // Profiles freeze the parent's model owner; project/focus selection belongs to dispatch.
+  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ modelOwner: expect.objectContaining({ retain: expect.any(Function) }), parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope } });
 
   expect(changed.resources?.source).toMatchObject({ workspace_id: 'new-workspace', branch_id: 'new-source', revision: 2 });
   expect(changed.resources?.snapshot.scope).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
