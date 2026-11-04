@@ -134,6 +134,18 @@ fn resolve_command_ids(names: &[&CStr]) -> Vec<c_int> {
     .collect()
 }
 
+fn localize_menu(model: &MenuModel, labels: &[(c_int, CefString)]) {
+  for index in 0..model.count() {
+    let command = model.command_id_at(index);
+    if let Some((_, label)) = labels.iter().find(|(id, _)| *id == command) {
+      model.set_label_at(index, Some(label));
+    }
+    if let Some(submenu) = model.sub_menu_at(index) {
+      localize_menu(&submenu, labels);
+    }
+  }
+}
+
 /// Drops the separators the removals leave behind: a menu must not open or end
 /// with one, and two in a row draw as a double rule.
 ///
@@ -201,6 +213,17 @@ wrap_context_menu_handler! {
       }
 
       remove_redundant_separators(model);
+
+      let labels: Vec<_> = crate::context_menu::context_menu_labels()
+        .into_iter()
+        .filter_map(|(name, label)| {
+          // CEF resolves names for its own build; unknown commands must not
+          // relabel separators or unrelated entries using the sentinel -1.
+          let id = unsafe { cef_id_for_command_id_name(name.as_ptr()) };
+          (id != UNKNOWN_COMMAND_ID).then(|| (id, CefString::from(label.as_str())))
+        })
+        .collect();
+      localize_menu(model, &labels);
 
       // An empty model is left empty on purpose: CEF then shows no menu at all,
       // which is the right outcome for a menu with nothing in it.

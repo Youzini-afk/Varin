@@ -78,6 +78,7 @@ impl NativeMenus {
         app.run_on_main_thread_blocking(move || {
             let menu = application_menu(&handle, &locale)?;
             handle.set_menu(menu.clone()).map_err(error)?;
+            tauri_runtime_cef::set_context_menu_labels(policy::context_menu_labels(&locale));
             if !cfg!(target_os = "macos") {
                 for window in handle.windows().values() {
                     let _ = window.hide_menu();

@@ -7,6 +7,7 @@ mod windows_notification_policy_tests;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    ffi::CStr,
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -53,6 +54,44 @@ pub fn text(locale: &str, key: &str) -> String {
 }
 pub fn counted(locale: &str, key: &str, count: usize) -> String {
     text(locale, key).replace("{count}", &count.to_string())
+}
+
+/// The same inert labels used by the Electron transition shell. Match only
+/// native command identities so page text and spelling suggestions stay intact.
+pub fn context_menu_labels(locale: &str) -> Vec<(&'static CStr, String)> {
+    [
+        (c"IDC_CONTENT_CONTEXT_UNDO", "Undo"),
+        (c"IDC_CONTENT_CONTEXT_REDO", "Redo"),
+        (c"IDC_CONTENT_CONTEXT_CUT", "Cut"),
+        (c"IDC_CONTENT_CONTEXT_COPY", "Copy"),
+        (c"IDC_CONTENT_CONTEXT_PASTE", "Paste"),
+        (
+            c"IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE",
+            "Paste and Match Style",
+        ),
+        (c"IDC_CONTENT_CONTEXT_SELECTALL", "Select All"),
+        (c"IDC_SPELLCHECK_ADD_TO_DICTIONARY", "Learn Spelling"),
+        (c"IDC_CONTENT_CONTEXT_COPYLINKLOCATION", "Copy Link"),
+        (c"IDC_CONTENT_CONTEXT_COPYIMAGE", "Copy Image"),
+        (
+            c"IDC_CONTENT_CONTEXT_COPYIMAGELOCATION",
+            "Copy Image Address",
+        ),
+        (c"IDC_CONTENT_CONTEXT_COPYAVLOCATION", "Copy Video Address"),
+        (c"IDC_CONTENT_CONTEXT_COPYVIDEOFRAME", "Copy Video Frame"),
+        (
+            c"IDC_CONTENT_CONTEXT_PICTUREINPICTURE",
+            "Picture in Picture",
+        ),
+        (c"IDC_CONTENT_CONTEXT_INSPECTELEMENT", "Inspect Element"),
+        (
+            c"IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS",
+            "Inspect Element",
+        ),
+    ]
+    .into_iter()
+    .map(|(command, key)| (command, text(locale, key)))
+    .collect()
 }
 pub fn truncate(value: &str, max: usize) -> String {
     let value = value.trim();
@@ -356,6 +395,22 @@ mod tests {
         assert_eq!(normalize_locale("ua-UA"), "uk");
         assert_eq!(normalize_locale("pt-PT"), "en");
         assert_eq!(truncate("  😀😀😀  ", 4), "😀…");
+    }
+    #[test]
+    fn context_menu_labels_follow_application_language_without_a_new_webview() {
+        let english: HashMap<_, _> = context_menu_labels("en-US").into_iter().collect();
+        let chinese: HashMap<_, _> = context_menu_labels("zh-Hans-CN").into_iter().collect();
+        let japanese: HashMap<_, _> = context_menu_labels("ja-JP").into_iter().collect();
+        assert_eq!(english.get(c"IDC_CONTENT_CONTEXT_COPY").unwrap(), "Copy");
+        assert_eq!(chinese.get(c"IDC_CONTENT_CONTEXT_COPY").unwrap(), "复制");
+        assert_ne!(
+            japanese.get(c"IDC_CONTENT_CONTEXT_COPY"),
+            english.get(c"IDC_CONTENT_CONTEXT_COPY")
+        );
+        assert_eq!(
+            context_menu_labels("unrecognized"),
+            context_menu_labels("en")
+        );
     }
     #[test]
     fn notifications_normalize_wrappers_and_dedupe_only_same_host() {

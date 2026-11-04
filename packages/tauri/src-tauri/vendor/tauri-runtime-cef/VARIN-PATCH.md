@@ -58,6 +58,11 @@ not a request to close. Optional native dialog and download handler factories
 retain CEF callbacks for the existing private Host owner. These factories are
 Rust-only, not renderer commands.
 
+The native shell supplies localized context-menu labels by stable Chromium
+command names. Each menu reads the current application-language snapshot, also
+for already-created webviews; unknown commands and page/spelling text are left
+unchanged. Labels do not enable filtered browser actions or add renderer APIs.
+
 The `varin-companion` resource scheme requires an originating browser because
 the registered webview label selects that surface's asset capability. Browserless
 workers and CefURLRequest may not borrow an arbitrary live label. The upstream

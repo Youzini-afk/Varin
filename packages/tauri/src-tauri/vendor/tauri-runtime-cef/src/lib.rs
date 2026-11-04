@@ -6,6 +6,8 @@
 #![allow(clippy::too_many_arguments)]
 
 mod cef_impl;
+mod context_menu;
+pub use context_menu::set_context_menu_labels;
 mod devtools;
 mod dialog;
 /// The `Last Version` breadcrumb in the root cache path, and what a rollback to an older CEF
