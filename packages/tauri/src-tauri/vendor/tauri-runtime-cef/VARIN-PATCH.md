@@ -99,8 +99,8 @@ Windows uses `WS_EX_NOACTIVATE` plus a window subclass that returns
 winit visibility, position and style changes. X11 uses the ICCCM No Input model:
 `InputHint=false` and no `WM_TAKE_FOCUS`, without changing unrelated protocols.
 macOS creates initially nonfocusable windows as nonactivating `NSPanel`s that
-remain visible when Varin deactivates, and
-uses an instance-local subclass to veto key/main-window eligibility. Runtime
+remain visible when Varin deactivates, and uses an instance-local subclass to
+veto key/main-window eligibility. Runtime
 changes update that veto without changing winit's class layout or other windows.
 An ordinary `NSWindow` toggled nonfocusable after creation is not converted to an
 `NSPanel`: key focus is blocked but AppKit application activation may still

@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const bootstrap = readFileSync(new URL('../src-tauri/src/preview.html', import.meta.url), 'utf8');
-const script = bootstrap.match(/<script>([\s\S]*)<\/script>/)![1];
+const script = bootstrap.match(/<script>([\s\S]*)<\/script>/)?.[1]
+  ?? (() => { throw new Error('Preview bootstrap script is missing'); })();
 
 test('preview bootstrap accepts only its embedding parent and generation, once, after load', () => {
   const listeners = new Map<string, (event: unknown) => void>(), messages: unknown[] = [], writes: string[] = [];
