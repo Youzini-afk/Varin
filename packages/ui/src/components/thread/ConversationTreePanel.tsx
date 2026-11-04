@@ -21,14 +21,14 @@ import { useBotNavigation } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 
-export function ConversationTreePanel({ active = true, identity: pinned }: { active?: boolean; identity?: ThreadIdentity }) {
+export function ConversationTreePanel({ active = true }: { active?: boolean }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const selected = useThreadStore(state => state.selectedIdentity);
   const botEntry = useBotNavigation(state => state.entry);
   const profile = useWorkbenchProfileId();
   const api = useRuntimeAPIs().threads;
-  const identity = (profile === VARIN_WORKBENCH_BOT_PROFILE_ID ? botEntry : selected) ?? pinned;
+  const identity = profile === VARIN_WORKBENCH_BOT_PROFILE_ID ? botEntry : selected;
   if (!active) return null;
   return identity && api ? <ConversationTree key={`${host}:${identity.threadId}`} api={api} identity={identity} host={host} />
     : <p className="p-4 typography-meta text-muted-foreground">{t('chat.tree.openConversation')}</p>;
@@ -176,11 +176,15 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
     refresh();
   });
   const currentRoute = tree?.routes.find(route => route.branchId === identity.branchId);
+  const openChild = (child: Pick<ThreadIdentity, 'threadId' | 'branchId'>) => action(async () => {
+    await openThreadFromNavigation(child);
+    openConversationTree();
+  });
   const renderTurn = (node: ThreadConversationTreeNode, depth: number) => <TreeTurn key={node.id} node={node} depth={depth} branchStart={depth > 0 && branchStarts.has(node.id)} api={api} identity={identity} tree={tree!} preview={search ? searchResults[previewKey(node)] : previewCache.current.get(previewKey(node))}
     load={readPreview} active={path.has(node.id)} selected={view.selected === node.id} currentBranch={identity.branchId} busy={busy}
     open={view.expanded[node.id] ?? false} onOpen={open => setView({ expanded: { ...view.expanded, [node.id]: open } })}
     onRoute={branchId => void navigate(node, 'reveal', branchId)} onSelect={() => void navigate(node)}
-    onChild={child => void action(async () => { const target = await openThreadFromNavigation(child); openConversationTree(target); })} />;
+    onChild={child => void openChild(child)} />;
   return <section className="flex h-full min-h-0 flex-col" aria-label={t('chat.tree.title')}>
     <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3">
       <div className="relative min-w-0 flex-1"><Icon name="search" className="pointer-events-none absolute left-2 top-2.5 size-3.5 text-muted-foreground" />
@@ -206,7 +210,7 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
       {tree?.routes.filter(route => !route.nodeId).map((route, index) => <button key={route.branchId} type="button" onClick={() => void action(async () => { await openThreadFromNavigation({ ...identity, branchId: route.branchId }); })}
         className="flex w-full items-center gap-2 rounded px-2 py-3 typography-meta hover:bg-interactive-hover"><Icon name="git-branch" className="size-4" />{t('thread.sidebar.branch', { number: index + 1 })} · {t('chat.tree.empty')}</button>)}
       {tree?.children.filter(child => !child.nodeId).map(child => <button key={child.threadId} type="button" className="mt-2 flex max-w-full items-center gap-2 rounded px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover"
-        onClick={() => void action(async () => { const target = await openThreadFromNavigation(child); openConversationTree(target); })}>
+        onClick={() => void openChild(child)}>
         <AgentAvatar identity={child.threadId} avatar={child.avatar ?? undefined} size={18} /><span className="truncate">{child.name}</span>
       </button>)}
     </div>

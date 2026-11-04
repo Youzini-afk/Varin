@@ -3,9 +3,7 @@ import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import type { BotMatter } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, type BotSession, type ThreadIdentity } from '@varin/application-client';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { openConversationTree } from '@/lib/openConversationTree';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
+import { BOT_TREE_PANEL_SCOPE, openConversationTree } from '@/lib/openConversationTree';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -124,12 +122,11 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
 
 const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { t } = useI18n();
-  const directory = normalizeContextPanelDirectoryKey(useEffectiveDirectory() ?? '');
-  const contextPanel = useUIStore(state => state.contextPanelByDirectory[directory]);
+  const contextPanel = useUIStore(state => state.contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]);
   const treeTab = contextPanel?.isOpen ? contextPanel.tabs.find(tab => tab.id === contextPanel.activeTabId && tab.mode === 'tree') : undefined;
   const [treeMounted, setTreeMounted] = React.useState(Boolean(treeTab));
   React.useEffect(() => { if (treeTab) setTreeMounted(true); }, [treeTab]);
-  const closeTree = () => useUIStore.getState().closeContextPanel(directory);
+  const closeTree = () => useUIStore.getState().closeContextPanel(BOT_TREE_PANEL_SCOPE);
   const { isMobile } = useDeviceInfo();
   const { threads, bots: botsAPI } = useRuntimeAPIs();
   const navigation = useBotNavigation();
@@ -527,7 +524,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const panelControl = isMobile ? undefined : <>
     {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
       className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-      onClick={() => treeTab ? closeTree() : openConversationTree(selectedEntry)}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
+      onClick={() => treeTab ? closeTree() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
     <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" aria-label={panelLabel} aria-expanded={panelVisible} onClick={togglePanel}
@@ -589,7 +586,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     {details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
     {isMobile && <Dialog open={Boolean(treeTab)} onOpenChange={open => { if (!open) closeTree(); }}>
       <DialogContent className="flex h-[85dvh] max-w-full flex-col gap-0 p-0"><DialogHeader className="px-4 py-3"><DialogTitle>{t('chat.tree.title')}</DialogTitle></DialogHeader>
-        <div className="min-h-0 flex-1"><React.Suspense fallback={null}><ConversationTreePanel identity={treeTab?.thread} active={Boolean(treeTab)} /></React.Suspense></div>
+        <div className="min-h-0 flex-1"><React.Suspense fallback={null}><ConversationTreePanel active={Boolean(treeTab)} /></React.Suspense></div>
       </DialogContent>
     </Dialog>}
   </div>;
@@ -598,7 +595,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     ? <div className="flex h-full min-h-0 flex-col bg-background">{panelModel ? <BotPanelBody model={panelModel} /> : null}</div>
     : <><BotPanel model={panelModel} open={!treeTab && panelVisible && panelModel !== null} floating={floating}
       onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }} />
-      {treeMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel surfaceModes={TREE_SURFACES} /></React.Suspense>}</>;
+      {treeMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_TREE_PANEL_SCOPE} surfaceModes={TREE_SURFACES} /></React.Suspense>}</>;
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}

@@ -3473,7 +3473,8 @@ it('conversation tree recovery retains assistant content and the current draft a
   await edit('[aria-label="Message thread"]', 'Keep this draft');
   await act(async () => button('Open conversation history').click());
   const panel = Object.values(useUIStore.getState().contextPanelByDirectory).find(panel => panel.tabs.some(tab => tab.mode === 'tree'));
-  expect(panel?.tabs.find(tab => tab.mode === 'tree')?.thread).toEqual(identity);
+  expect(panel?.tabs.find(tab => tab.mode === 'tree')).toMatchObject({ id: 'tree' });
+  expect(panel?.tabs.find(tab => tab.mode === 'tree')?.thread).toBeUndefined();
   expect(f.prepareNavigation).not.toHaveBeenCalled();
   const { useConversationTreeStore } = await import('@/stores/useConversationTreeStore');
   const { threadComposerKey, threadHostKey } = await import('@/stores/useThreadStore');

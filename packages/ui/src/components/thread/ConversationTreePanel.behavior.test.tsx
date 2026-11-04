@@ -53,6 +53,7 @@ beforeEach(() => {
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('IntersectionObserver', undefined);
   useConversationTreeStore.setState({ views: {}, navigation: {} });
+  useBotNavigation.setState({ botId: null, entry: null, model: null });
   useThreadStore.setState({ selectedIdentity: identity, threads: [] });
   services.api = {
     conversationTree: vi.fn(async () => tree),
@@ -65,7 +66,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const render = () => act(async () => root.render(<ConversationTreePanel identity={identity} />));
+const render = () => act(async () => root.render(<ConversationTreePanel />));
 const row = (id: string) => container.querySelector<HTMLElement>(`[data-tree-node="${id}"]`)!;
 
 it('opens another route at its original message without recovering or submitting work', async () => {
@@ -89,16 +90,24 @@ it('continues a chosen route with an immutable fork and preserves disclosure cho
   await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'chat.tree.continue')!.click());
   expect(services.api.fork).toHaveBeenCalledWith({ ...identity, branchId: 'saved', headId: 'saved-end', key: expect.any(String) });
   expect(catalog).toHaveBeenCalled();
-  await act(async () => root.render(<ConversationTreePanel active={false} identity={identity} />));
+  await act(async () => root.render(<ConversationTreePanel active={false} />));
   useThreadStore.setState({ selectedIdentity: identity });
   await render();
   expect(row('saved-turn').querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
 });
 
-it('uses the Bot conversation selection while the ordinary workbench keeps another Thread selected', async () => {
+it('uses the Bot selection in Bot mode and shows an empty tree when switching to a workbench draft', async () => {
   useThreadStore.setState({ selectedIdentity: { ...identity, threadId: 'ordinary-work' } });
   useBotNavigation.setState({ botId: 'bot', entry: identity });
-  await act(async () => root.render(<WorkbenchProfileContext.Provider value="varin.bot"><ConversationTreePanel identity={identity} /></WorkbenchProfileContext.Provider>));
+  await act(async () => root.render(<WorkbenchProfileContext.Provider value="varin.bot"><ConversationTreePanel /></WorkbenchProfileContext.Provider>));
   expect(services.api.conversationTree).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
   expect(container.querySelectorAll('[data-tree-node]')).toHaveLength(3);
+
+  await act(async () => {
+    useThreadStore.setState({ selectedIdentity: null });
+    root.render(<ConversationTreePanel />);
+  });
+  expect(container.querySelector('[data-tree-node]')).toBeNull();
+  expect(container.textContent).toBe('chat.tree.openConversation');
+  expect(services.api.conversationTree).toHaveBeenCalledTimes(1);
 });

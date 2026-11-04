@@ -8,15 +8,14 @@ beforeEach(() => {
 
 describe('useUIStore context panel tabs', () => {
   test('opens and restores a conversation tree without a project directory', () => {
-    const identity = { runtime: 'agent' as const, threadId: 'chat-only', branchId: 'main' };
     const store = useUIStore.getState();
-    store.openContextPanelTab('', { mode: 'tree', thread: identity });
+    store.openContextPanelTab('', { mode: 'tree' });
     expect(useUIStore.getState().contextPanelByDirectory['']).toMatchObject({ isOpen: true, activeTabId: 'tree' });
     store.toggleContextPanelExpanded('');
     expect(useUIStore.getState().contextPanelByDirectory['']?.expanded).toBe(true);
     store.closeContextPanel('');
     store.setActiveContextPanelTab('', 'tree');
-    expect(useUIStore.getState().contextPanelByDirectory['']?.tabs[0]?.thread).toEqual(identity);
+    expect(useUIStore.getState().contextPanelByDirectory['']).toMatchObject({ isOpen: true, activeTabId: 'tree' });
     store.closeContextPanelTab('', 'tree');
     expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(false);
   });

@@ -437,7 +437,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
     : !launch?.selection.source ? workspacePath : undefined;
   const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath, act,
-    disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => openConversationTree(identity), onFork: head => forkFrom(head, true),
+    disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => openConversationTree(surface), onFork: head => forkFrom(head, true),
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
   const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),
     refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
@@ -632,7 +632,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       {!botSurface && <AutoReviewBanner identity={identity} />}
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-      <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => openConversationTree(identity)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+      <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => openConversationTree(surface)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
         permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
           ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
           : workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}

@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useBotNavigation, useBotReturn, type BotSession, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { threadSummary } from '@/test/threadFixtures';
 import { useBotLayout } from './botLayout';
+import { BOT_TREE_PANEL_SCOPE } from '@/lib/openConversationTree';
 
 const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
@@ -36,7 +37,7 @@ vi.mock('@/lib/bots', async original => ({
 }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: {} }) }));
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
-vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: () => <aside data-conversation-tree="true" /> }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope }: { layoutScope?: string }) => <aside data-conversation-tree={layoutScope} /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -161,15 +162,18 @@ describe('Bot workbench', () => {
     expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
     expect(useUIStore.getState().settingsPage).toBe('appearance');
   });
-  it('opens the current Bot conversation tree without a project and keeps its exit mounted', async () => {
+  it('opens and closes the Bot tree independently of the workbench panel, keeping its exit mounted', async () => {
+    useUIStore.getState().openContextPanelTab('', { mode: 'context' });
+    const ordinaryPanel = useUIStore.getState().contextPanelByDirectory[''];
     await render();
     const toggle = container.querySelector<HTMLButtonElement>('[aria-label="chat.tree.title"]')!;
     expect(toggle).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(true);
-    expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(true);
+    expect(container.querySelector(`[data-conversation-tree="${BOT_TREE_PANEL_SCOPE}"]`)).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
     expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
   });
 

@@ -394,10 +394,11 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
   return `${value.slice(0, maxChars - 3)}...`;
 };
 
-export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[] }> = ({ surfaceModes }) => {
+export const ContextPanel: React.FC<{ layoutScope?: string; surfaceModes?: readonly ContextPanelMode[] }> = ({ layoutScope, surfaceModes }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  const panelKey = layoutScope ?? directoryKey;
   const currentSessionId = useThreadStore(state => state.selectedIdentity);
   const gitSessionDirectory = effectiveDirectory || null;
   const gitDirectoryScopeKey = React.useMemo(() => {
@@ -424,7 +425,7 @@ export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[]
     useUIStore.getState().openContextPanelTab(directoryKey, { mode: 'git' });
   }, [directoryKey, gitDirectoryScopeKey, setRightSidebarGitDirectory]);
 
-  const panelState = useUIStore((state) => state.contextPanelByDirectory[directoryKey]);
+  const panelState = useUIStore((state) => state.contextPanelByDirectory[panelKey]);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -573,11 +574,11 @@ export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[]
     }
     document.documentElement.style.cursor = '';
     if (activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+      setContextPanelWidth(panelKey, activeModeForWidth, finalWidth);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+  }, [activeModeForWidth, clampWidthForDrag, panelKey, setContextPanelWidth, width]);
 
   // Window-level drag listeners: tracking the pointer via the 3px handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -634,12 +635,12 @@ export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[]
   }, [isResizing]);
 
   const handleClose = React.useCallback(() => {
-    closeContextPanel(directoryKey);
-  }, [closeContextPanel, directoryKey]);
+    closeContextPanel(panelKey);
+  }, [closeContextPanel, panelKey]);
 
   const handleToggleExpanded = React.useCallback(() => {
-    toggleContextPanelExpanded(directoryKey);
-  }, [directoryKey, toggleContextPanelExpanded]);
+    toggleContextPanelExpanded(panelKey);
+  }, [panelKey, toggleContextPanelExpanded]);
 
   const handlePanelKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape') {
@@ -843,7 +844,7 @@ export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[]
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel active={isOpen} source={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'tree'
-            ? <ConversationTreePanel active={isOpen} identity={activeTab.thread} />
+            ? <ConversationTreePanel active={isOpen} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
             ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'material' && activeTab.targetPath && activeTab.thread
@@ -906,7 +907,7 @@ export const ContextPanel: React.FC<{ surfaceModes?: readonly ContextPanelMode[]
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-48">
           {surfaces.map(surface => <DropdownMenuItem key={surface.id} className="gap-2"
-            onSelect={() => useUIStore.getState().openContextSurface(directoryKey, surface.mode)}>
+            onSelect={() => useUIStore.getState().openContextSurface(panelKey, surface.mode)}>
             <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(surface.labelKey)}</span>
             {activeTab && getContextRailMode(activeTab.mode) === surface.mode ? <Icon name="check" className="size-3.5" /> : null}
           </DropdownMenuItem>)}

@@ -317,7 +317,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
     result.push({
       id,
       mode: candidate.mode,
-      ...(!restoreRoom && candidate.thread ? { thread: candidate.thread } : {}),
+      ...(!restoreRoom && candidate.mode !== 'tree' && candidate.thread ? { thread: candidate.thread } : {}),
       ...(!restoreRoom && candidate.member ? { member: candidate.member } : {}),
       ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
       ...(typeof candidate.materialLine === 'number' && Number.isSafeInteger(candidate.materialLine) && candidate.materialLine >= 1 ? { materialLine: candidate.materialLine } : {}),
