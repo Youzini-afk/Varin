@@ -3768,6 +3768,12 @@ const handleInvoke = async (
     case 'desktop_get_window_pinned':
       return { pinned: Boolean(browserWindow?.__varinPinned) };
 
+    case 'desktop_transfer_draft':
+    case 'desktop_complete_draft_transfer':
+      // Only Tauri owns the acknowledged draft-transfer broker. Electron's
+      // Mini Chat uses focus-only navigation and retains any unsent input.
+      throw new Error('Draft transfer is not supported by the Electron shell. Keep the source draft in Mini Chat.');
+
     case 'desktop_focus_main_window': {
       const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
       const branchId = typeof args.branchId === 'string' ? args.branchId.trim() : '';
