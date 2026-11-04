@@ -2,7 +2,8 @@
 //! record; renderer arguments cannot select another window or supply Host secrets.
 //! CEF handles are generic only so this same ledger can run without a GUI.
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
 use tokio::sync::watch;
 use url::Url;
 
@@ -16,6 +17,61 @@ pub(crate) struct WindowRecord<C, D> {
     pub bootstrap: Option<Value>,
     pub close: Option<C>,
     pub cdp: Option<D>,
+}
+
+/// Native-only connection authority. Deliberately no Debug, serialization, or
+/// public digest accessor: credentials and their fingerprints are not UI keys.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct WorkbenchAuthorityKey([u8; 32]);
+
+pub(crate) fn workbench_authority_key(bootstrap: &Value) -> Result<WorkbenchAuthorityKey, String> {
+    let field = |name: &str| {
+        bootstrap[name]
+            .as_str()
+            .ok_or_else(|| "Workbench connection authority is invalid".to_owned())
+    };
+    let mut endpoint = Url::parse(field("apiBaseUrl")?)
+        .map_err(|_| "Workbench connection endpoint is invalid")?;
+    if !matches!(endpoint.scheme(), "http" | "https") {
+        return Err("Workbench connection endpoint is invalid".into());
+    }
+    endpoint.set_fragment(None);
+    // Normalize the base path, not query values which may themselves end in '/'.
+    let path = endpoint.path().trim_end_matches('/').to_owned();
+    endpoint.set_path(&path);
+    let relay = field("relayHostId")?;
+    let token = field("clientToken")?;
+    let headers = bootstrap["requestHeaders"]
+        .as_object()
+        .ok_or("Workbench connection headers are invalid")?;
+    let mut canonical = BTreeMap::new();
+    for (name, value) in headers {
+        if name.is_empty() || !name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+        }) {
+            return Err("Workbench connection headers are invalid".into());
+        }
+        let value = value.as_str().ok_or("Workbench connection headers are invalid")?;
+        if value.contains(['\r', '\n', '\0'])
+            || canonical.insert(name.to_ascii_lowercase(), value).is_some()
+        {
+            // Even equal duplicate values can be joined differently by a transport.
+            return Err("Workbench connection headers are ambiguous or invalid".into());
+        }
+    }
+    let mut digest = Sha256::new();
+    let mut part = |value: &str| {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    };
+    for value in ["varin-workbench-authority-v1", endpoint.as_str(), relay, token] {
+        part(value);
+    }
+    for (name, value) in canonical {
+        part(&name);
+        part(value);
+    }
+    Ok(WorkbenchAuthorityKey(digest.finalize().into()))
 }
 
 pub(crate) fn authorize<'a, C, D>(
@@ -54,15 +110,15 @@ pub(crate) fn workbench_target<C, D>(
     windows: &HashMap<String, WindowRecord<C, D>>,
     source: &str,
     bootstrap: &Value,
-) -> Option<String> {
-    let key = crate::native_presentation::runtime_key(bootstrap);
-    windows
+) -> Result<Option<String>, String> {
+    let key = workbench_authority_key(bootstrap)?;
+    Ok(windows
         .iter()
         .filter(|(label, record)| {
             (label.as_str() == "main" || label.starts_with("workbench-"))
                 && record.close.is_some()
                 && record.bootstrap.as_ref().is_some_and(|candidate| {
-                    crate::native_presentation::runtime_key(candidate) == key
+                    workbench_authority_key(candidate).is_ok_and(|candidate| candidate == key)
                 })
         })
         .min_by_key(|(label, _)| {
@@ -77,7 +133,7 @@ pub(crate) fn workbench_target<C, D>(
                 label.as_str(),
             )
         })
-        .map(|(label, _)| label.clone())
+        .map(|(label, _)| label.clone()))
 }
 
 pub(crate) fn navigation_event(action: &Value) -> Result<&'static str, String> {
@@ -106,10 +162,8 @@ pub(crate) fn queue_navigation<C, D>(
         .bootstrap
         .as_ref()
         .ok_or("Navigation window is not ready")?;
-    if crate::native_presentation::runtime_key(target)
-        != crate::native_presentation::runtime_key(bootstrap)
-    {
-        return Err("Navigation window changed its Host".into());
+    if workbench_authority_key(target)? != workbench_authority_key(bootstrap)? {
+        return Err("Navigation window changed its connection authority".into());
     }
     if action["type"] != "transfer-draft" {
         action["apiBaseUrl"] = bootstrap["apiBaseUrl"].clone();
@@ -120,6 +174,16 @@ pub(crate) fn queue_navigation<C, D>(
     } else {
         record.navigation.push(action);
         Ok(None)
+    }
+}
+
+/// An old queued intent cannot cross a credential/tenant switch, even when the
+/// endpoint remains unchanged. Draft broker receipts are canceled by reconcile.
+pub(crate) fn discard_stale_navigation<C, D>(record: &mut WindowRecord<C, D>, next: &Value) {
+    let previous = record.bootstrap.as_ref().and_then(|value| workbench_authority_key(value).ok());
+    let next = workbench_authority_key(next).ok();
+    if previous.is_none() || previous != next {
+        record.navigation.clear();
     }
 }
 
@@ -246,12 +310,12 @@ mod tests {
             record.close = Some(());
         }
         let source = windows["mini-1"].bootstrap.clone().unwrap();
-        assert_eq!(workbench_target(&windows, "mini-1", &source), None);
-        let mut remote = record("https://mini.example/", "rotated", "remote");
+        assert_eq!(workbench_target(&windows, "mini-1", &source).unwrap(), None);
+        let mut remote = record("https://mini.example/", "mini-secret", "mini-alias");
         remote.close = Some(());
         windows.insert("workbench-1".into(), remote);
         assert_eq!(
-            workbench_target(&windows, "mini-1", &source).as_deref(),
+            workbench_target(&windows, "mini-1", &source).unwrap().as_deref(),
             Some("workbench-1")
         );
         windows
@@ -260,7 +324,73 @@ mod tests {
             .bootstrap
             .as_mut()
             .unwrap()["relayHostId"] = json!("other-relay");
-        assert_eq!(workbench_target(&windows, "mini-1", &source), None);
+        assert_eq!(workbench_target(&windows, "mini-1", &source).unwrap(), None);
+    }
+
+    #[test]
+    fn same_endpoint_workbenches_keep_credentials_and_headers_isolated() {
+        let mut windows = windows();
+        let source = windows["mini-1"].bootstrap.clone().unwrap();
+        let mut wrong_token = record("https://mini.example", "another-secret", "mini-alias");
+        wrong_token.close = Some(());
+        windows.insert("main".into(), wrong_token);
+        let mut wrong_headers = record("https://mini.example", "mini-secret", "other-tenant");
+        wrong_headers.close = Some(());
+        windows.insert("workbench-other".into(), wrong_headers);
+        // No existing window has this authority: the caller must create an isolated one.
+        assert_eq!(workbench_target(&windows, "mini-1", &source).unwrap(), None);
+        for label in ["main", "workbench-other"] {
+            assert!(queue_navigation(&mut windows, label, &source,
+                json!({"type":"new-thread","directory":"/private","projectId":"private"})).is_err());
+            assert!(windows[label].navigation.is_empty());
+        }
+        let mut matching = record("https://MINI.example:443/#fragment", "mini-secret", "mini-alias");
+        matching.close = Some(());
+        matching.bootstrap.as_mut().unwrap()["requestHeaders"] = json!({"x-window":"mini-alias"});
+        windows.insert("workbench-matching".into(), matching);
+        assert_eq!(workbench_target(&windows, "mini-1", &source).unwrap().as_deref(), Some("workbench-matching"));
+        let event = queue_navigation(&mut windows, "workbench-matching", &source,
+            json!({"type":"new-thread","directory":"/private","projectId":"private"})).unwrap().unwrap();
+        assert!(event.get("clientToken").is_none());
+        assert!(event.get("requestHeaders").is_none());
+    }
+
+    #[test]
+    fn authority_normalizes_header_names_and_order_but_never_ambiguous_credentials() {
+        let source = json!({"apiBaseUrl":"https://host.example/base/", "relayHostId":"", "clientToken":"secret",
+            "requestHeaders":{"Authorization":"Bearer tenant", "X-Tenant":"one"}});
+        let mut equivalent = source.clone();
+        equivalent["apiBaseUrl"] = json!("https://HOST.example:443/base#ignored");
+        equivalent["requestHeaders"] = json!({"x-tenant":"one", "authorization":"Bearer tenant"});
+        assert!(workbench_authority_key(&source).unwrap() == workbench_authority_key(&equivalent).unwrap());
+        for headers in [json!({"X-Tenant":"one","x-tenant":"two"}), json!({"X-Tenant":"one","x-tenant":"one"}),
+            json!({"X-Tenant":2}), json!({"Bad Header":"one"}), json!({"X-Tenant":"one\r\nsecret"})] {
+            equivalent["requestHeaders"] = headers;
+            assert!(workbench_authority_key(&equivalent).is_err());
+            assert!(workbench_target(&windows(), "mini-1", &equivalent).is_err());
+        }
+        let mut query_a = source.clone();
+        query_a["apiBaseUrl"] = json!("https://host.example/?tenant=/");
+        let mut query_b = query_a.clone();
+        query_b["apiBaseUrl"] = json!("https://host.example/?tenant=");
+        assert!(workbench_authority_key(&query_a).unwrap() != workbench_authority_key(&query_b).unwrap());
+    }
+
+    #[test]
+    fn runtime_authority_switch_discards_old_queued_navigation_without_leaking_credentials() {
+        let mut windows = windows();
+        let original = windows["main"].bootstrap.clone().unwrap();
+        windows.get_mut("main").unwrap().renderer_ready = false;
+        queue_navigation(&mut windows, "main", &original,
+            json!({"type":"new-thread","directory":"/private","projectId":"private"})).unwrap();
+        let target = windows.get_mut("main").unwrap();
+        let mut equivalent = original.clone();
+        equivalent["requestHeaders"] = json!({"x-window":"main-alias"});
+        discard_stale_navigation(target, &equivalent);
+        assert_eq!(target.navigation.len(), 1);
+        equivalent["clientToken"] = json!("other-user-token");
+        discard_stale_navigation(target, &equivalent);
+        assert!(target.navigation.is_empty());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Native, per-target draft handoff receipts. Focus and delivery are not acceptance.
-use crate::{native_presentation::runtime_key, window_registry::WindowRecord};
+use crate::window_registry::{WindowRecord, WorkbenchAuthorityKey, workbench_authority_key};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use tokio::sync::oneshot;
@@ -13,7 +13,7 @@ struct Pending {
     source: String,
     source_document: String,
     target: String,
-    host: String,
+    authority: WorkbenchAuthorityKey,
     target_document: Option<String>,
     bytes: usize,
     deadline: std::time::Instant,
@@ -94,20 +94,20 @@ impl Broker {
         }
         let source_record = windows.get(source).ok_or("Draft source is closed")?;
         let target_record = windows.get(target).ok_or("Draft target is closed")?;
-        let host = runtime_key(
+        let authority = workbench_authority_key(
             source_record
                 .bootstrap
                 .as_ref()
                 .ok_or("Draft source is not ready")?,
-        );
-        if runtime_key(
+        )?;
+        if workbench_authority_key(
             target_record
                 .bootstrap
                 .as_ref()
                 .ok_or("Draft target is not ready")?,
-        ) != host
+        )? != authority
         {
-            return Err("Draft target changed its Host".into());
+            return Err("Draft target changed its connection authority".into());
         }
         let id = uuid::Uuid::new_v4().to_string();
         let (reply, receiver) = oneshot::channel();
@@ -117,7 +117,7 @@ impl Broker {
                 source: source.into(),
                 source_document: source_record.document_nonce.clone(),
                 target: target.into(),
-                host,
+                authority,
                 target_document: None,
                 bytes,
                 deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
@@ -144,9 +144,9 @@ impl Broker {
             if record
                 .bootstrap
                 .as_ref()
-                .is_none_or(|value| runtime_key(value) != pending.host)
+                .is_none_or(|value| !workbench_authority_key(value).is_ok_and(|key| key == pending.authority))
             {
-                return Err("Draft transfer Host changed; acceptance is unknown".into());
+                return Err("Draft transfer connection authority changed; acceptance is unknown".into());
             }
         }
         Ok(())
@@ -255,7 +255,7 @@ mod tests {
             mini_thread: None, document_nonce: format!("{label}-document"), renderer_ready: true,
             navigation: vec![], native_ready: watch::channel(Some(Ok(false))).0,
             origin: url::Url::parse("http://tauri.localhost").unwrap(),
-            bootstrap: Some(json!({"apiBaseUrl":"https://host.example","relayHostId":"relay-1","clientToken":"secret"})), close: Some(()), cdp: None,
+            bootstrap: Some(json!({"apiBaseUrl":"https://host.example","relayHostId":"relay-1","clientToken":"secret","requestHeaders":{}})), close: Some(()), cdp: None,
         })).collect()
     }
     fn transfer() -> Value {
@@ -430,6 +430,58 @@ mod tests {
         assert!(broker.complete(&windows, "main", &id, true, None).is_err());
         assert_eq!(broker.delivery(&windows, "main", &id).unwrap(), None);
     }
+    #[tokio::test]
+    async fn same_endpoint_different_authorities_never_receive_a_draft() {
+        for (field, replacement) in [("clientToken", json!("other-secret")),
+            ("requestHeaders", json!({"X-Tenant":"other-tenant"}))] {
+            let mut windows = windows();
+            windows.get_mut("main").unwrap().bootstrap.as_mut().unwrap()[field] = replacement;
+            let mut broker = Broker::default();
+            assert!(broker.admit(&windows, "mini-1", "main", transfer()).is_err());
+            assert!(broker.pending.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn credential_changes_cancel_in_flight_transfers_even_when_both_windows_rotate_together() {
+        for labels in [vec!["mini-1"], vec!["main"], vec!["mini-1", "main"]] {
+            for (field, replacement) in [("clientToken", json!("rotated-secret")),
+                ("requestHeaders", json!({"X-Tenant":"different-tenant"}))] {
+                let mut windows = windows();
+                let mut broker = Broker::default();
+                let (id, receipt) = broker.admit(&windows, "mini-1", "main", transfer()).unwrap();
+                broker.delivery(&windows, "main", &id).unwrap();
+                for label in &labels {
+                    windows.get_mut(*label).unwrap().bootstrap.as_mut().unwrap()[field] = replacement.clone();
+                }
+                // The runtime-change owner calls this before completing its update.
+                broker.reconcile(&windows);
+                assert!(receipt.await.unwrap().is_err());
+                assert!(broker.pending.is_empty());
+                assert!(broker.complete(&windows, "main", &id, true, None).is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn normalized_same_authority_accepts_without_exposing_its_credentials() {
+        let mut windows = windows();
+        for record in windows.values_mut() {
+            record.bootstrap.as_mut().unwrap()["requestHeaders"] = json!({"Authorization":"Bearer secret", "X-Tenant":"one"});
+        }
+        windows.get_mut("main").unwrap().bootstrap.as_mut().unwrap()["requestHeaders"] = json!({"x-tenant":"one", "authorization":"Bearer secret"});
+        windows.get_mut("main").unwrap().bootstrap.as_mut().unwrap()["apiBaseUrl"] = json!("https://HOST.example:443/#ignored");
+        let mut broker = Broker::default();
+        let (id, receipt) = broker.admit(&windows, "mini-1", "main", transfer()).unwrap();
+        let delivered = broker.delivery(&windows, "main", &id).unwrap().unwrap();
+        assert!(delivered.get("clientToken").is_none());
+        assert!(delivered.get("requestHeaders").is_none());
+        assert!(!delivered.to_string().contains("Bearer secret"));
+        broker.reconcile(&windows);
+        broker.complete(&windows, "main", &id, true, None).unwrap();
+        assert!(receipt.await.unwrap().is_ok());
+    }
+
     #[tokio::test]
     async fn lifecycle_rejects_promptly_without_waiting_for_ack() {
         for (label, document_only) in [

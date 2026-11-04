@@ -1112,7 +1112,7 @@ async fn varin_invoke(
             if command == "desktop_open_thread_mini_chat_window" {
                 let thread = string(&args, "threadId")?;
                 let branch = string(&args, "branchId")?;
-                let key = crate::native_presentation::runtime_key(&bootstrap);
+                let key = crate::window_registry::workbench_authority_key(&bootstrap)?;
                 let existing_label = state
                     .windows
                     .lock()
@@ -1121,7 +1121,7 @@ async fn varin_invoke(
                     .find(|(_, window)| {
                         window.mini_thread.as_ref() == Some(&(thread.clone(), branch.clone()))
                             && window.bootstrap.as_ref().is_some_and(|bootstrap| {
-                                crate::native_presentation::runtime_key(bootstrap) == key
+                                crate::window_registry::workbench_authority_key(bootstrap).is_ok_and(|candidate| candidate == key)
                             })
                     })
                     .map(|(label, _)| label.clone());
@@ -2662,7 +2662,7 @@ fn focus_runtime_window(
             .windows
             .lock()
             .map_err(|_| "Window registry unavailable")?;
-        crate::window_registry::workbench_target(&windows, source_label, &bootstrap)
+        crate::window_registry::workbench_target(&windows, source_label, &bootstrap)?
     };
     let target = match target {
         Some(target) => target,
@@ -2815,6 +2815,7 @@ async fn varin_runtime_changed(
         if record.document_nonce != document_nonce {
             return Err("The original application document was replaced".into());
         }
+        crate::window_registry::discard_stale_navigation(record, &config);
         let bootstrap = record
             .bootstrap
             .as_mut()
@@ -2892,8 +2893,8 @@ fn start_deep_link_owner(app: &AppHandle, mut requests: tokio::sync::mpsc::Recei
                     let thread=string(&action,"threadId")?;let branch=string(&action,"branchId")?;
                     native_presentation_action(&app,"main",bootstrap,json!({"type":"focus-thread","threadId":thread,"branchId":branch,"directory":action["directory"].as_str().unwrap_or("")}));
                 }else if action["type"]=="host" {
-                    let key=crate::native_presentation::runtime_key(&bootstrap);
-                    let existing=app.state::<DesktopState>().windows.lock().map_err(|_|"Window registry unavailable")?.iter().find(|(label,window)|(label.as_str()=="main"||label.starts_with("workbench-"))&&window.bootstrap.as_ref().is_some_and(|candidate|crate::native_presentation::runtime_key(candidate)==key)).map(|(label,_)|label.clone());
+                    let key=crate::window_registry::workbench_authority_key(&bootstrap)?;
+                    let existing=app.state::<DesktopState>().windows.lock().map_err(|_|"Window registry unavailable")?.iter().find(|(label,window)|(label.as_str()=="main"||label.starts_with("workbench-"))&&window.bootstrap.as_ref().is_some_and(|candidate|crate::window_registry::workbench_authority_key(candidate).is_ok_and(|candidate|candidate==key))).map(|(label,_)|label.clone());
                     if let Some(window)=existing.and_then(|label|app.get_webview_window(&label)){native(window.show())?;native(window.unminimize())?;native(window.set_focus())?;}
                     else {let id=app.state::<DesktopState>().sequence.fetch_add(1,Ordering::Relaxed);create_window(&app,&format!("workbench-{id}"),"main",Some(bootstrap),None)?;}
                 }
