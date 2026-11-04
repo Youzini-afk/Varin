@@ -109,6 +109,13 @@ impl Owner {
     }
 }
 impl Permit {
+    pub(crate) fn failed_resource(&self, termination_confirmed: bool, failure: String) -> String {
+        if !termination_confirmed {
+            self.retain_cleanup_failure(failure.clone());
+        }
+        failure
+    }
+
     pub(crate) fn retain_cleanup_failure(&self, error: String) {
         let mut state = self
             .0

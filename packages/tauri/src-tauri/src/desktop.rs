@@ -546,9 +546,9 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         let mut local_origin = String::new(); let mut local_token = String::new();
         if enabled {
             let host = {
-                let _admission = state.admission.enter()?;
+                let admission = state.admission.enter()?;
                 let host = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
-                let service=crate::service::NativeService::attach(app.clone(),host.clone(),state.data_dir.clone()).await?;
+                let service=crate::service::NativeService::attach(app.clone(),host.clone(),state.data_dir.clone(),&admission).await?;
                 state.services.lock().await.push(service);
                 *state.host.lock().await = Some(host.clone());
                 host
@@ -2019,10 +2019,10 @@ async fn browser_service(app: &AppHandle) -> Result<crate::service::NativeServic
         return Err("Desktop is shutting down".into());
     }
     let service = {
-        let _admission = state.admission.enter()?;
+        let admission = state.admission.enter()?;
         let process = HostProcess::spawn_browser(state.runtime()?, &state.data_dir)?;
         let service =
-            crate::service::NativeService::attach(app.clone(), process, state.data_dir.clone()).await?;
+            crate::service::NativeService::attach(app.clone(), process, state.data_dir.clone(), &admission).await?;
         state.services.lock().await.push(service.clone());
         service
     };
@@ -2162,10 +2162,10 @@ async fn restart_local_host(app: &AppHandle, previous: &HostProcess) -> Result<(
         return Err("Desktop is shutting down".into());
     }
     let process = {
-        let _admission = state.admission.enter()?;
+        let admission = state.admission.enter()?;
         let process = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
         let service =
-            crate::service::NativeService::attach(app.clone(), process.clone(), state.data_dir.clone())
+            crate::service::NativeService::attach(app.clone(), process.clone(), state.data_dir.clone(), &admission)
                 .await?;
         *state.host.lock().await = Some(process.clone());
         state.services.lock().await.push(service);

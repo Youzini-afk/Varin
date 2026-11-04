@@ -934,6 +934,25 @@ await send({kind:'event',event:'ready',payload:{mode:'browser',pid:process.pid}}
         assert!(process.stop().await.is_err());
     }
     #[tokio::test]
+    async fn failed_admission_uses_original_scope_receipt_not_business_success() {
+        let (_directory, process) = fixture("setTimeout(()=>process.exit(13),80)");
+        let admission = crate::desktop_admission::Owner::default();
+        let original = admission.enter().unwrap();
+        process.ready().await.unwrap();
+        let ended = exited(&process).await;
+        assert!(process.stop().await.is_err(), "failed application exit stays failed");
+        let error = original.failed_resource(
+            ended.scope_ended,
+            "Native service construction failed".into(),
+        );
+        assert_eq!(error, "Native service construction failed");
+        drop(original);
+        let shutdown = admission.shutdown().await;
+        assert_eq!(shutdown.is_ok(), ended.scope_ended,
+            "only the original guardian's termination receipt can settle admission");
+    }
+
+    #[tokio::test]
     async fn unexpected_exit_is_not_successful_stop() {
         let (_directory, process) = fixture("setTimeout(()=>process.exit(13),80)");
         process.ready().await.unwrap();

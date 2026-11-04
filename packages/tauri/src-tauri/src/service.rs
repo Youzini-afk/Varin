@@ -54,13 +54,32 @@ pub struct NativeService {
     stopped: watch::Sender<bool>,
     cleaned: Arc<tokio::sync::Mutex<bool>>,
 }
+fn attachment_failure(
+    process: &HostProcess,
+    admission: &crate::desktop_admission::Permit,
+    error: String,
+) -> String {
+    let ended = process.snapshot().scope_ended;
+    let error = if ended { error } else {
+        format!("Original desktop service process termination is unconfirmed after attachment failed: {error}")
+    };
+    admission.failed_resource(ended, error)
+}
+
 impl NativeService {
     pub async fn attach(
         app: AppHandle,
         process: HostProcess,
         data_dir: PathBuf,
+        admission: &crate::desktop_admission::Permit,
     ) -> Result<Self, String> {
-        let mut incoming = process.take_events().await?;
+        let mut incoming = match process.take_events().await {
+            Ok(incoming) => incoming,
+            Err(error) => {
+                process.disconnect("Native service attachment could not own its events").await;
+                return Err(attachment_failure(&process, admission, error));
+            }
+        };
         let (send, mut outgoing) = mpsc::channel::<QueuedEvent>(512);
         let event_budget = Arc::new(AtomicUsize::new(0));
         let failed = Arc::new(AtomicBool::new(false));
@@ -117,8 +136,8 @@ impl NativeService {
                 process
                     .disconnect("Native service construction failed before ownership transfer")
                     .await;
-                process.wait_for_scope_end().await?;
-                return Err(error);
+                let cleanup = process.wait_for_scope_end().await;
+                return Err(attachment_failure(&process, admission, cleanup.err().unwrap_or(error)));
             }
         };
         let companion_emit = event.clone();
@@ -133,9 +152,18 @@ impl NativeService {
                 process
                     .disconnect("Companion service construction failed before ownership transfer")
                     .await;
-                process.wait_for_scope_end().await?;
-                network.shutdown().await?;
-                return Err(error);
+                // Process observation failure must not skip the independent
+                // native network owner or erase its unconfirmed cleanup.
+                let (process_cleanup, network_cleanup) = tokio::join!(
+                    process.wait_for_scope_end(), network.shutdown()
+                );
+                if let Err(error) = &network_cleanup {
+                    admission.retain_cleanup_failure(format!(
+                        "Original native network cleanup is unconfirmed after attachment failed: {error}"
+                    ));
+                }
+                let failure = process_cleanup.err().or_else(|| network_cleanup.err()).unwrap_or(error);
+                return Err(attachment_failure(&process, admission, failure));
             }
         };
         let computer =
