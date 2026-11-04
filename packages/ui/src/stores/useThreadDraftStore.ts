@@ -69,6 +69,8 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  /** Receiver receipt: a retry never overwrites edits made after accepting a copy. */
+  desktopHandoff?: { sourceDraftKey: string; snapshotId: string };
   selectedAttachments?: readonly DraftSelectedAttachment[];
   composerWorkflow?: import('@/components/thread/composerWorkflowState').ComposerWorkflowState;
   references?: readonly import('@/components/chat/composer/editor/references').ComposerReference[];
@@ -110,7 +112,10 @@ export interface ThreadDraft {
 export function hasUnsentDraftContent(draft: ThreadDraft): boolean {
   return Boolean(draft.text || draft.images.length || draft.materials.length || draft.files?.length
     || draft.selectedAttachments?.length || draft.references?.length || draft.pendingInput
-    || draft.firstSend || draft.externalInput || draft.collaboration?.attempts?.length);
+    || draft.firstSend || draft.externalInput || draft.externalPreparationKey || draft.collaboration?.sending || draft.collaboration?.attempts?.length
+    || (draft.composerWorkflow?.assist?.pending && !draft.composerWorkflow.assist.receipt)
+    || (draft.composerWorkflow?.handoff?.pending && !draft.composerWorkflow.handoff.receipt)
+    || (draft.composerWorkflow?.remember?.pending && !draft.composerWorkflow.remember.receipt));
 }
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */
@@ -118,6 +123,7 @@ export const useThreadDraftStore = create<{
   drafts: Record<string, ThreadDraft>;
   patch(key: string, patch: Partial<ThreadDraft> | ((draft: ThreadDraft) => Partial<ThreadDraft>)): void;
   remove(key: string): void;
+  replace(key: string, draft: ThreadDraft): void;
 }>((set) => ({
   drafts: {},
   patch: (key, patch) => set(state => {
@@ -131,5 +137,6 @@ export const useThreadDraftStore = create<{
     }
     return { drafts: { ...state.drafts, [key]: next } };
   }),
+  replace: (key, draft) => set(state => ({ drafts: { ...state.drafts, [key]: draft } })),
   remove: key => set(state => { const drafts = { ...state.drafts }; delete drafts[key]; return { drafts }; }),
 }));

@@ -105,3 +105,6 @@ mod startup_theme;
 
 #[cfg(any(feature = "desktop", test))]
 mod desktop_admission;
+
+#[cfg(any(feature = "desktop", test))]
+mod draft_transfer;

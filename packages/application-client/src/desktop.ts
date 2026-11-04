@@ -225,6 +225,27 @@ export type DesktopFocusResult = {
   focused: boolean;
 };
 
+/** In-memory composer transfer over the private native bridge. Files are encoded
+ * by the composer owner; no renderer-local Blob URL is a transferable asset. */
+export const DESKTOP_DRAFT_TRANSFER_MAX_BYTES = 64 * 1024 * 1024;
+export interface DesktopDraftTransfer {
+  schemaVersion: 1;
+  sourceDraftKey: string;
+  snapshotId: string;
+  sourceHostGeneration: number;
+  directory: string;
+  projectId: string;
+  threadId?: string;
+  branchId?: string;
+  draft: Record<string, unknown>;
+}
+export interface DesktopDraftTransferEvent {
+  transferId: string;
+  apiBaseUrl: string;
+  relayHostId: string;
+  transfer: DesktopDraftTransfer;
+}
+
 // ---------------------------------------------------------------------------
 // Host probe / auth DTO
 // ---------------------------------------------------------------------------
@@ -450,7 +471,8 @@ export type VarinDesktopEventMap = {
   'varin:companion-library-changed': void;
   'varin:update-progress': DesktopUpdateProgressEvent;
   'varin:open-thread': { directory: string | null; threadId: string; branchId: string; apiBaseUrl?: string | undefined; relayHostId?: string | undefined };
-  'varin:open-draft-thread': { directory: string; projectId: string };
+  'varin:open-draft-thread': { directory: string; projectId: string; apiBaseUrl?: string; relayHostId?: string };
+  'varin:transfer-draft': DesktopDraftTransferEvent;
   'varin:window-resized': void;
   'varin:window-maximized-changed': { maximized: boolean };
   'varin:installed-apps-updated': DesktopInstalledApp[];
@@ -582,6 +604,8 @@ export interface VarinDesktopCommandMap {
     args: { threadId?: string; branchId?: string; directory?: string; mode?: string; projectId?: string };
     result: DesktopFocusResult;
   };
+  desktop_transfer_draft: { args: { transfer: DesktopDraftTransfer }; result: { accepted: true } };
+  desktop_complete_draft_transfer: { args: { transferId: string; accepted: boolean; reason?: string }; result: null };
   desktop_new_window: { args: void; result: null };
   desktop_new_window_at_url: {
     args: { url: string; clientToken?: string; requestHeaders?: Record<string, unknown> };
@@ -752,6 +776,8 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_set_window_pinned: true,
   desktop_show_app_menu: true,
   desktop_focus_main_window: true,
+  desktop_transfer_draft: true,
+  desktop_complete_draft_transfer: true,
   desktop_new_window: true,
   desktop_new_window_at_url: true,
   desktop_new_window_for_host: true,
@@ -825,6 +851,7 @@ export const VARIN_DESKTOP_EVENT_CATALOG = {
   'varin:update-progress': true,
   'varin:open-thread': true,
   'varin:open-draft-thread': true,
+  'varin:transfer-draft': true,
   'varin:window-resized': true,
   'varin:window-maximized-changed': true,
   'varin:installed-apps-updated': true,

@@ -10,6 +10,8 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { useThreadDraftStore, hasUnsentDraftContent } from '@/stores/useThreadDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { Icon } from '@/components/icon/Icon';
+import { transferSelectedDesktopDraft } from '@/lib/agent-runtime/desktopDraftTransfer';
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 
 export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
   const identity = useThreadStore(state => state.selectedIdentity);
@@ -31,14 +33,18 @@ export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
     setOpeningMain(true);
     setWindowError(undefined);
     try {
-      const result = await invokeDesktop('desktop_focus_main_window', identity
-        ? { threadId: identity.threadId, branchId: identity.branchId, directory: directory || '' }
-        : { mode: 'draft', directory: directory || '', projectId: projectId || '' });
-      if (!result?.focused) throw new Error('The main window could not be opened.');
-      // Focusing another renderer does not transfer its in-memory composer.
-      // Inspect after the await too: the user may have typed while opening.
+      if (getDesktopRuntime()?.runtime === 'tauri') {
+        await transferSelectedDesktopDraft({ directory: directory || '', projectId: projectId || '' });
+      } else {
+        const result = await invokeDesktop('desktop_focus_main_window', identity
+          ? { threadId: identity.threadId, branchId: identity.branchId, directory: directory || '' }
+          : { mode: 'draft', directory: directory || '', projectId: projectId || '' });
+        if (!result?.focused) throw new Error('The main window could not be opened.');
+      }
+      // Another draft or newer edit may still belong to this source renderer.
+      // Legacy shells only focus, so their unsent input also remains protected.
       if (Object.values(useThreadDraftStore.getState().drafts).some(hasUnsentDraftContent)) {
-        setWindowError('The main window is open. Your unsent text and attachments are still in Mini Chat, so this window has been kept open.');
+        setWindowError('The main window is open. Other unsent input or unfinished composer work is still in Mini Chat, so this window has been kept open.');
         return;
       }
       await invokeDesktop('desktop_close_current_window');
@@ -52,7 +58,7 @@ export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
   return <div className="flex h-full min-h-0 flex-col">
     <header style={drag} className={`flex h-14 shrink-0 items-center gap-2 pr-3 ${mac ? 'pl-24' : 'pl-3'}`}>
       <WindowsWindowControls visible={usesFramelessChrome && side === 'left'} position="left" />
-      <ThreadSwitcherDropdown><button style={noDrag} className="min-w-0 flex-1 truncate text-left" aria-label="Switch conversation">{summary?.title || 'New conversation'}</button></ThreadSwitcherDropdown>
+      <ThreadSwitcherDropdown><button style={noDrag} className="min-w-0 flex-1 truncate text-left" aria-label="Switch conversation" disabled={openingMain}>{summary?.title || 'New conversation'}</button></ThreadSwitcherDropdown>
       <Button style={noDrag} variant="ghost" size="icon" aria-label={pinned ? 'Unpin window' : 'Pin window'} onClick={() => {
         void invokeDesktop('desktop_set_window_pinned', { pinned: !pinned }).then(result => setPinned(result?.pinned ?? pinned)).catch(error => setWindowError(error instanceof Error ? error.message : 'The window could not be pinned.'));
       }}><Icon name={pinned ? 'pushpin-2-fill' : 'pushpin-2'} className="size-4" /></Button>
@@ -60,6 +66,6 @@ export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
       <WindowsWindowControls visible={usesFramelessChrome && side === 'right'} position="right" />
     </header>
     {windowError && <p role="alert" className="px-3 py-2 text-destructive">{windowError}</p>}
-    <main className="min-h-0 flex-1">{unavailable ? <p role="alert" className="p-6">{unavailable}</p> : <ChatView />}</main>
+    <main className="min-h-0 flex-1" inert={openingMain} aria-busy={openingMain}>{unavailable ? <p role="alert" className="p-6">{unavailable}</p> : <ChatView />}</main>
   </div>;
 }

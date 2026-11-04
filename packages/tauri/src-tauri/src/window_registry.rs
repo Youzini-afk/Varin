@@ -82,6 +82,7 @@ pub(crate) fn workbench_target<C, D>(
 
 pub(crate) fn navigation_event(action: &Value) -> Result<&'static str, String> {
     match action["type"].as_str() {
+        Some("transfer-draft") => Ok("varin:transfer-draft"),
         Some("focus-thread") => Ok("varin:open-thread"),
         Some("new-thread") => Ok("varin:open-draft-thread"),
         Some("check-for-updates") => Ok("varin:check-for-updates"),
@@ -110,8 +111,10 @@ pub(crate) fn queue_navigation<C, D>(
     {
         return Err("Navigation window changed its Host".into());
     }
-    action["apiBaseUrl"] = bootstrap["apiBaseUrl"].clone();
-    action["relayHostId"] = bootstrap["relayHostId"].clone();
+    if action["type"] != "transfer-draft" {
+        action["apiBaseUrl"] = bootstrap["apiBaseUrl"].clone();
+        action["relayHostId"] = bootstrap["relayHostId"].clone();
+    }
     if record.renderer_ready {
         Ok(Some(action))
     } else {

@@ -41,6 +41,7 @@ struct DesktopState {
     activation_restores: crate::preengine_activation::RestoreIntents,
     boot: watch::Sender<Option<Reply>>,
     windows: Mutex<HashMap<String, WindowRecord>>,
+    draft_transfers: Mutex<crate::draft_transfer::Broker>,
     host: tokio::sync::Mutex<Option<HostProcess>>,
     services: tokio::sync::Mutex<Vec<crate::service::NativeService>>,
     browser_start: tokio::sync::Mutex<()>,
@@ -262,6 +263,11 @@ fn create_window(
         {
             if let Ok(mut windows) = frame_app.state::<DesktopState>().windows.lock() {
                 if let Some(record) = windows.get_mut(&frame_label) {
+                    if let Ok(mut transfers) =
+                        frame_app.state::<DesktopState>().draft_transfers.lock()
+                    {
+                        transfers.window_ended(&frame_label, true);
+                    }
                     record.renderer_ready = false;
                     record.document_nonce = uuid::Uuid::new_v4().to_string();
                     if let Some(cdp) = &record.cdp {
@@ -1214,6 +1220,99 @@ async fn varin_invoke(
             )?;
             Ok(Value::Null)
         }
+        "desktop_transfer_draft" => {
+            let mut args = args;
+            crate::draft_transfer::validate(&args["transfer"])?;
+            let source_document = state
+                .windows
+                .lock()
+                .map_err(|_| "Window registry unavailable")?
+                .get(webview.label())
+                .ok_or("Draft source is closed")?
+                .document_nonce
+                .clone();
+            let bootstrap = state.bootstrap(webview.label()).await?;
+            let target = focus_runtime_window(
+                &app,
+                webview.label(),
+                bootstrap.clone(),
+                json!({"type":"focus-runtime-window"}),
+            )?;
+            let (id, receipt) = {
+                let windows = state
+                    .windows
+                    .lock()
+                    .map_err(|_| "Window registry unavailable")?;
+                if windows
+                    .get(webview.label())
+                    .is_none_or(|record| record.document_nonce != source_document)
+                {
+                    return Err("Draft source document changed".into());
+                }
+                state
+                    .draft_transfers
+                    .lock()
+                    .map_err(|_| "Draft broker unavailable")?
+                    .admit(&windows, webview.label(), &target, args["transfer"].take())?
+            };
+            if let Err(error) = queue_navigation(
+                &app,
+                &target,
+                &bootstrap,
+                json!({"type":"transfer-draft","transferId":id}),
+            ) {
+                state
+                    .draft_transfers
+                    .lock()
+                    .map_err(|_| "Draft broker unavailable")?
+                    .cancel(&id, &error);
+                return Err(error);
+            }
+            let outcome = match tokio::time::timeout(std::time::Duration::from_secs(30), receipt)
+                .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => Err("Draft acknowledgment ended; acceptance is unknown".into()),
+                Err(_) => {
+                    state
+                        .draft_transfers
+                        .lock()
+                        .map_err(|_| "Draft broker unavailable")?
+                        .cancel(&id, "Draft acknowledgment timed out; acceptance is unknown");
+                    Err("Draft acknowledgment timed out; acceptance is unknown. Keep the source draft.".into())
+                }
+            };
+            // Remove buffered IDs as well as payloads, including a never-ready receiver.
+            if let Ok(mut windows) = state.windows.lock() {
+                if let Some(record) = windows.get_mut(&target) {
+                    record
+                        .navigation
+                        .retain(|action| action["transferId"] != id);
+                }
+            }
+            outcome?;
+            Ok(json!({"accepted":true}))
+        }
+        "desktop_complete_draft_transfer" => {
+            let id = string(&args, "transferId")?;
+            let accepted = boolean(&args, "accepted")?;
+            let windows = state
+                .windows
+                .lock()
+                .map_err(|_| "Window registry unavailable")?;
+            state
+                .draft_transfers
+                .lock()
+                .map_err(|_| "Draft broker unavailable")?
+                .complete(
+                    &windows,
+                    webview.label(),
+                    &id,
+                    accepted,
+                    args["reason"].as_str(),
+                )?;
+            Ok(Value::Null)
+        }
         "desktop_focus_main_window" => {
             let bootstrap = state.bootstrap(webview.label()).await?;
             let action = crate::window_registry::main_window_action(&args)?;
@@ -1691,6 +1790,7 @@ pub fn run() {
             activation_restores: crate::preengine_activation::RestoreIntents::default(),
             boot,
             windows: Mutex::new(HashMap::new()),
+            draft_transfers: Mutex::new(crate::draft_transfer::Broker::default()),
             host: tokio::sync::Mutex::new(None),
             services: tokio::sync::Mutex::new(Vec::new()),
             browser_start: tokio::sync::Mutex::new(()),
@@ -2089,6 +2189,7 @@ async fn restart_local_host(app: &AppHandle, previous: &HostProcess) -> Result<(
                 update(value);
             }
         }
+        state.draft_transfers.lock().map_err(|_| "Draft broker unavailable")?.reconcile(&windows);
         windows.keys().cloned().collect::<Vec<_>>()
     };
     for label in labels {
@@ -2428,6 +2529,9 @@ fn application_origin() -> url::Url {
 pub(crate) fn unregister_application_window(app: &AppHandle, label: &str) {
     if let Ok(mut windows) = app.state::<DesktopState>().windows.lock() {
         windows.remove(label);
+        if let Ok(mut transfers) = app.state::<DesktopState>().draft_transfers.lock() {
+            transfers.window_ended(label, false);
+        }
     }
 }
 
@@ -2520,7 +2624,7 @@ fn focus_runtime_window(
     source_label: &str,
     mut bootstrap: Value,
     action: Value,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let state = app.state::<DesktopState>();
     if state.quitting.load(Ordering::Acquire) {
         return Err("Desktop shutdown is already in progress".into());
@@ -2553,7 +2657,7 @@ fn focus_runtime_window(
     if action["type"] != "focus-runtime-window" {
         queue_navigation(app, &target, &bootstrap, action)?;
     }
-    Ok(())
+    Ok(target)
 }
 
 fn queue_navigation(
@@ -2577,6 +2681,36 @@ fn queue_navigation(
 }
 fn emit_navigation(app: &AppHandle, label: &str, action: Value) -> Result<(), String> {
     let event = crate::window_registry::navigation_event(&action)?;
+    if action["type"] == "transfer-draft" {
+        // Hold the ledger through emission so navigation/Host changes cannot race binding.
+        let state = app.state::<DesktopState>();
+        let windows = state
+            .windows
+            .lock()
+            .map_err(|_| "Window registry unavailable")?;
+        let mut transfers = state
+            .draft_transfers
+            .lock()
+            .map_err(|_| "Draft broker unavailable")?;
+        let id = string(&action, "transferId")?;
+        let detail = match transfers.delivery(&windows, label, &id) {
+            Ok(Some(detail)) => detail,
+            Ok(None) => return Ok(()), // Expired queued IDs never disclose a draft.
+            Err(error) => {
+                transfers.cancel(&id, &error);
+                return Err(error);
+            }
+        };
+        let result = native(app.emit_to(
+            tauri::EventTarget::webview_window(label),
+            "varin:emit",
+            json!({"event":event,"detail":detail}),
+        ));
+        if let Err(error) = &result {
+            transfers.cancel(&id, error);
+        }
+        return result;
+    }
     native(app.emit_to(
         tauri::EventTarget::webview_window(label),
         "varin:emit",
@@ -2603,10 +2737,13 @@ async fn varin_renderer_ready(
         window.renderer_ready = true;
         std::mem::take(&mut window.navigation)
     };
+    let mut failure = None;
     for action in queued {
-        emit_navigation(&app, webview.label(), action)?;
+        if let Err(error) = emit_navigation(&app, webview.label(), action) {
+            failure.get_or_insert(error);
+        }
     }
-    Ok(Value::Null)
+    failure.map_or(Ok(Value::Null), Err)
 }
 #[tauri::command]
 async fn varin_runtime_changed(
@@ -2665,6 +2802,11 @@ async fn varin_runtime_changed(
                 *background = remote.then(|| bootstrap.clone());
             }
         }
+        state
+            .draft_transfers
+            .lock()
+            .map_err(|_| "Draft broker unavailable")?
+            .reconcile(&windows);
     }
     refresh_desktop_state(&app);
     Ok(Value::Null)

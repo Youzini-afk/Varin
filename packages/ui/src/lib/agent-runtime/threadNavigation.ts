@@ -1,6 +1,7 @@
 import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
-import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useThreadDraftStore, type ThreadDraft } from '@/stores/useThreadDraftStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -55,12 +56,20 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   useUIStore.getState().closeMainSurfaces();
   return identity;
 }
-export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<string> {
+export async function startThreadFromNavigation(target: {
+  directory?: string | null; projectId?: string | null;
+  draftKey?: string; draft?: ThreadDraft; beforeCommit?: () => void;
+} = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
   await selectConversationShell(false, current);
   current();
-  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? undefined });
+  target.beforeCommit?.();
+  if (target.projectId && !useProjectsStore.getState().projects.some(project => project.id === target.projectId)) {
+    throw new Error('The draft project is unavailable on this Host');
+  }
+  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? undefined, key: target.draftKey, draft: target.draft });
+  if (target.projectId !== undefined) useProjectsStore.getState().setActiveProjectIdOnly(target.projectId || null);
   if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
   useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().closeMainSurfaces();

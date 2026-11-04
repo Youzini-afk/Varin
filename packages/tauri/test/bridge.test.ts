@@ -295,3 +295,26 @@ test('failed native runtime authority never becomes a successful document-ready 
   assert.deepEqual(port.calls.map(call => call.command), ['varin_bootstrap', 'varin_runtime_changed']);
   dispose?.();
 });
+
+test('draft transfer waits for native acceptance and dispatches its targeted receiver payload without retry', async () => {
+  let accept!: (value: { accepted: true }) => void;
+  const transfer = { schemaVersion: 1 as const, sourceDraftKey: 'draft', snapshotId: 'snapshot', sourceHostGeneration: 5,
+    directory: '/project', projectId: 'project', draft: { text: 'Retain these bytes', images: [], materials: [], preparedSource: null } };
+  const port = new NativePort((_command, args) => args?.command === 'desktop_transfer_draft'
+    ? new Promise(resolve => { accept = resolve; }) : null);
+  const events: unknown[] = [];
+  const { bridge, dispose } = await createTauriDesktopBridge(port, (name, detail) => events.push({ name, detail }));
+  let accepted = false;
+  const pending = bridge.invoke('desktop_transfer_draft', { transfer }).then(result => { accepted = result.accepted; });
+  await Promise.resolve();
+  assert.equal(accepted, false);
+  const detail = { transferId: 'native-id', apiBaseUrl: 'https://host.example', relayHostId: '', transfer };
+  port.emit('varin:transfer-draft', detail);
+  assert.deepEqual(events, [{ name: 'varin:transfer-draft', detail }]);
+  await bridge.invoke('desktop_complete_draft_transfer', { transferId: 'native-id', accepted: true });
+  assert.equal(accepted, false, 'sending the receiver command alone is not a source receipt');
+  accept({ accepted: true }); await pending;
+  assert.equal(accepted, true);
+  assert.equal(port.calls.filter(call => call.args?.command === 'desktop_transfer_draft').length, 1);
+  dispose();
+});

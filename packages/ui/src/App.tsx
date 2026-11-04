@@ -68,6 +68,7 @@ import {
 } from '@/lib/agent-runtime/threadNavigation';
 import { toast } from '@/components/ui';
 import { isDesktopThreadNavigationTarget } from '@/lib/agent-runtime/desktopThreadNavigation';
+import { listenDesktopDraftTransfers } from '@/lib/agent-runtime/desktopDraftTransfer';
 import {
   WorkbenchProfileBridge,
 } from '@/lib/extensions/workbench-registry';
@@ -457,11 +458,12 @@ function App({ apis }: AppProps) {
     if (embeddedSessionChat || typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ directory?: string; projectId?: string }>).detail;
+      const detail = (event as CustomEvent<{ directory?: string; projectId?: string; apiBaseUrl?: string; relayHostId?: string }>).detail;
+      if (detail?.apiBaseUrl !== undefined && !isDesktopThreadNavigationTarget(detail)) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      void startThreadFromNavigation({ directory }).catch((createError) => {
+      void startThreadFromNavigation({ directory, projectId: detail?.projectId }).catch((createError) => {
         toast.error('Failed to create conversation', {
           description: createError instanceof Error ? createError.message : String(createError),
         });
@@ -469,9 +471,10 @@ function App({ apis }: AppProps) {
     };
 
     window.addEventListener('varin:open-draft-thread', handler as EventListener);
+    const stopDraftTransfers = listenDesktopDraftTransfers(window);
     // Framework-neutral readiness: native navigation must wait for both handlers.
     window.dispatchEvent(new Event('varin:desktop-navigation-ready'));
-    return () => window.removeEventListener('varin:open-draft-thread', handler as EventListener);
+    return () => { stopDraftTransfers(); window.removeEventListener('varin:open-draft-thread', handler as EventListener); };
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {

@@ -1,6 +1,6 @@
 import type { ThreadSummary } from '@varin/protocol';
 import { create } from 'zustand';
-import { useThreadDraftStore } from './useThreadDraftStore';
+import { useThreadDraftStore, type ThreadDraft } from './useThreadDraftStore';
 import {
   getRuntimeApiBaseUrl, getRuntimeKey,
   subscribeRuntimeEndpointWillChange, subscribeRuntimeEndpointChanged,
@@ -28,7 +28,7 @@ interface ThreadNavigationState {
   loadCatalog(): Promise<void>;
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
-  openDraft(options?: { workspacePath?: string }): string;
+  openDraft(options?: { workspacePath?: string; key?: string; draft?: ThreadDraft }): string;
   materializeDraft(draftKey: string): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
@@ -124,8 +124,10 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
   openDraft(options) {
     const host = get().hostKey;
     navigation += 1;
-    const key = JSON.stringify([host, 'draft', crypto.randomUUID()]);
-    useThreadDraftStore.getState().patch(key, { workspacePath: options?.workspacePath });
+    const key = options?.key ?? JSON.stringify([host, 'draft', crypto.randomUUID()]);
+    if (JSON.parse(key)[0] !== host) throw new Error('Draft belongs to another Application Host');
+    if (options?.draft) useThreadDraftStore.getState().replace(key, options.draft);
+    else if (!useThreadDraftStore.getState().drafts[key]) useThreadDraftStore.getState().patch(key, { workspacePath: options?.workspacePath });
     selections.delete(host); draftSelections.set(host, key);
     set({ selectedIdentity: null, selectedDraftKey: key });
     return key;
