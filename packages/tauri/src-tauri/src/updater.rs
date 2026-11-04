@@ -216,6 +216,29 @@ fn forget(pending: Pending) {
         let _ = std::fs::remove_file(file);
     }
 }
+
+fn taskbar_progress(app: &AppHandle, progress: crate::update_progress::Progress) {
+    #[cfg(target_os = "windows")]
+    {
+        use crate::update_progress::Progress;
+        use tauri::window::{ProgressBarState, ProgressBarStatus};
+        let (status, value) = match progress {
+            Progress::Hidden => (ProgressBarStatus::None, None),
+            Progress::Indeterminate => (ProgressBarStatus::Indeterminate, None),
+            Progress::Percent(value) => (ProgressBarStatus::Normal, Some(value)),
+        };
+        for window in app.webview_windows().values() {
+            // CEF's Windows runtime dispatches to ITaskbarList3. A window that
+            // closed during a download simply has no remaining taskbar entry.
+            let _ = window.set_progress_bar(ProgressBarState {
+                status: Some(status),
+                progress: value,
+            });
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (app, progress);
+}
 #[derive(Debug)]
 pub enum InstallFailure {
     Preparation(String),
@@ -307,9 +330,13 @@ impl Owner {
             let _ = std::fs::remove_file(file);
             pending.downloaded = None;
         }
+        let progress = crate::update_progress::DownloadProgress::new(|progress| {
+            taskbar_progress(app, progress);
+        });
         let mut downloaded = 0_u64;
         let bytes=pending.update.download(|chunk,total|{
             downloaded=downloaded.saturating_add(chunk as u64);
+            progress.received(downloaded, total);
             emit(json!({"event":"Progress","data":{"chunkLength":chunk,"downloaded":downloaded,"total":total.unwrap_or(0)}}));
         },||{}).await.map_err(|_|"Update download or signature verification failed; the installed version was not changed")?;
         validate_bytes(&pending.update, &bytes)?;

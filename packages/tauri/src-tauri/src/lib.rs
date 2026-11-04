@@ -76,6 +76,9 @@ mod native_notifications;
 
 pub mod update_install;
 
+#[cfg(any(feature = "desktop", test))]
+mod update_progress;
+
 #[cfg(feature = "desktop")]
 mod legacy_migration;
 pub mod legacy_migration_data;
