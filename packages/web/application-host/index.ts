@@ -2239,6 +2239,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const model = await botAgentModel(bot);
     return model ? { homeDir: bot.homeDir, model } : null;
   });
+  threads.bindInteractiveUiFork(interactiveUi.captureBranch);
   threads.bindTitles(threadTitles);
   const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,
     readSettings: () => modelsService.readGlobalInferenceSettings(),

@@ -1,0 +1,31 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import type { ThreadPlanAPI, ThreadPlanState } from '@varin/application-client';
+import type { VarinEvent } from '@/lib/varinEvents';
+import { nativePlanObservation } from './native-plan';
+const host = vi.hoisted(() => ({ value: 1 }));
+const events = vi.hoisted(() => new Set<(event: VarinEvent) => void>());
+vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), getRuntimeEndpointGeneration: () => host.value }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: (listener: (event: VarinEvent) => void) => { events.add(listener); return () => events.delete(listener); } }));
+afterEach(() => { events.clear(); host.value = 1; });
+const identity = { runtime: 'agent' as const, threadId: 't', branchId: 'b' };
+it('shares reads and event observation across rows and closes with the last subscriber', async () => {
+  const read = vi.fn(async (): Promise<ThreadPlanState> => ({ identity, headId: 'h', plan: null }));
+  const api: ThreadPlanAPI = { read, update: vi.fn() };
+  const first = nativePlanObservation(api, identity, 1), second = nativePlanObservation(api, { ...identity }, 1);
+  expect(first).toBe(second);
+  const one = vi.fn(), two = vi.fn(), removeOne = first.subscribe(one), removeTwo = second.subscribe(two);
+  await Promise.resolve();
+  expect(read).toHaveBeenCalledTimes(1); expect(events.size).toBe(1); expect(one).toHaveBeenCalledTimes(1); expect(two).toHaveBeenCalledTimes(1);
+  for (const event of events) event({ type: 'plan-changed', threadId: 'other', branchId: 'b', ref: 'p' });
+  expect(read).toHaveBeenCalledTimes(1);
+  for (const event of events) event({ type: 'plan-changed', threadId: 't', branchId: 'b', ref: 'p' });
+  await Promise.resolve(); expect(read).toHaveBeenCalledTimes(2);
+  removeOne(); expect(events.size).toBe(1); removeTwo(); expect(events.size).toBe(0);
+});
+it('does not publish a delayed read after Host change or unsubscription', async () => {
+  let resolve!: (state: ThreadPlanState) => void;
+  const api: ThreadPlanAPI = { read: () => new Promise<ThreadPlanState>(done => { resolve = done; }), update: vi.fn() };
+  const observer = nativePlanObservation(api, identity, 1), listener = vi.fn(); const stop = observer.subscribe(listener);
+  host.value = 2; resolve({ identity, headId: 'h', plan: null }); await Promise.resolve();
+  expect(listener).not.toHaveBeenCalled(); expect(observer.getSnapshot()).toEqual({}); stop();
+});

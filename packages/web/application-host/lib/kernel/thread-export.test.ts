@@ -66,3 +66,27 @@ describe('conversation export', () => {
     await stream.next(); abort.abort(); await expect(stream.next()).rejects.toThrow(); expect(owners.runtime.historyItem).not.toHaveBeenCalled();
   });
 });
+
+it('exports assistant controls readably in Markdown while JSON, user, tool and reasoning stay raw', async () => {
+  const fence = '```varin-ui\n{"type":"choice","label":"Hair","options":["Short","Long"],"action":"Continue"}\n```';
+  const body = `Before\n\n${fence}\n\nAfter`;
+  const owners = fixture([item(1, 'user', { text: fence }), item(2, 'assistant', { content: { kind: 'text', text: body } }),
+    item(3, 'assistant', { content: { kind: 'output', output: { parts: [{ kind: 'text', text: body }] } } })]);
+  const markdown = await collect(exportThreadConversation(owners, { ...selection, format: 'markdown' }));
+  expect(markdown).toContain(`## user\n\n${fence}`);
+  expect(markdown.split('## assistant')[1]).toContain('Before\n\nContinue\n\nHair：\n- Short\n- Long\n\nAfter');
+  expect(markdown.split('## assistant')[2]).not.toContain('varin-ui');
+  const json = JSON.parse(await collect(exportThreadConversation(owners, selection)));
+  expect(json.messages.map((value: { text: string }) => value.text)).toEqual([fence, body, body]);
+  expect(exportPublicMessage(item(4, 'tool', { content: { kind: 'output', output: { parts: [{ kind: 'text', text: fence }] } } }), true, 'markdown')?.text).toBe(fence);
+  expect(exportPublicMessage(item(5, 'assistant', { content: { kind: 'reasoning_summary', text: fence } }), true, 'markdown')?.text).toBe(fence);
+});
+
+it('keeps invalid and outer-fenced examples intact and never joins separate native parts into a live fence', () => {
+  const invalid = '```varin-ui\n{"type":"unknown"}\n```';
+  const example = '````markdown\n```varin-ui\n{"type":"choice","options":["A"]}\n```\n````';
+  const text = `${invalid}\n\n${example}`;
+  expect(exportPublicMessage(item(1, 'assistant', { content: { kind: 'text', text } }), false, 'markdown')?.text).toBe(text);
+  const output = { content: { kind: 'output', output: { parts: [{ kind: 'text', text: '```varin-ui\n{"type":"choice","options":["A"]}' }, { kind: 'text', text: '```' }] } } };
+  expect(exportPublicMessage(item(1, 'assistant', output), false, 'markdown')?.text).toContain('varin-ui');
+});

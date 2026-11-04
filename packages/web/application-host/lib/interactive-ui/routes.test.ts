@@ -19,5 +19,17 @@ it('passes the parsed conversation identity and content through the production m
   expect(read).toHaveBeenCalledWith('family', source.ref);
   const preview = { preview: { callId: 'call', sequence: 2, contents: { 'index.html': '<h1>正在生成' }, entry: 'index.html', title: '报告' } };
   await request(app).post('/api/interactive-ui/view/attach').send({ ...identity, source: preview, viewRef: 'ui-view:view', clientId: 'client' }).expect(200);
-  expect(attach).toHaveBeenCalledWith('family', preview, 'ui-view:view', 'client', expect.any(AbortSignal));
+  expect(attach).toHaveBeenCalledWith('family', preview, 'ui-view:view', 'client', expect.any(AbortSignal), { threadId: 'thread', branchId: 'branch' });
+});
+
+it('rejects cross-conversation preview provenance before attaching or saving a selection', async () => {
+  const app = express(); registerCommonRequestMiddleware(app, { express });
+  const attach = vi.fn(), select = vi.fn();
+  registerInteractiveUiRoutes(app, { target: async () => 'family', attach, store: { select } } as unknown as InteractiveUiRuntime, (_req, _res, next) => next());
+  const identity = { runtime: 'agent', threadId: 'thread', branchId: 'branch' };
+  const source = { preview: { callId: 'preview', sequence: 0, title: 'Choice', entry: '', contents: {},
+    messageFragment: { threadId: 'other-thread', branchId: 'branch', messageId: 'message', fragmentKey: 'offset:0', contentVersion: '' } } };
+  await request(app).post('/api/interactive-ui/view/attach').send({ ...identity, source, clientId: 'client' }).expect(403);
+  await request(app).post('/api/interactive-ui/select').send({ ...identity, observation: source, selection: { text: 'choice' } }).expect(403);
+  expect(attach).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled();
 });

@@ -1,3 +1,5 @@
+vi.mock('./NativeObjectContent', () => ({ NativeObjectContent: () => null }));
+vi.mock('@/lib/interactive-ui/native-object-actions', () => ({ useNativeObjectOpener: () => vi.fn(), useNativeObjectActions: () => ({ open: vi.fn(), reference: vi.fn() }) }));
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';

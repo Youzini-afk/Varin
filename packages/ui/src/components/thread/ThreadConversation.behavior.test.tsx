@@ -1,3 +1,4 @@
+import { uiSession } from '@/lib/interactive-ui/sessions';
 import { addEditorContextAttachment, listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
@@ -3946,4 +3947,112 @@ it('composer tasks opens the collaboration surface in the navigation workspace a
   expect(panel?.isOpen).toBe(true); expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)).toMatchObject({ mode: 'threads' });
   expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)?.thread).toBeUndefined();
   expect(panels['/different/source']).toBeUndefined();
+});
+
+it('trusted interaction sends only its fixed result and preserves composer text and attachments', async () => {
+  const { sendUiResult } = await import('@/lib/interactive-ui/compose');
+  const { api, submit } = fixture();
+  const key = threadComposerKey(threadHostKey(), identity);
+  const images = [{ mimeType: 'image/png', data: imageData }];
+  useThreadDraftStore.getState().patch(key, { text: 'my unfinished draft', images });
+  await act(async () => root.render(<ThreadConversation api={api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' }} />));
+  const action = { identity, host: endpoint.generation, sourceKey: 'choice', text: 'Use the short hairstyle',
+    reference: { ref: 'ui:test@snapshot:one', title: 'Hairstyle', text: 'Short', source: { kind: 'ui' as const, snapshotRef: 'ui:test@snapshot:one', revisionRef: 'ui:test@1' } } };
+  await act(async () => { expect(await sendUiResult(action)).toEqual({ status: 'sent', inputId: 'sent' }); });
+  expect(submit).toHaveBeenCalledTimes(1);
+  expect(submit.mock.calls[0]![0].text).toContain('Use the short hairstyle');
+  expect(submit.mock.calls[0]![0].text).toContain('snapshot:one');
+  expect(submit.mock.calls[0]![0].text).not.toContain('my unfinished draft');
+  expect(submit.mock.calls[0]![0].images).toEqual([]);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'my unfinished draft', images });
+  await act(async () => { await sendUiResult(action); });
+  expect(submit).toHaveBeenCalledTimes(1);
+});
+
+it('trusted interaction retries an uncertain queue receipt with the original key and body after selection changes', async () => {
+  const { sendUiResult } = await import('@/lib/interactive-ui/compose');
+  const { api } = fixture(true);
+  const enqueue = vi.fn<ThreadsAPI['enqueue']>().mockRejectedValueOnce(new Error('lost response'))
+    .mockResolvedValue({ input_id: 'queued-action', run_id: 'ui-run', mode: 'next_run', cursor: 2 });
+  api.enqueue = enqueue;
+  await act(async () => root.render(<ThreadConversation api={api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' }} />));
+  const action = { identity, host: endpoint.generation, sourceKey: 'choice', text: 'original choice' };
+  await act(async () => { await expect(sendUiResult(action)).rejects.toThrow('lost response'); });
+  const original = enqueue.mock.calls[0]![0];
+  await act(async () => { expect(await sendUiResult({ ...action, text: 'later choice' })).toEqual({ status: 'queued', inputId: 'queued-action' }); });
+  expect(enqueue.mock.calls[1]![0]).toEqual(original);
+  expect(original.mode).toBe('next_run');
+  expect(original.text).toBe('original choice');
+});
+
+it('double clicks join the original interaction observation and stale Host calls cannot send', async () => {
+  const { sendUiResult } = await import('@/lib/interactive-ui/compose');
+  const { api, submit } = fixture();
+  let accept!: (value: Awaited<ReturnType<ThreadsAPI['submit']>>) => void;
+  submit.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
+  await act(async () => root.render(<ThreadConversation api={api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' }} />));
+  const action = { identity, host: endpoint.generation, sourceKey: 'choice', text: 'my choice' };
+  await act(async () => {
+    const first = sendUiResult(action), second = sendUiResult(action);
+    expect(submit).toHaveBeenCalledTimes(1);
+    accept({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'action', cursor: 1 });
+    expect(await first).toEqual(await second);
+  });
+  endpoint.generation++;
+  expect(() => sendUiResult(action)).toThrow('Host changed');
+  expect(submit).toHaveBeenCalledTimes(1);
+});
+
+it('keeps an uncertain interaction with its branch across unmount and does not send it to another branch', async () => {
+  const { sendUiResult } = await import('@/lib/interactive-ui/compose');
+  const { api, submit } = fixture();
+  submit.mockRejectedValueOnce(new Error('lost receipt'));
+  const preferredModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' as const };
+  await act(async () => root.render(<ThreadConversation api={api} identity={identity} preferredModel={preferredModel} />));
+  const action = { identity, host: endpoint.generation, sourceKey: 'choice', text: 'original branch choice' };
+  await act(async () => { await expect(sendUiResult(action)).rejects.toThrow('lost receipt'); });
+  const original = submit.mock.calls[0]![0];
+  await act(async () => root.render(<div>Other branch</div>));
+  await expect(sendUiResult({ ...action, identity: { ...identity, branchId: 'other-branch' } })).rejects.toThrow('Open the original conversation');
+  expect(submit).toHaveBeenCalledTimes(1);
+  await act(async () => root.render(<ThreadConversation api={api} identity={identity} preferredModel={preferredModel} />));
+  await act(async () => { expect(await sendUiResult(action)).toEqual({ status: 'sent', inputId: 'sent' }); });
+  expect(submit.mock.calls[1]![0]).toEqual(original);
+});
+
+it('flushes only mounted original-branch views before fork and blocks admission on save failure', async () => {
+  const f = fixture();
+  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
+  f.view.historyPage = { head: 'selected-message', previous: null };
+  const fork = vi.fn<ThreadsAPI['fork']>(async () => ({ ...identity, branchId: 'after-flush' })); f.api.fork = fork;
+  let finish!: () => void;
+  const own = uiSession('fork-flush-own', identity, endpoint.generation), sibling = uiSession('fork-flush-other', { ...identity, branchId: 'other' }, endpoint.generation);
+  const otherHost = uiSession('fork-flush-host', identity, endpoint.generation + 1);
+  own.flushState = vi.fn(() => new Promise<void>(resolve => { finish = resolve; })); sibling.flushState = vi.fn(); otherHost.flushState = vi.fn();
+  try {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} onBranchCreated={() => {}} />));
+    await act(async () => button('Branch conversation only').click());
+    expect(own.flushState).toHaveBeenCalledOnce(); expect(sibling.flushState).not.toHaveBeenCalled(); expect(otherHost.flushState).not.toHaveBeenCalled(); expect(fork).not.toHaveBeenCalled();
+    await act(async () => finish()); expect(fork).toHaveBeenCalledOnce();
+    own.flushState = vi.fn(async () => { throw new Error('Unsaved choice'); });
+    await act(async () => button('Branch conversation only').click());
+    expect(fork).toHaveBeenCalledOnce(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('Unsaved choice');
+  } finally { delete own.flushState; delete sibling.flushState; delete otherHost.flushState; }
+});
+it('does not fork the old scope when the active branch changes while flushing views', async () => {
+  const f = fixture();
+  f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
+  f.view.historyPage = { head: 'selected-message', previous: null };
+  const fork = vi.fn<ThreadsAPI['fork']>(async () => identity); f.api.fork = fork;
+  let finish!: () => void;
+  const session = uiSession('fork-flush-changing-scope', identity, endpoint.generation);
+  session.flushState = () => new Promise<void>(resolve => { finish = resolve; });
+  try {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} onBranchCreated={() => {}} />));
+    await act(async () => button('Branch conversation only').click());
+    const next = { ...identity, branchId: 'selected-during-save' }; f.view.identity = next;
+    f.view.thread.branches = [{ branch_id: next.branchId, head: null, active_run_id: null, latest_run: null }]; f.view.history = []; f.view.historyPage = { head: null, previous: null };
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={next} onBranchCreated={() => {}} />));
+    await act(async () => finish()); expect(fork).not.toHaveBeenCalled();
+  } finally { delete session.flushState; }
 });

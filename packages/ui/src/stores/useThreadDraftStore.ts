@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { ChangeSet } from '@codemirror/state';
+import { mapInteractionRanges, type InteractionRange } from '@/components/chat/composer/editor/interactionRanges';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { Attachment, ImageAttachment } from '@varin/protocol';
@@ -69,6 +71,10 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  /** Latest explicit action per source; retry snapshots share this draft's in-memory lifetime. */
+  interactionSends?: Record<string, { fingerprint: string; pending?: ThreadPendingInput; receipt?: { status: 'sent' | 'queued'; inputId?: string } }>;
+  interactions?: readonly InteractionRange[];
+  interactionAttachments?: Record<string, string>;
   selectedAttachments?: readonly DraftSelectedAttachment[];
   composerWorkflow?: import('@/components/thread/composerWorkflowState').ComposerWorkflowState;
   references?: readonly import('@/components/chat/composer/editor/references').ComposerReference[];
@@ -118,6 +124,12 @@ export const useThreadDraftStore = create<{
     const draft = state.drafts[key] ?? EMPTY_THREAD_DRAFT;
     const change = typeof patch === 'function' ? patch(draft) : patch;
     const next = { ...draft, ...change };
+    if (typeof change.text === 'string' && change.text !== draft.text && change.interactions === undefined && draft.interactions?.length) {
+      let from = 0, to = draft.text.length, end = change.text.length;
+      while (from < to && from < end && draft.text[from] === change.text[from]) from++;
+      while (to > from && end > from && draft.text[to - 1] === change.text[end - 1]) { to--; end--; }
+      next.interactions = mapInteractionRanges(draft.interactions, ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length));
+    }
     if (change.images) {
       let reference = Math.max(next.imageReferenceSequence ?? 0, ...change.images.map(image => image.reference ?? 0));
       next.images = change.images.map(image => image.reference === undefined ? { ...image, reference: ++reference } : image);

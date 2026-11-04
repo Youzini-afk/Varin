@@ -1,3 +1,6 @@
+import { flushUiSessions } from '@/lib/interactive-ui/sessions';
+import { registerUiSender } from '@/lib/interactive-ui/compose';
+import { projectContentReference } from '@/lib/agent-editor/projection';
 import { useThreadComposerWorkflows } from './useThreadComposerWorkflows';
 import { useThreadComposerCommands } from './ThreadComposerCommands';
 import { composerFileSelections, composerHistoryAttachments, selectComposerFile, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
@@ -360,8 +363,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const generation = identityGeneration.current;
     let key = forkKeys.current.get(headId);
     if (!key) { key = crypto.randomUUID(); forkKeys.current.set(headId, key); }
+    const target = { ...identity };
     await act(async () => {
-      const created = await api.fork({ ...identity, key, headId });
+      await flushUiSessions(target, host);
+      if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) throw new Error(t('ui.content.actionsUnavailable'));
+      const created = await api.fork({ ...target, key, headId });
       if (generation === identityGeneration.current) { forkKeys.current.delete(headId); onBranchCreated?.(created); }
     }, false, propagate);
   };
@@ -388,6 +394,46 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))));
   const hasComposerInput = Boolean(text.trim() || images.length || materials.length || draft.files?.length || draft.selectedAttachments?.length || inlineDrafts.length || editorContext.length);
   const sendDisabled = sendBlocked || (!draft.pendingInput && !hasComposerInput);
+  // Trusted platform buttons use the native input owner without consuming the composer.
+  // Registration follows the exact visible Host/branch; retained attempts live in its draft.
+  React.useLayoutEffect(() => registerUiSender(draftKey, async action => {
+    if (readOnly || host !== getRuntimeEndpointGeneration() || currentViewScope.current !== viewScope
+      || threadComposerKey(threadHostKey(), action.identity) !== draftKey) throw new Error(t('ui.content.sendUnavailable'));
+    const store = useThreadDraftStore.getState();
+    const fingerprint = JSON.stringify([action.text, action.reference?.source.kind === 'ui' ? action.reference.source.revisionRef : action.reference?.ref]);
+    let attempt = store.drafts[draftKey]?.interactionSends?.[action.sourceKey];
+    if (attempt?.receipt && attempt.fingerprint === fingerprint) return attempt.receipt;
+    if (!attempt?.pending) {
+      if (!snapshot || preparingDelegation || pending || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))) {
+        throw new Error(t('ui.content.sendUnavailable'));
+      }
+      const body = { ...identity, key: crypto.randomUUID(), text: action.reference
+        ? projectContentReference(action.text, action.reference, acceptsImages === true) : action.text,
+        images: acceptsImages === true && action.reference?.image ? [{ ...action.reference.image }] : [] };
+      const original: ThreadPendingInput = { fingerprint, editorText: action.text, status: 'sending',
+        ...(active ? { kind: 'enqueue', input: { ...body, mode: inputMode } }
+          : delegated ? { kind: 'continue', input: { ...body, previousRunId: run!.id, expectedHead: branch?.head ?? null } }
+          : { kind: 'submit', input: { ...body, expectedHead: branch?.head ?? null,
+            model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) },
+            ...(!botSurface && !snapshot.thread.bot_id ? { agent } : {}) } }) };
+      attempt = { fingerprint, pending: original };
+      store.patch(draftKey, current => ({ interactionSends: { ...current.interactionSends, [action.sourceKey]: attempt! } }));
+    }
+    const original = attempt.pending!;
+    const update = (next: ThreadPendingInput | undefined) => store.patch(draftKey, current => {
+      if (current.interactionSends?.[action.sourceKey]?.pending?.input.key !== original.input.key) return {};
+      const sends = { ...current.interactionSends };
+      if (next) sends[action.sourceKey] = { fingerprint: attempt!.fingerprint, pending: next };
+      else delete sends[action.sourceKey];
+      return { interactionSends: sends };
+    });
+    const inputId = await deliverThreadInput(api, original, update);
+    const receipt = { status: original.kind === 'enqueue' ? 'queued' as const : 'sent' as const, ...(inputId ? { inputId } : {}) };
+    store.patch(draftKey, current => current.interactionSends?.[action.sourceKey]?.pending?.input.key === original.input.key
+      ? { interactionSends: { ...current.interactionSends, [action.sourceKey]: { fingerprint: attempt!.fingerprint, receipt } } } : {});
+    if (host === getRuntimeEndpointGeneration() && currentViewScope.current === viewScope) void projection.current?.refresh();
+    return receipt;
+  }));
   const overviewKey = draftKey;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const contentOwner = `${host}:${draftKey}`;
@@ -407,10 +453,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const permissions = React.useRef<HTMLDivElement>(null);
   const showOverview = React.useCallback((section: OverviewPeekSection) => {
     if (section === 'context') { openThreadContext(identity, initialWorkspacePath, undefined, readOnly); return; }
-    if (botSurface) return;
     setFocusedOverview({ owner: contentOwner, section });
     disclosure(overviewKey, 'overview', true);
-  }, [identity, initialWorkspacePath, readOnly, botSurface, contentOwner, disclosure, overviewKey]);
+  }, [identity, initialWorkspacePath, readOnly, contentOwner, disclosure, overviewKey]);
   const treeNavigation = useConversationTreeStore(state => state.navigation[draftKey]);
   React.useEffect(() => () => {
     queueMicrotask(() => {
@@ -441,7 +486,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
   const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),
     refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
-  const overview = !botSurface && <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
+  const overview = (!botSurface || focusedOverview?.owner === contentOwner) && <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
     request={focusedOverview?.owner === contentOwner ? focusedOverview : undefined} pending={pending} readOnly={readOnly}
     workspacePath={emptyWorkspacePath} hasComputer={hasComputer} error={error}
     recoveryAttention={recovery.error || recovery.unavailable || undefined}
@@ -490,6 +535,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <p className="break-words text-destructive">{loadError}</p>
       <Button variant="outline" onClick={() => { setLoadFailure(undefined); void projection.current?.refresh(); }}>{t('harness.threads.history.retry')}</Button>
     </div> : <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
+      onOpenSection={showOverview}
       onScrollContainerChange={bindScrollViewport}
       runUsage={history.usage} historyReset={history.reset} historyReady={history.ready}
       navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
@@ -640,7 +686,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { userText?: unknown })?.userText === 'string' ? (item.content as { userText: string }).userText : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? async () => { showOverview('context'); await compactThrough(branch.head!); } : undefined}
-        editorRef={messageInput} value={text} onChange={(text, references) => useThreadDraftStore.getState().patch(draftKey, { text, references })} references={draft.references} api={api} identity={identity} source={preparedSource?.source} models={models}
+        editorRef={messageInput} value={text} onChange={(text, references, interactions) => useThreadDraftStore.getState().patch(draftKey, { text, references, interactions })} references={draft.references} interactions={draft.interactions} api={api} identity={identity} source={preparedSource?.source} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput)}

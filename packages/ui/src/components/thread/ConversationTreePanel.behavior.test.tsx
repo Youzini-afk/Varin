@@ -1,3 +1,5 @@
+import { uiSession } from '@/lib/interactive-ui/sessions';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -110,4 +112,19 @@ it('uses the Bot selection in Bot mode and shows an empty tree when switching to
   expect(container.querySelector('[data-tree-node]')).toBeNull();
   expect(container.textContent).toBe('chat.tree.openConversation');
   expect(services.api.conversationTree).toHaveBeenCalledTimes(1);
+});
+
+it('flushes the chosen source route, not the selected route, before admitting a fork', async () => {
+  vi.spyOn(useThreadStore.getState(), 'loadCatalog').mockResolvedValue();
+  let finish!: () => void;
+  const source = uiSession('tree-flush-source', { ...identity, branchId: 'saved' }, getRuntimeEndpointGeneration());
+  const selected = uiSession('tree-flush-selected', identity, getRuntimeEndpointGeneration());
+  source.flushState = vi.fn(() => new Promise<void>(resolve => { finish = resolve; })); selected.flushState = vi.fn();
+  try {
+    await render();
+    await act(async () => row('saved-turn').querySelector<HTMLButtonElement>('button')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'chat.tree.continue')!.click());
+    expect(source.flushState).toHaveBeenCalledOnce(); expect(selected.flushState).not.toHaveBeenCalled(); expect(services.api.fork).not.toHaveBeenCalled();
+    await act(async () => finish()); expect(services.api.fork).toHaveBeenCalledWith(expect.objectContaining({ branchId: 'saved' }));
+  } finally { delete source.flushState; delete selected.flushState; }
 });

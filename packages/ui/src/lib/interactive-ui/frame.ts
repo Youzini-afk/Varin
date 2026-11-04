@@ -91,6 +91,19 @@ function frameRuntime() {
   const save = () => { cancelAnimationFrame(saveFrame); saveFrame = requestAnimationFrame(() => send({ type: 'state', state: currentState() })); };
   let saveSequence = 0;
   const pendingSaves = new Map<string, { resolve(): void; reject(error: Error): void }>();
+  let actionSequence = 0;
+  const pendingActions = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+  const hostAction = (type: string, payload: object) => {
+    const action = new Promise<unknown>((resolve, reject) => {
+      if (parent === window) { reject(new Error('This exported page has no conversation host')); return; }
+      if (!ready && !(type === 'host-actions' && renderState === 'loading')) { reject(new Error('Content is not ready')); return; }
+      const id = `action:${++actionSequence}`;
+      pendingActions.set(id, { resolve, reject });
+      send({ type, id, ...payload, ...observation() });
+    });
+    void action.catch(() => {});
+    return action;
+  };
   Object.defineProperty(window, 'varinUI', { value: Object.freeze({ get state() { return state; },
     saveState(value: unknown) {
       state = JSON.parse(JSON.stringify(value));
@@ -107,6 +120,11 @@ function frameRuntime() {
       return saved;
     },
     setContext(value: unknown) { context = JSON.parse(JSON.stringify(value)); },
+    compose(input: { text: string; includeContext?: boolean }) {
+      if (!input || typeof input.text !== 'string' || !input.text.trim()) return Promise.reject(new Error('compose requires readable text'));
+      return hostAction('compose', { text: input.text, includeContext: input.includeContext === true });
+    },
+    requestActions(actions: unknown) { return hostAction('host-actions', { actions: JSON.parse(JSON.stringify(actions)) }); },
   }), configurable: false });
   const restore = () => {
     for (const [path, value] of Object.entries(savedControls)) {
@@ -118,6 +136,7 @@ function frameRuntime() {
     scrollTo(savedScroll.x, savedScroll.y);
   };
   const update = async (message: { files: Record<string, string>; assets?: Record<string, { mimeType: string; data: string }>; entry: string; committed: boolean; source: unknown; state?: ReturnType<typeof currentState> }) => {
+    ready = false;
     renderState = message.committed ? 'loading' : 'preview';
     if (message.state) { state = message.state.data; savedControls = message.state.controls; savedScroll = message.state.scroll; }
     const html = message.files[message.entry] ?? '';
@@ -155,8 +174,8 @@ function frameRuntime() {
     });
     // Root classes/variables are part of the authored palette too. Keep the
     // private frame channel while replacing the work's own document attributes.
-    for (const attribute of [...document.documentElement.attributes]) if (attribute.name !== 'data-channel' && !parsed.documentElement.hasAttribute(attribute.name)) document.documentElement.removeAttribute(attribute.name);
-    for (const attribute of [...parsed.documentElement.attributes]) if (attribute.name !== 'data-channel' && document.documentElement.getAttribute(attribute.name) !== attribute.value) document.documentElement.setAttribute(attribute.name, attribute.value);
+    for (const attribute of [...document.documentElement.attributes]) if (attribute.name !== 'data-channel' && attribute.name !== 'data-anchored' && !parsed.documentElement.hasAttribute(attribute.name)) document.documentElement.removeAttribute(attribute.name);
+    for (const attribute of [...parsed.documentElement.attributes]) if (attribute.name !== 'data-channel' && attribute.name !== 'data-anchored' && document.documentElement.getAttribute(attribute.name) !== attribute.value) document.documentElement.setAttribute(attribute.name, attribute.value);
     for (const attribute of [...document.body.attributes]) if (!parsed.body.hasAttribute(attribute.name)) document.body.removeAttribute(attribute.name);
     for (const attribute of [...parsed.body.attributes]) document.body.setAttribute(attribute.name, attribute.value);
     const incoming = document.createElement('div'); incoming.id = 'work';
@@ -191,6 +210,11 @@ function frameRuntime() {
     if (event.source !== parent || event.data?.channel !== channel) return;
     const message = event.data;
     if (message.type === 'update') updates = updates.then(() => update(message)).catch(error => { renderState = 'error'; send({ type: 'error', message: String(error) }); });
+    else if (message.type === 'action-result' || message.type === 'action-error') {
+      const pending = pendingActions.get(message.id); pendingActions.delete(message.id);
+      if (message.type === 'action-result') pending?.resolve(message.result);
+      else pending?.reject(new Error(message.error));
+    }
     else if (message.type === 'state-saved' || message.type === 'state-save-error') {
       const pending = pendingSaves.get(message.id); pendingSaves.delete(message.id);
       if (message.type === 'state-saved') pending?.resolve(); else pending?.reject(new Error(message.error));
@@ -201,6 +225,13 @@ function frameRuntime() {
       if (message.raster) void raster(message.bounds).then(image => send({ type: 'capture', id: message.id, ...value, image }), error => send({ type: 'capture-error', id: message.id, error: String(error) }));
       else send({ type: 'capture', id: message.id, ...value });
     } else if (message.type === 'reset') { state = null; savedControls = {}; savedScroll = { x: 0, y: 0 }; location.reload(); }
+  });
+  const interacting = () => send({ type: 'focus', editing: Boolean(document.activeElement?.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) });
+  addEventListener('blur', () => send({ type: 'focus', editing: false }));
+  addEventListener('focusin', interacting); addEventListener('focusout', () => queueMicrotask(interacting));
+  addEventListener('pagehide', () => {
+    for (const pending of pendingActions.values()) pending.reject(new Error('Content closed'));
+    pendingActions.clear();
   });
   addEventListener('input', save); addEventListener('change', save); addEventListener('scroll', save, { passive: true });
   const selectionDetails = () => {
@@ -226,7 +257,7 @@ function frameRuntime() {
   });
   // Wheel/touch events do not cross iframe documents. Report reading intent while
   // leaving native scrolling and local chart/list interactions with the browser.
-  const scrollIntent = (target: EventTarget | null, delta: number) => {
+  const scrollIntent = (target: EventTarget | null, delta: number, keyboard?: { key: string; shiftKey: boolean }) => {
     for (let node = target instanceof Element ? target : null; node && node !== document.body; node = node.parentElement) {
       const style = getComputedStyle(node);
       if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) {
@@ -234,18 +265,26 @@ function frameRuntime() {
           || (delta < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return;
       }
     }
-    send({ type: 'scroll-intent', intent: delta < 0 ? 'away-from-end' : 'toward-end' });
+    send({ type: 'scroll-intent', intent: delta < 0 ? 'away-from-end' : 'toward-end', ...(document.documentElement.dataset.anchored === 'true' ? keyboard ?? { delta } : {}) });
+    return true;
   };
   window.addEventListener('wheel', event => {
-    if (!event.defaultPrevented && !event.ctrlKey && event.deltaY) scrollIntent(event.target, event.deltaY);
-  }, { passive: true });
+    if (!event.defaultPrevented && !event.ctrlKey && event.deltaY && scrollIntent(event.target, event.deltaY) && document.documentElement.dataset.anchored === 'true') event.preventDefault();
+  }, { passive: false });
+  window.addEventListener('keydown', event => {
+    if (document.documentElement.dataset.anchored !== 'true' || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || ownsMenu(event.target)) return;
+    const away = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || event.key === ' ' && event.shiftKey;
+    if (!away && !['ArrowDown', 'PageDown', 'End', ' '].includes(event.key)) return;
+    // The Host owns the outer viewport and computes page/edge distances there.
+    if (scrollIntent(event.target, away ? -1 : 1, { key: event.key, shiftKey: event.shiftKey })) event.preventDefault();
+  });
   let touchY: number | undefined;
   window.addEventListener('touchstart', event => { touchY = event.touches.length === 1 ? event.touches[0]!.clientY : undefined; }, { passive: true });
   window.addEventListener('touchmove', event => {
     const y = event.touches.length === 1 ? event.touches[0]!.clientY : undefined;
-    if (!event.defaultPrevented && touchY !== undefined && y !== undefined && y !== touchY) scrollIntent(event.target, touchY - y);
+    if (!event.defaultPrevented && touchY !== undefined && y !== undefined && y !== touchY && scrollIntent(event.target, touchY - y) && document.documentElement.dataset.anchored === 'true') event.preventDefault();
     touchY = y;
-  }, { passive: true });
+  }, { passive: false });
   addEventListener('error', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
   addEventListener('unhandledrejection', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
   new ResizeObserver(measure).observe(dom());
@@ -258,7 +297,7 @@ function frameRuntime() {
   addEventListener('resize', measure);
   send({ type: 'ready' });
 }
-export function uiFrameDocument(channel: string, inline = false) {
+export function uiFrameDocument(channel: string, inline = false, anchored = false) {
   const layout = inline ? `
     html,body{width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important}
     /* Chat owns document scrolling. Growing content can outpace the async
@@ -280,7 +319,7 @@ export function uiFrameDocument(channel: string, inline = false) {
     #work :where(pre,code){white-space:pre-wrap;overflow-wrap:anywhere}
     #work :where(img,video,svg,canvas){max-width:100%}
   ` : '';
-  return `<!doctype html><html data-channel="${channel}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="https://varin.invalid/"><style id="theme"></style><style>html{color-scheme:light dark}:where(body){margin:0;padding:16px;font:14px/1.55 system-ui}*{box-sizing:border-box}img,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--primary)}:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}${layout}</style></head><body><div id="work"></div><script>(${frameRuntime.toString()})()</script></body></html>`;
+  return `<!doctype html><html data-channel="${channel}" data-anchored="${anchored}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="https://varin.invalid/"><style id="theme"></style><style>html{color-scheme:light dark}:where(body){margin:0;padding:16px;font:14px/1.55 system-ui}*{box-sizing:border-box}img,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--primary)}:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}${layout}</style></head><body><div id="work"></div><script>(${frameRuntime.toString()})()</script></body></html>`;
 }
 export function uiThemeCss(element: Element = document.body) {
   const computed = getComputedStyle(document.documentElement);

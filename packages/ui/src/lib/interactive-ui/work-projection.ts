@@ -1,4 +1,4 @@
-import { createInteractiveUiHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, InteractiveUiError, type RenderUiInput, type UiReceipt, type UiSource } from '@varin/application-client';
+import { createInteractiveUiHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, InteractiveUiError, normalizeConversationUi, type RenderUiInput, type UiReceipt, type UiSource } from '@varin/application-client';
 import type { ChatToolCall } from '@/components/conversation/types';
 import { formatMessage, useI18nStore, type I18nKey } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
@@ -71,7 +71,7 @@ class WorkProjection {
     if (request.signal.aborted || this.session.host !== getRuntimeEndpointGeneration()) return;
     this.base = source; this.loadedTarget = ref; this.target = ref;
     this.session.source = source;
-    updateUiSession(this.session, { source: { ref: source.ref }, files: source.contents, assets: source.assets,
+    updateUiSession(this.session, { source: { ref: source.ref }, content: source.content, files: source.contents, assets: source.assets,
       title: source.title, entry: source.entry, committed: true, status: '' });
   }
   private receipt() {
@@ -101,8 +101,12 @@ class WorkProjection {
     const title = saved?.title ?? this.input.title ?? base?.title ?? message('ui.content.title');
     const entry = relativeFile(saved?.entry ?? (this.call.rawArguments === undefined || this.reader.fieldComplete(this.input, 'entry') ? this.input.entry : undefined) ?? base?.entry ?? 'index.html');
     const committed = Boolean(saved && base?.ref === saved.ref);
-    const source = committed ? { ref: saved!.ref } : { preview: { callId: this.call.id, sequence: this.call.sequence ?? 0, contents: files, entry, title, ...(base ? { baseRef: base.ref } : {}) } };
-    updateUiSession(this.session, { source, files, assets: base?.assets ?? this.session.display?.assets ?? {}, title, entry, committed,
+    let content = base?.content;
+    if (!committed && this.input.content !== undefined && (this.call.rawArguments === undefined || this.reader.fieldComplete(this.input, 'content'))) {
+      try { content = normalizeConversationUi(this.input.content); } catch { /* Incomplete definitions remain a preview, not executable controls. */ }
+    }
+    const source = committed ? { ref: saved!.ref } : { preview: { callId: this.call.id, sequence: this.call.sequence ?? 0, contents: files, entry, title, ...(content ? { content } : {}), ...(base ? { baseRef: base.ref } : {}) } };
+    updateUiSession(this.session, { source, content, files, assets: base?.assets ?? this.session.display?.assets ?? {}, title, entry, committed,
       status: this.error || (this.failed ? message('ui.content.unsaved') : this.running ? message('ui.content.making') : saved ? '' : message('ui.content.unsaved')) });
     if (committed && this.session.panelMounted && this.session.panelDirectory) useUIStore.getState().openContextPanelTab(this.session.panelDirectory,
       { mode: 'ui', targetPath: this.session.key, thread: this.session.identity, contentRef: saved!.ref, label: title, dedupeKey: this.session.key });
@@ -113,7 +117,7 @@ const owner = (session: UiSession) => { let projection = projections.get(session
 export const projectUiWork = (session: UiSession, call: ChatToolCall, output: unknown, running: boolean, failed: boolean) => owner(session).update(call, output, running, failed);
 export const restoreUiWork = (session: UiSession, ref: string) => owner(session).restore(ref);
 export function releaseUiWork(session: UiSession) {
-  if (session.cardMounted || session.panelMounted || session.placement === 'panel') return;
+  if (session.inlineTarget || session.cardMounted || session.panelMounted || session.placement === 'panel') return;
   projections.get(session)?.close(); projections.delete(session); delete session.source; delete session.display;
 }
 function relativeFile(file: string) { return file.replaceAll('\\', '/').split('/').filter(part => part && part !== '.').join('/'); }

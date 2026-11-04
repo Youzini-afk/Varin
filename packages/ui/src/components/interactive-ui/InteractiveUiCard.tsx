@@ -1,5 +1,11 @@
 import React from 'react';
-import { createInteractiveUiHttpAPI, getRuntimeEndpointGeneration, InteractiveUiError, type ThreadIdentity, type UiObservation, type UiSource, type UiSourceIdentity, type UiViewState, type UiSelection } from '@varin/application-client';
+import { composeUiResult } from '@/lib/interactive-ui/compose';
+import { HtmlHostActions } from './HtmlHostActions';
+import { prepareHtmlResult } from '@/lib/interactive-ui/html-actions';
+import { DeclarativeUiContent } from './DeclarativeUiContent';
+import { InlineUiSlot } from './InlineUiViews';
+import { inlineViewportClip, uiInlineAnchor } from '@/lib/interactive-ui/inline-placement';
+import { createInteractiveUiHttpAPI, getRuntimeEndpointGeneration, InteractiveUiError, normalizeUiHostActions, type UiHostAction, type ThreadIdentity, type UiObservation, type UiSource, type UiSourceIdentity, type UiViewState, type UiSelection } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -12,7 +18,7 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 import { projectUiWork, releaseUiWork, restoreUiWork } from '@/lib/interactive-ui/work-projection';
 import { uiFrameDocument, uiThemeCss } from '@/lib/interactive-ui/frame';
 import { prepareUiFiles, createUiExport } from '@/lib/interactive-ui/modules';
-import { getUiSession, moveUiSession, openUiSessionPanel, uiSession, subscribeUiSessions, uiSessionsRevision, type UiSession } from '@/lib/interactive-ui/sessions';
+import { getUiSession, moveUiSession, openUiSessionPanel, uiSession, subscribeUiSessions, uiSessionsRevision, notifyUiSessions, type UiSession } from '@/lib/interactive-ui/sessions';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -32,7 +38,10 @@ export function InteractiveUiCard({ call, ownerCallId, execution, result, cwd, g
     session.cardMounted = true;
     return () => { session.cardMounted = false; releaseUiWork(session); };
   }, [session]);
-  if (!session?.display) return null;
+  if (!session) return null;
+  if (conversation?.uiInlineViews) return <InlineUiSlot session={session} anchorKey={`tool:${ownerCallId ?? call.id}`} kind="tool" cwd={cwd} />;
+  if (!session.display) return null;
+  if (session.display.content) return <DeclarativeUiContent node={session.display.content} sourceKey={session.key} source={session.display.source} isStreaming={!session.display.committed} />;
   return <UiWorkView session={session} {...session.display} cwd={cwd} />;
 }
 
@@ -43,24 +52,36 @@ function addReference(session: UiSession, selection: UiSelection) {
   const selected = useThreadStore.getState().selectedIdentity;
   if (selected?.threadId !== session.identity.threadId || selected.branchId !== session.identity.branchId) void useThreadStore.getState().selectThread(session.identity).catch(failure => toast.error(failure.message));
 }
-export function UiWorkView({ session, source, files, assets = {}, entry, title, cwd = '', committed, status = '', panel = false, onReturn }: {
+export function UiWorkView(props: UiWorkViewProps) {
+  const { t } = useI18n();
+  React.useSyncExternalStore(subscribeUiSessions, uiSessionsRevision, uiSessionsRevision);
+  const retained = React.useRef(props);
+  const changed = retained.current.source.ref !== props.source.ref;
+  const defer = changed && retained.current.committed && props.session.interacting;
+  if (!defer) retained.current = props;
+  return <>{defer && <p role="status" className="text-xs text-muted-foreground">{t('ui.content.updatedAvailable')} <button type="button" className="underline" onClick={() => { props.session.interacting = false; notifyUiSessions(); }}>{t('ui.content.useUpdate')}</button></p>}<UiWorkViewContent {...retained.current} /></>;
+}
+interface UiWorkViewProps {
   session: UiSession; source: UiSourceIdentity; files: Record<string, string>; entry: string; title: string; cwd?: string; committed: boolean; status?: string; panel?: boolean;
-  assets?: UiSource['assets'];
+  assets?: UiSource['assets']; anchored?: boolean;
   onReturn?(): void;
-}) {
+}
+function UiWorkViewContent({ session, source, files, assets = {}, entry, title, cwd = '', committed, status = '', panel = false, onReturn, anchored = false }: UiWorkViewProps) {
   const { t } = useI18n();
   const api = React.useMemo(() => createInteractiveUiHttpAPI(session.host), [session.host]);
   const surface = React.useRef<HTMLElement>(null);
   const iframe = React.useRef<HTMLIFrameElement>(null);
   const frameLoad = React.useRef({ channel: '', loaded: false });
   const [channel, setChannel] = React.useState(() => crypto.randomUUID());
-  const frameDoc = React.useMemo(() => uiFrameDocument(channel, !panel), [channel, panel]);
+  const frameDoc = React.useMemo(() => uiFrameDocument(channel, !panel, anchored), [channel, panel, anchored]);
   const [ready, setReady] = React.useState(false);
   const [viewInitialized, setViewInitialized] = React.useState(false);
   const [fullView, setFullView] = React.useState(false);
   const mobile = useUIStore(value => value.isMobile);
   const height = React.useRef(session.inlineSize?.height ?? 0);
   const [error, setError] = React.useState('');
+  const [hostActions, setHostActions] = React.useState<UiHostAction[]>([]);
+  React.useEffect(() => { setHostActions([]); }, [channel]);
   const [connectionError, setConnectionError] = React.useState('');
   const [persistenceError, setPersistenceError] = React.useState('');
   const [selectedText, setSelectedText] = React.useState<string>();
@@ -107,6 +128,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
         if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, bounds.left); right = Math.min(right, bounds.right); }
         if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom); }
       }
+      if (anchored) { const anchor = uiInlineAnchor(session)?.element; if (anchor) { const clip = inlineViewportClip(anchor); left = Math.max(left, clip.left); right = Math.min(right, clip.right); top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); } }
       if (right <= left || bottom <= top) throw new Error(t('ui.content.notVisible'));
       const image = await invokeDesktop('desktop_capture_page_rect', { x: left, y: top, width: right - left, height: bottom - top }).catch(() => null);
       if (!image) {
@@ -118,7 +140,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       observation.image = { mimeType: 'image/png', data: image.base64, method: 'screen', capturedAt: new Date().toISOString(), bounds: { x: left - rect.x, y: top - rect.y, width: right - left, height: bottom - top } };
     }
     return observation;
-  }, [ready, send, t]);
+  }, [ready, send, t, anchored, session]);
   const visible = panel || session.placement === 'inline';
   React.useEffect(() => { if (!visible) { setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID()); } }, [visible]);
   React.useEffect(() => {
@@ -137,13 +159,33 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
         // The timeline's existing ResizeObserver handles the resulting growth.
         iframe.current!.style.height = `${measured}px`;
       }
+      if (message.type === 'focus') { session.interacting = message.editing === true; notifyUiSessions(); }
       if (message.type === 'error') setError(t('ui.content.scriptFailed'));
       if (!panel && message.type === 'scroll-intent' && (message.intent === 'away-from-end' || message.intent === 'toward-end')) {
-        surface.current?.dispatchEvent(new CustomEvent(CHAT_TIMELINE_SCROLL_INTENT_EVENT, { bubbles: true, detail: message.intent }));
+        const anchor = anchored ? uiInlineAnchor(session)?.element : undefined;
+        (anchor ?? surface.current)?.dispatchEvent(new CustomEvent(CHAT_TIMELINE_SCROLL_INTENT_EVENT, { bubbles: true, detail: message.intent }));
+        if (anchor) for (let parent = anchor.parentElement; parent; parent = parent.parentElement) {
+          if (!/(auto|scroll)/.test(getComputedStyle(parent).overflowY) || parent.scrollHeight <= parent.clientHeight) continue;
+          const direction = message.intent === 'away-from-end' ? -1 : 1;
+          if (message.key === 'Home' || message.key === 'End') parent.scrollTo({ top: message.key === 'Home' ? 0 : parent.scrollHeight });
+          else if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', ' '].includes(message.key)) parent.scrollBy({ top: direction * (message.key.startsWith('Arrow') ? 40 : parent.clientHeight * 0.9) });
+          else if (Number.isFinite(message.delta)) parent.scrollBy({ top: message.delta });
+          break;
+        }
       }
       const observed = (): UiObservation => ({ ...message.source, viewRef: registration.current?.viewRef ?? session.viewRef ?? `ui-view:${crypto.randomUUID()}`,
         capturedAt: message.capturedAt, state: message.state, viewport: message.viewport, structure: message.structure, render: message.render,
         ...(message.context == null ? {} : { context: message.context }), ...(message.image ? { image: message.image } : {}), ...(message.textRange ? { textRange: message.textRange } : {}) });
+      if ((message.type === 'compose' || message.type === 'host-actions') && typeof message.id === 'string') {
+        const target = event.source as Window;
+        const respond = (result: object) => target.postMessage({ channel, type: 'action-result', id: message.id, result }, '*');
+        const fail = (failure: unknown) => target.postMessage({ channel, type: 'action-error', id: message.id, error: failure instanceof Error ? failure.message : String(failure) }, '*');
+        if (!actual.current.committed) fail(new Error('Content is not saved'));
+        else if (message.type === 'host-actions') {
+          try { setHostActions(normalizeUiHostActions(message.actions)); respond({ status: 'presented' }); } catch (failure) { fail(failure); }
+        } else if (typeof message.text !== 'string' || !message.text.trim()) fail(new Error('compose requires readable text'));
+        else void prepareHtmlResult(session, observed(), message.text, message.includeContext === true).then(composeUiResult).then(respond, fail);
+      }
       if (message.type === 'selection' || message.type === 'context-menu') {
         setSelectedText(message.text || undefined); textObservation.current = message.text ? observed() : undefined;
         if (message.type === 'context-menu' && Number.isFinite(message.x) && Number.isFinite(message.y)) {
@@ -172,7 +214,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
     window.addEventListener('message', receive);
     return () => { isMounted.current = false; window.removeEventListener('message', receive); clearTimeout(saveTimer.current);
       for (const pending of pendingCaptures.values()) pending.reject(new Error('页面已关闭')); pendingCaptures.clear(); };
-  }, [channel, persistState, session, panel, t]);
+  }, [channel, persistState, session, panel, anchored, t]);
   React.useEffect(() => {
     if (!ready || !visible) return;
     // Show HTML immediately while restoring view state. A failed observation connection
@@ -330,6 +372,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
         </div>}
       </div>
       {(error || connectionError || persistenceError || committed && !Object.hasOwn(files, entry)) && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{error || connectionError || persistenceError || t('ui.content.missingEntry', { file: entry })}</p>}
+      {(hostActions.length > 0 || Object.keys(session.pendingHostActions ?? {}).length > 0) && <HtmlHostActions actions={hostActions} session={session} capture={capture} />}
       {!panel && status && <p role="status" className="py-1 text-xs text-muted-foreground">{status}</p>}
     </> : <button className="w-full px-3 py-6 text-sm text-muted-foreground" onClick={returnInline}>{t('ui.content.expanded')}</button>}
     {fullView && <Dialog open onOpenChange={open => { if (!open) returnInline(); }}><DialogContent className="h-[94dvh] w-[96vw] max-w-none p-2">

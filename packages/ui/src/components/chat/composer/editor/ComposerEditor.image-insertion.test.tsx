@@ -50,3 +50,69 @@ it('does not replace text typed over the original selection while an image is be
   expect(editor.current!.getValue()).toBe('自己的说明[图片1]之后');
   insertion.dispose();
 });
+
+it('fills at the last cursor without replacing selection and only updates an untouched source span', async () => {
+  await act(async () => root.render(<Harness />));
+  act(() => editor.current!.setSelection(0, 2));
+  await act(async () => { await editor.current!.composeInteraction('choice', '短发'); });
+  expect(editor.current!.getValue()).toBe('之前\n\n短发\n\n之后');
+  await act(async () => { await editor.current!.composeInteraction('choice', '长发'); });
+  expect(editor.current!.getValue()).toBe('之前\n\n长发\n\n之后');
+  act(() => editor.current!.replaceRange(4, 6, '自己的发型'));
+  act(() => editor.current!.setSelection(editor.current!.getValue().length));
+  await act(async () => { await editor.current!.composeInteraction('choice', '卷发'); });
+  expect(editor.current!.getValue()).toBe('之前\n\n自己的发型\n\n之后\n\n卷发');
+});
+
+it('defers interaction insertion until composition ends without focusing the editor', async () => {
+  await act(async () => root.render(<Harness />));
+  const content = document.querySelector<HTMLElement>('.cm-content')!;
+  const focus = vi.spyOn(content, 'focus');
+  act(() => content.dispatchEvent(new window.Event('compositionstart', { bubbles: true })));
+  let completed = false;
+  const pending = editor.current!.composeInteraction('choice', '选择结果').then(() => { completed = true; });
+  expect(completed).toBe(false);
+  expect(editor.current!.getValue()).toBe('之前之后');
+  await act(async () => {
+    content.dispatchEvent(new window.Event('compositionend', { bubbles: true }));
+    await pending;
+  });
+  expect(editor.current!.getValue()).toContain('选择结果');
+  expect(focus).not.toHaveBeenCalled();
+});
+
+it('finishes an IME-deferred fill in the original draft after navigating away', async () => {
+  const { composeUiResult, registerUiComposer } = await import('@/lib/interactive-ui/compose');
+  const { useThreadDraftStore } = await import('@/stores/useThreadDraftStore');
+  const { threadComposerKey, threadHostKey } = await import('@/stores/useThreadStore');
+  const { getRuntimeEndpointGeneration } = await import('@varin/application-client');
+  const identity = { runtime: 'agent' as const, threadId: 'old-thread', branchId: 'old-branch' };
+  const key = threadComposerKey(threadHostKey(), identity);
+  useThreadDraftStore.getState().patch(key, { text: '之前之后' });
+  function DraftHarness() {
+    const draft = useThreadDraftStore(state => state.drafts[key]!);
+    React.useLayoutEffect(() => registerUiComposer(key, editor.current!), []);
+    return <ComposerEditor ref={editor} value={draft.text} interactions={draft.interactions}
+      onChange={change => useThreadDraftStore.getState().patch(key, { text: change.value, interactions: change.interactions })}
+      languageContext={{ inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(), knownSlashNames: new Set(), attachmentFilenames: [] }} />;
+  }
+  await act(async () => root.render(<DraftHarness />));
+  act(() => editor.current!.setSelection(2));
+  act(() => document.querySelector('.cm-content')!.dispatchEvent(new window.Event('compositionstart', { bubbles: true })));
+  const pending = composeUiResult({ identity, host: getRuntimeEndpointGeneration(), sourceKey: 'choice', text: '原会话的选择' });
+  await act(async () => { root.render(<div>Other conversation</div>); });
+  await expect(pending).resolves.toEqual({ status: 'filled', updated: false });
+  expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('之前\n\n原会话的选择\n\n之后');
+});
+
+it('does not apply a deferred action after its Host lease has changed', async () => {
+  await act(async () => root.render(<Harness />));
+  const content = document.querySelector<HTMLElement>('.cm-content')!;
+  act(() => content.dispatchEvent(new window.Event('compositionstart', { bubbles: true })));
+  let current = true;
+  const pending = editor.current!.composeInteraction('choice', 'stale host', () => current);
+  const rejected = expect(pending).rejects.toThrow('Interaction source changed');
+  current = false;
+  await act(async () => { content.dispatchEvent(new window.Event('compositionend', { bubbles: true })); await rejected; });
+  expect(editor.current!.getValue()).toBe('之前之后');
+});

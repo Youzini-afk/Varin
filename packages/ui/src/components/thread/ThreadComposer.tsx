@@ -1,5 +1,7 @@
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
+import type { InteractionRange } from '@/components/chat/composer/editor/interactionRanges';
+import { registerUiComposer } from '@/lib/interactive-ui/compose';
 import { flushSync } from 'react-dom';
 import { getRuntimeEndpointGeneration, type ThreadDraftSkillOptions, type ThreadsAPI, type ThreadIdentity, type ThreadSource, type ThreadModelInfo, type ThreadThinkingLevel } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
@@ -30,10 +32,11 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
-export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
+export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss,
   onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity }: {
-  editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[]): void;
+  editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
+  interactions?: readonly InteractionRange[];
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
   backendIdentity?: string; attachmentCandidates?: readonly ComposerAttachmentCandidate[];
   backendCommands?: Array<{ name: string; description: string; inputHint?: string }>;
@@ -76,6 +79,9 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     inputRef.current = handle;
     if (typeof editorRef === 'function') editorRef(handle); else if (editorRef) editorRef.current = handle;
   }, [editorRef]);
+  React.useLayoutEffect(() => {
+    if (identityKey && inputRef.current) return registerUiComposer(identityKey, inputRef.current);
+  }, [identityKey]);
   const [autocomplete, setAutocomplete] = React.useState<AutocompleteTrigger | null>(null);
   const [knownAgentNames, setKnownAgentNames] = React.useState<Set<string>>(() => new Set());
   const [confirmedMentions, setConfirmedMentions] = React.useState<Set<string>>(() => new Set());
@@ -340,6 +346,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             value={value}
             references={references}
             autocomplete={autocomplete && !layer ? { id: menuId, activeId: activeOption } : undefined}
+            interactions={interactions}
             onChange={(change) => {
               latestDraft.current = { value: change.value, references: change.references };
               if (pendingHistoryTextRef.current === change.value) {
@@ -348,7 +355,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
               }
               pendingHistoryTextRef.current = null;
               if (messageHistory.isBrowsing) messageHistory.reset();
-              onChange(change.value, change.references);
+              onChange(change.value, change.references, change.interactions);
               updateAutocomplete(
                 change.value,
                 change.selection.end,

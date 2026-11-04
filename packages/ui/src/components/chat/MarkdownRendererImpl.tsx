@@ -11,6 +11,7 @@ import 'katex/dist/katex.min.css';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@varin/application-client';
+import { ConversationContent } from '@/components/interactive-ui/ConversationContent';
 import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -1054,7 +1055,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   return markdownContent;
 };
 
-export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
+const MarkdownTextRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
   return prev.content === next.content
     && prev.isStreaming === next.isStreaming
     && prev.disableStreamAnimation === next.disableStreamAnimation
@@ -1068,6 +1069,11 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.enableFileReferences === next.enableFileReferences
     && prev.part?.id === next.part?.id;
 });
+
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = (props) => (
+  <ConversationContent content={props.content} messageId={props.messageId} variant={props.variant} isStreaming={props.isStreaming}
+    renderMarkdown={(text, start, streaming) => <MarkdownTextRenderer {...props} content={text} part={{ id: `${props.part?.id ?? props.messageId}:${start}` }} isStreaming={streaming} />} />
+);
 
 const SimpleMarkdownRendererImpl: React.FC<{
   content: string;

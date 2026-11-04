@@ -67,3 +67,52 @@ it('reads a connected view live and reports a missing or disconnected view with 
     await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it('registers only original assistant fragments, idempotently and independently per branch, retaining original source through revisions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'varin-ui-fragment-'));
+  const client = createKernelClient({ hostId: 'ui-fragment', storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false });
+  const definition = { type: 'choice', label: '发型', options: ['短发', '长发'], action: '继续设计' };
+  const text = '说明\n```varin-ui\n' + JSON.stringify(definition) + '\n```\n正文';
+  const references = [
+    { id: 'assistant', source: 'assistant', content_ref: 'original' },
+    { id: 'user', source: 'user', content_ref: 'user' },
+    { id: 'example', source: 'assistant', content_ref: 'example' },
+  ];
+  const runtime = {
+    thread: async () => ({ branches: [{ branch_id: 'main' }, { branch_id: 'fork' }] }),
+    familyList: async () => ({ rootThreadId: 'family' }),
+    historyPage: async () => ({ head: 'assistant', items: references, previous: null }),
+    historyItem: async (reference: { id: string; source: string }) => ({ ...reference, content: { content: { kind: 'text', text: reference.id === 'example' ? '````markdown\n' + text + '\n````' : text } } }),
+  };
+  try {
+    await client.start();
+    const ui = createInteractiveUiRuntime({ kernel: client, runtime: runtime as never, media: {} as never });
+    const identity = { runtime: 'agent' as const, threadId: 'thread', branchId: 'main' };
+    const registration = { messageId: 'assistant', fragmentKey: 'offset:3' };
+    const initial = await ui.registerFragment(identity, registration);
+    expect(initial.content).toMatchObject({ type: 'choice', options: [{ key: 'label:短发' }, { key: 'label:长发' }] });
+    expect(initial.definition).toEqual(definition);
+    expect(initial.messageFragment).toMatchObject({ ...registration, threadId: 'thread', branchId: 'main' });
+    expect(await ui.registerFragment(identity, registration)).toEqual(initial);
+    const fork = await ui.registerFragment({ ...identity, branchId: 'fork' }, registration);
+    expect(fork.workRef).not.toBe(initial.workRef);
+    const updated = await ui.store.render('family', { ref: initial.ref, content: { ...definition, options: ['短发', '长发', '新发型'] } }, 'update');
+    expect(updated.revision).toBe(2);
+    const branchUpdate = { ref: updated.ref, content: { ...definition, options: ['短发', '长发', '分支发型'] } };
+    const branchReceipt = await ui.renderForBranch('family', branchUpdate, 'branch-update', { threadId: 'thread', branchId: 'fork' });
+    expect(branchReceipt.workRef).not.toBe(updated.workRef);
+    expect((await ui.store.source('family', branchReceipt.ref)).forkedFrom).toBe(updated.ref);
+    expect(await ui.renderForBranch('family', branchUpdate, 'branch-update', { threadId: 'thread', branchId: 'fork' })).toEqual(branchReceipt);
+    await expect(ui.renderForBranch('family', branchUpdate, 'another-stale-update', { threadId: 'thread', branchId: 'fork' })).rejects.toMatchObject({ status: 409 });
+    expect((await ui.store.source('family', updated.workRef)).ref).toBe(updated.ref);
+    expect((await ui.registerFragment(identity, registration)).ref).toBe(initial.ref);
+    expect((await ui.store.source('family', fork.ref)).content).toEqual(initial.content);
+    expect(await ui.read('family', { kind: 'ui', ref: updated.ref, view: 'source' }, new AbortController().signal)).toMatchObject({ content: { type: 'choice' }, definition: { options: ['短发', '长发', '新发型'] } });
+    await expect(ui.registerFragment(identity, { ...registration, messageId: 'user' })).rejects.toMatchObject({ status: 404 });
+    await expect(ui.registerFragment(identity, { ...registration, messageId: 'absent' })).rejects.toMatchObject({ status: 404 });
+    await expect(ui.registerFragment(identity, { ...registration, messageId: 'example' })).rejects.toMatchObject({ status: 404 });
+    await expect(ui.registerFragment(identity, { ...registration, contentVersion: 'forged' })).rejects.toMatchObject({ status: 409 });
+    await expect(ui.registerFragment({ ...identity, branchId: 'absent' }, registration)).rejects.toMatchObject({ status: 404 });
+    ui.close();
+  } finally { await client.close(); await rm(root, { recursive: true, force: true }); }
+}, 30_000);

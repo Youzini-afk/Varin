@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { INTERACTIVE_UI_CAPABILITY, INTERACTIVE_UI_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
-import type { UiCaptureRequest, UiObservation, UiReadInput, UiSourceIdentity, UiViewState, RenderUiInput, ThreadIdentity } from '@varin/application-client';
+import { parseConversationContent, normalizeConversationUi, migrateConversationUiState } from '@varin/application-client';
+import type { UiBranchScope, UiFragmentRegistrationInput, UiMessageFragment, UiCaptureRequest, UiObservation, UiReadInput, UiSourceIdentity, UiViewState, RenderUiInput, ThreadIdentity } from '@varin/application-client';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { runToolDomainCall } from '../kernel/tool-invocation.js';
@@ -49,6 +50,55 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
     if (!thread.branches.some(branch => branch.branch_id === identity.branchId)) throw new UiContentError('Conversation branch is unavailable', 404);
     return scope(identity.threadId);
   };
+  const registerFragment = async (identity: ThreadIdentity, input: UiFragmentRegistrationInput, signal?: AbortSignal) => {
+    const root = await target(identity);
+    if (typeof input.messageId !== 'string' || !input.messageId || typeof input.fragmentKey !== 'string'
+      || input.contentIndex !== undefined && (!Number.isSafeInteger(input.contentIndex) || input.contentIndex < 0)) throw new UiContentError('Invalid message fragment identity');
+    // Search the current branch's ancestry, never read an arbitrary client-supplied history ID.
+    let before: string | undefined, head: string | undefined;
+    let selected: Awaited<ReturnType<AgentRuntimeClient['historyPage']>>['items'][number] | undefined;
+    do {
+      const page = await options.runtime.historyPage({ branchId: identity.branchId, limit: 100, ...(head ? { headId: head } : {}), ...(before ? { beforeId: before } : {}) }, signal);
+      if (head && (page.head !== head || page.boundary_reset)) throw new UiContentError('Conversation history changed; reopen this fragment', 409);
+      head = page.head ?? undefined;
+      selected = page.items.find(item => item.id === input.messageId);
+      if (selected) break;
+      if (page.previous === before && before) throw new UiContentError('History reader did not advance', 503);
+      before = page.previous ?? undefined;
+    } while (before);
+    if (!selected || selected.source !== 'assistant') throw new UiContentError('Assistant fragment is unavailable in this branch', 404);
+    const item = await options.runtime.historyItem(selected, signal);
+    const body = (item.content as { content?: { kind?: string; text?: unknown; output?: { parts?: { kind?: string; text?: unknown }[] } } })?.content;
+    let text: unknown;
+    if (body?.kind === 'text' && (input.contentIndex === undefined || input.contentIndex === 0)) text = body.text;
+    else if (body?.kind === 'output' && input.contentIndex !== undefined) {
+      const part = body.output?.parts?.[input.contentIndex]; if (part?.kind === 'text') text = part.text;
+    }
+    if (typeof text !== 'string') throw new UiContentError('Source is not assistant body text');
+    const fragment = parseConversationContent(text, { role: 'assistant' }).find(part => part.kind === 'ui' && part.fragmentKey === input.fragmentKey);
+    if (!fragment || fragment.kind !== 'ui') throw new UiContentError('Complete interaction not found at this source position', 404);
+    const contentVersion = createHash('sha256').update(fragment.raw).digest('hex');
+    if (input.contentVersion !== undefined && input.contentVersion !== contentVersion) throw new UiContentError('Fragment definition changed', 409);
+    const origin: UiMessageFragment = { threadId: identity.threadId, branchId: identity.branchId, messageId: selected.id,
+      fragmentKey: input.fragmentKey, ...(body?.kind !== 'output' || input.contentIndex === undefined ? {} : { contentIndex: input.contentIndex }), contentVersion };
+    const receipt = await store.render(root, { content: fragment.definition, ...(fragment.node.label ? { title: fragment.node.label } : {}) },
+      `fragment:${JSON.stringify(origin)}`, undefined, origin);
+    return store.source(root, receipt.ref);
+  };
+  const captureBranch = async (identity: ThreadIdentity, targetBranchId: string, headId: string | null, signal?: AbortSignal) => {
+    const root = await target(identity);
+    const ancestors = new Set<string>(); let before: string | undefined;
+    if (headId) do {
+      const page = await options.runtime.historyPage({ branchId: identity.branchId, headId, limit: 100, ...(before ? { beforeId: before } : {}) }, signal);
+      if (page.head !== headId || page.boundary_reset) throw new UiContentError('Fork history changed', 409);
+      for (const item of page.items) ancestors.add(item.id);
+      if (before && page.previous === before) throw new UiContentError('History reader did not advance', 503);
+      before = page.previous ?? undefined;
+    } while (before);
+    signal?.throwIfAborted();
+    await store.captureBranch(root, { threadId: identity.threadId, branchId: identity.branchId },
+      { threadId: identity.threadId, branchId: targetBranchId }, headId, messageId => ancestors.has(messageId));
+  };
   const closeView = (ref: string, current: LiveView) => {
     if (views.get(ref) !== current) return;
     views.delete(ref); current.wake?.();
@@ -72,18 +122,37 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       });
     } finally { signal.removeEventListener('abort', abort); current.pending.delete(id); current.queue = current.queue.filter(request => request.id !== id); }
   };
-  const attach = async (root: string, source: UiSourceIdentity, ref = `ui-view:${randomUUID()}`, clientId: string, signal?: AbortSignal) => {
+  const attach = async (root: string, source: UiSourceIdentity, ref = `ui-view:${randomUUID()}`, clientId: string, signal?: AbortSignal, branchScope?: UiBranchScope) => {
+    if (source.ref && source.preview) throw new UiContentError('View must have exactly one source');
     if (source.ref) source = { ref: (await store.resolve(root, source.ref)).version.ref };
     else if (!source.preview) throw new UiContentError('View needs a source');
+    else if (source.preview.content) { try { source = { preview: { ...source.preview, content: normalizeConversationUi(source.preview.content) } }; } catch { throw new UiContentError('Invalid declarative preview'); } }
     const old = views.get(ref);
+    const saved = await store.view(root, ref);
     let initialState: UiViewState | null | undefined;
-    if (old && (old.root !== root || old.clientId !== clientId)) {
-      initialState = (await store.view(root, ref))?.state ?? null; ref = `ui-view:${randomUUID()}`;
+    const otherBranch = Boolean(branchScope && saved?.branchScope && (branchScope.threadId !== saved.branchScope.threadId || branchScope.branchId !== saved.branchScope.branchId));
+    if (otherBranch) { initialState = null; ref = `ui-view:${randomUUID()}`; }
+    else if (old && (old.root !== root || old.clientId !== clientId) || saved?.lease && saved.lease.clientId !== clientId) {
+      initialState = saved?.state ?? null; ref = `ui-view:${randomUUID()}`;
     } else if (old) closeView(ref, old);
+    if (!otherBranch && saved?.state && saved.source.ref !== source.ref) {
+      const before = saved.source.ref ? (await store.source(root, saved.source.ref)).content : saved.source.preview?.content;
+      const after = source.ref ? (await store.source(root, source.ref)).content : source.preview?.content;
+      if (before && after) {
+        const data = saved.state.data;
+        const migrated = migrateConversationUiState(before, after, data && typeof data === 'object' && !Array.isArray(data) ? data : {});
+        initialState = { ...saved.state, data: migrated.values, controls: { ...saved.state.controls, __varinResetKeys: migrated.resetKeys } };
+      }
+    }
+    if (branchScope && (!saved || otherBranch)) initialState = await store.branchSeed(root, branchScope, source, clientId);
     const token = randomUUID();
-    const { state } = await store.saveView(root, ref, { source, lease: { token, clientId }, ...(initialState === undefined ? {} : { state: initialState }) });
+    const { state } = await store.saveView(root, ref, { ...(branchScope ? { branchScope } : {}), source, lease: { token, clientId }, ...(initialState === undefined ? {} : { state: initialState }) });
     signal?.throwIfAborted();
     return { viewRef: ref, token, state };
+  };
+  const validateViewScope = async (root: string, ref: string, scope: UiBranchScope) => {
+    const saved = await store.view(root, ref);
+    if (saved?.branchScope && (saved.branchScope.threadId !== scope.threadId || saved.branchScope.branchId !== scope.branchId)) throw new UiContentError('View belongs to another conversation branch', 403);
   };
   const poll = async (root: string, ref: string, token: string, signal: AbortSignal): Promise<UiCaptureRequest | null> => {
     if (!views.has(ref)) {
@@ -132,6 +201,12 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
             : 'No live view is connected for this revision. Open this content in the chat, then read summary to discover its ui-view: reference. Source is available with view: source.',
           next: candidates.map(ref => ({ kind: 'ui', ref, view })) };
       }
+      if (version.content) {
+        if (input.file) throw new UiContentError('Declarative content has no source files');
+        const definition = { content: version.content, definition: version.definition, messageFragment: version.messageFragment, branchScope: version.branchScope, forkedFrom: version.forkedFrom };
+        const page = textPage(JSON.stringify(definition), input, { kind: 'ui', ref: version.ref, view: 'source' });
+        return { status: 'ready', ...summary, ...(page.next || page.offset ? { contentText: page.content, offset: page.offset, totalBytes: page.totalBytes, ...(page.next ? { next: page.next } : {}) } : definition) };
+      }
       if (!input.file) return { status: 'ready', ...summary };
       const text = await store.file(root, version.ref, input.file);
       return sourcePage(text, input, version.ref);
@@ -155,12 +230,18 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
     }
     if (view === 'source') {
       if (observed.ref) return read(root, { ...input, ref: observed.ref }, signal);
+      if (observed.preview?.content) {
+        if (input.file) throw new UiContentError('Declarative previews have no source files');
+        const definition = { content: observed.preview.content, messageFragment: observed.preview.messageFragment };
+        const page = textPage(JSON.stringify(definition), input, { kind: 'ui', ref: snapshotRef, view: 'source' });
+        return { status: 'ready', snapshotRef, provenance: 'client-preview', ...(page.next || page.offset ? { contentText: page.content, offset: page.offset, totalBytes: page.totalBytes, ...(page.next ? { next: page.next } : {}) } : definition) };
+      }
       const contents = observed.preview!.contents;
       if (!input.file) return { status: 'ready', snapshotRef, files: Object.keys(contents) };
       if (!Object.hasOwn(contents, input.file)) throw new UiContentError('Preview file not found', 404);
       return { ...sourcePage(contents[input.file]!, input, snapshotRef), snapshotRef };
     }
-    const summary = { status: 'ready', snapshotRef, source: observed.ref ?? (observed.preview ? { callId: observed.preview.callId, sequence: observed.preview.sequence, baseRef: observed.preview.baseRef } : null), capturedAt: observed.capturedAt, viewport: observed.viewport, render: observed.render };
+    const summary = { status: 'ready', snapshotRef, provenance: observed.ref ? 'saved' : 'client-preview', source: observed.ref ?? (observed.preview ? { callId: observed.preview.callId, sequence: observed.preview.sequence, baseRef: observed.preview.baseRef } : null), capturedAt: observed.capturedAt, viewport: observed.viewport, render: observed.render };
     if (view === 'state') {
       const page = textPage(JSON.stringify({ state: observed.state, context: observed.context }), input, { kind: 'ui', ref: snapshotRef, view });
       return page.next || page.offset ? { ...summary, stateText: page.content, offset: page.offset, totalBytes: page.totalBytes, ...(page.next ? { next: page.next } : {}) }
@@ -181,6 +262,22 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
     }
     return { ...summary, totalNodes: observed.structure?.length ?? 0, screenshotAvailable: Boolean(observed.image), ...(text ? { text } : {}) };
   };
+  /** A fork writes through the original work owner and its idempotent operation receipts.
+   * Reusing an old parent reference cannot overwrite edits already made in the local branch. */
+  const renderForBranch = async (root: string, input: RenderUiInput, origin: string, branch: UiBranchScope,
+    readMedia?: (resourceId: string) => Promise<{ mimeType: string; bytes: Uint8Array }>) => {
+    if (input.ref && input.content !== undefined && input.changes === undefined) {
+      const source = await store.source(root, input.ref);
+      const owner = source.branchScope ?? source.messageFragment;
+      if (source.content && owner && (owner.threadId !== branch.threadId || owner.branchId !== branch.branchId)) {
+        const fork = await store.render(root, { content: source.definition ?? source.content, title: source.title },
+          `branch-fork:${JSON.stringify([branch.threadId, branch.branchId, source.workRef])}`, undefined,
+          source.messageFragment ? { ...source.messageFragment, ...branch } : undefined, branch, source.ref);
+        input = { ...input, ref: fork.ref };
+      }
+    }
+    return store.render(root, input, origin, readMedia, undefined, branch);
+  };
   const validate = compileToolJsonSchema(INTERACTIVE_UI_TOOL_DECLARATIONS[0]!.tool!.inputSchema);
   const capability: HostCapabilityHandler = async (method, input, call) => {
     if (method !== 'render' || !validate(input)) throw new UiContentError('Arguments do not match render_ui');
@@ -188,8 +285,11 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       try {
         call.signal.throwIfAborted();
         const root = await scope(invocation.threadId);
-        const result = await store.render(root, input as unknown as RenderUiInput, invocation.operationId,
-          resourceId => options.media.read({ owningWorkspaceId: threadMaterialScope(root), threadId: invocation.threadId }, resourceId));
+        const payload = input as unknown as RenderUiInput;
+        const readMedia = (resourceId: string) => options.media.read({ owningWorkspaceId: threadMaterialScope(root), threadId: invocation.threadId }, resourceId);
+        const run = payload.content !== undefined ? await options.runtime.run(invocation.runId) : undefined;
+        const result = run ? await renderForBranch(root, payload, invocation.operationId, { threadId: invocation.threadId, branchId: run.branch_id }, readMedia)
+          : await store.render(root, payload, invocation.operationId, readMedia);
         return { executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: parseVarinToolJson(result), parts: [] } } };
       } catch (error) {
         const unknown = error instanceof UiMutationUnknownError;
@@ -198,7 +298,7 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       }
     });
   };
-  return { store, scope, target, capability, read, attach, poll,
+  return { store, scope, target, registerFragment, renderForBranch, validateViewScope, captureBranch, capability, read, attach, poll,
     disconnect(root: string, ref: string, token: string) {
       const current = views.get(ref); if (current?.root === root && current.token === token) closeView(ref, current);
     },
@@ -213,7 +313,7 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       const current = live(root, ref, token); const pending = current.pending.get(id);
       if (pending) {
         if (error || !observation) pending.reject(new UiContentError(error ?? 'View capture is unavailable', 503));
-        else if (observation.viewRef !== ref || observation.ref !== current.source.ref || observation.preview?.callId !== current.source.preview?.callId) pending.reject(new UiContentError('View changed while observing', 409));
+        else if (observation.viewRef !== ref || observation.ref !== current.source.ref || observation.preview?.callId !== current.source.preview?.callId || observation.preview?.sequence !== current.source.preview?.sequence) pending.reject(new UiContentError('View changed while observing', 409));
         else pending.resolve(observation);
       }
       return { received: true };

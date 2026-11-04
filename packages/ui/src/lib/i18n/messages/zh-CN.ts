@@ -12,6 +12,26 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'ui.content.latest': '查看最新版本',
+  'ui.content.alreadyLatest': '当前已是最新版本。',
+  'ui.content.cyclicEmbed': '内容循环引用',
+  'ui.content.activity': '生成记录',
+
+  "ui.native.invalidFile": "文件引用无效",
+  "ui.native.loadingPlan": "计划正在加载或暂不可用",
+  "ui.native.oldPlan": "此引用不是当前计划修订，尚未加载其历史内容。",
+  "ui.native.recoveryUnavailable": "当前会话中此恢复记录不可用",
+  "ui.native.usageWrongBranch": "用量引用不属于当前会话分支",
+  "ui.native.usageUnavailable": "当前上下文用量不可用",
+  "ui.native.unavailable": "对象不可用：{ref}",
+  "ui.native.ownerUnavailable": "会话暂不可用",
+  "ui.native.connectionChanged": "连接已更改",
+  "ui.native.materialUnavailable": "材料阅读器不可用",
+  "ui.native.detailsUnavailable": "对象详情不可用",
+  "ui.native.frozenAt": "观察时间：{time}",
+  "ui.native.recovery": "恢复记录 {id}",
+  "ui.native.tokens": "{used} / {limit} tokens",
+
   'chat.tree.title': '会话树',
   'chat.tree.description': '浏览对话轮次、分岔与之前走过的路线',
   'chat.tree.openConversation': '打开一个会话，查看它的对话路线。',

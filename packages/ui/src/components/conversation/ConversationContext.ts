@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ThreadIdentity, ThreadsAPI, ThreadMemoryAPI, ThreadFileTarget } from '@varin/application-client';
+import type { ThreadIdentity, ThreadsAPI, ThreadMemoryAPI, ThreadFileTarget, ThreadSnapshot } from '@varin/application-client';
 import type { ChatToolExecutionState } from './types';
 import type { ChatToolCall, ChatToolResultMessage } from './types';
 export interface UiCardProjection { call: ChatToolCall; result?: ChatToolResultMessage; compact: boolean }
@@ -9,9 +9,13 @@ export interface ConversationPresentation {
   api: ThreadsAPI;
   identity: ThreadIdentity;
   head: string | null;
+  snapshot?: ThreadSnapshot;
+  openSection?(section: 'plan' | 'recovery' | 'context' | 'threads'): void;
   /** File references are relative to this conversation, not sidebar navigation. */
   fileDirectory?: string;
   toolExecutions: Record<string, ChatToolExecutionState>;
+  uiInlineViews?: boolean;
+  uiEmbeds?: Record<string, import('@/lib/interactive-ui/embed-projection').UiEmbedPlacement>;
   uiCards?: Record<string, UiCardProjection>;
   sourceEntry?(callId: string): string | undefined;
   outputDurationsMs?: Record<string, number>;

@@ -1,3 +1,4 @@
+import { flushUiSessions } from '@/lib/interactive-ui/sessions';
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadConversationTree, ThreadConversationTreeNode, ThreadIdentity, ThreadsAPI, ThreadTreePreview } from '@varin/application-client';
@@ -167,7 +168,11 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
   const fork = (node: ThreadConversationTreeNode) => action(async () => {
     let requestKey = forkKeys.current.get(node.lastItemId);
     if (!requestKey) { requestKey = crypto.randomUUID(); forkKeys.current.set(node.lastItemId, requestKey); }
-    const result = await api.fork({ ...identity, branchId: node.branchId, key: requestKey, headId: node.lastItemId });
+    const selectedIdentity = { ...identity }, target = { ...identity, branchId: node.branchId };
+    await flushUiSessions(target, host);
+    if (host !== getRuntimeEndpointGeneration() || lifetime.current.signal.aborted
+      || identityRef.current.threadId !== selectedIdentity.threadId || identityRef.current.branchId !== selectedIdentity.branchId) throw new Error(t('ui.content.actionsUnavailable'));
+    const result = await api.fork({ ...target, key: requestKey, headId: node.lastItemId });
     forkKeys.current.delete(node.lastItemId);
     if (host !== getRuntimeEndpointGeneration() || lifetime.current.signal.aborted) return;
     await useThreadStore.getState().loadCatalog();

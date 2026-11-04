@@ -1,6 +1,7 @@
 import React from 'react';
+import { ChatTextSourceContext } from './chatTextSourceContext';
 import type { ChatSessionMessageEntry } from './types';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged, type ChatMemoryPassage } from '@varin/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, conversationContentText, type ChatMemoryPassage } from '@varin/application-client';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
@@ -10,7 +11,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useConversationPresentation } from './ConversationContext';
 import { getMarkdownCodeText } from '@/components/chat/markdown/decorate';
 import { readMarkdownImageOriginal } from '@/components/chat/markdown/markdownImages';
-import { captureChatSelection, type ChatTextSource as ChatSourceData } from './chatSelection';
+import { captureChatSelection, chatTextSourceOffset, type ChatTextSource as ChatSourceData } from './chatSelection';
 import { ChatMemoryDialog } from './ChatMemoryDialog';
 import { resolveChatTimelineItem, type ChatTimelineProjection } from './chatTimelineProjection';
 import type { ChatTimelineProps } from './ChatTimelineEntries';
@@ -31,15 +32,16 @@ const ChatActionsContext = React.createContext<{
   more(element: HTMLElement): void;
 } | null>(null);
 
-export const ChatTextSource: React.FC<ChatSourceData & { children: React.ReactNode }> = ({ children, entryId, text, offset, contentIndex }) => {
+export { ChatTextSourceContext } from './chatTextSourceContext';
+export const ChatTextSource: React.FC<ChatSourceData & { children: React.ReactNode; role?: string; contentIdentity?: string }> = ({ children, entryId, text, offset, contentIndex, role, contentIdentity }) => {
   const context = React.useContext(ChatActionsContext);
   const previous = React.useRef<HTMLDivElement | null>(null);
   const attach = React.useCallback((element: HTMLDivElement | null) => {
     if (previous.current) context?.sources.delete(previous.current);
     previous.current = element;
-    if (element) context?.sources.set(element, { entryId, text, offset, contentIndex });
-  }, [contentIndex, context, entryId, offset, text]);
-  return <div ref={attach} className="contents" data-conversation-chat-source data-conversation-source-id={entryId}>{children}</div>;
+    if (element) context?.sources.set(element, { entryId, text, offset, contentIndex, role, contentIdentity });
+  }, [contentIndex, context, entryId, offset, text, role, contentIdentity]);
+  return <ChatTextSourceContext.Provider value={{ entryId, text, offset, contentIndex, role, contentIdentity }}><div ref={attach} className="contents" data-conversation-chat-source data-conversation-source-id={entryId}>{children}</div></ChatTextSourceContext.Provider>;
 };
 
 export const ChatMoreButton: React.FC = () => {
@@ -54,6 +56,7 @@ export const ChatMoreButton: React.FC = () => {
 interface MenuTarget {
   kind: 'selection' | 'user' | 'turn' | 'code' | 'link' | 'file' | 'image';
   text: string;
+  copyText?: string;
   entry?: ChatSessionMessageEntry;
   sourceEntryId?: string;
   href?: string;
@@ -113,9 +116,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
             || (entry.type === 'message' && entry.message.role === 'toolResult'
               && source.entryId === `tool-result:${entry.message.toolCallId}`));
           const content = entry?.type === 'message' && 'content' in entry.message ? entry.message.content : undefined;
-          const offset = source.contentIndex !== undefined && Array.isArray(content)
-            ? content.slice(0, source.contentIndex).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)
-            : source.offset;
+          const offset = chatTextSourceOffset(source, Array.isArray(content) ? content : undefined);
           return [sourceElement, { ...source, offset, entryId: entry?.id }] as const;
         }));
         const captured = captureChatSelection(range, resolved, selection.toString());
@@ -158,9 +159,10 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const live = item.kind === 'turn' ? item.turn.liveAssistant : item.kind === 'live-assistant' ? item.message : undefined;
     const replies = assistantMessagesForTurn(entries, live);
     const text = replies.map((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n').trim()).filter(Boolean).join('\n\n');
+    const copyText = replies.map(message => message.content.filter(part => part.type === 'text').map(part => conversationContentText(part.text, { role: 'assistant' })).join('\n').trim()).filter(Boolean).join('\n\n');
     const last = entries.filter((row): row is ChatSessionMessageEntry => row.type === 'message' && row.message.role === 'assistant'
       && row.message.content.some((part) => part.type === 'text' && part.text.trim())).at(-1);
-    return text ? { kind: 'turn', text, entry: last, sourceEntryId: last?.id, runtimeKey } : null;
+    return text ? { kind: 'turn', text, copyText, entry: last, sourceEntryId: last?.id, runtimeKey } : null;
   };
   const freeze = (eventTarget: EventTarget | null) => {
     const captured = capture(eventTarget);
@@ -255,7 +257,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
           <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openLink')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t('chat.context.copyLink')}</ContextMenuItem>
         </> : target ? <>
-          <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
+          <ContextMenuItem onClick={() => perform((value) => copy(value.copyText ?? value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(quote)}>{t('chat.context.quote')}</ContextMenuItem>
           {presentation.identity?.runtime === 'agent' && <ContextMenuItem onClick={() => setFollowing(true)}>{t('bot.follow.title')}</ContextMenuItem>}
           {target.kind === 'selection' && presentation.memory && presentation.head ? <>

@@ -24,3 +24,14 @@ test('external and unresolved module references retain their original resolution
   const prepared = await prepareUiFiles({ 'index.html': '<html><body></body></html>', 'main.js': code }, 'index.html');
   expect(prepared['main.js']).toBe(code);
 });
+
+test('loads platform controls from bundled work bytes on demand and preserves authored files', async () => {
+  vi.stubGlobal('DOMParser', DOMParser);
+  const plain = await prepareUiFiles({ 'index.html': '<p>Plain text</p>' }, 'index.html');
+  expect(Object.keys(plain)).toEqual(['index.html']);
+  const prepared = await prepareUiFiles({ 'index.html': '<html><body><script type="module">import { controls } from "@varin/ui"; controls.install();</script></body></html>', '__varin_controls__.mjs': 'export const custom = true;' }, 'index.html');
+  expect(prepared['__varin_controls__.mjs']).toBe('export const custom = true;');
+  expect(prepared['index.html']).toContain('ui-file:/___varin_controls__.mjs');
+  expect(prepared['___varin_controls__.mjs']).toContain('export const controls');
+  expect(prepared['___varin_controls__.mjs']).not.toMatch(/https?:/);
+});

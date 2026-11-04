@@ -76,6 +76,27 @@ rejection can release the pending input. A real receipt clears only the original
 If separate Goal registration is still pending after submit acceptance, retry retains the accepted Run
 and does not submit the message again.
 
+## Interactive content
+
+HTML and declarative content share `lib/interactive-ui/compose`. Explicit fills target the source
+Host and Thread/branch, insert at the last available cursor without replacing a selection, and never
+focus the editor. CodeMirror tracks untouched source ranges through edits and isolated undo/redo.
+Another fill updates an untouched range; editing or deleting it releases replacement ownership while
+its fixed source remains a reference. IME fills wait for composition to finish. If navigation unmounts
+the editor first, they finish in the original in-memory draft at its captured cursor.
+
+Platform-rendered Send buttons register with `ThreadConversation`, which freezes only the action's
+text and reference and uses `deliverThreadInput` with the existing submit/enqueue/child-continuation
+rules. It does not take the composer's text, files, goals, or pending source selection. Each source keeps
+its latest action attempt in the same Host/branch draft domain, never a second durable queue. Double
+clicks join the original observation; uncertain retries keep its original body, model and command key.
+A confirmed receipt replaces that attempt and deduplicates the unchanged action. Changing the action
+can create a new attempt after acceptance. Draft removal releases this transient state.
+
+Fixed interaction snapshots are explicitly projected as assistant-content source material. User-edited
+message text remains the final expression, not the old values in that snapshot. Existing attachment
+chips remain visible and removable through their original owner.
+
 ## File attachments
 
 Picker, paste and drop accept arbitrary files without a document-format allowlist. Native and external
