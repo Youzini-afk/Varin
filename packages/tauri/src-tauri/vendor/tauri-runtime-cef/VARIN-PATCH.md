@@ -85,3 +85,42 @@ sandbox acceptable under `SandboxPolicy::Required`.
 
 Pinned selection source:
 https://github.com/chromium/chromium/blob/156.0.8078.80/sandbox/linux/suid/client/setuid_sandbox_host.cc
+
+## Window focus policy
+
+`focusable` defaults to true and is independent of the one-time `focused`
+creation request. A nonfocusable window is created hidden, configured before
+mapping, and excluded from pending or explicit activation. CEF's focus handler
+vetoes browser focus independently of native top-level hints, including after a
+webview is reparented. This does not disable the browser or eat mouse clicks.
+
+Windows uses `WS_EX_NOACTIVATE` plus a window subclass that returns
+`MA_NOACTIVATE` (not `MA_NOACTIVATEANDEAT`) and preserves the policy across
+winit visibility, position and style changes. X11 uses the ICCCM No Input model:
+`InputHint=false` and no `WM_TAKE_FOCUS`, without changing unrelated protocols.
+macOS creates initially nonfocusable windows as nonactivating `NSPanel`s and
+uses an instance-local subclass to veto key/main-window eligibility. Runtime
+changes update that veto without changing winit's class layout or other windows.
+An ordinary `NSWindow` toggled nonfocusable after creation is not converted to an
+`NSPanel`: key focus is blocked but AppKit application activation may still
+occur on clicks. Callers that require nonactivation must set `focusable(false)`
+on the builder. Enabling focus on a panel restores key eligibility while keeping
+its original panel/application-activation behavior.
+
+Unit tests cover builder defaults/order, the real CEF focus callback across
+policy changes and the Windows non-eating mouse-activation response. They do
+not establish OS focus ownership. Native acceptance still needs another app
+owning keyboard focus while overlays are created, clicked, hidden/re-shown,
+repositioned and toggled, with OS focus and received click events observed on
+macOS, Windows and the target X11 window manager. Wayland is not claimed here;
+this CEF runtime requires its X11 host.
+
+## Opaque preview responses
+
+App-owned custom protocol responses that enforce a CSP `sandbox` without
+`allow-same-origin` retain their original bytes and script policy. They are
+presentation documents, so no native initialization scripts or script hashes
+are injected, including when loaded as a child frame. The normal packaged
+application path still receives initialization and its strict CSP hashes.
+CSP report-only headers do not opt out of initialization. CEF's existing
+subframe IPC denial remains independent of this response handling.

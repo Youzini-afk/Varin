@@ -26,7 +26,7 @@ pub fn browser_url(value: &str) -> Result<Url, String> {
     #[test] fn opaque_urls_do_not_share_authority() {
         let app = Url::parse("tauri://localhost/index.html").unwrap();
         assert!(same_application_origin(&app, &Url::parse("tauri://localhost/mini-chat.html").unwrap()));
-        for candidate in ["tauri://evil/index.html", "varin-ui://app", "https://tauri.localhost", "file:///tmp/index.html", "data:text/html,test", "tauri://localhost:123", "tauri://user@localhost"] {
+        for candidate in ["tauri://evil/index.html", "varin-ui://app", "http://varin-preview.localhost/interactive", "https://tauri.localhost", "file:///tmp/index.html", "data:text/html,test", "tauri://localhost:123", "tauri://user@localhost"] {
             assert!(!same_application_origin(&app, &Url::parse(candidate).unwrap()), "{candidate}");
         }
     }

@@ -15,7 +15,7 @@ use winit::platform::gtk4::WindowExtGtk4;
 
 use crate::window::AppWindow;
 
-use super::{taskbar, utils::set_wm_state};
+use super::{focus_protocols::update_focus_protocols, taskbar, utils::set_wm_state};
 
 /// 24-bit X11 parent for CEF browser children.
 ///
@@ -44,6 +44,7 @@ pub(crate) struct CefX11Host {
   background_color_provider: RefCell<Option<gtk::CssProvider>>,
   /// Whether the host is mapped; created mapped, unmapped while it only hosts offscreen webviews.
   mapped: Cell<bool>,
+  focusable: Rc<Cell<bool>>,
 }
 
 /// Geometry of the X11 host, shared with the GTK `layout` handler that keeps it up to date.
@@ -71,6 +72,15 @@ impl CefX11Host {
     gtk_window.set_child(Some(&default_vbox));
 
     let parent_xid = window_xid(window);
+    let focusable = Rc::new(Cell::new(true));
+    let mapped_focusable = focusable.clone();
+    gtk_window.connect_map(move |_| {
+      // GDK may refresh WM_HINTS while mapping. Reapply after each map, not
+      // only before the initial show, without touching unrelated protocols.
+      if !mapped_focusable.get() {
+        apply_x11_focusable(parent_xid, false);
+      }
+    });
     let initial_size = window.surface_size();
     let (xid, colormap) = create_cef_container(parent_xid, initial_size)?;
 
@@ -106,6 +116,7 @@ impl CefX11Host {
       geometry,
       background_color_provider: RefCell::new(None),
       mapped: Cell::new(true),
+      focusable,
     })
   }
 
@@ -167,6 +178,13 @@ impl Drop for CefX11Host {
 }
 
 impl AppWindow {
+  /// ICCCM No Input model: both InputHint=false and absence of WM_TAKE_FOCUS
+  /// are required. Merely disabling a GTK widget does not cover CEF X11 children.
+  pub(crate) fn apply_focusable(&self) {
+    self.cef_host.focusable.set(self.attrs.focusable);
+    apply_x11_focusable(self.xid(), self.attrs.focusable);
+  }
+
   pub(crate) fn cef_host_handle(&self) -> cef::sys::cef_window_handle_t {
     self.cef_host.xid as cef::sys::cef_window_handle_t
   }
@@ -355,4 +373,38 @@ fn set_cef_container_bounds(
   });
 
   PhysicalSize::new(width, height)
+}
+
+fn apply_x11_focusable(xid: c_ulong, focusable: bool) {
+  use x11_dl::xlib;
+  super::utils::with_x11((), |xlib, display| unsafe {
+    let existing = (xlib.XGetWMHints)(display, xid);
+    let mut hints = if existing.is_null() {
+      std::mem::zeroed()
+    } else {
+      let hints = *existing;
+      (xlib.XFree)(existing.cast());
+      hints
+    };
+    hints.flags |= xlib::InputHint;
+    hints.input = i32::from(focusable);
+    (xlib.XSetWMHints)(display, xid, &mut hints);
+
+    let take_focus = (xlib.XInternAtom)(display, c"WM_TAKE_FOCUS".as_ptr(), 0);
+    let mut protocols = std::ptr::null_mut();
+    let mut count = 0;
+    if (xlib.XGetWMProtocols)(display, xid, &mut protocols, &mut count) != 0 {
+      let mut updated = if count > 0 && !protocols.is_null() {
+        std::slice::from_raw_parts(protocols, count as usize).to_vec()
+      } else {
+        Vec::new()
+      };
+      if !protocols.is_null() {
+        (xlib.XFree)(protocols.cast());
+      }
+      update_focus_protocols(&mut updated, take_focus, focusable);
+      (xlib.XSetWMProtocols)(display, xid, updated.as_mut_ptr(), updated.len() as i32);
+    }
+    (xlib.XFlush)(display);
+  });
 }

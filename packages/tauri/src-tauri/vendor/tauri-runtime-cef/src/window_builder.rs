@@ -245,8 +245,8 @@ impl WindowBuilder for WindowBuilderWrapper {
     self
   }
 
-  fn focusable(self, _focusable: bool) -> Self {
-    // TODO
+  fn focusable(mut self, focusable: bool) -> Self {
+    self.attrs.focusable = focusable;
     self
   }
 
@@ -550,4 +550,37 @@ fn platform_attrs(attrs: &mut WindowAttributes) -> Box<PlatformAttributes> {
     .take()
     .and_then(|attrs| attrs.cast::<PlatformAttributes>().ok())
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod focus_tests {
+  use super::*;
+
+  #[test]
+  fn ordinary_windows_remain_focusable_by_default() {
+    assert!(WindowBuilderWrapper::default().attrs.focusable);
+    assert!(WindowBuilderWrapper::new().attrs.focusable);
+    assert!(
+      WindowBuilderWrapper::with_config(&WindowConfig::default())
+        .attrs
+        .focusable
+    );
+  }
+
+  #[test]
+  fn focusability_and_initial_focus_are_independent_and_order_insensitive() {
+    let first = WindowBuilderWrapper::new().focusable(false).focused(true);
+    let second = WindowBuilderWrapper::new().focused(true).focusable(false);
+    assert!(!first.attrs.focusable);
+    assert!(!second.attrs.focusable);
+    assert!(first.attrs.inner.active);
+    assert!(second.attrs.inner.active);
+    assert!(first.focusable(true).attrs.focusable);
+    let config = WindowConfig {
+      focusable: false,
+      focus: true,
+      ..Default::default()
+    };
+    assert!(!WindowBuilderWrapper::with_config(&config).attrs.focusable);
+  }
 }

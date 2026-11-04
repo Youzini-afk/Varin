@@ -514,6 +514,7 @@ pub(crate) struct AppWebview {
   pub(crate) popup_family: Arc<crate::popup::PopupFamily>,
   pub(crate) dialogs: crate::dialog::DialogState,
   pub(crate) host: cef::BrowserHost,
+  pub(crate) focusable: Arc<AtomicBool>,
   pub(crate) uri_scheme_protocols: Arc<HashMap<String, Arc<Box<UriSchemeProtocolHandler>>>>,
   pub(crate) devtools_protocol_handlers: Arc<Mutex<Vec<Arc<DevToolsProtocolHandler>>>>,
   /// Keeps the DevTools message observer registered. Dropping this unregisters the observer.
@@ -527,6 +528,13 @@ pub(crate) struct AppWebview {
 }
 
 impl AppWebview {
+  pub(crate) fn set_focusable(&self, focusable: bool) {
+    self.focusable.store(focusable, Ordering::Release);
+    if !focusable {
+      self.host.set_focus(0);
+    }
+  }
+
   fn resize(&self, scale: f64, x: i32, y: i32, width: i32, height: i32) {
     if let Some(view) = &self.offscreen {
       *view.bounds.lock().unwrap_or_else(|e| e.into_inner()) = Rect {
@@ -666,6 +674,7 @@ impl<T: UserEvent> WinitCefApp<T> {
       parent_size,
       scale,
       theme,
+      appwindow.attrs.focusable,
       drag_drop_event_target,
       offscreen,
       pending,
@@ -701,6 +710,7 @@ impl<T: UserEvent> WinitCefApp<T> {
     parent_size: PhysicalSize<u32>,
     scale: f64,
     theme: Option<Theme>,
+    focusable: bool,
     drag_drop_event_target: browser_client::DragDropEventTarget,
     offscreen: Option<crate::OffscreenView>,
     mut pending: PendingWebview<T, CefRuntime<T>>,
@@ -801,9 +811,11 @@ impl<T: UserEvent> WinitCefApp<T> {
       web_content_process_terminate_handler,
     };
 
+    let focusable = Arc::new(AtomicBool::new(focusable));
     let mut client =
       browser_client::TauriCefBrowserClient::build(browser_client::TauriCefBrowserClientArgs {
         context: context.clone(),
+        focusable: focusable.clone(),
         window_id,
         webview_id,
         label: pending.label.clone(),
@@ -983,6 +995,7 @@ impl<T: UserEvent> WinitCefApp<T> {
             popup_family,
             dialogs,
             host,
+            focusable,
             uri_scheme_protocols,
             devtools_protocol_handlers,
             devtools_observer_registration,
@@ -1184,6 +1197,7 @@ impl<T: UserEvent> WinitCefApp<T> {
           position: PhysicalPosition::new(0, 0).into(),
           size: parent_size.into(),
         });
+        child.set_focusable(target_appwindow.attrs.focusable);
         child.reparent(target_appwindow);
         child.set_bounds(parent_size, target_appwindow.window.scale_factor(), bounds);
         // Re-parenting does not preserve z-order: a view docked back into a
@@ -1290,7 +1304,11 @@ impl<T: UserEvent> WinitCefApp<T> {
       WebviewMessage::GoForward => child.browser.go_forward(),
       WebviewMessage::CanGoForward(tx) => _ = tx.send(Ok(child.browser.can_go_forward() == 1)),
       WebviewMessage::Close => child.host.close_browser(0),
-      WebviewMessage::SetFocus => child.host.set_focus(1),
+      WebviewMessage::SetFocus => {
+        if child.focusable.load(Ordering::Acquire) {
+          child.host.set_focus(1);
+        }
+      }
       WebviewMessage::Url(tx) => {
         let url = child.url().unwrap_or_default();
         let _ = tx.send(Ok(url));
@@ -1574,7 +1592,7 @@ impl std::fmt::Debug for CefWebviewAttributes {
 pub struct CefInitScript {
   pub(crate) script: String,
   pub(crate) hash: String,
-  for_main_frame_only: bool,
+  pub(crate) for_main_frame_only: bool,
 }
 
 impl CefInitScript {

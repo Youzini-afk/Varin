@@ -18,6 +18,7 @@ mod context_menu;
 mod display;
 mod download;
 mod drag;
+mod focus;
 mod frame;
 mod keyboard;
 mod life_span;
@@ -85,6 +86,7 @@ wrap_with_args! {
 
   pub(crate) struct TauriCefBrowserClient<T: UserEvent> {
     pub(crate) context: RuntimeContext<T>,
+    focusable: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) window_id: WindowId,
     pub(crate) webview_id: u32,
     pub(crate) label: String,
@@ -105,6 +107,10 @@ wrap_with_args! {
   }
 
   impl Client {
+    fn focus_handler(&self) -> Option<FocusHandler> {
+      Some(focus::TauriCefFocusHandler::new(self.focusable.clone()))
+    }
+
     fn render_handler(&self) -> Option<RenderHandler> {
       self.render_handler.clone()
     }
@@ -163,6 +169,8 @@ wrap_with_args! {
           webview_id,
           label: label.clone(),
           initial_url: None,
+          // CEF-owned popups are independent native windows, not overlay children.
+          focusable: Arc::new(std::sync::atomic::AtomicBool::new(true)),
           devtools_enabled,
           zoom_hotkeys_enabled,
           allowed_chrome_commands: allowed_chrome_commands.clone(),

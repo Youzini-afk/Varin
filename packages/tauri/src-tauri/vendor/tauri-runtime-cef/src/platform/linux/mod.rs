@@ -8,5 +8,6 @@ mod taskbar;
 mod utils;
 mod webview;
 mod window;
+mod focus_protocols;
 
 pub(crate) use window::CefX11Host;

@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="normal"></head><body><script>
+// This document has an opaque origin imposed by the response CSP as well as
+// the embedding iframe. It receives presentation HTML, never Host credentials.
+(() => {
+  const id = location.hash.slice(1);
+  const receive = event => {
+    if (event.source !== parent || event.data?.type !== 'varin-preview:install'
+      || event.data.id !== id || typeof event.data.html !== 'string') return;
+    removeEventListener('message', receive);
+    document.open();
+    document.write(event.data.html);
+    document.close();
+  };
+  if (parent === window || !id) return;
+  addEventListener('message', receive);
+  // Wait until the bootstrap load has finished. The next iframe load belongs
+  // to the installed document, not this otherwise invisible bootstrap.
+  addEventListener('load', () => parent.postMessage({ type: 'varin-preview:ready', id }, '*'), { once: true });
+})();
+</script></body></html>

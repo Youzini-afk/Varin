@@ -10,7 +10,7 @@
     "windows": [],
     "withGlobalTauri": false,
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: varin-companion:; font-src 'self' data:; connect-src 'self' ipc: http: https: ws: wss: varin-companion:; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: varin-companion:; font-src 'self' data: https://cdn.jsdelivr.net; connect-src 'self' ipc: http: https: ws: wss: varin-companion:; worker-src 'self' blob:; frame-src 'self' blob: http: https:; media-src 'self' blob: data: http: https:; object-src 'none'; base-uri 'self'",
       "capabilities": [
         "workbench"
       ]

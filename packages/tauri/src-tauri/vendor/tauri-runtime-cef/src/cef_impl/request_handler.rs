@@ -54,6 +54,64 @@ pub(crate) type SchemeRegistry = Arc<
   >,
 >;
 
+/// An opaque CSP sandbox is deliberately not an application document, even
+/// when its bytes are served by an app-owned custom protocol. Do not inject
+/// native initialization or mutate its script policy (hashes would also disable
+/// its explicit unsafe-inline allowance). Report-only policies do not qualify.
+fn opaque_sandbox(headers: &HeaderMap) -> bool {
+  headers
+    .get_all(CONTENT_SECURITY_POLICY)
+    .iter()
+    .any(|value| {
+      value.to_str().ok().is_some_and(|value| {
+        value.split(',').any(|policy| {
+          policy.split(';').any(|directive| {
+            let mut words = directive.split_ascii_whitespace();
+            words
+              .next()
+              .is_some_and(|name| name.eq_ignore_ascii_case("sandbox"))
+              && !words.any(|token| token.eq_ignore_ascii_case("allow-same-origin"))
+          })
+        })
+      })
+    })
+}
+
+fn prepare_protocol_response(
+  response: http::Response<Cow<'static, [u8]>>,
+  initialization_scripts: &[CefInitScript],
+  is_main_frame: bool,
+) -> http::Response<Cursor<Vec<u8>>> {
+  let initialization_scripts = if opaque_sandbox(response.headers()) {
+    &[][..]
+  } else {
+    initialization_scripts
+  };
+  let is_html = response
+    .headers()
+    .get(CONTENT_TYPE)
+    .and_then(|ct| ct.to_str().ok())
+    .is_some_and(|ct| ct.to_ascii_lowercase().starts_with("text/html"));
+  let (parts, body) = response.into_parts();
+  let body_bytes = body.into_owned();
+  let body_bytes = if is_html && !initialization_scripts.is_empty() {
+    inject_scripts_into_html_body(&body_bytes, initialization_scripts, is_main_frame)
+      .unwrap_or(body_bytes)
+  } else {
+    body_bytes
+  };
+  let mut response = http::Response::from_parts(parts, Cursor::new(body_bytes));
+  if let Some(csp) = response.headers_mut().get_mut(CONTENT_SECURITY_POLICY) {
+    let csp_string = csp.to_str().unwrap_or_default().to_string();
+    let new_csp =
+      csp_inject_initialization_scripts_hashes(csp_string, initialization_scripts, is_main_frame);
+    if let Ok(new_csp) = HeaderValue::from_str(&new_csp) {
+      *csp = new_csp;
+    }
+  }
+  response
+}
+
 fn csp_inject_initialization_scripts_hashes(
   existing_csp: String,
   initialization_scripts: &[CefInitScript],
@@ -364,35 +422,7 @@ wrap_with_args! {
         let initialization_scripts = self.initialization_scripts.clone();
         let is_main_frame = self.is_main_frame;
         let responder = Box::new(move |response: http::Response<Cow<'static, [u8]>>| {
-          let is_html = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|ct| ct.to_str().ok())
-            .map(|ct| ct.to_lowercase().starts_with("text/html"))
-            .unwrap_or(false);
-
-          let (parts, body) = response.into_parts();
-          let body_bytes = body.into_owned();
-          let body_bytes = if is_html {
-            inject_scripts_into_html_body(&body_bytes, &initialization_scripts, is_main_frame)
-              .unwrap_or(body_bytes)
-          } else {
-            body_bytes
-          };
-
-          let mut response = http::Response::from_parts(parts, Cursor::new(body_bytes));
-
-          if let Some(csp) = response.headers_mut().get_mut(CONTENT_SECURITY_POLICY) {
-            let csp_string = csp.to_str().unwrap_or_default().to_string();
-            let new_csp = csp_inject_initialization_scripts_hashes(
-              csp_string,
-              &initialization_scripts,
-              is_main_frame,
-            );
-            if let Ok(new_csp) = HeaderValue::from_str(&new_csp) {
-              *csp = new_csp;
-            }
-          }
+          let response = prepare_protocol_response(response, &initialization_scripts, is_main_frame);
 
           response_store.into_owned().borrow_mut().replace(response);
 
@@ -709,5 +739,70 @@ mod termination_tests {
     ] {
       assert_eq!(termination_reason(status), expected);
     }
+  }
+}
+
+#[cfg(test)]
+mod sandbox_response_tests {
+  use super::*;
+
+  #[test]
+  fn opaque_sandbox_bytes_and_policy_are_not_given_native_initialization() {
+    let scripts = [CefInitScript {
+      script: "window.nativeBridge = true".into(),
+      hash: "'sha256-test'".into(),
+      for_main_frame_only: false,
+    }];
+    let body = b"<!doctype html><html><head></head><body><script>render()</script></body></html>";
+    for csp in [
+      "sandbox allow-scripts; script-src 'unsafe-inline'",
+      "sandbox",
+      "SANDBOX allow-scripts",
+      "default-src 'none', sandbox allow-scripts",
+    ] {
+      for is_main_frame in [false, true] {
+        let response = http::Response::builder()
+          .header(CONTENT_TYPE, "text/html")
+          .header(CONTENT_SECURITY_POLICY, csp)
+          .body(Cow::Borrowed(body.as_slice()))
+          .unwrap();
+        let prepared = prepare_protocol_response(response, &scripts, is_main_frame);
+        assert_eq!(prepared.body().get_ref(), body);
+        assert_eq!(prepared.headers()[CONTENT_SECURITY_POLICY], csp);
+      }
+    }
+    let response = http::Response::builder()
+      .header(CONTENT_TYPE, "text/html")
+      .header(CONTENT_SECURITY_POLICY, "script-src 'self'")
+      .body(Cow::Borrowed(body.as_slice()))
+      .unwrap();
+    let prepared = prepare_protocol_response(response, &scripts, true);
+    assert!(String::from_utf8_lossy(prepared.body().get_ref()).contains("window.nativeBridge"));
+    assert!(
+      prepared.headers()[CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .contains("'sha256-test'")
+    );
+  }
+
+  #[test]
+  fn only_an_enforced_opaque_sandbox_disables_initialization() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+      "Content-Security-Policy-Report-Only",
+      HeaderValue::from_static("sandbox"),
+    );
+    assert!(!opaque_sandbox(&headers));
+    headers.insert(
+      CONTENT_SECURITY_POLICY,
+      HeaderValue::from_static("sandbox allow-scripts allow-same-origin"),
+    );
+    assert!(!opaque_sandbox(&headers));
+    headers.append(
+      CONTENT_SECURITY_POLICY,
+      HeaderValue::from_static("sandbox allow-scripts"),
+    );
+    assert!(opaque_sandbox(&headers));
   }
 }

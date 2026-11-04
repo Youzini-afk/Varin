@@ -49,6 +49,10 @@ pub(crate) fn nswindow(window: &dyn winit::window::Window) -> Retained<NSWindow>
 }
 
 impl AppWindow {
+  pub(crate) fn apply_focusable(&self) {
+    apply_focusable(&nswindow(self.window.as_ref()), self.attrs.focusable);
+  }
+
   pub(crate) fn cef_host_handle(&self) -> cef::sys::cef_window_handle_t {
     let nsview = self.nsview();
     Retained::as_ptr(&nsview).cast_mut().cast()
@@ -346,4 +350,101 @@ fn traffic_light_observer(nswindow: &NSWindow) -> Option<Retained<TrafficLightOb
 
 fn set_traffic_light_observer(nswindow: &NSWindow, observer: &TrafficLightObserver) {
   utils::set_associated_object(nswindow, traffic_light_observer_key(), observer);
+}
+
+// Keep winit's native class and ivars intact. Only this window gets the subclass;
+// replacing methods on WinitWindow itself would disable unrelated windows.
+#[derive(Default)]
+struct FocusabilityIvars {
+  focusable: Cell<bool>,
+}
+
+define_class!(
+  #[unsafe(super(NSObject))]
+  #[name = "TauriCefFocusability"]
+  #[ivars = FocusabilityIvars]
+  #[thread_kind = MainThreadOnly]
+  struct Focusability;
+  unsafe impl NSObjectProtocol for Focusability {}
+);
+
+fn focusability_key() -> *const c_void {
+  static KEY: u8 = 0;
+  &KEY as *const u8 as *const c_void
+}
+
+unsafe extern "C" fn can_become_window(
+  window: &objc2::runtime::AnyObject,
+  selector: objc2::runtime::Sel,
+) -> objc2::runtime::Bool {
+  use objc2::{msg_send, runtime::Bool};
+  let state = unsafe { objc2::ffi::objc_getAssociatedObject(window, focusability_key()) };
+  if !state.is_null() {
+    let state = unsafe { &*state.cast::<Focusability>() };
+    if !state.ivars().focusable.get() {
+      return Bool::NO;
+    }
+  }
+  let superclass = window
+    .class()
+    .superclass()
+    .expect("focus subclass has a superclass");
+  // Preserve NSPanel's different main-window policy when focus is re-enabled.
+  if selector == sel!(canBecomeKeyWindow) {
+    unsafe { msg_send![super(window, superclass), canBecomeKeyWindow] }
+  } else {
+    unsafe { msg_send![super(window, superclass), canBecomeMainWindow] }
+  }
+}
+
+fn apply_focusable(window: &NSWindow, focusable: bool) {
+  use objc2::{
+    msg_send,
+    runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel},
+  };
+  let state = utils::associated_object(window, focusability_key());
+  let state = if let Some(state) = state {
+    // Only this module writes this key.
+    unsafe { Retained::cast_unchecked::<Focusability>(state) }
+  } else {
+    let state = Focusability::alloc(window.mtm()).set_ivars(FocusabilityIvars {
+      focusable: Cell::new(focusable),
+    });
+    let state: Retained<Focusability> = unsafe { msg_send![super(state), init] };
+    let superclass = window.class();
+    let name = std::ffi::CString::new(format!(
+      "TauriCefNonfocusable_{}",
+      superclass.name().to_string_lossy()
+    ))
+    .unwrap();
+    let class = AnyClass::get(&name).unwrap_or_else(|| {
+      let mut class = ClassBuilder::new(&name, superclass).expect("unique focus subclass");
+      unsafe {
+        class.add_method(
+          sel!(canBecomeKeyWindow),
+          can_become_window as unsafe extern "C" fn(&AnyObject, Sel) -> Bool,
+        );
+        class.add_method(
+          sel!(canBecomeMainWindow),
+          can_become_window as unsafe extern "C" fn(&AnyObject, Sel) -> Bool,
+        );
+      }
+      class.register()
+    });
+    utils::set_associated_object(window, focusability_key(), &state);
+    // No new ivars, compatible method signatures, and called on the main thread.
+    unsafe {
+      AnyObject::set_class(window, class);
+    }
+    state
+  };
+  state.ivars().focusable.set(focusable);
+  if !focusable {
+    if window.isKeyWindow() {
+      window.resignKeyWindow();
+    }
+    if window.isMainWindow() {
+      window.resignMainWindow();
+    }
+  }
 }

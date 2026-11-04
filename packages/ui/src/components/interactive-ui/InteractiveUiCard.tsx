@@ -1,4 +1,5 @@
 import React from 'react';
+import { SandboxedHtmlFrame } from '@/components/ui/SandboxedHtmlFrame';
 import { createInteractiveUiHttpAPI, getRuntimeEndpointGeneration, InteractiveUiError, type ThreadIdentity, type UiObservation, type UiSource, type UiSourceIdentity, type UiViewState, type UiSelection } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -312,7 +313,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       className={`absolute right-0 top-0 z-10 size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted ${mobile ? 'flex' : 'hidden [@media(any-pointer:coarse)]:flex'}`}><Icon name="more" className="size-4" /></button>}
     {visible ? <>
       <div className={`relative min-h-0 ${panel ? 'flex-1' : ''}`}>
-        <iframe ref={iframe} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={frameDoc}
+        <SandboxedHtmlFrame ref={iframe} title={title} html={frameDoc} policy="interactive"
           onLoad={() => {
             if (frameLoad.current.channel !== channel) { frameLoad.current = { channel, loaded: true }; return; }
             setReady(false); setError(t('ui.content.navigated'));

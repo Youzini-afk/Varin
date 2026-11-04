@@ -397,8 +397,6 @@ pub(crate) enum WindowMessage {
   #[cfg(target_os = "macos")]
   SetSimpleFullscreen(bool),
   SetFocus,
-  // TODO: Implement SetFocusable, winit currently doesn't expose an API for it
-  #[allow(unused)]
   SetFocusable(bool),
   SetIcon(Icon<'static>),
   SetSkipTaskbar(bool),
@@ -502,9 +500,10 @@ pub(crate) struct AppWindow {
     objc2::rc::Retained<crate::platform::macos::FullscreenTransition>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct AppWindowAttrs {
   pub(crate) inner: WindowAttributes,
+  pub(crate) focusable: bool,
   pub(crate) center: bool,
   pub(crate) background_color: Option<Color>,
   pub(crate) prevent_overflow: Option<Size>,
@@ -537,6 +536,45 @@ pub(crate) struct AppWindowAttrs {
     target_os = "openbsd"
   ))]
   pub(crate) transient_for: Option<gtk::Window>,
+}
+
+impl Default for AppWindowAttrs {
+  fn default() -> Self {
+    Self {
+      inner: WindowAttributes::default(),
+      focusable: true,
+      center: false,
+      background_color: None,
+      prevent_overflow: None,
+      #[cfg(target_os = "macos")]
+      traffic_light_position: None,
+      #[cfg(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
+      visible_on_all_workspaces: false,
+      #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
+      skip_taskbar: false,
+      #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
+      transient_for: None,
+    }
+  }
 }
 
 impl AppWindow {
@@ -573,6 +611,9 @@ impl AppWindow {
   /// routinely downgrades to a taskbar highlight. Both get a native nudge
   /// first.
   pub(crate) fn activate(&self) {
+    if !self.attrs.focusable {
+      return;
+    }
     #[cfg(target_os = "macos")]
     crate::platform::macos::activate_application();
 
@@ -694,8 +735,25 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
     prepare_window_attributes(event_loop, &mut attrs);
 
+    // Install the native focus policy before mapping, otherwise even a short-lived
+    // initial activation steals keyboard input from the application being controlled.
+    let mut native_attrs = attrs.inner.clone();
+    if !attrs.focusable {
+      native_attrs.active = false;
+      native_attrs.visible = false;
+      #[cfg(target_os = "macos")]
+      {
+        use winit::platform::macos::WindowAttributesMacOS;
+        let platform = native_attrs
+          .platform
+          .take()
+          .and_then(|attrs| attrs.cast::<WindowAttributesMacOS>().ok())
+          .unwrap_or_default();
+        native_attrs.platform = Some(Box::new(platform.with_panel(true)));
+      }
+    }
     let window = event_loop
-      .create_window(attrs.inner.clone())
+      .create_window(native_attrs)
       .map_err(|e| Error::CreateWindow(Box::new(e)))?;
 
     #[cfg(any(
@@ -710,7 +768,7 @@ impl<T: UserEvent> WinitCefApp<T> {
     })?;
 
     let winit_id = window.id();
-    let pending_activation = (attrs.inner.active && attrs.inner.visible)
+    let pending_activation = (attrs.focusable && attrs.inner.active && attrs.inner.visible)
       .then(|| Instant::now() + PENDING_ACTIVATION_TIMEOUT);
     #[cfg(target_os = "macos")]
     let fullscreen_transition = {
@@ -748,6 +806,13 @@ impl<T: UserEvent> WinitCefApp<T> {
       #[cfg(target_os = "macos")]
       fullscreen_transition,
     };
+
+    if !appwindow.attrs.focusable {
+      appwindow.apply_focusable();
+      if appwindow.attrs.inner.visible {
+        appwindow.window.set_visible(true);
+      }
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -1212,8 +1277,15 @@ impl<T: UserEvent> WinitCefApp<T> {
         window.set_max_surface_size(max_size);
       }
 
-      WindowMessage::SetFocusable(_) => {
-        // TODO
+      WindowMessage::SetFocusable(focusable) => {
+        appwindow.attrs.focusable = focusable;
+        if !focusable {
+          appwindow.pending_activation = None;
+        }
+        for child in &appwindow.children {
+          child.set_focusable(focusable);
+        }
+        appwindow.apply_focusable();
       }
       WindowMessage::SetProgressBar(state) => {
         #[cfg(target_os = "macos")]

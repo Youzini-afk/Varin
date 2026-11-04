@@ -93,3 +93,6 @@ mod benchmark;
 
 #[cfg(any(feature = "desktop", test))]
 mod computer_registry;
+
+#[cfg(any(feature = "desktop", test))]
+mod preview;

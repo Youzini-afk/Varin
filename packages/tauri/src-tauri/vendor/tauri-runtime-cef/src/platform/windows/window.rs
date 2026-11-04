@@ -12,7 +12,7 @@ use windows::Win32::{
   Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
   System::Com::{CLSCTX_SERVER, CoCreateInstance},
   UI::{
-    Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled},
+    Input::KeyboardAndMouse::{EnableWindow, GetActiveWindow, IsWindowEnabled, SetActiveWindow},
     Shell::{
       ITaskbarList3, TBPF_ERROR, TBPF_INDETERMINATE, TBPF_NOPROGRESS, TBPF_NORMAL, TBPF_PAUSED,
       TaskbarList,
@@ -26,6 +26,31 @@ use crate::{window::AppWindow, window_handle::SoftbufferWindowHandle};
 use super::icon::icon_to_hicon;
 
 impl AppWindow {
+  pub(crate) fn apply_focusable(&self) {
+    use windows::Win32::UI::{Shell::SetWindowSubclass, WindowsAndMessaging::*};
+    // NOACTIVATE does not disable the window or discard mouse clicks. The
+    // subclass also handles active-window tracking and winit style rewrites.
+    unsafe {
+      let hwnd = self.hwnd();
+      let _ = SetWindowSubclass(
+        hwnd,
+        Some(focus_subclass_proc),
+        FOCUS_SUBCLASS_ID,
+        usize::from(self.attrs.focusable),
+      );
+      let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+      let style = if self.attrs.focusable {
+        style & !(WS_EX_NOACTIVATE.0 as isize)
+      } else {
+        style | WS_EX_NOACTIVATE.0 as isize
+      };
+      SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
+      if !self.attrs.focusable && GetActiveWindow() == hwnd {
+        let _ = SetActiveWindow(HWND::default());
+      }
+    }
+  }
+
   pub(crate) fn cef_host_handle(&self) -> cef::sys::cef_window_handle_t {
     cef::sys::HWND(self.hwnd().0 as *mut _)
   }
@@ -170,5 +195,70 @@ impl AppWindow {
     };
     result.ok()?;
     Some((rect.bottom - rect.top) as u32)
+  }
+}
+
+const FOCUS_SUBCLASS_ID: usize = 0x5443464f;
+
+unsafe extern "system" fn focus_subclass_proc(
+  hwnd: HWND,
+  message: u32,
+  wparam: windows::Win32::Foundation::WPARAM,
+  lparam: windows::Win32::Foundation::LPARAM,
+  subclass_id: usize,
+  focusable: usize,
+) -> windows::Win32::Foundation::LRESULT {
+  use windows::Win32::{
+    Foundation::LRESULT,
+    UI::{
+      Shell::{DefSubclassProc, RemoveWindowSubclass},
+      WindowsAndMessaging::*,
+    },
+  };
+  unsafe {
+    if focusable == 0 {
+      if message == WM_MOUSEACTIVATE {
+        // MA_NOACTIVATEANDEAT would lose the overlay's first click.
+        return LRESULT(MA_NOACTIVATE as isize);
+      }
+      if message == WM_WINDOWPOSCHANGING {
+        let position = &mut *(lparam.0 as *mut WINDOWPOS);
+        position.flags |= SWP_NOACTIVATE;
+      }
+      if message == WM_STYLECHANGING && wparam.0 as i32 == GWL_EXSTYLE.0 {
+        let style = &mut *(lparam.0 as *mut STYLESTRUCT);
+        style.styleNew |= WS_EX_NOACTIVATE.0;
+      }
+    }
+    if message == WM_NCDESTROY {
+      let _ = RemoveWindowSubclass(hwnd, Some(focus_subclass_proc), subclass_id);
+    }
+    DefSubclassProc(hwnd, message, wparam, lparam)
+  }
+}
+
+#[cfg(test)]
+mod focus_tests {
+  use super::*;
+  use windows::Win32::{
+    Foundation::{LPARAM, WPARAM},
+    UI::WindowsAndMessaging::{MA_NOACTIVATE, WM_MOUSEACTIVATE},
+  };
+
+  #[test]
+  fn nonfocusable_mouse_activation_keeps_the_click() {
+    // This path must return before forwarding to the HWND, so no native window
+    // or desktop is needed. NOACTIVATEANDEAT would drop the actual UI action.
+    let result = unsafe {
+      focus_subclass_proc(
+        HWND::default(),
+        WM_MOUSEACTIVATE,
+        WPARAM(0),
+        LPARAM(0),
+        FOCUS_SUBCLASS_ID,
+        0,
+      )
+    };
+    assert_eq!(result.0, MA_NOACTIVATE as isize);
   }
 }

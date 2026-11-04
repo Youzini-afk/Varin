@@ -1,4 +1,5 @@
 import React from 'react';
+import { SandboxedHtmlFrame } from '@/components/ui/SandboxedHtmlFrame';
 import type { ComputerFrame, ComputerGesture } from '@varin/protocol';
 import { COMPUTER_FEEDBACK_HTML } from '@/lib/computerFeedback';
 import { useI18n } from '@/lib/i18n';
@@ -28,6 +29,6 @@ export const ComputerFeedback = React.forwardRef<ComputerFeedbackHandle, { bound
   }, [ready, bounds, configuration, disabled, clear]);
   // Match srcdoc's normal color scheme: Chromium paints an opaque canvas when
   // the iframe inherits a dark scheme but its transparent document uses light.
-  return <iframe ref={ref} srcDoc={COMPUTER_FEEDBACK_HTML} sandbox="allow-scripts" tabIndex={-1} title={t('computer.feedback.title')} style={{ colorScheme: 'normal' }}
+  return <SandboxedHtmlFrame ref={ref} html={COMPUTER_FEEDBACK_HTML} policy="feedback" tabIndex={-1} title={t('computer.feedback.title')} style={{ colorScheme: 'normal' }}
     aria-hidden="true" onLoad={() => setReady(true)} className="pointer-events-none absolute inset-0 h-full w-full border-0" />;
 });
