@@ -1390,12 +1390,11 @@ async fn varin_frontend_migration(
     if webview.label() != "main" {
         return Err("Only the main application may migrate its client preferences".into());
     }
-    let method = match action.as_str() {
-        "read" => "frontendMigrationRead",
-        "complete" => "frontendMigrationComplete",
-        _ => return Err("Unknown client migration action".into()),
-    };
-    state.setting(method,json!({"id":id,"digest":digest,"importedKeys":imported_keys,"retainedKeys":retained_keys})).await
+    match action.as_str() {
+        "read" => state.setting("frontendMigrationRead", json!({"serialized":true})).await,
+        "complete" => state.setting("frontendMigrationComplete",json!({"id":id,"digest":digest,"importedKeys":imported_keys,"retainedKeys":retained_keys})).await,
+        _ => Err("Unknown client migration action".into()),
+    }
 }
 #[tauri::command]
 async fn varin_file_grant_existing(

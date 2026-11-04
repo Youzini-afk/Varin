@@ -3,10 +3,10 @@ import type { DesktopNativeTransport } from './bridge.js';
 /** Runs before any React/Zustand module hydrates. A new shell never overwrites a
  * preference already authored in its own origin, including on partial retries. */
 export async function importDesktopFrontendState(storage: Storage, transport: DesktopNativeTransport, subtle: SubtleCrypto): Promise<DesktopFrontendImportReceipt | null> {
-  const raw = await transport.invoke<unknown>('varin_frontend_migration', { action: 'read' });
+  const raw = await transport.invoke<string | null>('varin_frontend_migration', { action: 'read' });
   if (raw === null)
     return null;
-  const stage = validateDesktopFrontendStage(raw);
+  const stage = validateDesktopFrontendStage(JSON.parse(raw));
   const bytes = new TextEncoder().encode(JSON.stringify(stage.payload));
   const digest = [...new Uint8Array(await subtle.digest('SHA-256', bytes))].map(v => v.toString(16).padStart(2, '0')).join('');
   if (digest !== stage.digest)

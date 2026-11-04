@@ -35,7 +35,11 @@ export function createDesktopSettingsOwner(filePath = path.join(resolveVarinData
         await store.update(root=>{root.desktopNativeMigration=receipt;const frontend=record(root.desktopFrontendMigration);if(frontend.stage==='imported')root.desktopFrontendMigration={...frontend,credentialsComplete:receipt.credentialsComplete};});
         return null;
       }
-      case 'frontendMigrationRead': return createDesktopFrontendMigrationOwner(store).read();
+      case 'frontendMigrationRead': {
+        const stage = createDesktopFrontendMigrationOwner(store).read();
+        // CEF IPC reorders object keys. Preserve the serialization used by the digest.
+        return args.serialized === true && stage ? JSON.stringify(stage) : stage;
+      }
       case 'frontendMigrationComplete': return createDesktopFrontendMigrationOwner(store).complete(args);
       case 'snapshot': {
         const root = store.readSync();

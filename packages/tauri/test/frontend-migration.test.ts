@@ -22,7 +22,7 @@ function fixture() {
     async invoke<T>(_method: string, args?: unknown) {
       calls.push(args); return ((args as {
         action: string;
-      }).action === 'read' ? stage : null) as T;
+      }).action === 'read' ? JSON.stringify(stage) : null) as T;
     }, async listen() { return () => { }; }
   }; return { stage, calls, transport };
 }
