@@ -76,6 +76,21 @@ function assertSettled(draft: ThreadDraft): void {
     throw new Error('This draft has a send or attachment operation awaiting confirmation. Keep Mini Chat open until it settles.');
   }
 }
+/** Blob URLs are renderer-local assets only in attachment holders. Ordinary
+ * composer text, filenames and workflow output may legitimately discuss them. */
+function assertPortableAttachments(draft: ThreadDraft): void {
+  const blobURL = (value: unknown) => typeof value === 'string' && value.startsWith('blob:');
+  const files = [...(draft.files ?? []), ...(draft.firstMessageReceipt?.files ?? [])];
+  const images = [...draft.images, ...(draft.firstMessageReceipt?.images ?? [])];
+  const workflowAttachments = [...(draft.composerWorkflow?.assist?.pending?.attachments ?? []), ...(draft.composerWorkflow?.handoff?.pending?.attachments ?? [])];
+  if (images.some(image => blobURL(image.data)) || files.some(file => blobURL(file.data) || blobURL(file.attachment?.ref))
+    || draft.materials.some(material => blobURL(material.snapshotId))
+    || draft.selectedAttachments?.some(file => blobURL(file.selection.ref) || blobURL(file.attachment?.ref))
+    || draft.references?.some(reference => reference.target.kind === 'attachment' && blobURL(reference.target.attachment.ref))
+    || workflowAttachments.some(attachment => blobURL(attachment.ref)) || blobURL(draft.composerWorkflow?.recipient?.avatar)) {
+    throw new Error('A source window Blob URL is not an attachment receipt. The original draft remains in Mini Chat.');
+  }
+}
 function base64(bytes: Uint8Array): string {
   const chunks: string[] = [];
   for (let start = 0; start < bytes.length; start += 0x8000) chunks.push(String.fromCharCode(...bytes.subarray(start, start + 0x8000)));
@@ -100,7 +115,6 @@ export async function serializeDesktopDraft(draft: ThreadDraft): Promise<Record<
       return { __varinDraftBlob: 1, mimeType: value.type, base64: base64(new Uint8Array(await value.arrayBuffer())) };
     }
     if (typeof value === 'string') {
-      if (value.startsWith('blob:')) throw new Error('A renderer-local attachment could not be copied. The original draft remains in Mini Chat.');
       budget += new TextEncoder().encode(value).byteLength;
       if (budget > DESKTOP_DRAFT_TRANSFER_MAX_BYTES) throw transferLimit();
       return value;
@@ -130,7 +144,9 @@ export async function serializeDesktopDraft(draft: ThreadDraft): Promise<Record<
     if (imageBytes > DESKTOP_DRAFT_TRANSFER_MAX_BYTES) throw transferLimit();
     images.push({ ...image, data: base64(new Uint8Array(await blob.arrayBuffer())) });
   }
-  return await encode({ ...draft, images }) as Record<string, unknown>;
+  const copy = { ...draft, images };
+  assertPortableAttachments(copy);
+  return await encode(copy) as Record<string, unknown>;
 }
 
 export function deserializeDesktopDraft(transfer: DesktopDraftTransfer, targetGeneration: number): ThreadDraft {
@@ -142,7 +158,6 @@ export function deserializeDesktopDraft(transfer: DesktopDraftTransfer, targetGe
     }
     if (Array.isArray(value)) return value.map(decode);
     if (record) return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, decode(item)]));
-    if (typeof value === 'string' && value.startsWith('blob:')) throw new Error('A source window Blob URL is not an attachment receipt');
     return value;
   };
   const value = object(decode(transfer.draft));
@@ -154,6 +169,7 @@ export function deserializeDesktopDraft(transfer: DesktopDraftTransfer, targetGe
     })))) throw new Error('The transferred composer data is invalid');
   const draft = value as unknown as ThreadDraft;
   assertSettled(draft);
+  assertPortableAttachments(draft);
   const generation = (original: number | undefined) => original === transfer.sourceHostGeneration ? targetGeneration : -1;
   return { ...draft,
     files: draft.files?.map(file => ({ ...file, preparationHost: generation(file.preparationHost) })),

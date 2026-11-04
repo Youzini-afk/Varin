@@ -135,6 +135,39 @@ it('does not forward Blob URLs as images and does not revive stale Host referenc
   } finally { fetchBlob.mockRestore(); URL.revokeObjectURL(original.images[0]!.data); }
 });
 
+it('preserves ordinary text and filenames beginning with blob: without fetching them as attachments', async () => {
+  const source = completeDraft();
+  source.text = 'blob: URLs are local to their renderer. Explain why.';
+  source.files![0].filename = 'blob:notes.txt'; source.materials[0].filename = 'blob:paper.pdf';
+  source.composerWorkflow = { assist: { result: 'blob: URL explanation' } };
+  const fetch = vi.spyOn(globalThis, 'fetch');
+  try {
+    const received = deserializeDesktopDraft(nativeJSON(await transfer(source)), 12);
+    expect(received.text).toBe(source.text);
+    expect(received.files![0].filename).toBe('blob:notes.txt');
+    expect(received.materials[0].filename).toBe('blob:paper.pdf');
+    expect(received.composerWorkflow?.assist?.result).toBe('blob: URL explanation');
+    expect(fetch).not.toHaveBeenCalled();
+  } finally { fetch.mockRestore(); }
+});
+
+it.each(['file', 'selection', 'reference', 'material', 'preview-image'] as const)('still rejects renderer-local Blob URLs in %s attachment holders', async holder => {
+  const source = completeDraft();
+  if (holder === 'file') source.files![0].attachment!.ref = 'blob:source-file';
+  if (holder === 'selection') source.selectedAttachments![0].selection = { ref: 'blob:source-file' };
+  if (holder === 'reference') source.references![0].target = { kind: 'attachment', attachment: { ref: 'blob:source-file', filename: 'notes.txt', mimeType: 'text/plain', byteLength: 5 } };
+  if (holder === 'material') source.materials[0].snapshotId = 'blob:source-document';
+  if (holder === 'preview-image') source.firstMessageReceipt = { key: 'first-send', inputId: 'accepted-input', text: '', files: [], images: [{ data: 'blob:source-image', mimeType: 'image/png' }] };
+  await expect(serializeDesktopDraft(source)).rejects.toThrow('not an attachment receipt');
+});
+
+it('refuses incoming image Blob URLs even when plain blob: text is allowed', async () => {
+  const payload = await transfer();
+  payload.draft.text = 'blob: this is ordinary text';
+  payload.draft.images = [{ data: 'blob:foreign-renderer', mimeType: 'image/png' }];
+  expect(() => deserializeDesktopDraft(payload, 12)).toThrow('not an attachment receipt');
+});
+
 it('acknowledges only after real receiving-store installation and survives removal of the original source', async () => {
   const payload = await transfer(); const target = new EventTarget();
   const dispose = listenDesktopDraftTransfers(target);
