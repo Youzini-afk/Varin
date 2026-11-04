@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -51,6 +51,9 @@ test('a missing or extra-data marker cannot authorize reopening a private sessio
 
 const supported=['linux','win32'].includes(process.platform);
 const native={skip:!supported,timeout:30_000};
+// Compilation and Cargo's shared build lock are preparation, not part of a
+// launched writer's readiness or original-scope shutdown observation budget.
+before(async()=>{if(supported)await prepareNativeProcessOwner();});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const exists=file=>fs.stat(file).then(()=>true,()=>false);
 const count=file=>fs.readFile(file,'utf8').then(text=>text.length,()=>0);
