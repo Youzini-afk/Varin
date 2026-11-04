@@ -17,7 +17,9 @@ export async function prepareDesktopRenderer(): Promise<void> {
         notice.textContent=chinese?'检测到尚未处理的旧版桌面资料。此单引擎版本未包含受控迁移工具，尚未启动新的本地服务。原数据已保留。请从 Varin 原发布页安装签名过的 Electron → Tauri 过渡版本，完成迁移后再使用此版本。不要选择来历不明的程序。':'Previous desktop data needs the signed transition release before this single-engine version can open it. No new local service has started, and your original data is intact. Install the Electron → Tauri transition release from Varin’s original releases page, then return to this version. Do not select an unverified executable.';
         const link=document.createElement('a');link.href='https://github.com/Youzini-afk/Varin/releases';link.target='_blank';link.rel='noopener noreferrer';link.textContent=chinese?'打开 Varin 原发布页':'Open Varin’s original releases';
         root.replaceChildren(notice,link);
-      }else{notice.textContent='Varin could not initialize this desktop window. Close and reopen the window to retry.';root.replaceChildren(notice);}
+      }else{notice.textContent=navigator.language.toLowerCase().startsWith('zh')?'Varin 启动失败。请退出应用后重新打开。':'Varin could not initialize this desktop window. Quit and reopen the app to retry.';root.replaceChildren(notice);}
+      // React never mounts on this path, so it cannot retire the pre-paint cover.
+      document.getElementById('initial-loading')?.remove();
     }
     throw error;
   }

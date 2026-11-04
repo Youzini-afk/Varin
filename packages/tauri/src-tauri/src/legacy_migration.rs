@@ -11,6 +11,7 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    ffi::OsString,
     path::Path,
     process::Stdio,
     sync::{Arc, Mutex},
@@ -282,11 +283,22 @@ impl Drop for HiddenPage {
         }
     }
 }
-async fn read_frame(input: &mut (impl AsyncRead + Unpin)) -> Reply {
-    let length = input
-        .read_u32()
+async fn read_frame(input: &mut (impl AsyncRead + Unpin), first_response: bool) -> Reply {
+    let mut header = [0; 4];
+    input
+        .read_exact(&mut header)
         .await
-        .map_err(|_| "Legacy exporter pipe ended before its receipt")? as usize;
+        .map_err(|_| "Legacy exporter pipe ended before its receipt")?;
+    // The Windows Electron launcher can emit one CRLF before JS runs. A valid
+    // length prefix cannot begin with these bytes. Keep subsequent frames strict.
+    if cfg!(windows) && first_response && header.starts_with(b"\r\n") {
+        header.copy_within(2..4, 0);
+        input
+            .read_exact(&mut header[2..])
+            .await
+            .map_err(|_| "Legacy exporter pipe ended before its receipt")?;
+    }
+    let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > data::MAX_BYTES {
         return Err("Legacy exporter record exceeds its private pipe budget".into());
     }
@@ -356,7 +368,8 @@ pub async fn prepare(
         .config_dir()
         .map_err(|_| "Previous desktop profile location is unavailable")?
         .join("Varin");
-    let present = tokio::task::spawn_blocking(move || data::legacy_profile_present(&original))
+    let profile = original.clone();
+    let present = tokio::task::spawn_blocking(move || data::legacy_profile_present(&profile))
         .await
         .map_err(|_| "Previous desktop profile inspection stopped")??;
     let Some(legacy) = runtime.manifest.legacy_electron.as_ref() else {
@@ -405,8 +418,13 @@ pub async fn prepare(
     let executable = contained_file(&runtime.root, &legacy.executable)
         .map_err(|_| "Legacy exporter is not a contained native binary")?;
     let mut command = Command::new(executable);
+    // Read the same profile the native owner inspected, including when the OS
+    // config directory differs from Chromium's default user data directory.
+    let mut profile_argument = OsString::from("--user-data-dir=");
+    profile_argument.push(&original);
     command
         .arg("--varin-export-private-state")
+        .arg(profile_argument)
         .env("VARIN_DATA_DIR", data_dir)
         .env_remove("NODE_OPTIONS")
         .env_remove("ELECTRON_RUN_AS_NODE")
@@ -432,7 +450,7 @@ pub async fn prepare(
     let mut application: Option<HiddenPage> = None;
     let outcome:Reply=async{
         write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"begin","nonce":nonce,"lease":lease.record()})).await?;
-        let ready=read_frame(&mut input).await?;check_frame(&ready,&nonce)?;
+        let ready=read_frame(&mut input,true).await?;check_frame(&ready,&nonce)?;
         if ready["kind"]!="ready" || ready["sourceVersion"]!=legacy.version || ready["browserStatus"]!="not-migrated"
             || ready["credentialCount"].as_u64().is_none_or(|count| count > 6) {
             return Err("Legacy exporter version or scope was not confirmed".into());
@@ -444,7 +462,7 @@ pub async fn prepare(
         let mut target=ui.cdp.entries("http://tauri.localhost").await?;
         let mut credentials=Vec::new();let mut sequence=0u64;
         loop{
-            let record=read_frame(&mut input).await?;check_frame(&record,&nonce)?;
+            let record=read_frame(&mut input,false).await?;check_frame(&record,&nonce)?;
             if record["kind"]=="done"{if record["records"].as_u64()!=Some(sequence)||ready["credentialCount"].as_u64()!=Some(credentials.len()as u64){return Err("Legacy export receipt omitted original items".into())}break}
             sequence+=1;if record["sequence"].as_u64()!=Some(sequence){return Err("Legacy private record ordering is invalid".into())}
             let status=match record["kind"].as_str(){

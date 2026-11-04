@@ -14,9 +14,11 @@ it('blocks normal startup and shows the fixed original release recovery path for
  expect(document.querySelector('a')?.getAttribute('href')).toBe('https://github.com/Youzini-afk/Varin/releases');
  expect(document.querySelector('a')?.getAttribute('target')).toBe('_blank');
 });
-it('does not expose arbitrary native failure text or invent a recovery executable URL',async()=>{
- const {window}=parseHTML('<html><body><div id="root"></div></body></html>');Object.defineProperty(window,'top',{value:window,configurable:true});Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
+it('reveals the startup error without exposing arbitrary native failure details',async()=>{
+ const {window}=parseHTML('<html><body><div id="initial-loading"></div><div id="root"></div></body></html>');Object.defineProperty(window,'top',{value:window,configurable:true});Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
  vi.stubGlobal('window',window);vi.stubGlobal('document',window.document);vi.stubGlobal('navigator',{language:'en'});
  boot.initialize.mockRejectedValueOnce('https://untrusted.test/executable?secret=fixture');
  await expect(prepareDesktopRenderer()).rejects.toBe('https://untrusted.test/executable?secret=fixture');expect(document.body.textContent).not.toContain('secret');expect(document.querySelector('a')).toBeNull();
+ expect(document.getElementById('initial-loading')).toBeNull();
+ expect(document.querySelector('[role="alert"]')?.textContent).toContain('Quit and reopen');
 });
