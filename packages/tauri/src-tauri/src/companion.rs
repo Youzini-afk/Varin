@@ -125,7 +125,7 @@ impl CompanionWindows {
         emit: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> Result<Self, String> {
         let registry = registry(&app)?;
-        registry.register(|owner_id| Self {
+        let owner = registry.register(|owner_id| Self {
             app: app.clone(),
             service,
             data_dir,
@@ -133,7 +133,46 @@ impl CompanionWindows {
             owner_id,
             emit,
             lifecycle: Arc::default(),
-        })
+        })?;
+        owner.watch_displays();
+        Ok(owner)
+    }
+
+    fn watch_displays(&self) {
+        // Tauri does not expose monitor hotplug/work-area notifications. Observe
+        // native topology only while this original owner has companion surfaces;
+        // per-window ScaleFactorChanged misses unplugging a same-DPI monitor.
+        let owner = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut previous = None;
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if !owner.registry.active(owner.owner_id) {
+                    break;
+                }
+                match owner.registry.snapshot(owner.owner_id) {
+                    Ok(surfaces) if surfaces.is_empty() => {
+                        previous = None;
+                        continue;
+                    }
+                    Err(_) => break,
+                    _ => {}
+                }
+                let Ok((displays, primary)) = owner.displays() else {
+                    continue;
+                };
+                let current = geometry::topology(displays, primary);
+                if previous
+                    .as_ref()
+                    .is_some_and(|previous| previous != &current)
+                {
+                    owner.event(json!({"kind":"displays"}));
+                }
+                previous = Some(current);
+            }
+        });
     }
     /// An exited Node owner cannot send its final window closes. Native lifetime
     /// remains here until CEF confirms each original browser is actually gone.

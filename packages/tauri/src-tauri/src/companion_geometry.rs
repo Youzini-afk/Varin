@@ -25,7 +25,7 @@ impl Rect {
             * (self.bottom().min(b.bottom()) - self.y.max(b.y)).max(0.)
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Display {
     pub id: u64,
     pub physical: Rect,
@@ -70,6 +70,13 @@ impl Display {
         }
     }
 }
+/// Enumeration order is not a display change. Work area, position, scale,
+/// membership and primary identity all are, even without a window DPI event.
+pub fn topology(mut displays: Vec<Display>, primary: u64) -> (Vec<Display>, u64) {
+    displays.sort_by_key(|display| display.id);
+    (displays, primary)
+}
+
 // Preserve start/end alignment and partial-overlap anchors in the parent's DIP
 // lane, including a larger child that straddles both ends of its parent.
 fn lane_offset(
@@ -260,5 +267,34 @@ mod tests {
             false,
         );
         assert_eq!(ds[1].logical.x, 1920.);
+    }
+}
+
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+    #[test]
+    fn detects_hotplug_work_area_primary_and_dpi_changes_without_enumeration_noise() {
+        let rect = Rect {
+            x: 0.,
+            y: 0.,
+            width: 1920.,
+            height: 1080.,
+        };
+        let first = Display::new(1, rect, rect, 1.);
+        let second = Display::new(2, Rect { x: 1920., ..rect }, Rect { x: 1920., ..rect }, 1.);
+        let original = topology(vec![first.clone(), second.clone()], 1);
+        assert_eq!(original, topology(vec![second.clone(), first.clone()], 1));
+        assert_ne!(original, topology(vec![first.clone()], 1));
+        assert_ne!(original, topology(vec![first.clone(), second.clone()], 2));
+        let mut changed = second.clone();
+        changed.work.height -= 48.;
+        assert_ne!(original, topology(vec![first.clone(), changed], 1));
+        let mut changed = second.clone();
+        changed.scale = 2.;
+        assert_ne!(original, topology(vec![first.clone(), changed], 1));
+        let mut changed = second;
+        changed.physical.x = -1920.;
+        assert_ne!(original, topology(vec![first, changed], 1));
     }
 }

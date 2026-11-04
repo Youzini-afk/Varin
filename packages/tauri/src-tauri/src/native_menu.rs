@@ -77,13 +77,21 @@ impl NativeMenus {
         let handle = app.clone();
         app.run_on_main_thread_blocking(move || {
             let menu = application_menu(&handle, &locale)?;
-            handle.set_menu(menu.clone()).map_err(error)?;
-            tauri_runtime_cef::set_context_menu_labels(policy::context_menu_labels(&locale));
-            if !cfg!(target_os = "macos") {
-                for window in handle.windows().values() {
-                    let _ = window.hide_menu();
+            if cfg!(target_os = "macos") {
+                handle.set_menu(menu.clone()).map_err(error)?;
+            } else {
+                // Do not install an app-wide menu: newly created windows would
+                // inherit a visible menubar, including inert companion surfaces.
+                for window in handle.webview_windows().values().filter(|window| {
+                    window.label() == "main"
+                        || window.label().starts_with("workbench-")
+                        || window.label().starts_with("mini-chat-")
+                }) {
+                    window.set_menu(menu.clone()).map_err(error)?;
+                    window.hide_menu().map_err(error)?;
                 }
             }
+            tauri_runtime_cef::set_context_menu_labels(policy::context_menu_labels(&locale));
             let owner = handle.state::<Self>();
             let mut state = owner.state.lock().map_err(|_| "Native menus unavailable")?;
             state.locale = locale;
@@ -92,6 +100,21 @@ impl NativeMenus {
             render_tray(&handle, &mut state)
         })
         .map_err(error)?
+    }
+    pub fn attach_window(&self, window: &WebviewWindow) -> Result<(), String> {
+        if !cfg!(target_os = "macos") {
+            let menu = self
+                .state
+                .lock()
+                .map_err(|_| "Native menus unavailable")?
+                .menu
+                .clone();
+            if let Some(menu) = menu {
+                window.set_menu(menu).map_err(error)?;
+                window.hide_menu().map_err(error)?;
+            }
+        }
+        Ok(())
     }
     pub fn popup(&self, window: &WebviewWindow, args: &Value) -> Result<(), String> {
         let menu = {

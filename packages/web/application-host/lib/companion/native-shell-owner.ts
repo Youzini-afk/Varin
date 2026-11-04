@@ -161,6 +161,15 @@ export function createNativeShellCompanionOwner(options: { port: DesktopNativePo
         return args.action === 'list' ? operation() : serialized(operation);
       }
       case 'desktop_set_companion': return serialized(async () => { if (typeof args.enabled !== 'boolean') throw new Error('Companion requires an explicit boolean'); if (args.enabled) { const library=await ensureAssets(); await library.ready(selected()); await wake(); } else await closeAll(); await store.update(root => {root.desktopCompanionEnabled=args.enabled;}); changed();return status(); });
+      case 'desktop_get_window_pinned': { const owner = await requireOwner(request.windowLabel); await refresh(); return { pinned: owner.isAlwaysOnTop() }; }
+      case 'desktop_set_window_pinned': {
+        const owner = await requireOwner(request.windowLabel);
+        if (typeof args.pinned !== 'boolean') throw new Error('Pinned state requires an explicit boolean');
+        owner.setAlwaysOnTop(args.pinned);
+        await owner.flush();
+        scenes.refresh(owner.id);
+        return { pinned: owner.isAlwaysOnTop() };
+      }
       case 'desktop_companion_presented': { const owner=await requireOwner(request.windowLabel); if (args.status==='ready') presentation.presented(owner); else if (args.status==='failed' && typeof args.message==='string') presentation.fail(owner,args.message); else throw new Error('Invalid companion presentation result'); await owner.flush(); changed(); return null; }
       case 'desktop_companion_scene': { const owner=await requireOwner(request.windowLabel); const descriptor=readCompanionSceneDescriptor(args.descriptor); if (descriptor.drawing?.bundle==='review') throw new Error('Review drawing requires explicit developer review'); scenes.update(owner,descriptor,args.viewport as CompanionSceneViewport);scenes.block(owner.id,movement.isDragging(owner.id));return scenes.inspectionReceipt(owner.id); }
       case 'desktop_companion_stool': { const owner=await requireOwner(request.windowLabel); if (args.phase==='clear') {stools.clear(owner.id);return null;} if (args.phase!=='lift' && args.phase!=='landing') throw new Error('Invalid world stool phase'); const origin=args.phase==='lift' ? origins.get(owner.id) ?? owner.getContentBounds() : owner.getContentBounds();stools.show(owner,companionWorldRect(origin,args.viewport),args.phase); return null; }

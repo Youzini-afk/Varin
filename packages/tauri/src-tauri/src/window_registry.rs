@@ -32,6 +32,94 @@ pub(crate) fn authorize<'a, C, D>(
     Ok(record)
 }
 
+/// Open-in-main retains the caller's Host and draft context. A partial thread
+/// identity is an error, never permission to discard it and focus another Host.
+pub(crate) fn main_window_action(args: &Value) -> Result<Value, String> {
+    let value = |key: &str| args[key].as_str().unwrap_or("").trim();
+    let thread = value("threadId");
+    let branch = value("branchId");
+    if thread.is_empty() != branch.is_empty() {
+        return Err("Both thread and branch identities are required".into());
+    }
+    Ok(if !thread.is_empty() {
+        json!({"type":"focus-thread", "threadId":thread, "branchId":branch, "directory":value("directory")})
+    } else if args["mode"] == "draft" {
+        json!({"type":"new-thread", "directory":value("directory"), "projectId":value("projectId")})
+    } else {
+        json!({"type":"focus-runtime-window"})
+    })
+}
+
+pub(crate) fn workbench_target<C, D>(
+    windows: &HashMap<String, WindowRecord<C, D>>,
+    source: &str,
+    bootstrap: &Value,
+) -> Option<String> {
+    let key = crate::native_presentation::runtime_key(bootstrap);
+    windows
+        .iter()
+        .filter(|(label, record)| {
+            (label.as_str() == "main" || label.starts_with("workbench-"))
+                && record.close.is_some()
+                && record.bootstrap.as_ref().is_some_and(|candidate| {
+                    crate::native_presentation::runtime_key(candidate) == key
+                })
+        })
+        .min_by_key(|(label, _)| {
+            (
+                if label.as_str() == source {
+                    0
+                } else if label.as_str() == "main" {
+                    1
+                } else {
+                    2
+                },
+                label.as_str(),
+            )
+        })
+        .map(|(label, _)| label.clone())
+}
+
+pub(crate) fn navigation_event(action: &Value) -> Result<&'static str, String> {
+    match action["type"].as_str() {
+        Some("focus-thread") => Ok("varin:open-thread"),
+        Some("new-thread") => Ok("varin:open-draft-thread"),
+        Some("check-for-updates") => Ok("varin:check-for-updates"),
+        _ => Err("Unknown workbench navigation action".into()),
+    }
+}
+
+/// A pending document owns its queued intent until its own readiness receipt.
+/// Never silently drop it because startup is slow or a fixed queue fills up.
+pub(crate) fn queue_navigation<C, D>(
+    windows: &mut HashMap<String, WindowRecord<C, D>>,
+    label: &str,
+    bootstrap: &Value,
+    mut action: Value,
+) -> Result<Option<Value>, String> {
+    navigation_event(&action)?;
+    let record = windows
+        .get_mut(label)
+        .ok_or("Navigation window is closed")?;
+    let target = record
+        .bootstrap
+        .as_ref()
+        .ok_or("Navigation window is not ready")?;
+    if crate::native_presentation::runtime_key(target)
+        != crate::native_presentation::runtime_key(bootstrap)
+    {
+        return Err("Navigation window changed its Host".into());
+    }
+    action["apiBaseUrl"] = bootstrap["apiBaseUrl"].clone();
+    action["relayHostId"] = bootstrap["relayHostId"].clone();
+    if record.renderer_ready {
+        Ok(Some(action))
+    } else {
+        record.navigation.push(action);
+        Ok(None)
+    }
+}
+
 pub(crate) fn validate_browser_device_args(args: &Value) -> Result<(), String> {
     let action = args["action"]
         .as_str()
@@ -119,6 +207,93 @@ mod tests {
     }
     fn app_url() -> Url {
         Url::parse("http://tauri.localhost/mini-chat.html").unwrap()
+    }
+
+    #[test]
+    fn open_in_main_keeps_draft_context_and_rejects_partial_thread_identity() {
+        assert_eq!(
+            main_window_action(
+                &json!({"mode":"draft","directory":" /work ","projectId":"project"})
+            )
+            .unwrap(),
+            json!({"type":"new-thread","directory":"/work","projectId":"project"})
+        );
+        assert_eq!(
+            main_window_action(&json!({})).unwrap()["type"],
+            "focus-runtime-window"
+        );
+        for args in [
+            json!({"threadId":"t"}),
+            json!({"branchId":"b"}),
+            json!({"threadId":"t","branchId":" "}),
+        ] {
+            assert!(main_window_action(&args).is_err());
+        }
+        assert_eq!(
+            main_window_action(&json!({"threadId":"t","branchId":"b","directory":"/remote"}))
+                .unwrap()["type"],
+            "focus-thread"
+        );
+    }
+
+    #[test]
+    fn mini_chat_handoff_never_selects_a_workbench_on_another_host() {
+        let mut windows = windows();
+        for record in windows.values_mut() {
+            record.close = Some(());
+        }
+        let source = windows["mini-1"].bootstrap.clone().unwrap();
+        assert_eq!(workbench_target(&windows, "mini-1", &source), None);
+        let mut remote = record("https://mini.example/", "rotated", "remote");
+        remote.close = Some(());
+        windows.insert("workbench-1".into(), remote);
+        assert_eq!(
+            workbench_target(&windows, "mini-1", &source).as_deref(),
+            Some("workbench-1")
+        );
+        windows
+            .get_mut("workbench-1")
+            .unwrap()
+            .bootstrap
+            .as_mut()
+            .unwrap()["relayHostId"] = json!("other-relay");
+        assert_eq!(workbench_target(&windows, "mini-1", &source), None);
+    }
+
+    #[test]
+    fn navigation_retains_drafts_and_update_checks_until_the_target_is_ready() {
+        let mut windows = windows();
+        let source = windows["main"].bootstrap.clone().unwrap();
+        windows.get_mut("main").unwrap().renderer_ready = false;
+        let action =
+            main_window_action(&json!({"mode":"draft","directory":"/work","projectId":"p"}))
+                .unwrap();
+        for _ in 0..40 {
+            assert_eq!(
+                queue_navigation(&mut windows, "main", &source, action.clone()).unwrap(),
+                None
+            );
+        }
+        let updates = json!({"type":"check-for-updates"});
+        queue_navigation(&mut windows, "main", &source, updates.clone()).unwrap();
+        let record = windows.get_mut("main").unwrap();
+        assert_eq!(record.navigation.len(), 41);
+        assert_eq!(record.navigation[0]["projectId"], "p");
+        assert_eq!(record.navigation[0]["directory"], "/work");
+        assert!(record.navigation[0]["clientToken"].is_null());
+        assert_eq!(
+            navigation_event(record.navigation.last().unwrap()).unwrap(),
+            "varin:check-for-updates"
+        );
+        record.renderer_ready = true;
+        assert!(
+            queue_navigation(&mut windows, "main", &source, updates.clone())
+                .unwrap()
+                .is_some()
+        );
+        assert!(queue_navigation(&mut windows, "mini-1", &source, updates.clone()).is_err());
+        windows.remove("main");
+        assert!(queue_navigation(&mut windows, "main", &source, updates).is_err());
     }
 
     #[test]

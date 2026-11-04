@@ -6,6 +6,14 @@ Every trusted top-level window independently obtains `varin_bootstrap` before Ru
 
 The private local-Host restart event contains only the previous origin. The adapter re-reads the authorized bootstrap and uses the existing guarded runtime switch, preserving document/draft guards and editor surfaces. It checks identity both before queued preparation and at commit. A window already switched to a remote Host retains that endpoint and its credentials. This event is not exposed through the public desktop event catalog and does not reload a renderer.
 
+## Window presentation
+
+Mini Chat's Open in main action selects a workbench on the same Host, including relay identity. Draft handoff retains its directory and project; an incomplete Thread/branch identity is rejected. Native focus and event admission must succeed before Mini Chat closes. New workbenches always receive the main role rather than inheriting the caller's Mini Chat role. Navigation and update-menu intents wait for the target document's readiness; Mini Chat is not an update-dialog consumer.
+
+Windows and Linux attach the hidden application menu only to conversation windows, including later windows, while macOS retains its global menu. macOS transparency keeps the shared Save and Restart contract: persist the preference, honor the existing guarded shutdown, then relaunch with matching native and renderer backing.
+
+Companion pin changes pass through the surface's original Host owner and refresh its scene after the native receipt. While that owner has surfaces, native topology is sampled once a second because Tauri has no global display-change notification. Membership, primary display, work area, position and scale changes notify the original placement owner; enumeration order alone does not. Same-DPI hotplug and physical platform composition still require desktop verification.
+
 ## Computer Use presentation
 
 Each native service owns its original Host control holder and an owner-specific control window. The inert control links return only to that captured service channel. Native presentation does not own input execution or transfer the Host's human-input lease.

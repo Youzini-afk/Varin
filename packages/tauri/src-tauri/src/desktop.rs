@@ -190,6 +190,10 @@ fn create_window(
     bootstrap: Option<Value>,
     query: Option<&str>,
 ) -> Result<(), String> {
+    let bootstrap = bootstrap.map(|mut value| {
+        value["windowRole"] = json!(role);
+        value
+    });
     let path = if role == "mini-chat" {
         "mini-chat.html"
     } else {
@@ -212,8 +216,8 @@ fn create_window(
             "Varin".into()
         })
         .inner_size(
-            if role == "mini-chat" { 460. } else { 1280. },
-            if role == "mini-chat" { 680. } else { 840. },
+            if role == "mini-chat" { 520. } else { 1280. },
+            if role == "mini-chat" { 760. } else { 800. },
         )
         .data_directory(app.state::<DesktopState>().data_dir.join("cef/application"))
         .min_inner_size(
@@ -295,6 +299,8 @@ fn create_window(
             return Err(error.to_string());
         }
     };
+    app.state::<crate::native_menu::NativeMenus>()
+        .attach_window(&window)?;
     // The bundled app talks to its authenticated Host on 127.0.0.1. CEF treats
     // that as a loopback permission even though both ends belong to this app.
     // Scope it to the bundled origin in the application profile.
@@ -715,6 +721,19 @@ async fn varin_invoke(
             native(window.close())?;
             Ok(Value::Null)
         }
+        "desktop_get_window_pinned" | "desktop_set_window_pinned"
+            if webview.label().starts_with("companion-") =>
+        {
+            let process = crate::companion::process_for_window(&app, webview.label()).await?;
+            process
+                .request(
+                    "companionInvoke",
+                    json!({
+                        "command": command, "args": args, "windowLabel": webview.label()
+                    }),
+                )
+                .await
+        }
         "desktop_get_window_pinned" => Ok(json!({"pinned":native(window.is_always_on_top())?})),
         "desktop_set_window_pinned" => {
             let pinned = boolean(&args, "pinned")?;
@@ -726,35 +745,6 @@ async fn varin_invoke(
             if !cfg!(target_os = "macos") {
                 return Ok(json!({"supported":false,"enabled":false}));
             }
-            let windows: Vec<_> = app
-                .webview_windows()
-                .into_values()
-                .filter(|window| {
-                    window.label() == "main"
-                        || window.label().starts_with("workbench-")
-                        || window.label().starts_with("mini-chat-")
-                })
-                .collect();
-            for window in windows {
-                let active = crate::engine::macos_chrome::apply(&window, enabled).await?;
-                if let Some(record) = state
-                    .windows
-                    .lock()
-                    .map_err(|_| "Window registry unavailable")?
-                    .get_mut(window.label())
-                {
-                    record.native_ready.send_replace(Some(Ok(active)));
-                    if let Some(bootstrap) = record.bootstrap.as_mut() {
-                        bootstrap["macVibrancy"] = json!(active);
-                    }
-                }
-                emit(
-                    &app,
-                    window.label(),
-                    "varin:vibrancy-ready",
-                    json!({"ready":active}),
-                );
-            }
             state
                 .setting(
                     "setPreference",
@@ -765,7 +755,12 @@ async fn varin_invoke(
                 .preferences
                 .lock()
                 .map_err(|_| "Preferences unavailable")?["desktopVibrancy"] = json!(enabled);
-            Ok(json!({"supported":true,"enabled":enabled}))
+            // Renderer chrome is bootstrapped once. Preserve Save and Restart:
+            // do not change native backing while React still sees the old mode.
+            // A cancelled/failed drain rejects the call, so the UI can retry.
+            drain(&app).await?;
+            app.request_restart();
+            Ok(json!({"supported":true,"enabled":enabled,"requiresRestart":true}))
         }
         "desktop_set_window_theme" => {
             let theme = match args["themeMode"].as_str() {
@@ -1169,22 +1164,9 @@ async fn varin_invoke(
             Ok(Value::Null)
         }
         "desktop_focus_main_window" => {
-            if args["threadId"].is_string() && args["branchId"].is_string() {
-                let bootstrap = state.bootstrap(webview.label()).await?;
-                let mut action = args;
-                action["type"] = json!("focus-thread");
-                native_presentation_action(&app, webview.label(), bootstrap, action);
-            } else {
-                if app.get_webview_window("main").is_none() {
-                    create_window(&app, "main", "main", None, None)?;
-                }
-                let target = app
-                    .get_webview_window("main")
-                    .ok_or("Main window is unavailable")?;
-                native(target.show())?;
-                native(target.unminimize())?;
-                native(target.set_focus())?;
-            }
+            let bootstrap = state.bootstrap(webview.label()).await?;
+            let action = crate::window_registry::main_window_action(&args)?;
+            focus_runtime_window(&app, webview.label(), bootstrap, action)?;
             Ok(json!({"focused":true}))
         }
         "desktop_notify" => {
@@ -2209,7 +2191,23 @@ pub(crate) fn menu_action(app: &AppHandle, action: &str) {
         }
         "updates" => {
             if let Some(window) = target {
-                emit(app, window.label(), "varin:check-for-updates", Value::Null);
+                let app = app.clone();
+                let label = window.label().to_owned();
+                tauri::async_runtime::spawn(async move {
+                    let result = async {
+                        let bootstrap = bootstrap_for_window(&app, &label).await?;
+                        focus_runtime_window(
+                            &app,
+                            &label,
+                            bootstrap,
+                            json!({"type":"check-for-updates"}),
+                        )
+                    }
+                    .await;
+                    if let Err(error) = result {
+                        crate::dialogs::inform(&app, "Unable to check for updates", error);
+                    }
+                });
             }
         }
         "clear-cache" => {
@@ -2272,7 +2270,11 @@ pub(crate) fn menu_action(app: &AppHandle, action: &str) {
         }
         "devtools" => {
             if let Some(window) = target {
-                window.open_devtools();
+                if window.is_devtools_open() {
+                    window.close_devtools();
+                } else {
+                    window.open_devtools();
+                }
             }
         }
         "undo" | "redo" | "cut" | "copy" | "paste" | "select-all" => {
@@ -2438,88 +2440,76 @@ pub(crate) fn native_presentation_action(
         "focus-thread" | "new-thread" | "focus-runtime-window" => {}
         _ => return,
     }
-    // Find the original runtime, never send a thread identity to a differently
-    // configured window merely because it happens to be named main.
-    let key = crate::native_presentation::runtime_key(&bootstrap);
-    let target = {
-        let state = app.state::<DesktopState>();
-        let windows = state.windows.lock().ok();
-        windows.and_then(|windows| {
-            windows
-                .iter()
-                .filter(|(candidate, record)| {
-                    (candidate.as_str() == "main" || candidate.starts_with("workbench-"))
-                        && record.close.is_some()
-                        && record.bootstrap.as_ref().is_some_and(|candidate| {
-                            crate::native_presentation::runtime_key(candidate) == key
-                        })
-                })
-                .min_by_key(|(candidate, _)| {
-                    if candidate.as_str() == label {
-                        0
-                    } else if candidate.as_str() == "main" {
-                        1
-                    } else {
-                        2
-                    }
-                })
-                .map(|(label, _)| label.clone())
-        })
-    };
-    if let Some(target) = target {
-        if let Some(window) = app.get_webview_window(&target) {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
-        if kind != "focus-runtime-window" {
-            queue_navigation(app, &target, &bootstrap, action);
-        }
-    } else {
-        let state = app.state::<DesktopState>();
-        let label = format!(
-            "workbench-{}",
-            state.sequence.fetch_add(1, Ordering::Relaxed)
-        );
-        if create_window(app, &label, "main", Some(bootstrap.clone()), None).is_ok()
-            && kind != "focus-runtime-window"
-        {
-            queue_navigation(app, &label, &bootstrap, action);
-        }
-    }
+    let _ = focus_runtime_window(app, label, bootstrap, action);
 }
 
-fn queue_navigation(app: &AppHandle, label: &str, bootstrap: &Value, mut action: Value) {
-    action["apiBaseUrl"] = bootstrap["apiBaseUrl"].clone();
-    action["relayHostId"] = bootstrap["relayHostId"].clone();
-    let immediate = {
-        let state = app.state::<DesktopState>();
-        let Ok(mut windows) = state.windows.lock() else {
-            return;
-        };
-        let Some(window) = windows.get_mut(label) else {
-            return;
-        };
-        if window.renderer_ready {
-            true
-        } else {
-            if window.navigation.len() < 32 {
-                window.navigation.push(action.clone());
-            }
-            false
+fn focus_runtime_window(
+    app: &AppHandle,
+    source_label: &str,
+    mut bootstrap: Value,
+    action: Value,
+) -> Result<(), String> {
+    let state = app.state::<DesktopState>();
+    if state.quitting.load(Ordering::Acquire) {
+        return Err("Desktop shutdown is already in progress".into());
+    }
+    let target = {
+        let windows = state
+            .windows
+            .lock()
+            .map_err(|_| "Window registry unavailable")?;
+        crate::window_registry::workbench_target(&windows, source_label, &bootstrap)
+    };
+    let target = match target {
+        Some(target) => target,
+        None => {
+            let target = format!(
+                "workbench-{}",
+                state.sequence.fetch_add(1, Ordering::Relaxed)
+            );
+            bootstrap["windowRole"] = json!("main");
+            create_window(app, &target, "main", Some(bootstrap.clone()), None)?;
+            target
         }
     };
-    if immediate {
-        emit_navigation(app, label, action);
+    let window = app
+        .get_webview_window(&target)
+        .ok_or("Main window is unavailable")?;
+    native(window.show())?;
+    native(window.unminimize())?;
+    native(window.set_focus())?;
+    if action["type"] != "focus-runtime-window" {
+        queue_navigation(app, &target, &bootstrap, action)?;
     }
+    Ok(())
 }
-fn emit_navigation(app: &AppHandle, label: &str, action: Value) {
-    let event = if action["type"] == "focus-thread" {
-        "varin:open-thread"
-    } else {
-        "varin:open-draft-thread"
+
+fn queue_navigation(
+    app: &AppHandle,
+    label: &str,
+    bootstrap: &Value,
+    action: Value,
+) -> Result<(), String> {
+    let immediate = {
+        let state = app.state::<DesktopState>();
+        let mut windows = state
+            .windows
+            .lock()
+            .map_err(|_| "Window registry unavailable")?;
+        crate::window_registry::queue_navigation(&mut windows, label, bootstrap, action)?
     };
-    emit(app, label, event, action);
+    if let Some(action) = immediate {
+        emit_navigation(app, label, action)?;
+    }
+    Ok(())
+}
+fn emit_navigation(app: &AppHandle, label: &str, action: Value) -> Result<(), String> {
+    let event = crate::window_registry::navigation_event(&action)?;
+    native(app.emit_to(
+        tauri::EventTarget::webview_window(label),
+        "varin:emit",
+        json!({"event":event,"detail":action}),
+    ))
 }
 #[tauri::command]
 async fn varin_renderer_ready(
@@ -2542,7 +2532,7 @@ async fn varin_renderer_ready(
         std::mem::take(&mut window.navigation)
     };
     for action in queued {
-        emit_navigation(&app, webview.label(), action);
+        emit_navigation(&app, webview.label(), action)?;
     }
     Ok(Value::Null)
 }
