@@ -45,6 +45,9 @@ pub struct AttachmentPathRetirement {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialRetention {
+    /// Global retention hints, not authority. Populated only for full maintenance
+    /// reads explicitly requesting them; omitted scans return None, never an empty set.
+    pub ui_references: Option<Vec<String>>,
     pub attachment_preparations: Vec<AttachmentPreparationRetirement>,
     pub attachment_sources: Vec<AttachmentSourceRetirement>,
     pub attachments: Vec<super::attachments::AttachmentDelivery>,
@@ -53,6 +56,7 @@ pub struct MaterialRetention {
     pub sources: Vec<source_retention::SourceRetirement>,
 }
 pub struct MaterialRetentionRead {
+    ui_retention: Option<crate::content::collection::UiRetentionRead>,
     preparations: Vec<(String, u64, super::tool_content::ToolInvocationRead)>,
     attachment_sources: Vec<AttachmentSourceRetirement>,
     attachments: Vec<super::attachments::AttachmentDelivery>,
@@ -212,7 +216,9 @@ impl MaterialRetentionRead {
                 });
             }
         }
+        let ui_references = self.ui_retention.map(|read| read.load(&self.content)).transpose()?;
         Ok(MaterialRetention {
+            ui_references,
             attachment_preparations,
             attachment_sources: self.attachment_sources,
             attachments,
@@ -227,6 +233,7 @@ impl Catalog {
         &self,
         child_id: Option<&str>,
         drained_threads: &[String],
+        include_ui_references: bool,
     ) -> Result<MaterialRetentionRead> {
         let publication = self.content.begin_publication();
         let mut threads = Vec::new();
@@ -312,6 +319,7 @@ impl Catalog {
             Vec::new()
         };
         Ok(MaterialRetentionRead {
+            ui_retention: if include_ui_references && child_id.is_none() { Some(crate::content::collection::capture_ui_retention(&self.db)?) } else { None },
             preparations,
             attachment_sources,
             attachments: self

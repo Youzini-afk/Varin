@@ -16,7 +16,7 @@ function fixture() {
     bind: vi.fn(async () => ({ authorityId: 'result-authority', resourceEpoch: 'current-target-generation', source })),
     service: vi.fn(async () => undefined), release: vi.fn(async () => ({ phase: 'retired' })) };
   const runtime = { coordinatorHostId: 'coordinator', managedSource: vi.fn(async () => client) };
-  const plan: MaterialRetention = { sources: [], inheritances: [], attachments: [], threads: [{ threadId: 'deleted', rootThreadId: 'root', release: true }],
+  const plan: MaterialRetention = { uiReferences: [], sources: [], inheritances: [], attachments: [], threads: [{ threadId: 'deleted', rootThreadId: 'root', release: true }],
     attachmentPreparations: [], attachmentSources: [{ threadId: 'deleted', runId: 'original-run', epoch: 7, source }] };
   return { kernel, actor, client, runtime, plan, cleanup: () => releaseDeletedAttachmentSources(kernel as unknown as KernelClient, runtime as unknown as AgentRuntimeClient, plan) };
 }

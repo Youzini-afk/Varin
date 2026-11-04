@@ -50,7 +50,7 @@ function fixture() {
     run: vi.fn(async () => ({ id: 'run', thread_id: child.threadId, branch_id: child.branchId })),
     launch: vi.fn(async () => null),
     operation: vi.fn(async () => { throw new Error('No native Operation'); }),
-    materialRetention: vi.fn(async () => ({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [], attachments: [], threads: [] })),
+    materialRetention: vi.fn(async () => ({ attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [], attachments: [], threads: [] })),
     child: vi.fn(async () => ({ parent_thread_id: root.threadId, parent_branch_id: root.branchId, child_thread_id: child.threadId, child_branch_id: child.branchId })),
   } as unknown as AgentRuntimeClient;
   const owner = createThreadAttachments({ kernel: {} as KernelClient, runtime, storage: f.workingStates, materials: f.materials, resolveLiveSource: vi.fn() });
@@ -146,7 +146,7 @@ it('keeps an admitted binary stream alive until it stops, while deletion waits',
 
 it('retains exact typed child-context references before original Thread deletion', async () => {
   const f = fixture(), attachment = await f.upload(root, 'context', Buffer.from('context original'));
-  await f.owner.retain({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [], threads: [
+  await f.owner.retain({ attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [], threads: [
     { threadId: root.threadId, rootThreadId: root.threadId, release: true },
     { threadId: child.threadId, rootThreadId: root.threadId, release: false },
   ], attachments: [{ holderKind: 'context', holderId: 'dispatch', threadId: child.threadId, branchId: child.branchId, attachments: [attachment] }] });
@@ -178,7 +178,7 @@ it('does not let an execution-path cache keep its original descriptor alive afte
 
 it('admits final typed report references on demand without granting unrelated references', async () => {
   const f = fixture(), attachment = await f.upload(child, 'report', Buffer.from('final report file'));
-  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [],
+  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [],
     threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }],
     attachments: [{ holderKind: 'report', holderId: 'execution', threadId: root.threadId, branchId: root.branchId,
       sourceThreadId: child.threadId, sourceBranchId: child.branchId, attachments: [attachment] }] });
@@ -233,7 +233,7 @@ it('drains an in-flight upload before deletion sweeps its late fixed record', as
 it('does not revoke an accepted original delivery when its same-key retry loses its observer', async () => {
   const f = fixture(), attachment = await f.upload(root, 'accepted', Buffer.from('accepted original'));
   await f.owner.prepare(root, [{ ref: attachment.ref }], 'accepted-key', child.threadId);
-  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [], threads: [],
+  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [], threads: [],
     attachments: [{ holderKind: 'input', holderId: 'accepted-message', threadId: child.threadId, branchId: child.branchId, attachments: [attachment] }] });
   const controller = new AbortController(), original = f.workingStates.withBranchStore.bind(f.workingStates);
   f.workingStates.withBranchStore = async (scope, purpose, action, mode, actor) => {
@@ -254,7 +254,7 @@ it('releases only partial path captures after their original Operation is defini
   const operationId = 'native-operation';
   await expect(f.owner.prepare(root, [{ path: '/admitted/path.bin' }, { ref: 'attachment:missing' }], operationId, child.threadId)).rejects.toThrow('Attachment 2');
   const ref = `attachment:${createHash('sha256').update(JSON.stringify([root.threadId, operationId, 0])).digest('hex')}`;
-  const plan = { attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [], attachments: [], threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }] };
+  const plan = { attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [], attachments: [], threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }] };
   vi.mocked(f.runtime.operation).mockResolvedValue({ id: operationId, run_id: 'run', phase: 'running', outcome: null, effect: 'none' } as never);
   expect(await f.owner.reconcilePreparations(plan)).toEqual({ pending: true }); expect(f.records.has(ref)).toBe(true);
   vi.mocked(f.runtime.operation).mockResolvedValue({ id: operationId, run_id: 'run', phase: 'terminal', outcome: 'failed', effect: 'none' } as never);
@@ -266,7 +266,7 @@ it('releases only partial path captures after their original Operation is defini
 it('reconciles an unpublished delivery after lost observation only when the original Operation proves failure', async () => {
   const f = fixture(), attachment = await f.upload(root, 'original', Buffer.from('original'));
   await f.owner.prepare(root, [{ ref: attachment.ref }], 'failed-send', child.threadId);
-  const plan = { attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [], attachments: [], threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }] };
+  const plan = { attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [], attachments: [], threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }] };
   vi.mocked(f.runtime.operation).mockResolvedValue({ id: 'failed-send', run_id: 'run', phase: 'running', outcome: null, effect: 'none' } as never);
   expect(await f.owner.reconcilePreparations(plan)).toEqual({ pending: true });
   expect(await collected((await f.owner.read(child, attachment.ref)).stream)).toEqual(Buffer.from('original'));
@@ -299,7 +299,7 @@ it('lazily admits only Catalog-proven final source report references', async () 
   const f = fixture(), scope = threadMaterialScope(root.threadId), authority = { kind: 'thread' as const, owningWorkspaceId: scope, threadId: child.threadId };
   const snapshot = await f.materials.put(scope, { sourceUrl: 'https://example.com/report', finalUrl: 'https://example.com/report', representation: 'markdown' }, Buffer.from('report evidence'), authority);
   const [attachment] = await f.owner.prepare(child, [{ ref: snapshot.snapshotId }], 'capture-source', child.threadId);
-  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], sources: [], inheritances: [],
+  vi.mocked(f.runtime.materialRetention).mockResolvedValue({ attachmentPreparations: [], attachmentSources: [], uiReferences: [], sources: [], inheritances: [],
     threads: [{ threadId: root.threadId, rootThreadId: root.threadId, release: false }],
     attachments: [{ holderKind: 'report', holderId: 'execution', threadId: root.threadId, branchId: root.branchId,
       sourceThreadId: child.threadId, sourceBranchId: child.branchId, attachments: [attachment!] }] });

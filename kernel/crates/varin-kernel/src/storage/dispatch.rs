@@ -139,6 +139,7 @@ impl Storage {
             "storage.record.workspaces" => {
                 storage.domain_record_workspaces(authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.ui.cleanup" => storage.ui_cleanup(authorized_params, grant_id.unwrap_or("")),
             "storage.record.release" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
             }),

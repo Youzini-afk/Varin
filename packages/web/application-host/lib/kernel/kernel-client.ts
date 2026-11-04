@@ -560,6 +560,10 @@ export class KernelScopedClient {
     return this.owner.listRecords(params, this.grant, signal);
   }
 
+  uiCleanup(workspaceId: string, signal?: AbortSignal): Promise<{ pending: boolean; failures: string[] }> {
+    return this.owner.uiCleanup({ workspaceId }, this.grant, signal);
+  }
+
   releaseRecord(operationId: string, workspaceId: string, recordId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.releaseRecord({ operationId, workspaceId, recordId }, this.grant, signal);
   }
@@ -1978,6 +1982,10 @@ export class KernelClient {
       ? result.workspaceIds.filter((id): id is string => typeof id === "string" && id.length > 0)
       : [];
     return { workspaceIds: ids };
+  }
+
+  async uiCleanup(params: KernelMethodParams["storage.ui.cleanup"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ pending: boolean; failures: string[] }> {
+    return this.requestRaw<{ pending: boolean; failures: string[] }>("storage.ui.cleanup", params, { signal, grant });
   }
 
   async releaseRecord(params: KernelMethodParams["storage.record.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

@@ -116,3 +116,47 @@ it('registers only original assistant fragments, idempotently and independently 
     ui.close();
   } finally { await client.close(); await rm(root, { recursive: true, force: true }); }
 }, 30_000);
+
+it('inherits HTML state only after its original successful tool receipt is inside the fork cut, across reopen and isolated revisions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'varin-ui-html-fork-'));
+  const options = { hostId: 'ui-html-fork', storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false };
+  let client = createKernelClient(options);
+  const main = { threadId: 'thread', branchId: 'main' }, child = { threadId: 'thread', branchId: 'child' };
+  const records = new Map<string, unknown>();
+  const runtime = {
+    thread: async () => ({ branches: ['main', 'child', 'earlier'].map(branch_id => ({ branch_id })) }),
+    familyList: async () => ({ rootThreadId: 'family' }),
+    historyPage: async ({ headId }: { headId?: string }) => ({ head: headId, previous: null, items: headId === 'receipt-one'
+      ? [{ id: 'receipt-one', source: 'tool', thread_id: 'thread', run_id: 'run', content_ref: 'receipt-body', parent: null }] : [] }),
+    historyItem: async (reference: { id: string }) => ({ ...reference, content: records.get(reference.id) }),
+  };
+  try {
+    await client.start();
+    let ui = createInteractiveUiRuntime({ kernel: client, runtime: runtime as never, media: {} as never });
+    const first = await ui.renderForBranch('family', { changes: [{ op: 'write', file: 'index.html', text: '<input id="amount">' }] }, 'request-one:tool:html', main);
+    records.set('receipt-one', { content: { kind: 'tool_result', result: { request_id: 'request-one', call_id: 'html', completion: {
+      kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: first, parts: [] },
+    } } } });
+    const view = await ui.attach('family', { ref: first.ref }, undefined, 'client', undefined, main);
+    const initial = { data: { amount: 42 }, controls: { '#amount': '42' }, scroll: { x: 0, y: 20 } };
+    await ui.state('family', view.viewRef, view.token, initial);
+    await ui.captureBranch({ runtime: 'agent', ...main }, child.branchId, 'receipt-one');
+    const later = await ui.renderForBranch('family', { ref: first.ref, changes: [{ op: 'write', file: 'index.html', text: '<input id="new-amount">' }] }, 'request-two:tool:html', main);
+    await ui.state('family', view.viewRef, view.token, { ...initial, data: { amount: 99 } });
+    await ui.captureBranch({ runtime: 'agent', ...main }, child.branchId, 'receipt-one');
+    ui.close(); await client.close(); client = createKernelClient(options); await client.start();
+    ui = createInteractiveUiRuntime({ kernel: client, runtime: runtime as never, media: {} as never });
+    const restored = await ui.attach('family', { ref: first.ref }, undefined, 'client', undefined, child);
+    expect(restored.state).toEqual(initial);
+    expect((await ui.attach('family', { ref: later.ref }, undefined, 'client', undefined, child)).state).toBeNull();
+    const change = { ref: first.ref, changes: [{ op: 'write' as const, file: 'index.html', text: '<p>Child</p>' }] };
+    const edited = await ui.renderForBranch('family', change, 'child-edit', child);
+    expect(edited.workRef).not.toBe(first.workRef);
+    expect((await ui.store.source('family', first.workRef)).ref).toBe(later.ref);
+    expect(await ui.renderForBranch('family', change, 'child-edit', child)).toEqual(edited);
+    await expect(ui.renderForBranch('family', change, 'stale-child-edit', child)).rejects.toMatchObject({ status: 409 });
+    await ui.captureBranch({ runtime: 'agent', ...main }, 'earlier', null);
+    expect((await ui.attach('family', { ref: first.ref }, undefined, 'client', undefined, { ...main, branchId: 'earlier' })).state).toBeNull();
+    ui.close();
+  } finally { await client.close(); await rm(root, { recursive: true, force: true }); }
+}, 30_000);

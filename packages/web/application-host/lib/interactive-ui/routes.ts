@@ -17,7 +17,7 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
     'view/detach': (root, body) => runtime.detach(root, String(body.viewRef), String(body.token), body.state as UiViewState | undefined),
     'view/state': (root, body) => runtime.state(root, String(body.viewRef), String(body.token), body.state as UiViewState),
     'view/reply': (root, body) => runtime.reply(root, String(body.viewRef), String(body.token), String(body.id), body.observation as UiObservation | undefined, body.error as string | undefined),
-    select: (root, body) => { validateSourceScope(body, body.observation as UiObservation); return runtime.store.select(root, body.observation as UiObservation, body.selection as { text?: string; region?: UiSelection['region'] }); },
+    select: (root, body) => { validateSourceScope(body, body.observation as UiObservation); return runtime.store.select(root, body.observation as UiObservation, body.selection as { text?: string; region?: UiSelection['region'] }, { threadId: String(body.threadId), branchId: String(body.branchId) }); },
     selection: (root, body) => runtime.store.selection(root, String(body.ref)),
   };
   app.get('/api/interactive-ui/view/observe', requireAuth, async (req, res) => {
@@ -30,6 +30,7 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
       await runtime.validateViewScope(root, viewRef, { threadId: req.query.threadId, branchId: req.query.branchId });
       res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' }); res.flushHeaders();
       while (!abort.signal.aborted) {
+        await runtime.target({ threadId: req.query.threadId, branchId: req.query.branchId });
         const request = await runtime.poll(root, viewRef, token, abort.signal);
         if (!res.write(request ? `data: ${JSON.stringify(request)}\n\n` : ': heartbeat\n\n')) break;
       }

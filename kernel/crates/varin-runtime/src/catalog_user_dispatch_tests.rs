@@ -637,3 +637,22 @@ fn staging_cancellation_is_atomic_for_operation_and_parent_tree() {
         assert_eq!(f.counts().2, 0);
     }
 }
+
+#[test]
+fn ui_retention_includes_dispatch_and_selected_inherited_context() {
+    let mut f = Fixture::new();
+    let run = f.db.run(&f.command.run_id).unwrap();
+    let inherited = f.db.append_history(&run.id, f.db.epoch(), f.command.expected_head.as_deref(), HistorySource::Assistant,
+        json!({"id":"ui-inherited","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"ui:inherited@4 ui-snapshot:background"},"opaque":null}), None).unwrap();
+    f.command.expected_head = Some(inherited.id.clone());
+    f.command.input.task = "Read ui-selection:dispatch and update ui:dispatch@2".into();
+    f.command.input.background = vec![background::BackgroundReference {
+        thread_id: "parent".into(), branch_id: "main".into(), head_id: inherited.id.clone(), item_ids: vec![inherited.id],
+    }];
+    let child = f.accept();
+    assert!(child.inherited_context.is_some());
+    let retained = f.db.capture_material_retention(None, &[], true).unwrap().load().unwrap().ui_references.unwrap();
+    for reference in ["ui:inherited@4", "ui-snapshot:background", "ui-selection:dispatch", "ui:dispatch@2"] {
+        assert!(retained.iter().any(|value| value == reference), "missing {reference}: {retained:?}");
+    }
+}

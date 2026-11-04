@@ -2,7 +2,8 @@ import { normalizeConversationUi, migrateConversationUiState } from '@varin/appl
 import { createHash, randomUUID } from 'node:crypto';
 import type { RenderUiInput, UiReceipt, UiSource, UiObservation, UiSelection, UiViewState, UiSourceIdentity, UiMessageFragment, UiBranchScope, ConversationUiNode } from '@varin/application-client';
 import type { KernelClient, KernelScopedClient } from '../kernel/kernel-client.js';
-import type { KernelRecordResult } from '../kernel/protocol.generated.js';
+import type { KernelRecordResult, MaterialRetention } from '../kernel/protocol.generated.js';
+import { createUiActivity, releaseUiRecords } from './lifecycle.js';
 
 /** code names a public, stable reason that survives the generic resource wrapper. */
 export class UiContentError extends Error { constructor(message: string, readonly status = 400, readonly code?: string) { super(message); } }
@@ -34,7 +35,10 @@ export function applyUiEdits(text: string, edits: { oldText: string; newText: st
 }
 const receipt = (version: Revision): UiReceipt => ({ kind: 'ui', ref: version.ref, workRef: version.workRef, title: version.title,
   revision: version.revision, entry: version.entry, files: Object.keys(version.files) });
-export function createUiContentStore(kernel: KernelClient, onCleanupError: () => void = () => {}) {
+export function createUiContentStore(kernel: KernelClient, onCleanupError: () => void = () => {}, requireOwner?: (scope: UiBranchScope) => Promise<void>) {
+  const activity = createUiActivity();
+  const guarded = <A extends unknown[], R>(action: (root: string, ...args: A) => Promise<R>) =>
+    (root: string, ...args: A): Promise<R> => activity.run(root, () => action(root, ...args));
   const clients = new Map<string, Promise<KernelScopedClient>>();
   const connection = (scope: string) => {
     let pending = clients.get(scope);
@@ -83,6 +87,14 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
       [ref, { mimeType: object.mimeType, data: (await bytes(root, record.recordId, object)).toString('base64') }])));
     return { ...receipt(version), contents, assets, ...(version.branchScope ? { branchScope: version.branchScope } : {}), ...(version.forkedFrom ? { forkedFrom: version.forkedFrom } : {}), ...(version.content ? { content: version.content, definition: version.definition } : {}), ...(version.messageFragment ? { messageFragment: version.messageFragment } : {}) };
   };
+  const operationReceipt = async (root: string, origin: string): Promise<UiReceipt | null> => {
+    const operation = await (await connection(workspace(root))).getOperation(`ui-render:${hash(origin)}`);
+    if (!operation || operation.state !== 'committed') return null;
+    const record = operation.result as KernelRecordResult;
+    const saved = (JSON.parse(record.payloadJson) as Work).mutation.receipt;
+    if (saved.kind !== 'ui' || saved.workRef !== record.recordId) throw new UiContentError('Original UI operation receipt is invalid');
+    return saved;
+  };
   const locks = new Map<string, Promise<unknown>>();
   const render = async (root: string, input: RenderUiInput, origin: string,
     readMedia?: (resourceId: string) => Promise<{ mimeType: string; bytes: Uint8Array }>, messageFragment?: UiMessageFragment, branchScope?: UiBranchScope, forkedFrom?: string): Promise<UiReceipt> => {
@@ -93,6 +105,8 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     catch (error) { throw new UiContentError(error instanceof Error ? error.message : 'Invalid content'); }
     // Capture the base at admission, before joining this work's commit sequence.
     const base = input.ref ? await resolve(root, input.ref) : null;
+    const owner = branchScope ?? messageFragment ?? base?.version.branchScope ?? base?.version.messageFragment;
+    if (owner) await requireOwner?.(owner);
     if (base && Boolean(base.version.content) !== Boolean(content)) throw new UiContentError('A work cannot change between HTML and declarative content');
     const id = base?.version.workRef ?? `ui:${hash(origin).slice(0, 32)}`;
     const operationId = `ui-render:${hash(origin)}`;
@@ -189,6 +203,8 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     const key = `${root}:${ref}`;
     const task = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
       const record = await viewRecord(root, ref), previous = record ? JSON.parse(record.payloadJson) as ViewRecord : null;
+      const owner = patch.branchScope ?? previous?.branchScope;
+      if (owner) await requireOwner?.(owner);
       if (expectedLease !== undefined && previous?.lease?.token !== expectedLease) throw new UiContentError('View connection changed', 409);
       let source = patch.source ?? previous?.source;
       if (source?.preview) source = { preview: { ...source.preview, contents: {} } };
@@ -204,7 +220,9 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     locks.set(key, task);
     try { return await task; } finally { if (locks.get(key) === task) locks.delete(key); }
   };
-  const snapshot = async (root: string, observation: UiObservation) => {
+  const snapshot = async (root: string, observation: UiObservation, branchScope?: UiBranchScope) => {
+    branchScope ??= (await view(root, observation.viewRef))?.branchScope;
+    if (branchScope) await requireOwner?.(branchScope);
     if (observation.ref && observation.preview) throw new UiContentError('Observation must have exactly one source');
     if (observation.preview?.content) {
       try { observation = { ...observation, preview: { ...observation.preview, content: normalizeConversationUi(observation.preview.content) } }; }
@@ -227,7 +245,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         const blob = await client.putBlob(Buffer.from(image.data, 'base64'), `${id}:image`);
         owners.push(blob.ownerId); object = { hash: blob.hash, slot: 'image' }; refs.push({ slot: 'image', objectHash: blob.hash });
       }
-      await put(root, id, 'ui.snapshot', { ...value,
+      await put(root, id, 'ui.snapshot', { ...value, ...(branchScope ? { branchScope } : {}),
         ...(preview ? { preview: { provenance: 'client-preview', callId: preview.callId, sequence: preview.sequence, baseRef: preview.baseRef, entry: preview.entry, title: preview.title, files, ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}) } } : {}),
         ...(image ? { image: { ...object, mimeType: image.mimeType, method: image.method, capturedAt: image.capturedAt, bounds: image.bounds } } : {}) }, id, refs, owners);
       return id;
@@ -246,10 +264,11 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
       ...(preview.baseRef ? { baseRef: preview.baseRef } : {}), ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}), contents } } : {}),
       ...(image ? { image: { mimeType: image.mimeType, method: image.method, ...(image.capturedAt ? { capturedAt: image.capturedAt } : {}), ...(image.bounds ? { bounds: image.bounds } : {}), data: (await bytes(root, ref, image)).toString('base64') } } : {}) };
   };
-  const select = async (root: string, observation: UiObservation, selected: { text?: string; region?: UiSelection['region'] }): Promise<UiSelection> => {
-    const snapshotRef = await snapshot(root, observation);
+  const select = async (root: string, observation: UiObservation, selected: { text?: string; region?: UiSelection['region'] }, branchScope?: UiBranchScope): Promise<UiSelection> => {
+    branchScope ??= (await view(root, observation.viewRef))?.branchScope;
+    const snapshotRef = await snapshot(root, observation, branchScope);
     const ref = `ui-selection:${randomUUID()}`;
-    await put(root, ref, 'ui.selection', { snapshotRef, ...selected }, ref);
+    await put(root, ref, 'ui.selection', { snapshotRef, ...selected, ...(branchScope ? { branchScope } : {}) }, ref);
     return selection(root, ref);
   };
   const selection = async (root: string, ref: string): Promise<UiSelection> => {
@@ -265,9 +284,10 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
       }) : observed.structure } : {}) };
   };
   type BranchCapture = { kind: 'branch-state'; source: UiBranchScope; target: UiBranchScope; headId: string | null; capturedAt: string;
-    views: { clientId: string; viewRef: string; sourceRef: string; confirmedAt: number; fragment: UiMessageFragment; content: ConversationUiNode; state: UiViewState }[] };
+    views: { clientId: string; viewRef: string; sourceRef: string; confirmedAt: number; fragment?: UiMessageFragment; content?: ConversationUiNode; state: UiViewState }[] };
   const captureId = (target: UiBranchScope) => `ui-branch-state:${hash(canonical(target))}`;
-  const captureBranch = async (root: string, from: UiBranchScope, target: UiBranchScope, headId: string | null, containsMessage: (messageId: string) => boolean) => {
+  const captureBranch = async (root: string, from: UiBranchScope, target: UiBranchScope, headId: string | null, containsMessage: (messageId: string) => boolean, containsRevision: (ref: string) => boolean = () => false) => {
+    await requireOwner?.(from);
     const id = captureId(target), key = `${root}:${id}`;
     const work = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
       const existing = await get(root, id);
@@ -286,9 +306,11 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
           const clientId = saved.clientId ?? saved.lease?.clientId;
           if (!saved.state || !clientId || !saved.source.ref || saved.branchScope?.threadId !== from.threadId || saved.branchScope.branchId !== from.branchId) continue;
           const original = (await resolve(root, saved.source.ref)).version;
-          if (!original.content || !original.messageFragment || !containsMessage(original.messageFragment.messageId)) continue;
+          const fragment = original.content && original.messageFragment && containsMessage(original.messageFragment.messageId)
+            && (original.revision === 1 && !original.forkedFrom || containsRevision(original.ref)) ? original.messageFragment : undefined;
+          if (!fragment && !containsRevision(original.ref)) continue;
           captured.views.push({ clientId, viewRef: record.recordId, sourceRef: original.ref, confirmedAt: record.updatedAt,
-            fragment: original.messageFragment, content: original.content, state: saved.state });
+            ...(fragment ? { fragment } : {}), ...(original.content ? { content: original.content } : {}), state: saved.state });
         }
         cursor = page.nextCursor ?? undefined;
       } while (cursor !== undefined);
@@ -305,19 +327,25 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     const capture = JSON.parse(record.payloadJson) as BranchCapture;
     if (capture.kind !== 'branch-state' || canonical(capture.target) !== canonical(target)) throw new UiContentError('Invalid branch state capture');
     const current = (await resolve(root, sourceIdentity.ref)).version, fragment = current.messageFragment;
-    if (!current.content || !fragment) return null;
-    const matches = capture.views.filter(view => view.clientId === clientId && view.fragment.messageId === fragment.messageId
-      && view.fragment.fragmentKey === fragment.fragmentKey && (view.fragment.contentIndex ?? 0) === (fragment.contentIndex ?? 0)
-      && view.fragment.contentVersion === fragment.contentVersion);
+    const matches = capture.views.filter(view => view.clientId === clientId && (fragment && current.content
+      ? view.fragment?.messageId === fragment.messageId && view.fragment.fragmentKey === fragment.fragmentKey
+        && (view.fragment.contentIndex ?? 0) === (fragment.contentIndex ?? 0) && view.fragment.contentVersion === fragment.contentVersion
+      : view.sourceRef === current.ref && Boolean(view.content) === Boolean(current.content)));
     // Multiple independent views can have different explorations. Never select an arbitrary one.
     if (matches.length !== 1) return null;
     const seed = matches[0]!, data = seed.state.data;
+    if (!current.content || !seed.content) return seed.state;
     const migrated = migrateConversationUiState(seed.content, current.content, data && typeof data === 'object' && !Array.isArray(data) ? data : {});
     return { ...seed.state, data: migrated.values, controls: { ...seed.state.controls, __varinResetKeys: migrated.resetKeys } };
   };
-  return { source, render, resolve, view, saveView, snapshot, captureBranch, branchSeed, readSnapshot, select, selection,
-    async file(root: string, ref: string, file: string) { const { record, version } = await resolve(root, ref); const object = version.files[file];
-      if (!object) throw new UiContentError('Work file not found', 404); return (await bytes(root, record.recordId, object)).toString('utf8'); },
+  return { source: guarded(source), render: guarded(render), resolve: guarded(resolve), view: guarded(view), saveView: guarded(saveView),
+    snapshot: guarded(snapshot), operationReceipt: guarded(operationReceipt), captureBranch: guarded(captureBranch), branchSeed: guarded(branchSeed), readSnapshot: guarded(readSnapshot), select: guarded(select), selection: guarded(selection),
+    cleanup: (root: string, signal?: AbortSignal) => activity.exclusive(root, async () =>
+      (await connection(workspace(root))).uiCleanup(workspace(root), signal)),
+    collect: (root: string, plan: MaterialRetention, signal?: AbortSignal) => activity.exclusive(root, async () =>
+      releaseUiRecords(await connection(workspace(root)), workspace(root), plan, signal)),
+    file: guarded(async (root: string, ref: string, file: string) => { const { record, version } = await resolve(root, ref); const object = version.files[file];
+      if (!object) throw new UiContentError('Work file not found', 404); return (await bytes(root, record.recordId, object)).toString('utf8'); }),
   };
 }
 export type UiContentStore = ReturnType<typeof createUiContentStore>;

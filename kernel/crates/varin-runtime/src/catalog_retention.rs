@@ -76,6 +76,56 @@ mod tests {
     }
 
     #[test]
+    fn ui_retention_follows_surviving_content_not_thread_visibility() {
+        let root = Fixture::new(); let mut db = root.open();
+        let removed = submit(&mut db, "removed-ui", "```ui\n{\"ref\":\"ui:shared@2\"}\n``` ui-selection:original");
+        finish(&mut db, &removed.run_id);
+        assert!(db.capture_material_retention(None, &[], false).unwrap().load().unwrap().ui_references.is_none());
+        assert!(db.capture_material_retention(Some("removed-ui"), &[], true).unwrap().load().unwrap().ui_references.is_none());
+        db.create_thread("surviving-ui", "surviving-ui-main").unwrap();
+        db.db.execute("UPDATE branches SET head=?1 WHERE id='surviving-ui-main'", [&removed.input_id]).unwrap();
+        let refs = |db: &Catalog| db.capture_material_retention(None, &[], true).unwrap().load().unwrap().ui_references.unwrap();
+        assert!(refs(&db).contains(&"ui:shared@2".into()));
+        delete(&mut db, "removed-ui");
+        retire(&mut db).unwrap();
+        assert!(refs(&db).contains(&"ui:shared@2".into()));
+        assert!(refs(&db).contains(&"ui-selection:original".into()));
+        delete(&mut db, "surviving-ui");
+        retire(&mut db).unwrap();
+        assert!(refs(&db).is_empty());
+    }
+
+    #[test]
+    fn ui_retention_keeps_pending_deleted_run_until_native_drain() {
+        let root = Fixture::new(); let mut db = root.open();
+        let running = submit(&mut db, "running-ui", "ui-snapshot:active ui-view:open");
+        delete(&mut db, "running-ui");
+        assert_eq!(retire(&mut db).unwrap(), (0, 1));
+        let refs = db.capture_material_retention(None, &[], true).unwrap().load().unwrap().ui_references.unwrap();
+        assert!(refs.contains(&"ui-snapshot:active".into()));
+        assert!(refs.contains(&"ui-view:open".into()));
+        finish(&mut db, &running.run_id);
+        retire(&mut db).unwrap();
+        assert!(db.capture_material_retention(None, &[], true).unwrap().load().unwrap().ui_references.unwrap().is_empty());
+    }
+
+    #[test]
+    fn ui_retention_includes_queue_of_an_archived_live_thread() {
+        let root = Fixture::new(); let mut db = root.open();
+        submit(&mut db, "queued-ui", "initial");
+        db.enqueue_input(&inputs::EnqueueInput {
+            key: "queued-ui-message".into(), thread_id: "queued-ui".into(), branch_id: "queued-ui-main".into(),
+            mode: InputMode::Boundary, input: json!({"text":"Inspect ui-selection:queued ui:queued@1"}), configuration: None,
+        }).unwrap();
+        db.update_thread(&threads::ThreadUpdate { thread_id:"queued-ui".into(), key:"archive-ui".into(),
+            expected_revision:db.inspect_thread("queued-ui").unwrap()["revision"].as_u64().unwrap(),
+            title:None,pinned:None,archived:Some(true),title_mode:None }).unwrap();
+        let refs = db.capture_material_retention(None, &[], true).unwrap().load().unwrap().ui_references.unwrap();
+        assert!(refs.contains(&"ui-selection:queued".into()));
+        assert!(refs.contains(&"ui:queued@1".into()));
+    }
+
+    #[test]
     fn deleted_conversation_usage_survives_retirement_and_loses_only_its_title() {
         use crate::catalog::usage_ledger::fixture::{completed_conversation, summary};
         let root = Fixture::new(); let mut db = root.open();

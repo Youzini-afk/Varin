@@ -24,7 +24,7 @@ fn deleted_material_maintenance_does_not_wake_itself_after_workers_are_drained()
     let (wake, wakes) = mpsc::channel();
     supervisor.set_wake_sender(wake).unwrap();
     for _ in 0..2 {
-        let plan = supervisor.material_retention(None).unwrap();
+        let plan = supervisor.material_retention(None, false).unwrap();
         assert!(plan.threads.iter().any(|thread| thread.thread_id == "deleted" && thread.release));
         assert!(matches!(wakes.try_recv(), Err(mpsc::TryRecvError::Empty)),
             "an inspection with no original worker must not schedule another maintenance pass");

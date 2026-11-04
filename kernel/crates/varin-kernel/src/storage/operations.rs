@@ -223,8 +223,11 @@ pub(super) fn idempotent(
     }
     let params_hash = hash_json(&identity_params)?;
     if let Some(result) = storage.operation_existing(operation_id, kind, &params_hash)? {
-        return Ok(result);
+        return if kind == "storage.record.release" { storage.retry_ui_cleanup_receipt(operation_id, result) } else { Ok(result) };
     }
+    let ui_release_objects = if kind == "storage.record.release" {
+        storage.ui_record_release_objects(params_value)?.filter(|(_, objects)| !objects.is_empty())
+    } else { None };
     let selected_gc = params_value.get("objectHashes").and_then(Value::as_array)
         .map(|hashes| hashes.iter().filter_map(Value::as_str).map(String::from).collect::<BTreeSet<_>>());
     let prior_cleanup = if kind == "storage.gc" {
@@ -238,19 +241,30 @@ pub(super) fn idempotent(
         params![operation_id],
     )?;
     storage.conn.execute_batch("BEGIN IMMEDIATE")?;
+    let mut ui_mark_readers = BTreeSet::new();
     let outcome = (|| {
         storage.operation_begin(operation_id, kind, &params_hash)?;
         storage.record_operation_workspace(
             operation_id,
             params_value.get("workspaceId").and_then(Value::as_str),
         )?;
-        let result = action(storage)?;
+        let mut result = action(storage)?;
+        if let Some((record_type, objects)) = &ui_release_objects {
+            // Mark in the same transaction as the record and receipt retirement.
+            // Shared/read-leased objects remain rooted by the original GC owner.
+            ui_mark_readers = storage.blob_read_roots.active_hashes().intersection(objects).cloned().collect();
+            storage.gc_selected(Some(objects))?;
+            result["uiCleanup"] = json!({"recordType":record_type,"objectHashes":objects,"pending":true,"failures":[]});
+        }
         storage.operation_finish(operation_id, &result)?;
         Ok::<Value, KernelError>(result)
     })();
     match outcome {
         Ok(result) => {
             storage.conn.execute_batch("COMMIT")?;
+            if ui_release_objects.is_some() {
+                return storage.finish_ui_cleanup_receipt(operation_id, result, &ui_mark_readers);
+            }
             if kind == "storage.gc" {
                 let cleanup = storage.drain_selected_gc_files(selected_gc.as_ref())?;
                 let mut enriched = result.clone();

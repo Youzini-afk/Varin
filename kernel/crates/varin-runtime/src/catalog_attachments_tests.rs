@@ -403,7 +403,7 @@ fn final_source_report_retains_only_acquired_citations_after_child_deletion() {
     let mut fixture = Fixture::new_in_bot();
     let child = fixture.accept();
     let child = start_child(&mut fixture.db, child);
-    let targeted = fixture.db.capture_material_retention(Some(&child.child_thread_id), &[]).unwrap().load().unwrap();
+    let targeted = fixture.db.capture_material_retention(Some(&child.child_thread_id), &[], false).unwrap().load().unwrap();
     assert_eq!(targeted.threads.len(), 1);
     assert_eq!(targeted.threads[0].root_thread_id, child.parent_thread_id);
     let run = fixture.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
@@ -424,10 +424,10 @@ fn final_source_report_retains_only_acquired_citations_after_child_deletion() {
         .item(serde_json::from_value(json!({"itemId":answer.id,"maxBytes":1})).unwrap(), &|| false).unwrap();
     assert_eq!(history_page.attachments, vec![source.clone()]);
 
-    let plan = fixture.db.capture_material_retention(None, &[]).unwrap().load().unwrap();
+    let plan = fixture.db.capture_material_retention(None, &[], false).unwrap().load().unwrap();
     assert!(plan.attachments.iter().any(|edge| edge.holder_kind == "report" && edge.thread_id == child.parent_thread_id && edge.attachments == vec![source.clone()]));
     let revision = fixture.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
     fixture.db.delete_thread(&threads::ThreadDelete { thread_id: child.child_thread_id.clone(), key: "delete-source-worker".into(), expected_revision: revision }).unwrap();
-    let plan = fixture.db.capture_material_retention(None, &[child.child_thread_id.clone()]).unwrap().load().unwrap();
+    let plan = fixture.db.capture_material_retention(None, &[child.child_thread_id.clone()], false).unwrap().load().unwrap();
     assert!(plan.attachments.iter().any(|edge| edge.thread_id == child.parent_thread_id && edge.attachments == vec![source.clone()]));
 }

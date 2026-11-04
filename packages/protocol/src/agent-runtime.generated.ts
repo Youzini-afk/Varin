@@ -40,9 +40,11 @@ export interface SourceRetirementParams {
 
 export interface MaterialRetentionParams {
   childThreadId?: string;
+  includeUiReferences?: boolean;
 }
 
 export interface MaterialRetention {
+  uiReferences: string[] | null;
   attachmentPreparations: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource; operationId: string; attachments: Array<{ref: string; path: string}>}>;
   attachmentSources: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource}>;
   sources: Array<{cleanupId: string; source: LaunchSource}>;
@@ -1771,7 +1773,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 80; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 81; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
