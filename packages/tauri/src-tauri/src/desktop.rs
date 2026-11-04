@@ -21,7 +21,7 @@ use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_runtime_cef::WebviewWindowBuilderCefExt;
+use tauri_runtime_cef::{WebviewCefExt, WebviewWindowBuilderCefExt};
 use tokio::sync::watch;
 
 type Reply = Result<Value, String>;
@@ -295,6 +295,24 @@ fn create_window(
             return Err(error.to_string());
         }
     };
+    // The bundled app talks to its authenticated Host on 127.0.0.1. CEF treats
+    // that as a loopback permission even though both ends belong to this app.
+    // Scope it to the bundled origin in the application profile.
+    window.with_cef_webview(|view| {
+        use tauri_runtime_cef::cef::{
+            CefString, ContentSettingTypes, ContentSettingValues, ImplBrowser, ImplBrowserHost,
+            ImplRequestContext,
+        };
+        if let Some(context) = view.browser().host().and_then(|host| host.request_context()) {
+            let origin = CefString::from(application_origin().as_str());
+            context.set_content_setting(
+                Some(&origin),
+                None,
+                ContentSettingTypes::LOOPBACK_NETWORK,
+                ContentSettingValues::ALLOW,
+            );
+        }
+    }).map_err(|_| "Application loopback permission could not be configured")?;
     if prepare_now {
         let enabled = app
             .state::<DesktopState>()
