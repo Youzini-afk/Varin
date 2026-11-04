@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, createHash, createPublicKey, verify } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import { BrowserExecutionError, type BrowserAction, type BrowserCatalog, type BrowserDevice, type BrowserDeviceIdentity, type BrowserDownload, type BrowserEvent,
-  type BrowserFrame, type BrowserInputRequest, type BrowserObservation, type BrowserOwner, type BrowserPage, type BrowserPresentationOwner, type BrowserReadRequest } from '@varin/protocol';
+  type BrowserFrame, type BrowserClipboardRequest, type BrowserInputRequest, type BrowserObservation, type BrowserOwner, type BrowserPage, type BrowserPresentationOwner, type BrowserReadRequest } from '@varin/protocol';
 import { BrowserDeviceWire, object, text } from './device-wire.js';
 import { RemoteBrowserOwner, browserActor, type BrowserActor, type BrowserDeviceGrant } from './remote-owner.js';
 
@@ -182,6 +182,7 @@ export class BrowserRegistry implements BrowserOwner {
       return async () => { await stop(); this.viewers.delete(streamId); };
     } catch (error) { this.viewers.delete(streamId); throw error; }
   }
+  async clipboard(input: BrowserClipboardRequest) { this.assertViewer(input.pageId, input.streamId); return presentationOwner(await this.owner(input.pageId)).clipboard(input); }
   async input(input: BrowserInputRequest) { this.assertViewer(input.pageId, input.streamId); return presentationOwner(await this.owner(input.pageId)).input(input); }
   stop() { for (const grant of this.grants.values()) { grant.control?.terminate(); grant.media?.terminate(); } this.grants.clear(); for (const entry of this.devices.values()) { entry.releaseEvents(); if (entry.owner instanceof RemoteBrowserOwner) entry.owner.closeTransport(); } }
 }

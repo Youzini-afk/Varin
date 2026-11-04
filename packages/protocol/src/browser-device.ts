@@ -37,15 +37,24 @@ export type BrowserUserInput =
   | { type: 'composition'; text: string; selectionStart: number; selectionEnd: number }
   | { type: 'touch'; phase: 'start' | 'move' | 'end' | 'cancel'; points: { id: number; x: number; y: number; radiusX: number; radiusY: number; force: number }[]; modifiers: number }
   | { type: 'release' };
-export interface BrowserInputRequest {
+export interface BrowserInputIdentity {
   pageId: string; pageGeneration: string; streamId: string; controlEpoch: string; frameSequence: number;
-  input: BrowserUserInput;
 }
+export interface BrowserInputRequest extends BrowserInputIdentity { input: BrowserUserInput }
+/** A cut ticket retains one original DOM selection in its BrowserOwner. It is
+ * single use and never authorizes another page, viewer or control generation. */
+export type BrowserClipboardRequest = BrowserInputIdentity & (
+  | { action: 'capture' }
+  | { action: 'cut' | 'release'; selectionId: string }
+);
+export interface BrowserClipboardSelection { selectionId: string; text: string }
+
 export interface BrowserPresentationOwner extends BrowserOwner {
   readonly ownerGeneration: string;
   takeControl(pageId: string, paused: boolean, viewerId?: string): BrowserPage | Promise<BrowserPage>;
   subscribeFrames(pageId: string, streamId: string, listener: (frame: BrowserFrame) => void): Promise<() => Promise<void>>;
   input(request: BrowserInputRequest, signal?: AbortSignal): Promise<void>;
+  clipboard(request: BrowserClipboardRequest, signal?: AbortSignal): Promise<BrowserClipboardSelection | null>;
   resize(pageId: string, streamId: string, width: number, height: number): Promise<void>;
   chooseFiles(pageId: string, chooserId: string, files: { name: string; bytes: Uint8Array }[], signal?: AbortSignal): Promise<void>;
 }

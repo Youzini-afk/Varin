@@ -86,6 +86,12 @@ test('real compositor frames and IME input cross both WebSockets and HTTP while 
   expect(f.native.calls.find(call => call.params.method === 'Input.insertText')?.params.params).toEqual({ text: '你好' });
   expect(f.native.calls.find(call => call.params.method === 'Page.screencastFrameAck')?.params.params).toEqual({ sessionId: 9 });
   expect((await f.request(`/pages/${page.pageId}/input`, { ...base, controlEpoch: 'stale', input: { type: 'text', text: 'never' } })).status).toBe(409);
+  // Clipboard tickets use the same authenticated viewer and control generation.
+  const selection = await f.request(`/pages/${page.pageId}/clipboard`, { ...base, action: 'capture' });
+  expect(selection.status).toBe(200); expect(await selection.json()).toBeNull();
+  expect((await f.request(`/pages/${page.pageId}/clipboard`, { ...base, action: 'capture' }, 'other-token')).status).toBe(409);
+  expect((await f.request(`/pages/${page.pageId}/clipboard`, { ...base, controlEpoch: 'stale', action: 'capture' })).status).toBe(409);
+  expect((await f.request(`/pages/${page.pageId}/clipboard`, { ...base, action: 'cut', selectionId: 'invented' })).status).toBe(409);
   abort.abort(); await consuming;
   await eventually(() => f.native.calls.some(call => call.params.method === 'Page.stopScreencast'));
   expect((await f.owner.list())[0]).toMatchObject({ pageId: page.pageId, viewers: 0, agentPaused: true });

@@ -7,7 +7,7 @@ import { BrowserExecutionError, isBrowserExecutionError, type BrowserDeviceIdent
 import { BrowserDeviceWire, BROWSER_CONTROL_BYTES, BROWSER_REQUESTS, browserMediaMaxPayload, deferred, object, text } from './device-wire.js';
 import type { BrowserActor, BrowserDeviceGrant } from './remote-owner.js';
 import { parseBrowserAction, parseBrowserRead } from './desktop-invoke.js';
-import { parseBrowserInput } from './input-validation.js';
+import { parseBrowserInput, parseBrowserClipboard } from './input-validation.js';
 
 type Owner = BrowserPresentationOwner & { proveIdentity(hostId: string, challenge: string): { publicKey: string; signature: string }; act: BrowserPresentationOwner['act'] & ((pageId: string, action: import('@varin/protocol').BrowserAction, signal?: AbortSignal, user?: boolean) => Promise<import('@varin/protocol').BrowserActionResult>) };
 interface Active { leaseId: string; controller: AbortController; completion: Promise<void> }
@@ -242,6 +242,7 @@ export class BrowserDeviceService {
           connection.streams.set(streamId, { pageId: pageId(), principalId: (caller as { principalId: string }).principalId, stop }); result = null; break;
         }
         case 'unsubscribeFrames': { const id = text(args.streamId); viewer(id); const stream = connection.streams.get(id); connection.streams.delete(id); await stream?.stop(); result = null; break; }
+        case 'clipboard': viewer(text(args.streamId)); result = await owner.clipboard(parseBrowserClipboard(args), signal); break;
         case 'input': viewer(text(args.streamId)); await owner.input(parseBrowserInput(args) as BrowserInputRequest, signal); result = null; break;
         case 'resize': viewer(text(args.streamId)); if (typeof args.width !== 'number' || typeof args.height !== 'number') throw new Error('Invalid browser viewport'); await owner.resize(pageId(), text(args.streamId), args.width, args.height); result = null; break;
         case 'chooseFiles': { human(); const page = (await owner.list()).find(value => value.pageId === pageId()); if (!page?.controlViewerId || page.fileChooser?.chooserId !== args.chooserId) throw new Error('The original file chooser has no human lease'); viewer(page.controlViewerId); await owner.chooseFiles(pageId(), text(args.chooserId), files(args.files), signal); result = null; break; }
@@ -250,7 +251,7 @@ export class BrowserDeviceService {
       }
       await send({ kind: 'response', ok: true, executorStopped: true, result: result ?? null });
     } catch (error) {
-      const execution = isBrowserExecutionError(error) ? error : new BrowserExecutionError(error, entered && ['open', 'act', 'upload', 'input', 'chooseFiles'].includes(method) ? 'unknown' : 'none');
+      const execution = isBrowserExecutionError(error) ? error : new BrowserExecutionError(error, entered && ['open', 'act', 'upload', 'input', 'clipboard', 'chooseFiles'].includes(method) ? 'unknown' : 'none');
       await send({ kind: 'response', ok: false, error: { message: execution.message, effect: execution.effect, executorStopped: execution.executorStopped, pendingCompletion: Boolean(execution.completion) } });
       if (execution.completion) { await execution.completion; await send({ kind: 'stopped', executorStopped: true }); }
       else if (!execution.executorStopped) throw execution;

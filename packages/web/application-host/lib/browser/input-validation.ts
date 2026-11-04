@@ -1,4 +1,4 @@
-import type { BrowserInputRequest } from '@varin/protocol';
+import type { BrowserInputRequest, BrowserClipboardRequest } from '@varin/protocol';
 import { object, text } from './device-wire.js';
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const integer = (value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): value is number => finite(value) && Number.isSafeInteger(value) && value >= minimum && value <= maximum;
@@ -21,4 +21,14 @@ export function parseBrowserInput(value: unknown): BrowserInputRequest {
   }
   if (!valid) throw new Error('Invalid browser user input');
   return request as unknown as BrowserInputRequest;
+}
+
+
+export function parseBrowserClipboard(value: unknown): BrowserClipboardRequest {
+  const request = object(value);
+  // The clipboard operation has the exact same observed-frame/control identity.
+  parseBrowserInput({ ...request, input: { type: 'release' } });
+  if (request.action !== 'capture' && request.action !== 'cut' && request.action !== 'release') throw new Error('Invalid browser clipboard operation');
+  if (request.action !== 'capture') text(request.selectionId);
+  return request as unknown as BrowserClipboardRequest;
 }

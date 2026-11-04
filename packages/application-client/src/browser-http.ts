@@ -1,5 +1,5 @@
 import { BROWSER_BINARY_MAX, BROWSER_HEADER_MAX, decodeBrowserPacket, type BrowserAction, type BrowserActionResult, type BrowserCatalog, type BrowserEvent,
-  type BrowserFrame, type BrowserInputRequest, type BrowserPage, type BrowserReadRequest, type BrowserObservation, type BrowserDownload } from '@varin/protocol';
+  type BrowserFrame, type BrowserClipboardRequest, type BrowserClipboardSelection, type BrowserInputRequest, type BrowserPage, type BrowserReadRequest, type BrowserObservation, type BrowserDownload } from '@varin/protocol';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { RuntimeEventSource } from './transport/runtime-event-source.js';
@@ -33,6 +33,7 @@ export function createBrowserHttpClient() {
     action: (pageId: string, action: BrowserAction) => request<BrowserActionResult>(`${pagePath(pageId)}/action`, action),
     read: (input: BrowserReadRequest) => request<BrowserObservation>(`${pagePath(input.pageId)}/read`, input),
     control: (pageId: string, streamId: string, paused: boolean) => request<BrowserPage>(`${pagePath(pageId)}/control`, { streamId, paused }),
+    clipboard: (input: BrowserClipboardRequest) => request<BrowserClipboardSelection | null>(`${pagePath(input.pageId)}/clipboard`, input),
     input: (input: BrowserInputRequest) => request(`${pagePath(input.pageId)}/input`, input),
     resize: (pageId: string, streamId: string, width: number, height: number) => request(`${pagePath(pageId)}/resize`, { streamId, width, height }),
     downloads: (pageId: string) => request<BrowserDownload[]>(`${pagePath(pageId)}/downloads`),

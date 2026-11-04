@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CDPSession, Frame, Page, Protocol } from 'puppeteer-core';
-import { BrowserExecutionError, type BrowserFrame, type BrowserInputRequest } from '@varin/protocol';
+import { BrowserExecutionError, type BrowserFrame, type BrowserClipboardRequest, type BrowserClipboardSelection, type BrowserInputRequest } from '@varin/protocol';
+
+import { NativeBrowserClipboard } from './native-clipboard.js';
 
 export interface PresentationPage {
   id: string; presentationStreams: Set<string>; generation: string; controlEpoch: string; viewerId?: string; agentPaused: boolean; page: Page;
@@ -11,7 +13,7 @@ export interface PresentationPage {
 }
 type Stream = { listener(frame: BrowserFrame): void; lastSequence: number; viewport?: { width: number; height: number; scale: number } };
 type Capture = { page: PresentationPage; session: CDPSession; streams: Map<string, Stream>; sequence: number; keys: Map<string, Protocol.Input.DispatchKeyEventRequest>;
-  buttons: Map<string, Protocol.Input.DispatchMouseEventRequest>; stopped: boolean; stopEvents(): void; releaseActivity(): Promise<void> };
+  buttons: Map<string, Protocol.Input.DispatchMouseEventRequest>; clipboard: NativeBrowserClipboard; stopped: boolean; stopEvents(): void; releaseActivity(): Promise<void> };
 
 /** This adapter observes and inputs the original Chromium page. It owns no page lifetime. */
 export class NativeBrowserPresentation {
@@ -30,7 +32,7 @@ export class NativeBrowserPresentation {
         const page = this.options.require(pageId);
         const session = (page.page.mainFrame() as Frame & { client: CDPSession }).client;
         const releaseActivity = await this.options.acquireActivity(page);
-        const capture: Capture = { page, session, streams: new Map(), sequence: 0, keys: new Map(), buttons: new Map(), stopped: false, stopEvents: () => {}, releaseActivity };
+        const capture: Capture = { page, session, streams: new Map(), sequence: 0, keys: new Map(), buttons: new Map(), clipboard: new NativeBrowserClipboard(), stopped: false, stopEvents: () => {}, releaseActivity };
         const frameListener = (event: Protocol.Page.ScreencastFrameEvent) => {
           // ACK the native frame after taking bounded ownership. A slow observer
           // drops obsolete frames in its transport; it never stalls the page.
@@ -78,6 +80,7 @@ export class NativeBrowserPresentation {
     return async () => {
       if (stopped) return; stopped = true;
       capture.streams.delete(streamId);
+      await capture.clipboard.release(streamId);
       if (capture.page.viewerId === streamId) await this.release(capture);
       if (!capture.streams.size) await this.close(pageId);
       capture.page.presentationStreams.delete(streamId); this.options.changed(capture.page);
@@ -85,6 +88,7 @@ export class NativeBrowserPresentation {
   }
   private async release(capture: Capture): Promise<void> {
     const { session } = capture;
+    await capture.clipboard.release();
     const keys = [...capture.keys], buttons = [...capture.buttons];
     const work = keys.map(([, key]) => session.send('Input.dispatchKeyEvent', { ...key, type: 'keyUp' }));
     for (const [, button] of buttons) work.push(session.send('Input.dispatchMouseEvent', { ...button, type: 'mouseReleased', buttons: 0 }) as Promise<void>);
@@ -92,6 +96,22 @@ export class NativeBrowserPresentation {
     await Promise.all(work);
     for (const [id, key] of keys) if (capture.keys.get(id) === key) capture.keys.delete(id);
     for (const [id, button] of buttons) if (capture.buttons.get(id) === button) capture.buttons.delete(id);
+  }
+  async clipboard(request: BrowserClipboardRequest, signal?: AbortSignal): Promise<BrowserClipboardSelection | null> {
+    const page = this.options.require(request.pageId), capture = await this.captures.get(request.pageId);
+    const stream = capture?.streams.get(request.streamId);
+    const valid = () => Boolean(capture && !capture.stopped && capture.streams.has(request.streamId)
+      && page.generation === request.pageGeneration && page.agentPaused && page.viewerId === request.streamId && page.controlEpoch === request.controlEpoch);
+    if (!capture || !stream || !valid()) throw new BrowserExecutionError('Browser clipboard generation or human control lease is stale', 'none');
+    if (!Number.isSafeInteger(request.frameSequence) || request.frameSequence <= 0 || request.frameSequence > stream.lastSequence) throw new BrowserExecutionError('Clipboard access requires an observed browser frame', 'none');
+    return this.options.queued(page, async () => {
+      signal?.throwIfAborted();
+      if (!valid()) throw new BrowserExecutionError('Browser clipboard control changed before dispatch', 'none');
+      return capture.clipboard.execute(request, page.page, valid);
+    }, signal);
+  }
+  async invalidateClipboard(pageId: string): Promise<void> {
+    const capture = await this.captures.get(pageId); await capture?.clipboard.release();
   }
   async input(request: BrowserInputRequest, signal?: AbortSignal): Promise<void> {
     const page = this.options.require(request.pageId);
@@ -135,6 +155,7 @@ export class NativeBrowserPresentation {
     if (![width, height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 16384)) throw new Error('Browser viewport exceeds Chromium texture dimensions');
     // Only the current human holder may resize; another observer must letterbox.
     if (capture.page.viewerId !== streamId || !capture.page.agentPaused) throw new Error('Take control before resizing the browser viewport');
+    await capture.clipboard.release();
     capture.page.controlEpoch = randomUUID(); this.options.changed(capture.page);
     await capture.session.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   }
@@ -159,7 +180,7 @@ export class NativeBrowserPresentation {
     }, signal);
   }
   async releaseInput(pageId: string): Promise<void> { const capture = await this.captures.get(pageId); if (capture) await this.release(capture); }
-  async forgetClosed(pageId: string): Promise<void> { const pending = this.captures.get(pageId); this.captures.delete(pageId); const capture = await pending; capture?.stopEvents(); }
+  async forgetClosed(pageId: string): Promise<void> { const pending = this.captures.get(pageId); this.captures.delete(pageId); const capture = await pending; capture?.stopEvents(); await capture?.clipboard.release(); }
   async close(pageId: string): Promise<void> {
     const pending = this.captures.get(pageId); if (!pending) return;
     const capture = await pending; capture.stopped = true;

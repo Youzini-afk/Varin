@@ -124,10 +124,11 @@ export class NativeBrowserOwner implements BrowserOwner {
         page.on('framenavigated', frame => {
           for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref);
           entry.refKeys.clear(); entry.navigation++; entry.observations.clear();
+          void this.presentation.invalidateClipboard(entry.id).catch(() => {});
           if (frame === page.mainFrame()) entry.controlEpoch = randomUUID();
           changed();
         });
-        page.on('framedetached', frame => { for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref); });
+        page.on('framedetached', frame => { for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref); void this.presentation.invalidateClipboard(entry.id).catch(() => {}); });
         page.on('dialog', dialog => { entry.dialog = dialog; changed(); this.emit({ kind: 'dialog', pageId: id, type: dialog.type(), message: dialog.message(), defaultPrompt: dialog.defaultValue() }); });
         changed(); return entry;
       } catch (error) { await native.close(); throw error; }
@@ -588,6 +589,7 @@ export class NativeBrowserOwner implements BrowserOwner {
     for (const entry of this.pages.values()) if (entry.threads.delete(threadId) && !entry.threads.size && !entry.retained) await this.close(entry.id);
   }
   subscribeFrames(pageId: string, streamId: string, listener: (frame: import('@varin/protocol').BrowserFrame) => void) { return this.presentation.subscribe(pageId, streamId, listener); }
+  clipboard(request: import('@varin/protocol').BrowserClipboardRequest, signal?: AbortSignal) { return this.presentation.clipboard(request, signal); }
   input(request: import('@varin/protocol').BrowserInputRequest, signal?: AbortSignal) { return this.presentation.input(request, signal); }
   resize(pageId: string, streamId: string, width: number, height: number) { return this.presentation.resize(pageId, streamId, width, height); }
   chooseFiles(pageId: string, chooserId: string, files: { name: string; bytes: Uint8Array }[], signal?: AbortSignal) { return this.presentation.chooseFiles(pageId, chooserId, files, signal); }

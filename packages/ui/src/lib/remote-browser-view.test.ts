@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { BROWSER_SELECTION_SCRIPT, browserInspectorScripts, copyBrowserSelection, createBrowserResizeQueue, createBrowserTextInput, isBrowserClipboardShortcut } from './remote-browser-view';
+import { BROWSER_SELECTION_SCRIPT, browserInspectorScripts, copyBrowserSelection, cutBrowserSelection, createBrowserResizeQueue, createBrowserTextInput, isBrowserClipboardShortcut } from './remote-browser-view';
 
 afterEach(() => vi.unstubAllGlobals());
 
 test('clipboard shortcuts remain local on both platforms without swallowing AltGr', () => {
   expect(isBrowserClipboardShortcut({ key: 'V', ctrlKey: true, metaKey: false, altKey: false })).toBe(true);
   expect(isBrowserClipboardShortcut({ key: 'c', ctrlKey: false, metaKey: true, altKey: false })).toBe(true);
+  expect(isBrowserClipboardShortcut({ key: 'x', ctrlKey: true, metaKey: false, altKey: false })).toBe(true);
+  expect(isBrowserClipboardShortcut({ key: 'X', ctrlKey: false, metaKey: true, altKey: false })).toBe(true);
   expect(isBrowserClipboardShortcut({ key: 'v', ctrlKey: true, metaKey: false, altKey: true })).toBe(false);
 });
 
@@ -79,4 +81,15 @@ test('inspection cancellation fences late installation and older cancellation ca
   const pending = run(next.start); expect(document.querySelector('[id^="__varin_browser_overlay"]')).not.toBeNull();
   run(first.cancel); expect(document.querySelector('[id^="__varin_browser_overlay"]')).not.toBeNull();
   run(next.cancel); expect(await pending).toBeNull(); expect(document.querySelector('[id^="__varin_browser_overlay"]')).toBeNull();
+});
+
+
+test('a clipboard write rejected before capture finishes still releases the late original ticket', async () => {
+  let captured!: (value: { selectionId: string; text: string }) => void;
+  const selection = new Promise<{ selectionId: string; text: string }>(resolve => { captured = resolve; });
+  const cut = vi.fn(), release = vi.fn().mockResolvedValue(null);
+  const pending = cutBrowserSelection({ capture: () => selection, copy: async () => { throw new Error('denied'); }, valid: () => true, cut, release });
+  const failed = expect(pending).rejects.toThrow('denied');
+  captured({ selectionId: 'original', text: 'text' }); await failed;
+  expect(cut).not.toHaveBeenCalled(); expect(release).toHaveBeenCalledExactlyOnceWith('original');
 });

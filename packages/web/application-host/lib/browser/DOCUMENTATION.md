@@ -16,6 +16,19 @@
 
 `native-shell-owner.test.ts` drives the production shared owner, Puppeteer and CDP transport against a native-device fixture. It exercises identity-preserving remount, stale input rejection, pending and queued cancellation, lost pipes, file capture, terminal download cleanup and separate Web rendering. Installed CEF/session/sandbox behavior requires native desktop acceptance in addition to these tests.
 
+## Viewer clipboard
+
+`native-clipboard.ts` retains one one-use selection ticket per live viewer in the original BrowserOwner.
+Capture uses the focused frame's isolated Puppeteer realm; the ticket holds its actual input/DOM nodes,
+selection offsets and original page/control generation. Password and non-editable selections are not
+captured, and inaccessible frames never fall back to a guessed document.
+
+The viewer writes its local clipboard before redeeming a cut ticket. The original serialized input lane
+rechecks the viewer lease, then atomically checks the same selection and invokes Chromium's editing command.
+It never writes the device clipboard or replaces input values directly. Changed selections, navigation,
+revocation, cancelled/no-op edits and repeated tickets do not report a successful cut. Navigation, viewer
+release and page teardown dispose retained handles; uncertain deletion is not automatically replayed.
+
 ## Explicit cross-device grants
 
 `registry.ts` selects original owners and admits authenticated Browser device connections. `device-service.ts` runs beside the original native owner and connects only after explicit interactive-profile authorization for the selected Host. HTTP and both WebSocket lanes check the Host identity; grants and one-use identity challenges bind the authenticated principal. The owner signs the challenge with its process-generation Ed25519 key; its public-key fingerprint determines its Browser identity. A different device cannot claim a disconnected owner's pages by copying catalog fields. The Host accepts recovered stop receipts only from that same device, Browser and owner generation, with the original request lease.

@@ -8,7 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { createBrowserInputQueue, browserModifiers } from '@/lib/remote-browser-input';
-import { browserFrameMatchesControl, browserInspectorScripts, browserPosition, BROWSER_POSITION_SCRIPT, BROWSER_SELECTION_SCRIPT, copyBrowserSelection, createBrowserResizeQueue, createBrowserTextInput, isBrowserClipboardShortcut } from '@/lib/remote-browser-view';
+import { browserFrameMatchesControl, browserInspectorScripts, browserPosition, BROWSER_POSITION_SCRIPT, BROWSER_SELECTION_SCRIPT, copyBrowserSelection, cutBrowserSelection, createBrowserResizeQueue, createBrowserTextInput, isBrowserClipboardShortcut } from '@/lib/remote-browser-view';
 import { registerBrowserMaterialCapture } from '@/lib/agent-editor/material-navigation';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
@@ -195,7 +195,8 @@ export function RemoteBrowserPane({ initialUrl, directory, tabID, onNavigate, in
     event.preventDefault();
   };
   const key = (event: React.KeyboardEvent, phase: 'down' | 'up') => {
-    if (!controlled || composing.current || event.nativeEvent.isComposing || isBrowserClipboardShortcut(event)) return;
+    if (!controlled || composing.current || event.nativeEvent.isComposing) return;
+    if (isBrowserClipboardShortcut(event)) return;
     if (phase === 'down') textInput.key();
     send({ type: 'key', phase, key: event.key, code: event.code, windowsVirtualKeyCode: event.keyCode, location: event.location, modifiers: browserModifiers(event), autoRepeat: event.repeat });
     if (event.key.length !== 1 && event.key !== 'Unidentified' || event.ctrlKey || event.metaKey) event.preventDefault();
@@ -258,6 +259,20 @@ export function RemoteBrowserPane({ initialUrl, directory, tabID, onNavigate, in
         onCompositionEnd={event => { composing.current = false; textInput.end(event.data); event.currentTarget.value = ''; }}
         onInput={event => { const native = event.nativeEvent as InputEvent; textInput.input(event.currentTarget.value, native.inputType, native.isComposing); if (!composing.current) event.currentTarget.value = ''; }}
         onPaste={event => { event.preventDefault(); send({ type: 'text', text: event.clipboardData.getData('text/plain') }); }}
+        onCut={event => {
+          event.preventDefault();
+          const original = pageRef.current, observed = frame.current;
+          if (!original || !observed || composing.current || !browserFrameMatchesControl(original, observed, streamId)) return;
+          setError('');
+          const identity = { pageId: observed.pageId, pageGeneration: observed.pageGeneration, streamId, controlEpoch: observed.controlEpoch, frameSequence: observed.sequence };
+          void cutBrowserSelection({
+            capture: () => api.clipboard({ ...identity, action: 'capture' }),
+            copy: read => copyBrowserSelection(read, navigator.clipboard),
+            valid: () => mounted.current && pageRef.current?.pageId === identity.pageId && pageRef.current.generation === identity.pageGeneration && pageRef.current.controlEpoch === identity.controlEpoch && browserFrameMatchesControl(pageRef.current, frame.current, streamId),
+            cut: selectionId => api.clipboard({ ...identity, action: 'cut', selectionId }),
+            release: selectionId => api.clipboard({ ...identity, action: 'release', selectionId }),
+          }).catch(cause => { if (mounted.current) setError(String(cause)); });
+        }}
         onCopy={event => {
           event.preventDefault();
           const original = pageRef.current;

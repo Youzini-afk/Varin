@@ -4,7 +4,7 @@ import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT }
 /** Keep clipboard shortcuts local. Forwarding them would access the device's
  * clipboard, not the viewer's, and cancelling keydown suppresses paste/copy. */
 export function isBrowserClipboardShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
-  return (event.ctrlKey || event.metaKey) && !event.altKey && ['c', 'v'].includes(event.key.toLowerCase());
+  return (event.ctrlKey || event.metaKey) && !event.altKey && ['c', 'v', 'x'].includes(event.key.toLowerCase());
 }
 
 export function browserFrameMatchesControl(page: BrowserPage | undefined, frame: BrowserFrameInfo | undefined, streamId: string): boolean {
@@ -114,4 +114,30 @@ export function browserInspectorScripts(viewerId: string, sequence: number) {
       window[${key}] = { sequence: ${sequence}, cancelled: true };
     })()`,
   };
+}
+
+/** Keep the captured ticket even when clipboard permission fails immediately:
+ * its asynchronous capture still needs to be released on the original owner. */
+export async function cutBrowserSelection(options: {
+  capture(): Promise<import('@varin/protocol').BrowserClipboardSelection | null>;
+  copy(read: () => Promise<string>): Promise<void>;
+  valid(): boolean;
+  cut(selectionId: string): Promise<unknown>;
+  release(selectionId: string): Promise<unknown>;
+}): Promise<void> {
+  const selection = options.capture();
+  try {
+    await options.copy(async () => {
+      const captured = await selection;
+      if (!captured || typeof captured.selectionId !== 'string' || !captured.selectionId || typeof captured.text !== 'string') throw new Error('No editable selection is available to cut');
+      if (!options.valid()) throw new Error('The original browser selection is no longer active; nothing was cut');
+      return captured.text;
+    });
+    const captured = await selection;
+    if (!captured || !options.valid()) throw new Error('The original browser selection is no longer active; nothing was cut');
+    await options.cut(captured.selectionId);
+  } finally {
+    const captured = await selection.catch(() => null);
+    if (captured && typeof captured.selectionId === 'string') await options.release(captured.selectionId).catch(() => {});
+  }
 }

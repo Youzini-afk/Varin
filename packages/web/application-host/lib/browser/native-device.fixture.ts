@@ -24,7 +24,7 @@ export class NativeDevice implements NativeBrowserShellPort {
       const command = String(params.method), args = params.params as Record<string, unknown> | undefined;
       if (command === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame', loaderId: 'loader', url: this.pages.get(pageId)?.url, securityOrigin: 'https://example.com', mimeType: 'text/html' } } };
       if (command === 'Runtime.enable') this.context(pageId);
-      if (command === 'Page.createIsolatedWorld') return { executionContextId: 2 };
+      if (command === 'Page.createIsolatedWorld') { this.cdp(pageId, 'Runtime.executionContextCreated', { context: { id: 2, origin: 'https://example.com', name: args?.worldName ?? '', auxData: { isDefault: false, type: 'isolated', frameId: 'frame' } } }); return { executionContextId: 2 }; }
       if (command === 'Page.navigate') {
         const state = this.pages.get(pageId)!; state.url = String(args?.url); this.emit({ kind: 'changed', pageId, state: { ...state } }); const loaderId = `load-${++this.generation}`;
         this.cdp(pageId, 'Page.frameNavigated', { frame: { id: 'frame', loaderId, url: state.url, securityOrigin: 'https://example.com', mimeType: 'text/html' } }); this.context(pageId);

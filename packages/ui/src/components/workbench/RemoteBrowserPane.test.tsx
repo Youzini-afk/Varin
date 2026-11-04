@@ -7,7 +7,7 @@ import { RemoteBrowserPane } from './RemoteBrowserPane';
 import { BROWSER_POSITION_SCRIPT, BROWSER_SELECTION_SCRIPT, browserInspectorScripts } from '@/lib/remote-browser-view';
 
 const mocks = vi.hoisted(() => ({
-  api: { catalog: vi.fn(), events: vi.fn(), frames: vi.fn(), control: vi.fn(), resize: vi.fn(), input: vi.fn(), action: vi.fn(), read: vi.fn() },
+  api: { catalog: vi.fn(), events: vi.fn(), frames: vi.fn(), control: vi.fn(), resize: vi.fn(), input: vi.fn(), clipboard: vi.fn(), action: vi.fn(), read: vi.fn() },
   capture: undefined as undefined | (() => Promise<unknown>),
   selected: { runtime: 'agent', threadId: 'thread', branchId: 'branch' },
   draftImage: vi.fn(), draftText: vi.fn(), annotation: vi.fn(), position: vi.fn(), toast: { success: vi.fn(), error: vi.fn() },
@@ -65,6 +65,7 @@ beforeEach(async () => {
   mocks.api.frames.mockImplementation((_page: string, _stream: string, listener: typeof frames, signal: AbortSignal) => { frames = listener; return new Promise<void>(resolve => { endFrames = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); }); });
   mocks.api.control.mockImplementation(async (_page: string, stream: string, paused: boolean) => { page = { ...page, agentPaused: paused, controlViewerId: paused ? stream : undefined, controlEpoch: 'controlled' }; return page; });
   mocks.api.resize.mockResolvedValue(undefined); mocks.api.input.mockResolvedValue(undefined);
+  mocks.api.clipboard.mockImplementation(async request => request.action === 'capture' ? { selectionId: 'selection', text: 'selected input text' } : null);
   mocks.api.action.mockImplementation(async (_page: string, action: { script?: string }) => ({ page, action: 'evaluate', value: action.script === BROWSER_POSITION_SCRIPT ? { x: 12, y: 345 } : action.script === BROWSER_SELECTION_SCRIPT ? 'selected input text' : undefined }));
   mocks.api.read.mockImplementation(async () => ({ page, viewport: { width: 800, height: 600, scale: 1 }, image: { base64: 'image', width: 800, height: 600 } }));
   mocks.annotation.mockResolvedValue(new File(['image'], 'annotation.png')); mocks.draftImage.mockResolvedValue(undefined);
@@ -156,4 +157,38 @@ test('a decoded frame arriving after stream termination cannot revive browser co
   await act(async () => decoded({ width: 800, height: 600, close() {} }));
   expect(button('contextPanel.preview.inspect.toggle').disabled).toBe(true);
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('browser.streamEnded');
+});
+
+
+
+test('local cut writes the viewer clipboard before redeeming the original owner ticket', async () => {
+  await render(); await emitFrame(); await takeControl();
+  const order: string[] = [];
+  mocks.api.clipboard.mockImplementation(async request => { order.push(request.action); return request.action === 'capture' ? { selectionId: 'selection', text: 'selected input text' } : null; });
+  vi.mocked(navigator.clipboard.writeText).mockImplementation(async text => { order.push(`copy:${text}`); });
+  const input = container.querySelector('textarea')!;
+  const key = await dispatch(input, 'keydown', { key: 'x', code: 'KeyX', keyCode: 88, ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+  expect(key.defaultPrevented).toBe(false); expect(mocks.api.input).not.toHaveBeenCalled();
+  await dispatch(input, 'cut');
+  expect(order).toEqual(['capture', 'copy:selected input text', 'cut', 'release']);
+  expect(mocks.api.clipboard).toHaveBeenCalledWith(expect.objectContaining({ action: 'cut', pageId: 'page', pageGeneration: 'generation', controlEpoch: 'controlled', streamId: 'viewer', selectionId: 'selection' }));
+});
+
+test('clipboard permission failure releases the ticket without cutting anything', async () => {
+  await render(); await emitFrame(); await takeControl();
+  vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('Clipboard permission denied'));
+  await dispatch(container.querySelector('textarea')!, 'cut');
+  expect(mocks.api.clipboard.mock.calls.map(([request]) => request.action)).toEqual(['capture', 'release']);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('Clipboard permission denied');
+});
+
+test('revocation while the viewer clipboard is pending never redeems the cut ticket', async () => {
+  await render(); await emitFrame(); await takeControl();
+  let finish!: () => void;
+  vi.mocked(navigator.clipboard.writeText).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  await dispatch(container.querySelector('textarea')!, 'cut');
+  page = { ...page, controlEpoch: 'revoked', controlViewerId: undefined, agentPaused: false };
+  await act(async () => events({ kind: 'page', page })); await act(async () => finish());
+  expect(mocks.api.clipboard.mock.calls.map(([request]) => request.action)).toEqual(['capture', 'release']);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('nothing was cut');
 });

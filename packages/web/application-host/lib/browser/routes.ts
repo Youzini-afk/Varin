@@ -9,7 +9,7 @@ import { browserActor } from './remote-owner.js';
 import { BrowserRegistry, presentationOwner } from './registry.js';
 import { object, text, browserMediaMaxPayload, BROWSER_TRANSFER_BYTES } from './device-wire.js';
 import { parseBrowserAction, parseBrowserRead } from './desktop-invoke.js';
-import { parseBrowserInput } from './input-validation.js';
+import { parseBrowserInput, parseBrowserClipboard } from './input-validation.js';
 
 /** Browser authority is explicit and independent of Computer permissions. */
 export function browserPrincipal(value: unknown): string {
@@ -63,6 +63,7 @@ export function registerBrowserRoutes(app: Express, options: {
     browsers.assertViewer(String(request.params.pageId), text(input.streamId));
     return presentationOwner(await browsers.owner(String(request.params.pageId))).takeControl(String(request.params.pageId), input.paused, text(input.streamId));
   });
+  route('post', '/pages/:pageId/clipboard', async (request, response) => response.json(await browsers.clipboard(parseBrowserClipboard({ ...object(request.body), pageId: String(request.params.pageId) }))));
   route('post', '/pages/:pageId/input', request => browsers.input(parseBrowserInput({ ...object(request.body), pageId: String(request.params.pageId) })));
   route('post', '/pages/:pageId/resize', async request => {
     const input = object(request.body); if (typeof input.width !== 'number' || typeof input.height !== 'number') throw new Error('Invalid browser viewport');

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { BrowserExecutionError, type BrowserAction, type BrowserDeviceIdentity, type BrowserDownload, type BrowserEvent, type BrowserFrame,
-  type BrowserInputRequest, type BrowserObservation, type BrowserPage, type BrowserPresentationOwner, type BrowserReadRequest } from '@varin/protocol';
+  type BrowserClipboardRequest, type BrowserClipboardSelection, type BrowserInputRequest, type BrowserObservation, type BrowserPage, type BrowserPresentationOwner, type BrowserReadRequest } from '@varin/protocol';
 import { BrowserDeviceWire, BROWSER_REQUESTS, deferred, object, text } from './device-wire.js';
 
 export type BrowserActor = { kind: 'thread'; threadId: string; runId: string; invocationId: string } | { kind: 'user'; principalId: string };
@@ -121,6 +121,7 @@ export class RemoteBrowserOwner implements BrowserPresentationOwner {
     catch (error) { this.streams.delete(streamId); throw error; }
     return async () => { if (!this.streams.delete(streamId)) return; if (!originalActor) throw new Error('Original Browser observer actor is unavailable'); await browserActor.run(originalActor, () => this.call('unsubscribeFrames', { pageId, streamId })); };
   }
+  clipboard(request: BrowserClipboardRequest, signal?: AbortSignal) { return this.call<BrowserClipboardSelection | null>('clipboard', request, signal); }
   input(request: BrowserInputRequest, signal?: AbortSignal) { return this.call<void>('input', request, signal); }
   resize(pageId: string, streamId: string, width: number, height: number) { return this.call<void>('resize', { pageId, streamId, width, height }); }
   chooseFiles(pageId: string, chooserId: string, files: { name: string; bytes: Uint8Array }[], signal?: AbortSignal) { return this.call<void>('chooseFiles', { pageId, chooserId, files }, signal); }
