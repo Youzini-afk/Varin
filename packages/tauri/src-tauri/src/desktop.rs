@@ -1683,7 +1683,9 @@ pub fn run() {
             tauri::async_runtime::spawn(initialize(app.handle().clone(), root));
             Ok(())
         });
-    let app = match crate::engine::configure(crate::companion::register_asset_protocol(builder))
+    let app = match crate::engine::configure(crate::preview::register_protocol(
+        crate::companion::register_asset_protocol(builder),
+    ))
         .build(context)
     {
         Ok(app) => app,

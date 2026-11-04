@@ -9,6 +9,9 @@ afterEach(() => vi.unstubAllGlobals());
 it('keeps ordinary browsers on srcdoc with an opaque sandbox', async () => {
   const { window, document } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  // Ordinary HTTP Hosts do not expose secure-context randomUUID. Their existing
+  // srcdoc feedback must not acquire a desktop-only bootstrap prerequisite.
+  vi.stubGlobal('crypto', {});
   const root = createRoot(document.body);
   await act(async () => root.render(<SandboxedHtmlFrame title="Work" policy="interactive" html="<h1>Work</h1>" />));
   const frame = document.querySelector('iframe')!;

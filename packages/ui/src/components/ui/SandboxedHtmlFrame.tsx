@@ -14,7 +14,7 @@ export const SandboxedHtmlFrame = React.forwardRef<HTMLIFrameElement, Props>(fun
 ) {
   const frame = React.useRef<HTMLIFrameElement | null>(null);
   const native = getDesktopRuntime()?.runtime === 'tauri';
-  const generation = React.useMemo(() => ({ id: crypto.randomUUID(), html, policy, installed: false }), [html, policy]);
+  const generation = React.useMemo(() => ({ id: native ? crypto.randomUUID() : '', html, policy, installed: false }), [html, policy, native]);
   React.useLayoutEffect(() => {
     if (!native) return;
     const receive = (event: MessageEvent) => {
