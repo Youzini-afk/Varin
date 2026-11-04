@@ -32,7 +32,9 @@ export function createBrowserInputQueue(options: {
     else queue.push(request);
     void drain();
   };
-  return { enqueue, resume() { if (stopped) return; generation++; failed = false; queue.length = 0; },
+  return { enqueue,
+    async settled() { while (active) await active; },
+    resume() { if (stopped) return; generation++; failed = false; queue.length = 0; },
     stop(): Promise<void> {
       if (stopping) return stopping;
       stopped = true; queue.length = 0;

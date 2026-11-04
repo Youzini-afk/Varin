@@ -40,3 +40,15 @@ describe('remote browser human input lane', () => {
     await queue.stop();
   });
 });
+
+
+test('waiting for settled input drains the original click before screenshot capture', async () => {
+  const first = deferred(), second = deferred(), calls: BrowserInputRequest[] = [];
+  const queue = createBrowserInputQueue({ frame: () => frame, failed: vi.fn(), send: async request => {
+    calls.push(request); if (calls.length === 1) await first.promise; else if (calls.length === 2) await second.promise;
+  } });
+  queue.enqueue(press); await Promise.resolve(); queue.enqueue(motion(12));
+  const settled = vi.fn(); const waiting = queue.settled().then(settled);
+  first.resolve(); await vi.waitFor(() => expect(calls).toHaveLength(2)); expect(settled).not.toHaveBeenCalled();
+  second.resolve(); await waiting; expect(settled).toHaveBeenCalledOnce(); await queue.stop();
+});
