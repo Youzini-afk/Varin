@@ -318,3 +318,129 @@ test('draft transfer waits for native acceptance and dispatches its targeted rec
   assert.equal(port.calls.filter(call => call.args?.command === 'desktop_transfer_draft').length, 1);
   dispose();
 });
+
+const draftTransfer = () => ({ schemaVersion: 1 as const, sourceDraftKey: 'source-draft', snapshotId: 'original-snapshot', sourceHostGeneration: 2,
+  directory: '/project', projectId: '', draft: { text: 'Keep the original Host', images: [], materials: [], preparedSource: null } });
+
+test('Host-scoped commands wait for the actual native runtime receipt without blocking window controls', async () => {
+  const target = makeWindow();
+  let settle!: () => void;
+  const write = new Promise<void>(resolve => { settle = resolve; });
+  let nativeEndpoint = 'https://selected-host.example';
+  const observed: string[] = [];
+  const port = new NativePort(async (command, args) => {
+    if (command === 'varin_bootstrap') return bootstrap({ documentNonce: 'original-document' });
+    if (command === 'varin_runtime_changed') {
+      await write;
+      nativeEndpoint = (args?.config as { apiBaseUrl: string }).apiBaseUrl;
+    }
+    if (command === 'varin_invoke' && args?.command !== 'desktop_minimize_current_window') observed.push(nativeEndpoint);
+    return args?.command === 'desktop_transfer_draft' ? { accepted: true } : null;
+  });
+  const dispose = await installTauriDesktop(target, port);
+  const bridge = target.__VARIN_DESKTOP__!;
+  target.__VARIN_API_BASE_URL__ = 'https://new-host.example';
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  const transfer = draftTransfer();
+  const pending = [
+    bridge.invoke('desktop_transfer_draft', { transfer }),
+    bridge.invoke('desktop_complete_draft_transfer', { transferId: 'receipt', accepted: true }),
+    bridge.invoke('desktop_focus_main_window', { mode: 'draft' }),
+    bridge.invoke('desktop_new_window'),
+    bridge.invoke('desktop_new_window_at_url', { url: 'https://explicit-host.example' }),
+    bridge.invoke('desktop_new_window_for_host', { hostId: 'saved-host' }),
+    bridge.invoke('desktop_open_draft_mini_chat_window', { directory: '/project' }),
+    bridge.invoke('desktop_open_thread_mini_chat_window', { threadId: 'thread', branchId: 'branch' }),
+    bridge.invoke('desktop_notify', { title: 'Host notification' }),
+    bridge.invoke('desktop_tray_update', { dockBadgeCount: 1 }),
+    bridge.invoke('desktop_browser_device', { action: 'status' }),
+    bridge.invoke('desktop_browser_control', { pageId: 'original-page', paused: true }),
+    bridge.invoke('desktop_web_render', { url: 'https://example.com' }),
+  ];
+  await bridge.invoke('desktop_minimize_current_window');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(observed, [], 'none of the scoped commands may use the old native Host');
+  assert.equal(port.calls.filter(call => call.command === 'varin_runtime_changed').length, 1);
+  settle();
+  assert.deepEqual((await Promise.all(pending))[0], { accepted: true });
+  assert.equal(observed.length, pending.length);
+  assert.ok(observed.every(endpoint => endpoint === 'https://new-host.example'));
+  assert.deepEqual(port.calls.find(call => call.args?.command === 'desktop_transfer_draft')?.args?.args, { transfer });
+  dispose?.();
+});
+
+test('a failed runtime write rejects scoped commands and remains failed without a hidden retry', async () => {
+  const target = makeWindow();
+  let rejectWrite!: (error: Error) => void;
+  const write = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'original-document' })
+    : command === 'varin_runtime_changed' ? write : null);
+  const dispose = await installTauriDesktop(target, port);
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  const rejected = assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_transfer_draft', { transfer: draftTransfer() }), /Native authority rejected/);
+  rejectWrite(new Error('Native authority rejected'));
+  await rejected;
+  await assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_focus_main_window', {}), /Native authority rejected/);
+  target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(port.calls.map(call => call.command), ['varin_bootstrap', 'varin_runtime_changed']);
+  await target.__VARIN_DESKTOP__!.invoke('desktop_close_current_window');
+  assert.equal(port.calls.at(-1)?.args?.command, 'desktop_close_current_window');
+  dispose?.();
+});
+
+test('a later Host revision promptly rejects an earlier command and never replays it on the new Host', async () => {
+  const target = makeWindow();
+  let settle!: () => void;
+  const write = new Promise<void>(resolve => { settle = resolve; });
+  let writes = 0;
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'original-document' })
+    : command === 'varin_runtime_changed' && ++writes === 1 ? write : null);
+  const dispose = await installTauriDesktop(target, port);
+  target.__VARIN_API_BASE_URL__ = 'https://first.example';
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  const rejected = assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_transfer_draft', { transfer: draftTransfer() }), /original desktop document or Application Host changed/);
+  await new Promise(resolve => setImmediate(resolve));
+  target.__VARIN_API_BASE_URL__ = 'https://second.example';
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  await rejected; // No need for the old native write to finish to reject its dependent request.
+  const next = target.__VARIN_DESKTOP__!.invoke('desktop_focus_main_window', {});
+  settle();
+  await next;
+  assert.deepEqual(port.calls.filter(call => call.command === 'varin_invoke').map(call => call.args?.command), ['desktop_focus_main_window']);
+  assert.deepEqual(port.calls.filter(call => call.command === 'varin_runtime_changed').map(call => (call.args?.config as { apiBaseUrl: string }).apiBaseUrl), ['https://first.example', 'https://second.example']);
+  dispose?.();
+});
+
+test('a revision change after ledger completion is still checked immediately before IPC dispatch', async () => {
+  const target = makeWindow();
+  let settle!: () => void;
+  const write = new Promise<void>(resolve => { settle = resolve; });
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'original-document' })
+    : command === 'varin_runtime_changed' ? write : null);
+  const dispose = await installTauriDesktop(target, port);
+  const rejected = assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_open_draft_mini_chat_window', {}), /original desktop document or Application Host changed/);
+  await new Promise(resolve => setImmediate(resolve));
+  settle();
+  queueMicrotask(() => target.dispatchEvent(new Event('varin:runtime-endpoint-changed')));
+  await rejected;
+  assert.equal(port.calls.some(call => call.command === 'varin_invoke'), false);
+  dispose?.();
+});
+
+test('document disposal rejects a waiting transfer before a stalled native write can finish', async () => {
+  const target = makeWindow();
+  let settle!: () => void;
+  const write = new Promise<void>(resolve => { settle = resolve; });
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'original-document' })
+    : command === 'varin_runtime_changed' ? write : null);
+  const dispose = await installTauriDesktop(target, port);
+  const rejected = assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_transfer_draft', { transfer: draftTransfer() }), /original desktop document or Application Host changed/);
+  await new Promise(resolve => setImmediate(resolve));
+  target.dispatchEvent(new Event('pagehide'));
+  await rejected;
+  settle();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(port.calls.some(call => call.command === 'varin_invoke'), false);
+  dispose?.();
+});

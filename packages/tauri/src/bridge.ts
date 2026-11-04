@@ -42,10 +42,21 @@ export interface DesktopBridgeConnection {
   dispose(): void;
 }
 
+/** Wait for the invoking document's original Host ledger, then recheck at IPC dispatch. */
+export type DesktopRuntimeFence = () => Promise<() => void>;
+
+const runtimeCommands = new Set<VarinDesktopCommand>([
+  'desktop_transfer_draft', 'desktop_complete_draft_transfer', 'desktop_focus_main_window',
+  'desktop_new_window', 'desktop_new_window_at_url', 'desktop_new_window_for_host',
+  'desktop_open_draft_mini_chat_window', 'desktop_open_thread_mini_chat_window',
+  'desktop_notify', 'desktop_tray_update', 'desktop_web_render',
+]);
+
 export async function createTauriDesktopBridge(
   transport: DesktopNativeTransport,
   onEvent?: (event: VarinDesktopEvent, detail: unknown) => void,
   onLocalHostRestart?: (detail: unknown) => void,
+  runtimeFence?: DesktopRuntimeFence,
 ): Promise<DesktopBridgeConnection> {
   let disposed = false;
   const listeners = new Map<VarinDesktopEvent, Set<Listener>>();
@@ -74,12 +85,18 @@ export async function createTauriDesktopBridge(
   });
 
   const bridge: VarinDesktopBridge = Object.freeze({
-    invoke: <K extends VarinDesktopCommand>(
+    invoke: async <K extends VarinDesktopCommand>(
       command: K,
       ...invocation: VarinDesktopCommandInvocation<K>
     ): Promise<VarinDesktopCommandResult<K>> => {
       if (!isVarinDesktopCommand(command)) {
         return Promise.reject(new DesktopBridgeError('unknown_command', 'Unknown desktop command'));
+      }
+      // These operations inherit the native window's selected Host. Window
+      // chrome and explicit local recovery controls stay usable after a failed sync.
+      if (runtimeFence && (runtimeCommands.has(command) || command.startsWith('desktop_browser_'))) {
+        const assertCurrent = await runtimeFence();
+        assertCurrent();
       }
       return request('varin_invoke', { command, args: invocation[0] ?? {} });
     },

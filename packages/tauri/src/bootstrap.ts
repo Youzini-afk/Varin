@@ -79,6 +79,44 @@ export async function installTauriDesktop(
   }
 
   let disposed = false;
+  let runtimeRevision = 0;
+  let runtimeInvalidation = new AbortController();
+  let runtimeReceipt: Promise<void> | undefined;
+  let nativeState = Promise.resolve();
+  const staleRuntime = () => new DesktopBridgeError('stale_runtime', 'The original desktop document or Application Host changed before this request could be sent');
+  const assertRuntime = (revision: number) => {
+    if (disposed || revision !== runtimeRevision) throw staleRuntime();
+  };
+  const reportRuntime = (): Promise<void> => {
+    if (runtimeReceipt) return runtimeReceipt;
+    const revision = runtimeRevision;
+    const config = { apiBaseUrl: target.__VARIN_API_BASE_URL__ ?? '', clientToken: target.__VARIN_CLIENT_TOKEN__ ?? '',
+      requestHeaders: { ...target.__VARIN_RUNTIME_HEADERS__ }, relayHostId: target.__VARIN_RELAY_HOST_ID__ ?? '' };
+    const operation = nativeState.then(async () => {
+      assertRuntime(revision);
+      if (!bootstrap.documentNonce) throw new DesktopBridgeError('missing_document', 'The native desktop document identity is unavailable');
+      await transport.invoke('varin_runtime_changed', { documentNonce: bootstrap.documentNonce, config });
+    });
+    // Only the sequencing tail recovers for a later independent Host change.
+    // Callers retain the original receipt, including its failure, without retry.
+    nativeState = operation.catch(() => {});
+    runtimeReceipt = operation;
+    return operation;
+  };
+  const runtimeFence = async (): Promise<() => void> => {
+    const revision = runtimeRevision, signal = runtimeInvalidation.signal;
+    const assertCurrent = () => assertRuntime(revision);
+    assertCurrent();
+    let invalidate!: () => void;
+    const invalidated = new Promise<never>((_resolve, reject) => {
+      invalidate = () => reject(staleRuntime());
+      signal.addEventListener('abort', invalidate, { once: true });
+    });
+    try { await Promise.race([reportRuntime(), invalidated]); }
+    finally { signal.removeEventListener('abort', invalidate); }
+    assertCurrent();
+    return assertCurrent;
+  };
   let initialized!: () => void;
   const ready = new Promise<void>(resolve => { initialized = resolve; });
   let restarts = ready;
@@ -93,7 +131,7 @@ export async function installTauriDesktop(
       // projection reports the disconnected endpoint; originals remain intact.
       console.warn('[desktop] Local Host connection could not be refreshed safely');
     });
-  });
+  }, runtimeFence);
 
   Object.assign(target, {
     __VARIN_DESKTOP_RUNTIME__: Object.freeze({
@@ -116,28 +154,23 @@ export async function installTauriDesktop(
     __VARIN_DESKTOP__: connection.bridge,
   });
 
-  let nativeState = Promise.resolve();
-  const reportRuntime = (): Promise<void> => {
-    if (!bootstrap.documentNonce || disposed) return Promise.resolve();
-    const config = { apiBaseUrl: target.__VARIN_API_BASE_URL__ ?? '', clientToken: target.__VARIN_CLIENT_TOKEN__ ?? '',
-      requestHeaders: { ...target.__VARIN_RUNTIME_HEADERS__ }, relayHostId: target.__VARIN_RELAY_HOST_ID__ ?? '' };
-    const operation = nativeState.then(async () => {
-      if (!disposed) await transport.invoke('varin_runtime_changed', { documentNonce: bootstrap.documentNonce, config });
-    });
-    // Keep later independent changes ordered, but do not turn this failed
-    // document's ledger write into a successful navigation-ready receipt.
-    nativeState = operation.catch(() => {});
-    return operation;
-  };
-  const navigationReady = () => { void reportRuntime().then(async () => {
-    if (!disposed && bootstrap.documentNonce) await transport.invoke('varin_renderer_ready', { documentNonce: bootstrap.documentNonce });
+  const navigationReady = () => { void runtimeFence().then(async assertCurrent => {
+    assertCurrent();
+    await transport.invoke('varin_renderer_ready', { documentNonce: bootstrap.documentNonce });
   }).catch(() => { console.warn('[desktop] Native navigation readiness could not be confirmed'); }); };
-  const runtimeChanged = () => { void reportRuntime().catch(() => { console.warn('[desktop] Native runtime presentation could not be synchronized'); }); };
+  const runtimeChanged = () => {
+    runtimeRevision += 1;
+    runtimeInvalidation.abort();
+    runtimeInvalidation = new AbortController();
+    runtimeReceipt = undefined;
+    void reportRuntime().catch(() => { console.warn('[desktop] Native runtime presentation could not be synchronized'); });
+  };
   target.addEventListener('varin:desktop-navigation-ready', navigationReady);
   target.addEventListener('varin:runtime-endpoint-changed', runtimeChanged);
   initialized();
   const dispose = () => {
     disposed = true;
+    runtimeInvalidation.abort();
     target.removeEventListener('pagehide', dispose);
     target.removeEventListener('varin:desktop-navigation-ready', navigationReady);
     target.removeEventListener('varin:runtime-endpoint-changed', runtimeChanged);
