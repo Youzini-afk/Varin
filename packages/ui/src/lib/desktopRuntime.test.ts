@@ -25,6 +25,9 @@ test('Tauri bootstrap drives existing UI chrome, locale, boot and window actions
       requests.push({ command, args });
       return (command === 'varin_bootstrap' ? {
         version: 1, runtime: 'tauri', platform: 'linux', arch: 'arm64', windowRole: 'main',
+        // Secondary workbenches share the main presentation role, not the
+        // original window's one-time frontend migration ownership.
+        frontendMigrationOwner: false, documentNonce: 'ui-contract-workbench',
         localPage: true, localOrigin: 'http://127.0.0.1:19001', apiBaseUrl: 'https://remote.example',
         clientToken: 'window-remote-token', requestHeaders: {}, homeDirectory: '/home/local', relayHostId: 'remote-one',
         macosMajor: 0, macVibrancy: false, trayEnabled: true, locale: 'zh-CN',
