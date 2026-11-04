@@ -20,7 +20,7 @@ class NativePort implements DesktopNativeTransport {
     this.listener = handler;
     return () => { this.unsubscriptions++; this.listener = undefined; };
   }
-  emit(event: string, detail?: unknown) { this.listener?.({ event, detail }); }
+  emit(event: string, detail?: unknown, delivery?: { runtimeEpoch: string; documentNonce: string }) { this.listener?.({ event, detail, ...delivery }); }
 }
 
 const bootstrap = (overrides: Partial<TauriDesktopBootstrap> = {}): TauriDesktopBootstrap => ({
@@ -168,13 +168,15 @@ test('events preserve typed payloads, isolate callbacks, unsubscribe and dispose
 test('main and Mini Chat bootstrap retain separate selected Host credentials and events', async () => {
   const main = makeWindow();
   const mini = makeWindow();
-  const mainPort = new NativePort(() => bootstrap());
-  const miniPort = new NativePort(() => bootstrap({
+  const mainPort = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'main-document' })
+    : command === 'varin_runtime_changed' ? { runtimeEpoch: 'main-epoch', documentNonce: 'main-document' } : null);
+  const miniPort = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({
+    documentNonce: 'mini-document',
     windowRole: 'mini-chat', apiBaseUrl: 'https://second-host.example',
     clientToken: 'second-window-token', relayHostId: 'host-two',
     requestHeaders: { 'X-Varin-Client': 'client-two' },
     bootOutcome: { target: 'remote', status: 'ok', hostId: 'host-two', url: 'https://second-host.example' },
-  }));
+  }) : command === 'varin_runtime_changed' ? { runtimeEpoch: 'mini-epoch', documentNonce: 'mini-document' } : null);
   const disposeMain = await installTauriDesktop(main, mainPort);
   const disposeMini = await installTauriDesktop(mini, miniPort);
   assert.equal(main.__VARIN_CLIENT_TOKEN__, 'remote-window-token');
@@ -186,9 +188,12 @@ test('main and Mini Chat bootstrap retain separate selected Host credentials and
   assert.equal('__VARIN_ELECTRON__' in mini, false);
   const received: unknown[] = [];
   mini.addEventListener('varin:open-thread', event => received.push((event as CustomEvent).detail));
-  mainPort.emit('varin:open-thread', { threadId: 'main-only' });
+  main.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  mini.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await new Promise(resolve => setImmediate(resolve));
+  mainPort.emit('varin:open-thread', { threadId: 'main-only' }, { runtimeEpoch: 'main-epoch', documentNonce: 'main-document' });
   assert.deepEqual(received, []);
-  miniPort.emit('varin:open-thread', { threadId: 'mini-only' });
+  miniPort.emit('varin:open-thread', { threadId: 'mini-only' }, { runtimeEpoch: 'mini-epoch', documentNonce: 'mini-document' });
   assert.deepEqual(received, [{ threadId: 'mini-only' }]);
   mini.dispatchEvent(new Event('pagehide'));
   assert.equal(miniPort.unsubscriptions, 1);
@@ -245,7 +250,8 @@ test('navigation readiness waits for the exact document runtime ledger before na
   const target = makeWindow();
   let settle!: () => void;
   const write = new Promise<void>(resolve => { settle = resolve; });
-  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'document-one' }) : command === 'varin_runtime_changed' ? write : null);
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'document-one' })
+    : command === 'varin_runtime_changed' ? write.then(() => ({ runtimeEpoch: 'runtime-one', documentNonce: 'document-one' })) : null);
   const dispose = await installTauriDesktop(target, port);
   assert.deepEqual(port.calls.map(call => call.command), ['varin_bootstrap']);
   target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
@@ -257,7 +263,7 @@ test('navigation readiness waits for the exact document runtime ledger before na
   } });
   settle();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(port.calls[2], { command: 'varin_renderer_ready', args: { documentNonce: 'document-one' } });
+  assert.deepEqual(port.calls[2], { command: 'varin_renderer_ready', args: { documentNonce: 'document-one', runtimeEpoch: 'runtime-one' } });
   dispose?.();
 });
 
@@ -333,6 +339,7 @@ test('Host-scoped commands wait for the actual native runtime receipt without bl
     if (command === 'varin_runtime_changed') {
       await write;
       nativeEndpoint = (args?.config as { apiBaseUrl: string }).apiBaseUrl;
+      return { runtimeEpoch: 'runtime-new', documentNonce: 'original-document' };
     }
     if (command === 'varin_invoke' && args?.command !== 'desktop_minimize_current_window') observed.push(nativeEndpoint);
     return args?.command === 'desktop_transfer_draft' ? { accepted: true } : null;
@@ -395,7 +402,7 @@ test('a later Host revision promptly rejects an earlier command and never replay
   const write = new Promise<void>(resolve => { settle = resolve; });
   let writes = 0;
   const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'original-document' })
-    : command === 'varin_runtime_changed' && ++writes === 1 ? write : null);
+    : command === 'varin_runtime_changed' ? (++writes === 1 ? write : Promise.resolve()).then(() => ({ runtimeEpoch: `runtime-${writes}`, documentNonce: 'original-document' })) : null);
   const dispose = await installTauriDesktop(target, port);
   target.__VARIN_API_BASE_URL__ = 'https://first.example';
   target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
@@ -442,5 +449,134 @@ test('document disposal rejects a waiting transfer before a stalled native write
   settle();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(port.calls.some(call => call.command === 'varin_invoke'), false);
+  dispose?.();
+});
+
+test('targeted navigation is delivered only to the synchronized document and epoch, never replayed after same-URL credential changes', async () => {
+  const target = makeWindow();
+  const first = { runtimeEpoch: 'first-epoch', documentNonce: 'receiver-document' };
+  const second = { runtimeEpoch: 'second-epoch', documentNonce: 'receiver-document' };
+  let settle!: (value: typeof second) => void;
+  const write = new Promise<typeof second>(resolve => { settle = resolve; });
+  let writes = 0;
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: first.documentNonce })
+    : command === 'varin_runtime_changed' ? (++writes === 1 ? first : write) : null);
+  const dispose = await installTauriDesktop(target, port);
+  const names = ['varin:transfer-draft', 'varin:open-thread', 'varin:open-draft-thread'] as const;
+  const dom: unknown[] = [], bridge: unknown[] = [];
+  for (const name of names) {
+    target.addEventListener(name, event => dom.push((event as CustomEvent).detail));
+    await target.__VARIN_DESKTOP__!.listen(name, event => bridge.push(event.payload));
+  }
+  const detail = { transferId: 'original-transfer', transfer: draftTransfer(), threadId: 'thread', branchId: 'branch', directory: '/project', apiBaseUrl: target.__VARIN_API_BASE_URL__, relayHostId: target.__VARIN_RELAY_HOST_ID__ };
+  for (const name of names) port.emit(name, detail, first);
+  assert.deepEqual(dom, [], 'native metadata alone is not a successful renderer synchronization receipt');
+  target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await new Promise(resolve => setImmediate(resolve));
+  for (const name of names) port.emit(name, detail, first);
+  assert.deepEqual(dom, names.map(() => detail));
+  assert.deepEqual(bridge, dom);
+
+  // Neither URL nor relay changes. Only the connection's authority changes.
+  target.__VARIN_CLIENT_TOKEN__ = 'second-test-token';
+  target.__VARIN_RUNTIME_HEADERS__ = { 'X-Varin-Client': 'second-client' };
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  for (const name of names) {
+    port.emit(name, detail, first);
+    port.emit(name, detail, second);
+  }
+  let updates = 0;
+  target.addEventListener('varin:check-for-updates', () => { updates++; });
+  port.emit('varin:check-for-updates');
+  assert.equal(updates, 1, 'global update navigation does not inherit a Host');
+  assert.equal(dom.length, names.length);
+  settle(second);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dom.length, names.length, 'dropped events must not be replayed against a new receipt');
+  assert.deepEqual(port.calls.filter(call => call.command === 'varin_renderer_ready').map(call => call.args), [first, second]);
+  for (const name of names) {
+    port.emit(name, detail, first);
+    port.emit(name, detail, { ...second, documentNonce: 'replaced-document' });
+    port.emit(name, detail);
+  }
+  assert.equal(dom.length, names.length);
+  assert.deepEqual(bridge, dom, 'bridge listeners cannot bypass the delivery fence');
+  for (const name of names) port.emit(name, detail, second);
+  assert.equal(dom.length, names.length * 2);
+  assert.deepEqual(bridge, dom);
+  dispose?.();
+});
+
+test('failed or superseded native receipts cannot authorize delayed drafts and disposed documents cannot receive them', async () => {
+  const target = makeWindow();
+  const first = { runtimeEpoch: 'first', documentNonce: 'receiver-document' };
+  const stale = { runtimeEpoch: 'stale', documentNonce: first.documentNonce };
+  const current = { runtimeEpoch: 'current', documentNonce: first.documentNonce };
+  let settleStale!: (value: typeof stale) => void;
+  const staleWrite = new Promise<typeof stale>(resolve => { settleStale = resolve; });
+  let writes = 0;
+  const port = new NativePort(command => {
+    if (command === 'varin_bootstrap') return bootstrap({ documentNonce: first.documentNonce });
+    if (command !== 'varin_runtime_changed') return null;
+    if (++writes === 1) return first;
+    if (writes === 2) throw new Error('Native runtime rejected');
+    return writes === 3 ? staleWrite : current;
+  });
+  const dispose = await installTauriDesktop(target, port);
+  const received: unknown[] = [];
+  target.addEventListener('varin:transfer-draft', event => received.push((event as CustomEvent).detail));
+  target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await new Promise(resolve => setImmediate(resolve));
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  await new Promise(resolve => setImmediate(resolve));
+  const detail = { transferId: 'original-transfer', transfer: draftTransfer() };
+  port.emit('varin:transfer-draft', detail, first);
+  assert.deepEqual(received, []);
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  await new Promise(resolve => setImmediate(resolve));
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  settleStale(stale);
+  port.emit('varin:transfer-draft', detail, stale);
+  await new Promise(resolve => setImmediate(resolve));
+  port.emit('varin:transfer-draft', detail, stale);
+  assert.deepEqual(received, [], 'an obsolete successful response must never publish its epoch');
+  assert.deepEqual(port.calls.filter(call => call.command === 'varin_renderer_ready').map(call => call.args), [first, current]);
+  port.emit('varin:transfer-draft', detail, current);
+  assert.deepEqual(received, [detail]);
+  const queuedNativeDelivery = port.listener!;
+  target.dispatchEvent(new Event('pagehide'));
+  queuedNativeDelivery({ event: 'varin:transfer-draft', detail, ...current });
+  assert.deepEqual(received, [detail]);
+  dispose?.();
+});
+
+test('missing or wrong-document runtime receipts never authorize commands or targeted events', async () => {
+  for (const receipt of [null, {}, { runtimeEpoch: '', documentNonce: 'receiver-document' }, { runtimeEpoch: 'epoch', documentNonce: 'other-document' }]) {
+    const target = makeWindow();
+    const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: 'receiver-document' }) : receipt);
+    const dispose = await installTauriDesktop(target, port);
+    let delivered = false;
+    target.addEventListener('varin:transfer-draft', () => { delivered = true; });
+    await assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_focus_main_window', {}), /native desktop runtime receipt/);
+    port.emit('varin:transfer-draft', { transfer: draftTransfer() }, { runtimeEpoch: 'epoch', documentNonce: 'receiver-document' });
+    assert.equal(delivered, false);
+    assert.equal(port.calls.some(call => call.command === 'varin_invoke'), false);
+    dispose?.();
+  }
+});
+
+test('a listener that changes Host cannot expose the same stale event to subsequent consumers', async () => {
+  const target = makeWindow();
+  const delivery = { runtimeEpoch: 'epoch', documentNonce: 'receiver-document' };
+  const port = new NativePort(command => command === 'varin_bootstrap' ? bootstrap({ documentNonce: delivery.documentNonce }) : delivery);
+  const dispose = await installTauriDesktop(target, port);
+  target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await new Promise(resolve => setImmediate(resolve));
+  await target.__VARIN_DESKTOP__!.listen('varin:transfer-draft', () => target.dispatchEvent(new Event('varin:runtime-endpoint-changed')));
+  let delivered = false;
+  await target.__VARIN_DESKTOP__!.listen('varin:transfer-draft', () => { delivered = true; });
+  target.addEventListener('varin:transfer-draft', () => { delivered = true; });
+  port.emit('varin:transfer-draft', { transfer: draftTransfer() }, delivery);
+  assert.equal(delivered, false);
   dispose?.();
 });

@@ -82,6 +82,7 @@ export async function installTauriDesktop(
   let runtimeRevision = 0;
   let runtimeInvalidation = new AbortController();
   let runtimeReceipt: Promise<void> | undefined;
+  let runtimeEpoch: string | undefined;
   let nativeState = Promise.resolve();
   const staleRuntime = () => new DesktopBridgeError('stale_runtime', 'The original desktop document or Application Host changed before this request could be sent');
   const assertRuntime = (revision: number) => {
@@ -95,7 +96,12 @@ export async function installTauriDesktop(
     const operation = nativeState.then(async () => {
       assertRuntime(revision);
       if (!bootstrap.documentNonce) throw new DesktopBridgeError('missing_document', 'The native desktop document identity is unavailable');
-      await transport.invoke('varin_runtime_changed', { documentNonce: bootstrap.documentNonce, config });
+      const receipt = record(await transport.invoke('varin_runtime_changed', { documentNonce: bootstrap.documentNonce, config }));
+      assertRuntime(revision);
+      if (receipt?.documentNonce !== bootstrap.documentNonce || typeof receipt.runtimeEpoch !== 'string' || !receipt.runtimeEpoch) {
+        throw new DesktopBridgeError('invalid_runtime_receipt', 'The native desktop runtime receipt is missing or belongs to another document');
+      }
+      runtimeEpoch = receipt.runtimeEpoch;
     });
     // Only the sequencing tail recovers for a later independent Host change.
     // Callers retain the original receipt, including its failure, without retry.
@@ -131,7 +137,12 @@ export async function installTauriDesktop(
       // projection reports the disconnected endpoint; originals remain intact.
       console.warn('[desktop] Local Host connection could not be refreshed safely');
     });
-  }, runtimeFence);
+  }, runtimeFence, (event, envelope) => {
+    if (event !== 'varin:transfer-draft' && event !== 'varin:open-thread' && event !== 'varin:open-draft-thread') return true;
+    const delivery = record(envelope);
+    return !disposed && runtimeEpoch !== undefined && delivery?.runtimeEpoch === runtimeEpoch
+      && delivery.documentNonce === bootstrap.documentNonce;
+  });
 
   Object.assign(target, {
     __VARIN_DESKTOP_RUNTIME__: Object.freeze({
@@ -154,22 +165,35 @@ export async function installTauriDesktop(
     __VARIN_DESKTOP__: connection.bridge,
   });
 
-  const navigationReady = () => { void runtimeFence().then(async assertCurrent => {
+  let navigationInstalled = false;
+  let readinessReceipt: Promise<void> | undefined;
+  const reportNavigationReady = async () => {
+    const assertCurrent = await runtimeFence();
     assertCurrent();
-    await transport.invoke('varin_renderer_ready', { documentNonce: bootstrap.documentNonce });
-  }).catch(() => { console.warn('[desktop] Native navigation readiness could not be confirmed'); }); };
+    if (!readinessReceipt) readinessReceipt = transport.invoke('varin_renderer_ready', { documentNonce: bootstrap.documentNonce, runtimeEpoch });
+    await readinessReceipt;
+  };
+  const navigationReady = () => {
+    navigationInstalled = true;
+    void reportNavigationReady().catch(() => { console.warn('[desktop] Native navigation readiness could not be confirmed'); });
+  };
   const runtimeChanged = () => {
     runtimeRevision += 1;
     runtimeInvalidation.abort();
     runtimeInvalidation = new AbortController();
     runtimeReceipt = undefined;
-    void reportRuntime().catch(() => { console.warn('[desktop] Native runtime presentation could not be synchronized'); });
+    runtimeEpoch = undefined;
+    readinessReceipt = undefined;
+    void reportRuntime().then(() => {
+      if (navigationInstalled) return reportNavigationReady();
+    }).catch(() => { console.warn('[desktop] Native runtime presentation could not be synchronized'); });
   };
   target.addEventListener('varin:desktop-navigation-ready', navigationReady);
   target.addEventListener('varin:runtime-endpoint-changed', runtimeChanged);
   initialized();
   const dispose = () => {
     disposed = true;
+    runtimeEpoch = undefined;
     runtimeInvalidation.abort();
     target.removeEventListener('pagehide', dispose);
     target.removeEventListener('varin:desktop-navigation-ready', navigationReady);

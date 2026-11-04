@@ -57,6 +57,7 @@ export async function createTauriDesktopBridge(
   onEvent?: (event: VarinDesktopEvent, detail: unknown) => void,
   onLocalHostRestart?: (detail: unknown) => void,
   runtimeFence?: DesktopRuntimeFence,
+  acceptEvent?: (event: VarinDesktopEvent, envelope: unknown) => boolean,
 ): Promise<DesktopBridgeConnection> {
   let disposed = false;
   const listeners = new Map<VarinDesktopEvent, Set<Listener>>();
@@ -77,11 +78,16 @@ export async function createTauriDesktopBridge(
     // Private lifecycle fact: not part of the renderer command/event catalog.
     if (event === 'varin:local-host-restarted') { onLocalHostRestart?.(detail); return; }
     if (!isVarinDesktopEvent(event)) return;
+    // Reject stale scoped delivery before any bridge or DOM consumer sees its body.
+    // Rejected events are not buffered for a later runtime receipt.
+    const current = () => !disposed && (!acceptEvent || acceptEvent(event, payload));
+    if (!current()) return;
     // Snapshot to preserve listener ordering even when a callback unsubscribes.
     for (const listener of [...(listeners.get(event) ?? [])]) {
+      if (!current()) return;
       try { listener(detail); } catch { /* A consumer cannot starve other consumers. */ }
     }
-    onEvent?.(event, detail);
+    if (current()) onEvent?.(event, detail);
   });
 
   const bridge: VarinDesktopBridge = Object.freeze({
