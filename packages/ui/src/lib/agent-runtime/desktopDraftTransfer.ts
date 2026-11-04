@@ -226,9 +226,16 @@ export async function acceptDesktopDraftTransfer(event: DesktopDraftTransferEven
     if (existing && !sameReceipt(existing) && hasUnsentDraftContent(existing)) throw new Error('The main window already has a different unsent draft for this conversation. Both drafts have been kept.');
   };
   assertCanReceive();
-  // A replay confirms the existing copy without stealing focus or replacing
-  // edits. In particular, it must not strand a newer local draft.
-  if (sameReceipt(useThreadDraftStore.getState().drafts[key])) return;
+  // Catalog-backed composers remain reachable after navigation. A local draft
+  // has only one navigation entry: its receipt is usable only while selected,
+  // or after we can safely restore that selection below without losing input.
+  if (sameReceipt(useThreadDraftStore.getState().drafts[key])) {
+    if (identity) {
+      await useThreadStore.getState().resolveThread(identity);
+      assertCanReceive();
+      if (sameReceipt(useThreadDraftStore.getState().drafts[key])) return;
+    } else if (useThreadStore.getState().selectedDraftKey === key) return;
+  }
   const assertCanNavigate = () => {
     assertCanReceive();
     const selectedKey = useThreadStore.getState().selectedDraftKey;

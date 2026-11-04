@@ -194,16 +194,66 @@ it('rechecks the currently selected local draft after async navigation, includin
   expect(Object.keys(useThreadDraftStore.getState().drafts)).toEqual([key]);
 });
 
-it('acknowledges a repeated receipt without switching away from a newer local draft', async () => {
+it('rejects a repeated local receipt that is no longer reachable behind a newer dirty local draft', async () => {
   const payload = await transfer(); await acceptDesktopDraftTransfer(event(payload));
   const receivedKey = useThreadStore.getState().selectedDraftKey!;
   const newerKey = useThreadStore.getState().openDraft();
   useThreadDraftStore.getState().patch(newerKey, { text: 'New local work' });
   const received = useThreadDraftStore.getState().drafts[receivedKey];
-  await acceptDesktopDraftTransfer(event(payload));
+  await expect(acceptDesktopDraftTransfer(event(payload))).rejects.toThrow('another unsent local draft');
   expect(useThreadStore.getState().selectedDraftKey).toBe(newerKey);
   expect(useThreadDraftStore.getState().drafts[receivedKey]).toBe(received);
   expect(useThreadDraftStore.getState().drafts[newerKey].text).toBe('New local work');
+});
+
+it('restores a repeated local receipt from an empty draft without replacing edits made to its received copy', async () => {
+  const payload = await transfer(); await acceptDesktopDraftTransfer(event(payload));
+  const receivedKey = useThreadStore.getState().selectedDraftKey!;
+  useThreadDraftStore.getState().patch(receivedKey, { text: 'Edited after import' });
+  const received = useThreadDraftStore.getState().drafts[receivedKey];
+  useThreadStore.getState().openDraft();
+  await acceptDesktopDraftTransfer(event(payload));
+  expect(useThreadStore.getState().selectedDraftKey).toBe(receivedKey);
+  expect(useThreadDraftStore.getState().drafts[receivedKey]).toBe(received);
+});
+
+it('retains the original source when a lost native acknowledgement is retried behind another dirty target draft', async () => {
+  const sourceKey = useThreadStore.getState().openDraft();
+  useThreadDraftStore.getState().replace(sourceKey, completeDraft());
+  const source = { navigation: useThreadStore.getState(), drafts: useThreadDraftStore.getState().drafts };
+  let receiver: typeof source;
+  const restore = (renderer: typeof source) => {
+    useThreadStore.setState(renderer.navigation);
+    useThreadDraftStore.setState({ drafts: renderer.drafts });
+  };
+  state.invoke.mockImplementationOnce(async (_command: string, args: { transfer: DesktopDraftTransfer }) => {
+    useThreadStore.setState({ selectedIdentity: null, selectedDraftKey: null });
+    useThreadDraftStore.setState({ drafts: {} });
+    await acceptDesktopDraftTransfer(event(args.transfer));
+    const importedKey = useThreadStore.getState().selectedDraftKey!;
+    const newerKey = useThreadStore.getState().openDraft();
+    useThreadDraftStore.getState().patch(newerKey, { text: 'Main-window work after import' });
+    expect(useThreadDraftStore.getState().drafts[importedKey].desktopHandoff?.snapshotId).toBe(args.transfer.snapshotId);
+    receiver = { navigation: useThreadStore.getState(), drafts: useThreadDraftStore.getState().drafts };
+    restore(source);
+    throw new Error('Draft transfer timed out; acknowledgement was lost');
+  });
+  await expect(transferSelectedDesktopDraft(context)).rejects.toThrow('acknowledgement was lost');
+  expect(useThreadDraftStore.getState().drafts[sourceKey]).toBe(source.drafts[sourceKey]);
+  state.invoke.mockImplementationOnce(async (_command: string, args: { transfer: DesktopDraftTransfer }) => {
+    restore(receiver);
+    try { await acceptDesktopDraftTransfer(event(args.transfer)); return { accepted: true }; }
+    finally {
+      receiver = { navigation: useThreadStore.getState(), drafts: useThreadDraftStore.getState().drafts };
+      restore(source);
+    }
+  });
+  await expect(transferSelectedDesktopDraft(context)).rejects.toThrow('another unsent local draft');
+  expect(state.invoke.mock.calls[1][1].transfer.snapshotId).toBe(state.invoke.mock.calls[0][1].transfer.snapshotId);
+  expect(useThreadStore.getState().selectedDraftKey).toBe(sourceKey);
+  expect(useThreadDraftStore.getState().drafts[sourceKey]).toBe(source.drafts[sourceKey]);
+  restore(receiver!);
+  expect(useThreadDraftStore.getState().drafts[useThreadStore.getState().selectedDraftKey!].text).toBe('Main-window work after import');
 });
 
 it('checks receiving-store conflicts and repeated receipts again after asynchronous navigation', async () => {
@@ -351,14 +401,15 @@ async function boundFixture(bot = false) {
         source: { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: 'workspace', execution_workspace_id: 'execution', branch_id: null, revision: null, live_root: { hostId: 'native-host', canonicalRoot: '/projects/a', rootId: 'root' } } } },
   };
   const snapshot = vi.fn(async () => view);
-  const api = { list: async () => [summary], snapshot,
+  const list = vi.fn(async () => [summary]);
+  const api = { list, snapshot,
     observe: async (_cursor: number, _listener: unknown, { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
   } as unknown as ThreadsAPI;
   registerRuntimeAPIs({ threads: api, bots: { get: async () => ({ id: 'bot-owner', archived: false }) } } as unknown as RuntimeAPIs);
   const unbind = bindThreadStore(api);
   await useThreadStore.getState().loadCatalog();
   await useThreadStore.getState().selectThread(identity);
-  return { identity, view, snapshot, unbind };
+  return { identity, view, snapshot, list, unbind };
 }
 
 it.each(['prepared', 'launch', 'workspace', 'bot'] as const)('uses the actual %s source of an established conversation and keeps its paths sendable', async mode => {
@@ -436,6 +487,36 @@ it('allows returning to ordinary Catalog-backed unsent input after receiving a n
     await useThreadStore.getState().selectThread(f.identity);
     expect(useThreadStore.getState().selectedIdentity).toEqual(f.identity);
     expect(useThreadDraftStore.getState().drafts[key].text).toBe('Unsent input on an existing Thread');
+  } finally { f.unbind(); registerRuntimeAPIs(null); }
+});
+
+it('confirms repeated Catalog-backed receipts without disturbing a newer dirty local draft', async () => {
+  const f = await boundFixture();
+  try {
+    const payload = { ...await transfer(), threadId: f.identity.threadId, branchId: f.identity.branchId };
+    await acceptDesktopDraftTransfer(event(payload));
+    const receivedKey = threadComposerKey(useThreadStore.getState().hostKey, f.identity);
+    useThreadDraftStore.getState().patch(receivedKey, { text: 'Edited Catalog-backed input' });
+    const received = useThreadDraftStore.getState().drafts[receivedKey];
+    const newerKey = useThreadStore.getState().openDraft();
+    useThreadDraftStore.getState().patch(newerKey, { text: 'New local input' });
+    await acceptDesktopDraftTransfer(event(payload));
+    expect(useThreadStore.getState().selectedDraftKey).toBe(newerKey);
+    expect(useThreadDraftStore.getState().drafts[receivedKey]).toBe(received);
+    await useThreadStore.getState().selectThread(f.identity);
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(useThreadStore.getState().hostKey, f.identity)]).toBe(received);
+  } finally { f.unbind(); registerRuntimeAPIs(null); }
+});
+
+it('does not confirm an old receipt after its established Thread disappears from Catalog', async () => {
+  const f = await boundFixture();
+  try {
+    const payload = { ...await transfer(), threadId: f.identity.threadId, branchId: f.identity.branchId };
+    await acceptDesktopDraftTransfer(event(payload));
+    const local = useThreadStore.getState().openDraft();
+    f.list.mockResolvedValue([]); await useThreadStore.getState().loadCatalog();
+    await expect(acceptDesktopDraftTransfer(event(payload))).rejects.toThrow('Conversation is unavailable');
+    expect(useThreadStore.getState().selectedDraftKey).toBe(local);
   } finally { f.unbind(); registerRuntimeAPIs(null); }
 });
 
