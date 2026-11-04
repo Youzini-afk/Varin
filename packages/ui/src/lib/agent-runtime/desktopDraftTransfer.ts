@@ -4,8 +4,10 @@ import { invokeDesktop } from '@/lib/desktop';
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, hasUnsentDraftContent, type ThreadDraft } from '@/stores/useThreadDraftStore';
 import { useThreadStore, selectedComposerKey, threadComposerKey } from '@/stores/useThreadStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
+import { useBotNavigation } from '@/lib/bots';
 import { isDesktopThreadNavigationTarget } from './desktopThreadNavigation';
-import { openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
+import { currentWorkbenchProfileId, openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
 
 const snapshotIds = new WeakMap<ThreadDraft, string>();
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -169,7 +171,8 @@ export async function acceptDesktopDraftTransfer(event: DesktopDraftTransferEven
   if (identity) {
     await openThreadFromNavigation({ ...identity, directory: transfer.directory || null });
     assertCanReceive();
-    const selected = useThreadStore.getState().selectedIdentity;
+    const selected = currentWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID
+      ? useBotNavigation.getState().entry : useThreadStore.getState().selectedIdentity;
     if (selected?.threadId !== identity.threadId || selected?.branchId !== identity.branchId) throw new Error('Draft navigation was superseded');
     if (!sameReceipt(useThreadDraftStore.getState().drafts[key])) useThreadDraftStore.getState().replace(key, draft);
     useProjectsStore.getState().setActiveProjectIdOnly(transfer.projectId || null);

@@ -1,7 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { DesktopDraftTransfer, DesktopDraftTransferEvent } from '@varin/application-client/desktop';
 import type { ThreadDraft } from '@/stores/useThreadDraftStore';
-const state = vi.hoisted(() => ({ generation: 5, endpoint: 'https://source.example', projectId: '', directory: '', invoke: vi.fn(), projectAvailable: true, shell: vi.fn() }));
+import type { RuntimeAPIs, ThreadsAPI, ThreadIdentity } from '@varin/application-client';
+import type { ThreadSummary } from '@varin/protocol';
+import { defaultVarinWorkbenchProfileDocument, type VarinWorkbenchProfileDocument } from '@varin/extension-contract';
+const state = vi.hoisted(() => ({ generation: 5, endpoint: 'https://source.example', projectId: '', directory: '', invoke: vi.fn(), projectAvailable: true, shell: vi.fn(), document: undefined as VarinWorkbenchProfileDocument | undefined }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(),
   getRuntimeEndpointGeneration: () => state.generation, getRuntimeApiBaseUrl: () => state.endpoint, getRuntimeKey: () => 'source',
 }));
@@ -9,11 +12,13 @@ vi.mock('@/lib/desktop', () => ({ invokeDesktop: state.invoke }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: { getState: () => ({ projects: state.projectAvailable ? [{ id: 'project-a' }] : [], setActiveProjectIdOnly: (id: string) => { state.projectId = id; } }) } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: (value: string) => { state.directory = value; } }) } }));
 vi.mock('@/stores/useUIStore', () => ({ useUIStore: { getState: () => ({ setActiveMainTab: vi.fn(), closeMainSurfaces: vi.fn(), setSettingsDialogOpen: vi.fn() }) } }));
-vi.mock('@/lib/extensions/catalog-store', () => ({ getVarinExtensionCatalogState: () => ({ snapshot: undefined }) }));
+vi.mock('@/lib/extensions/catalog-store', () => ({ getVarinExtensionCatalogState: () => ({ snapshot: state.document ? { workbench: { authoritative: true, document: state.document } } : undefined }) }));
 vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.shell }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { bindThreadStore, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
+import { useBotNavigation } from '@/lib/bots';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { acceptDesktopDraftTransfer, serializeDesktopDraft, deserializeDesktopDraft, transferSelectedDesktopDraft, listenDesktopDraftTransfers } from './desktopDraftTransfer';
 const hostKey = 'same-native-host';
 const context = { directory: '/projects/a', projectId: 'project-a' };
@@ -29,7 +34,9 @@ const transfer = async (draft = completeDraft()): Promise<DesktopDraftTransfer> 
 const event = (payload: DesktopDraftTransfer): DesktopDraftTransferEvent => ({ transferId: 'native-transfer', apiBaseUrl: state.endpoint, relayHostId: '', transfer: payload });
 beforeEach(() => {
   state.generation = 5; state.endpoint = 'https://source.example'; state.projectId = ''; state.directory = ''; state.projectAvailable = true;
-  state.invoke.mockReset(); state.shell.mockReset();
+  state.invoke.mockReset(); state.document = undefined;
+  state.shell.mockReset().mockImplementation(async (profile: string) => { if (state.document) state.document.activeProfileId = profile; });
+  useBotNavigation.setState({ botId: null, entry: null, model: null });
   useThreadDraftStore.setState({ drafts: {} });
   useThreadStore.setState({ hostKey, selectedIdentity: null, selectedDraftKey: null, threads: [] });
 });
@@ -173,4 +180,40 @@ it('the receiver sends a negative receipt when its project context is unavailabl
   expect(useThreadStore.getState().selectedDraftKey).toBeNull();
   expect(useThreadDraftStore.getState().drafts).toEqual({});
   dispose();
+});
+
+it.each([{ bot: false, owner: 'ordinary Thread' }, { bot: true, owner: 'Bot' }])('installs a bound draft through its actual $owner navigation without submitting', async ({ bot }) => {
+  state.document = defaultVarinWorkbenchProfileDocument();
+  const identity: ThreadIdentity = { runtime: 'agent', threadId: 'bound-thread', branchId: 'review-branch' };
+  const summary: ThreadSummary = {
+    thread_id: identity.threadId, main_branch_id: 'main-branch', title: 'Bound conversation', revision: 1, created_at_ms: 0, updated_at_ms: 0,
+    pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false,
+    bot_id: bot ? 'bot-owner' : null, parent_thread_id: null, observer_project_ids: [],
+    branches: ['main-branch', identity.branchId].map(branch_id => ({ branch_id, head: null, active_run_id: null, latest_run: null })),
+  };
+  const create = vi.fn(), submit = vi.fn();
+  const api = { list: async () => [summary], create, submit,
+    observe: async (_cursor: number, _listener: unknown, { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
+  } as unknown as ThreadsAPI;
+  registerRuntimeAPIs({ bots: { get: async () => ({ id: 'bot-owner', archived: false }) } } as unknown as RuntimeAPIs);
+  const unbind = bindThreadStore(api);
+  try {
+    await useThreadStore.getState().loadCatalog();
+    await useThreadStore.getState().selectThread({ threadId: identity.threadId, branchId: 'main-branch' });
+    const payload = { ...await transfer({ ...completeDraft(), identity }), threadId: identity.threadId, branchId: identity.branchId };
+    await acceptDesktopDraftTransfer(event(payload));
+    const received = useThreadDraftStore.getState().drafts[threadComposerKey(useThreadStore.getState().hostKey, identity)];
+    expect(received.identity).toEqual(identity);
+    expect(received.text).toBe('Review @notes and image 3');
+    expect(await received.files![0]!.data.text()).toBe('original binary\0bytes');
+    if (bot) {
+      expect(useBotNavigation.getState().entry).toEqual(identity);
+      expect(useThreadStore.getState().selectedIdentity?.branchId).toBe('main-branch');
+    } else {
+      expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+      expect(state.directory).toBe('/projects/a');
+    }
+    expect(state.projectId).toBe('project-a');
+    expect(create).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled();
+  } finally { unbind(); registerRuntimeAPIs(null); }
 });
