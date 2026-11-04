@@ -105,7 +105,12 @@ struct HiddenPage {
     allowed: Arc<Mutex<Option<String>>>,
 }
 impl HiddenPage {
-    async fn open(app: &AppHandle, data_dir: &Path, application: bool) -> Result<Self, String> {
+    async fn open(
+        app: &AppHandle,
+        data_dir: &Path,
+        application: bool,
+        admission: Option<&crate::desktop_admission::Permit>,
+    ) -> Result<Self, String> {
         if !application && !crate::smoke::requested() {
             return Err("The migration reader only admits the application profile".into());
         }
@@ -196,7 +201,16 @@ impl HiddenPage {
             }
         });
         if attached.is_err() {
-            close.request(window.as_ref()).await?;
+            let cleanup = close.request(window.as_ref()).await;
+            if !close.closed() {
+                if let Some(admission) = admission {
+                    admission.retain_cleanup_failure(format!(
+                        "Original application migration page closure is unconfirmed after observer attachment failed: {}",
+                        cleanup.as_ref().err().map(String::as_str).unwrap_or("missing close receipt")
+                    ));
+                }
+            }
+            cleanup?;
             return Err("Migration native observer could not attach".into());
         }
         let stopped = close.clone();
@@ -462,7 +476,7 @@ pub async fn prepare(
             || ready["credentialCount"].as_u64().is_none_or(|count| count > 6) {
             return Err("Legacy exporter version or scope was not confirmed".into());
         }
-        application=Some(HiddenPage::open(app,data_dir,true).await?);
+        application=Some(HiddenPage::open(app,data_dir,true,Some(admission)).await?);
         admission.until_shutdown(async {
             let ui=application.as_mut().unwrap();ui.wait_origin("http://tauri.localhost").await?;
             let staged=settings.call(runtime,data_dir,"frontendMigrationRead",json!({}),json!({})).await?;

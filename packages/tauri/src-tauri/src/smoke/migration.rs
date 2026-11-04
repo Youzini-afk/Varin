@@ -119,7 +119,7 @@ pub(crate) async fn observe(
             );
         }
     }
-    let mut browser = HiddenPage::open(app, data_dir, false).await?;
+    let mut browser = HiddenPage::open(app, data_dir, false, None).await?;
     let observation: Reply = async {
         browser.offline().await?;
         browser.origin(ORIGIN).await?;
