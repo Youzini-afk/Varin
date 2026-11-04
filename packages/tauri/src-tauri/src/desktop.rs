@@ -47,6 +47,7 @@ struct DesktopState {
     focus_update: tokio::sync::Mutex<()>,
     exit_ready: AtomicBool,
     preferences: Mutex<Value>,
+    startup_theme: OnceLock<Value>,
     sequence: AtomicU64,
     quitting: AtomicBool,
     started_enabled: AtomicBool,
@@ -226,6 +227,14 @@ fn create_window(
         )
         .decorations(cfg!(target_os = "macos"))
         .visible(false)
+        .initialization_script(crate::startup_theme::initialization_script(
+            app.state::<DesktopState>().startup_theme.get().unwrap_or(&Value::Null),
+        ))
+        .theme(match app.state::<DesktopState>().startup_theme.get().and_then(|theme| theme["mode"].as_str()) {
+            Some("light") => Some(tauri::Theme::Light),
+            Some("dark") => Some(tauri::Theme::Dark),
+            _ => None,
+        })
         .on_new_window(move |url, _| {
             if external_url(&json!(url.as_str())).is_ok() {
                 let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
@@ -485,7 +494,15 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         let lease=state.lease.get().ok_or("Desktop data lease is unavailable")?;lease.verify()?;
         let migration=crate::legacy_migration::prepare(&app,state.runtime()?,&state.settings,&state.data_dir,lease).await?;
         let snapshot = state.setting("snapshot", json!({})).await?;
+        if state.quitting.load(Ordering::Acquire) {
+            return Err("Desktop shutdown is already in progress".into());
+        }
         *state.preferences.lock().map_err(|_| "Preferences unavailable")? = snapshot["preferences"].clone();
+        let _ = state.startup_theme.set(snapshot["startupTheme"].clone());
+        // The old native settings are available before this document is built.
+        // Hand off only splash presentation before its blocking prepaint script;
+        // Host readiness and the sole frontend migration import still happen later.
+        create_window(&app, "main", "main", None, None)?;
         let mut mac_vibrancy=false;
         if let Some(window)=app.get_webview_window("main"){
             let applied=crate::engine::macos_chrome::apply(&window,snapshot["preferences"]["desktopVibrancy"]!=false).await;
@@ -498,6 +515,8 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         state.started_enabled.store(enabled, Ordering::Relaxed);
         app.state::<crate::native_menu::NativeMenus>().install(&app,snapshot["locale"].as_str().unwrap_or("en"))?;
         if app.state::<crate::native_menu::NativeMenus>().tray(&app,if cfg!(target_os="macos"){snapshot["preferences"]["desktopMacMenuBarEnabled"]!=false}else{true}).is_err(){eprintln!("Varin system tray is unavailable; the application window remains accessible");}
+        state.activation_restores.ready()?;
+        dispatch_activation_restore(&app)?;
         if let Some(window)=app.get_webview_window("main"){
             let background=std::env::args().any(|argument|argument=="--background");
             let reachable=cfg!(target_os="macos")||app.state::<crate::native_menu::NativeMenus>().tray_enabled();
@@ -567,6 +586,15 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         }
     }
     if !ready {
+        // Settings/runtime failures still get the ordinary startup error surface.
+        // No presentation or Host wait is added to this recovery path.
+        if !state.quitting.load(Ordering::Acquire) && app.get_webview_window("main").is_none() {
+            if create_window(&app, "main", "main", None, None).is_err() {
+                eprintln!("Varin startup recovery window could not be created");
+            }
+        }
+        let _ = state.activation_restores.ready();
+        let _ = dispatch_activation_restore(&app);
         if let Ok(windows) = state.windows.lock() {
             for window in windows.values() {
                 if window.native_ready.borrow().is_none() {
@@ -580,11 +608,18 @@ async fn initialize(app: AppHandle, root: PathBuf) {
                 }
             }
         }
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.show();
+        if !state.quitting.load(Ordering::Acquire) {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+            }
         }
     }
     state.boot.send_replace(Some(result.clone()));
+    if !ready && !state.quitting.load(Ordering::Acquire) && app.get_webview_window("main").is_none() {
+        // Native window creation itself failed; there is no surface to recover.
+        // Use the existing guarded shutdown instead of remaining invisibly alive.
+        app.exit(1);
+    }
     refresh_desktop_state(&app);
     if let Some(request) = state.benchmark.clone() {
         let app = app.clone();
@@ -1642,6 +1677,7 @@ pub fn run() {
             focus_update: tokio::sync::Mutex::new(()),
             exit_ready: AtomicBool::new(false),
             preferences: Mutex::new(json!({})),
+            startup_theme: OnceLock::new(),
             sequence: AtomicU64::new(1),
             quitting: AtomicBool::new(false),
             started_enabled: AtomicBool::new(false),
@@ -1673,11 +1709,6 @@ pub fn run() {
                 eprintln!("Varin native notifications are unavailable; desktop startup continues");
             }
             start_geometry_writer(app.handle());
-            create_window(app.handle(), "main", "main", None, None)
-                .map_err(std::io::Error::other)?;
-            app.state::<DesktopState>().activation_restores.ready()
-                .map_err(std::io::Error::other)?;
-            dispatch_activation_restore(app.handle()).map_err(std::io::Error::other)?;
             start_deep_link_owner(app.handle(), deep_link_requests);
             queue_deep_links(app.handle(), std::env::args().collect(), "argv");
             tauri::async_runtime::spawn(initialize(app.handle().clone(), root));
@@ -1719,7 +1750,10 @@ pub fn run() {
             // background notification ownership survives that event like Electron.
             if code.is_none()
                 && !app.state::<DesktopState>().quitting.load(Ordering::Acquire)
-                && (cfg!(target_os = "macos")
+                // The private migration window may close before startup has
+                // constructed main. Its close is not a user request to quit.
+                && (app.state::<DesktopState>().boot.borrow().is_none()
+                    || cfg!(target_os = "macos")
                     || (app
                         .state::<crate::native_menu::NativeMenus>()
                         .tray_enabled()
@@ -2130,6 +2164,13 @@ pub(crate) fn show_last_conversation(app: &AppHandle) -> Result<String, String> 
 }
 
 pub(crate) fn show_main(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    if state.boot.borrow().is_none() && app.get_webview_window("main").is_none() {
+        // Startup alone creates the first conversation after its presentation is
+        // known. Early OS activation must not create a competing default page.
+        let _ = state.activation_restores.request();
+        return;
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();

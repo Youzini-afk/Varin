@@ -1,6 +1,7 @@
 /** Short-lived desktop settings process. Importing this entry does not construct
  * an Application Host, Catalog, KnowledgeStore or network listener. All writes
  * use the existing cross-process settings owner, including its lock/recovery. */
+import { desktopStartupTheme } from './lib/platform/desktop-startup-theme.js';
 import { nativeMigrationReceipt } from './lib/platform/native-migration-receipt.js';
 import { createDesktopFrontendMigrationOwner } from './lib/platform/frontend-migration.js';
 import { randomUUID } from 'node:crypto';
@@ -52,6 +53,7 @@ export function createDesktopSettingsOwner(filePath = path.join(resolveVarinData
           homeDirectory: process.env.VARIN_WORKSPACE_ROOT?.trim() ? path.resolve(process.env.VARIN_WORKSPACE_ROOT.trim()) : os.homedir(),
           preferences: Object.fromEntries([...booleanKeys].flatMap(key => typeof root[key] === 'boolean' ? [[key, root[key]]] : [])),
           windowState: root.desktopWindowState ?? null,
+          startupTheme: desktopStartupTheme(root),
         };
       }
       case 'desktop_hosts_get': return { ...readHostConnections(store), localOrigin: text(args.localOrigin) || null };

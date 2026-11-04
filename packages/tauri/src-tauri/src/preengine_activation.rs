@@ -21,7 +21,7 @@ const FORWARD_ERROR: &str =
     "Desktop activation was not confirmed; original data ownership is retained";
 
 /// Window restoration is separate from deep-link delivery. Coalesce requests
-/// received before the primary window exists; setup alone owns its creation.
+/// received before the primary window exists; startup alone owns its creation.
 #[derive(Default)]
 pub(crate) struct RestoreIntents(std::sync::Mutex<(bool, bool)>);
 impl RestoreIntents {

@@ -8,6 +8,8 @@ The private local-Host restart event contains only the previous origin. The adap
 
 ## Window presentation
 
+The first application document is constructed after the existing settings/native migration phase, so its blocking prepaint script can use an allowlisted, non-secret mode and splash-color projection. Existing frontend theme storage takes precedence. The projection never writes localStorage or acknowledges migration; the original importer remains the only frontend handoff owner. The window is still shown before Application Host readiness, without adding a renderer acknowledgment or timeout gate. A temporary migration window closing during this phase is not a quit request; explicit shutdown retains its original drain path. Runtime/settings failures create the normal startup-error surface and release the existing failure signals. This is a source-level first-paint contract, not measured CEF paint timing or GUI evidence.
+
 Mini Chat's Open in main action selects a workbench on the same Host, including relay identity. Draft handoff retains its directory and project; an incomplete Thread/branch identity is rejected. Native focus and event admission must succeed before Mini Chat closes. New workbenches always receive the main role rather than inheriting the caller's Mini Chat role. Navigation and update-menu intents wait for the target document's readiness; Mini Chat is not an update-dialog consumer.
 
 Windows and Linux attach the hidden application menu only to conversation windows, including later windows, while macOS retains its global menu. macOS transparency keeps the shared Save and Restart contract: persist the preference, honor the existing guarded shutdown, then relaunch with matching native and renderer backing.

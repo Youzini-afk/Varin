@@ -10,7 +10,14 @@
       // branded splash instead of flashing white while React/CSS load.
       (function() {
         try {
-          var storedTheme = JSON.parse(localStorage.getItem('varin.theme.v1') || 'null');
+          // The native handoff is presentation only: never write it into the
+          // frontend store or bypass the original migration receipt. Existing
+          // destination preferences win over the startup settings projection.
+          var storedTheme = null;
+          try { storedTheme = JSON.parse(localStorage.getItem('varin.theme.v1') || 'null'); } catch (_) {}
+          if (!storedTheme || !['light', 'dark', 'system'].includes(storedTheme.mode)) {
+            storedTheme = window.__VARIN_STARTUP_THEME__;
+          }
           var themeMode = storedTheme && storedTheme.mode;
           var isDark;
 
@@ -32,10 +39,10 @@
           var splashBgDark = splash && splash.dark && splash.dark.background;
           var splashFgDark = splash && splash.dark && splash.dark.foreground;
 
-          if (splashBgLight) document.documentElement.style.setProperty('--splash-background-light', splashBgLight);
-          if (splashFgLight) document.documentElement.style.setProperty('--splash-stroke-light', splashFgLight);
-          if (splashBgDark) document.documentElement.style.setProperty('--splash-background-dark', splashBgDark);
-          if (splashFgDark) document.documentElement.style.setProperty('--splash-stroke-dark', splashFgDark);
+          if (typeof splashBgLight === 'string' && CSS.supports('color', splashBgLight)) document.documentElement.style.setProperty('--splash-background-light', splashBgLight);
+          if (typeof splashFgLight === 'string' && CSS.supports('color', splashFgLight)) document.documentElement.style.setProperty('--splash-stroke-light', splashFgLight);
+          if (typeof splashBgDark === 'string' && CSS.supports('color', splashBgDark)) document.documentElement.style.setProperty('--splash-background-dark', splashBgDark);
+          if (typeof splashFgDark === 'string' && CSS.supports('color', splashFgDark)) document.documentElement.style.setProperty('--splash-stroke-dark', splashFgDark);
         } catch (error) {
           console.warn('Failed to apply theme:', error);
         }

@@ -99,3 +99,6 @@ mod computer_registry;
 
 #[cfg(any(feature = "desktop", test))]
 mod preview;
+
+#[cfg(any(feature = "desktop", test))]
+mod startup_theme;
