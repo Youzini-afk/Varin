@@ -372,7 +372,74 @@ test('Host-scoped commands wait for the actual native runtime receipt without bl
   assert.deepEqual((await Promise.all(pending))[0], { accepted: true });
   assert.equal(observed.length, pending.length);
   assert.ok(observed.every(endpoint => endpoint === 'https://new-host.example'));
+  for (const call of port.calls.filter(call => call.command === 'varin_invoke')) {
+    if (call.args?.command === 'desktop_minimize_current_window') {
+      assert.deepEqual(call.args, { command: 'desktop_minimize_current_window', args: {} });
+    } else {
+      assert.equal(call.args?.documentNonce, 'original-document');
+      assert.equal(call.args?.runtimeEpoch, 'runtime-new');
+      assert.deepEqual(Object.keys(call.args!).sort(), ['args', 'command', 'documentNonce', 'runtimeEpoch']);
+    }
+  }
   assert.deepEqual(port.calls.find(call => call.args?.command === 'desktop_transfer_draft')?.args?.args, { transfer });
+  dispose?.();
+});
+
+test('a scoped request queued behind a later native runtime report retains its original receipt and is not replayed', async () => {
+  const target = makeWindow();
+  const documentNonce = 'original-document';
+  let writes = 0;
+  let nativeReceipt = { documentNonce, runtimeEpoch: '' };
+  const queue: Array<() => void> = [];
+  let admitted = 0;
+  const port = new NativePort((command, args) => {
+    if (command === 'varin_bootstrap') return bootstrap({ documentNonce });
+    if (command === 'varin_runtime_changed') {
+      nativeReceipt = { documentNonce, runtimeEpoch: `epoch-${++writes}` };
+      return nativeReceipt;
+    }
+    if (command === 'varin_invoke') return new Promise((resolve, reject) => {
+      // Simulate native scheduling after transport dispatch, not merely a
+      // delayed runtime receipt on the renderer side of the boundary.
+      queue.push(() => {
+        if (args?.documentNonce !== nativeReceipt.documentNonce || args?.runtimeEpoch !== nativeReceipt.runtimeEpoch) {
+          reject({ code: 'stale_runtime', message: 'The original native runtime receipt changed' });
+          return;
+        }
+        admitted++;
+        resolve(args.command === 'desktop_transfer_draft' ? { accepted: true } : null);
+      });
+    });
+    return null;
+  });
+  const dispose = await installTauriDesktop(target, port);
+  const transfer = draftTransfer();
+  const rejection = assert.rejects(target.__VARIN_DESKTOP__!.invoke('desktop_transfer_draft', { transfer }),
+    (error: unknown) => error instanceof DesktopBridgeError && error.code === 'stale_runtime');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(queue.length, 1);
+  assert.deepEqual(port.calls.find(call => call.command === 'varin_invoke')?.args, {
+    command: 'desktop_transfer_draft', args: { transfer }, documentNonce, runtimeEpoch: 'epoch-1',
+  });
+
+  // A native handler may see this report before the earlier invoke. Same URL,
+  // different authority must not silently retag that already-dispatched draft.
+  target.__VARIN_CLIENT_TOKEN__ = 'new-authority';
+  target.dispatchEvent(new Event('varin:runtime-endpoint-changed'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(nativeReceipt.runtimeEpoch, 'epoch-2');
+  queue.shift()!();
+  await rejection;
+  assert.equal(admitted, 0);
+  assert.equal(port.calls.filter(call => call.args?.command === 'desktop_transfer_draft').length, 1);
+  assert.equal(port.calls.find(call => call.command === 'varin_invoke')?.args?.runtimeEpoch, 'epoch-1');
+
+  const next = target.__VARIN_DESKTOP__!.invoke('desktop_focus_main_window', {});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(port.calls.at(-1)?.args, { command: 'desktop_focus_main_window', args: {}, ...nativeReceipt });
+  queue.shift()!();
+  await next;
+  assert.equal(admitted, 1);
   dispose?.();
 });
 

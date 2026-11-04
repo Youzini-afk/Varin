@@ -42,8 +42,16 @@ export interface DesktopBridgeConnection {
   dispose(): void;
 }
 
-/** Wait for the invoking document's original Host ledger, then recheck at IPC dispatch. */
-export type DesktopRuntimeFence = () => Promise<() => void>;
+export interface DesktopRuntimeReceipt {
+  readonly documentNonce: string;
+  readonly runtimeEpoch: string;
+}
+
+/** Wait for the original Host ledger; carry that receipt through native dispatch. */
+export type DesktopRuntimeFence = () => Promise<{
+  assertCurrent(): void;
+  readonly receipt: DesktopRuntimeReceipt;
+}>;
 
 const runtimeCommands = new Set<VarinDesktopCommand>([
   'desktop_transfer_draft', 'desktop_complete_draft_transfer', 'desktop_focus_main_window',
@@ -100,11 +108,15 @@ export async function createTauriDesktopBridge(
       }
       // These operations inherit the native window's selected Host. Window
       // chrome and explicit local recovery controls stay usable after a failed sync.
+      let receipt: DesktopRuntimeReceipt | undefined;
       if (runtimeFence && (runtimeCommands.has(command) || command.startsWith('desktop_browser_'))) {
-        const assertCurrent = await runtimeFence();
-        assertCurrent();
+        const authorization = await runtimeFence();
+        authorization.assertCurrent();
+        receipt = authorization.receipt;
       }
-      return request('varin_invoke', { command, args: invocation[0] ?? {} });
+      // Native may process this after a newer runtime report. Preserve the
+      // original receipt as transport metadata, never in the business arguments.
+      return request('varin_invoke', { command, args: invocation[0] ?? {}, ...receipt });
     },
     openDialog: (options?: DesktopDialogOptions) => request<DesktopDialogResult>('varin_dialog_open', { options: options ?? {} }),
     grantFileAccess: (filePath: string) => request<DesktopDialogFileGrant>('varin_file_grant_existing', { filePath }),

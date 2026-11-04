@@ -16,14 +16,44 @@ afterEach(() => {
 async function setup() {
   const target = Object.assign(new EventTarget(), { document: { documentElement: { toggleAttribute() { } } }, location: { href: 'http://tauri.localhost/', origin: 'http://tauri.localhost' } }) as unknown as DesktopBootstrapTarget;
   Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
-  let value: TauriDesktopBootstrap = { version: 1, runtime: 'tauri', localPage: true, platform: 'linux', arch: 'x64', windowRole: 'main', frontendMigrationOwner: true, localOrigin: 'http://127.0.0.1:19001', apiBaseUrl: 'http://127.0.0.1:19001', clientToken: 'old-token', requestHeaders: {}, homeDirectory: '/home/example', relayHostId: '', macosMajor: 0, macVibrancy: false, trayEnabled: true, bootOutcome: { target: 'local', status: 'ok' } };
+  let value: TauriDesktopBootstrap = { version: 1, runtime: 'tauri', localPage: true, platform: 'linux', arch: 'x64', windowRole: 'main', frontendMigrationOwner: true, documentNonce: 'restart-document', localOrigin: 'http://127.0.0.1:19001', apiBaseUrl: 'http://127.0.0.1:19001', clientToken: 'old-token', requestHeaders: {}, homeDirectory: '/home/example', relayHostId: '', macosMajor: 0, macVibrancy: false, trayEnabled: true, bootOutcome: { target: 'local', status: 'ok' } };
   let listener!: (payload: unknown) => void;
   const calls: string[] = [];
-  const transport: DesktopNativeTransport = { async invoke<T>(command: string, args?: Record<string, unknown>) { calls.push(command); if (command === 'varin_invoke' && args?.command === 'desktop_local_client_token_get') return 'old-token' as T; return value as T; }, async listen(handler) { listener = handler; return () => { listener = () => { }; }; } };
+  let revision = 0;
+  let receipt: Record<string, unknown> | undefined, readiness: Record<string, unknown> | undefined, config: unknown;
+  const transport: DesktopNativeTransport = {
+    async invoke<T>(command: string, args?: Record<string, unknown>) {
+      calls.push(command);
+      if (command === 'varin_bootstrap') return value as T;
+      if (command === 'varin_runtime_changed') {
+        assert.equal(args?.documentNonce, value.documentNonce);
+        config = args?.config;
+        receipt = { documentNonce: value.documentNonce, runtimeEpoch: `restart-epoch-${++revision}` };
+        return receipt as T;
+      }
+      if (command === 'varin_renderer_ready') {
+        assert.deepEqual(args, receipt);
+        readiness = args;
+        return null as T;
+      }
+      if (command === 'varin_invoke' && args?.command === 'desktop_local_client_token_get') return 'old-token' as T;
+      throw new Error(`Unexpected native command: ${command}`);
+    },
+    async listen(handler) { listener = handler; return () => { listener = () => { }; }; },
+  };
+  const assertSynchronized = () => {
+    assert.ok(receipt, 'the runtime must have a successful native receipt');
+    assert.deepEqual(readiness, receipt, 'navigation must acknowledge the current runtime epoch');
+    assert.deepEqual(config, { apiBaseUrl: target.__VARIN_API_BASE_URL__, clientToken: target.__VARIN_CLIENT_TOKEN__,
+      requestHeaders: { ...target.__VARIN_RUNTIME_HEADERS__ }, relayHostId: target.__VARIN_RELAY_HOST_ID__ });
+  };
   const dispose = await installTauriDesktop(target, transport);
   releases.push(dispose!);
   switchRuntimeEndpoint({ apiBaseUrl: value.apiBaseUrl, clientToken: value.clientToken, runtimeKey: 'local' });
-  return { target, calls, restart(sameOrigin = false) { if (!sameOrigin) value = { ...value, apiBaseUrl: 'http://127.0.0.1:19002', localOrigin: 'http://127.0.0.1:19002', clientToken: 'replacement-token' }; listener({ event: 'varin:local-host-restarted', detail: { previousOrigin: 'http://127.0.0.1:19001' } }); } };
+  target.dispatchEvent(new Event('varin:desktop-navigation-ready'));
+  await tick();
+  assertSynchronized();
+  return { target, calls, assertSynchronized, restart(sameOrigin = false) { if (!sameOrigin) value = { ...value, apiBaseUrl: 'http://127.0.0.1:19002', localOrigin: 'http://127.0.0.1:19002', clientToken: 'replacement-token' }; listener({ event: 'varin:local-host-restarted', detail: { previousOrigin: 'http://127.0.0.1:19001' } }); } };
 }
 test('local Host restart uses the shared guarded switch without reloading or exposing its private event', async () => {
   const f = await setup();
@@ -43,6 +73,7 @@ test('local Host restart uses the shared guarded switch without reloading or exp
   assert.equal(f.target.__VARIN_CLIENT_TOKEN__, 'replacement-token');
   assert.equal(f.target.__VARIN_LOCAL_ORIGIN__, 'http://127.0.0.1:19002');
   assert.equal(f.calls.filter(c => c === 'varin_bootstrap').length, 2);
+  f.assertSynchronized();
 });
 test('restart never overwrites an already selected remote endpoint or credentials', async () => {
   const f = await setup();
@@ -56,6 +87,7 @@ test('restart never overwrites an already selected remote endpoint or credential
   assert.equal(f.target.__VARIN_CLIENT_TOKEN__, 'remote-token');
   assert.equal(f.target.__VARIN_LOCAL_ORIGIN__, 'http://127.0.0.1:19002');
   assert.equal(cleaned, false);
+  f.assertSynchronized();
 });
 test('a remote switch already queued wins without cleaning that new runtime', async () => {
   const f = await setup();
@@ -74,6 +106,7 @@ test('a remote switch already queued wins without cleaning that new runtime', as
   assert.equal(getRuntimeKey(), 'host:remote');
   assert.equal(f.target.__VARIN_CLIENT_TOKEN__, 'remote-token');
   assert.equal(cleanups, 1);
+  f.assertSynchronized();
 });
 
 
@@ -91,6 +124,7 @@ test('remote-selected same-port restart clears cached local grants without chang
   assert.equal(getRuntimeUrlAuthTokenSync(), 'remote-url-grant');
   assert.equal(getRuntimeKey(), 'host:remote');
   assert.equal(f.target.__VARIN_CLIENT_TOKEN__, 'remote-token');
+  f.assertSynchronized();
 });
 
 test('remote-selected same-port restart fences the in-flight local mint even when the private bearer is unchanged', async () => {
@@ -117,4 +151,5 @@ test('remote-selected same-port restart fences the in-flight local mint even whe
   assert.equal(getLocalRuntimeUrlAuthTokenSync(local), '');
   assert.equal(getRuntimeKey(), 'host:remote');
   assert.equal(f.target.__VARIN_CLIENT_TOKEN__, 'remote-token');
+  f.assertSynchronized();
 });

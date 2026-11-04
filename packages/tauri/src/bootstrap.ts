@@ -7,7 +7,7 @@ import {
   type PreloadBootstrapLocalPayload,
   type VarinDesktopBridge,
 } from '@varin/application-client/desktop';
-import { createTauriDesktopBridge, DesktopBridgeError, type DesktopNativeTransport } from './bridge.js';
+import { createTauriDesktopBridge, DesktopBridgeError, type DesktopNativeTransport, type DesktopRuntimeFence, type DesktopRuntimeReceipt } from './bridge.js';
 
 export type DesktopWindowRole = 'main' | 'mini-chat' | 'companion' | 'companion-scene' | 'companion-stool';
 
@@ -81,14 +81,14 @@ export async function installTauriDesktop(
   let disposed = false;
   let runtimeRevision = 0;
   let runtimeInvalidation = new AbortController();
-  let runtimeReceipt: Promise<void> | undefined;
+  let runtimeReceipt: Promise<DesktopRuntimeReceipt> | undefined;
   let runtimeEpoch: string | undefined;
   let nativeState = Promise.resolve();
   const staleRuntime = () => new DesktopBridgeError('stale_runtime', 'The original desktop document or Application Host changed before this request could be sent');
   const assertRuntime = (revision: number) => {
     if (disposed || revision !== runtimeRevision) throw staleRuntime();
   };
-  const reportRuntime = (): Promise<void> => {
+  const reportRuntime = (): Promise<DesktopRuntimeReceipt> => {
     if (runtimeReceipt) return runtimeReceipt;
     const revision = runtimeRevision;
     const config = { apiBaseUrl: target.__VARIN_API_BASE_URL__ ?? '', clientToken: target.__VARIN_CLIENT_TOKEN__ ?? '',
@@ -102,14 +102,15 @@ export async function installTauriDesktop(
         throw new DesktopBridgeError('invalid_runtime_receipt', 'The native desktop runtime receipt is missing or belongs to another document');
       }
       runtimeEpoch = receipt.runtimeEpoch;
+      return Object.freeze({ documentNonce: bootstrap.documentNonce, runtimeEpoch: receipt.runtimeEpoch });
     });
     // Only the sequencing tail recovers for a later independent Host change.
     // Callers retain the original receipt, including its failure, without retry.
-    nativeState = operation.catch(() => {});
+    nativeState = operation.then(() => {}, () => {});
     runtimeReceipt = operation;
     return operation;
   };
-  const runtimeFence = async (): Promise<() => void> => {
+  const runtimeFence: DesktopRuntimeFence = async () => {
     const revision = runtimeRevision, signal = runtimeInvalidation.signal;
     const assertCurrent = () => assertRuntime(revision);
     assertCurrent();
@@ -118,10 +119,11 @@ export async function installTauriDesktop(
       invalidate = () => reject(staleRuntime());
       signal.addEventListener('abort', invalidate, { once: true });
     });
-    try { await Promise.race([reportRuntime(), invalidated]); }
+    let receipt: DesktopRuntimeReceipt;
+    try { receipt = await Promise.race([reportRuntime(), invalidated]); }
     finally { signal.removeEventListener('abort', invalidate); }
     assertCurrent();
-    return assertCurrent;
+    return { assertCurrent, receipt };
   };
   let initialized!: () => void;
   const ready = new Promise<void>(resolve => { initialized = resolve; });
@@ -168,9 +170,9 @@ export async function installTauriDesktop(
   let navigationInstalled = false;
   let readinessReceipt: Promise<void> | undefined;
   const reportNavigationReady = async () => {
-    const assertCurrent = await runtimeFence();
-    assertCurrent();
-    if (!readinessReceipt) readinessReceipt = transport.invoke('varin_renderer_ready', { documentNonce: bootstrap.documentNonce, runtimeEpoch });
+    const authorization = await runtimeFence();
+    authorization.assertCurrent();
+    if (!readinessReceipt) readinessReceipt = transport.invoke('varin_renderer_ready', { ...authorization.receipt });
     await readinessReceipt;
   };
   const navigationReady = () => {
