@@ -7,6 +7,11 @@ import type { Page } from 'puppeteer-core';
 import { NativeBrowserPresentation, type PresentationPage } from './native-presentation.js';
 import { captureBrowserSelection, deleteBrowserSelection } from './native-clipboard.js';
 
+interface FixtureInput {
+  value: string; type: string; readOnly: boolean; selectionStart: number; selectionEnd: number;
+  cloneNode(deep: boolean): unknown; replaceWith(node: unknown): void;
+}
+
 /** DOM identity is real; only Chromium's native editing command and CDP transport
  * are test ports. These checks do not claim installed-platform edit/IME coverage. */
 function documentFixture(editable = false) {
@@ -20,7 +25,7 @@ function documentFixture(editable = false) {
   Object.assign(document, { getSelection: () => selection });
   const edit = vi.fn(() => {
     if (editable) { element.textContent = 'same  text'; selection.isCollapsed = true; }
-    else { const input = element as HTMLInputElement; input.value = 'same  text'; input.selectionStart = input.selectionEnd = 5; }
+    else { const input = element as FixtureInput; input.value = 'same  text'; input.selectionStart = input.selectionEnd = 5; }
     return true;
   });
   Object.assign(document, { execCommand: edit });
@@ -61,7 +66,7 @@ test.each([false, true])('single-use cut targets the captured %s editor through 
 });
 
 test.each(['selection', 'value', 'node', 'readonly', 'password'])('a changed input %s preserves the page text', async change => {
-  const f = await setup(), selected = await f.capture(), input = f.element as HTMLInputElement;
+  const f = await setup(), selected = await f.capture(), input = f.element as FixtureInput;
   if (change === 'selection') input.selectionStart = 0;
   if (change === 'value') input.value = 'replacement selected text';
   if (change === 'readonly') input.readOnly = true;
@@ -104,12 +109,12 @@ test('a second viewer cannot redeem another viewer’s selection ticket', async 
 test.each([false, true])('a cancelled or unchanged native edit (%s) is not reported as a successful cut', async result => {
   const f = await setup(), selected = await f.capture(); f.edit.mockImplementation(() => result);
   await expect(f.cut(selected!.selectionId)).rejects.toThrow('could not delete');
-  expect((f.element as HTMLInputElement).value).toBe('same selected text');
+  expect((f.element as FixtureInput).value).toBe('same selected text');
   await expect(f.cut(selected!.selectionId)).rejects.toThrow('no longer available'); await f.stop();
 });
 
 test('capture excludes password inputs and inaccessible iframe documents', () => {
-  const f = documentFixture(); (f.element as HTMLInputElement).type = 'password';
+  const f = documentFixture(); (f.element as FixtureInput).type = 'password';
   expect(f.run(captureBrowserSelection)).toBeNull();
   const iframe = f.document.createElement('iframe'); Object.defineProperty(iframe, 'contentDocument', { value: null });
   f.document.body.appendChild(iframe); Object.defineProperty(f.document, 'activeElement', { value: iframe });

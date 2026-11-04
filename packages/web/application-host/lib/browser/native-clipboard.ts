@@ -2,10 +2,31 @@ import { randomUUID } from 'node:crypto';
 import type { Frame, JSHandle, Page } from 'puppeteer-core';
 import { BrowserExecutionError, type BrowserClipboardRequest, type BrowserClipboardSelection, type BrowserInputIdentity } from '@varin/protocol';
 
+// These structures describe functions serialized into Chromium, not globals
+// available to the Node Host. Keep lib.dom out of the Host's fetch/stream types.
+interface PageElement {
+  tagName: string; isConnected: boolean; isContentEditable?: boolean;
+  shadowRoot: { activeElement: PageElement | null } | null;
+}
+interface PageInput extends PageElement {
+  type: string; value: string; disabled: boolean; readOnly: boolean;
+  selectionStart: number | null; selectionEnd: number | null; selectionDirection: string | null;
+}
+interface PageFrameElement extends PageElement { contentDocument: PageDocument | null }
+interface PageSelection {
+  anchorNode: object | null; anchorOffset: number; focusNode: object | null; focusOffset: number;
+  rangeCount: number; isCollapsed: boolean; toString(): string;
+}
+interface PageDocument {
+  activeElement: PageElement | null; designMode: string;
+  hasFocus(): boolean; getSelection(): PageSelection | null; execCommand(command: string): boolean;
+}
+declare const document: PageDocument;
+
 type SelectionSnapshot = {
-  document: Document; element: Element; text: string;
+  document: PageDocument; element: PageElement; text: string;
 } & ({ kind: 'input'; value: string; start: number; end: number; direction: string | null; inputType: string }
-  | { kind: 'editable'; anchor: Node; anchorOffset: number; focus: Node; focusOffset: number });
+  | { kind: 'editable'; anchor: object; anchorOffset: number; focus: object; focusOffset: number });
 
 /** Runs in the original focused frame. Nodes stay in an owner-held JSHandle,
  * never in a page global or a caller-provided selector. */
@@ -15,7 +36,7 @@ export function captureBrowserSelection(): SelectionSnapshot | null {
   while (element) {
     if (element.shadowRoot?.activeElement) { element = element.shadowRoot.activeElement; continue; }
     if (element.tagName === 'IFRAME') {
-      const child = (element as HTMLIFrameElement).contentDocument;
+      const child = (element as PageFrameElement).contentDocument;
       if (!child) return null; // The owner will inspect the focused cross-origin frame itself.
       doc = child; element = doc.activeElement; continue;
     }
@@ -23,13 +44,13 @@ export function captureBrowserSelection(): SelectionSnapshot | null {
   }
   if (!element) return null;
   if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-    const input = element as HTMLInputElement | HTMLTextAreaElement;
+    const input = element as PageInput;
     if (input.type === 'password' || input.disabled || input.readOnly || input.selectionStart === null || input.selectionEnd === null || input.selectionStart === input.selectionEnd) return null;
     return { kind: 'input', document: doc, element, text: input.value.slice(input.selectionStart, input.selectionEnd), value: input.value,
       start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection, inputType: input.type };
   }
   const selection = doc.getSelection();
-  if (!(element as HTMLElement).isContentEditable && doc.designMode !== 'on' || !selection || selection.rangeCount !== 1 || selection.isCollapsed || !selection.anchorNode || !selection.focusNode) return null;
+  if (!element.isContentEditable && doc.designMode !== 'on' || !selection || selection.rangeCount !== 1 || selection.isCollapsed || !selection.anchorNode || !selection.focusNode) return null;
   return { kind: 'editable', document: doc, element, text: selection.toString(), anchor: selection.anchorNode,
     anchorOffset: selection.anchorOffset, focus: selection.focusNode, focusOffset: selection.focusOffset };
 }
@@ -42,7 +63,7 @@ export function deleteBrowserSelection(saved: SelectionSnapshot | null): 'delete
   while (element) {
     if (element.shadowRoot?.activeElement) { element = element.shadowRoot.activeElement; continue; }
     if (element.tagName === 'IFRAME') {
-      const child = (element as HTMLIFrameElement).contentDocument;
+      const child = (element as PageFrameElement).contentDocument;
       if (!child) return 'stale';
       doc = child; element = doc.activeElement; continue;
     }
@@ -50,18 +71,18 @@ export function deleteBrowserSelection(saved: SelectionSnapshot | null): 'delete
   }
   if (doc !== saved.document || element !== saved.element || !element?.isConnected) return 'stale';
   if (saved.kind === 'input') {
-    const input = element as HTMLInputElement | HTMLTextAreaElement;
+    const input = element as PageInput;
     if (input.disabled || input.readOnly || input.type !== saved.inputType || input.type === 'password' || input.value !== saved.value
       || input.selectionStart !== saved.start || input.selectionEnd !== saved.end || input.selectionDirection !== saved.direction) return 'stale';
   } else {
     const selection = doc.getSelection();
-    if (!(element as HTMLElement).isContentEditable && doc.designMode !== 'on' || !selection || selection.rangeCount !== 1
+    if (!element.isContentEditable && doc.designMode !== 'on' || !selection || selection.rangeCount !== 1
       || selection.anchorNode !== saved.anchor || selection.anchorOffset !== saved.anchorOffset || selection.focusNode !== saved.focus
       || selection.focusOffset !== saved.focusOffset || selection.toString() !== saved.text) return 'stale';
   }
   if (!doc.execCommand('delete')) return 'unavailable';
   // A cancelled/no-op editor command must not be reported as a successful cut.
-  if (saved.kind === 'input') return (element as HTMLInputElement).value !== saved.value ? 'deleted' : 'unavailable';
+  if (saved.kind === 'input') return (element as PageInput).value !== saved.value ? 'deleted' : 'unavailable';
   return doc.getSelection()?.isCollapsed ? 'deleted' : 'unavailable';
 }
 
