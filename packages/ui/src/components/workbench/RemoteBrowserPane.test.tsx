@@ -35,7 +35,7 @@ vi.mock('@/lib/preview/screenshot-capture', () => ({
 
 let root: Root, container: HTMLElement, page: BrowserPage;
 let events: (event: BrowserEvent) => void, frames: (frame: BrowserFrame) => void;
-let resize: () => void;
+let resize: () => void, endFrames: () => void;
 const dispatch = async (element: Element, type: string, extra: Record<string, unknown> = {}) => {
   const event = new window.Event(type, { bubbles: true, cancelable: true }); Object.assign(event, extra);
   await act(async () => { element.dispatchEvent(event); }); return event;
@@ -62,7 +62,7 @@ beforeEach(async () => {
   page = { pageId: 'page', browserId: 'browser', generation: 'generation', controlEpoch: 'original', url: 'https://example.com/', title: 'Page', loading: false, retained: true, canGoBack: true, canGoForward: false, agentPaused: false };
   mocks.api.catalog.mockResolvedValue({ pages: [page], devices: [{ browserId: 'browser', label: 'Original browser', state: 'connected' }] });
   mocks.api.events.mockImplementation((_page: string, listener: typeof events) => { events = listener; return () => {}; });
-  mocks.api.frames.mockImplementation((_page: string, _stream: string, listener: typeof frames, signal: AbortSignal) => { frames = listener; return new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); });
+  mocks.api.frames.mockImplementation((_page: string, _stream: string, listener: typeof frames, signal: AbortSignal) => { frames = listener; return new Promise<void>(resolve => { endFrames = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); }); });
   mocks.api.control.mockImplementation(async (_page: string, stream: string, paused: boolean) => { page = { ...page, agentPaused: paused, controlViewerId: paused ? stream : undefined, controlEpoch: 'controlled' }; return page; });
   mocks.api.resize.mockResolvedValue(undefined); mocks.api.input.mockResolvedValue(undefined);
   mocks.api.action.mockImplementation(async (_page: string, action: { script?: string }) => ({ page, action: 'evaluate', value: action.script === BROWSER_POSITION_SCRIPT ? { x: 12, y: 345 } : action.script === BROWSER_SELECTION_SCRIPT ? 'selected input text' : undefined }));
@@ -145,4 +145,15 @@ test('changing chats cancels inspection instead of attaching a late result to ei
   expect(mocks.api.action).toHaveBeenCalledWith('page', { action: 'evaluate', script: browserInspectorScripts('viewer', 1).cancel });
   await act(async () => finish({ page, value: { target: { bounds: { x: 1, y: 1, width: 2, height: 2 } }, position: { x: 12, y: 345 }, url: page.url } }));
   expect(mocks.draftImage).not.toHaveBeenCalled(); expect(mocks.draftText).not.toHaveBeenCalled();
+});
+
+
+test('a decoded frame arriving after stream termination cannot revive browser control', async () => {
+  let decoded!: (value: ImageBitmap) => void;
+  vi.mocked(createImageBitmap).mockImplementationOnce(() => new Promise(resolve => { decoded = resolve; }));
+  await render(); await emitFrame();
+  await act(async () => endFrames());
+  await act(async () => decoded({ width: 800, height: 600, close() {} }));
+  expect(button('contextPanel.preview.inspect.toggle').disabled).toBe(true);
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('browser.streamEnded');
 });

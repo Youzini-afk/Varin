@@ -80,16 +80,16 @@ export function RemoteBrowserPane({ initialUrl, directory, tabID, onNavigate, in
   }, [api, accept, directory, initialUrl, refresh, t, tabID]);
   React.useEffect(() => {
     if (!page?.pageId) return;
-    const pageId = page.pageId, cancellation = new AbortController(); let stopped = false, decoding = false;
+    const pageId = page.pageId, cancellation = new AbortController(); let stopped = false, streamEnded = false, decoding = false;
     let pendingFrame: BrowserFrame | undefined;
     frame.current = undefined; setLive(false);
     const draw = async () => {
-      if (decoding || stopped) return; decoding = true;
+      if (decoding || stopped || streamEnded) return; decoding = true;
       try {
-        while (pendingFrame && !stopped) {
+        while (pendingFrame && !stopped && !streamEnded) {
           const next = pendingFrame; pendingFrame = undefined;
           const bitmap = await createImageBitmap(new Blob([new Uint8Array(next.bytes)], { type: next.mimeType }));
-          try { if (!stopped && canvas.current) { canvas.current.width = bitmap.width; canvas.current.height = bitmap.height; canvas.current.getContext('2d')?.drawImage(bitmap, 0, 0); frame.current = next; setLive(true); } }
+          try { if (!stopped && !streamEnded && canvas.current) { canvas.current.width = bitmap.width; canvas.current.height = bitmap.height; canvas.current.getContext('2d')?.drawImage(bitmap, 0, 0); frame.current = next; setLive(true); } }
           finally { bitmap.close(); }
         }
       } catch (cause) { if (!stopped) setError(String(cause)); }
@@ -97,15 +97,18 @@ export function RemoteBrowserPane({ initialUrl, directory, tabID, onNavigate, in
     };
     inputQueue.current = createBrowserInputQueue({ frame: () => !inspection.current?.attaching && browserFrameMatchesControl(pageRef.current, frame.current, streamId) ? frame.current : undefined,
       send: request => api.input(request), failed: cause => { if (!stopped) setError(String(cause)); } });
+    const endStream = (message: string) => {
+      if (stopped || streamEnded) return;
+      streamEnded = true; pendingFrame = undefined; frame.current = undefined; setLive(false); setError(message);
+    };
     const stopEvents = api.events(pageId, event => {
       if (stopped) return;
       if (event.kind === 'page') accept(event.page);
       if (event.kind === 'download') setDownloads(previous => [...previous.filter(item => item.downloadId !== event.download.downloadId), event.download]);
-      if (event.kind === 'closed') { frame.current = undefined; setLive(false); setError(t('browser.pageClosed')); cancellation.abort(); }
+      if (event.kind === 'closed') { endStream(t('browser.pageClosed')); cancellation.abort(); }
     });
-    void api.frames(pageId, streamId, value => { pendingFrame = value; void draw(); }, cancellation.signal).then(() => {
-      if (!stopped) { frame.current = undefined; setLive(false); setError(t('browser.streamEnded')); }
-    }).catch(cause => { if (!stopped) { frame.current = undefined; setLive(false); setError(String(cause)); } });
+    void api.frames(pageId, streamId, value => { if (!stopped && !streamEnded) { pendingFrame = value; void draw(); } }, cancellation.signal)
+      .then(() => endStream(t('browser.streamEnded'))).catch(cause => endStream(String(cause)));
     const blur = () => inputQueue.current?.enqueue({ type: 'release' }); window.addEventListener('blur', blur);
     return () => { stopped = true; void inputQueue.current?.stop(); inputQueue.current = undefined; pendingFrame = undefined; cancellation.abort(); stopEvents(); window.removeEventListener('blur', blur); };
   }, [api, page?.pageId, streamId, accept, t]);
