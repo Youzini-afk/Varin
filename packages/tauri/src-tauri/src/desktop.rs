@@ -626,8 +626,8 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         }
     }
     state.boot.send_replace(Some(result.clone()));
-    restore_startup_failure(&app);
-    if !ready && !state.quitting.load(Ordering::Acquire) && app.get_webview_window("main").is_none() {
+    let recovery = restore_startup_failure(&app);
+    if matches!(recovery, StartupRecovery::Failed) && !state.quitting.load(Ordering::Acquire) {
         // Native window creation itself failed; there is no surface to recover.
         // Use the existing guarded shutdown instead of remaining invisibly alive.
         app.exit(1);
@@ -1577,20 +1577,32 @@ async fn close_workbench_window(
     result
 }
 
-fn restore_startup_failure(app: &AppHandle) {
+enum StartupRecovery {
+    NotNeeded,
+    Deferred,
+    Ready,
+    Failed,
+}
+
+fn restore_startup_failure(app: &AppHandle) -> StartupRecovery {
     let state = app.state::<DesktopState>();
     let error = match state.boot.borrow().as_ref() {
         Some(Err(error)) => error.clone(),
-        _ => return,
+        _ => return StartupRecovery::NotNeeded,
     };
-    let Ok(_recovery) = state.admission.enter_presentation() else { return; };
+    let Ok(_recovery) = state.admission.enter_presentation() else { return StartupRecovery::Deferred; };
     // Acquire only after presentation is admitted. A failed attempt while the
     // gate is closed must not suppress the post-reopen retry from drain.
-    let Some(_flight) = state.startup_recovery.enter() else { return; };
+    let Some(_flight) = state.startup_recovery.enter() else { return StartupRecovery::Deferred; };
     if app.get_webview_window("main").is_none()
         && create_window(app, "main", "main", None, None).is_err()
     {
         eprintln!("Varin startup recovery window could not be created");
+        // Another recovery owner or a temporarily closed gate is not a failed
+        // native construction. Only this actual attempt can justify exit(1).
+        if app.get_webview_window("main").is_none() {
+            return StartupRecovery::Failed;
+        }
     }
     if let Ok(windows) = state.windows.lock() {
         for window in windows.values() {
@@ -1604,6 +1616,7 @@ fn restore_startup_failure(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
     }
+    StartupRecovery::Ready
 }
 
 async fn drain(app: &AppHandle) -> Result<(), String> {
