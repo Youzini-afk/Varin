@@ -27,6 +27,7 @@ import { HarnessTransport, record, text } from './transport.js';
 import type { HarnessConnection } from './adapter.js';
 import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
 import { assertProfilePlatform, profileVersionArguments } from './profile-launch.js';
+import { findInstalledExternalExecutable } from './installed-executable.js';
 import { connectCodex } from './codex.js';
 import { connectPi } from './pi.js';
 import { connectAcp } from './acp.js';
@@ -391,7 +392,7 @@ export class ExternalAgentsService {
     const env = { ...process.env, ...this.environment.getLoginShellEnvSnapshot() };
     const executable = path.isAbsolute(config.command)
       ? config.command
-      : this.environment.searchPathFor(config.command, env.PATH ?? env.Path);
+      : this.environment.searchPathFor(config.command, env.PATH ?? env.Path) ?? await findInstalledExternalExecutable(config);
     if (!executable || !(await stat(executable).catch(() => null))?.isFile())
       throw new ExternalAgentError('program_missing', `Cannot find ${config.command} on this Host`);
     if (process.platform === 'win32' && /\.cmd$/i.test(executable)) {
