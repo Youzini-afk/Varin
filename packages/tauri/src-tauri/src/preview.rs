@@ -2,7 +2,7 @@
 //! This protocol serves one static bootstrap, not files or arbitrary URLs. The
 //! opaque sandbox has no native capability, Host identity or credential input.
 const BOOTSTRAP: &str = include_str!("preview.html");
-const INTERACTIVE_CSP: &str = "default-src 'none'; script-src 'unsafe-inline' blob: https:; style-src 'unsafe-inline' https:; img-src data: blob: https: http:; font-src data: blob: https:; media-src data: blob: https: http:; connect-src https: http:; worker-src blob:; frame-src https: http:; object-src 'none'; base-uri https:; form-action 'none'; frame-ancestors http://tauri.localhost https://tauri.localhost; sandbox allow-scripts";
+const INTERACTIVE_CSP: &str = "default-src 'none'; script-src 'unsafe-inline' blob: https:; style-src 'unsafe-inline' blob: https:; img-src data: blob: https: http:; font-src data: blob: https:; media-src data: blob: https: http:; connect-src blob: data: https: http:; worker-src blob:; frame-src https: http:; object-src 'none'; base-uri https:; form-action 'none'; frame-ancestors http://tauri.localhost https://tauri.localhost; sandbox allow-scripts";
 const FEEDBACK_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://tauri.localhost https://tauri.localhost; sandbox allow-scripts";
 
 fn document(method: &str, path: &str) -> Option<(&'static str, &'static str)> {
@@ -69,6 +69,19 @@ mod tests {
             assert_eq!(directives["form-action"], ["'none'"]);
             assert!(!directives["script-src"].contains(&"'unsafe-eval'"));
         }
+        // The renderer resolves work-local CSS and fetchable JSON/assets into
+        // object/data URLs. Their resource policies must allow those forms.
+        let (_, csp) = document("GET", "/interactive").unwrap();
+        let directives: std::collections::HashMap<_, _> = csp
+            .split(';')
+            .map(|directive| {
+                let mut words = directive.split_whitespace();
+                (words.next().unwrap(), words.collect::<Vec<_>>())
+            })
+            .collect();
+        assert!(directives["style-src"].contains(&"blob:"));
+        assert!(directives["connect-src"].contains(&"blob:"));
+        assert!(directives["connect-src"].contains(&"data:"));
         let (_, csp) = document("GET", "/feedback").unwrap();
         assert!(!csp.contains("connect-src")); // No network in the gesture overlay.
     }
