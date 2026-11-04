@@ -24,22 +24,62 @@ pub(crate) struct WindowRecord<C, D> {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct WorkbenchAuthorityKey([u8; 32]);
 
+/// A command's caller binding is captured before its first await. Readiness or
+/// creation serialization must not silently retarget it to a later connection.
+pub(crate) struct WorkbenchInvocation {
+    document: String,
+    authority: Option<WorkbenchAuthorityKey>,
+}
+impl WorkbenchInvocation {
+    pub fn capture<C, D>(record: &WindowRecord<C, D>) -> Result<Self, String> {
+        Ok(Self {
+            document: record.document_nonce.clone(),
+            authority: invocation_authority(record.bootstrap.as_ref().ok_or("Window bootstrap is not ready")?)?,
+        })
+    }
+    pub fn require_current<C, D>(&self, record: &WindowRecord<C, D>) -> Result<(), String> {
+        if record.document_nonce != self.document || record.bootstrap.as_ref()
+            .is_none_or(|value| !invocation_authority(value).is_ok_and(|key| key == self.authority)) {
+            return Err("The original window document or connection authority changed; the command was not retargeted".into());
+        }
+        Ok(())
+    }
+}
+
+fn invocation_authority(bootstrap: &Value) -> Result<Option<WorkbenchAuthorityKey>, String> {
+    // The native not-configured/recovery UI must still be able to open a chosen
+    // Host. This binds only its own document, never makes empty endpoints reusable.
+    if bootstrap["apiBaseUrl"] == "" && bootstrap["relayHostId"] == ""
+        && bootstrap["clientToken"] == ""
+        && bootstrap["requestHeaders"].as_object().is_some_and(|headers| headers.is_empty())
+        && matches!(bootstrap["bootOutcome"]["status"].as_str(), Some("not-configured" | "unreachable" | "missing")) {
+        return Ok(None);
+    }
+    workbench_authority_key(bootstrap).map(Some)
+}
+
 pub(crate) fn workbench_authority_key(bootstrap: &Value) -> Result<WorkbenchAuthorityKey, String> {
     let field = |name: &str| {
         bootstrap[name]
             .as_str()
             .ok_or_else(|| "Workbench connection authority is invalid".to_owned())
     };
-    let mut endpoint = Url::parse(field("apiBaseUrl")?)
-        .map_err(|_| "Workbench connection endpoint is invalid")?;
-    if !matches!(endpoint.scheme(), "http" | "https") {
-        return Err("Workbench connection endpoint is invalid".into());
-    }
-    endpoint.set_fragment(None);
-    // Normalize the base path, not query values which may themselves end in '/'.
-    let path = endpoint.path().trim_end_matches('/').to_owned();
-    endpoint.set_path(&path);
     let relay = field("relayHostId")?;
+    let api = field("apiBaseUrl")?;
+    let endpoint = if api.is_empty() && !relay.is_empty() {
+        // A selected relay has no direct endpoint before frontend activation.
+        String::new()
+    } else {
+        let mut endpoint = Url::parse(api).map_err(|_| "Workbench connection endpoint is invalid")?;
+        if !matches!(endpoint.scheme(), "http" | "https") {
+            return Err("Workbench connection endpoint is invalid".into());
+        }
+        endpoint.set_fragment(None);
+        // Normalize the base path, not query values which may themselves end in '/'.
+        let path = endpoint.path().trim_end_matches('/').to_owned();
+        endpoint.set_path(&path);
+        endpoint.to_string()
+    };
     let token = field("clientToken")?;
     let headers = bootstrap["requestHeaders"]
         .as_object()
@@ -374,6 +414,57 @@ mod tests {
         let mut query_b = query_a.clone();
         query_b["apiBaseUrl"] = json!("https://host.example/?tenant=");
         assert!(workbench_authority_key(&query_a).unwrap() != workbench_authority_key(&query_b).unwrap());
+    }
+
+    #[test]
+    fn native_selected_relay_without_direct_endpoint_has_its_own_authority() {
+        let mut windows = windows();
+        let relay = json!({"apiBaseUrl":"","relayHostId":"relay-saved-host","clientToken":"relay-token", "requestHeaders":{"X-Tenant":"one"}});
+        let target = windows.get_mut("main").unwrap();
+        target.close = Some(()); target.bootstrap = Some(relay.clone());
+        assert_eq!(workbench_target(&windows, "mini-1", &relay).unwrap().as_deref(), Some("main"));
+        assert!(queue_navigation(&mut windows, "main", &relay, json!({"type":"new-thread"})).unwrap().is_some());
+        for (field, value) in [("relayHostId", json!("other-relay")), ("clientToken", json!("other-token")),
+            ("requestHeaders", json!({"X-Tenant":"two"})), ("apiBaseUrl", json!("https://activated-relay.example"))] {
+            let mut other = relay.clone(); other[field] = value;
+            assert_eq!(workbench_target(&windows, "mini-1", &other).unwrap(), None);
+        }
+        let mut empty_direct = relay.clone(); empty_direct["relayHostId"] = json!("");
+        assert!(workbench_authority_key(&empty_direct).is_err());
+    }
+
+    #[tokio::test]
+    async fn commands_waiting_for_creation_or_bootstrap_cannot_change_their_original_authority() {
+        for change in ["document", "endpoint", "relay", "token", "headers"] {
+            let mut caller = record("https://original.example", "original-secret", "tenant-one");
+            let invocation = WorkbenchInvocation::capture(&caller).unwrap();
+            tokio::task::yield_now().await; // A creation/readiness wait lets the caller switch.
+            match change {
+                "document" => caller.document_nonce = "new-document".into(),
+                "endpoint" => caller.bootstrap.as_mut().unwrap()["apiBaseUrl"] = json!("https://new.example"),
+                "relay" => caller.bootstrap.as_mut().unwrap()["relayHostId"] = json!("other-relay"),
+                "token" => caller.bootstrap.as_mut().unwrap()["clientToken"] = json!("other-secret"),
+                _ => caller.bootstrap.as_mut().unwrap()["requestHeaders"] = json!({"X-Window":"tenant-two"}),
+            }
+            assert!(invocation.require_current(&caller).is_err(), "{change}");
+        }
+        let mut caller = record("https://original.example/", "original-secret", "tenant-one");
+        let invocation = WorkbenchInvocation::capture(&caller).unwrap();
+        caller.bootstrap.as_mut().unwrap()["requestHeaders"] = json!({"x-window":"tenant-one"});
+        tokio::task::yield_now().await;
+        assert!(invocation.require_current(&caller).is_ok());
+    }
+
+    #[test]
+    fn not_configured_native_ui_can_choose_a_host_without_sharing_an_empty_authority() {
+        let mut caller = record("https://original.example", "secret", "tenant");
+        caller.bootstrap = Some(json!({"apiBaseUrl":"","relayHostId":"","clientToken":"","requestHeaders":{},
+            "bootOutcome":{"status":"not-configured","target":null}}));
+        let invocation = WorkbenchInvocation::capture(&caller).unwrap();
+        assert!(invocation.require_current(&caller).is_ok());
+        assert!(workbench_authority_key(caller.bootstrap.as_ref().unwrap()).is_err());
+        caller.bootstrap.as_mut().unwrap()["apiBaseUrl"] = json!("https://chosen.example");
+        assert!(invocation.require_current(&caller).is_err());
     }
 
     #[test]

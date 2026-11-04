@@ -92,6 +92,14 @@ impl DesktopState {
             .map_err(|_| "Window registry unavailable")?;
         crate::window_registry::authorize(&windows, webview.label(), &url).map(|_| ())
     }
+    fn workbench_invocation(&self, label: &str) -> Result<crate::window_registry::WorkbenchInvocation, String> {
+        let windows = self.windows.lock().map_err(|_| "Window registry unavailable")?;
+        crate::window_registry::WorkbenchInvocation::capture(windows.get(label).ok_or("Window is closed")?)
+    }
+    fn require_workbench_invocation(&self, label: &str, invocation: &crate::window_registry::WorkbenchInvocation) -> Result<(), String> {
+        let windows = self.windows.lock().map_err(|_| "Window registry unavailable")?;
+        invocation.require_current(windows.get(label).ok_or("Window is closed")?)
+    }
     async fn bootstrap(&self, label: &str) -> Reply {
         let mut prepared = self
             .windows
@@ -824,7 +832,9 @@ async fn varin_invoke(
             Ok(Value::Null)
         }
         "desktop_tray_update" => {
+            let invocation = state.workbench_invocation(webview.label())?;
             let bootstrap = state.bootstrap(webview.label()).await?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             app.state::<crate::native_menu::NativeMenus>().update_tray(
                 &app,
                 webview.label(),
@@ -1106,8 +1116,10 @@ async fn varin_invoke(
         | "desktop_new_window_for_host"
         | "desktop_open_draft_mini_chat_window"
         | "desktop_open_thread_mini_chat_window" => {
+            let invocation = state.workbench_invocation(webview.label())?;
             let _creation = state.mini_create.lock().await;
             let mut bootstrap = state.bootstrap(webview.label()).await?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             let mini = command.contains("mini_chat");
             if command == "desktop_open_thread_mini_chat_window" {
                 let thread = string(&args, "threadId")?;
@@ -1201,6 +1213,7 @@ async fn varin_invoke(
                     query.append_pair(key, value);
                 }
             }
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             create_window(
                 &app,
                 &label,
@@ -1213,15 +1226,9 @@ async fn varin_invoke(
         "desktop_transfer_draft" => {
             let mut args = args;
             crate::draft_transfer::validate(&args["transfer"])?;
-            let source_document = state
-                .windows
-                .lock()
-                .map_err(|_| "Window registry unavailable")?
-                .get(webview.label())
-                .ok_or("Draft source is closed")?
-                .document_nonce
-                .clone();
+            let invocation = state.workbench_invocation(webview.label())?;
             let bootstrap = state.bootstrap(webview.label()).await?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             let target = focus_runtime_window(
                 &app,
                 webview.label(),
@@ -1233,12 +1240,7 @@ async fn varin_invoke(
                     .windows
                     .lock()
                     .map_err(|_| "Window registry unavailable")?;
-                if windows
-                    .get(webview.label())
-                    .is_none_or(|record| record.document_nonce != source_document)
-                {
-                    return Err("Draft source document changed".into());
-                }
+                invocation.require_current(windows.get(webview.label()).ok_or("Draft source is closed")?)?;
                 state
                     .draft_transfers
                     .lock()
@@ -1281,6 +1283,7 @@ async fn varin_invoke(
                 }
             }
             outcome?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             Ok(json!({"accepted":true}))
         }
         "desktop_complete_draft_transfer" => {
@@ -1304,13 +1307,17 @@ async fn varin_invoke(
             Ok(Value::Null)
         }
         "desktop_focus_main_window" => {
+            let invocation = state.workbench_invocation(webview.label())?;
             let bootstrap = state.bootstrap(webview.label()).await?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             let action = crate::window_registry::main_window_action(&args)?;
             focus_runtime_window(&app, webview.label(), bootstrap, action)?;
             Ok(json!({"focused":true}))
         }
         "desktop_notify" => {
+            let invocation = state.workbench_invocation(webview.label())?;
             let bootstrap = state.bootstrap(webview.label()).await?;
+            state.require_workbench_invocation(webview.label(), &invocation)?;
             app.state::<crate::native_notifications::NativeNotifications>()
                 .show(&app, webview.label(), &bootstrap, &args)?;
             Ok(Value::Null)
@@ -1389,15 +1396,21 @@ async fn varin_invoke(
         }
         "desktop_browser_device" => {
             crate::window_registry::validate_browser_device_args(&args)?;
+            let invocation = state.workbench_invocation(webview.label())?;
             state.bootstrap(webview.label()).await?;
             // Select the caller's original native record, never a label, target
             // object or credentials supplied in renderer arguments.
             let request = {
                 let windows = state.windows.lock().map_err(|_| "Window registry unavailable")?;
+                invocation.require_current(windows.get(webview.label()).ok_or("Window is closed")?)?;
                 crate::window_registry::browser_device_request(&windows, webview.label(), args)?
             };
             let service = browser_service(&app).await?;
-            service.process.request("browserInvoke", request).await
+            state.require_workbench_invocation(webview.label(), &invocation)?;
+            let result = service.process.request("browserInvoke", request).await;
+            state.require_workbench_invocation(webview.label(), &invocation)
+                .map_err(|_| "The window connection changed while observing the Browser device result; the original outcome is unknown")?;
+            result
         }
         command if command.starts_with("desktop_browser_") || command == "desktop_web_render" => {
             let service = browser_service(&app).await?;
