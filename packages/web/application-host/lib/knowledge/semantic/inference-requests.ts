@@ -359,7 +359,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             catch (error) { controller.abort(cancelled()); throw error; }
             // Selection cannot retry semantic failures into a different model choice.
             // HTTP/transport failures still use the ordinary frozen retry policy.
-            const retryInvalid = selectedBinding.purpose !== 'delegation-model-selection';
+            const retryInvalid = !['delegation-model-selection', 'web-selection', 'web-reading'].includes(selectedBinding.purpose);
             if ((!response.ok || !observed.valid && retryInvalid) && await waitForRetry(options.kernel, retrySettings,
               { ...responseRetryFailure(response, raw), ...(response.ok ? { code: 'invalid_response' } : {}) }, retriesUsed, requestSignal)) continue;
             // The SDK receives exactly these already drained bytes. Cancellation cannot erase their usage.

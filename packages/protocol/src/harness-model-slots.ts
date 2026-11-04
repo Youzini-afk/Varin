@@ -20,6 +20,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "worker",
   "verifier",
   "reader",
+  "webSelection",
   "nextStep",
   "permissionJudge",
   "researchInvestigation",

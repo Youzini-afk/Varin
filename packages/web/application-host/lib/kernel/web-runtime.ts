@@ -9,11 +9,11 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '../models/schema.js';
 import {
-  resolveHarnessDocumentReadingSettings,
-  DOCUMENT_MIME_TYPES,
+  resolveHarnessDocumentReadingSettings, parseHarnessWebSearchSettings,
+  DOCUMENT_MIME_TYPES, formatWebSourceCitation, parseWebSourceCitation, materialAttachmentRef,
   type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
   type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
-  type MaterialsCollectionParams,
+  type MaterialsCollectionParams, type ScholarlyPaper,
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
 import { readDocumentMaterial, type AlternateDocumentReader, type DocumentMaterialSources } from '../harness/document-material.js';
@@ -21,7 +21,7 @@ import { resolveHarnessWebBinding, type HarnessWebBinding } from '../harness/har
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { createWebFetch } from '../harness/web-fetch.js';
 import type { ThreadMaterialAuthority, WebMaterialStore } from '../harness/web-materials.js';
-import { createWebSearchService, parseSearchProviderSettings, resolveConfiguredSearchProvider } from '../harness/web-search.js';
+import { createWebSearchService, resolveConfiguredSearchProvider } from '../harness/web-search.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
 import { extendToolConfiguration } from './extension-tool-owner.js';
@@ -31,15 +31,30 @@ import type { ExtensionToolBinding, LaunchSource, OutputBody, IncomingMedia, Out
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import type { DocumentSources } from './document-sources.js';
+import { parseWebRetrievalAssistanceConfiguration, WebAssistanceIndeterminateError, type WebRetrievalAssistanceConfiguration, type createWebRetrievalAssistance } from './web-retrieval-assistance.js';
+import { captureSearchSource, captureScholarlySource } from '../harness/web-sources.js';
 import { MaterialCollectionMutationError, type createMaterialCollections } from '../harness/material-collections.js';
 
 export { WEB_CAPABILITY };
 const declarations = new Map(WEB_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.web.'.length),
   { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+const sourceCitation = (result: FetchResult): FetchResult => {
+  if (result.status !== 'ok' || !result.snapshot || result.snapshot.document?.kind === 'pdf') return result;
+  const snapshot = result.snapshot;
+  if (snapshot.document) {
+    const query = new URLSearchParams({ page: '1', format: snapshot.document.kind });
+    if (snapshot.document.source?.contentHash) query.set('sourceHash', snapshot.document.source.contentHash);
+    return { ...result, citation: `varin-material://${encodeURIComponent(snapshot.snapshotId)}?${query}`, attachmentRef: materialAttachmentRef(snapshot.snapshotId) };
+  }
+  return { ...result, citation: formatWebSourceCitation({ snapshotId: snapshot.snapshotId, contentHash: snapshot.contentHash,
+    ...(result.range && result.range.endLine >= result.range.startLine ? { startLine: result.range.startLine, endLine: result.range.endLine } : {}) }),
+    attachmentRef: materialAttachmentRef(snapshot.snapshotId) };
+};
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
 interface WebConfiguration {
-  version: 1;
+  version: 1 | 2;
+  assistance?: WebRetrievalAssistanceConfiguration;
   web: HarnessWebBinding;
   documentReading: HarnessDocumentReadingSettings;
   disabledTools: string[];
@@ -65,22 +80,24 @@ function configuration(identity: string | null | undefined): WebConfiguration {
   let value: unknown;
   try { value = identity ? JSON.parse(identity) : null; } catch { value = null; }
   const invalid = () => new Error('The original Web configuration is unavailable; prepare a new execution');
-  if (!object(value) || value.version !== 1 || Object.keys(value).some(key => !['version', 'web', 'documentReading', 'disabledTools'].includes(key))
+  if (!object(value) || (value.version !== 1 && value.version !== 2) || Object.keys(value).some(key => !['version', 'web', 'documentReading', 'disabledTools', 'assistance'].includes(key))
     || !object(value.web) || typeof value.web.generation !== 'string' || !object(value.web.settings)
     || !object(value.web.settings.domains) || !strings(value.web.settings.domains.block)
     || value.web.settings.domains.allow !== undefined && !strings(value.web.settings.domains.allow)
     || value.web.settings.render !== undefined && typeof value.web.settings.render !== 'boolean'
-    || value.web.settings.search !== undefined && !parseSearchProviderSettings(value.web.settings.search)
+    || value.web.settings.readingAssistance !== undefined && typeof value.web.settings.readingAssistance !== 'boolean'
+    || value.web.settings.search !== undefined && !parseHarnessWebSearchSettings(value.web.settings.search)
     || value.web.searchError !== undefined && typeof value.web.searchError !== 'string'
     || !strings(value.disabledTools)) throw invalid();
   const documentReading = resolveHarnessDocumentReadingSettings(value.documentReading);
   if (!isDeepStrictEqual(documentReading, value.documentReading)) throw invalid();
-  return { version: 1, web: value.web as unknown as HarnessWebBinding, documentReading, disabledTools: value.disabledTools };
+  return { version: value.version as 1 | 2, web: value.web as unknown as HarnessWebBinding, documentReading, disabledTools: value.disabledTools,
+    ...(value.version === 2 ? { assistance: parseWebRetrievalAssistanceConfiguration(value.assistance) } : {}) };
 }
 function decode(method: string, value: unknown) {
   const selected = declarations.get(method);
   if (!selected || !selected.validate(value)) throw new HarnessServiceError('invalid-params',
-    'Arguments do not match the Web capability. Select exactly one document source; a reader-model prompt is unsupported.');
+    'Arguments do not match the Web capability. Select a supported search request, page or document source.');
   return { selected, input: parseVarinToolJson(value) };
 }
 
@@ -89,7 +106,7 @@ function decode(method: string, value: unknown) {
 export function webOutput(result: FetchResult | WebSearchResult): OutputBody<IncomingMedia> {
   const parts: OutputPart<IncomingMedia>[] = [];
   const snapshotRef = (snapshot: NonNullable<Extract<FetchResult, { status: 'ok' }>['snapshot']>) => {
-    if (snapshot.document?.kind !== 'pdf') return snapshot;
+    if (snapshot.document?.kind !== 'pdf') { const { structure: _structure, ...identity } = snapshot; return identity; }
     const { structure: _structure, document, ...identity } = snapshot;
     return { ...identity, ...(document ? { document: { kind: document.kind, parser: document.parser,
       ...(document.pageCount === undefined ? {} : { pageCount: document.pageCount }),
@@ -112,13 +129,26 @@ export function webOutput(result: FetchResult | WebSearchResult): OutputBody<Inc
       ...(pageImage ? { pageImage: image(pageImage) } : {}),
       ...(pageImages ? { pageImages: pageImages.map(image) } : {}) };
   };
-  const data = 'items' in result
-    ? { ...result, items: result.items.map(item => item.fetch ? { ...item, fetch: project(item.fetch) } : item) }
-    : project(result);
+  const searchProjection = (value: WebSearchResult) => {
+    // Per-query observations carry distinct citations. Do not repeat the same
+    // bodies in an additional merged list or disclose the full route catalogue.
+    const { results: _merged, connections, ...metadata } = value;
+    return { ...metadata, ...(!value.items.length && connections ? { connections } : {}),
+      items: value.items.map(item => item.fetch ? { ...item, fetch: project(item.fetch) } : { ...item,
+        ...(item.results ? { results: item.results.map(hit => {
+          const { excerpts, ...metadata } = hit;
+          const characters = Array.from(hit.snippet);
+          const displayed = hit.source && characters.length > 1600 ? characters.slice(0, 1600).join('') : hit.snippet;
+          return { ...metadata, snippet: displayed, ...(excerpts ? { excerptsCount: excerpts.length } : {}),
+            ...(displayed !== hit.snippet ? { preview: { truncated: true, characters: 1600, totalCharacters: characters.length },
+              nextRead: { snapshotId: hit.source!.snapshot.snapshotId } } : {}) };
+        }) } : {}) }) };
+  };
+  const data = 'items' in result ? searchProjection(result) : project(result);
   return { data: parseVarinToolJson(data), parts };
 }
 function receipt(value: FetchResult | WebSearchResult): ToolExecutionReceipt {
-  const successful = 'items' in value ? value.items.some(item => ['ok', 'empty', 'partial'].includes(item.status))
+  const successful = 'items' in value ? Boolean(value.connections && !value.items.length) || value.items.some(item => ['ok', 'empty', 'partial'].includes(item.status))
     : value.status === 'ok' || value.status === 'redirect-cross-host';
   return { executor_stopped: true, completion: { kind: 'result', outcome: successful ? 'succeeded' : 'failed', effect: 'none', content: webOutput(value) } };
 }
@@ -130,6 +160,7 @@ export interface WebRuntimeOptions {
   alternateDocumentReader?: AlternateDocumentReader;
   documentSources?: DocumentSources;
   materials: WebMaterialStore;
+  assistance?: ReturnType<typeof createWebRetrievalAssistance>;
   collections?: ReturnType<typeof createMaterialCollections>;
   fetch: typeof globalThis.fetch;
   readAuth(): unknown | Promise<unknown>;
@@ -157,16 +188,46 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     workspaceId: owner.workspaceId, authority: owner.authority, signal,
     domainPolicy: domains(config), engineOptions: config.documentReading,
   });
-  const fetchPage = (request: WebFetchRequest, owner: { workspaceId: string; authority: ThreadMaterialAuthority }, config: WebConfiguration, signal: AbortSignal): Promise<FetchResult> => {
+  const fetchPage = async (request: WebFetchRequest, owner: { workspaceId: string; authority: ThreadMaterialAuthority }, config: WebConfiguration, signal: AbortSignal, invocation?: ToolInvocationAuthority): Promise<FetchResult> => {
+    const citation = request.ref ? parseWebSourceCitation(request.ref) : null;
+    if (request.ref && !citation) throw new HarnessServiceError('invalid-params', 'webfetch ref requires a retained web source citation; use document_read for document attachment refs');
+    if (citation && request.snapshotId && request.snapshotId !== citation.snapshotId) throw new HarnessServiceError('invalid-params', 'The source reference and snapshot identify different observations');
+    if (citation) request = { ...request, snapshotId: citation.snapshotId,
+      ...(!request.position && citation.startLine ? { position: { kind: 'lines', startLine: citation.startLine, ...(citation.endLine ? { endLine: citation.endLine } : {}) } as const } : {}) };
+    if (request.snapshotId && invocation) {
+      const retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal,
+        ...(citation?.contentHash ? { expectedContentHash: citation.contentHash } : {}) });
+      if (!retained && options.documentSources?.retainMaterial) {
+        const run = await options.runtime.run(invocation.runId, signal);
+        if (run.thread_id !== invocation.threadId) throw new HarnessServiceError('forbidden', 'The source reader invocation changed');
+        await options.documentSources.retainMaterial({ runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id }, request.snapshotId, signal);
+        await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal,
+          ...(citation?.contentHash ? { expectedContentHash: citation.contentHash } : {}) });
+      }
+    }
     if (request.render === true && config.web.settings?.render !== true) return Promise.resolve({ status: 'renderer-unavailable', url: request.url ?? '', reason: 'disabled' });
-    return options.webFetch.fetch(request, { ...context(owner, config, signal), render: request.render === true });
+    const result = await options.webFetch.fetch(request, { ...context(owner, config, signal), render: request.render === true,
+      allowRenderFallback: config.web.settings?.render === true,
+      ...(options.alternateDocumentReader ? { alternateDocumentReader: options.alternateDocumentReader } : {}),
+      ...(request.question && invocation && config.assistance && config.web.settings?.readingAssistance === true && options.assistance
+        ? { selectPassages: input => options.assistance!.selectPassages(input, { invocation, configuration: config.assistance! }) } : {}) });
+    if (citation && result.status === 'ok') {
+      const total = result.completeness?.display.totalLines ?? result.range?.totalLines;
+      if (total !== undefined && ((citation.startLine ?? 1) > total || (citation.endLine ?? 1) > total)) return { status: 'position-not-found', snapshotId: citation.snapshotId, detail: 'The citation range is outside the retained source representation' };
+    }
+    return sourceCitation(result);
   };
-  const search = createWebSearchService<{ owner: { workspaceId: string; authority: ThreadMaterialAuthority }; config: WebConfiguration; signal: AbortSignal }>(
+  const search = createWebSearchService<{ owner: { workspaceId: string; authority: ThreadMaterialAuthority }; config: WebConfiguration; signal: AbortSignal; invocation: ToolInvocationAuthority }>(
     async ctx => ctx.config.web.searchError ? { unavailable: true, hint: ctx.config.web.searchError }
       : resolveConfiguredSearchProvider({ settings: ctx.config.web.settings?.search,
         auth: ctx.config.web.settings?.search ? await options.readAuth() : {}, fetch: options.fetch }),
     async ctx => domains(ctx.config),
-    { fetchUrl: (url, ctx) => fetchPage({ url }, ctx.owner, ctx.config, ctx.signal) },
+    { resolveSourcePreferences: async ctx => ctx.config.web.settings?.sourcePreferences ?? {},
+      fetchUrl: (url, ctx) => fetchPage({ url }, ctx.owner, ctx.config, ctx.signal),
+      selectConnection: (input, ctx) => options.assistance && ctx.config.assistance
+        ? options.assistance.selectConnection(input, { invocation: ctx.invocation, configuration: ctx.config.assistance })
+        : Promise.resolve({ reason: 'Search assistance is unavailable; using the configured route.' }),
+    },
   );
   const inputMaterials: ThreadInputMaterials = async (identity, references, signal) => {
     const selected = parseThreadMaterials(references)!;
@@ -239,7 +300,11 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       // User reads recheck current policy; no stale tool binding comes from UI.
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
-      const retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal });
+      let retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal });
+      if (!retained && options.documentSources?.retainMaterial) {
+        await options.documentSources.retainMaterial(identity, request.snapshotId, signal);
+        retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal });
+      }
       return retained?.ref.document
         ? readMaterial(request, context(owner, config, signal))
         : fetchPage(request, owner, config, signal);
@@ -299,21 +364,63 @@ export function createWebRuntime(options: WebRuntimeOptions) {
             outcome: original.result.status === 'ok' ? 'succeeded' : 'failed', effect: original.effect,
             content: { data: parseVarinToolJson(original.result), parts: [] } } };
         }
-        const result = method === 'search' ? await search.handle(input as WebSearchRequest, { owner, config, signal: call.signal })
-          : method === 'fetch' ? await fetchPage(input as WebFetchRequest, owner, config, call.signal)
+        let result = method === 'search' ? await search.handle(input as WebSearchRequest, { owner, config, signal: call.signal, invocation })
+          : method === 'fetch' ? await fetchPage(input as WebFetchRequest, owner, config, call.signal, invocation)
             : await readMaterial(input as unknown as DocumentReadRequest,
               context(owner, config, call.signal), options.documentSources?.tool(invocation));
-        if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
-        const completed = receipt(result);
-        if ('status' in result && result.status === 'ok') {
-          const original = result.sourceSnapshot ?? result.snapshot;
-          if (original?.document?.source && options.documentSources) {
-            const attachment = await options.documentSources.attachment(invocation, original.snapshotId, call.signal);
-            if (attachment && completed.completion.kind === 'result') completed.completion.content.parts.push({ kind: 'attachment', attachment });
+        if ('items' in result) {
+          // Retain each actual observation before projecting it. A failed material
+          // write must not discard a completed search or claim a readable source.
+          for (const item of result.items) {
+            if (item.fetch) item.fetch = sourceCitation(item.fetch);
+            for (const hit of item.results ?? []) {
+              if (call.signal.aborted) break;
+              try { hit.source = await captureSearchSource(options.materials, hit, owner.authority, {
+                providerId: item.providerId ?? result.providerId, ...(item.connectionId ? { connectionId: item.connectionId } : {}),
+                ...(item.query ? { query: item.query } : {}), ...((item.objective ?? result.objective) ? { objective: (item.objective ?? result.objective)! } : {}), operationId: invocation.operationId,
+              }, call.signal); } catch { hit.sourceError = 'The source observation could not be retained; the search result remains available.'; }
+            }
           }
+          const searchResult = result;
+          if (searchResult.results) searchResult.results = searchResult.results.map(hit => {
+            const observed = searchResult.items.flatMap(item => item.results ?? []).find(item => item.url === hit.url && item.snippet === hit.snippet);
+            return observed?.source ? { ...hit, source: observed.source } : hit;
+          });
+        } else result = sourceCitation(result);
+        if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
+        const attachments: OutputPart<IncomingMedia>[] = [];
+        const snapshots = new Set<string>();
+        const include = (value: FetchResult) => { if (value.status === 'ok') {
+          if (value.snapshot) snapshots.add(value.snapshot.snapshotId);
+          if (value.sourceSnapshot) snapshots.add(value.sourceSnapshot.snapshotId);
+        } };
+        if ('items' in result) for (const item of result.items) {
+          if (item.fetch) include(item.fetch);
+          for (const hit of item.results ?? []) if (hit.source) snapshots.add(hit.source.snapshot.snapshotId);
+        } else include(result);
+        if (options.documentSources) for (const snapshotId of snapshots) {
+          try {
+            const attachment = await options.documentSources.attachment(invocation, snapshotId, call.signal);
+            if (attachment) {
+              attachments.push({ kind: 'attachment', attachment });
+              if ('items' in result) for (const item of result.items) for (const hit of item.results ?? []) if (hit.source?.snapshot.snapshotId === snapshotId) hit.source.deliveryStatus = 'ready';
+            }
+          } catch {
+            const detail = 'Source delivery could not be prepared. The retained citation remains readable in this Thread; include its varin-material URL in typed attachments to retry explicit sharing.';
+            if ('items' in result) for (const item of result.items) for (const hit of item.results ?? []) if (hit.source?.snapshot.snapshotId === snapshotId) hit.source.deliveryStatus = 'unavailable';
+            if ('items' in result) result.notices = [...(result.notices ?? []), detail];
+            else if (result.status === 'ok') result = { ...result, detail: [result.detail, detail].filter(Boolean).join(' ') };
+          }
+        }
+        const completed = receipt(result);
+        if (completed.completion.kind === 'result') {
+          completed.completion.content.parts.push(...attachments);
+          if (call.signal.aborted) completed.completion.outcome = 'cancelled';
         }
         return completed;
       } catch (error) {
+        if (error instanceof WebAssistanceIndeterminateError) return { executor_stopped: false, completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown',
+          content: { data: { status: 'unavailable', error: error.message, code: 'assistance-indeterminate' }, parts: [] } } };
         if (error instanceof MaterialCollectionMutationError) return { executor_stopped: error.effect !== 'unknown',
           completion: { kind: 'result', outcome: error.effect === 'unknown' ? 'indeterminate' : 'failed', effect: error.effect,
             content: { data: { status: 'failed', error: error.message }, parts: [] } } };
@@ -328,7 +435,10 @@ export function createWebRuntime(options: WebRuntimeOptions) {
   const prepareConfiguration = async (run: ExtensionToolRun, required: readonly ExtensionToolBinding[], previous?: ExtensionToolConfiguration): Promise<ExtensionToolConfiguration> => {
     // Recovery keeps the exact credential-free accepted configuration. Credentials
     // are resolved from their current owner at the actual search dispatch.
-    const captured = required.length ? null : await options.settings(run.source).then(capture).then(
+    const captured = required.length ? null : await options.settings(run.source).then(async snapshot => {
+      const value = capture(snapshot);
+      return { ...value, version: 2 as const, ...(options.assistance ? { assistance: await options.assistance.capture(snapshot.global.harness) } : {}) };
+    }).then(
       value => ({ value }), error => ({ error }),
     );
     return extendToolConfiguration(previous, (descriptor, original) => {
@@ -341,9 +451,30 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       if (!WEB_TOOL_DECLARATIONS.some(value => value.id === descriptor.id && value.version === descriptor.version)) return undefined;
       if (!captured || 'error' in captured) return undefined;
       if (captured.value.disabledTools.includes(descriptor.tool!.name)) return false;
-      return descriptor.tool!.name !== 'websearch' || (!captured.value.web.searchError && Boolean(captured.value.web.settings?.search));
+      // Missing search settings means the product-provided anonymous route.
+      // Explicit disabling and invalid assets must never turn into that default.
+      const search = captured.value.web.settings?.search;
+      const configured = search === undefined ? undefined : parseHarnessWebSearchSettings(search);
+      return descriptor.tool!.name !== 'websearch' || (!captured.value.web.searchError
+        && (configured === undefined || Boolean(configured && configured.enabled !== false && configured.connections.some(connection => connection.enabled))));
     });
   };
   const snapshotCapability = createMaterialToolOwner(options.materials, async (invocation, signal) => (await invocationScope(invocation, signal)).authority);
-  return { user, capability, prepareConfiguration, snapshotCapability, inputMaterials };
+  const retainScholarlySources = async (invocation: ToolInvocationAuthority, papers: ScholarlyPaper[], signal: AbortSignal) => {
+    const owner = await invocationScope(invocation, signal);
+    const parts: OutputPart<IncomingMedia>[] = [];
+    for (const paper of papers) {
+      if (signal.aborted) break;
+      try {
+        paper.source = await captureScholarlySource(options.materials, paper, owner.authority, invocation.operationId, signal);
+        const attachment = await options.documentSources?.attachment(invocation, paper.source.snapshot.snapshotId, signal);
+        if (attachment) { parts.push({ kind: 'attachment', attachment }); paper.source.deliveryStatus = 'ready'; }
+      } catch {
+        if (paper.source) paper.source.deliveryStatus = 'unavailable';
+        paper.sourceError = 'The metadata result remains available, but its retained source or typed delivery could not be prepared.';
+      }
+    }
+    return parts;
+  };
+  return { user, capability, prepareConfiguration, snapshotCapability, inputMaterials, retainScholarlySources, close: () => search.dispose() };
 }

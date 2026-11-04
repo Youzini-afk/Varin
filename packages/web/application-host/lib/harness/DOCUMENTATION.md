@@ -63,11 +63,24 @@ Catalog queues one final answer through ordinary message ingress after executor/
 including when the original parent Run has already completed. UI trace reads remain a presentation
 API; the model does not need to retrieve tool evidence or ask another model to summarize progress.
 
-Web search has a Host-owned keyless default and disclosed failure-only fallback. An explicitly selected
-provider never silently becomes another provider. Domain filtering applies before disclosure; valid
-empty results differ from failures. Web fetch retains original-page/snapshot authority independently
-of discovery snippets. Scholarly search returns the provider's real page, continuation and content
-state; a metadata record is not the paper itself.
+Web search resolves a stable connection catalogue with independent credentials, default/fallback routes and
+actual adapter capabilities. Missing settings enable the keyless Exa/Parallel route; explicit disabling,
+empty connections and invalid settings do not. Objective guides queries without an extra request. Exact
+connection selection never falls back; valid empty results differ from failures. Applied filters retain
+upstream/post-filter/ranking semantics and time basis. Source preferences cannot relax network policy.
+
+Search and scholarly metadata observations use `web-sources.ts` and the original material owner. They
+remain distinguishable from downloaded pages/full papers. Fixed citations carry revision/range, while
+native typed descriptors establish delivery. A copied citation alone cannot grant access. Reports,
+paged history and compaction carry only sources acquired through that typed ancestry.
+
+`web-fetch.ts` separates acquisition, extraction and display completeness. Question-guided selection
+returns original ranges, structure and continuation. Optional assistance uses original purpose-scoped
+inference receipts, validates connection/range output, and never replays an unknown paid operation.
+GET/HEAD rendering belongs to the actual BrowserOwner through Host egress, including every resource and
+redirect. Electron's temporary capture session denies independent network, worker/frame/socket and
+interactive requests; login-dependent work needing those capabilities continues through Browser Use.
+Caches expire actively, share only compatible producers, and drain the last consumer on cancellation.
 
 PDFs and Web materials share original-byte views, explicit grants, revision checks and page-image parts.
 `ThreadMaterials.upload` uses `documentReader` to retain original PDF bytes in MaterialStore under the

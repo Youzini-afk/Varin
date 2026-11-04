@@ -282,6 +282,18 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
     ui: { page: 'harness-web', titleKey: 'settings.harness.role.reader', keywords: ["reader", "agent", "model", "enable", "disable"] },
   },
   {
+    id: 'harness.models.webSelection', category: 'web', owner: 'agent-settings',
+    field: { path: 'harness.models.webSelection', kind: 'json', scope: 'user', note: 'Optional ordinary search selector: {enabled?, providerId, modelId, agent?: {modelSettings?: {thinkingLevel?, temperature?}}}; requires web.search.smartSelection.' },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.harness.role.webSelection', keywords: ['web', 'search', 'selection', 'model', '搜索', '选择'] },
+  },
+  {
+    id: 'harness.web.assistance', category: 'web', owner: 'agent-settings',
+    field: { path: 'harness.web.readingAssistance', kind: 'boolean', scope: 'user', default: false },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.assistance.title', keywords: ['web', 'reading', 'assistance', 'passage', '阅读', '选段'] },
+  },
+  {
     id: 'knowledge.model', category: 'knowledge', owner: 'agent-settings',
     fields: [
       { path: 'harness.models.memoryOrganizer', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
@@ -459,6 +471,13 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
     ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.documentReading.title',
       descriptionKey: 'settings.page.harness.web.documentReading.description',
       keywords: ['document reading', 'PDF', 'Docling', 'Tesseract', 'OCR'] },
+  },
+  {
+    id: 'harness.web.sourcePreferences', category: 'web', owner: 'agent-settings',
+    field: { path: 'harness.web.sourcePreferences', kind: 'json', scope: 'user-or-project',
+      note: '{preferredDomains?: string[], excludedDomains?: string[]} — search defaults, not network permissions; explicit per-request preferences override these defaults' },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.webConnections.preferences', keywords: ['sources', 'preferred', 'excluded', '来源', '偏好'] },
   },
   {
     id: 'harness.web.domains', category: 'web', owner: 'agent-settings', authority: 'permissions',

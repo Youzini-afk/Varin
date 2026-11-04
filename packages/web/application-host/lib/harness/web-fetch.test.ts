@@ -363,7 +363,7 @@ describe("web-fetch service", () => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200,
       headers: new Headers({ "content-type": "application/pdf" }),
       arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) })) as never;
-    const renderer = vi.fn(async () => "<html>not the PDF</html>");
+    const renderer = vi.fn(async () => ({ html: "<html>not the PDF</html>", finalUrl: "https://example.com/visual.pdf", blockedRequests: 0 }));
     const ingest = vi.fn(async (input: { source: Buffer; sourceUrl: string }) => ({
       status: "ok" as const, url: input.sourceUrl, finalUrl: input.sourceUrl,
       contentType: "application/pdf", markdown: "PDF text", bytes: 8, fromCache: false, rendered: false,
@@ -746,4 +746,261 @@ describe("structured reading (D-315 L3)", () => {
       expect(sliced.range).toEqual({ startLine: 4, endLine: 5, totalLines: 17 });
     }
   });
+});
+
+describe("question-directed original reading", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  const open = (body: string, options: Partial<import("./web-fetch.js").WebFetchDeps> = {}) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { headers: { "content-type": "text/markdown" } })));
+    const fixture = createMaterialStoreFixture();
+    return { ...fixture, service: createWebFetch({ ssrf: createMockSsrf(), materials: fixture.materials, ...options }) };
+  };
+  it("selects Chinese and technical passages with exact unchanged original ranges", async () => {
+    const body = ["# 产品手册", "", "## 账户", "注册账户可以使用电子邮件。", "", "## 代理故障", "出现 ERR_CONNECTION_RESET 时，检查代理的 TLS 配置。", "仅当代理启用时，才需设置 HTTPS_PROXY；直连不要设置。", "", "```bash", "export HTTPS_PROXY=http://proxy.example:8080", "```", "", "## 价格", "基础套餐每月十元。"].join("\n");
+    const { service, materials } = open(body);
+    const result = await service.fetch({ url: "https://example.com/manual", question: "如何处理代理的 ERR_CONNECTION_RESET 错误？", maxLines: 8 }, fetchContext);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(result.markdown).toContain("检查代理的 TLS 配置");
+    expect(result.markdown).toContain("仅当代理启用时");
+    expect(result.markdown).not.toContain("基础套餐");
+    expect(result.selection).toMatchObject({ method: "question", matched: true });
+    expect(result.markdown).toBe(result.ranges!.map(range => body.split("\n").slice(range.startLine - 1, range.endLine).join("\n")).join("\n\n…\n\n"));
+    const original = await materials.read("ws", result.snapshot!.snapshotId, fetchContext.authority);
+    expect(original?.body.toString("utf8")).toBe(body);
+    const reread = await service.fetch({ snapshotId: result.snapshot!.snapshotId, position: { kind: "section", title: "代理故障" } }, fetchContext);
+    expect(reread.status === "ok" && reread.markdown).toContain("export HTTPS_PROXY");
+    await service.dispose();
+  });
+
+  it("rejects invented helper ranges, uses deterministic fallback and never uses helper prose", async () => {
+    const helper = vi.fn(async () => ({ ranges: [{ startLine: 300, endLine: 500 }], reason: "invalid source ranges" }));
+    const { service } = open("# TLS\n\nTLS requires certificate verification.\n\n# Other\n\nUnrelated detail.", { selectPassages: helper });
+    const result = await service.fetch({ url: "https://example.com/tls", question: "TLS certificate verification" }, fetchContext);
+    expect(result).toMatchObject({ status: "ok", selection: { method: "question", detail: "invalid source ranges" } });
+    expect(result.status === "ok" && result.markdown).toContain("TLS requires certificate verification.");
+    expect(helper).toHaveBeenCalledOnce();
+    await service.dispose();
+  });
+
+  it("accepts only grounded helper locations and preserves fenced code and table structure", async () => {
+    const body = "# Setup\n\n```sh\nset MODE=1\n\necho done\n```\n\n| Option | Default |\n| --- | --- |\n| MODE | 1 |\n\nOther material.";
+    const { service } = open(body, { selectPassages: async () => ({ ranges: [{ startLine: 5, endLine: 5 }, { startLine: 11, endLine: 11 }], assistance: { status: "selected", purpose: "reading" } }) });
+    const result = await service.fetch({ url: "https://example.com/setup", question: "How do I set the mode?" }, fetchContext);
+    expect(result).toMatchObject({ status: "ok", selection: { method: "helper", assistance: { status: "selected" } } });
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(result.markdown).toContain("```sh\nset MODE=1\n\necho done\n```");
+    expect(result.markdown).toContain("| Option | Default |\n| --- | --- |\n| MODE | 1 |");
+    expect(result.markdown).not.toContain("Other material.");
+    await service.dispose();
+  });
+
+  it("reports a searched range when no passage matches instead of inventing an answer", async () => {
+    const { service } = open("# Apples\n\nApples grow on trees.");
+    const result = await service.fetch({ url: "https://example.com/apple", question: "What is ERR_SSL_PROTOCOL_ERROR?" }, fetchContext);
+    expect(result).toMatchObject({ status: "ok", ranges: [], selection: { method: "question", matched: false, searchedRange: { startLine: 1, endLine: 3 } }, nextRead: { position: { kind: "lines", startLine: 1 } } });
+    expect(result.status === "ok" && result.markdown).toContain("No relevant passages");
+    await service.dispose();
+  });
+
+  it("pages a long document from the same immutable snapshot even after the URL changes", async () => {
+    const body = Array.from({ length: 375 }, (_, index) => `Original line ${index + 1}`).join("\n");
+    const { service } = open(body);
+    const first = await service.fetch({ url: "https://example.com/long" }, fetchContext);
+    if (first.status !== "ok") throw new Error(first.status);
+    expect(first.range).toEqual({ startLine: 1, endLine: 160, totalLines: 375 });
+    expect(first.completeness).toMatchObject({ download: { status: "complete" }, extraction: { status: "complete" }, display: { status: "partial" } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Changed live page")));
+    const second = await service.fetch(first.nextRead!, fetchContext);
+    if (second.status !== "ok") throw new Error(second.status);
+    const last = await service.fetch(second.nextRead!, fetchContext);
+    if (last.status !== "ok") throw new Error(last.status);
+    expect([first.markdown, second.markdown, last.markdown].join("\n")).toBe(body);
+    expect(last.nextRead).toBeUndefined();
+    expect(second.snapshot!.snapshotId).toBe(first.snapshot!.snapshotId);
+    expect(last.snapshot!.snapshotId).toBe(first.snapshot!.snapshotId);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await service.dispose();
+  });
+
+  it("preserves HTML headings, code and real table cells instead of flattening them", async () => {
+    const html = '<html><body><main><h1>Setup</h1><p>Only when enabled:</p><pre><code class="language-js">if (enabled) {\n  run();\n}</code></pre><table><tr><th>Option</th><th>Docs</th></tr><tr><td>TLS</td><td><a href="https://example.com/tls">Guide</a></td></tr></table></main></body></html>';
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(html, { headers: { "content-type": "text/html" } })));
+    const service = createWebFetch({ ssrf: createMockSsrf() });
+    const result = await service.fetch("https://example.com/table", fetchContext);
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(result.markdown).toContain("# Setup");
+    expect(result.markdown).toContain("```js\nif (enabled) {");
+    expect(result.markdown).toContain("| Option | Docs |\n| --- | --- |\n| TLS | [Guide](https://example.com/tls) |");
+    expect(result.structure!.tables).toHaveLength(1);
+    expect(result.completeness!.extraction.status).toBe("unknown");
+    await service.dispose();
+  });
+
+  it("counts bytes across streaming UTF-8 boundaries and records partial input on snapshots", async () => {
+    const source = Buffer.from("开源代码与文档", "utf8");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(source.subarray(0, 1));
+      controller.enqueue(source.subarray(1, 4));
+      controller.enqueue(source.subarray(4));
+      controller.close();
+    } }), { headers: { "content-type": "text/plain" } })));
+    const { materials } = createMaterialStoreFixture();
+    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: 10, materials });
+    const result = await service.fetch("https://example.com/utf8", fetchContext);
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(result.markdown).toBe("开源代");
+    expect(result.markdown).not.toContain("�");
+    expect(result.bytes).toBe(10);
+    expect(result.completeness).toMatchObject({ download: { status: "partial", receivedBytes: source.length, retainedBytes: 10, limitBytes: 10 }, extraction: { status: "partial" }, display: { status: "complete" } });
+    const reread = await service.fetch({ snapshotId: result.snapshot!.snapshotId }, fetchContext);
+    expect(reread.status === "ok" && reread.completeness!.download.status).toBe("partial");
+    expect(reread.status === "ok" && reread.nextRead).toBeUndefined();
+    await service.dispose();
+  });
+
+  it("fully decodes a multibyte stream exactly at the byte limit", async () => {
+    const source = Buffer.from("你好🙂", "utf8");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+      for (const byte of source) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    } }), { headers: { "content-type": "text/plain", "content-length": String(source.length) } })));
+    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: source.length });
+    const result = await service.fetch("https://example.com/exact", fetchContext);
+    expect(result).toMatchObject({ status: "ok", markdown: "你好🙂", bytes: source.length, completeness: { download: { status: "complete", receivedBytes: source.length } } });
+    await service.dispose();
+  });
+
+  it("uses automatic rendering only when enabled with an actual Host renderer", async () => {
+    const shell = '<html><body><div id="app"></div><script src="app.js"></script></body></html>';
+    const renderer = vi.fn(async () => ({ html: '<html><body><p>Rendered result</p></body></html>', finalUrl: "https://example.com/shell", blockedRequests: 0 }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(shell, { headers: { "content-type": "text/html" } })));
+    const service = createWebFetch({ ssrf: createMockSsrf(), renderer });
+    expect(await service.fetch("https://example.com/shell", fetchContext)).toMatchObject({ status: "empty-shell" });
+    expect(renderer).not.toHaveBeenCalled();
+    const rendered = await service.fetch("https://example.com/shell", { ...fetchContext, allowRenderFallback: true });
+    expect(rendered).toMatchObject({ status: "ok", rendered: true, markdown: "Rendered result", completeness: { download: { status: "complete" } } });
+    expect(renderer).toHaveBeenCalledOnce();
+    expect(await service.fetch({ url: "https://example.com/shell", render: false }, { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "empty-shell" });
+    const remote = createWebFetch({ ssrf: createMockSsrf() });
+    expect(await remote.fetch("https://example.com/shell", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "empty-shell", hint: expect.stringContaining("no BrowserOwner") });
+    await Promise.all([service.dispose(), remote.dispose()]);
+  });
+
+  it("routes Office originals through the existing reader and never text-decodes ZIP bytes", async () => {
+    const source = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(source, { headers: { "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" } })));
+    const alternateDocumentReader = vi.fn<import("./document-material.js").AlternateDocumentReader>(async () => ({ status: "ok" as const, url: "https://example.com/a.docx", finalUrl: "https://example.com/a.docx", contentType: "text/markdown", markdown: "Office content", bytes: 14, fromCache: false, rendered: false }));
+    const service = createWebFetch({ ssrf: createMockSsrf(), alternateDocumentReader });
+    const result = await service.fetch("https://example.com/a.docx", fetchContext);
+    expect(result).toMatchObject({ status: "ok", markdown: "Office content" });
+    expect(alternateDocumentReader.mock.calls[0]?.[2]).toMatchObject({ source });
+    await service.dispose();
+  });
+
+  it("expires unused cached bytes and drains pending stream cancellation before disposal", async () => {
+    vi.useFakeTimers();
+    const { service } = open("cache content", { cacheTtlMs: 50 });
+    await service.fetch("https://example.com/cache", fetchContext);
+    expect(service.cache.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(51);
+    expect(service.cache.size).toBe(0);
+    await service.dispose();
+    vi.useRealTimers();
+    let stopped!: () => void;
+    const released = new Promise<void>(resolve => { stopped = resolve; });
+    const cancel = vi.fn(() => released);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ pull() {}, cancel }), { headers: { "content-type": "text/plain" } })));
+    const draining = createWebFetch({ ssrf: createMockSsrf() });
+    const pending = draining.fetch("https://example.com/stream", fetchContext);
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    let disposed = false;
+    const closing = draining.dispose().then(() => { disposed = true; });
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(disposed).toBe(false);
+    stopped();
+    await Promise.all([closing, rejected]);
+    expect(draining.inflight.size).toBe(0);
+    expect(draining.cache.size).toBe(0);
+    expect(await draining.fetch("https://example.com/new", fetchContext)).toMatchObject({ status: "failed", reason: "Web fetch service is closed" });
+  });
+});
+
+describe("rendering preserves original egress authority", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("checks every rendered subresource and final URL and does not transfer cached browser observations", async () => {
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      fetched.push(url);
+      return new Response('<html><script src="app.js"></script><body></body></html>', { headers: { "content-type": "text/html" } });
+    }));
+    const renderer = vi.fn<NonNullable<import("./web-fetch.js").WebFetchDeps["renderer"]>>(async request => {
+      await expect(request.fetch({ url: "http://127.0.0.1/private", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("private-network");
+      await expect(request.fetch({ url: "https://denied.example/script.js", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("domain policy");
+      await request.fetch({ url: "https://example.com/app.js", method: "GET", headers: {} }, request.signal!);
+      return { html: '<p>Original rendered source</p>', finalUrl: "https://example.com/final", blockedRequests: 2 };
+    });
+    const service = createWebFetch({ ssrf: createMockSsrf(), renderer, rendererId: "real-owner",
+      domainPolicy: () => ({ block: ["denied.example"] }) });
+    const ctx = { ...fetchContext, allowRenderFallback: true };
+    const result = await service.fetch("https://example.com/start", ctx);
+    expect(result).toMatchObject({ status: "ok", finalUrl: "https://example.com/final", completeness: { download: { status: "partial" }, extraction: { status: "partial" } } });
+    expect(fetched).toEqual(["https://example.com/start", "https://example.com/app.js"]);
+    await service.fetch("https://example.com/start", { ...ctx, authority: { ...ctx.authority, threadId: "another-thread" } });
+    expect(renderer).toHaveBeenCalledTimes(2);
+    await service.fetch("https://example.com/start", ctx);
+    expect(renderer).toHaveBeenCalledTimes(3);
+    await service.dispose();
+  });
+  it("refuses a renderer that reports a forbidden final navigation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('<script src="app.js"></script>', { headers: { "content-type": "text/html" } })));
+    const service = createWebFetch({ ssrf: createMockSsrf(), renderer: async () => ({ html: '<p>private</p>', finalUrl: 'http://127.0.0.1/private', blockedRequests: 0 }) });
+    expect(await service.fetch("https://example.com/start", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "blocked", reason: "private-network" });
+    expect(service.cache.size).toBe(0);
+    await service.dispose();
+  });
+  it("bounds all concurrent rendered resources by one acquisition budget", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      return url.endsWith("/start") ? new Response("<script></script>", { headers: { "content-type": "text/html" } })
+        : new Response("12345678", { headers: { "content-type": "text/plain" } });
+    }));
+    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: 20, renderer: async request => {
+      const responses = await Promise.allSettled(["a", "b", "c"].map(path => request.fetch({ url: `https://example.com/${path}`, method: "GET", headers: {} }, request.signal!)));
+      await expect(request.fetch({ url: "https://example.com/after-limit", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("aggregate download budget");
+      return { html: "<p>result</p>", finalUrl: request.url, blockedRequests: responses.filter(value => value.status === "rejected").length + 1 };
+    } });
+    const result = await service.fetch("https://example.com/start", { ...fetchContext, allowRenderFallback: true });
+    expect(result).toMatchObject({ status: "ok", completeness: { download: { status: "partial", retainedBytes: 20, receivedBytes: 24, limitBytes: 20 }, extraction: { status: "partial" } } });
+    expect(urls).not.toContain("https://example.com/after-limit");
+    await service.dispose();
+  });
+  it("keeps the renderer deadline active and waits for its original stop", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const drained = new Promise<void>(resolve => { release = resolve; });
+    let rendererSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<script></script>", { headers: { "content-type": "text/html" } })));
+    const service = createWebFetch({ ssrf: createMockSsrf(), renderer: async request => {
+      rendererSignal = request.signal;
+      await drained;
+      return { html: "<p>late</p>", finalUrl: request.url, blockedRequests: 0 };
+    } });
+    let settled = false;
+    try {
+      const pending = service.fetch("https://example.com/slow-render", { ...fetchContext, allowRenderFallback: true }).then(result => { settled = true; return result; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rendererSignal).toBeDefined();
+      await vi.advanceTimersByTimeAsync(20_001);
+      expect(rendererSignal!.aborted).toBe(true);
+      expect(settled).toBe(false);
+      release();
+      expect(await pending).toMatchObject({ status: "failed", errorClass: "timeout" });
+      expect(service.cache.size).toBe(0);
+      await service.dispose();
+    } finally { release(); vi.useRealTimers(); }
+  });
+
 });

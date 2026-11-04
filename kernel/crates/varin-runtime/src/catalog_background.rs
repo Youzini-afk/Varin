@@ -102,6 +102,7 @@ pub(super) fn load(
                 RuntimeError::Invalid("background item IDs must be unique".into())
             })?;
             let hydrated = content.hydrate_history(metadata)?;
+            let attachments = super::attachments::history_attachments_with_report(db, &hydrated, &hydrated.content)?;
             let items = super::execution_persistence::history_input_items(
                 &hydrated.id,
                 hydrated.source,
@@ -120,6 +121,19 @@ pub(super) fn load(
                     Content::ToolCall { .. } | Content::ToolResult { .. }
                 ) {
                     item.content=Content::Output{output:json!({"quotedHistory":item.content,"reference":reference,"originalRole":hydrated.source}).into()};
+                }
+                if !attachments.is_empty() {
+                    let mut output = match item.content {
+                        Content::Output { output } => output,
+                        Content::Text { text } => crate::output::OutputBody { data: Value::Null, parts: vec![crate::output::OutputPart::Text { text }] },
+                        other => crate::output::OutputBody { data: json!({"quotedHistory":other}), parts: Vec::new() },
+                    };
+                    for attachment in &attachments {
+                        if !output.parts.iter().any(|part| matches!(part, crate::output::OutputPart::Attachment { attachment: existing } if existing.reference == attachment.reference)) {
+                            output.parts.push(crate::output::OutputPart::Attachment { attachment: attachment.clone() });
+                        }
+                    }
+                    item.content = Content::Output { output };
                 }
                 item.provenance = Provenance::ExternalData {
                     source: format!(

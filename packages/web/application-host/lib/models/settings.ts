@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import {
-  mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
+  mergeHarnessSettings, parseHarnessWebSearchSettings, parseHarnessWebSourcePreferences, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
   parseHarnessImageSettings, resolveHarnessDelegationModelSelectionSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
   type HarnessSettingsInput, type JsonValue, parseModelRetrySettings, THINKING_LEVELS, type ThinkingLevel,
 } from '@varin/protocol';
@@ -51,6 +51,23 @@ export function validateAgentSettings(document: Record<string, unknown>): Record
   return document as Record<string, JsonValue>;
 }
 
+/** Convert only supported search assets on the original settings write path.
+ * Reads keep raw revisions and malformed assets intact. */
+const normalizeSearchSettingsForWrite = (document: Record<string, JsonValue>): void => {
+  const harness = object(document.harness) ? document.harness : undefined;
+  const web = harness && object(harness.web) ? harness.web : undefined;
+  if (!web) return;
+  if (web.search !== undefined) {
+    const normalized = parseHarnessWebSearchSettings(web.search);
+    if (normalized) web.search = JSON.parse(JSON.stringify(normalized)) as JsonValue;
+  }
+  if (web.sourcePreferences !== undefined) {
+    const normalized = parseHarnessWebSourcePreferences(web.sourcePreferences);
+    if (!normalized) throw new ModelConfigurationError('invalid_settings', 'Invalid web search source preferences');
+    web.sourcePreferences = JSON.parse(JSON.stringify(normalized)) as JsonValue;
+  }
+};
+
 /** Agent configuration belongs to the Host and is available without a conversation worker. */
 export class AgentSettingsService {
   readonly global: ConfigurationFile<Record<string, JsonValue>>;
@@ -97,6 +114,7 @@ export class AgentSettingsService {
       for (const key of input.remove) delete document[key];
       Object.assign(document, input.set);
       assertSupportedPermissionChange(previousMode, document);
+      normalizeSearchSettingsForWrite(document);
       return document;
     });
     return input.scope === 'global'
@@ -109,6 +127,7 @@ export class AgentSettingsService {
       const previousMode = permissionMode(document);
       document.harness = update(structuredClone((document.harness ?? {}) as Record<string, JsonValue>));
       assertSupportedPermissionChange(previousMode, document);
+      normalizeSearchSettingsForWrite(document);
       return document;
     });
   }

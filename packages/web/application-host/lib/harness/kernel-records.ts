@@ -47,7 +47,7 @@ type ContextLike = {
   client?: KernelBlobClient;
   records: {
     get(id: string): Promise<RecordLike | null>;
-    list(input: { recordType?: string }): Promise<RecordLike[]>;
+    list(input: { recordType?: string; threadId?: string }): Promise<RecordLike[]>;
     put(input: RecordPutInput): Promise<RecordLike>;
     release(operationId: string, recordId: string): Promise<Record<string, unknown>>;
   };

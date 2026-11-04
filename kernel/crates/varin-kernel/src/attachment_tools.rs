@@ -185,7 +185,8 @@ fn prepared_response(
             .map_err(error)
             .map_err(|failure| failure.with_details(json!({"attachmentIndex":index})))?;
         if let AttachmentSelection::Ref { reference } = selection {
-            if reference != &attachment.reference {
+            let expected = varin_runtime::catalog::attachments::material_attachment_reference(reference);
+            if expected.as_ref().unwrap_or(reference) != &attachment.reference {
                 return Err(
                     error("attachment owner changed the selected fixed reference")
                         .with_details(json!({"attachmentIndex":index,"ref":reference})),

@@ -1,10 +1,11 @@
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 import {
   mergeHarnessWebDomainPolicy,
+  parseHarnessWebSearchSettings,
+  parseHarnessWebSourcePreferences,
   type HarnessSettings,
   type HarnessWebDomainPolicy,
   } from "@varin/protocol";
-import { parseSearchProviderSettings } from "./web-search.js";
 
 export interface HarnessWebBinding {
   generation: string;
@@ -54,16 +55,21 @@ export const resolveHarnessMaterialWebPolicy = (snapshot: AgentSettingsSnapshot)
 export const resolveHarnessWebBinding = (snapshot: AgentSettingsSnapshot): HarnessWebBinding => {
   const user = webFrom(snapshot.global);
   const render = typeof user.render === "boolean" ? user.render : undefined;
-  const search = parseSearchProviderSettings(user.search);
+  const search = parseHarnessWebSearchSettings(user.search);
   const domains = resolveHarnessMaterialWebPolicy(snapshot);
+  const userPreferences = parseHarnessWebSourcePreferences(user.sourcePreferences);
+  const projectPreferences = parseHarnessWebSourcePreferences(snapshot.projectTrusted ? webFrom(snapshot.project).sourcePreferences : undefined);
+  const sourcePreferences = userPreferences && projectPreferences ? { ...userPreferences, ...projectPreferences } : null;
   const settings: HarnessSettings["web"] = {
     ...(render === undefined ? {} : { render }),
+    ...(typeof user.readingAssistance === "boolean" ? { readingAssistance: user.readingAssistance } : {}),
     ...(search ? { search } : {}),
     domains,
+    ...(sourcePreferences && Object.keys(sourcePreferences).length ? { sourcePreferences } : {}),
   };
   return {
     generation: `${snapshot.globalRevision}:${snapshot.projectTrusted ? snapshot.projectRevision : "untrusted"}`,
     settings,
-    ...(user.search !== undefined && !search ? { searchError: "Invalid web search provider configuration" } : {}),
+    ...(user.search !== undefined && !search ? { searchError: "Invalid web search provider configuration" } : !sourcePreferences ? { searchError: "Invalid web search source preferences" } : {}),
   };
 };

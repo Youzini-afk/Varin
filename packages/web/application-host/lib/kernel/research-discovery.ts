@@ -4,13 +4,13 @@ import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS } f
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '../models/schema.js';
-import type { ScholarlySearchParams } from '@varin/protocol';
+import type { ScholarlySearchParams, ScholarlyPaper } from '@varin/protocol';
 import type { ScholarlySearchService } from '../harness/research-search.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
 import { extendToolConfiguration } from './extension-tool-owner.js';
-import type { ExtensionToolBinding, LaunchSource } from './protocol.generated.js';
-import { runToolDomainCall } from './tool-invocation.js';
+import type { ExtensionToolBinding, LaunchSource, OutputPart, IncomingMedia } from './protocol.generated.js';
+import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 
 export { RESEARCH_DISCOVERY_CAPABILITY };
 const declarations = new Map(RESEARCH_DISCOVERY_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.research.'.length),
@@ -38,6 +38,7 @@ export interface ResearchDiscoveryRuntimeOptions {
   service: ScholarlySearchService;
   /** Original user and trusted-project settings, without a Pi session or Web provider dependency. */
   settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
+  retainSources?(invocation: ToolInvocationAuthority, papers: ScholarlyPaper[], signal: AbortSignal): Promise<OutputPart<IncomingMedia>[]>;
 }
 export function createResearchDiscoveryRuntime(options: ResearchDiscoveryRuntimeOptions) {
   const capability: HostCapabilityHandler = async (method, value, call) => {
@@ -49,9 +50,14 @@ export function createResearchDiscoveryRuntime(options: ResearchDiscoveryRuntime
       try {
         if (!configuration(invocation.configurationIdentity).enabled) throw new HarnessServiceError('forbidden', 'Scholarly search is disabled in the accepted settings');
         const result = await options.service.handle(input as unknown as ScholarlySearchParams, { signal: call.signal });
+        let parts: OutputPart<IncomingMedia>[] = [];
+        if (!call.signal.aborted && result.papers.length && options.retainSources) {
+          try { parts = await options.retainSources(invocation, result.papers, call.signal); }
+          catch { for (const paper of result.papers) paper.sourceError = 'Source retention is unavailable; the original metadata result is preserved.'; }
+        }
         return { executor_stopped: true, completion: { kind: 'result', effect: 'none',
           outcome: call.signal.aborted ? 'cancelled' : result.status === 'failed' || result.status === 'unavailable' ? 'failed' : 'succeeded',
-          content: { data: parseVarinToolJson(result), parts: [] } } };
+          content: { data: parseVarinToolJson(result), parts } } };
       } catch (error) {
         // The original owner settles only after its fetch and body reader drain.
         return { executor_stopped: true, completion: { kind: 'result', outcome: call.signal.aborted ? 'cancelled' : 'failed', effect: 'none',

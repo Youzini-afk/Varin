@@ -4,7 +4,7 @@ import type { ThreadAttachmentOwner } from './thread-attachments.js';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import type { ThreadResearchSelection } from '@varin/application-client';
+import type { ThreadIdentity, ThreadResearchSelection } from '@varin/application-client';
 import type { DocumentReadRequest } from '@varin/protocol';
 import type { DocumentIngestInput } from '../harness/document-reading.js';
 import type { DocumentArtifactSource, DocumentMaterialSources } from '../harness/document-material.js';
@@ -28,6 +28,7 @@ const contentType = (filename: string): string => ({
 
 export interface DocumentSources {
   bindAttachments(owner: ThreadAttachmentOwner): void;
+  retainMaterial?(identity: ThreadIdentity, snapshotId: string, signal?: AbortSignal): Promise<void>;
   attachment(authority: ToolInvocationAuthority, snapshotId: string, signal?: AbortSignal): Promise<import('@varin/protocol').Attachment | undefined>;
   tool(authority: ToolInvocationAuthority): DocumentMaterialSources;
   path(selection: ThreadResearchSelection, path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
@@ -133,6 +134,7 @@ export function createDocumentSources(options: {
   };
   return {
     bindAttachments(owner) { attachments = owner; },
+    async retainMaterial(identity, snapshotId, signal) { await attachments?.retainMaterial(identity, snapshotId, signal); },
     async attachment(authority, snapshotId, signal) {
       if (!attachments) return undefined;
       const run = await options.runtime.run(authority.runId, signal);

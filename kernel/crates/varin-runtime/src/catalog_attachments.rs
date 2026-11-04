@@ -113,6 +113,24 @@ pub(super) fn history_attachments(body: &Value, source:HistorySource) -> Result<
     if source==HistorySource::User {input_attachments(body)} else {Ok(Vec::new())}
 }
 
+/// Final report relationships remain available in a bounded history read even
+/// when that page contains prose only. The original report, not prose parsing at
+/// read time, selects these already acquired descriptors.
+pub(super) fn history_attachments_with_report(db: &Connection, item: &HistoryItem, body: &Value) -> Result<Vec<Attachment>> {
+    let mut files = history_attachments(body, item.source)?;
+    if item.source != HistorySource::Assistant { return Ok(files); }
+    let execution: Option<String> = db.query_row("SELECT body FROM delegated_executions WHERE run_id=?1", [&item.run_id], |row| row.get(0)).optional()?;
+    if let Some(execution) = execution {
+        let execution: delegated::DelegatedExecution = serde_json::from_str(&execution)?;
+        if let Some(report) = execution.report.filter(|report| report.history_ids.contains(&item.id)) {
+            for attachment in report.attachments {
+                if attachment.reference.starts_with("attachment:material_") && !files.iter().any(|file| file.reference == attachment.reference) { files.push(attachment); }
+            }
+        }
+    }
+    Ok(files)
+}
+
 pub(super) fn validate_prepared(
     selections: &[AttachmentSelection],
     attachments: &[Attachment],
@@ -126,7 +144,8 @@ pub(super) fn validate_prepared(
         selection.validate()?;
         attachment.validate()?;
         if let AttachmentSelection::Ref { reference } = selection {
-            if reference.starts_with("attachment:") && reference != &attachment.reference {
+            if (reference.starts_with("attachment:") && reference != &attachment.reference)
+                || (reference.starts_with("varin-material://") && material_attachment_reference(reference).as_ref() != Some(&attachment.reference)) {
                 return Err(RuntimeError::Conflict(
                     "prepared attachment changed the selected fixed reference".into(),
                 ));
@@ -302,6 +321,35 @@ pub(super) fn output(
         data: Value::Null,
         parts,
     }
+}
+
+/// Resolve a typed source selector to its immutable attachment identity. This
+/// function creates no descriptor and confers no read authority.
+pub fn material_attachment_reference(reference: &str) -> Option<String> {
+    let source = reference.strip_prefix("varin-material://")?;
+    let id = source.split('?').next()?;
+    if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        || source.bytes().any(|byte| byte.is_ascii_whitespace() || matches!(byte, b'#' | b'<' | b'>' | b'(' | b')' | b'\"' | b'\'')) {
+        return None;
+    }
+    Some(format!("attachment:material_{}", hex::encode(id.as_bytes())))
+}
+
+/// Citations select only material descriptors already acquired through typed history.
+/// A URL, snapshot-shaped string or hash cannot manufacture a descriptor or read grant.
+pub(crate) fn cited_materials(texts: &[String], known: &[Attachment]) -> Vec<Attachment> {
+    let citation = regex::Regex::new(r#"varin-material://([A-Za-z0-9_-]+)(?:\?[^\s<>\)\"']*)?(?:[\s<>\)\"']|$)"#)
+        .expect("material citation pattern");
+    let selected: std::collections::BTreeSet<String> = texts.iter().flat_map(|text| {
+        citation.captures_iter(text).map(|capture| format!("attachment:material_{}", hex::encode(capture[1].as_bytes()))).collect::<Vec<_>>()
+    }).collect();
+    let mut result = Vec::new();
+    for attachment in known {
+        if selected.contains(&attachment.reference) && !result.iter().any(|item: &Attachment| item.reference == attachment.reference) {
+            result.push(attachment.clone());
+        }
+    }
+    result
 }
 
 /// Reports reuse actual outgoing deliveries to the organizer, not file-looking text.

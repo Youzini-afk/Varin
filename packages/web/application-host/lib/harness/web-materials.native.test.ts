@@ -11,6 +11,9 @@ import { createMaterialStorageAccess, threadMaterialScope } from "../kernel/mate
 import type { MaterialCollectionContext } from "./material-collections.js";
 import { createWebFetch } from "./web-fetch.js";
 import { createDocumentReader } from "./document-reading.js";
+import { createThreadAttachments } from '../kernel/thread-attachments.js';
+import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
+import { createMaterialLifecycle } from './material-lifecycle.js';
 import { makePdf } from "./pdf-test-fixture.js";
 
 it("persists web material, collection membership and related-thread access through the kernel", async () => {
@@ -84,6 +87,20 @@ it("persists web material, collection membership and related-thread access throu
     }, { byteRange: { offset: 2, length: 7 }, expectedContentHash: ref.contentHash }))?.body.toString()).toBe("durable");
     expect(await materials.read(scopeId, ref.snapshotId, authority("unrelated"))).toBeNull();
 
+    // Real Storage retains the source and typed recipient edge independently of
+    // the fetching Thread. Catalog report selection has its own native tests.
+    const sourceOwner = 'web-source-owner', sourceRecipient = 'web-source-recipient';
+    const evidence = await materials.put(scopeId, { sourceUrl: 'https://example.com/evidence', finalUrl: 'https://example.com/evidence',
+      representation: 'search-observation-v1', provenance: { kind: 'search-result', providerId: 'provider', contentKind: 'provider-excerpt' } },
+      Buffer.from('Saved provider excerpt'), authority(sourceOwner));
+    const attachmentOwner = createThreadAttachments({ kernel: client, storage: access, materials, resolveLiveSource: async () => { throw new Error('No file source'); },
+      runtime: { familyList: async () => ({ rootThreadId: 'parent' }), thread: async (threadId: string) => ({ branches: [{ branch_id: `${threadId}-branch` }] }) } as unknown as AgentRuntimeClient });
+    await attachmentOwner.prepare({ runtime: 'agent', threadId: sourceOwner, branchId: `${sourceOwner}-branch` }, [{ ref: evidence.snapshotId }], 'deliver-web-evidence', sourceRecipient);
+    const lifecycle = createMaterialLifecycle({ withBranchStore: (scope, purpose, consume, mode) => access.withBranchStore(scope, purpose, consume, mode, { threadId: sourceOwner }) });
+    await lifecycle.releaseThreadMaterials(scopeId, sourceOwner);
+    expect((await materials.read(scopeId, evidence.snapshotId, authority(sourceRecipient)))?.body.toString()).toBe('Saved provider excerpt');
+    expect(await materials.read(scopeId, evidence.snapshotId, authority('unrelated'))).toBeNull();
+
     // Restart the native storage owner, then reread through fresh Host facades.
     await adapter.dispose();
     await client.close();
@@ -95,6 +112,7 @@ it("persists web material, collection membership and related-thread access throu
       const found = await reopened.read(scopeId, ref.snapshotId, authority("child"), { includeSource: true });
       expect(found?.body.toString()).toBe("A durable finding.");
       expect(found?.source?.bytes).toEqual(source);
+      expect((await reopened.read(scopeId, evidence.snapshotId, authority(sourceRecipient)))?.body.toString()).toBe('Saved provider excerpt');
     } finally { await reopenedAdapter.dispose(); await reopenedClient.close(); }
   } finally {
     vi.unstubAllGlobals();

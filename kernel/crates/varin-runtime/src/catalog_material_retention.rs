@@ -230,19 +230,14 @@ impl Catalog {
     ) -> Result<MaterialRetentionRead> {
         let publication = self.content.begin_publication();
         let mut threads = Vec::new();
-        if child_id.is_none() {
-            for row in self
-                .db
-                .prepare("SELECT id FROM threads")?
-                .query_map([], |row| row.get::<_, String>(0))?
-            {
-                let id = row?;
-                threads.push(MaterialThreadRetention {
-                    root_thread_id: scheduling::thread_family(&self.db, &id)?,
-                    release: drained_threads.contains(&id),
-                    thread_id: id,
-                });
-            }
+        for row in self.db.prepare("SELECT id FROM threads WHERE (?1 IS NULL OR id=?1)")?
+            .query_map([child_id], |row| row.get::<_, String>(0))? {
+            let id = row?;
+            threads.push(MaterialThreadRetention {
+                root_thread_id: scheduling::thread_family(&self.db, &id)?,
+                release: drained_threads.contains(&id),
+                thread_id: id,
+            });
         }
         let mut attachment_sources = Vec::new();
         if child_id.is_none() {
@@ -308,7 +303,7 @@ impl Catalog {
                 holder_kind:"report".into(),holder_id:execution.execution_id,
                 thread_id:target_thread,branch_id:target_branch,
                 source_thread_id:Some(child.child_thread_id),source_branch_id:Some(child.child_branch_id),
-                attachments:Vec::new(),input_ref:None,
+                attachments:report.attachments.clone(),input_ref:None,
             },report,history));}
         }
         let sources = if child_id.is_none() {

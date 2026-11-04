@@ -28,7 +28,7 @@ describe("configured web search providers", () => {
       web: { results: [{ title: "Brave result", url: "https://docs.example/a", description: "snippet" }] },
     }));
     const provider = createConfiguredSearchProvider({ provider: "brave" }, { apiKey: "brave-secret", fetch });
-    await expect(provider.search("query", { limit: 50, recency: "week" })).resolves.toEqual({
+    await expect(provider.search("query", { limit: 50, recency: "week" })).resolves.toMatchObject({
       results: [{ title: "Brave result", url: "https://docs.example/a", snippet: "snippet" }],
     });
     const [requestUrl, init] = fetch.mock.calls[0]!;
@@ -75,7 +75,7 @@ describe("configured web search providers", () => {
 
     const jinaFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ data: [{ title: "J", url: "https://j.example", content: "J body" }] }));
     const jina = createConfiguredSearchProvider({ provider: "jina" }, { apiKey: "jina", fetch: jinaFetch });
-    expect(await jina.search("q", {})).toEqual({ results: [{ title: "J", url: "https://j.example", snippet: "J body" }] });
+    expect(await jina.search("q", {})).toMatchObject({ results: [{ title: "J", url: "https://j.example", snippet: "J body" }] });
     expect(new URL(String(jinaFetch.mock.calls[0]![0])).searchParams.get("q")).toBe("q");
 
     const searxFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ results: [{ title: "S", url: "https://s.example", content: "S body" }] }));
@@ -102,13 +102,13 @@ describe("configured web search providers", () => {
     expect(resolveConfiguredSearchProvider({
       settings: { provider: "brave", credentialRef: "missing" },
       auth: {},
-    })).toEqual({ unavailable: true, hint: "search credential is unavailable: missing" });
+    })).toMatchObject({ connections: [{ available: false, detail: "search credential is unavailable: missing" }] });
     expect(resolveConfiguredSearchProvider({
       settings: { provider: "searxng", endpoint: "http://localhost:8080" },
       auth: {},
       fetch: vi.fn(),
     })).toMatchObject({ id: "configured-searxng" });
-    expect(resolveConfiguredSearchProvider({ settings: {}, auth: {} })).toEqual({
+    expect(resolveConfiguredSearchProvider({ settings: {}, auth: {} })).toMatchObject({
       unavailable: true,
       hint: "invalid search provider configuration",
     });
@@ -157,7 +157,7 @@ describe("configured web search providers", () => {
       blockedDomains: ["tracker.docs.example.com", "ads.docs.example.com"],
     }));
     expect(result.items[0]?.status).toBe("ok");
-    expect(result.items[0]?.results).toEqual([
+    expect(result.items[0]?.results).toMatchObject([
       { title: "Docs", url: "https://api.docs.example.com/a", snippet: "ok" },
     ]);
   });
@@ -173,7 +173,7 @@ describe("configured web search providers", () => {
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
     expect("unavailable" in resolved).toBe(false);
     if ("unavailable" in resolved) return;
-    await expect(resolved.search("current news", { limit: 3 })).resolves.toEqual({
+    await expect(resolved.search("current news", { limit: 3 })).resolves.toMatchObject({
       providerId: "default-exa",
       results: [{ title: "Exa", url: "https://exa.example/a", snippet: "result" }],
     });
@@ -205,7 +205,7 @@ describe("configured web search providers", () => {
     }));
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
     if ("unavailable" in resolved) throw new Error("default provider unexpectedly unavailable");
-    await expect(resolved.search("query", {})).resolves.toEqual({
+    await expect(resolved.search("query", {})).resolves.toMatchObject({
       providerId: "default-exa",
       results: [
         { title: "First", url: "https://exa.example/first", snippet: "first highlight … second highlight", publishedAt: "2026-09-01" },
@@ -223,6 +223,7 @@ describe("configured web search providers", () => {
       expect(body.params.arguments).toEqual({
         query: "query",
         numResults: 10,
+        enableHighlights: true,
         includeDomains: ["docs.example"],
         excludeDomains: ["ads.example"],
         startPublishedDate: "2026-09-17",
@@ -235,7 +236,7 @@ describe("configured web search providers", () => {
       allowedDomains: ["docs.example"],
       blockedDomains: ["ads.example"],
       recency: "day",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       providerId: "default-exa",
       results: [{ title: "Advanced", url: "https://docs.example/a", snippet: "exact" }],
     });
@@ -251,10 +252,10 @@ describe("configured web search providers", () => {
     });
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
     if ("unavailable" in resolved) throw new Error("default provider unexpectedly unavailable");
-    await expect(resolved.search("query", { limit: 2 })).resolves.toEqual({
+    await expect(resolved.search("query", { limit: 2 })).resolves.toMatchObject({
       providerId: "default-parallel",
       results: [{ title: "Parallel", url: "https://parallel.example/a", snippet: "excerpt", publishedAt: "2026-09-18" }],
-      notices: ["Exa MCP failed (Exa search failed with HTTP 429 (rate limited)); used Parallel MCP."],
+      notices: ["default-exa failed (Exa search failed with HTTP 429 (rate limited)); used default-parallel."],
     });
     expect(fetch).toHaveBeenCalledTimes(2);
     const parallelBody = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body)) as { params: { name: string; arguments: unknown } };
@@ -265,7 +266,7 @@ describe("configured web search providers", () => {
     const fetch = vi.fn(async () => new Response("down", { status: 503 }));
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
     if ("unavailable" in resolved) throw new Error("default provider unexpectedly unavailable");
-    await expect(resolved.search("query", {})).rejects.toThrow("Exa MCP failed (Exa search failed with HTTP 503); Parallel MCP failed (Parallel search failed with HTTP 503)");
+    await expect(resolved.search("query", {})).rejects.toMatchObject({ attempts: [{ connectionId: "default-exa", failure: { httpStatus: 503 } }, { connectionId: "default-parallel", failure: { httpStatus: 503 } }] });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -276,7 +277,7 @@ describe("configured web search providers", () => {
       expect(body.params.arguments.objective).toContain("prefer results from these domains: docs.example");
       expect(body.params.arguments.objective).toContain("exclude results from these domains: ads.example");
       expect(body.params.arguments.objective).toContain("prefer results from the last week");
-      expect(body.params.arguments.search_queries[0]).toBe(body.params.arguments.objective);
+      expect(body.params.arguments.search_queries[0]).toBe("query (site:docs.example) -site:ads.example");
       return mcpResponse({ structuredContent: { results: [{ title: "Parallel", url: "https://ads.example/a", highlights: ["filtered"] }] } });
     });
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
@@ -285,7 +286,7 @@ describe("configured web search providers", () => {
     await expect(service.handle({ query: "query", allowedDomains: ["docs.example"], blockedDomains: ["ads.example"], recency: "week" }, context)).resolves.toMatchObject({
       providerId: "default-parallel",
       items: [{ status: "empty", results: [] }],
-      notices: [expect.stringContaining("Exa MCP failed"), expect.stringContaining("Parallel MCP cannot guarantee")],
+      notices: expect.arrayContaining([expect.stringContaining("default-exa failed"), expect.stringContaining("Parallel MCP cannot guarantee")]),
     });
   });
 
@@ -305,7 +306,7 @@ describe("configured web search providers", () => {
     const fetch = vi.fn(async () => mcpResponse({ structuredContent: { results: [] } }));
     const resolved = resolveConfiguredSearchProvider({ settings: undefined, auth: {}, fetch });
     if ("unavailable" in resolved) throw new Error("default provider unexpectedly unavailable");
-    await expect(resolved.search("no hits", {})).resolves.toEqual({ providerId: "default-exa", results: [] });
+    await expect(resolved.search("no hits", {})).resolves.toMatchObject({ providerId: "default-exa", results: [] });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -376,15 +377,16 @@ describe("configured web search providers", () => {
       objective: "goal",
     }, context);
 
-    // Canonical item order: query, queries, objective, urls, cursor.
-    expect(result.items).toHaveLength(4);
-    expect(result.items.map((item) => item.status)).toEqual(["ok", "failed", "ok", "ok"]);
+    // Objective guides existing queries, without adding another search.
+    expect(result.items).toHaveLength(3);
+    expect(result.items.map((item) => item.status)).toEqual(["ok", "failed", "ok"]);
     expect(result.items[0]?.results?.[0]?.url).toBe("https://example.com/alpha");
     expect(result.items[1]?.detail).toBe("boom");
-    expect(result.items[2]?.kind).toBe("objective");
-    expect(result.items[3]?.kind).toBe("url");
-    expect(result.items[3]?.fetch?.status).toBe("ok");
-    expect(result.items[3]?.fetch?.status === "ok" ? result.items[3].fetch.snapshot?.snapshotId : null).toBe("snap-url-1");
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search).toHaveBeenCalledWith("alpha", expect.objectContaining({ objective: "goal" }));
+    expect(result.items[2]?.kind).toBe("url");
+    expect(result.items[2]?.fetch?.status).toBe("ok");
+    expect(result.items[2]?.fetch?.status === "ok" ? result.items[2].fetch.snapshot?.snapshotId : null).toBe("snap-url-1");
     expect(result.capabilities.fetch).toBe(true);
   });
 
@@ -459,4 +461,202 @@ describe("configured web search providers", () => {
     });
     expect(result.items.map((item) => item.status)).toEqual(["ok", "cancelled"]);
   });
+});
+
+const connectionSettings = () => ({
+  connections: [
+    { id: "primary", name: "Primary Exa", provider: "exa", credentialRef: "exa-main", enabled: true },
+    { id: "backup", name: "Backup Tavily", provider: "tavily", credentialRef: "tavily-backup", enabled: true },
+  ], defaultConnectionId: "primary", fallbackConnectionIds: ["backup"],
+});
+const credentials = { "exa-main": { key: "private-exa-key" }, "tavily-backup": { key: "private-tavily-key" } };
+
+describe("connection routing and observation semantics", () => {
+  it("normalizes legacy settings without losing endpoint or credential and rejects conflicting identities", async () => {
+    const { parseSearchSettings } = await import("./web-search.js");
+    expect(parseSearchSettings({ provider: "brave", endpoint: "https://proxy.example/search", credentialRef: "old-account" })).toEqual({
+      connections: [{ id: "configured-brave", name: "brave", provider: "brave", endpoint: "https://proxy.example/search", credentialRef: "old-account", enabled: true }],
+      defaultConnectionId: "configured-brave", fallbackConnectionIds: [],
+    });
+    expect(parseSearchSettings({ ...connectionSettings(), fallbackConnectionIds: ["missing"] })).toBeNull();
+    expect(parseSearchSettings({ ...connectionSettings(), connections: [connectionSettings().connections[0], connectionSettings().connections[0]] })).toBeNull();
+    expect(parseSearchSettings({ connections: [], fallbackConnectionIds: [], enabled: false })).toEqual({ connections: [], fallbackConnectionIds: [], enabled: false });
+  });
+
+  it("lists safe configured connection capabilities without searching or disclosing endpoints/keys", async () => {
+    const fetch = vi.fn();
+    const provider = resolveConfiguredSearchProvider({ settings: connectionSettings(), auth: credentials, fetch });
+    const service = createWebSearchService(async () => provider);
+    const result = await service.handle({ action: "connections" }, context);
+    expect(result.connections?.map(item => item.id)).toEqual(["primary", "backup"]);
+    expect(result.connections?.[0]).toMatchObject({ available: true, capabilities: { domains: "native", excerpts: true } });
+    expect(JSON.stringify(result)).not.toMatch(/private-|credentialRef|api\.exa/);
+    expect(fetch).not.toHaveBeenCalled();
+    await service.dispose();
+  });
+
+  it("routes only along configured fallbacks and preserves failure classification and exact selection", async () => {
+    const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0]) => String(url).includes("exa")
+      ? new Response("do not disclose private-exa-key", { status: 403 }) : jsonResponse({ results: [{ title: "B", url: "https://docs.example/a", content: "excerpt" }] }));
+    const provider = resolveConfiguredSearchProvider({ settings: connectionSettings(), auth: credentials, fetch });
+    const service = createWebSearchService(async () => provider);
+    const automatic = await service.handle({ query: "question" }, context);
+    expect(automatic.items[0]).toMatchObject({ connectionId: "backup", providerId: "configured-tavily", attempts: [
+      { connectionId: "primary", failure: { kind: "authentication", httpStatus: 403 } }, { connectionId: "backup", status: "ok" },
+    ] });
+    expect(JSON.stringify(automatic)).not.toContain("private-exa-key");
+    const exact = await service.handle({ query: "question", connectionId: "primary" }, context);
+    expect(exact.items[0]).toMatchObject({ status: "failed", connectionId: "primary", failure: { kind: "authentication" } });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await service.dispose();
+  });
+
+  it("keeps successful empty results and explicitly disabled connections distinct", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ results: [] }));
+    const settings = connectionSettings(); settings.connections[1]!.enabled = false;
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings, auth: credentials, fetch }));
+    expect((await service.handle({ query: "no hits" }, context)).items[0]).toMatchObject({ status: "empty", connectionId: "primary" });
+    expect((await service.handle({ query: "q", connectionId: "backup" }, context)).items[0]).toMatchObject({ status: "unavailable", failure: { kind: "disabled" } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await service.dispose();
+  });
+
+  it("preserves per-query providers under concurrent partial fallback and merges duplicate observations", async () => {
+    const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (String(url).includes("exa") && body.query === "second") return new Response("rate limited", { status: 429, headers: { "Retry-After": "2" } });
+      return jsonResponse({ results: [{ title: "Same", url: "https://example.com/page?version=2&utm_source=search", highlights: [body.query] }] });
+    });
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings: connectionSettings(), auth: credentials, fetch }));
+    const result = await service.handle({ queries: ["first", "second"], objective: "Compare the same source" }, context);
+    expect(result.items.map(item => item.connectionId)).toEqual(["primary", "backup"]);
+    expect(result.providerId).toBe("mixed");
+    expect(result.items[1]?.attempts?.[0]?.failure).toMatchObject({ kind: "rate-limited", retryAfterMs: 2000 });
+    expect(result.results).toHaveLength(1);
+    expect(result.results?.[0]?.provenance?.map(item => item.query)).toEqual(["first", "second"]);
+    expect(result.results?.[0]?.excerpts).toEqual(["first", "second"]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await service.dispose();
+  });
+
+  it("uses native/operator conditions before results and reports unsupported strict constraints", async () => {
+    const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0]) => jsonResponse({ data: [{ title: "J", url: "https://docs.example/a", content: "body" }] }));
+    const provider = createConfiguredSearchProvider({ provider: "jina" }, { apiKey: "key", fetch });
+    await provider.search("exact ERR_VERSION", { allowedDomains: ["docs.example"], blockedDomains: ["ads.example"], recency: "week", language: "zh", region: "CN" });
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("q")).toBe("exact ERR_VERSION (site:docs.example) -site:ads.example");
+    expect(url.searchParams.get("tbs")).toBe("qdr:w");
+    expect(url.searchParams.get("hl")).toBe("zh");
+    expect(url.searchParams.get("gl")).toBe("cn");
+    const unavailable = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings: { provider: "searxng", endpoint: "https://search.example" }, auth: {}, fetch }));
+    expect((await unavailable.handle({ query: "q", recency: "week", strictFilters: true }, context)).items[0]).toMatchObject({ status: "unsupported", failure: { kind: "unsupported" } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await unavailable.dispose();
+  });
+
+  it("makes smart selection optional and never overrides exact selection or bypasses fallback", async () => {
+    const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0]) => String(url).includes("tavily") ? new Response("down", { status: 503 }) : jsonResponse({ results: [] }));
+    const settings = { ...connectionSettings(), smartSelection: true };
+    const selectConnection = vi.fn(async () => ({ connectionId: "backup" }));
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings, auth: credentials, fetch }), undefined, { selectConnection });
+    const result = await service.handle({ query: "q" }, context);
+    expect(result.items[0]?.attempts?.map(item => item.connectionId)).toEqual(["backup", "primary"]);
+    await service.handle({ query: "q", connectionId: "primary" }, context);
+    expect(selectConnection).toHaveBeenCalledTimes(1);
+    await service.dispose();
+    const unknown = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings, auth: credentials, fetch }), undefined, {
+      selectConnection: async () => { throw Object.assign(new Error("unknown inference"), { code: "web-assistance-indeterminate" }); },
+    });
+    await expect(unknown.handle({ query: "q" }, context)).rejects.toMatchObject({ code: "web-assistance-indeterminate" });
+    await unknown.dispose();
+  });
+
+  it("treats malformed provider responses as protocol failure rather than empty results", async () => {
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings: { provider: "exa", credentialRef: "exa-main" }, auth: credentials,
+      fetch: async () => jsonResponse({ error: "private failure" }), }));
+    const result = await service.handle({ query: "q" }, context);
+    expect(result.items[0]).toMatchObject({ status: "failed", failure: { kind: "protocol" } });
+    expect(JSON.stringify(result)).not.toContain("private failure");
+    await service.dispose();
+  });
+});
+
+describe("search response cache lifetime", () => {
+  it("separates full request semantics, retains observation time, bypasses refresh and expires", async () => {
+    let now = 1000;
+    const search = vi.fn(async () => ({ results: [{ title: "hit", url: "https://example.com", snippet: "excerpt" }] }));
+    const provider = { id: "test", cacheKey: "config-1", capabilities: { pagination: false as const }, search };
+    const service = createWebSearchService(async () => provider, undefined, { now: () => now, cacheTtlMs: 100 });
+    const original = await service.handle({ query: "q", objective: "one" }, context);
+    now += 1;
+    const cached = await service.handle({ query: "q", objective: "one" }, context);
+    expect(cached.items[0]).toMatchObject({ fromCache: true, retrievedAt: original.items[0]?.retrievedAt });
+    await service.handle({ query: "q", objective: "two" }, context);
+    await service.handle({ query: "q", objective: "one", language: "zh" }, context);
+    await service.handle({ query: "q", objective: "one", refresh: true }, context);
+    now += 101;
+    expect((await service.handle({ query: "q", objective: "one" }, context)).items[0]?.fromCache).toBe(false);
+    provider.cacheKey = "config-2";
+    await service.handle({ query: "q", objective: "one" }, context);
+    expect(search).toHaveBeenCalledTimes(6);
+    await service.dispose();
+  });
+
+  it("detaches one cancelled reader while the original producer completes for another", async () => {
+    let finish!: (value: { results: [] }) => void;
+    let upstream: AbortSignal | undefined;
+    const search = vi.fn(async (_query: string, options: { signal?: AbortSignal }) => { upstream = options.signal; return new Promise<{ results: [] }>(resolve => { finish = resolve; }); });
+    const provider = { id: "test", capabilities: { pagination: false as const }, search };
+    const service = createWebSearchService(async () => provider);
+    const first = new AbortController(); const second = new AbortController();
+    const a = service.handle({ query: "q" }, { signal: first.signal });
+    const b = service.handle({ query: "q" }, { signal: second.signal });
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    first.abort();
+    expect((await a).items[0]?.status).toBe("cancelled");
+    expect(upstream?.aborted).toBe(false);
+    finish({ results: [] });
+    expect((await b).items[0]?.status).toBe("empty");
+    expect((await service.handle({ query: "q" }, context)).items[0]?.fromCache).toBe(true);
+    await service.dispose();
+  });
+
+  it("aborts the last producer and drains its actual completion on shutdown", async () => {
+    let release!: () => void;
+    let upstream: AbortSignal | undefined;
+    const search = vi.fn(async (_query: string, options: { signal?: AbortSignal }) => { upstream = options.signal; await new Promise<void>(resolve => { release = resolve; }); return { results: [] }; });
+    const provider = { id: "test", capabilities: { pagination: false as const }, search };
+    const service = createWebSearchService(async () => provider);
+    const controller = new AbortController();
+    const result = service.handle({ query: "q" }, { signal: controller.signal });
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    let observerStopped = false;
+    void result.then(() => { observerStopped = true; });
+    controller.abort();
+    await Promise.resolve();
+    expect(observerStopped).toBe(false);
+    expect(upstream?.aborted).toBe(true);
+    let stopped = false;
+    const disposed = service.dispose().then(() => { stopped = true; });
+    await Promise.resolve(); expect(stopped).toBe(false);
+    release(); await disposed; expect(stopped).toBe(true);
+    expect((await result).items[0]?.status).toBe("cancelled");
+    expect((await service.handle({ query: "q" }, context)).items[0]?.status).toBe("cancelled");
+  });
+});
+
+it('keeps source preferences separate from immutable network policy and applies upstream boosting', async () => {
+  const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ results: [
+    { title: 'Other', url: 'https://other.example/a', content: 'other' }, { title: 'Preferred', url: 'https://docs.example/a', content: 'preferred' },
+    { title: 'Excluded', url: 'https://excluded.example/a', content: 'exclude preference' }, { title: 'Blocked', url: 'https://blocked.example/a', content: 'network policy' },
+  ] }));
+  const provider = resolveConfiguredSearchProvider({ settings: { provider: 'tavily', credentialRef: 'tavily-backup' }, auth: credentials, fetch });
+  const service = createWebSearchService(async () => provider, async () => ({ block: ['blocked.example'] }), {
+    resolveSourcePreferences: async () => ({ preferredDomains: ['docs.example'], excludedDomains: ['excluded.example'] }),
+  });
+  const result = await service.handle({ query: 'q' }, context);
+  expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({ include_domains: ['docs.example'], include_domains_mode: 'boost', exclude_domains: ['blocked.example', 'excluded.example'] });
+  expect(result.items[0]?.results?.map(item => item.title)).toEqual(['Preferred', 'Other']); expect(result.items[0]?.appliedFilters).toContainEqual({ field: 'preferredDomains', method: 'native' });
+  const overridden = await service.handle({ query: 'q', preferredDomains: [], blockedDomains: [] }, context);
+  expect(overridden.items[0]?.results?.map(item => item.title)).toEqual(['Other', 'Preferred', 'Excluded']); await service.dispose();
 });

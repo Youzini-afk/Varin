@@ -67,6 +67,22 @@ it('freezes only its original setting and restores it without rereading changed 
     .toMatchObject({ completion: { outcome: 'succeeded', effect: 'none', content: { data: { status: 'empty' } } } });
 });
 
+it('retains scholarly source observations through the admitted tool and preserves completed metadata when retention fails', async () => {
+  const fetch = vi.fn(async () => json({ id: 'https://openalex.org/W1', title: 'Original paper metadata' }));
+  const retainSources = vi.fn<NonNullable<ResearchDiscoveryRuntimeOptions['retainSources']>>(async (invocation, papers, signal) => {
+    expect(invocation).toMatchObject({ threadId: 'thread', runId: 'run', operationId: 'request:tool:call' });
+    expect(signal.aborted).toBe(false);
+    expect(papers[0]).toMatchObject({ id: 'https://openalex.org/W1', content: 'metadata-only' });
+    throw new Error('Original material owner unavailable');
+  });
+  const runtime = createResearchDiscoveryRuntime({ service: createResearchSearchService({ fetch }), settings: async () => snapshot(), retainSources });
+  const prepared = await runtime.prepareConfiguration(run, []);
+  const result = await invoke(runtime, { action: 'paper', paperId: 'W1' }, prepared(declaration));
+  expect(retainSources).toHaveBeenCalledOnce();
+  expect(result.value).toMatchObject({ status: 'ok', papers: [{ title: 'Original paper metadata', sourceError: expect.stringContaining('preserved') }] });
+  expect(result.receipt).toMatchObject({ executor_stopped: true, completion: { outcome: 'succeeded' } });
+});
+
 it('preserves unavailable relations and provider failures distinctly', async () => {
   const fetch = vi.fn(async () => json({ error: 'malformed provider envelope' }));
   const runtime = createResearchDiscoveryRuntime({ service: createResearchSearchService({ fetch }), settings: async () => snapshot() });

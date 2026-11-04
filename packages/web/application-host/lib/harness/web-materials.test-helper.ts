@@ -60,8 +60,8 @@ export const createMaterialStoreFixture = (options: {
       async get(recordId: string): Promise<TestRecord | null> {
         return records.get(recordId) ?? null;
       },
-      async list(input: { recordType?: string }): Promise<TestRecord[]> {
-        return [...records.values()].filter((record) => !input.recordType || record.recordType === input.recordType);
+      async list(input: { recordType?: string; threadId?: string }): Promise<TestRecord[]> {
+        return [...records.values()].filter((record) => (!input.recordType || record.recordType === input.recordType) && (!input.threadId || record.threadId === input.threadId));
       },
       async put(input: Omit<TestRecord, "recordRevision" | "workspaceId"> & { workspaceId?: string; operationId: string; expectedRecordRevision?: number }): Promise<TestRecord> {
         const existing = records.get(input.recordId);

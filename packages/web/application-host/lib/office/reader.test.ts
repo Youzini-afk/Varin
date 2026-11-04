@@ -15,8 +15,8 @@ it('reads Office body by path and snapshot, continues exact object pages, and ke
   const saved = new Map<string, { ref: WebSnapshotRef; source: { bytes: Buffer }; body: Buffer }>();
   const materials = {
     put: async (_workspace: string, draft: WebSnapshotDraft, body: Buffer, _authority: unknown, options: { source: { bytes: Buffer } }) => {
-      const { structure, document, ...fields } = draft;
-      const ref: WebSnapshotRef = { ...fields, ...(structure ? { structure } : {}), ...(document ? { document } : {}), snapshotId: `snapshot-${saved.size}`, fetchedAt: 1,
+      const { structure, document, acquisition, ...fields } = draft;
+      const ref: WebSnapshotRef = { ...fields, ...(structure ? { structure } : {}), ...(document ? { document } : {}), ...(acquisition ? { acquisition } : {}), snapshotId: `snapshot-${saved.size}`, fetchedAt: 1,
         contentHash: createHash('sha256').update(body).digest('hex'), byteLength: body.length };
       saved.set(ref.snapshotId, { ref, body, source: options.source }); return ref;
     },

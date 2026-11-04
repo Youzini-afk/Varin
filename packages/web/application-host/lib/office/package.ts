@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type { OfficeEdit, OfficeFormat, OfficeObject, OfficeReadRequest, OfficeReadResult, OfficeSection } from '@varin/protocol';
+import { openOfficeArchive, type OfficeArchiveLimits } from './archive-budget.js';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -38,14 +39,16 @@ export class OfficePackage {
   readonly format: OfficeFormat;
   readonly revision: string;
   private readonly zip: AdmZip;
+  private readonly archive: ReturnType<typeof openOfficeArchive>;
   private readonly documents = new Map<string, Document>();
   private readonly changed = new Set<string>();
   private readonly targets = new Map<string, { part: string; element: Element }>();
   private readonly notices = new Set<string>();
 
-  constructor(bytes: Uint8Array) {
+  constructor(bytes: Uint8Array, limits?: Partial<OfficeArchiveLimits>) {
     this.revision = revision(bytes);
-    try { this.zip = new AdmZip(Buffer.from(bytes)); } catch { throw new Error('The document is not a readable Office Open XML package; encrypted or legacy binary files need an Office application'); }
+    this.archive = openOfficeArchive(bytes, limits);
+    this.zip = this.archive.zip;
     if (this.zip.getEntry('word/document.xml')) this.format = 'docx';
     else if (this.zip.getEntry('xl/workbook.xml')) this.format = 'xlsx';
     else if (this.zip.getEntry('ppt/presentation.xml')) this.format = 'pptx';
@@ -57,7 +60,7 @@ export class OfficePackage {
     const entry = this.zip.getEntry(part);
     if (!entry) throw new Error(`The document is missing its ${part} part`);
     let error: string | undefined;
-    const bytes = entry.getData();
+    const bytes = this.archive.read(entry);
     const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
     const source = new TextDecoder(encoding, { fatal: true }).decode(bytes);
     let document: Document;
