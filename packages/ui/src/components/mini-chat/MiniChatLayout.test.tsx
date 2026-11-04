@@ -18,11 +18,13 @@ vi.mock('@/components/views/ChatView', () => ({ ChatView: () => <div>Conversatio
 vi.mock('@/components/thread/ThreadSwitcherDropdown', () => ({ ThreadSwitcherDropdown: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 import { MiniChatLayout } from './MiniChatLayout';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 
 let root: Root;
 let container: HTMLElement;
 beforeEach(() => {
   desktop.identity = null;
+  useThreadDraftStore.setState({ drafts: {} });
   desktop.invoke.mockReset().mockImplementation(async (command: string) => command === 'desktop_get_window_pinned' ? { pinned: false } : { focused: true });
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', window);
@@ -70,4 +72,34 @@ it('does not close Mini Chat when native did not confirm focus', async () => {
   await act(async () => open().click());
   expect(desktop.invoke).not.toHaveBeenCalledWith('desktop_close_current_window');
   expect(container.querySelector('[role="alert"]')).not.toBeNull();
+});
+
+
+it('keeps actual unsent text and binary attachments in the source store after native focus succeeds', async () => {
+  const bytes = new Blob(['original file'], { type: 'text/plain' });
+  useThreadDraftStore.getState().patch('mini-draft', {
+    text: 'Do not lose this draft',
+    images: [{ mimeType: 'image/png', data: 'data:image/png;base64,aGVsbG8=' }],
+    files: [{ id: 'file', filename: 'notes.txt', mimeType: 'text/plain', data: bytes, status: 'selected' }],
+  });
+  const original = useThreadDraftStore.getState().drafts['mini-draft'];
+  await render();
+  await act(async () => open().click());
+  expect(desktop.invoke).toHaveBeenCalledWith('desktop_focus_main_window', expect.anything());
+  expect(desktop.invoke).not.toHaveBeenCalledWith('desktop_close_current_window');
+  expect(useThreadDraftStore.getState().drafts['mini-draft']).toBe(original);
+  expect(await original.files![0]!.data.text()).toBe('original file');
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('kept open');
+});
+
+it('also protects input typed while the main window is opening', async () => {
+  let complete!: (value: unknown) => void;
+  desktop.invoke.mockImplementation((command: string) => command === 'desktop_focus_main_window'
+    ? new Promise(resolve => { complete = resolve; }) : Promise.resolve({ pinned: false }));
+  await render();
+  act(() => open().click());
+  useThreadDraftStore.getState().patch('new-draft', { text: 'Typed during the handoff' });
+  await act(async () => complete({ focused: true }));
+  expect(desktop.invoke).not.toHaveBeenCalledWith('desktop_close_current_window');
+  expect(useThreadDraftStore.getState().drafts['new-draft'].text).toBe('Typed during the handoff');
 });

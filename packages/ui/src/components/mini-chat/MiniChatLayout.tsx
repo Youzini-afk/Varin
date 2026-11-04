@@ -7,6 +7,7 @@ import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { useThreadDraftStore, hasUnsentDraftContent } from '@/stores/useThreadDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { Icon } from '@/components/icon/Icon';
 
@@ -34,6 +35,12 @@ export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
         ? { threadId: identity.threadId, branchId: identity.branchId, directory: directory || '' }
         : { mode: 'draft', directory: directory || '', projectId: projectId || '' });
       if (!result?.focused) throw new Error('The main window could not be opened.');
+      // Focusing another renderer does not transfer its in-memory composer.
+      // Inspect after the await too: the user may have typed while opening.
+      if (Object.values(useThreadDraftStore.getState().drafts).some(hasUnsentDraftContent)) {
+        setWindowError('The main window is open. Your unsent text and attachments are still in Mini Chat, so this window has been kept open.');
+        return;
+      }
       await invokeDesktop('desktop_close_current_window');
     } catch (error) {
       setWindowError(error instanceof Error ? error.message : 'The main window could not be opened.');

@@ -106,6 +106,12 @@ export interface ThreadDraft {
     sending?: boolean;
   };
 }
+/** Closing a renderer must never discard in-memory input or an uncertain send. */
+export function hasUnsentDraftContent(draft: ThreadDraft): boolean {
+  return Boolean(draft.text || draft.images.length || draft.materials.length || draft.files?.length
+    || draft.selectedAttachments?.length || draft.references?.length || draft.pendingInput
+    || draft.firstSend || draft.externalInput || draft.collaboration?.attempts?.length);
+}
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */
 export const useThreadDraftStore = create<{
