@@ -48,6 +48,7 @@
 
 ## 持续演进的设计
 
+- [增量上下文管理](design/incremental-context-management.md)：待讨论；摘要块、原文回读等为候选思路，需重新判断理解连续性、总成本与实现必要性，尚未确定实施方向。
 - [Tauri 桌面迁移](design/tauri-desktop-migration.md)：设计提案；完整保留功能与动效、随包 Browser Use，优化轻客户端、原生呈现和本地／远端服务的运行边界。
 - [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。
 
