@@ -34,6 +34,8 @@ async function render(initial: HarnessSettingsInput = {}) {
 }
 const buttons = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === text);
 async function click(text: string, index = 0) { await act(async () => buttons(text)[index]!.click()); }
+const disclosures = () => [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')];
+async function toggle(index: number) { await act(async () => disclosures()[index]!.click()); }
 const configuration = () => parseHarnessWebSearchSettings(latest.web?.search)!;
 const initial = () => ({ web: { search: { connections: [
   { id: 'one', name: 'First', provider: 'exa' as const, enabled: true, credentialRef: 'first-account' },
@@ -53,11 +55,12 @@ test('migrates legacy credentials on first edit and changes fallback order witho
   expect(configuration().connections[0]).toMatchObject({ id: 'configured-exa', credentialRef: 'original-ref', endpoint: 'https://proxy.example/search' });
   expect(latest.web?.search).not.toHaveProperty('provider');
   await act(async () => root.unmount()); root = createRoot(container); await render(initial());
+  await toggle(1);
   await click('settings.webConnections.moveEarlier', 1); expect(configuration().fallbackConnectionIds).toEqual(['two', 'one']); expect(configuration().defaultConnectionId).toBe('one');
   await click('settings.harness.rules.remove'); expect(configuration().connections.map(connection => connection.id)).toEqual(['two']); expect(configuration().fallbackConnectionIds).toEqual(['two']); expect(configuration().defaultConnectionId).toBeUndefined();
 });
 test('writes each key to its exact saved connection rather than the shared provider', async () => {
-  await render(initial()); vi.useFakeTimers(); const inputs = [...container.querySelectorAll<HTMLInputElement>('input[type=password]')];
+  await render(initial()); await toggle(1); vi.useFakeTimers(); const inputs = [...container.querySelectorAll<HTMLInputElement>('input[type=password]')];
   await act(async () => { inputs[1]!.value = 'second-key'; inputs[1]!.dispatchEvent(new window.Event('input', { bubbles: true })); });
   await act(async () => vi.advanceTimersByTime(650));
   const write = fixture.fetch.mock.calls.find(call => call[1]?.method === 'PUT');
@@ -66,9 +69,35 @@ test('writes each key to its exact saved connection rather than the shared provi
 test('tests once while pending and discards late results after the connection is removed', async () => {
   let resolve!: (response: Response) => void; let testSignal: AbortSignal | undefined; const fallback = fixture.fetch.getMockImplementation()!;
   fixture.fetch.mockImplementation((url: string, init?: RequestInit) => { if (!url.endsWith('/test')) return fallback(url, init); testSignal = init?.signal ?? undefined; return new Promise<Response>(done => { resolve = done; }); });
-  await render(initial()); await click('settings.webConnections.test'); await click('settings.webConnections.testing');
+  await render(initial()); await toggle(0); await click('settings.webConnections.test'); await click('settings.webConnections.testing');
   expect(fixture.fetch.mock.calls.filter(call => call[0].endsWith('/test'))).toHaveLength(1);
   await click('settings.harness.rules.remove'); expect(testSignal?.aborted).toBe(true);
   await act(async () => resolve(new Response(JSON.stringify({ checkedAt: 123, status: 'ok', resultCount: 99 }))));
   expect(container.textContent).not.toContain('99 settings.webConnections.results'); expect(configuration().connections.map(connection => connection.id)).toEqual(['two']);
+});
+
+test('starts saved connections collapsed, opens additions and preserves editing across reversible toggles', async () => {
+  await render(initial());
+  expect(disclosures().map(button => button.getAttribute('aria-expanded'))).toEqual(['false', 'false']);
+  const first = disclosures()[0]!;
+  const panel = document.getElementById(first.getAttribute('aria-controls')!)!;
+  expect(panel.hasAttribute('inert')).toBe(true);
+  await toggle(0);
+  expect(panel.hasAttribute('inert')).toBe(false);
+  vi.useFakeTimers();
+  const name = [...panel.querySelectorAll<HTMLInputElement>('input')].find(input => input.value === 'First')!;
+  await act(async () => { name.value = 'Renamed'; name.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  const reads = fixture.fetch.mock.calls.length;
+  await toggle(0); await toggle(0);
+  expect([...panel.querySelectorAll('input')]).toContain(name);
+  expect(name.value).toBe('Renamed');
+  expect(fixture.fetch.mock.calls).toHaveLength(reads);
+  await act(async () => vi.advanceTimersByTime(650));
+  expect(configuration().connections[0]?.name).toBe('Renamed');
+  await toggle(0);
+  await click('settings.webConnections.add');
+  expect(disclosures().map(button => button.getAttribute('aria-expanded'))).toEqual(['false', 'false', 'true']);
+  await toggle(2);
+  expect(disclosures()[2]!.getAttribute('aria-expanded')).toBe('false');
+  expect(configuration().connections).toHaveLength(3);
 });

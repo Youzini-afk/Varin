@@ -3474,6 +3474,7 @@ export const settingsDict = {
   "settings.webConnections.firstEnabled": "First enabled connection",
   "settings.webConnections.name": "Name",
   "settings.webConnections.description": "Selection guidance",
+  "settings.webConnections.descriptionHint": "Describe when to use this connection. Agents can read it, and smart selection uses it to choose a connection. Default and fallback order are configured separately.",
   "settings.webConnections.endpoint": "Endpoint override",
   "settings.webConnections.providerDefault": "Provider default endpoint",
   "settings.webConnections.fallback": "Use as fallback",

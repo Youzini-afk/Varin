@@ -3475,6 +3475,7 @@ export const settingsDict = {
   "settings.webConnections.firstEnabled": "第一个已启用连接",
   "settings.webConnections.name": "名称",
   "settings.webConnections.description": "用途说明",
+  "settings.webConnections.descriptionHint": "说明这个连接适合什么搜索。Agent 可读取，启用智能选择时也会作为选用依据。默认连接和备用顺序单独设置。",
   "settings.webConnections.endpoint": "服务端点",
   "settings.webConnections.providerDefault": "供应商默认端点",
   "settings.webConnections.fallback": "用作备用连接",

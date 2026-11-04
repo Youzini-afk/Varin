@@ -5,13 +5,47 @@ import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '@/compon
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
-
+import './search-connections.css';
 
 const providers = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const;
 const providerName = (provider: HarnessWebSearchProvider) => provider === 'searxng' ? 'SearXNG' : provider[0]!.toUpperCase() + provider.slice(1);
+
+function ConnectionDisclosure({ connection, initiallyOpen, onEnabledChange, onRemove, children }: React.PropsWithChildren<{
+  connection: HarnessWebSearchConnection;
+  initiallyOpen: boolean;
+  onEnabledChange(enabled: boolean): void;
+  onRemove(): void;
+}>) {
+  const { t } = useI18n();
+  const [open, setOpen] = React.useState(initiallyOpen);
+  const id = React.useId();
+  const provider = providerName(connection.provider);
+  return <div className="search-connection">
+    <div className="search-connection-header">
+      <button type="button" id={`${id}-trigger`} className="search-connection-toggle" aria-expanded={open} aria-controls={`${id}-panel`}
+        onClick={() => setOpen(value => !value)}>
+        <Icon name="arrow-right-s" className="search-connection-chevron size-4 shrink-0" />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-medium break-words [overflow-wrap:anywhere]">{connection.name}</span>
+            {connection.name !== provider ? <span className="typography-meta text-muted-foreground">{provider}</span> : null}
+          </span>
+          {connection.description ? <span className="mt-1 block truncate typography-meta text-muted-foreground" title={connection.description}>{connection.description}</span> : null}
+        </span>
+      </button>
+      <Switch checked={connection.enabled} onCheckedChange={onEnabledChange} aria-label={`${connection.name}: ${t('settings.webConnections.enabled')}`} />
+      <Button variant="ghost" size="sm" onClick={onRemove}>{t('settings.harness.rules.remove')}</Button>
+    </div>
+    <div id={`${id}-panel`} className="search-connection-panel" data-open={open} role="region" aria-labelledby={`${id}-trigger`} aria-hidden={!open} inert={!open}>
+      <div><div className="search-connection-fields space-y-4">{children}</div></div>
+    </div>
+  </div>;
+}
 
 function SearchCredential({ connectionId, onChanged }: { connectionId: string; onChanged(): void }) {
   const { t } = useI18n();
@@ -94,6 +128,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
   const current = React.useRef(config);
   current.current = config;
   const [newProvider, setNewProvider] = React.useState<HarnessWebSearchProvider>('exa');
+  const [newConnectionId, setNewConnectionId] = React.useState<string | null>(null);
   const [credentialRevision, setCredentialRevision] = React.useState(0);
   const credentialChanged = React.useCallback(() => setCredentialRevision(value => value + 1), []);
   const save = (value: HarnessWebSearchConfiguration) => {
@@ -119,22 +154,17 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
           <SelectContent><SelectItem value="none">{t('settings.webConnections.firstEnabled')}</SelectItem>{config.connections.map(connection => <SelectItem key={connection.id} value={connection.id}>{connection.name}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
-      {config.connections.map(connection => <div key={connection.id} className="space-y-4 rounded-lg border p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">{connection.name} · {providerName(connection.provider)}</span>
-          <Button variant="ghost" size="sm" onClick={() => {
+      {config.connections.map(connection => <ConnectionDisclosure key={connection.id} connection={connection} initiallyOpen={connection.id === newConnectionId}
+        onEnabledChange={enabled => edit(connection.id, { enabled })} onRemove={() => {
             const value = current.current;
             if (!value) return;
             const { defaultConnectionId, ...rest } = value;
             save({ ...rest, connections: value.connections.filter(item => item.id !== connection.id), fallbackConnectionIds: value.fallbackConnectionIds.filter(id => id !== connection.id),
               ...(defaultConnectionId && defaultConnectionId !== connection.id ? { defaultConnectionId } : {}) });
-          }}>{t('settings.harness.rules.remove')}</Button>
-        </div>
-        <p className="typography-meta text-muted-foreground">{connection.id}</p>
-        <SettingsCheckboxRow checked={connection.enabled} onChange={enabled => edit(connection.id, { enabled })}
-          ariaLabel={`${connection.name}: ${t('settings.webConnections.enabled')}`} label={t('settings.webConnections.enabled')} />
+          }}>
+        <p className="break-all typography-meta text-muted-foreground">{connection.id}</p>
         <SettingsFieldRow label={t('settings.webConnections.name')}><AutoSaveInput value={connection.name} onCommit={name => edit(connection.id, { name: name.trim() || connection.name })} /></SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.webConnections.description')}><AutoSaveInput value={connection.description ?? ''} onCommit={description => edit(connection.id, { description })} /></SettingsFieldRow>
+        <SettingsFieldRow label={t('settings.webConnections.description')} description={t('settings.webConnections.descriptionHint')}><AutoSaveInput value={connection.description ?? ''} onCommit={description => edit(connection.id, { description })} /></SettingsFieldRow>
         <SettingsFieldRow label={t('settings.webConnections.endpoint')}>
           <AutoSaveInput value={connection.endpoint ?? ''} placeholder={connection.provider === 'searxng' ? 'https://search.example.com' : t('settings.webConnections.providerDefault')}
             validate={value => { if (!value.trim() && connection.provider !== 'searxng') return null; try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? null : t('settings.harness.validUrl'); } catch { return t('settings.harness.validUrl'); } }}
@@ -154,7 +184,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
           }}>{t('settings.webConnections.moveEarlier')}</Button>
         </div> : null}
         <ConnectionTest connectionId={connection.id} generation={JSON.stringify([connection, credentialRevision])} />
-      </div>)}
+      </ConnectionDisclosure>)}
       {!config.connections.length ? <p className="typography-meta text-muted-foreground">{t('settings.webConnections.empty')}</p> : null}
       <Button variant="ghost" onClick={() => update({ web: { search: undefined } })}>{t('settings.webConnections.restoreDefault')}</Button>
     </> : null}
@@ -165,6 +195,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
       </Select>
       <Button variant="outline" onClick={() => {
         const id = `${newProvider}-${crypto.randomUUID()}`;
+        setNewConnectionId(id);
         const value = current.current ?? { connections: [], fallbackConnectionIds: [] };
         save({ ...value, connections: [...value.connections, { id, name: providerName(newProvider), provider: newProvider, enabled: true, credentialRef: `varin-web-search-connection-${id}` }],
           ...(value.defaultConnectionId ? {} : { defaultConnectionId: id }) });

@@ -1,0 +1,31 @@
+.search-connection {
+  min-width: 0;
+  border: 1px solid var(--interactive-border);
+  border-radius: 10px;
+}
+.search-connection-header { display: flex; align-items: center; gap: 12px; padding-right: 12px; }
+.search-connection-toggle {
+  display: flex; align-items: center; flex: 1; min-width: 0; gap: 10px;
+  padding: 16px; text-align: start; border-radius: 9px;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out);
+}
+.search-connection-toggle:hover { background: var(--interactive-hover); }
+.search-connection-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+.search-connection-chevron { color: var(--muted-foreground); transition: transform var(--motion-dur-glide) var(--motion-ease-glide); }
+.search-connection-toggle[aria-expanded=true] .search-connection-chevron { transform: rotate(90deg); }
+/* Keep editors mounted. Reversing a toggle continues from the current height,
+   and credentials, pending saves and test results survive a collapse. */
+.search-connection-panel {
+  display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.search-connection-panel[data-open=true] { grid-template-rows: 1fr; opacity: 1; }
+.search-connection-panel > div { min-height: 0; overflow: hidden; }
+.search-connection-fields { margin-inline: 16px; padding-block: 16px; border-top: 1px solid var(--interactive-border); }
+/* Newly added connections reveal from zero even on their first rendered frame. */
+@starting-style {
+  .search-connection-panel[data-open=true] { grid-template-rows: 0fr; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-connection-toggle, .search-connection-chevron, .search-connection-panel { transition: none; }
+}
