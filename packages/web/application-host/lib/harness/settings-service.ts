@@ -157,12 +157,14 @@ export interface ClientSurfaceBridge {
   /** Connected surfaces whose stream was Host-validated against one caller Thread/branch. */
   listForThread(identity: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): ClientSurfaceInfo[];
   /**
-   * Read or apply client-owned fields on one surface. The bridge resolves the
+   * Read/apply client-owned fields, or deliver an owned credential-entry request
+   * (metadata only; the acknowledgement confirms presentation, never key entry).
+   * The bridge resolves the
    * target: the Surface bound to the caller's authenticated Thread/branch. Several
    * bound candidates = `ambiguous`; none = `unavailable`.
    */
   request(op: {
-    type: 'read' | 'apply';
+    type: 'read' | 'apply' | 'present-credential';
     entries: { id: string; itemIndex?: number; values?: Record<string, unknown>; reset?: string[]; expectedRevision?: string }[];
   }, target: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): Promise<{
     surface: ClientSurfaceInfo;

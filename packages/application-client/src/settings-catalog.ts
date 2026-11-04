@@ -104,7 +104,7 @@ export interface SettingsActionRef {
     | 'service:git' | 'service:tunnel'
     | 'service:extension-packages' | 'service:extensions' | 'service:agents' | 'service:embedding-requests'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
-    | 'service:self-bot' | 'service:self-conversation'
+    | 'service:self-bot' | 'service:self-conversation' | 'service:web-search'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
   verbs?: readonly string[];
@@ -446,10 +446,16 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.web.search', category: 'web', owner: 'agent-settings', authority: 'credentials',
     field: { path: 'harness.web.search', kind: 'json', scope: 'user',
-      note: '{provider: brave|exa|tavily|jina|searxng, endpoint?, credentialRef?} — credentialRef names a native credential reference; secret material is never returned' },
+      note: '{connections: [{id,name,provider,enabled,description?,endpoint?,credentialRef?}], defaultConnectionId?, fallbackConnectionIds: string[], enabled?, smartSelection?}. JSON writes replace this entire configuration. Prefer harness.web.search.connections actions to edit one connection, enter credentials privately or test it. Credential references identify Host-owned secrets; reads never return secret material.' },
     apply: 'next-run',
     ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web',
       keywords: ['brave', 'tavily', 'exa', 'jina', 'searxng', 'API key', 'search'] },
+  },
+  {
+    id: 'harness.web.search.connections', category: 'web', owner: 'action',
+    actionRef: { domain: 'service:web-search', verbs: ['list', 'add', 'patch', 'remove', 'route', 'restore-default', 'test', 'credential-status', 'enter-credential', 'remove-credential'],
+      note: 'Manage one search connection without replacing unrelated settings. Read list for revision, exact IDs and credential status. enter-credential opens private user input on the authenticated interface for this conversation; it returns a queryable/cancellable operation, never the key. A real test uses only the selected connection.' },
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web', keywords: ['search connection', 'search provider', 'API key', 'brave', 'exa', 'tavily', 'jina', 'searxng', '搜索连接', '搜索提供商'] },
   },
   {
     id: 'harness.web.render', category: 'web', owner: 'agent-settings',

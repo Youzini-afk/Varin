@@ -19,6 +19,7 @@ import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/sche
 import { getSettingsActionContracts } from './settings-action-contracts.js';
 import { patchModelChannel, sanitizeModelConnections, sanitizeMcpDocument, type McpDocumentWriteReceipt } from './settings-domain-patches.js';
 import { createSelfBotAdapter, createSelfConversationAdapter, type SelfSettingsDeps } from './settings-self-actions.js';
+import { createSearchSettingsAdapter } from './search-settings-actions.js';
 
 export interface SettingsActionContext {
   caller: SettingsServiceCaller;
@@ -142,6 +143,7 @@ export interface GitIdentityStore {
 }
 
 export interface SettingsActionDeps {
+  searchConnections?(): import('./search-connection-settings.js').SearchConnectionSettings;
   /** Lazy because Bot/Thread services are created after the settings facade. */
   self?(): SelfSettingsDeps | null;
   embeddingRequests?(): ReturnType<typeof import('../knowledge/vectors/request-settings.js').createEmbeddingRequestSettings>;
@@ -895,6 +897,7 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['service:self-bot', createSelfBotAdapter(() => deps.self?.())],
     ['service:self-conversation', createSelfConversationAdapter(() => deps.self?.())],
     ['runtime:providers', providersAdapter(deps)],
+    ['service:web-search', createSearchSettingsAdapter(() => deps.searchConnections?.())],
     ['runtime:mcp', mcpAdapter(deps)],
     ['service:extension-packages', extensionPackagesAdapter(deps)],
     ['service:agents', agentsAdapter(deps)],

@@ -182,6 +182,16 @@ Bot knowledge-vector 仍有独立用途，使用 `vectors/embedding-owner.ts`、
 用户连接保存稳定 ID、名称、适配器、端点、凭据引用、说明和启用状态；同一服务可以有多个账号或实例。
 默认与备用顺序独立配置。旧单渠道设置读取时归一化，首次保存写连接结构，保留原凭据引用。
 
+Agent 通过设置工具的 `harness.web.search.connections` 动作管理这些相同的连接。先 `list` 读取原始 ID、
+状态和配置 revision，再按连接 `add`、`patch`、`remove`，或用 `route` 调整默认、备用顺序与智能选择。
+修改沿原 AgentSettings 的 revision 检查与权限管理，不覆盖其他连接或设置。`test` 与设置页共用真实测试实现，
+只测试指定连接，无自动备用；零命中与失败分开报告。整组 `harness.web.search` 仍支持显式完整替换。
+
+`enter-credential` 在当前对话绑定的已认证界面打开密码输入框，返回原设置动作可查询、可取消的 operation。
+用户输入直接送到 Host 原凭据 owner，模型只能看到状态和连接元数据。切换 Host 清空本机输入；取消的请求拒绝后续提交，
+端点或凭据引用变化时旧录入请求也会失败。该交互随 Host 会话存在，重启后需要重新发起；已保存的密钥保存在原凭据存储。
+`credential-status` 只返回配置状态，`remove-credential` 显式移除该引用的密钥；删除连接本身保留可能共享的凭据。
+
 `websearch` 的 `objective` 是本次目标，与 `query` / `queries` 同时提供时不另发一条目标搜索。
 只有目标时可直接搜索。`action:connections` 只返回可用连接及真实能力，不发网络请求。
 `connectionId` 精确选择一个连接且不自动换渠道；`connectionIds` 显式进行互补搜索。

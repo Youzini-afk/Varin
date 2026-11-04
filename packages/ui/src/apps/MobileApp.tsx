@@ -23,6 +23,7 @@ import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
+import { SearchCredentialDialog } from '@/components/sections/harness/SearchCredentialDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRouter } from '@/hooks/useRouter';
@@ -2807,6 +2808,7 @@ export function MobileApp({ apis }: MobileAppProps) {
             <WorkbenchShellHost />
             <WorkbenchTransitionOverlay />
             <Toaster position="top-center" offset="calc(var(--varin-safe-area-top, 0px) + 16px)" />
+            <SearchCredentialDialog />
           </div>
         </TooltipProvider>
       </RuntimeAPIProvider>

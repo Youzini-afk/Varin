@@ -275,6 +275,7 @@ import { createPdfEngine } from './lib/harness/pdf-engine.js';
 
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
+import { createSearchConnectionSettings } from './lib/harness/search-connection-settings.js';
 
 import { checkDesktopHttpUrl, checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { createEgressRuntime } from './lib/harness/egress.js';
@@ -1265,6 +1266,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Agent tools and user settings surfaces share the same native owners and CAS.
   const settingsActionRegistry = createSettingsActionRegistry({
+    searchConnections: () => searchConnectionSettings,
     self: () => ({ runtime: agentRuntime, bots: botService, threads, resolveBotModel: botAgentModel }),
     embeddingRequests: () => embeddingRequestSettings,
     models: () => modelsService,
@@ -1733,6 +1735,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const projectTrust = new ProjectTrustService(VARIN_DATA_DIR, (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal));
   registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
   const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  const searchConnectionSettings = createSearchConnectionSettings({ settings: modelsService.settings, credentials: serviceCredentials,
+    searchFetch: egressRuntime.fetch as typeof globalThis.fetch, surfaces: clientSurfaceBridge,
+    changed: request => broadcastGlobalUiEvent?.({ type: 'varin:search-credential-changed', properties: { requestId: request.id, status: request.status,
+      ...(request.status === 'completed' ? { connectionId: request.connectionId } : {}) } }),
+    credentialChanged: connectionId => broadcastGlobalUiEvent?.({ type: 'varin:search-credential-changed', properties: { connectionId } }),
+  });
   const executionEnvironment = createExecutionEnvironmentRuntime({ platform: platformEnvironmentRuntime,
     preference: async () => (await modelsService.settings.harness()).shell });
   app.get('/api/execution-environment', uiAuthController.requireAuth, async (req, res) => {
@@ -2509,6 +2517,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerWebSearchCredentialRoutes(app, {
+    connections: searchConnectionSettings,
     readAuth: serviceCredentials.read, saveAuth: serviceCredentials.save, removeAuth: serviceCredentials.remove,
     readSearchSettings: () => modelsService.settings.harness().then(value => value.web?.search),
     searchFetch: egressRuntime.fetch as typeof globalThis.fetch,
@@ -3181,6 +3190,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('unsubscribeModels', () => unsubscribeModels());
       await shutdown.run('stopModelDirectory', () => stopModelDirectory());
       await shutdown.run('modelsService.authorizations.close', () => modelsService.authorizations.close());
+      await shutdown.run('searchConnectionSettings.close', () => searchConnectionSettings.close());
       await shutdown.run('unsubscribeModelKernel', () => unsubscribeModelKernel());
       await shutdown.run('modelExtensions.close', () => modelExtensions.close());
       await shutdown.run('documentsAuthority.dispose', () => documentsAuthority.dispose());

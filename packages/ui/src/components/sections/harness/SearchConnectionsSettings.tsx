@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import './search-connections.css';
+import { useSearchCredentialRequests } from '@/stores/useSearchCredentialRequests';
 
 const providers = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const;
 const providerName = (provider: HarnessWebSearchProvider) => provider === 'searxng' ? 'SearXNG' : provider[0]!.toUpperCase() + provider.slice(1);
@@ -49,6 +50,7 @@ function ConnectionDisclosure({ connection, initiallyOpen, onEnabledChange, onRe
 
 function SearchCredential({ connectionId, onChanged }: { connectionId: string; onChanged(): void }) {
   const { t } = useI18n();
+  const credentialRevision = useSearchCredentialRequests(state => state.credentialRevision);
   const changed = React.useRef(onChanged); changed.current = onChanged;
   const [configured, setConfigured] = React.useState<boolean | null>(null);
   const [editing, setEditing] = React.useState(false);
@@ -66,10 +68,10 @@ function SearchCredential({ connectionId, onChanged }: { connectionId: string; o
     void runtimeFetch(url, { cache: 'no-store', signal: abort.signal }).then(async (response) => {
       if (!response.ok) throw new Error(t('settings.harness.credentialFailed'));
       const result = await response.json() as { configured: boolean };
-      if (!abort.signal.aborted) setConfigured(result.configured);
+      if (!abort.signal.aborted) { setConfigured(result.configured); setError(null); }
     }).catch((failure) => { if (!abort.signal.aborted) setError(String(failure)); });
     return () => { lifecycle.mounted = false; abort.abort(); };
-  }, [url, t, attempt]);
+  }, [url, t, attempt, credentialRevision]);
 
   const save = React.useCallback(async () => {
     clearTimeout(timer.current);

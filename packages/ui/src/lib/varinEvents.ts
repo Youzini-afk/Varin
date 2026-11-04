@@ -4,6 +4,7 @@ import { parseComputerAutomationInvalidation, parseComputerAutomationState, pars
 import type { ComputerActivityEntry, ComputerAutomationInvalidation, ComputerAutomationState } from '@varin/protocol';
 import { bindClientSurfaceThread, selectedClientThread, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { searchCredentialChanged } from '@/stores/useSearchCredentialRequests';
 
 type StreamReadyEvent = {
   type: 'stream-ready';
@@ -162,6 +163,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'varin:client-settings-request') {
     const properties = getEventProperties(envelope.properties);
     if (properties) void handleClientSettingsRequest(properties);
+    return;
+  }
+  if (envelope.type === 'varin:search-credential-changed') {
+    const properties = getEventProperties(envelope.properties);
+    if (properties) searchCredentialChanged(properties);
     return;
   }
 

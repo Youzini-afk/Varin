@@ -47,6 +47,23 @@ const channelSchema = object({ id: string, name: string, type: string, enabled: 
 export function getSettingsActionContracts(entry: SettingsCatalogEntry): Record<string, SettingsActionContract> {
   let contracts: Record<string, SettingsActionContract>;
   switch (entry.actionRef?.domain) {
+    case 'service:web-search': {
+      const provider = { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng'] };
+      const fields = { name: string, description: { type: 'string' }, enabled: { type: 'boolean' }, endpoint: nullableString };
+      contracts = {
+        list: read(),
+        add: write(object({ ...revision, connection: object({ ...fields, endpoint: string, provider }, ['provider']) }, ['expectedRevision', 'connection']), 'next-request', 'The Host assigns the connection ID and its private credential reference.', 'credentials'),
+        patch: write(object({ ...identified, set: { ...object(fields), minProperties: 1 } }, ['id', 'expectedRevision', 'set']), 'next-request', 'Only supplied fields change; null endpoint restores the provider default.'),
+        remove: write(object(identified, ['id', 'expectedRevision']), 'next-request', 'Removes the connection and route references. Credentials are retained; remove-credential explicitly removes a key.', 'credentials'),
+        route: write(object({ ...revision, set: { ...object({ defaultConnectionId: nullableString, fallbackConnectionIds: { type: 'array', uniqueItems: true, items: string }, enabled: { type: 'boolean' }, smartSelection: { type: 'boolean' } }), minProperties: 1 } }, ['expectedRevision', 'set']), 'next-request'),
+        'restore-default': write(object(revision, ['expectedRevision']), 'next-request', 'Restores the built-in keyless route without removing any saved key.', 'credentials'),
+        test: read(object({ id: string }, ['id']), 'Runs one real Varin documentation search on this saved connection, with no fallback or cached result. Provider usage may be charged.'),
+        'credential-status': read(object({ id: string }, ['id'])),
+        'enter-credential': write(object({ id: string }, ['id']), 'next-request', 'Opens a private password field in the interface bound to this conversation. Do not ask for a key in chat or pass one in tool arguments. Query/cancel the returned operation to observe completion.', 'credentials'),
+        'remove-credential': write(object({ id: string }, ['id']), 'next-request', 'Removes the key under this saved connection reference; any connection sharing that reference also loses access.', 'credentials'),
+      };
+      break;
+    }
     case 'service:self-bot': contracts = {
       read: read(), update: write({ ...object({ expectedRevision: integer, name: string, instructions: nullableString,
         model: { anyOf: [model, { type: 'null' }] } }, ['expectedRevision']), minProperties: 2 }, 'next-request',

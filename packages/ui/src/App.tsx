@@ -38,6 +38,7 @@ import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { AboutDialog } from '@/components/ui/AboutDialog';
+import { SearchCredentialDialog } from '@/components/sections/harness/SearchCredentialDialog';
 import { VarinDiagnosticsDialog } from '@/components/ui/VarinDiagnosticsDialog';
 import { WorkspaceEditReviewDialog } from '@/components/workbench/WorkspaceEditReviewDialog';
 import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
@@ -656,6 +657,7 @@ function App({ apis }: AppProps) {
                 embeddedSessionChat={embeddedSessionChat}
                 embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
               />
+              <SearchCredentialDialog />
             </div>
           </TooltipProvider>
         </RuntimeAPIProvider>
@@ -693,6 +695,7 @@ function App({ apis }: AppProps) {
               <WorkbenchShellHost onReadyChange={setWorkbenchReady} />
               <Toaster />
               <WorkspaceEditReviewDialog />
+              <SearchCredentialDialog />
               {!isBootShell && (
                 <>
                   <WorkbenchTransitionOverlay />

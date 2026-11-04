@@ -25,6 +25,7 @@ import {
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useThreadStore, threadHostKey } from '@/stores/useThreadStore';
 import { ClientSettingConflict, clientSettingSnapshot, synchronousClientSetting, type ClientSettingAuthority } from './client-settings-authority';
+import { openSearchCredentialRequest } from '@/stores/useSearchCredentialRequests';
 
 const SURFACE_ID_STORAGE_KEY = 'varin.client-surface.window.v1';
 let cachedSurfaceId: string | null = null;
@@ -267,6 +268,14 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
   const results: ClientSettingsFieldResult[] = [];
   for (const entry of entries) {
     if (generation !== getRuntimeEndpointGeneration()) return;
+    if (properties.op === 'present-credential') {
+      try {
+        if (entry.id !== 'harness.web.search.connections' || typeof entry.values?.requestId !== 'string') throw new Error('Unknown credential entry request.');
+        await openSearchCredentialRequest(entry.values.requestId);
+        results.push({ id: entry.id, status: 'applied', mutation: 'none' });
+      } catch { results.push({ id: entry.id, status: 'unavailable', mutation: 'none', error: 'Credential entry could not be opened.' }); }
+      continue;
+    }
     const authority = typeof entry.id === 'string' ? AUTHORITIES[entry.id] : undefined;
     if (!authority) {
       results.push({ id: String(entry.id ?? ''), ...(entry.itemIndex !== undefined ? { itemIndex: entry.itemIndex } : {}), status: 'unavailable', error: 'this surface does not own that setting' });

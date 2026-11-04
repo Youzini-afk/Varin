@@ -68,6 +68,7 @@ export function createSettingsPermissionSubjects(deps: SettingsPermissionSubject
       if (paths.some(path => typeof path === 'string' && /^(command|args|cwd|type|url|env|headers|auth|oauth)(\.|$)/.test(path))) actionAuthority = 'credentials';
     }
     const target = `${id}:${verb}`;
+    if (entry?.actionRef?.domain === 'service:web-search' && verb === 'patch' && record(values.set) && 'endpoint' in values.set) actionAuthority = 'credentials';
     if (entry?.actionRef?.domain === 'runtime:providers' && ['save', 'patch'].includes(verb)) {
       const snapshot = await deps.models().file.read();
       signal.throwIfAborted();

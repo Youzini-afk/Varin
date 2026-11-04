@@ -89,6 +89,16 @@ describe('settings semantic authorization', () => {
     expect((await resolve('settings_action', { id: 'tunnel.start', verb: 'status', args: {} }, signal()))?.[0]?.authority).toBeUndefined();
   });
 
+  it('keeps search description edits ordinary while authorizing credential entry and endpoint changes per connection', async () => {
+    const action = (verb: string, args: Record<string, unknown>) => resolve('settings_action', { id: 'harness.web.search.connections', verb, args }, signal());
+    expect((await action('patch', { id: 'research', expectedRevision: 'r', set: { description: 'Academic sources' } }))?.[0]?.authority).toBeUndefined();
+    expect((await action('patch', { id: 'research', expectedRevision: 'r', set: { endpoint: 'https://search.example' } }))?.[0]?.authority).toBe('settings:credentials');
+    const first = (await action('enter-credential', { id: 'research' }))![0]!;
+    const second = (await action('enter-credential', { id: 'backup' }))![0]!;
+    expect(first.authority).toBe('settings:credentials');
+    expect(first.persistMatch).not.toEqual(second.persistMatch);
+  });
+
   it('allows configured-provider model and suffix choices while protecting base mounts, proxies and accounts', async () => {
     const save = (candidate: ModelChannel) => resolve('settings_action', { id: 'providers.connect', verb: 'save', args: { channel: candidate, expectedRevision: 'revision' } }, signal());
     const apiShape = { ...channel, connection: { paths: { chat: '/alternate-chat' } }, models: [{ ...channel.models[0]!, id: 'other-model', requestModelId: 'remote-id', contextWindow: 65536 }] };
