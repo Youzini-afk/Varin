@@ -48,14 +48,14 @@ it('compiles original configured profiles without losing unavailable choices, sc
     process: agent({ tools: ['file_read', 'process_spawn'], worktree: 'isolated' }),
   } } };
   const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities, settings: async () => settings });
-  const frozen = await prepare({ parent: f.parent, workFocus: 'code' });
+  const frozen = await prepare({ parent: f.parent });
   const profile = (id: string) => frozen.presets.find(value => value.id === `custom:${id}`)!;
   expect(frozen.normal_unavailable).toBeNull();
   expect(frozen.presets.find(preset=>preset.id==='verifier')).toMatchObject({unavailable:null,model_source:'inherit',tools:['file_read','file_write','process_spawn','ask_user']});
   expect(profile('reader')).toMatchObject({ model_source: 'inherit', model: null, unavailable: null, tools: ['file_read'], avatar: 'dome-ivory' });
   expect(profile('selected')).toMatchObject({ model_source: 'selected', model: { configuration: { model: 'model' } }, unavailable: null });
   expect(profile('off').unavailable?.code).toBe('child-profile-disabled');
-  expect(profile('research').unavailable?.code).toBe('child-profile-scope_unavailable');
+  expect(profile('research')).toMatchObject({ unavailable: null, work_focus: ['research'] });
   expect(profile('unsupported')).toMatchObject({ tools: ['file_read', 'computer'], unavailable: null });
   expect(frozen.native_capabilities).toEqual(f.capabilities); // Actual request directory resolves non-native names, never a latest registry.
   expect(profile('physical').unavailable).toBeNull(); // Actual directory decides whether a same-named tool is native or a Host service.
@@ -64,18 +64,21 @@ it('compiles original configured profiles without losing unavailable choices, sc
   expect(profile('process')).not.toHaveProperty('work_mode');
   settings.harness.agents.reader.instructions = 'Changed later.';
   expect(profile('reader').instructions).toBe('Keep the original result.');
-  expect((await prepare({ parent: f.parent, workFocus: 'code' })).identity).not.toBe(frozen.identity);
-  expect((await prepare({ parent: f.parent })).presets.find(value => value.id === 'custom:research')?.unavailable?.code).toBe('child-profile-scope_unavailable');
+  expect((await prepare({ parent: f.parent })).identity).not.toBe(frozen.identity);
 });
 
-it('uses the admitted project work focus and a general default for unscoped conversations', async () => {
+it('retains roles from every focus for dispatch-time choice and freezes their applicability', async () => {
   const f = await fixture();
+  const scopes = ['research'];
   const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities,
-    projectWorkFocus: async id => id === 'research-project' ? 'research' : undefined,
-    settings: async () => ({ harness: { agents: { research: agent({ workFocus: ['research'] }), code: agent({ workFocus: ['code'] }) } } }) });
-  const result = await prepare({ parent: f.parent, projectId: 'research-project' });
-  expect(result.presets.find(profile => profile.id === 'custom:research')?.unavailable).toBeNull();
-  expect(result.presets.find(profile => profile.id === 'custom:code')?.unavailable?.code).toBe('child-profile-scope_unavailable');
+    settings: async () => ({ harness: { agents: { research: agent({ workFocus: scopes }), code: agent({ workFocus: ['code'] }) } } }) });
+  const result = await prepare({ parent: f.parent });
+  expect(result.presets.find(profile => profile.id === 'research_peer')).toMatchObject({ unavailable: null, work_focus: ['research'] });
+  expect(result.presets.find(profile => profile.id === 'custom:research')).toMatchObject({ unavailable: null, work_focus: ['research'] });
+  expect(result.presets.find(profile => profile.id === 'custom:code')).toMatchObject({ unavailable: null, work_focus: ['code'] });
+  scopes.push('office');
+  expect(result.presets.find(profile => profile.id === 'custom:research')?.work_focus).toEqual(['research']);
+  expect((await prepare({ parent: f.parent })).identity).not.toBe(result.identity);
 });
 
 it('normalizes inherited overrides through the actual model owner, retaining original thinking and explicit zero', async () => {

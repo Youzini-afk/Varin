@@ -29,6 +29,14 @@ it('admits exact edited instructions, selected refs, explicit source and prepare
 it('returns the exact existing receipt before settings or attachment revalidation',async()=>{
  const f=fixture();f.runtime.userChildDispatchReceipt.mockResolvedValueOnce(original);vi.mocked(readDelegationModelCatalog).mockRejectedValueOnce(new Error('configuration removed'));expect(await f.api.dispatch(input)).toEqual(original);expect(readDelegationModelCatalog).not.toHaveBeenCalled();expect(f.attachments.prepare).not.toHaveBeenCalled();expect(f.runtime.acceptUserChildDispatch).not.toHaveBeenCalled();
 });
+it('passes an explicit work focus independently of file mode and rejects unknown focuses', async () => {
+  const f = fixture();
+  await f.api.dispatch({ ...input, workFocus: 'research' });
+  expect(f.runtime.acceptUserChildDispatch).toHaveBeenCalledWith(expect.objectContaining({
+    input: expect.objectContaining({ workFocus: 'research', workMode: 'shared' }),
+  }), undefined);
+  expect(() => parseThreadDispatchInput({ ...input, workFocus: 'coding' })).toThrow(ThreadPreAdmissionError);
+});
 it('rejects invented actor or implicit source and exposes an editable pre-admission rejection',()=>{
  expect(()=>parseThreadDispatchInput({...input,actor:{kind:'agent'}})).toThrow(ThreadPreAdmissionError);expect(()=>parseThreadDispatchInput({...input,projectId:undefined})).toThrow(ThreadPreAdmissionError);expect(()=>parseThreadDispatchInput({...input,background:[{...input.background![0],itemIds:[]}]})).toThrow(ThreadPreAdmissionError);
 });

@@ -5733,6 +5733,7 @@ export interface ChildCapabilityFailure {
 }
 
 export interface ChildPreset {
+  work_focus?: string[];
   external?: { configuration_id: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; model?: string; launch: { command: string; args: string[] } };
   description?: string;
   tools_source: 'default' | 'explicit';
@@ -5818,6 +5819,7 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  workFocus?: "general" | "code" | "research" | "office";
   projectId?: string;
   background?: Array<{threadId:string;branchId:string;headId:string;itemIds:string[]}>;
   sourcePath?: string;

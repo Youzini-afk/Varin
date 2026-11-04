@@ -1,7 +1,7 @@
 /** User handoff coordinates existing owners. Catalog retains the original command,
  * relation and receipt; this adapter never creates a detached conversation. */
 import type { ThreadDispatchCatalog, ThreadDispatchInput, ThreadDispatchReceipt, ThreadIdentity } from '@varin/application-client';
-import { parseAttachmentSelections } from '@varin/protocol';
+import { isWorkFocusId, parseAttachmentSelections } from '@varin/protocol';
 import type { ModelsService } from '../models/service.js';
 import { readDelegationModelCatalog } from '../models/delegation-catalog.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -15,10 +15,11 @@ const nonempty = (value: unknown): value is string => typeof value === 'string' 
 export function parseThreadDispatchInput(value: unknown): ThreadDispatchInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid('Handoff input must be an object');
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !['runtime', 'threadId', 'branchId', 'key', 'runId', 'expectedHead', 'text', 'name', 'model', 'thinking', 'projectId', 'workMode', 'background', 'attachments'].includes(key))
+  if (Object.keys(input).some(key => !['runtime', 'threadId', 'branchId', 'key', 'runId', 'expectedHead', 'text', 'name', 'model', 'thinking', 'projectId', 'workMode', 'workFocus', 'background', 'attachments'].includes(key))
     || input.runtime !== 'agent' || !['threadId', 'branchId', 'key', 'runId', 'text', 'model'].every(key => nonempty(input[key]))
     || !(input.expectedHead === null || nonempty(input.expectedHead)) || !(input.projectId === null || nonempty(input.projectId))
     || !['shared', 'read_only', 'isolated_write'].includes(String(input.workMode))
+    || input.workFocus !== undefined && !isWorkFocusId(input.workFocus)
     || input.name !== undefined && !nonempty(input.name) || input.thinking !== undefined && !nonempty(input.thinking)) return invalid('Select a native Thread, model, source and handoff instructions');
   if (input.background !== undefined && (!Array.isArray(input.background) || input.background.some(value => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
@@ -33,6 +34,7 @@ export function parseThreadDispatchInput(value: unknown): ThreadDispatchInput {
 function command(input: ThreadDispatchInput): UserChildDispatchCommand {
   return { key: input.key, threadId: input.threadId, branchId: input.branchId, runId: input.runId, expectedHead: input.expectedHead,
     input: { task: input.text, model: input.model, thinking: input.thinking ?? 'default', workMode: input.workMode,
+      ...(input.workFocus === undefined ? {} : { workFocus: input.workFocus }),
       ...(input.name === undefined ? {} : { name: input.name }), ...(input.projectId === null ? {} : { projectId: input.projectId }),
       ...(input.background?.length ? { background: input.background } : {}), ...(input.attachments?.length ? { attachments: input.attachments } : {}) } };
 }

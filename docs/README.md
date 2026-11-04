@@ -48,6 +48,7 @@
 
 ## 持续演进的设计
 
+- [联网检索、网页阅读与来源引用](design/web-retrieval.md)：设计提案；覆盖默认搜索修复、多渠道与按问题阅读、来源引用、调研续接和材料回收，尚未实施。
 - [增量上下文管理](design/incremental-context-management.md)：待讨论；摘要块、原文回读等为候选思路，需重新判断理解连续性、总成本与实现必要性，尚未确定实施方向。
 - [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。
 

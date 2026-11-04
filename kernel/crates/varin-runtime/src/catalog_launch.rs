@@ -525,6 +525,8 @@ impl ExtensionToolBinding {
         Ok(())
     }
 }
+pub const WORK_FOCUS_IDS: [&str; 4] = ["general", "code", "research", "office"];
+
 /// The user's Agent configuration for this Run. Tools select from the admitted directory;
 /// they never grant capabilities absent from that directory.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -605,7 +607,7 @@ impl LaunchSelection {
     pub(super) fn validate_structure(&self) -> Result<()> {
         self.driver.validate().map_err(|error| RuntimeError::Invalid(error.to_string()))?;
         validate_policy_models(&self.driver_models)?;
-        if self.agent.as_ref().is_some_and(|agent| !matches!(agent.work_focus.as_str(), "general" | "code" | "research" | "office")) {
+        if self.agent.as_ref().is_some_and(|agent| !WORK_FOCUS_IDS.contains(&agent.work_focus.as_str())) {
             return Err(RuntimeError::Invalid("unknown Agent work focus".into()));
         }
         if let Some(catalog) = &self.child_dispatch {

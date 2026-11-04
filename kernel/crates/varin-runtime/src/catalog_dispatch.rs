@@ -78,6 +78,9 @@ pub struct DispatchInput {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
+    /// Tool disclosure focus for this child. Omission inherits the admitted caller's focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_focus: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_mode: Option<ChildWorkMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,11 +111,14 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_focus: None, work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
         for attachment in &self.attachments { attachment.validate()?; }
+        if self.work_focus.as_deref().is_some_and(|focus| !launches::WORK_FOCUS_IDS.contains(&focus)) {
+            return Err(RuntimeError::Invalid("workFocus must be general, code, research or office".into()));
+        }
         if self.preset.is_some() && (self.model.is_some() || self.thinking.is_some()) {
             return Err(RuntimeError::Invalid("A preset retains its own model and thinking configuration; omit preset for free model selection".into()));
         }
@@ -198,6 +204,9 @@ pub enum ChildPresetToolsSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
+    /// Empty means this role is available in every child work focus.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_focus: Vec<String>,
     /// A configured independent harness. Its own model/tools are not Varin model bindings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalChildBinding>,
@@ -277,6 +286,9 @@ impl ChildDispatchCatalog {
         }
         let mut names = std::collections::BTreeSet::new();
         for preset in &self.presets {
+            if preset.work_focus.iter().any(|focus| !launches::WORK_FOCUS_IDS.contains(&focus.as_str())) {
+                return Err(RuntimeError::Invalid("child preset has an unknown work focus".into()));
+            }
             if preset.id.trim().is_empty()
                 || preset.name.trim().is_empty()
                 || !names.insert(&preset.id)
@@ -368,6 +380,9 @@ pub struct ChildSelectedProfile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenChildDispatch {
+    /// Frozen with the caller's request, including when it delegates across projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_focus: Option<String>,
     pub source: Option<super::launches::SourceSelection>,
     /// Optional child directory. The same frozen composition also serves non-delegating MCP/extension calls.
     pub catalog_ref: Option<Value>,
@@ -408,6 +423,7 @@ pub struct ChildDispatchSelection {
 }
 #[derive(Debug)]
 pub struct ResolvedChildSelection {
+    pub agent: Option<launches::AgentSelection>,
     pub process: bool,
     pub frozen_reference: Value,
     pub catalog_ref: Value,
@@ -516,6 +532,8 @@ impl ChildDispatchSelection {
     pub fn external_preset(&self, input: &DispatchInput) -> Result<Option<ChildPreset>> {
         input.validate()?;
         let Some(preset) = self.catalog.presets.iter().find(|p| input.preset.as_deref() == Some(p.id.as_str()) && p.external.is_some()) else { return Ok(None); };
+        if input.work_focus.is_some() { return Err(RuntimeError::Invalid("workFocus selects Varin's native tool disclosure; this external Agent manages its own modes. Omit workFocus for an external preset".into())); }
+        self.require_preset_focus(preset, self.work_focus(input))?;
         if let Some(reason) = &preset.unavailable { return Err(RuntimeError::Invalid(format!("external Agent unavailable: {}", reason.code))); }
         if input.tools.is_some() { return Err(RuntimeError::Invalid("External Agents use their own tools; omit tools for this dispatch".into())); }
         // A prompt is not a read-only boundary. Only advertise this mode after the adapter
@@ -634,14 +652,28 @@ impl ChildDispatchSelection {
     pub fn project(&self,input:&DispatchInput)->Result<Option<ChildProjectSource>> {
         input.project_id.as_ref().map(|id|self.catalog.projects.iter().find(|p|&p.id==id).cloned().ok_or_else(||RuntimeError::Invalid(format!("Registered project {id} is not in this request; use matters projects to discover available project IDs")))).transpose()
     }
+    pub fn work_focus<'a>(&'a self, input: &'a DispatchInput) -> &'a str {
+        input.work_focus.as_deref().or(self.frozen.work_focus.as_deref()).unwrap_or("general")
+    }
+    fn require_preset_focus(&self, preset: &ChildPreset, focus: &str) -> Result<()> {
+        if !preset.work_focus.is_empty() && !preset.work_focus.iter().any(|allowed| allowed == focus) {
+            return Err(RuntimeError::Invalid(format!(
+                "Child preset {} is available in workFocus [{}], not {focus}. Choose an applicable workFocus or omit preset for free dispatch",
+                preset.id, preset.work_focus.join(", ")
+            )));
+        }
+        Ok(())
+    }
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
         self.project(input)?;
+        let focus = self.work_focus(input);
         let model_selection_required = input.preset.is_none() && self.catalog.model_selection_preparation;
         if !model_selection_required && (input.model.is_some() || input.thinking.is_some()) {
             return Err(RuntimeError::Invalid("Delegated model preparation unavailable; start a new request".into()));
         }
-        let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none() && preset.id != "code_retrieval")
+        let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none() && preset.id != "code_retrieval"
+            && (preset.work_focus.is_empty() || preset.work_focus.iter().any(|allowed| allowed == focus)))
             .map(|preset| preset.id.as_str()).collect::<Vec<_>>().join(", ");
         let available = if available.is_empty() { "none" } else { &available };
         let (mut tools, mode, instructions, model, avatar) = if let Some(id) = &input.preset {
@@ -660,6 +692,7 @@ impl ChildDispatchSelection {
                         else { format!("; unavailable capabilities: {}", failure.capabilities.join(", ")) }
                 )));
             }
+            self.require_preset_focus(preset, focus)?;
             if preset
                 .inherit_base
                 .as_ref()
@@ -773,6 +806,9 @@ impl ChildDispatchSelection {
                 .is_some_and(|capability| capability.process)
         });
         Ok(ResolvedChildSelection {
+            agent: input.work_focus.as_ref().or(self.frozen.work_focus.as_ref()).map(|focus| launches::AgentSelection {
+                profile_id: None, name: None, work_focus: focus.clone(), tools: None,
+            }),
             process,
             frozen_reference: self.reference.clone(),
             catalog_ref: self.frozen.catalog_ref.clone().ok_or_else(|| {
@@ -969,6 +1005,7 @@ impl ChildDispatchPreparation {
             Some(
                 self.content
                     .save(&serde_json::to_value(FrozenChildDispatch {
+                        work_focus: self.selection.agent.as_ref().map(|agent| agent.work_focus.clone()),
                         source: self.selection.source.clone(),
                         catalog_ref,
                         parent_model: self.model.clone(),

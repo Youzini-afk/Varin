@@ -264,7 +264,7 @@ impl Catalog {
                 let operation: Operation = serde_json::from_str(&row?)?;
                 if operation.external_receipt.as_ref().is_some_and(|receipt| !receipt.executor_stopped) { continue; }
                 let intent = super::tool_content::ToolIntent::from_operation(&operation)?;
-                if !matches!((intent.call().name.as_str(), intent.call().schema_version.as_str()), ("send", "5") | ("dispatch", "8")) { continue; }
+                if !matches!((intent.call().name.as_str(), intent.call().schema_version.as_str()), ("send", "5") | ("dispatch", "8" | "9")) { continue; }
                 let run = self.run(&operation.run_id)?;
                 let Some(launch) = self.launch_metadata(&run.id)? else { continue; };
                 let context = crate::execution::ToolExecutionContext { run_id: run.id.clone(), operation_id: operation.id, origin: intent.origin().clone() };

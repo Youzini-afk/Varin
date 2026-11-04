@@ -174,7 +174,7 @@ export class ThreadAdapter {
         const model = await waitForModelBinding(this.models.resolveModel(profile.model), model => model.credentialOwner.release(), signal);
         try {
           const initialContext = await this.prepareContext!(identity, source, { mode: 'bot', threadRole: 'main', projectId: `bot:${work.botId}` }, signal);
-          const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ projectId: `bot:${work.botId}`, modelOwner: model.credentialOwner,
+          const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner,
             parent: { configuration: model.configuration, credential_scope: await model.credentialOwner.scope() } }, signal) : undefined;
           signal.throwIfAborted();
           const receipt = await this.runtime.admitBotWork({ work, configuration: model.configuration, initialContext,
@@ -923,7 +923,7 @@ export class ThreadAdapter {
         mode: 'agent', threadRole: 'main', projectId: definition.project_id,
       }, signal);
       const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
-      const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ projectId: definition.project_id, modelOwner: model.credentialOwner, parent: {
+      const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
         configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
       } }, signal) : undefined;
       signal.throwIfAborted();
@@ -1028,7 +1028,7 @@ export class ThreadAdapter {
               }
             }
             if (this.prepareChildProfiles) {
-              command.launch!.childDispatch = await this.prepareChildProfiles({ ...(input.agent ? { workFocus: input.agent.workFocus } : {}), projectId: (initialContext?.personalization ?? checkpoint?.personalization)?.projectId ?? null, modelOwner: model.credentialOwner, parent: {
+              command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
                 configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
               } });
             }

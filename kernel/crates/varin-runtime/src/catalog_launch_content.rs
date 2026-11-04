@@ -328,6 +328,7 @@ impl ChildLaunchPreparation {
             .collect();
         names.sort();
         if names != self.selected.profile.tools
+            || self.child.agent != self.selected.agent
             || self.child.connection_identity != self.selected.model.connection_identity()?
             || self.child.credential_scope != self.selected.model.credential_scope
             || self.child.model != self.selected.model.configuration.model

@@ -64,6 +64,7 @@ fn install(
 }
 fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     ChildPreset {
+        work_focus: Vec::new(),
         external: None,
         description: None,
         avatar: None,
@@ -90,6 +91,7 @@ fn input() -> DispatchInput {
         name: None,
         task: "Perform the selected task".into(),
         preset: None,
+        work_focus: None,
         work_mode: None,
         tools: None,
     }
@@ -105,6 +107,7 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
     other.configuration.model = "selected-worker".into();
     other.configuration.model_options = Some(json!({"temperature":0}));
     let mut selected = preset("worker-custom", Some(other.clone()));
+    selected.work_focus = vec!["research".into()];
     selected.avatar = Some("dome-ivory".into());
     let catalog = ChildDispatchCatalog { model_selection_preparation: false, projects:Vec::new(),
         native_capabilities: Vec::new(),
@@ -124,7 +127,13 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
         .contains("worker_disabled"));
     let mut request = input();
     request.preset = Some("worker-custom".into());
+    assert!(selection.resolve(&request).unwrap_err().to_string().contains("workFocus [research]"));
+    request.work_focus = Some("research".into());
     let resolved = selection.resolve(&request).unwrap();
+    assert_eq!(resolved.agent.as_ref().unwrap().work_focus, "research");
+    request.work_focus = Some("coding".into());
+    assert!(selection.resolve(&request).unwrap_err().to_string().contains("workFocus must be"));
+    request.work_focus = Some("research".into());
     assert_eq!(resolved.model, other);
     assert_eq!(resolved.profile.avatar.as_deref(), Some("dome-ivory"));
     assert_eq!(

@@ -1,7 +1,7 @@
 /** Existing user-owned execution presets -> immutable native dispatch choices.
  * This reads no secrets, prepares no child and owns no configuration or execution state. */
 import { createHash } from 'node:crypto';
-import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, observeQuickRetrieval, requiresRetrievalModelSelection, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
+import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, observeQuickRetrieval, requiresRetrievalModelSelection, type HarnessSettingsInput } from '@varin/protocol';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel, ExternalAgentSettings } from '@varin/application-client';
@@ -11,9 +11,6 @@ import { waitForModelBinding } from './model-binding-lifetime.js';
 
 export interface ChildProfileInput {
   parent: ChildModelBinding;
-  workFocus?: WorkFocusId;
-  /** Project already admitted by the Thread context owner. */
-  projectId?: string | null;
   /** The original parent selection retains implementations referenced by its frozen child catalog. */
   modelOwner?: ExistingHostCredentialOwner;
 }
@@ -29,7 +26,6 @@ const unavailable = (code: string, capabilities: string[] = []): ChildCapability
 export function createChildProfilePreparer(owners: {
   /** The existing global SettingsManager snapshot, never project overrides or a Pi Session. */
   settings(): Promise<unknown>;
-  projectWorkFocus?(projectId: string): Promise<WorkFocusId | undefined>;
   projects?(): Promise<ChildProjectSource[]>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   models: ThreadModelAuthority;
@@ -54,10 +50,11 @@ export function createChildProfilePreparer(owners: {
     const parent = input.parent;
     const catalogModelId = parent.configuration.catalogModelId ?? parent.configuration.model;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
-    const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined) ?? 'general';
     signal?.throwIfAborted();
     const defaults = agentPresetTools(descriptors);
-    const observations = [...observePresets(settings.models, main, settings.agents, focus, 'agent', defaults),
+    // Freeze all configured roles. The native dispatch resolves each role's scope
+    // against the child's selected focus, including recursive delegation.
+    const observations = [...observePresets(settings.models, main, settings.agents, undefined, 'agent', defaults),
       observeQuickRetrieval(settings.models, main, defaults.retrieval)];
     const externalSettings = owners.externalAgents ? await waitWithSignal(owners.externalAgents(), signal) : undefined;
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
@@ -66,6 +63,7 @@ export function createChildProfilePreparer(owners: {
         ? resolveAgentTools(settings.models[definition.slot]?.agent?.tools, 'agent', definition.tools).source
         : 'explicit';
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, description: definition.teamDescription, instructions: definition.systemPromptFragment,
+        ...(definition.workFocus?.length ? { work_focus: [...definition.workFocus] } : {}),
         ...(definition.avatar ? { avatar: definition.avatar } : {}),
         tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };

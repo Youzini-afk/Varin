@@ -500,6 +500,7 @@ impl Fixture {
             name: None,
             task: "Read the fixed file and report".into(),
             preset: None,
+            work_focus: None,
             work_mode: Some(if isolated {
                 varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
             } else {
@@ -550,6 +551,7 @@ impl Fixture {
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
             presets: if internal { vec![varin_runtime::catalog::dispatch::ChildPreset {
+                work_focus: Vec::new(),
                 external: None,
                 description: None,
                 id:"code_retrieval".into(),name:"Quick retrieval".into(),avatar:None,
