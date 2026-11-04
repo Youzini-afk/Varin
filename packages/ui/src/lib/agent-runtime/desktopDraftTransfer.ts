@@ -1,4 +1,4 @@
-import { getRuntimeEndpointGeneration } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
 import { DESKTOP_DRAFT_TRANSFER_MAX_BYTES, type DesktopDraftTransfer, type DesktopDraftTransferEvent } from '@varin/application-client/desktop';
 import { invokeDesktop } from '@/lib/desktop';
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, hasUnsentDraftContent, type ThreadDraft } from '@/stores/useThreadDraftStore';
@@ -6,6 +6,7 @@ import { useThreadStore, selectedComposerKey, threadComposerKey } from '@/stores
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { useBotNavigation } from '@/lib/bots';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { isDesktopThreadNavigationTarget } from './desktopThreadNavigation';
 import { currentWorkbenchProfileId, openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
 
@@ -13,6 +14,55 @@ const snapshotIds = new WeakMap<ThreadDraft, string>();
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const transferLimit = () => new Error('This draft is too large for the native transfer buffer. It remains in Mini Chat.');
+
+// Native JSON transport may reorder object properties. Scope equality is about
+// the complete descriptor, not its property insertion order (or just its path).
+function sameJSON(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left)) return Array.isArray(right) && left.length === right.length && left.every((item, index) => sameJSON(item, right[index]));
+  const a = object(left), b = object(right);
+  return Boolean(a && b && Object.keys(a).length === Object.keys(b).length
+    && Object.keys(a).every(key => Object.hasOwn(b, key) && sameJSON(a[key], b[key])));
+}
+function hasPathReferences(draft: ThreadDraft): boolean {
+  return Boolean(draft.selectedAttachments?.some(file => 'path' in file.selection)
+    || draft.references?.some(reference => reference.target.kind === 'file' || reference.target.kind === 'directory'));
+}
+/** Read the same source descriptor as the receiving composer. A launch belongs
+ * to the original Catalog snapshot, never to a claimed scope in the payload. */
+async function referenceSource(draft: ThreadDraft, identity: ThreadIdentity | null): Promise<unknown> {
+  if (!identity) return draft.sourceSelection ?? draft.workspacePath;
+  const api = getRegisteredRuntimeAPIs()?.threads;
+  if (!api) throw new Error('The conversation source is unavailable. Both drafts have been kept.');
+  const snapshot = await api.snapshot(identity);
+  if (snapshot.identity.threadId !== identity.threadId || snapshot.identity.branchId !== identity.branchId
+    || snapshot.thread.thread_id !== identity.threadId) throw new Error('The conversation source does not match this draft');
+  const branch = snapshot.thread.branches.find(value => value.branch_id === identity.branchId);
+  if (!branch) throw new Error('The conversation branch is unavailable');
+  const run = snapshot.activeRun ?? branch.latest_run;
+  const launch = snapshot.launch?.run_id === run?.id ? snapshot.launch : null;
+  const bot = Boolean(snapshot.thread.bot_id) && !snapshot.thread.parent_thread_id;
+  return (bot ? undefined : draft.preparedSource?.source) ?? launch?.selection.source ?? (bot ? undefined : draft.workspacePath);
+}
+function rebasePathReferences(draft: ThreadDraft, source: Pick<DesktopDraftTransfer, 'sourceDraftKey' | 'sourceHostGeneration'>,
+  generation: number, draftKey: string, descriptor: unknown): ThreadDraft {
+  const targetScope = JSON.stringify([generation, draftKey, descriptor]);
+  const targetDescriptor: unknown = JSON.parse(targetScope)[2];
+  const rebase = (scope: string | undefined, host: number): string => {
+    let parsed: unknown;
+    try { parsed = scope === undefined ? undefined : JSON.parse(scope); } catch { /* Invalid scopes remain invalid. */ }
+    if (host !== generation || !Array.isArray(parsed) || parsed.length !== 3
+      || parsed[0] !== source.sourceHostGeneration || parsed[1] !== source.sourceDraftKey || !sameJSON(parsed[2], targetDescriptor)) {
+      throw new Error('A referenced file belongs to an earlier source. Select it again. Both drafts have been kept.');
+    }
+    return targetScope;
+  };
+  return { ...draft,
+    selectedAttachments: draft.selectedAttachments?.map(file => 'path' in file.selection ? { ...file, sourceKey: rebase(file.sourceKey, file.host) } : file),
+    references: draft.references?.map(reference => reference.target.kind === 'file' || reference.target.kind === 'directory'
+      ? { ...reference, target: { ...reference.target, sourceKey: rebase(reference.target.sourceKey, reference.host) } } : reference),
+  };
+}
 
 function assertSettled(draft: ThreadDraft): void {
   if (draft.externalConversationId || draft.externalPreparationKey) {
@@ -121,7 +171,20 @@ export async function transferSelectedDesktopDraft(context: { directory: string;
   const sourceDraftKey = selectedComposerKey(navigation) ?? JSON.stringify([navigation.hostKey, 'draft', crypto.randomUUID()]);
   const snapshot = useThreadDraftStore.getState().drafts[sourceDraftKey];
   const draft = snapshot ?? EMPTY_THREAD_DRAFT;
+  assertSettled(draft);
   const sourceHostGeneration = getRuntimeEndpointGeneration();
+  const sourceIsCurrent = () => {
+    const current = useThreadStore.getState();
+    return getRuntimeEndpointGeneration() === sourceHostGeneration && current.hostKey === navigation.hostKey
+      && selectedComposerKey(current) === selectedComposerKey(navigation)
+      && current.selectedIdentity?.threadId === navigation.selectedIdentity?.threadId && current.selectedIdentity?.branchId === navigation.selectedIdentity?.branchId
+      && useThreadDraftStore.getState().drafts[sourceDraftKey] === snapshot;
+  };
+  if (hasPathReferences(draft)) {
+    const descriptor = await referenceSource(draft, navigation.selectedIdentity);
+    if (!sourceIsCurrent()) throw new Error('The draft changed while preparing its copy. Please open it in main again.');
+    rebasePathReferences(draft, { sourceDraftKey, sourceHostGeneration }, sourceHostGeneration, sourceDraftKey, descriptor);
+  }
   let snapshotId = snapshotIds.get(draft);
   if (!snapshotId) { snapshotId = crypto.randomUUID(); snapshotIds.set(draft, snapshotId); }
   const transfer: DesktopDraftTransfer = {
@@ -131,15 +194,10 @@ export async function transferSelectedDesktopDraft(context: { directory: string;
     draft: await serializeDesktopDraft(draft),
   };
   if (new TextEncoder().encode(JSON.stringify(transfer)).byteLength > DESKTOP_DRAFT_TRANSFER_MAX_BYTES) throw transferLimit();
-  if (getRuntimeEndpointGeneration() !== sourceHostGeneration || useThreadStore.getState().hostKey !== navigation.hostKey
-    || selectedComposerKey(useThreadStore.getState()) !== selectedComposerKey(navigation)
-    || useThreadDraftStore.getState().drafts[sourceDraftKey] !== snapshot) {
-    throw new Error('The draft changed while preparing its copy. Please open it in main again.');
-  }
+  if (!sourceIsCurrent()) throw new Error('The draft changed while preparing its copy. Please open it in main again.');
   const result = await invokeDesktop('desktop_transfer_draft', { transfer });
   if (!result?.accepted) throw new Error('The main window has not confirmed receiving this draft. Mini Chat remains open.');
-  if (getRuntimeEndpointGeneration() !== sourceHostGeneration || useThreadStore.getState().hostKey !== navigation.hostKey
-    || useThreadDraftStore.getState().drafts[sourceDraftKey] !== snapshot) {
+  if (!sourceIsCurrent()) {
     throw new Error('The earlier copy reached the main window. Newer edits are still in Mini Chat, so this window remains open.');
   }
   if (snapshot) useThreadDraftStore.getState().remove(sourceDraftKey);
@@ -158,7 +216,7 @@ export async function acceptDesktopDraftTransfer(event: DesktopDraftTransferEven
   if (Boolean(transfer.threadId) !== Boolean(transfer.branchId)) throw new Error('Both thread and branch identities are required');
   const identity = transfer.threadId && transfer.branchId ? { runtime: 'agent' as const, threadId: transfer.threadId, branchId: transfer.branchId } : null;
   const key = identity ? threadComposerKey(host, identity) : JSON.stringify([host, 'draft', 'handoff', transfer.sourceDraftKey]);
-  const draft = deserializeDesktopDraft(transfer, generation);
+  let draft = deserializeDesktopDraft(transfer, generation);
   if (draft.identity && (!identity || draft.identity.threadId !== identity.threadId || draft.identity.branchId !== identity.branchId)) throw new Error('The draft conversation identity does not match its destination');
   const sameReceipt = (value: ThreadDraft | undefined) => value?.desktopHandoff?.sourceDraftKey === transfer.sourceDraftKey && value.desktopHandoff.snapshotId === transfer.snapshotId;
   const assertCanReceive = () => {
@@ -168,8 +226,25 @@ export async function acceptDesktopDraftTransfer(event: DesktopDraftTransferEven
     if (existing && !sameReceipt(existing) && hasUnsentDraftContent(existing)) throw new Error('The main window already has a different unsent draft for this conversation. Both drafts have been kept.');
   };
   assertCanReceive();
+  // A replay confirms the existing copy without stealing focus or replacing
+  // edits. In particular, it must not strand a newer local draft.
+  if (sameReceipt(useThreadDraftStore.getState().drafts[key])) return;
+  const assertCanNavigate = () => {
+    assertCanReceive();
+    const selectedKey = useThreadStore.getState().selectedDraftKey;
+    const selected = selectedKey && useThreadDraftStore.getState().drafts[selectedKey];
+    if (selectedKey !== key && selected && !selected.identity && hasUnsentDraftContent(selected)) {
+      throw new Error('The main window has another unsent local draft. Finish or clear it before opening Mini Chat here. Both drafts have been kept.');
+    }
+  };
+  assertCanNavigate();
+  if (hasPathReferences(draft)) {
+    const descriptor = await referenceSource(draft, identity);
+    assertCanNavigate();
+    draft = rebasePathReferences(draft, transfer, generation, key, descriptor);
+  }
   if (identity) {
-    await openThreadFromNavigation({ ...identity, directory: transfer.directory || null });
+    await openThreadFromNavigation({ ...identity, directory: transfer.directory || null, beforeCommit: assertCanNavigate });
     assertCanReceive();
     const selected = currentWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID
       ? useBotNavigation.getState().entry : useThreadStore.getState().selectedIdentity;
@@ -183,7 +258,7 @@ export async function acceptDesktopDraftTransfer(event: DesktopDraftTransferEven
     // Read the receipt at the actual commit boundary, after asynchronous shell
     // navigation. A duplicate that arrived meanwhile must not replace new edits.
     target.beforeCommit = () => {
-      assertCanReceive();
+      assertCanNavigate();
       target.draft = sameReceipt(useThreadDraftStore.getState().drafts[key]) ? undefined : draft;
     };
     await startThreadFromNavigation(target);

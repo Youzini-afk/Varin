@@ -29,7 +29,7 @@ export async function openExternalConversationFromNavigation(id: string): Promis
   useExternalAgentStore.getState().select(id);
   useUIStore.getState().setSettingsDialogOpen(false);
 }
-export async function openThreadFromNavigation(target: { threadId: string; branchId?: string; directory?: string | null }): Promise<ThreadIdentity> {
+export async function openThreadFromNavigation(target: { threadId: string; branchId?: string; directory?: string | null; beforeCommit?: () => void }): Promise<ThreadIdentity> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const current = () => {
     if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded');
@@ -42,12 +42,13 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   // A Bot's own conversations stay in the Bot workbench. Its delegated work is an ordinary
   // execution Thread and opens where its files, terminals and collaboration live.
   const botConversation = Boolean(bot) && !parentThreadId;
-  const select = () => { void useThreadStore.getState().selectThread(identity).catch(() => {}); };
-  await selectConversationShell(botConversation, current, select);
-  current();
+  const beforeCommit = () => { current(); target.beforeCommit?.(); };
+  const select = () => { void useThreadStore.getState().selectThread({ ...identity, beforeCommit }).catch(() => {}); };
+  await selectConversationShell(botConversation, beforeCommit, select);
+  beforeCommit();
   if (bot && botConversation) await openBotConversation(bot.id, identity, null, bot.archived);
   else {
-    await useThreadStore.getState().selectThread(identity);
+    await useThreadStore.getState().selectThread({ ...identity, beforeCommit });
     current();
     if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
   }
@@ -62,9 +63,12 @@ export async function startThreadFromNavigation(target: {
 } = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
-  await selectConversationShell(false, current);
-  current();
-  target.beforeCommit?.();
+  const beforeCommit = () => { current(); target.beforeCommit?.(); };
+  // A guarded incoming draft owns this navigation. Keep the current local
+  // selection until openDraft commits, rather than restoring another Thread
+  // during the Bot shell reveal and losing the draft we still need to protect.
+  await selectConversationShell(false, beforeCommit, target.beforeCommit ? beforeCommit : undefined);
+  beforeCommit();
   if (target.projectId && !useProjectsStore.getState().projects.some(project => project.id === target.projectId)) {
     throw new Error('The draft project is unavailable on this Host');
   }

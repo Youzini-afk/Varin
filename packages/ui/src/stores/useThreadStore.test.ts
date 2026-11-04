@@ -42,6 +42,22 @@ it('opens the canonical branch from native catalog and keeps pin/archive/read wr
   await useThreadStore.getState().markRead(identity.threadId, 4);
   expect(useThreadStore.getState().threads[0].unread).toBe(false);
 });
+it('runs an optional navigation guard after an async Catalog lookup and before discarding the local draft selection', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const local = useThreadStore.getState().openDraft();
+  const pending = deferred<ThreadSummary[]>(); f.list.mockImplementationOnce(() => pending.promise);
+  useThreadStore.setState({ threads: [] });
+  const beforeCommit = vi.fn(() => {
+    if (useThreadDraftStore.getState().drafts[local]?.text) throw new Error('Keep local input reachable');
+  });
+  const selecting = useThreadStore.getState().selectThread({ ...identity, beforeCommit });
+  useThreadDraftStore.getState().patch(local, { text: 'Typed while Catalog was loading' });
+  pending.resolve([summary()]);
+  await expect(selecting).rejects.toThrow('Keep local input reachable');
+  expect(beforeCommit).toHaveBeenCalledOnce();
+  expect(useThreadStore.getState().selectedDraftKey).toBe(local);
+  expect(useThreadStore.getState().selectedIdentity).toBeNull();
+});
 it('invalidates catalog on original events and never turns a failed refresh into an empty success', async () => {
   const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
   f.list.mockRejectedValueOnce(new Error('catalog offline'));

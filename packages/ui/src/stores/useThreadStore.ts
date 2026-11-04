@@ -27,7 +27,7 @@ interface ThreadNavigationState {
   catalogError: string | null;
   loadCatalog(): Promise<void>;
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
-  selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
+  selectThread(identity: { threadId: string; branchId?: string; beforeCommit?: () => void }): Promise<ThreadIdentity>;
   openDraft(options?: { workspacePath?: string; key?: string; draft?: ThreadDraft }): string;
   materializeDraft(draftKey: string): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
@@ -115,6 +115,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     const thread = get().threads.find(thread => thread.thread_id === target.threadId);
     const identity = thread ? resolveCatalogIdentity(get().hostKey, thread, target) : (await get().resolveThread(target)).identity;
     if (owner !== binding || next !== navigation) throw new Error('Conversation navigation was superseded');
+    target.beforeCommit?.();
     // Catalog identity is authoritative; snapshot execution remains owned by ThreadProjection.
     const branchId = identity.branchId;
     selectedBranches.set(JSON.stringify([get().hostKey, target.threadId]), branchId);
