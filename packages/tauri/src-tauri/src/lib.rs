@@ -102,3 +102,6 @@ mod preview;
 
 #[cfg(any(feature = "desktop", test))]
 mod startup_theme;
+
+#[cfg(any(feature = "desktop", test))]
+mod desktop_admission;

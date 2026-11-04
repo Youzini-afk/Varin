@@ -48,6 +48,7 @@ struct DesktopState {
     exit_ready: AtomicBool,
     preferences: Mutex<Value>,
     startup_theme: OnceLock<Value>,
+    admission: crate::desktop_admission::Owner,
     sequence: AtomicU64,
     quitting: AtomicBool,
     started_enabled: AtomicBool,
@@ -191,6 +192,9 @@ fn create_window(
     bootstrap: Option<Value>,
     query: Option<&str>,
 ) -> Result<(), String> {
+    // Hold through native construction and registry publication, not the
+    // asynchronously prepared renderer/native-ready callbacks.
+    let _admission = app.state::<DesktopState>().admission.enter()?;
     let bootstrap = bootstrap.map(|mut value| {
         value["windowRole"] = json!(role);
         value
@@ -491,12 +495,13 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         checked.unwrap_or_else(|_| Err("Desktop runtime verification could not finish".into()));
     let _ = state.runtime.set(runtime);
     let result: Reply = async {
-        let lease=state.lease.get().ok_or("Desktop data lease is unavailable")?;lease.verify()?;
-        let migration=crate::legacy_migration::prepare(&app,state.runtime()?,&state.settings,&state.data_dir,lease).await?;
-        let snapshot = state.setting("snapshot", json!({})).await?;
-        if state.quitting.load(Ordering::Acquire) {
-            return Err("Desktop shutdown is already in progress".into());
-        }
+        let (migration, snapshot) = {
+            let admission = state.admission.enter()?;
+            let lease=state.lease.get().ok_or("Desktop data lease is unavailable")?;lease.verify()?;
+            let migration=crate::legacy_migration::prepare(&app,state.runtime()?,&state.settings,&state.data_dir,lease,&admission).await?;
+            let snapshot = state.setting("snapshot", json!({})).await?;
+            (migration, snapshot)
+        };
         *state.preferences.lock().map_err(|_| "Preferences unavailable")? = snapshot["preferences"].clone();
         let _ = state.startup_theme.set(snapshot["startupTheme"].clone());
         // The old native settings are available before this document is built.
@@ -508,29 +513,40 @@ async fn initialize(app: AppHandle, root: PathBuf) {
             let applied=crate::engine::macos_chrome::apply(&window,snapshot["preferences"]["desktopVibrancy"]!=false).await;
             if let Some(record)=state.windows.lock().map_err(|_|"Window registry unavailable")?.get("main"){record.native_ready.send_replace(Some(applied.clone()));}
             mac_vibrancy=applied?;
-            let _=crate::window_geometry::restore(&app,&window,&snapshot["windowState"]);
-            state.geometry_ready.store(true,Ordering::Release);
         }
         let enabled = snapshot["localHostMode"]["effectiveEnabled"].as_bool().ok_or("Local startup preference is invalid")?;
-        state.started_enabled.store(enabled, Ordering::Relaxed);
-        app.state::<crate::native_menu::NativeMenus>().install(&app,snapshot["locale"].as_str().unwrap_or("en"))?;
-        if app.state::<crate::native_menu::NativeMenus>().tray(&app,if cfg!(target_os="macos"){snapshot["preferences"]["desktopMacMenuBarEnabled"]!=false}else{true}).is_err(){eprintln!("Varin system tray is unavailable; the application window remains accessible");}
-        state.activation_restores.ready()?;
-        dispatch_activation_restore(&app)?;
-        if let Some(window)=app.get_webview_window("main"){
-            let background=std::env::args().any(|argument|argument=="--background");
-            let reachable=cfg!(target_os="macos")||app.state::<crate::native_menu::NativeMenus>().tray_enabled();
-            if !background||!reachable{native(window.show())?;}
-        }
-        if snapshot["preferences"]["desktopKeepAwakeEnabled"]==true {
-            if app.state::<crate::power::PowerManager>().set(&app,true).await.is_err(){eprintln!("Varin sleep inhibitor could not be enabled; application startup continues");}
+        {
+            // Native preparation above may outlive a Quit. Re-enter before creating
+            // menus, power leases or showing any registered window.
+            let _presentation = state.admission.enter()?;
+            if let Some(window)=app.get_webview_window("main") {
+                let _=crate::window_geometry::restore(&app,&window,&snapshot["windowState"]);
+                state.geometry_ready.store(true,Ordering::Release);
+            }
+            state.started_enabled.store(enabled, Ordering::Relaxed);
+            app.state::<crate::native_menu::NativeMenus>().install(&app,snapshot["locale"].as_str().unwrap_or("en"))?;
+            if app.state::<crate::native_menu::NativeMenus>().tray(&app,if cfg!(target_os="macos"){snapshot["preferences"]["desktopMacMenuBarEnabled"]!=false}else{true}).is_err(){eprintln!("Varin system tray is unavailable; the application window remains accessible");}
+            state.activation_restores.ready()?;
+            dispatch_activation_restore(&app)?;
+            if let Some(window)=app.get_webview_window("main"){
+                let background=std::env::args().any(|argument|argument=="--background");
+                let reachable=cfg!(target_os="macos")||app.state::<crate::native_menu::NativeMenus>().tray_enabled();
+                if !background||!reachable{native(window.show())?;}
+            }
+            if snapshot["preferences"]["desktopKeepAwakeEnabled"]==true {
+                if app.state::<crate::power::PowerManager>().set(&app,true).await.is_err(){eprintln!("Varin sleep inhibitor could not be enabled; application startup continues");}
+            }
         }
         let mut local_origin = String::new(); let mut local_token = String::new();
         if enabled {
-            let host = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
-            let service=crate::service::NativeService::attach(app.clone(),host.clone(),state.data_dir.clone()).await?;
-            state.services.lock().await.push(service);
-            *state.host.lock().await = Some(host.clone());
+            let host = {
+                let _admission = state.admission.enter()?;
+                let host = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
+                let service=crate::service::NativeService::attach(app.clone(),host.clone(),state.data_dir.clone()).await?;
+                state.services.lock().await.push(service);
+                *state.host.lock().await = Some(host.clone());
+                host
+            };
             match host.ready().await {
                 Ok(ready) => { local_origin = ready.origin.unwrap_or_default(); local_token = ready.client_token.unwrap_or_default(); }
                 Err(_) => { /* Retain selected local identity and show recovery below. */ }
@@ -586,15 +602,20 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         }
     }
     if !ready {
-        // Settings/runtime failures still get the ordinary startup error surface.
-        // No presentation or Host wait is added to this recovery path.
-        if !state.quitting.load(Ordering::Acquire) && app.get_webview_window("main").is_none() {
-            if create_window(&app, "main", "main", None, None).is_err() {
+        // Recovery is a new resource admission, while failure settlement below
+        // must still unblock existing documents when Quit already closed it.
+        if let Ok(_recovery) = state.admission.enter() {
+            if app.get_webview_window("main").is_none()
+                && create_window(&app, "main", "main", None, None).is_err()
+            {
                 eprintln!("Varin startup recovery window could not be created");
             }
+            let _ = state.activation_restores.ready();
+            let _ = dispatch_activation_restore(&app);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+            }
         }
-        let _ = state.activation_restores.ready();
-        let _ = dispatch_activation_restore(&app);
         if let Ok(windows) = state.windows.lock() {
             for window in windows.values() {
                 if window.native_ready.borrow().is_none() {
@@ -606,11 +627,6 @@ async fn initialize(app: AppHandle, root: PathBuf) {
                             "Desktop initialization failed before native window preparation".into()
                         }))));
                 }
-            }
-        }
-        if !state.quitting.load(Ordering::Acquire) {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
             }
         }
     }
@@ -1478,6 +1494,9 @@ async fn drain(app: &AppHandle) -> Result<(), String> {
         return Err("Desktop shutdown is already pending".into());
     }
     let result: Result<(), String> = async {
+        // No resource snapshot is valid until every earlier admission has
+        // published its owner (or finished its original cleanup).
+        state.admission.shutdown().await?;
         if let Some(host) = state
             .host
             .lock()
@@ -1583,6 +1602,7 @@ async fn drain(app: &AppHandle) -> Result<(), String> {
     .await;
     if result.is_err() {
         state.settings.resume();
+        state.admission.resume()?;
         state.quitting.store(false, Ordering::Release);
     }
     result
@@ -1678,6 +1698,7 @@ pub fn run() {
             exit_ready: AtomicBool::new(false),
             preferences: Mutex::new(json!({})),
             startup_theme: OnceLock::new(),
+            admission: crate::desktop_admission::Owner::default(),
             sequence: AtomicU64::new(1),
             quitting: AtomicBool::new(false),
             started_enabled: AtomicBool::new(false),
@@ -1879,10 +1900,14 @@ async fn browser_service(app: &AppHandle) -> Result<crate::service::NativeServic
     if state.quitting.load(Ordering::Acquire) {
         return Err("Desktop is shutting down".into());
     }
-    let process = HostProcess::spawn_browser(state.runtime()?, &state.data_dir)?;
-    let service =
-        crate::service::NativeService::attach(app.clone(), process, state.data_dir.clone()).await?;
-    state.services.lock().await.push(service.clone());
+    let service = {
+        let _admission = state.admission.enter()?;
+        let process = HostProcess::spawn_browser(state.runtime()?, &state.data_dir)?;
+        let service =
+            crate::service::NativeService::attach(app.clone(), process, state.data_dir.clone()).await?;
+        state.services.lock().await.push(service.clone());
+        service
+    };
     service.process.ready().await?;
     refresh_desktop_state(app);
     Ok(service)
@@ -2018,12 +2043,16 @@ async fn restart_local_host(app: &AppHandle, previous: &HostProcess) -> Result<(
     if state.quitting.load(Ordering::Acquire) {
         return Err("Desktop is shutting down".into());
     }
-    let process = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
-    let service =
-        crate::service::NativeService::attach(app.clone(), process.clone(), state.data_dir.clone())
-            .await?;
-    *state.host.lock().await = Some(process.clone());
-    state.services.lock().await.push(service);
+    let process = {
+        let _admission = state.admission.enter()?;
+        let process = HostProcess::spawn(state.runtime()?, &state.data_dir)?;
+        let service =
+            crate::service::NativeService::attach(app.clone(), process.clone(), state.data_dir.clone())
+                .await?;
+        *state.host.lock().await = Some(process.clone());
+        state.services.lock().await.push(service);
+        process
+    };
     let ready = process.ready().await?;
     let origin = ready
         .origin

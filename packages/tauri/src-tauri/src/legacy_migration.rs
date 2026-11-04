@@ -349,6 +349,7 @@ pub async fn prepare(
     settings: &settings::Owner,
     data_dir: &Path,
     lease: &Lease,
+    admission: &crate::desktop_admission::Permit,
 ) -> Reply {
     lease.verify()?;
     // The acceptance fixture never inspects a pre-existing user's profile.
@@ -449,40 +450,48 @@ pub async fn prepare(
     let nonce = uuid::Uuid::new_v4().to_string();
     let mut application: Option<HiddenPage> = None;
     let outcome:Reply=async{
-        write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"begin","nonce":nonce,"lease":lease.record()})).await?;
-        let ready=read_frame(&mut input,true).await?;check_frame(&ready,&nonce)?;
+        // Quit cancels private-reader waits, but not construction/cleanup of an
+        // already-admitted native page. The outer owner still joins both original
+        // process termination and page closure before releasing admission.
+        let ready = admission.until_shutdown(async {
+            write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"begin","nonce":nonce,"lease":lease.record()})).await?;
+            read_frame(&mut input,true).await
+        }).await?;
+        check_frame(&ready,&nonce)?;
         if ready["kind"]!="ready" || ready["sourceVersion"]!=legacy.version || ready["browserStatus"]!="not-migrated"
             || ready["credentialCount"].as_u64().is_none_or(|count| count > 6) {
             return Err("Legacy exporter version or scope was not confirmed".into());
         }
         application=Some(HiddenPage::open(app,data_dir,true).await?);
-        let ui=application.as_mut().unwrap();ui.wait_origin("http://tauri.localhost").await?;
-        let staged=settings.call(runtime,data_dir,"frontendMigrationRead",json!({}),json!({})).await?;
-        let staged_config=staged["payload"]["entries"]["config-store"].as_str();
-        let mut target=ui.cdp.entries("http://tauri.localhost").await?;
-        let mut credentials=Vec::new();let mut sequence=0u64;
-        loop{
-            let record=read_frame(&mut input,false).await?;check_frame(&record,&nonce)?;
-            if record["kind"]=="done"{if record["records"].as_u64()!=Some(sequence)||ready["credentialCount"].as_u64()!=Some(credentials.len()as u64){return Err("Legacy export receipt omitted original items".into())}break}
-            sequence+=1;if record["sequence"].as_u64()!=Some(sequence){return Err("Legacy private record ordering is invalid".into())}
-            let status=match record["kind"].as_str(){
-                Some("credential")=>{
-                    let slot=record["slot"].as_str().ok_or("Legacy credential slot is invalid")?;let value=record["value"].as_str();
-                    if !data::credential_slot(slot) || credentials.iter().any(|item:&Value|item["slot"]==slot){return Err("Legacy credential inventory is invalid".into())}
-                    let status=if record["sourceStatus"]=="unavailable" {"failed"} else {match data::credential_change(slot,value.ok_or("Legacy credential value is invalid")?,&target,staged_config){Ok(Some((key,value)))=>{ui.cdp.put("http://tauri.localhost",&key,&value).await?;target.insert(key,value);"imported"},Ok(None)=>"retained",Err(_)=>"failed"}};
-                    credentials.push(json!({"slot":slot,"status":status}));status
-                }
-                _=>return Err("Legacy private record kind is not allowed".into())
-            };
-            write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"ack","nonce":nonce,"sequence":sequence,"status":status})).await?;
-        }
-        let receipt=json!({"schema":1,"protocol":1,"sourceSha":legacy.source_sha,"sourceVersion":legacy.version,"attemptComplete":true,
-            "browserStatus":"not-migrated","browserRequiresLogin":true,
-            "companionFailures":ready["uiReceipt"]["companions"]["failures"].as_array().cloned().unwrap_or_default(),
-            "credentials":credentials,"sourceRetained":true});
-        ui.cdp.put("http://tauri.localhost",data::RECOVERY_KEY,&serde_json::to_string(&data::safe_recovery(&receipt)).map_err(|_|"Migration recovery status could not be encoded")?).await?;
-        write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"complete","nonce":nonce,"records":sequence})).await?;
-        Ok(receipt)
+        admission.until_shutdown(async {
+            let ui=application.as_mut().unwrap();ui.wait_origin("http://tauri.localhost").await?;
+            let staged=settings.call(runtime,data_dir,"frontendMigrationRead",json!({}),json!({})).await?;
+            let staged_config=staged["payload"]["entries"]["config-store"].as_str();
+            let mut target=ui.cdp.entries("http://tauri.localhost").await?;
+            let mut credentials=Vec::new();let mut sequence=0u64;
+            loop{
+                let record=read_frame(&mut input,false).await?;check_frame(&record,&nonce)?;
+                if record["kind"]=="done"{if record["records"].as_u64()!=Some(sequence)||ready["credentialCount"].as_u64()!=Some(credentials.len()as u64){return Err("Legacy export receipt omitted original items".into())}break}
+                sequence+=1;if record["sequence"].as_u64()!=Some(sequence){return Err("Legacy private record ordering is invalid".into())}
+                let status=match record["kind"].as_str(){
+                    Some("credential")=>{
+                        let slot=record["slot"].as_str().ok_or("Legacy credential slot is invalid")?;let value=record["value"].as_str();
+                        if !data::credential_slot(slot) || credentials.iter().any(|item:&Value|item["slot"]==slot){return Err("Legacy credential inventory is invalid".into())}
+                        let status=if record["sourceStatus"]=="unavailable" {"failed"} else {match data::credential_change(slot,value.ok_or("Legacy credential value is invalid")?,&target,staged_config){Ok(Some((key,value)))=>{ui.cdp.put("http://tauri.localhost",&key,&value).await?;target.insert(key,value);"imported"},Ok(None)=>"retained",Err(_)=>"failed"}};
+                        credentials.push(json!({"slot":slot,"status":status}));status
+                    }
+                    _=>return Err("Legacy private record kind is not allowed".into())
+                };
+                write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"ack","nonce":nonce,"sequence":sequence,"status":status})).await?;
+            }
+            let receipt=json!({"schema":1,"protocol":1,"sourceSha":legacy.source_sha,"sourceVersion":legacy.version,"attemptComplete":true,
+                "browserStatus":"not-migrated","browserRequiresLogin":true,
+                "companionFailures":ready["uiReceipt"]["companions"]["failures"].as_array().cloned().unwrap_or_default(),
+                "credentials":credentials,"sourceRetained":true});
+            ui.cdp.put("http://tauri.localhost",data::RECOVERY_KEY,&serde_json::to_string(&data::safe_recovery(&receipt)).map_err(|_|"Migration recovery status could not be encoded")?).await?;
+            write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"complete","nonce":nonce,"records":sequence})).await?;
+            Ok(receipt)
+        }).await
     }.await;
     drop(output);
     // Native close and process cleanup proceed independently. A stuck/lost
