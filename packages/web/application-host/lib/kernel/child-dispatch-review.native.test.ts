@@ -1,5 +1,6 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
+import { invokedToolResult, responsesToolResult as result } from './provider-tool-result.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -107,15 +108,6 @@ function tool(name: string, args: unknown, id: string) {
 }
 function answer(text: string, id: string) {
   return { id, type: 'message', content: [{ type: 'output_text', text }] };
-}
-function result(body: Record<string, unknown>, name?: string) {
-  const items = body.input as Array<Record<string, unknown>>;
-  const call = name ? items.findLast(item => item.type === 'function_call' && (item.name === name
-    || item.name === 'tool_invoke' && JSON.parse(String(item.arguments)).name === name)) : undefined;
-  const output = items.findLast(item => item.type === 'function_call_output' && (!call || item.call_id === call.call_id));
-  const value = output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
-  const content = value?.content as { name?: string; completion: Record<string, unknown>; result: unknown } | undefined;
-  return content?.name ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
 }
 function assertPairing(body: Record<string, unknown>) {
   const pending = new Set<string>();
@@ -1843,8 +1835,7 @@ function combinedResult(body: Record<string, unknown>, family: CombinedFamily, n
   const blocks = output.content as Array<{ type: string; text?: string }>;
   expect(blocks[0]?.type).toBe('text');
   const value = JSON.parse(blocks[0]!.text!) as Record<string, unknown>;
-  const content = value.content as { name?: string; completion: Record<string, unknown>; result: unknown } | undefined;
-  return content?.name ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
+  return invokedToolResult(value, call?.name, call?.input);
 }
 async function durableRequests(root: string, runId: string) {
   const database = new DatabaseSync(path.join(root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
