@@ -422,8 +422,8 @@ it('actual model tools share UI notes, keep reads cheap, enforce revision CAS an
   type ToolResult = { call_id: string; completion: { kind: string; outcome?: string; effect?: string; content?: Record<string, unknown> } };
   const results = history.filter(item => item.source === 'tool').map(item => {
     const result = (item.content as { content: { result: ToolResult } }).content.result;
-    const output = result.completion.content as { data: { reference: { name: string }; completion: ToolResult['completion']; result: unknown }; parts: unknown[] };
-    expect(output.data.reference.name).toBe('memory');
+    const output = result.completion.content as { data: { name: string; completion: ToolResult['completion']; result: unknown }; parts: unknown[] };
+    expect(output.data.name).toBe('memory');
     return { ...result, completion: { ...output.data.completion, content: { data: output.data.result, parts: output.parts } } };
   });
   expect(results.map(result => result.call_id)).toEqual(['memory-read-empty', 'memory-save', 'memory-read-saved', 'memory-stale-write', 'memory-delete']);

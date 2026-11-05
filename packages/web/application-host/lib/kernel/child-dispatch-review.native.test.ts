@@ -114,8 +114,8 @@ function result(body: Record<string, unknown>, name?: string) {
     || item.name === 'tool_invoke' && JSON.parse(String(item.arguments)).name === name)) : undefined;
   const output = items.findLast(item => item.type === 'function_call_output' && (!call || item.call_id === call.call_id));
   const value = output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
-  const content = value?.content as { reference?: unknown; completion: Record<string, unknown>; result: unknown } | undefined;
-  return content?.reference ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
+  const content = value?.content as { name?: string; completion: Record<string, unknown>; result: unknown } | undefined;
+  return content?.name ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
 }
 function assertPairing(body: Record<string, unknown>) {
   const pending = new Set<string>();
@@ -575,7 +575,7 @@ it('two real send observations retain their original requests across Host restar
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
       for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({
-        content: { reference: { name: 'send', version: '5' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
+        content: { name: 'send', completion: { kind: 'job_accepted', effect: 'confirmed' } },
       });
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
@@ -1843,8 +1843,8 @@ function combinedResult(body: Record<string, unknown>, family: CombinedFamily, n
   const blocks = output.content as Array<{ type: string; text?: string }>;
   expect(blocks[0]?.type).toBe('text');
   const value = JSON.parse(blocks[0]!.text!) as Record<string, unknown>;
-  const content = value.content as { reference?: unknown; completion: Record<string, unknown>; result: unknown } | undefined;
-  return content?.reference ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
+  const content = value.content as { name?: string; completion: Record<string, unknown>; result: unknown } | undefined;
+  return content?.name ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
 }
 async function durableRequests(root: string, runId: string) {
   const database = new DatabaseSync(path.join(root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
