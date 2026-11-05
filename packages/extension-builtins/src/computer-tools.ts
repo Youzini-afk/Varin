@@ -34,7 +34,7 @@ const declaration = (method: string, operation: 'read' | 'effect', description: 
 });
 /** Product manifest, Host decoder and Tool directory consume this same declaration. */
 export const COMPUTER_TOOL_DECLARATIONS = [
-  declaration('request', 'effect', 'Request a desktop assignment from the root task. Returns a pending requestId; use computer_wait for the decision.', schema({ ...desktop, access: { enum: ['observe', 'control'] }, reason: string }, ['access', 'reason'])),
+  declaration('request', 'effect', 'A child task requests a desktop assignment from its root task. Returns a pending requestId; use computer_wait for the decision. Root tasks use computer_control directly. This is task coordination, not an operating-system permission prompt.', schema({ ...desktop, access: { enum: ['observe', 'control'] }, reason: string }, ['access', 'reason'])),
   declaration('access', 'read', 'List desktop requests and current assignments for this task family.', schema({})),
   declaration('grant', 'effect', 'As the root task, grant a pending child desktop request. Existing controllers must release first.', schema({ requestId: string }, ['requestId'])),
   declaration('deny', 'effect', 'As the root task, deny a pending child desktop request with an optional reason.', schema({ requestId: string, reason: string }, ['requestId'])),

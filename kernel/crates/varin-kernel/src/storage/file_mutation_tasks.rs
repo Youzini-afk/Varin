@@ -8,7 +8,7 @@ use super::file_mutations::{
 };
 use super::file_resource_leases::{canonical_lease_path, FileLeaseRequest};
 use super::file_resources::{
-    normalized_relative_path, parse_file_params, resolve_admitted_resource, FileState,
+    parse_file_params, resolve_admitted_resource, FileState,
 };
 use super::*;
 use crate::model::CanonicalFileLeaseResource;
@@ -330,7 +330,7 @@ impl Storage {
                 "Text mutation workspace differs from admitted root".into(),
             ));
         }
-        let normalized = normalized_relative_path(mutation.path(), false)?.0;
+        let normalized = super::file_resources::resource_path(&admitted, mutation.path(), grant, false)?;
         if mutation.read_version().is_empty()
             && (matches!(mutation, TextMutation::Edit(_))
                 || matches!(mutation,TextMutation::Write(args)if args.mode==Some(FileWriteMode::Replace)))

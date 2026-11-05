@@ -30,10 +30,10 @@ export async function withFileRecoveryEditors<T>(
   const registrations = await documents.listWorkspaceRegistrations();
   const groups = new Map<string, Map<string, string>>();
   for (const resource of paths) {
-    const absolute = path.join(await canonicalizePathIdentity(path.dirname(path.join(root, resource)), { allowMissing: true }), path.basename(resource));
+    const absolute = path.join(await canonicalizePathIdentity(path.dirname(path.resolve(root, resource)), { allowMissing: true }), path.basename(resource));
     for (const registration of registrations) {
       const relative = path.relative(key(registration.canonicalPath), key(absolute));
-      if (!relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) continue;
+      if ((!relative && registration.kind !== 'file') || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) continue;
       const items = groups.get(registration.workspaceId) ?? new Map<string, string>();
       items.set(relative.replaceAll('\\', '/'), resource);
       groups.set(registration.workspaceId, items);

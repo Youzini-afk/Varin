@@ -211,7 +211,7 @@ export async function admitRunSourceAuthority(
     threadId: run.thread_id,
     runId: run.id,
     ...(options.retention === 'caller' ? { operationId: options.operationId } : {}),
-    capabilities: ['storage.read', 'storage.write', ...(integration ? ['recovery'] : []), ...(saved.selection.tools.some(tool => tool.requirements?.process) ? ['process'] : [])],
+    capabilities: ['storage.read', 'storage.write', ...(selection.mode === 'live_root' && runtime.deviceFileAccess !== false ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []), ...(saved.selection.tools.some(tool => tool.requirements?.process) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
 

@@ -2015,6 +2015,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }}), documentsAuthority.admitWorkspaceRegistration, createAgentDriver(extensionRuntime));
   agentRuntime.bindManagedSources(managedRemoteTargets);
   agentRuntime.executionEnvironment = () => executionEnvironment.snapshot();
+  agentRuntime.deviceFileAccess = !workspaceConfig.lockdown;
   let stopTokenizerCollection: (() => Promise<void>) | undefined;
   const startTokenizerCollection = () => {
     stopTokenizerCollection ??= modelsService.tokenizers.startCollection({
@@ -2248,6 +2249,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindNextSteps(nextSteps);
   threads.bindContextPolicy((run, signal) => contextService.presentation(run, signal));
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindDefaultDeviceSource(async identity => {
+    // An execution directory is not a registered product project. No inventory,
+    // baseline capture or mount is needed for ordinary device file access.
+    const selected = await sourceDirectory.resolve({ resourceOwner: { kind: 'local' }, path: workspaceConfig.root });
+    const liveRoot = await liveSources.prepare(selected.workspaceId, selected.workspaceId, identity.threadId);
+    return { resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, executionWorkspaceId: selected.workspaceId,
+      mode: 'live_root', liveRoot, tools: await agentRuntime.sourceTools('live_root') };
+  });
   const threadSourceFiles = createThreadSourceFiles({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, compute: kernelCompute, remote: managedSourceConsumers.files });
   threads.bindSourceFiles(threadSourceFiles);
@@ -2291,6 +2300,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const userIntegrations = createThreadIntegrations({ ...userIntegrationOwners, requireIdentity: identity => threads.requireIdentity(identity),
     onError: () => console.error('[Integration] Original source cleanup requires attention') });
   const targetRecovery = createManagedRecoveryService({ kernel: kernelClient, hostId, documents: documentsAuthority,
+    deviceFileAccess: !workspaceConfig.lockdown,
     storage: kernelStorageAdapter, store: kernelRecoveryStore, recovery: foundationalRecoveryEngine,
     validateLiveSource: liveSources.validate });
   const targetScheduleReceipts = createKernelManagedScheduleReceipts(kernelClient,
@@ -2312,6 +2322,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    deviceFileAccess: !workspaceConfig.lockdown,
     executionEnvironment: () => executionEnvironment.snapshot(),
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
     draftSourceFiles: (input, signal) => threadSourceFiles.draftFiles(input, signal),

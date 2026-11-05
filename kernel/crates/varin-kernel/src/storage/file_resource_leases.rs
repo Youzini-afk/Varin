@@ -1,6 +1,6 @@
 //! One physical overlap boundary across all admitted workspace/root identities.
 //! Grant/root ownership authorizes access; it must not partition disk exclusion.
-use super::file_resources::{normalized_relative_path, parse_file_params};
+use super::file_resources::parse_file_params;
 use super::*;
 use crate::model::CanonicalFileLeaseResource;
 use crate::protocol_generated::{KernelFileLeaseAcquireParams, KernelFileLeaseReleaseParams};
@@ -369,7 +369,10 @@ impl Storage {
             .resources
             .iter()
             .map(|resource| {
-                let (path, _) = normalized_relative_path(&resource.path, true)?;
+                // Parsing is independent of the grant. The original resource
+                // resolver admits device paths or enforces a scoped namespace.
+                if resource.path.contains('\0') { return Err(KernelError::Protocol("File path contains NUL".into())); }
+                let path = resource.path.replace('\\', "/");
                 let subtree = match resource.scope.as_str() {
                     "exact" => false,
                     "subtree" => true,

@@ -6,15 +6,16 @@ import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extensio
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-client';
-import { computerWorkKey, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
+import { computerWorkKey, sameComputerWork, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { compileToolJsonSchema } from '../models/schema.js';
 import { ComputerEffectError, type ComputerService, type ComputerExecutionEvidence } from '../computer/computer-service.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { PendingComputerControlEvent, PendingComputerControlCancellation } from '../computer/computer-records.js';
-import { ComputerError, ComputerReleaseUnconfirmed } from '../computer/computer-error.js';
+import { ComputerError, ComputerReleaseUnconfirmed, ComputerDriverStartupError } from '../computer/computer-error.js';
 import type { ComputerWorkResolution } from '../computer/computer-actor.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
+import { KernelRequestError } from './kernel-error.js';
 import type { ComputerScope, Effect, Run, ComputerRequestRecord, ComputerRequestView, ComputerEventReceipt, ComputerDecisionActor, KernelMethod, KernelMethodParams, Operation } from './protocol.generated.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import { extendToolConfiguration } from './extension-tool-owner.js';
@@ -250,9 +251,22 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
         const desktopId = method === 'prepare'
           ? (await computers.preparationTarget(typeof params.connectionId === 'string' ? params.connectionId : undefined)).id
           : await computers.resolveDesktop(typeof params.desktopId === 'string' ? params.desktopId : computers.automation.desktopFor(execution) ?? undefined, configured.defaultDesktopId);
-        if (method === 'request') return computers.automation.manage(work, execution, async stopSignal => {
+        if (method === 'request') return await computers.automation.manage(work, execution, async (stopSignal, actor) => {
+          if (sameComputerWork(actor.execution.work, actor.rootWork)) {
+            throw new ComputerError('computer-request-invalid', 'Only a child task requests a desktop assignment from its root. The root task can use computer_control directly; computer_request is not an operating-system permission prompt.');
+          }
           inputCallStarted = true;
-          const accepted = await rpc<ComputerRequestRecord, 'runtime.computer.request.create'>('runtime.computer.request.create', { operationId: original.operationId, desktopId, access: params.access as 'observe' | 'control', reason: String(params.reason) });
+          let accepted: ComputerRequestRecord;
+          try {
+            accepted = await rpc<ComputerRequestRecord, 'runtime.computer.request.create'>('runtime.computer.request.create', { operationId: original.operationId, desktopId, access: params.access as 'observe' | 'control', reason: String(params.reason) });
+          } catch (error) {
+            // The transport can prove that an undispatched request had no effect.
+            // A lost response retains the original uncertain-effect contract.
+            if (error instanceof KernelRequestError && error.settlement === 'not_dispatched') {
+              return result({ error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) } }, 'none', true, 'failed');
+            }
+            throw error;
+          }
           if (context.signal.aborted || stopSignal.aborted) await cancelRequests([accepted.id]);
           await runtime.reconcileObservations();
           return result({ desktopId, requestId: accepted.id, status: context.signal.aborted || stopSignal.aborted ? 'cancelled' : accepted.status, revision: accepted.revision }, 'confirmed');
@@ -372,9 +386,11 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           throw error;
         });
       } catch (error) {
+        if (error instanceof ComputerDriverStartupError) return result({ error: { code: 'computer-driver-unavailable', message: error.message,
+          details: { stage: 'driver_startup', desktopId: error.desktopId } } }, 'none', true, 'failed');
         if (error instanceof ComputerEffectError) return result({ error: { code: error.harnessCode, message: error.message } }, 'unknown', error.inputWriterStopped, 'indeterminate');
         if (inputCallStarted) throw error;
-        return result({ error: { code: error instanceof ComputerError ? error.computerCode : error instanceof HarnessServiceError ? error.harnessCode : 'computer-request-invalid',
+        return result({ error: { code: error instanceof ComputerError ? error.computerCode : error instanceof HarnessServiceError ? error.harnessCode : 'computer-driver-unavailable',
           message: error instanceof Error ? error.message : String(error) } }, 'none', true, context.signal.aborted ? 'cancelled' : 'failed');
       }
     });

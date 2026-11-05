@@ -23,7 +23,7 @@ pub(crate) struct ObjectSource {
 }
 pub(crate) enum Source {
     Tree { catalog: PathBuf, objects: PathBuf, root: String },
-    Disk { root: PathBuf },
+    Disk { root: PathBuf, device: bool },
     Objects,
 }
 pub(crate) struct Task {

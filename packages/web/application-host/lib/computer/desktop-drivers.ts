@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ComputerDesktop } from '@varin/protocol';
 import { createDriverSession, type ComputerDriverSession, type DriverSpawnSpec } from './driver-host.js';
+import { ComputerDriverStartupError } from './computer-error.js';
 
 /** Platform session owners multiplex live capture independently from input.
  * Other drivers keep a separate read-only process; neither changes Agent trees. */
@@ -54,8 +55,9 @@ export function createDesktopDriverPool(options: {
         return { driver, desktop };
       } catch (error) {
         if (drivers.get(desktopId) === driver) drivers.delete(desktopId);
-        await driver.dispose();
-        throw error;
+        try { await driver.dispose(); }
+        catch (cleanup) { throw new ComputerDriverStartupError(desktopId, new AggregateError([error, cleanup], String(error))); }
+        throw new ComputerDriverStartupError(desktopId, error);
       }
     })();
     loading.set(key, task);

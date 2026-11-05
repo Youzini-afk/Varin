@@ -52,15 +52,23 @@ impl Storage {
             if job.params_hash!=hash{return Err(failure("Computation identity was reused with different parameters"));}
             return self.computations.read(&params.job_id,0,65536).map_err(failure);
         }
-        let roots=params.paths.clone().unwrap_or_else(||vec![String::new()]).iter().map(|p|relative(p)).collect::<Result<Vec<_>,_>>()?;
+        let device_root = if params.operation != "inventory" && super::file_resources::device_access(grant) {
+            params.root_id.as_deref().map(|id| self.admitted_file_root(id, grant)).transpose()?.filter(|root|root.native.is_none())
+        } else { None };
+        let path = |value:&str| match &device_root {
+            Some(root)=>super::file_resources::device_path(&root.canonical_root,value)
+                .map(|path|path.to_string_lossy().replace('\\',"/")),
+            None=>relative(value),
+        };
+        let roots=params.paths.clone().unwrap_or_else(||vec![String::new()]).iter().map(|p|path(p)).collect::<Result<Vec<_>,_>>()?;
         let scopes=grant.path_scopes.iter().map(|s|relative(s)).collect::<Result<Vec<_>,_>>()?;
         params.paths=Some(roots);
-        if let Some(path)=&mut params.start_after_path { *path=relative(path)?; }
-        if let Some(files)=params.files.as_mut(){for file in files{file.path=relative(&file.path)?;if !path_allowed(grant,&file.path){return Err(KernelError::Authorization("Requested file is outside grant scope".into()));}}}
-        for paths in [&mut params.exclude_paths]{if let Some(paths)=paths{for path in paths{*path=relative(path)?;}}}
+        if let Some(value)=&mut params.start_after_path { *value=path(value)?; }
+        if let Some(files)=params.files.as_mut(){for file in files{file.path=path(&file.path)?;if !path_allowed(grant,&file.path){return Err(KernelError::Authorization("Requested file is outside grant scope".into()));}}}
+        for paths in [&mut params.exclude_paths]{if let Some(paths)=paths{for value in paths{*value=path(value)?;}}}
         let mut overlays=Vec::new();let mut seen=BTreeSet::new();
         for object in params.objects.as_deref().unwrap_or_default(){
-            let path=relative(&object.path)?;
+            let path=path(&object.path)?;
             if !seen.insert(path.clone()){return Err(failure("Duplicate fixed-view overlay path"));}
             if !path_allowed(grant,&path){return Err(KernelError::Authorization("Overlay path is outside grant scope".into()));}
             if object.missing==Some(true){
@@ -120,7 +128,7 @@ impl Storage {
             // and query traversal. Control must not synchronously enter a mount.
             let admitted=self.admitted_file_root(root_id,grant)?;
             if admitted.owning_workspace_id!=params.workspace_id{return Err(KernelError::Authorization("Root workspace does not match computation".into()));}
-            Source::Disk{root:admitted.canonical_root}
+            Source::Disk{root:admitted.canonical_root,device:device_root.is_some()}
         }else if params.objects.is_some(){Source::Objects}else{return Err(failure("Computation requires an admitted pin, root, or fixed text source"));};
         let selected=params.files.as_deref().unwrap_or_default().iter().filter_map(|f|f.recipe_id.as_ref()).collect::<BTreeSet<_>>();
         let mut recipes=HashMap::new();

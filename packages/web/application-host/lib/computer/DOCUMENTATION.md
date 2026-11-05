@@ -12,6 +12,12 @@ and the branch's active Run, including source-less work; context or auxiliary Ru
 branch owner. Tool calls additionally validate their real ModelStep or PolicyAction Operation.
 The caller cannot supply a parent, Run or role to the model-facing API.
 
+`computer_request` asks the root Agent to assign desktop access to a child. A root uses
+`computer_control` directly; its invalid assignment request returns a completed no-effect failure,
+not an unknown Host effect. Driver startup failures retain their original cause under
+`computer-driver-unavailable` and are separate from invalid request arguments. A control reservation
+does not establish that the native observation/input driver can start.
+
 Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
 owns `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait`,
 `computer_control/open/put/install`, `computer_browser_read/browser`, `computer_office_read/office`,

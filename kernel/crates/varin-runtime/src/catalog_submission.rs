@@ -384,13 +384,9 @@ impl PreparedSubmission {
         if let Some(selection) = &launch {
             selection.validate()?;
         }
-        if inherit_source
-            && launch
-                .as_ref()
-                .is_none_or(|selection| selection.source.is_some())
-        {
+        if inherit_source && launch.is_none() {
             return Err(RuntimeError::Invalid(
-                "source inheritance requires a launch without an explicit source".into(),
+                "source inheritance requires a launch selection".into(),
             ));
         }
         if let Some(basis) = &personalization {
@@ -414,6 +410,7 @@ impl PreparedSubmission {
         let selected_source = launch.as_ref().and_then(|launch| launch.source.clone());
         let context_source = if inherit_source {
             active.as_ref().and_then(|checkpoint| checkpoint.resources.as_ref()).and_then(|resources| resources.source.clone())
+                .or_else(|| selected_source.clone())
         } else { selected_source.clone() };
         let normalized_source =
             super::followups::normalized_source(context_source.clone(), &run_id);

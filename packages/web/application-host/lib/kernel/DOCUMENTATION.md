@@ -42,6 +42,12 @@ selection and persists it in the frozen tool context. Managed tool dispatch forw
 to its target owner. A changed default takes effect at the next model request, while accepted commands
 retain their interpreter and process identity. No coordinator program path is used as a remote fallback.
 
+Ordinary live sources receive device filesystem access unless the Host explicitly enables deployment
+lockdown. The registered directory remains the default working directory, not a project-only file boundary.
+Source-less user submissions supply the Host's default live directory as an inheritance fallback; Catalog
+atomically retains any existing selected source. No project, inventory, baseline or mount is created for it.
+File transactions and recovery keep relative identities inside that directory and absolute identities outside.
+
 Typed `ExecutionError` code/message/details survive kernel, managed-source and script transport.
 Original completion state decides whether a model-facing error is projected; opaque successful tool
 data is not reclassified. The Catalog stores error details with its existing completion and GC roots,

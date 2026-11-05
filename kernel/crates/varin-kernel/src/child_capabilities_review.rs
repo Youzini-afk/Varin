@@ -4,6 +4,23 @@ fn with_disclosure(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
     tools.extend(varin_runtime::tool_disclosure::schemas());
     tools
 }
+
+#[test]
+fn bot_default_delegation_excludes_main_only_tools_and_still_resolves() {
+    let read=schemas().into_iter().find(|schema|schema.name=="file_read").unwrap();
+    let dispatch=schemas().into_iter().find(|schema|schema.name=="dispatch").unwrap();
+    let wait=schemas().into_iter().find(|schema|schema.name=="wait_child").unwrap();
+    let fixture=fixture::Fixture::new_extended_parent_with_schemas(read.clone(),dispatch,wait);
+    let mut selection=fixture.db.capture_child_dispatch_invocation(&fixture.context).unwrap().load().unwrap();
+    let mut parent=selection.frozen.allowed_delegation.clone();
+    parent.extend([crate::bot_work_tools::schema(),crate::agent_goals::schema()]);
+    selection.frozen.allowed_delegation=delegated(&parent);
+    let mut input=fixture.input.clone();input.tools=None;
+    let (_,tools)=crate::collaboration::resolve_selection(&selection,&input).unwrap();
+    assert!(tools.contains(&read));
+    assert!(!tools.iter().any(|tool|matches!(tool.name.as_str(),"matters"|"goal_report")));
+    let root=fixture.root.clone();drop(selection);drop(fixture);std::fs::remove_dir_all(root).unwrap();
+}
 #[path = "../../varin-runtime/tests/fixtures/child_dispatch.rs"]
 mod fixture;
 

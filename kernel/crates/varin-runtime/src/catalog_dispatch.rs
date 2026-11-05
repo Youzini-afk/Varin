@@ -141,10 +141,8 @@ impl DispatchInput {
         if let Some(tools) = &self.tools {
             validate_names(tools)?;
         }
-        if self.source_path.as_deref().is_some_and(|path| path != "." && (path.is_empty()
-            || path.contains(['\\', ':', '\0']) || path.starts_with('/')
-            || path.split('/').any(|part| part.is_empty() || matches!(part, "." | "..")))) {
-            return Err(RuntimeError::Invalid("sourcePath must be a directory relative to the selected source (or . for its root)".into()));
+        if self.source_path.as_deref().is_some_and(|path| path.is_empty() || path.contains('\0')) {
+            return Err(RuntimeError::Invalid("sourcePath must be a nonempty directory path on the source Host".into()));
         }
         Ok(())
     }

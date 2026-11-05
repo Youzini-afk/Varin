@@ -10,6 +10,7 @@ import { createWorkspaceRecoveryEngine } from '../recovery/journal-engine.js';
 import { createRecoveryJournalFixture } from '../recovery/journal-fixture.test-helper.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
 import { KernelFileResourceBackend } from './file-resource-backend.js';
+import { withFileRecoveryEditors, type RecoveryEditors } from '../recovery/file-recovery-editors.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -42,6 +43,31 @@ const fixture = async () => {
   const identity: RecoveryIdentity = { workspaceId: 'owning', canonicalRoot: root, authorityId: 'host', filesystemProfile: 'test' };
   return { ...bindings, client, adapter, identity, root, gate, entered, authority };
 };
+
+it('uses a device grant for outside recovery paths and includes standalone dirty editors', async () => {
+  const h = await fixture();
+  const selected = path.join(h.root, 'selected'); await fs.mkdir(selected);
+  const outside = path.join(h.root, 'outside.txt'); await fs.writeFile(outside, 'disk');
+  const identity = { ...h.identity, canonicalRoot: selected };
+  const authority = { ...h.authority, canonicalRoot: selected };
+  const files = new KernelFileResourceBackend(h.adapter as unknown as KernelStorageAdapter, { authority });
+  await expect(files.relativePathFor(identity, outside)).rejects.toThrow('outside');
+  authority.deviceFileAccess = true;
+  const address = outside.replaceAll('\\', '/');
+  expect((await files.relativePathFor(identity, outside)).relative).toBe(address);
+  await files.captureDetailed(identity, outside);
+  expect(h.client.fileCapture).toHaveBeenCalledWith(expect.objectContaining({ rootId: authority.rootId, path: address }), undefined);
+  const settle = vi.fn(async () => {}), release = vi.fn(async () => {});
+  const barrier = vi.fn(async () => ({ settle, release }));
+  const documents = { listWorkspaceRegistrations: async () => [{ workspaceId: 'outside-editor', canonicalPath: outside, kind: 'file' }],
+    beginDirtyStateBarrier: barrier, inspectDirtyBuffers: async () => [{ resources: [{ resource: { resourceId: '' } }] }] } as unknown as RecoveryEditors;
+  await withFileRecoveryEditors(documents, selected, [address], async blocked => {
+    expect(blocked[address]).toContain('unsaved editor changes');
+  });
+  expect(barrier).toHaveBeenCalledWith('outside-editor', [''], expect.anything());
+  expect(settle).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+  expect(h.adapter.fileAuthorityContext).not.toHaveBeenCalled();
+});
 
 it('previews current and recorded content on the original root, paging across UTF-8 without captures', async () => {
   const h = await fixture();

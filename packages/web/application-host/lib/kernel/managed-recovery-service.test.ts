@@ -80,7 +80,7 @@ describe('managed Recovery original file owner', () => {
     }, undefined);
     expect(h.sourceAuthorityGrant).not.toHaveBeenCalled();
     expect(h.fileAuthorityContext).toHaveBeenCalledWith({ owningWorkspaceId: 'workspace', executionWorkspaceId: 'workspace',
-      canonicalRoot: '/project', purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance'] });
+      canonicalRoot: '/project', purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance', 'filesystem.device'] });
     expect(h.store.recordTurnStart).toHaveBeenCalledWith(expect.objectContaining({ executionId: 'run:input',
       conversation: { kind: 'thread', threadId: 'thread', branchId: 'history' }, runId: 'run', userEntryId: 'input',
       runtimeGeneration: 99, fileTarget: target }));

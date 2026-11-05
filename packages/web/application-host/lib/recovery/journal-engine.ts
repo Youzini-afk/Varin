@@ -493,7 +493,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     const selected=await targetIdentity(identity,target);
     const root = selected.canonicalRoot;
     const resource = target.resourcePath ?? key;
-    const absolute = path.join(await canonicalizePathIdentity(path.dirname(path.join(root,resource)), {allowMissing:true}),path.basename(resource));
+    const absolute = path.join(await canonicalizePathIdentity(path.dirname(path.resolve(root,resource)), {allowMissing:true}),path.basename(resource));
     const normalize = (value:string) => process.platform === "win32" ? value.toLowerCase() : value;
     const result: Array<{workspaceId:string;path:string}> = [];
     for (const registration of await documents.listWorkspaceRegistrations()) {

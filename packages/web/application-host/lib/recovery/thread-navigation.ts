@@ -144,7 +144,8 @@ export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liv
         }
         if (normalizePathIdentity(root) !== normalizePathIdentity(target.canonicalRoot) || normalizePathIdentity(identity.canonicalRoot) !== normalizePathIdentity(root))
             throw new Error('Recovery physical root changed');
-        const authority = await storage.fileAuthorityContext({ owningWorkspaceId: identity.workspaceId, executionWorkspaceId: target.executionWorkspaceId, canonicalRoot: root, purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance'] });
+        const authority = await storage.fileAuthorityContext({ owningWorkspaceId: identity.workspaceId, executionWorkspaceId: target.executionWorkspaceId, canonicalRoot: root, purpose: 'recovery-maintenance',
+            capabilities: ['recovery.maintenance', ...(source.mode === 'live_root' && runtime.deviceFileAccess !== false ? ['filesystem.device'] : [])] });
         if (authority.rootId !== target.rootId)
             throw new Error('Recovery registration differs from its original root');
         return new KernelFileResourceBackend(storage, { authority });

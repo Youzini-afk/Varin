@@ -44,6 +44,34 @@ test('Computer settings hide declarations during preparation without acquiring a
     assert.equal(opened.calls.length, 0);
   } finally { await opened.cleanup(); }
 });
+
+test('driver startup failures retain their cause and report no desktop input', async () => {
+  const f = await fixture();
+  try {
+    f.failDriverStartup();
+    const result = await f.invoke('observe', { desktopId: 'local-console', app: 'editor' });
+    assert.equal(result.receipt.completion.kind, 'result');
+    if (result.receipt.completion.kind !== 'result') throw new Error('Expected a completed failure');
+    assert.equal(result.receipt.completion.effect, 'none');
+    assert.equal(result.receipt.completion.outcome, 'failed');
+    assert.match(JSON.stringify(result.content), /computer-driver-unavailable/);
+    assert.match(JSON.stringify(result.content), /endpoint protection/);
+    assert(!f.calls.includes('get_app_state'));
+  } finally { await f.cleanup(); }
+});
+
+test('root desktop requests explain the child-only contract without dispatch or an unknown effect', async () => {
+  const f = await fixture();
+  try {
+    const result = await f.invoke('request', { access: 'control', reason: 'Use this desktop' });
+    assert.equal(result.receipt.completion.kind, 'result');
+    if (result.receipt.completion.kind !== 'result') throw new Error('Expected a completed rejection');
+    assert.equal(result.receipt.completion.effect, 'none');
+    assert.equal(result.receipt.completion.outcome, 'failed');
+    assert.match(JSON.stringify(result.content), /computer_control/);
+    assert.equal(f.requestFacts.length, 0);
+  } finally { await f.cleanup(); }
+});
 async function fixture(records = new Map<string, KernelRecordResult>(), remote: Partial<Pick<ComputerServiceOptions, 'hostId' | 'remoteHosts' | 'fetch' | 'platform' | 'vmExec' | 'resolveWork'>> = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'varin-computer-domain-'));
   let enabled = true, releases = 0, failClear = false, blockInput = false, idle = false, deliveries = 0, terminal = false, releaseSucceeds = true, failList = false;
@@ -58,11 +86,13 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
   const calls: string[] = [];
   const requests: Array<Omit<DriverRequest, 'id'>> = [];
   let applicationReply: ((op: Omit<DriverRequest, 'id'>) => Promise<DriverResponse>) | undefined;
+  let startupFailure = false;
   let applicationTools: { browser: boolean; office: boolean } | undefined;
   const driver: ComputerDriverSession = { capabilities: null, alive: () => true, cancel: () => true, dispose: () => {},
     interrupt: async () => { releases++; input.reject(new Error('original input interrupted without a final action response')); return { released: releaseSucceeds }; },
     async request(op, dispatch) {
       dispatch?.beforeDispatch?.(); calls.push(String(op.tool)); requests.push(structuredClone(op));
+      if (startupFailure && op.tool === 'release_input') throw new Error('Driver startup blocked by endpoint protection');
       if (op.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready', ...(applicationTools ? { applicationTools } : {}) } });
       if (op.tool === 'get_app_state') return response({ snapshot: { app: { name: 'editor', pid: 3, windowTitle: 'Controlled' },
         windowBounds: { x: 0, y: 0, width: 100, height: 100 }, treeLines: ['0 Edit'], elements: [{ index: 0, name: 'Edit', controlType: 'Edit' }] } });
@@ -144,6 +174,7 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
   }
   return { computer, computers, kernel, calls, requests, records, invoke, started, dataDir, releases: () => releases,
     applicationSupport: (support: { browser: boolean; office: boolean }) => { applicationTools = support; },
+    failDriverStartup: () => { startupFailure = true; },
     applicationReply: (reply: NonNullable<typeof applicationReply>) => { applicationReply = reply; },
     blockApplication: () => { applicationReply = async () => { started.resolve(); return input.promise; }; },
     controlFacts, controlCancels,

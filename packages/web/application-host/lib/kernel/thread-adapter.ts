@@ -189,6 +189,8 @@ export class ThreadAdapter {
     }
   }
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
+  private defaultDeviceSource?: (identity: ThreadIdentity) => Promise<ThreadSource>;
+  bindDefaultDeviceSource(prepare: (identity: ThreadIdentity) => Promise<ThreadSource>): void { this.defaultDeviceSource = prepare; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
   private codeExchangeReader?: import('./thread-code-exchange.js').ThreadCodeExchangeReader;
   bindCodeExchangeReader(reader: import('./thread-code-exchange.js').ThreadCodeExchangeReader): void { this.codeExchangeReader = reader; }
@@ -948,12 +950,15 @@ export class ThreadAdapter {
       const model = await this.models.resolveModel(input.model);
       try {
         this.assertImagesSupported(input.images, model.configuration);
+        // Keep this fallback stable even on retries. Catalog decides inheritance
+        // atomically; the latest selected project/remote source always wins.
+        const candidateSource = input.source ?? await this.defaultDeviceSource?.(input) ?? null;
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
           expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length), acceptsImages: model.configuration.acceptsImages !== false }), configuration: model.configuration,
-          launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: input.source ? {
-            resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
-            ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{nativeScope:input.source.nativeScope}:{}),branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
-          } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
+          launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: candidateSource ? {
+            resourceOwner: candidateSource.resourceOwner, workspaceId: candidateSource.workspaceId, executionWorkspaceId: candidateSource.executionWorkspaceId,
+            ...(candidateSource.mode==='native_workspace'&&candidateSource.nativeScope?{nativeScope:candidateSource.nativeScope}:{}),branchId: candidateSource.branchId ?? null, revision: candidateSource.revision ?? null, mode: candidateSource.mode, liveRoot: candidateSource.liveRoot ?? null, ...(candidateSource.environmentRunId ? { environmentRunId: candidateSource.environmentRunId } : {}),
+          } : null, enabledTools: candidateSource?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
         };
         if (input.references?.length || input.skills?.length || parseExplicitSkillCommand(input.text) || this.prepareContext || this.prepareChildProfiles || input.agent) {
           const accepted = await this.runtime.inputReceipt(command);
@@ -979,7 +984,8 @@ export class ThreadAdapter {
         let initialContext: InitialContext | undefined;
         const explicitSkill = Boolean(input.skills?.length) || parseExplicitSkillCommand(input.text) !== null;
         const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
-        const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
+        const replacingSource = input.source !== undefined || Boolean(candidateSource && !checkpoint?.resources?.source);
+        const preparesResources = this.prepareContext && (replacingSource || !checkpoint);
         let inputPreparation: InputResourcePreparation | undefined;
         if (preparesResources || explicitSkill || this.prepareChildProfiles || input.agent) {
           // An accepted command owns its original receipt. A later malformed settings file must not
@@ -994,13 +1000,13 @@ export class ThreadAdapter {
           try {
             const agent = input.agent ? await this.prepareAgent(input.agent) : undefined;
             if (agent) command.launch!.agent = agent.selection;
-            if (this.prepareContext && checkpoint && input.source) {
+            if (this.prepareContext && checkpoint && replacingSource && candidateSource) {
               if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
-              initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
+              initialContext = await this.prepareContext!.forSource(checkpoint, candidateSource);
               command.expectedContextCheckpoint = checkpoint.id;
             } else if (this.prepareContext && !checkpoint) {
               let source = input.source ?? null;
-              if (!source) {
+              if (!source && input.source === undefined) {
                 const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
                 const previous = latest ? await this.runtime.launch(latest.id) : null;
                 const inherited = previous?.selection.source;
@@ -1013,7 +1019,7 @@ export class ThreadAdapter {
                   };
                 }
               }
-              initialContext = await this.prepareContext.main(input, source);
+              initialContext = await this.prepareContext.main(input, source ?? candidateSource);
             }
             if (agent) {
               if (!this.prepareContext?.withAgent) throw new Error('Agent context preparation is unavailable');

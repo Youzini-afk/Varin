@@ -4,14 +4,14 @@ import type { LaunchSource } from './protocol.generated.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
-import { assertAbsolutePathInWorkspace, resolveWorkspacePath } from '../workspace/path-safety.js';
+import { assertAbsolutePathInWorkspace, resolveWorkspacePath, canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
 
 export type ThreadFileTargetResolver = (runId: string, source: LaunchSource | null, file: string, signal?: AbortSignal) => Promise<ThreadFileTarget>;
 
 /** User file navigation uses Documents admission; it does not acquire an Agent tool grant. */
 export function createThreadFileTargetResolver(options: {
   storageRoot: string;
-  documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
+  documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration' | 'ensureResourceRoot'>;
   validateLiveSource: LiveSourceResolver;
   nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner|undefined;
 }): ThreadFileTargetResolver {
@@ -34,6 +34,14 @@ export function createThreadFileTargetResolver(options: {
       root = await admitMaterializedRoot(location.targetPath, signal);
     }
     const normalized = process.platform === 'win32' ? file.replace(/^\/([a-zA-Z])\//, '$1:/') : file;
+    if (source.mode === 'live_root') {
+      const absolute = await canonicalizePathIdentity(path.resolve(root, normalized), { allowMissing: true });
+      if (!isPathWithinRoot(absolute, root)) {
+        const resource = await options.documents.ensureResourceRoot(absolute, 'file');
+        await options.documents.admitWorkspaceRegistration(resource.workspaceId, signal);
+        return { kind: 'document', workspaceId: resource.workspaceId, root: absolute, resourceId: '' };
+      }
+    }
     const target = await (path.isAbsolute(normalized) ? assertAbsolutePathInWorkspace(normalized, { root }) : resolveWorkspacePath(normalized, { root }));
     const workspace = await options.documents.resolveWorkspace({ path: root });
     await options.documents.admitWorkspaceRegistration(workspace.workspaceId, signal);

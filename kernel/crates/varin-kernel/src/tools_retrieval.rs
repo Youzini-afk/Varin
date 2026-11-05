@@ -1,7 +1,7 @@
 //! Internal retrieval uses the ordinary native Agent engine and its original Operation.
 use super::*;
 fn valid_path(path: &str) -> bool {
-    normalized_path(path, false).is_ok() && !path.split('/').any(str::is_empty)
+    normalized_path(path, false).is_ok()
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,7 +29,7 @@ impl RetrievalQueryArgs {
         {
             return Err(ExecutionError::new(
                 "invalid_tool_arguments",
-                "Code retrieval requires a question and optional normalized relative paths",
+                "Code retrieval requires a question and optional file or directory paths",
             ));
         }
         Ok(args)
@@ -39,7 +39,7 @@ impl RetrievalQueryArgs {
 pub(super) fn schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["question"],"properties":{
         "question":{"type":"string","minLength":1,"description":"A focused question about the current source files or materials. Existing clues can be included naturally; no plan or keywords are required."},
-        "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."}
+        "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional file or directory paths on the source Host. Live device sources accept absolute paths or paths relative to the working directory; isolated sources keep their own namespace."}
     }})
 }
 

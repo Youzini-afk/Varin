@@ -3,7 +3,7 @@
 //! same Storage owner. Local owner fixtures drive these identical stages.
 use super::file_resource_leases::{canonical_lease_path, FileLeaseRequest, RetainedFileLease};
 use super::file_resources::{
-    file_params_value, normalized_relative_path, parse_file_params, resolve_admitted_resource,
+    file_params_value, parse_file_params, resolve_admitted_resource,
     FileState, ResolvedFileResource,
 };
 use super::*;
@@ -451,7 +451,7 @@ impl Storage {
         } else {
             &["path"][..]
         } {
-            let path = normalized_relative_path(field(*name)?, root_metadata)?.0;
+            let path = super::file_resources::resource_path(&root, field(*name)?, grant, root_metadata)?;
             if !path_allowed(grant, &path) {
                 return Err(KernelError::Authorization(
                     "File effect is outside grant scope".into(),

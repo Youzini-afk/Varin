@@ -429,7 +429,7 @@ impl Storage {
             )?;
             let cwd = string(&record, "cwd")?;
             if root.owning_workspace_id != workspace
-                || !contains(&root.canonical_root, Path::new(cwd))
+                || (!super::file_resources::device_access(&grant) && !contains(&root.canonical_root, Path::new(cwd)))
             {
                 return Err(KernelError::Authorization(
                     "native process source root changed".into(),
@@ -667,9 +667,13 @@ impl Storage {
         let cwd = string(&record, "cwd")?;
         let relative = string(&record, "sourceRelativeCwd")?;
         let original_root = Path::new(string(&record, "sourceRoot")?);
+        let device=super::file_resources::device_access(&original) && super::file_resources::device_access(grant);
+        let same_path=if device {
+            super::file_resources::device_path(original_root,relative)?==super::file_resources::device_path(original_root,cwd)?
+        }else{original_root.join(relative)==Path::new(cwd)};
         if root.owning_workspace_id != workspace
-            || !contains(original_root, Path::new(cwd))
-            || original_root.join(relative) != Path::new(cwd)
+            || (!device && !contains(original_root, Path::new(cwd)))
+            || !same_path
             || !path_allowed(&original, relative)
             || !path_allowed(grant, relative)
         {
@@ -695,7 +699,8 @@ impl Storage {
                     "delegated process result is not a stopped source ancestor".into(),
                 ));
             }
-        } else if !contains(&root.canonical_root, Path::new(cwd))
+        } else if (!device && !contains(&root.canonical_root, Path::new(cwd)))
+            || (device && root.canonical_root != original_root)
             || original.path_scopes != grant.path_scopes
         {
             return Err(KernelError::Authorization(

@@ -10,7 +10,7 @@ export const MANAGED_REMOTE_PROTOCOL_VERSION = 1;
 
 export type ManagedHostSourceOwner = Extract<SourceResourceOwner, { kind: 'managed_host' }>;
 /** Obtained from the verified authenticated client, never from a request body. */
-export interface ManagedSourcePrincipal { principalId: string; capabilities: readonly string[] }
+export interface ManagedSourcePrincipal { principalId: string; capabilities: readonly string[]; allowedDirectories?: readonly string[] }
 export type SourceAuthorityScope = import('../kernel/protocol.generated.js').SourceAuthorityScope;
 export interface ManagedSourceCapabilities {
   executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;

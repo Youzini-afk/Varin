@@ -133,6 +133,8 @@ interface ToolCompositionState {
 }
 /** Explicit authority client. Existing Pi thread routes are not silently redirected. */
 export class AgentRuntimeClient {
+  /** Explicit Host deployment confinement; desktop installs default to device access. */
+  deviceFileAccess = true;
   executionEnvironment = () => defaultExecutionEnvironment.snapshot();
   async executionEnvironmentForSource(source: CalendarProtocol.LaunchSource | null | undefined, signal?: AbortSignal) {
     if (source?.resource_owner.kind !== 'managed_host') return this.executionEnvironment();

@@ -153,6 +153,10 @@ impl Storage {
     }
 
     fn recovery_path(path: &str) -> Result<String, KernelError> {
+        if Path::new(path).is_absolute() {
+            return super::file_resources::device_path(Path::new(""),path)
+                .map(|path|path.to_string_lossy().replace('\\',"/"));
+        }
         if path == "." { Ok(".".into()) } else { Self::validate_path(path).map(|parts|parts.join("/")) }
     }
     fn validate_root_recovery_state(path:&str,state:&Value)->Result<(),KernelError>{
@@ -1784,6 +1788,10 @@ pub(super) fn resolve_reservation_conflicts(reservations: &[Value], requested: &
         let directory = reservation["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("Integration reservation root is missing".into()))?;
         let paths: Vec<String> = serde_json::from_value(reservation["paths"].clone())?;
         let physical = paths.iter().map(|path| {
+            // These are original journal names, not a new effect authorization.
+            if Path::new(path).is_absolute() {
+                return super::file_resource_leases::canonical_lease_path(PathBuf::from(path));
+            }
             let resolved = super::file_resources::resolve_scoped_resource(Path::new(directory), path, true, true, |_|true)?;
             super::file_resource_leases::canonical_lease_path(resolved.absolute)
         }).collect::<Result<Vec<_>, KernelError>>()?;

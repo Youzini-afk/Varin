@@ -16,6 +16,7 @@ mod admission;
 use admission::InputAdmission;
 struct Model {
     write: bool,
+    path: String,
     wires: Arc<Mutex<Vec<Value>>>,
     catalog: Arc<Mutex<Catalog>>,
 }
@@ -104,10 +105,10 @@ impl ModelProvider for Model {
             (
                 write_id,
                 "file_write",
-                json!({"path":"a.txt","readVersion":version,"content":if later {"C"}else{"B"}}),
+                json!({"path":self.path,"readVersion":version,"content":if later {"C"}else{"B"}}),
             )
         } else {
-            (read_id, "file_read", json!({"path":"a.txt"}))
+            (read_id, "file_read", json!({"path":self.path}))
         };
         let schema = request
             .view
@@ -136,10 +137,18 @@ impl ModelProvider for Model {
 }
 #[test]
 fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
+    exercise_journal(false);
+}
+#[test]
+fn assembled_device_file_journal_restores_outside_the_default_directory() {
+    exercise_journal(true);
+}
+fn exercise_journal(device: bool) {
     let root = std::env::temp_dir().join(format!("thread-recovery-{}", uuid::Uuid::new_v4()));
     let workspace = root.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
-    std::fs::write(workspace.join("a.txt"), "A").unwrap();
+    let file=if device{root.join("outside.txt")}else{workspace.join("a.txt")};
+    std::fs::write(&file, "A").unwrap();
     let mut catalog = Catalog::open(root.join("runtime")).unwrap();
     catalog.create_thread("thread", "main").unwrap();
     let runtime = Arc::new(RunSupervisor::new(catalog));
@@ -249,7 +258,9 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         let grant_id = format!("actor:{}", run.id);
         let mut store = storage.lock().unwrap();
         let identity = root.join("storage").to_string_lossy().to_string();
-        store.issue_grant(&json!({"grantId":grant_id,"hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":run.id,"pathScopes":[""],"capabilities":["storage.read","storage.write","recovery"]}),"host","generation",&identity,"epoch").unwrap();
+        let mut capabilities=vec!["storage.read","storage.write","recovery"];
+        if device {capabilities.push("filesystem.device");}
+        store.issue_grant(&json!({"grantId":grant_id,"hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":run.id,"pathScopes":[""],"capabilities":capabilities}),"host","generation",&identity,"epoch").unwrap();
         let args = json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace});
         let (grant, args) = store
             .authorize(
@@ -274,6 +285,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         };
         start.provider = Arc::new(Model {
             write,
+            path: if device {file.to_string_lossy().into_owned()}else{"a.txt".into()},
             wires: wires.clone(),
             catalog: runtime.catalog(),
         });
@@ -303,7 +315,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
     };
     let first = launch("FUTURE_ONLY", true);
     assert_eq!(
-        std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+        std::fs::read_to_string(&file).unwrap(),
         "C"
     );
     let owner = runtime.catalog();
@@ -349,6 +361,17 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         .unwrap();
     assert_eq!(later_turn["userEntryId"], range[1].anchor.entry_id);
     assert_ne!(turn["checkpointId"], later_turn["checkpointId"]);
+    if device {
+        let registered=store.dispatch("file.root.register",&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace}),Some(&actor),&grant).unwrap();
+        let root_id=registered["rootId"].as_str().unwrap();
+        let args=serde_json::from_value(json!({"point":"current:before","paths":[file]})).unwrap();
+        let mut dispatched=false;
+        let restored=store.restore_recorded_files("workspace",root_id,"thread","device-restore",&args,Some(&range[0].anchor),varin_runtime::SourceMode::LiveRoot,&grant,&mut dispatched).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(),"A","{restored}");
+        let undo=serde_json::from_value(json!({"undo":"device-restore"})).unwrap();
+        let restored=store.restore_recorded_files("workspace",root_id,"thread","device-undo",&undo,Some(&range[0].anchor),varin_runtime::SourceMode::LiveRoot,&grant,&mut dispatched).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(),"C","{restored}");
+    }
     drop(store);
     assert_eq!(turn["userEntryId"], first.input_id);
     assert_eq!(turn["conversation"]["kind"], "thread");
@@ -392,7 +415,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         RunState::Completed
     );
     assert_eq!(
-        std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+        std::fs::read_to_string(&file).unwrap(),
         "C"
     );
     assembly.context.close();

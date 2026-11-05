@@ -85,7 +85,7 @@ impl Storage {
             return Err(KernelError::Authorization("Reservation query workspace differs from its original root".into()));
         }
         for path in &params.paths {
-            let (path, _) = super::file_resources::normalized_relative_path(path, true)?;
+            let path = super::file_resources::resource_path(&root, path, grant, true)?;
             if !path_allowed(grant, &path) { return Err(KernelError::Authorization("Reservation query is outside grant scope".into())); }
         }
         Ok(ConflictTask { _native_retention:self.retain_native_reader(&params.root_id)?, root,
@@ -746,7 +746,7 @@ impl Storage {
         workspace: &str,
         root: &str,
         thread: &str,
-        action: Action,
+        mut action: Action,
         anchor: Option<&JournalAnchor>,
         mode: varin_runtime::SourceMode,
         grant: &Grant,
@@ -757,9 +757,25 @@ impl Storage {
                 "Recovery journal belongs to a different conversation".into(),
             ));
         }
+        let admitted=self.admitted_file_root(root, grant)?;
+        if let Action::Points(args)=&mut action {
+            if let Some(paths)=&mut args.paths {
+                for path in paths { *path=super::file_resources::resource_path(&admitted,path,grant,true)?; }
+            }
+        }
+        if let Action::Restore{args,..}|Action::RestoreReceipt{args,..}=&mut action {
+            for paths in [&mut args.paths,&mut args.overwrite_paths].into_iter().flatten() {
+                for path in paths { *path=super::file_resources::resource_path(&admitted,path,grant,true)?; }
+            }
+            if let Some(blocked)=args.blocked_paths.take() {
+                args.blocked_paths=Some(blocked.into_iter().map(|(path,reason)| {
+                    Ok((super::file_resources::resource_path(&admitted,&path,grant,true)?,reason))
+                }).collect::<Result<_,KernelError>>()?);
+            }
+        }
         let task = Task {
             workspace: workspace.into(),
-            root: self.admitted_file_root(root, grant)?,
+            root: admitted,
             thread: thread.into(),
             action: Arc::new(action),
             anchor: anchor.cloned(),

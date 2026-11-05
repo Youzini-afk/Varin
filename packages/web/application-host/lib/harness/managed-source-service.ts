@@ -24,6 +24,7 @@ import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
 export interface ManagedSourceServiceOptions {
+  deviceFileAccess?: boolean;
   executionEnvironment?: () => Promise<import('../kernel/protocol.generated.js').ExecutionEnvironment>;
   kernel: KernelClient;
   hostId: string;
@@ -398,7 +399,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         owningWorkspace: source.workspace_id, executionWorkspace: source.execution_workspace_id,
         threadId: input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
         ...(input.operationId ? { operationId: input.operationId } : {}),
-        capabilities: [...new Set([...selected.grantCapabilities, ...(integration ? ['recovery'] : []),
+        capabilities: [...new Set([...selected.grantCapabilities, ...(source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []),
           ...(resultOnly ? ['storage.write'] : []), ...(['script_environment', 'mcp_owner'].includes(input.purpose) ? ['process'] : [])])], pathScopes: [''] }, signal);
       let opened: SourceAuthorityResult | undefined;
       try {

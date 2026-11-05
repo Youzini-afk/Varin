@@ -90,12 +90,16 @@ pub(crate) fn select_frozen(
         })
         .collect()
 }
-/// Main-only Goal authority is not a delegation selection. Every returned tool is
-/// present in the actual parent directory with the identical owning declaration.
+/// Main-only capabilities stay with their declaring owner. Host/extension tools
+/// retain their original frozen declarations rather than a second native allowlist.
 pub(crate) fn delegated(parent: &[ToolSchema]) -> Vec<ToolSchema> {
+    let main_only = crate::run_tools::builtin_definitions(
+        &ToolKind::all().collect(), true, true, true,
+    ).into_iter().filter(|definition| definition.child.is_none())
+        .map(|definition| definition.schema.name).collect::<std::collections::BTreeSet<_>>();
     parent
         .iter()
-        .filter(|tool| tool.name != "goal_report")
+        .filter(|tool| !main_only.contains(&tool.name))
         .cloned()
         .collect()
 }

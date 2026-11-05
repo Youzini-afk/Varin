@@ -91,7 +91,7 @@ export async function readSourceDocument(input: {
     const bytes = await sourceBytes(client, state, { ownerId }, signal);
     return { source: bytes, sourceUrl: source.resource_owner.kind === 'managed_host'
       ? `${provenance}/roots/${encodeURIComponent(physicalRoot.rootId)}/${captured.path.split('/').map(encodeURIComponent).join('/')}`
-      : pathToFileURL(path.join(physicalRoot.canonicalRoot, captured.path)).href,
+      : pathToFileURL(path.resolve(physicalRoot.canonicalRoot, captured.path)).href,
       title: path.posix.basename(captured.path), contentType: contentType(captured.path) };
   } finally { if (ownerId) await client.releaseBlob(ownerId); }
 }

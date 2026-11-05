@@ -17,6 +17,51 @@ pub(super) struct ResolvedFileResource {
     pub(super) native: Option<super::native_sources::NativeFileRoot>,
 }
 
+/// A device grant changes path placement, not the original resource/operation owner.
+/// Scoped grants and virtual workspace roots retain their existing namespace.
+pub(crate) fn device_access(grant: &Grant) -> bool {
+    grant.capabilities.contains("filesystem.device")
+}
+
+pub(crate) fn device_path(root: &Path, value: &str) -> Result<PathBuf, KernelError> {
+    if value.contains('\0') { return Err(KernelError::Protocol("File path contains NUL".into())); }
+    let value = value.replace('\\', "/");
+    let requested = Path::new(&value);
+    let joined = if requested.is_absolute() { requested.to_path_buf() } else { root.join(requested) };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::CurDir => (),
+            Component::ParentDir => { normalized.pop(); },
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    if !normalized.is_absolute() { return Err(KernelError::Protocol("Device path must resolve to an absolute path".into())); }
+    #[cfg(windows)]
+    {
+        let text = normalized.to_string_lossy().replace('\\', "/");
+        if let Some(tail) = text.strip_prefix("//?/UNC/") { return Ok(PathBuf::from(format!("//{tail}"))); }
+        if let Some(tail) = text.strip_prefix("//?/") { return Ok(PathBuf::from(tail)); }
+    }
+    Ok(normalized)
+}
+
+pub(crate) fn resource_path(root: &FileRoot, value: &str, grant: &Grant, allow_root: bool) -> Result<String, KernelError> {
+    if device_access(grant) && root.native.is_none() {
+        let path = device_path(&root.canonical_root, value)?;
+        if !allow_root && path.file_name().is_none() {
+            return Err(KernelError::Operation("A filesystem root is not a file".into()));
+        }
+        // Preserve existing in-directory journal/version identities. Only targets
+        // outside the default directory need a device-absolute resource name.
+        let base = device_path(&root.canonical_root, "")?;
+        let name = path.strip_prefix(&base).unwrap_or(&path);
+        return name.to_str().map(|path| path.replace('\\', "/"))
+            .ok_or_else(|| KernelError::Protocol("File path is not UTF-8".into()));
+    }
+    Ok(normalized_relative_path(value, allow_root)?.0)
+}
+
 /// Pure identity shared by registration and immutable Source receipt verification.
 pub(super) fn file_root_identity(workspace: &str, execution_workspace: &str, canonical: &Path) -> String {
     let identity = format!("file-root-v2\0{workspace}\0{execution_workspace}\0{}", canonical.to_string_lossy());
@@ -809,6 +854,16 @@ pub(super) fn resolve_admitted_resource(
     grant: &Grant,
     allow_root: bool,
 ) -> Result<ResolvedFileResource, KernelError> {
+    if device_access(grant) && root.native.is_none() {
+        let path = resource_path(root, relative, grant, allow_root)?;
+        if !path_allowed(grant, &path) { return Err(KernelError::Authorization("File path is outside the selected grant".into())); }
+        // The original root remains the default directory and execution identity.
+        // Absolute targets may reside on any volume available to this Host account.
+        if fs::canonicalize(&root.canonical_root)? != root.canonical_root {
+            return Err(KernelError::Authorization("Default working directory identity changed".into()));
+        }
+        return Ok(ResolvedFileResource { absolute: root.canonical_root.join(&path), path, native: None });
+    }
     let session=root.native.as_ref().map(|native|native.session.upgrade().ok_or_else(||KernelError::Authorization("Native source owner is closed".into()))).transpose()?;
     if let Some(session)=&session{session.check_mounted()?;}
     let mut resource=resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| {

@@ -40,9 +40,12 @@ pub(crate) struct Traversal {
 
 pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
 pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
-pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path.strip_prefix(root).is_some_and(|tail|tail.is_empty()||tail.starts_with('/'))}
+pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path.strip_prefix(root).is_some_and(|tail|tail.is_empty()||root.ends_with('/')||tail.starts_with('/'))}
 fn relative_to<'a>(path:&'a str,root:&str)->&'a str {
     if root.is_empty(){path}else{path.strip_prefix(root).unwrap_or(path).trim_start_matches('/')}
+}
+fn display_name<'a>(path:&'a str,device_root:Option<&str>)->&'a str {
+    device_root.filter(|root|within(path,root)).map_or(path,|root|relative_to(path,root))
 }
 fn selection_relative<'a>(path:&'a str,selections:&[String])->&'a str {
     let selected=selections.iter().filter(|root|within(path,root)).max_by_key(|root|root.len());
@@ -141,9 +144,16 @@ fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document
         Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None})
     }else{Ok(Document{path:source.path,revision:source.revision,state:PathState::Missing,bytes:None,metadata:None})}
 }
-fn safe_disk_path(root:&Path,path:&Path,scopes:&[String])->Result<PathBuf>{
+fn disk_name(root:&Path,path:&Path,device:bool)->Result<String>{
+    if device {
+        return crate::storage::file_resources::device_path(root,path.to_str().ok_or("File path is not UTF-8")?)
+            .map(|path|path.to_string_lossy().replace('\\',"/")).map_err(|e|e.to_string());
+    }
+    Ok(path.strip_prefix(root).map_err(|_|"File identity escaped its admitted root")?.to_string_lossy().replace('\\',"/"))
+}
+fn safe_disk_path(root:&Path,path:&Path,scopes:&[String],device:bool)->Result<PathBuf>{
     let canonical=fs::canonicalize(path).map_err(|e|e.to_string())?;
-    let relative=canonical.strip_prefix(root).map_err(|_|"File identity escaped its admitted root")?.to_string_lossy().replace('\\',"/");
+    let relative=disk_name(root,&canonical,device)?;
     if !scopes.iter().any(|scope|within(&relative,scope)){return Err("File target is outside the granted scope".into());}
     Ok(canonical)
 }
@@ -152,7 +162,7 @@ fn safe_disk_path(root:&Path,path:&Path,scopes:&[String])->Result<PathBuf>{
 /// it, explicit scopes can name hidden state, and unreadable paths fail capture.
 /// The traversal stays on a compute worker and streams one inventory across pages.
 pub(crate) fn inventory(task: &Task, shared: &Shared) -> Result<bool> {
-    let Source::Disk { root } = &task.source else {
+    let Source::Disk { root, .. } = &task.source else {
         return Err("Workspace inventory requires an admitted directory".into());
     };
     let canonical = fs::canonicalize(root).map_err(|e| e.to_string())?;
@@ -207,16 +217,20 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
     let immediate=task.params.immediate.unwrap_or(false);
     let roots=task.params.paths.clone().unwrap_or_else(||vec![String::new()]);
     let explicit=task.params.files.as_deref().unwrap_or_default().iter().map(|f|f.path.clone()).collect::<HashSet<_>>();
-    let mut roots=roots.iter().map(|p|normalize(p)).collect::<Result<Vec<_>>>()?;
+    let normalize_path=|value:&str| match &task.source { Source::Disk{root,device:true}=>disk_name(root,Path::new(value),true),_=>normalize(value) };
+    let mut roots=roots.iter().map(|p|normalize_path(p)).collect::<Result<Vec<_>>>()?;
     roots.sort_by(|a,b|a.split('/').cmp(b.split('/')));
     roots.dedup();
     let selections=roots.clone();
     let mut minimal_roots=Vec::<String>::new();
     for path in roots { if !minimal_roots.iter().any(|parent|within(&path,parent)){minimal_roots.push(path);} }
     let roots=minimal_roots.into_iter().rev().collect::<Vec<_>>();
-    let excluded=task.params.exclude_paths.clone().unwrap_or_default().into_iter().map(|p|normalize(&p)).collect::<Result<HashSet<_>>>()?;
+    let excluded=task.params.exclude_paths.clone().unwrap_or_default().into_iter().map(|p|normalize_path(&p)).collect::<Result<HashSet<_>>>()?;
     let dirs:HashSet<String>=task.params.exclude_directories.clone().unwrap_or_default().into_iter().collect();
     let scopes=task.scopes.clone();
+    let device_root=match &task.source {
+        Source::Disk{root,device:true}=>Some(disk_name(root,root,true)?),_=>None,
+    };
     let include_hidden=task.params.include_hidden.unwrap_or(false);
     let mut glob_builder=ignore::overrides::OverrideBuilder::new("");
     for glob in task.params.globs.as_deref().unwrap_or_default(){glob_builder.add(glob).map_err(|e|e.to_string())?;}
@@ -229,7 +243,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         if excluded.iter().any(|p|within(path,p))||(!explicit.is_empty()&&!explicit.contains(path))||!scopes.iter().any(|scope|within(path,scope))||!roots.iter().any(|root|within(path,root)){return false;}
         if immediate&&!selections.iter().any(|root|path==root||path.rsplit_once('/').map(|(parent,_)|parent==root).unwrap_or(root.is_empty())){return false;}
         if selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
-        let matched = glob.matched(path,directory);
+        let matched = glob.matched(display_name(path,device_root.as_deref()),directory);
         // ignore's directory exemption keeps walkers descending. Traversal is
         // already separate here; records must actually match a positive glob.
         !matched.is_ignore() && (!directory || glob.num_whitelists() == 0 || matched.is_whitelist())
@@ -253,7 +267,8 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         let path=overlay.path.clone();
         shared.check()?; if !eligible(&path,false) {continue;}
         if shadowed.iter().any(|ancestor|ancestor!=&path&&within(&path,ancestor)){continue;}
-        let document=load_object(overlay,content,shared)?;
+        let mut document=load_object(overlay,content,shared)?;
+        document.path=display_name(&document.path,device_root.as_deref()).into();
         if !matches!(document.state,PathState::Missing)&&!callback(document)? {return Ok(false);}
     }
     let mut partial=traversal.partial;
@@ -318,7 +333,8 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 }
             }}
         },
-        Source::Disk{root}=>{
+        Source::Disk{root,device}=>{
+            let device=*device;
             let canonical=fs::canonicalize(root).map_err(|e|e.to_string())?;
             if canonical!=*root {return Err("Admitted root identity changed before native capture".into());}
             let root=canonical;
@@ -361,7 +377,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 if !disk.visited.insert(prefix.clone()) { continue; }
                 shared.check()?;
                 let directory = fs::canonicalize(root.join(&prefix)).map_err(|e|e.to_string())?;
-                if !directory.starts_with(&root) { continue; }
+                if !device && !directory.starts_with(&root) { continue; }
                 let git_visible = task.params.include_tracked.unwrap_or(false) && task.params.respect_gitignore.unwrap_or(true);
                 let exact = if explicit.is_empty() { None } else {
                     Some(explicit.iter().filter(|p|within(p,&prefix)).map(|p| {
@@ -387,7 +403,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let walk_ignore_errors=ignore_errors.clone();
                 // Explicit paths are search roots, including ignored directories. Compile
                 // ignore rules once per selected root; the traversal reuses these matchers.
-                if respect&&ignore_matchers.is_none() {
+                if respect&&!device&&ignore_matchers.is_none() {
                     let mut probe=ignore::WalkBuilder::new(&root).hidden(false).build_matchers().remove(0);
                     let mut matchers=Vec::new();
                     for selected in &selections {
@@ -405,12 +421,15 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     matchers.sort_by_key(|(selected,_)|std::cmp::Reverse(selected.len()));
                     ignore_matchers=Some(std::sync::Arc::new(std::sync::Mutex::new(matchers)));
                 }
-                let matchers=if respect{ignore_matchers.clone()}else{None};
+                let matchers=if respect&&device {
+                    let matcher=ignore::WalkBuilder::new(&directory).hidden(false).build_matchers().remove(0);
+                    Some(std::sync::Arc::new(std::sync::Mutex::new(vec![(prefix.clone(),matcher)])))
+                }else if respect{ignore_matchers.clone()}else{None};
                 let mut builder=ignore::WalkBuilder::new(&directory);
                 if immediate&&selections.len()==roots.len() { builder.max_depth(Some(1)); }
                 builder.sort_by_file_name(|a,b|a.cmp(b)).standard_filters(false).follow_links(false)
                     .filter_entry(move|entry|{
-                        let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
+                        let Ok(path)=disk_name(&walk_root,entry.path(),device)else{return false;};
                         let is_directory=entry.file_type().is_some_and(|t|t.is_dir());
                         if is_directory && walk_after.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))==std::cmp::Ordering::Less && !within(after,&path)) {return false;}
                         if !walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))
@@ -449,7 +468,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 if listing {disk.walks.rotate_left(1);}
                 let entry=match entry{Ok(entry)=>entry,Err(_)=>{partial=true;continue;}};
                 if entry.error().is_some(){partial=true;}
-                let path=entry.path().strip_prefix(&root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
+                let path=disk_name(&root,entry.path(),device)?;
                 let Some(kind)=entry.file_type()else{partial=true;continue;};
                 if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,kind.is_dir()){continue;}
                 let mut bytes=None;let mut object_hash=String::new();let mut revision=String::new();
@@ -468,13 +487,14 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let state=if kind.is_dir(){PathState::Directory{mode:None}}else if kind.is_symlink(){PathState::Symlink{symlink_target:fs::read_link(entry.path()).map_err(|e|e.to_string())?.to_string_lossy().into(),mode:None}}
                 else if kind.is_file(){
                     if content {
-                        let result: Result<Option<CapturedFile>>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let file=File::open(&canonical).map_err(|e|e.to_string())?;
+                        let result: Result<Option<CapturedFile>>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes,device)?;let file=File::open(&canonical).map_err(|e|e.to_string())?;
                             let b=if task.params.operation=="search"{search_capture(file,shared)?}else{Some(read_capture(file,None,shared)?)};
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
                         match result{Ok(Some(captured))=>{bytes=Some(captured.bytes);metadata=Some(captured.metadata);object_hash=captured.object_hash;revision=captured.revision;},Ok(None)=>continue,Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
                     PathState::RegularFile{object_hash,byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
+                let path=display_name(&path,device_root.as_deref()).into();
                 if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
             }
             partial|=ignore_errors.load(std::sync::atomic::Ordering::Relaxed);

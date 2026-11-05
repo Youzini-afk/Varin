@@ -52,7 +52,7 @@ const declaration = (method: string, description: string, inputSchema: JsonObjec
 });
 
 export const OFFICE_TOOL_DECLARATIONS = [
-  declaration('read', 'Read DOCX, XLSX or PPTX structure from a fixed attachment ref, source-relative path or fixed snapshotId. Overview lists sections; content returns paragraphs, cells, shapes and notes with revision-bound object IDs. Select a section, objectId, worksheet range or query; offset/limit continue results. Formulas and cached values are distinct; a stored cache is not a new calculation. Use document_read for PDF pages.', {
+  declaration('read', 'Read DOCX, XLSX or PPTX structure from a fixed attachment ref, file path on the source Host or fixed snapshotId. Overview lists sections; content returns paragraphs, cells, shapes and notes with revision-bound object IDs. Select a section, objectId, worksheet range or query; offset/limit continue results. Formulas and cached values are distinct; a stored cache is not a new calculation. Use document_read for PDF pages.', {
     ...object({ ...source, view: { enum: ['overview', 'content', 'find'] }, section: text, objectId: text, range: text, query: text, offset: integer, limit: { type: 'integer', minimum: 1 } }), ...exactlyOneSource,
   }),
   declaration('write', 'Create an editable Office file or edit an existing revision in place. edit requires expectedRevision from office_read; object IDs belong to that revision. Text edits preserve surrounding runs and unrelated package parts. Worksheet edits clear stale formula caches and request recalculation; office_export through LibreOffice performs actual recalculation. PPTX coordinates are inches, DOCX font sizes are points. create only writes a missing path; replace explicitly replaces a known revision with new content.', { $defs:{content:create,edits}, oneOf: [
@@ -65,7 +65,7 @@ export const OFFICE_TOOL_DECLARATIONS = [
   }),
   declaration('export', 'Convert an input Office file (ref, sourcePath or snapshotId, exactly one) using LibreOffice and save it to the separate output destination path. Exporting XLSX to XLSX also recalculates formulas. expectedRevision is required to replace an existing destination; omitting it creates a new file. The result identifies the engine and the committed file revision.', { ...object({
     ref: { ...text, description: 'Input fixed attachment reference.' },
-    sourcePath: { ...text, description: 'Input source-relative file path; choose sourcePath or snapshotId.' },
+    sourcePath: { ...text, description: 'Input file path on the source Host, absolute for a live device or relative to its working directory; choose sourcePath or snapshotId.' },
     snapshotId: { ...text, description: 'Input snapshot; choose snapshotId or sourcePath.' },
     path: { ...text, description: 'Output destination file path, distinct from the input sourcePath or snapshotId.' },
     expectedRevision: text, format: { enum: ['pdf', 'docx', 'xlsx', 'pptx', 'csv'] },

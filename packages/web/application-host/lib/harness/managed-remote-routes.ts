@@ -88,7 +88,8 @@ export function registerManagedRemoteRoutes(
         response.status(403).json({ error: `Managed execution capability is unavailable: ${missing.join(", ")}` });
         return;
       }
-      principals.set(request, { principalId: auth.clientId, capabilities: [...capabilities] });
+      principals.set(request, { principalId: auth.clientId, capabilities: [...capabilities],
+        ...(auth.client.allowedDirectories?.length ? { allowedDirectories: auth.client.allowedDirectories } : {}) });
       next();
     } catch (error) { next(error); }
   };

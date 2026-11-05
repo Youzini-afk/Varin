@@ -25,8 +25,9 @@ export function createChildProjectSourcePreparer(owners: {
       const backend=await owners.inspectBackend(selected.id,signal);
       if (!backend.dependenciesReady) throw new WorkspaceBackendUnavailableError(backend);
     }
-    // sourcePath was validated as a normalized relative directory by native dispatch admission.
-    const directory = relative ? path.join(project.path, ...relative.split('/')) : project.path;
+    // Resolve with the selected Host's path syntax, not the coordinator's OS.
+    const paths = /^[a-zA-Z]:[\\/]|^\\\\/.test(project.path) ? path.win32 : path.posix;
+    const directory = relative ? paths.resolve(project.path, relative) : project.path;
     const source = await owners.sources.resolve({ resourceOwner: selected.resource_owner, path: directory }, signal);
     return owners.prepare({ ...identity, key, workspaceId: source.workspaceId, resourceOwner: source.resourceOwner,
       mode: mode === 'isolated_write' ? 'materialized' : 'live_root', content: { mode: 'saved-files' }, captureScopes: [] }, signal);

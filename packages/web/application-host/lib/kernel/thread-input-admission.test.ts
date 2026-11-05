@@ -37,6 +37,23 @@ function fixture() {
   return { api: createThreadsHttpAPI(), adapter, runtime, queued, models, source, configuration };
 }
 afterEach(() => vi.unstubAllGlobals());
+it('supplies a device default for source-less sends while keeping explicit sources and inheritance intent', async () => {
+  const f = fixture();
+  const fallback = { resourceOwner: { kind: 'local' as const }, workspaceId: 'device', executionWorkspaceId: 'device',
+    mode: 'live_root' as const, liveRoot: { hostId: 'host', rootId: 'home-root', canonicalRoot: '/home/user' }, tools: ['file_read', 'process_spawn'] };
+  const prepare = vi.fn(async () => fallback);
+  f.adapter.bindDefaultDeviceSource(prepare);
+  await f.api.submit(input);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    inheritSource: true, source: expect.objectContaining({ workspaceId: 'device' }), enabledTools: fallback.tools,
+  }) }));
+  const project = { ...fallback, workspaceId: 'project', executionWorkspaceId: 'project' };
+  await f.api.submit({ ...input, source: project });
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    inheritSource: false, source: expect.objectContaining({ workspaceId: 'project' }),
+  }) }));
+});
 it('reports an unavailable extension process as a service failure before admission', async () => {
   const f = fixture();
   f.models.resolveModel.mockRejectedValueOnce(new BrokeredHostUnavailableError('private process diagnostic'));

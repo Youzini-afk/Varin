@@ -72,6 +72,8 @@ export interface KernelPendingFileOperation {
 }
 
 export interface KernelFileAuthorityContext {
+  /** Path addressing follows the actual native grant, not the navigation project. */
+  deviceFileAccess?: boolean;
   client: KernelScopedClient;
   rootId: string;
   owningWorkspaceId: string;
@@ -1829,6 +1831,7 @@ export class KernelStorageAdapter {
     }
     return {
       client, rootId,
+      deviceFileAccess: grant.capabilities.includes('filesystem.device'),
       owningWorkspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId,
       canonicalRoot,

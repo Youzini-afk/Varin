@@ -120,12 +120,14 @@ impl Storage {
             self.source_physical_root(&effective,grant,host_id)?
         } else { self.source_physical_root(binding, grant, host_id)? };
         if let (Some(relative), Some(root)) = (&delegation.source_path, &physical) {
-            // Resolve at the original authority, before publishing the handoff. A
-            // symlink to a sibling or an absent directory must never widen capture.
-            let segments = Self::validate_path(relative)?;
+            // Resolve on the actual resource Host. A live device source may
+            // choose any directory; fixed/isolated sources retain their view.
             let original = fs::canonicalize(&root.canonical_root)?;
-            let selected = fs::canonicalize(segments.iter().fold(original.clone(), |path, part| path.join(part)))?;
-            if !selected.starts_with(&original) || !selected.is_dir() {
+            let device = source.mode == varin_runtime::SourceMode::LiveRoot && super::file_resources::device_access(grant);
+            let requested = if device { super::file_resources::device_path(&original,relative)? }
+                else { Self::validate_path(relative)?.iter().fold(original.clone(), |path, part| path.join(part)) };
+            let selected = fs::canonicalize(requested)?;
+            if (!device && !selected.starts_with(&original)) || !selected.is_dir() {
                 return Err(KernelError::Operation("sourcePath must select a directory inside the admitted source".into()));
             }
             let parameters=json!({"workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":selected});

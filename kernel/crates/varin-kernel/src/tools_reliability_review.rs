@@ -60,10 +60,14 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_device_access(false)
+    }
+    fn with_device_access(device: bool) -> Self {
         let root = std::env::temp_dir().join(format!("varin-tools-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(root.join("work")).unwrap();
         let mut storage = Storage::open(&root.join("store"), HOST).unwrap();
-        storage.issue_grant(&json!({"grantId":"actor","hostGeneration":GENERATION,"capabilities":["storage.admin","process"],
+        let capabilities=if device {vec!["storage.read","storage.write","process","filesystem.device"]}else{vec!["storage.admin","process"]};
+        storage.issue_grant(&json!({"grantId":"actor","hostGeneration":GENERATION,"capabilities":capabilities,
             "pathScopes":[""],"owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","runId":"run"}),
             HOST,GENERATION,&root.join("store").to_string_lossy(),EPOCH).unwrap();
         let params = json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":root.join("work")});
@@ -150,6 +154,49 @@ impl Fixture {
             other => panic!("{other:?}"),
         }
     }
+}
+
+#[test]
+fn device_files_read_write_search_and_process_admission_share_the_selected_host_paths() {
+    let mut f=Fixture::with_device_access(true);
+    let outside=f.root.join("other");fs::create_dir_all(&outside).unwrap();
+    let file=outside.join("device.txt");fs::write(&file,"before device marker").unwrap();
+    let path=file.to_string_lossy().replace('\\',"/");
+    let before=f.read(json!({"path":path}));
+    assert_eq!(before["content"]["text"],"before device marker");
+    let updated=f.call("file_write",json!({"path":path,"content":"after device marker","readVersion":before["readVersion"]}));
+    assert!(matches!(updated,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{updated:?}");
+    assert_eq!(fs::read_to_string(&file).unwrap(),"after device marker");
+    let relative=f.read(json!({"path":"../other/device.txt"}));
+    assert_eq!(relative["readVersion"],f.read(json!({"path":path}))["readVersion"]);
+    {
+        let mut storage=f._storage.lock().unwrap();
+        let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        let context=ToolExecutionContext{run_id:"run".into(),operation_id:"outside-child".into(),origin:ToolOrigin::ModelStep{request_id:"request".into()}};
+        let delegation=varin_runtime::catalog::dispatch::ChildSourceDelegation{source_path:Some(outside.to_string_lossy().into_owned()),agent_source:None,
+            work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,process:false,configured_preset:false,selection_ref:json!({})};
+        let handoff=storage.child_source_handoff(&f.executor.binding,&context,&delegation,&grant,HOST,false).unwrap();
+        assert_eq!(fs::canonicalize(handoff["root"]["root"]["canonicalRoot"].as_str().unwrap()).unwrap(),fs::canonicalize(&outside).unwrap());
+    }
+    fs::write(f.root.join("work/local.txt"),"local device marker").unwrap();
+    for tool in ["file_list","file_search"] {
+        let mut args=json!({"paths":[".",outside],"respectGitignore":false});
+        if tool=="file_search" {args["query"]=json!("device marker");}
+        let result=f.call(tool,args);
+        let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=result else{panic!("{result:?}")};
+        let text=content.data.to_string();assert!(text.contains("device.txt")&&text.contains("local.txt"),"{text}");
+    }
+    let command=if cfg!(windows){json!({"command":"cmd.exe","args":["/d","/c","cd"],"cwd":outside,"waitMs":1000})}
+        else{json!({"command":"/bin/pwd","cwd":outside,"waitMs":1000})};
+    let result=f.call("process_spawn",command);
+    let content=match result {
+        ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=>content.data,
+        ToolCompletion::JobAccepted{content:Some(content),..}=>content.data,
+        other=>panic!("{other:?}"),
+    };
+    assert!(content.get("observationError").is_none(),"{content}");
+    assert_eq!(fs::canonicalize(content["cwd"].as_str().unwrap()).unwrap(),fs::canonicalize(&outside).unwrap());
+    assert!(content.get("observation").is_some(),"{content}");
 }
 
 pub(crate) fn source_reader(run:&str,thread:&str)->(KernelToolExecutor,TestRoot) {

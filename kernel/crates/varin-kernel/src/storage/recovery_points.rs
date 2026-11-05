@@ -767,14 +767,14 @@ impl Storage {
             &json!({"workspaceId":workspace,"threadId":thread}),
             &grant.grant_id,
         )?;
-        self.admitted_file_root(root, grant)?;
+        let admitted = self.admitted_file_root(root, grant)?;
         for path in args
             .paths
             .iter()
             .flatten()
             .chain(args.overwrite_paths.iter().flatten())
         {
-            let canonical=super::file_resources::normalized_relative_path(path,true)?.0;
+            let canonical=super::file_resources::resource_path(&admitted,path,grant,true)?;
             if !path_allowed(grant,&canonical){return Err(KernelError::Authorization("Restore path is outside grant scope".into()));}
         }
         let original = self.recovery_operation_get(

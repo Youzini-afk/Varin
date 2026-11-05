@@ -404,7 +404,7 @@ export const dict = {
   "thread.composer.interrupt": "Interrupt generation",
   "thread.composer.afterRun": "After this run",
   "thread.composer.images": "Attach images",
-  "thread.composer.chatOnly": "Chat only",
+  "thread.composer.chatOnly": "No project",
   "thread.message.summarize": "Summarize through here",
 
   "chat.fileAttachment.actions.attachPdfs": "Attach PDFs",

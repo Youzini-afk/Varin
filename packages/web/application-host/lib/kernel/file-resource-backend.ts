@@ -185,6 +185,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
   }
 
   private translated(context: BoundFileContext, resourceId: string): string {
+    if (context.deviceFileAccess && !context.basePath && path.isAbsolute(resourceId)) return resourceId.replaceAll('\\', '/');
     return joinResource(context.basePath, resourceId);
   }
 
@@ -329,7 +330,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const pathId = this.translated(context, resolved.relative);
     const lease = this.leaseFor(context);
     const expected = options.expected ?? lease?.observed.get(pathId);
-    if (normalizeRelative(resolved.relative) === '' && (state.kind !== 'directory' || expected?.kind !== 'directory')) {
+    if ((!resolved.relative || resolved.relative === '.') && (state.kind !== 'directory' || expected?.kind !== 'directory')) {
       throw new Error('Workspace root accepts a conditional directory metadata update only');
     }
     const value = await context.client.fileApply({
@@ -381,7 +382,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
 
   async mkdir(identity: RecoveryIdentity, relativePath: string, recursive = true): Promise<void> {
     const context = await this.bind(identity);
-    const pathId = this.translated(context, normalizeRelative(relativePath));
+    const pathId = this.translated(context, relativePath);
     const lease = this.leaseFor(context);
     const value = await context.client.fileMkdir({
       operationId: `file-mkdir:${randomUUID()}`,
@@ -396,7 +397,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
 
   async remove(identity: RecoveryIdentity, relativePath: string, options: { recursive?: boolean; force?: boolean; operationId?: string } = {}): Promise<void> {
     const context = await this.bind(identity);
-    const pathId = this.translated(context, normalizeRelative(relativePath));
+    const pathId = this.translated(context, relativePath);
     const lease = this.leaseFor(context);
     const value = await context.client.fileRemove({
       operationId: options.operationId ?? `file-remove:${randomUUID()}`,
@@ -427,8 +428,8 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       operationId: options.operationId ?? `file-rename:${randomUUID()}`,
       workspaceId: context.owningWorkspaceId,
       rootId: context.rootId,
-      fromPath: this.translated(context, normalizeRelative(fromPath)),
-      toPath: this.translated(context, normalizeRelative(toPath)),
+      fromPath: this.translated(context, fromPath),
+      toPath: this.translated(context, toPath),
       ...(options.targetMustBeMissing === undefined ? {} : { targetMustBeMissing: options.targetMustBeMissing }),
       ...(options.expectedFrom ? { expectedFromJson: JSON.stringify(options.expectedFrom) } : {}),
       ...(options.expectedTo ? { expectedToJson: JSON.stringify(options.expectedTo) } : {}),
@@ -454,7 +455,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       const value = await context.client.fileScan({
         workspaceId: context.owningWorkspaceId,
         rootId: context.rootId,
-        path: this.translated(context, normalizeRelative(relativePath)),
+        path: this.translated(context, relativePath),
         ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalizeRelative) } : {}),
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 1024,
@@ -482,7 +483,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const value = await context.client.fileMeasure({
       workspaceId: context.owningWorkspaceId,
       rootId: context.rootId,
-      path: this.translated(context, normalizeRelative(relativePath)),
+      path: this.translated(context, relativePath),
     }, options.signal);
     const logicalBytes = value.logicalBytes === null || value.logicalBytes === undefined
       ? null
@@ -523,7 +524,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       operationId: options.operationId,
       workspaceId: context.owningWorkspaceId,
       rootId: context.rootId,
-      path: this.translated(context, normalizeRelative(relativePath)),
+      path: this.translated(context, relativePath),
       sourceRoot,
       leaseId: existing.leaseId,
     }, options.signal);
@@ -546,6 +547,12 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
   }
 
   async relativePathFor(identity: RecoveryIdentity, inputPath: string): Promise<ResolvedPath> {
+    if (this.options.authority?.deviceFileAccess) {
+      const absolute = path.resolve(identity.canonicalRoot, inputPath);
+      const relative = path.relative(identity.canonicalRoot, absolute);
+      const outside = path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`);
+      return { absolute, relative: (outside ? absolute : relative || '.').replaceAll('\\', '/') };
+    }
     return this.helper.relativePathFor(identity, inputPath);
   }
 

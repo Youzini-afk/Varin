@@ -3,7 +3,7 @@
 //! native filesystem callbacks can therefore use that same Storage owner.
 use super::file_resource_leases::{canonical_lease_path, covers};
 use super::file_resources::{
-    file_mode, normalized_relative_path, resolve_admitted_resource, FileState,
+    file_mode, resolve_admitted_resource, FileState,
 };
 use super::*;
 
@@ -434,7 +434,7 @@ impl Storage {
         let requested = params["path"]
             .as_str()
             .ok_or_else(|| KernelError::Operation("File path is missing".into()))?;
-        let (path, _) = normalized_relative_path(requested, false)?;
+        let path = super::file_resources::resource_path(&self.admitted_file_root(root_id, grant)?, requested, grant, false)?;
         if !path_allowed(grant, &path) {
             return Err(KernelError::Authorization(
                 "File read is outside grant scope".into(),

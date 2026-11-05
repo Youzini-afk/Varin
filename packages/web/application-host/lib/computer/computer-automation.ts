@@ -483,13 +483,13 @@ export function createComputerAutomation(options: {
             pendingAssignments.delete(assignmentId); },
         async releaseRequest(assignmentId: string) { const lease = leases.get(assignmentId) ?? failedReleases.get(assignmentId) ?? releasing.get(assignmentId)?.lease; if (lease)
             await removeLease(lease); },
-        async manage<T>(work: ComputerWorkRef, expected: ComputerExecutionRef, task: (signal: AbortSignal) => Promise<T>, desktopId?: string): Promise<T> {
+        async manage<T>(work: ComputerWorkRef, expected: ComputerExecutionRef, task: (signal: AbortSignal, actor: ComputerActor) => Promise<T>, desktopId?: string): Promise<T> {
             const actor = await resolve(work, desktopId, undefined, expected);
             assertRound(actor);
             const abort = new AbortController(), id = randomUUID();
             controllers.set(id, { actor, abort, access: 'observe', ...(desktopId ? { desktopId } : {}) });
             try {
-                return await task(abort.signal);
+                return await task(abort.signal, actor);
             }
             finally {
                 controllers.delete(id);

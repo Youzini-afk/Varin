@@ -2,7 +2,7 @@
 //! control thread. The original process intent owns admission and final handles.
 use super::file_effects::{Control, Local};
 use super::file_resources::{
-    file_params_value, normalized_relative_path, resolve_admitted_resource,
+    file_params_value, resolve_admitted_resource,
 };
 use super::*;
 
@@ -138,14 +138,15 @@ impl Task {
                 "process cwd escaped the registered directory".into(),
             ));
         }
-        let relative = cwd
-            .strip_prefix(&self.root.canonical_root)
+        let relative = if super::file_resources::device_access(&self.grant) && self.root.native.is_none() {
+            super::file_resources::resource_path(&self.root, cwd.to_str().ok_or_else(||KernelError::Protocol("Process cwd is not UTF-8".into()))?, &self.grant, true)?
+        } else { cwd.strip_prefix(&self.root.canonical_root)
             .map_err(|_| {
                 KernelError::Authorization("process cwd escaped the registered directory".into())
             })?
             .to_str()
             .ok_or_else(|| KernelError::Authorization("process cwd is not UTF-8".into()))?
-            .replace('\\', "/");
+            .replace('\\', "/") };
         if !path_allowed(&self.grant, &relative) {
             return Err(KernelError::Authorization(
                 "process cwd is outside grant scope".into(),
@@ -245,11 +246,11 @@ impl Storage {
                 "process root workspace mismatch".into(),
             ));
         }
-        normalized_relative_path(
+        super::file_resources::resource_path(&root,
             params["cwd"]
                 .as_str()
                 .ok_or_else(|| KernelError::Operation("process cwd is required".into()))?,
-            true,
+            grant, true,
         )?;
         let task = Task {
             params: Arc::new(params),

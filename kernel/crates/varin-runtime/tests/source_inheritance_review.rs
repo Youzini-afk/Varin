@@ -25,6 +25,23 @@ fn complete(db: &mut Catalog, receipt: &Receipt) {
     db.transition_run(&run.id, run.epoch, run.revision, RunState::Completed)
         .unwrap();
 }
+
+#[test]
+fn default_device_source_fills_an_empty_conversation_without_replacing_an_inherited_source() {
+    let root=std::env::temp_dir().join(format!("varin-device-default-{}",uuid::Uuid::new_v4()));
+    let mut db=Catalog::open(&root).unwrap();db.create_thread("thread","main").unwrap();
+    let fallback=selection("model-a",Some("device-default"));
+    let first_command=command(&db,"initial","main");
+    let first=db.submit_with_inherited_source(&first_command,fallback.clone()).unwrap();
+    assert_eq!(db.launch_intent(&first.run_id).unwrap().unwrap().selection.source.unwrap().branch_id.as_deref(),Some("device-default"));
+    complete(&mut db,&first);
+    let project=db.submit_with_launch(&command(&db,"project","main"),Some(selection("model-a",Some("selected-project")))).unwrap();
+    complete(&mut db,&project);
+    assert_eq!(db.submit_with_inherited_source(&first_command,fallback.clone()).unwrap(),first);
+    let next=db.submit_with_inherited_source(&command(&db,"continue","main"),fallback).unwrap();
+    assert_eq!(db.launch_intent(&next.run_id).unwrap().unwrap().selection.source.unwrap().branch_id.as_deref(),Some("selected-project"));
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}
 #[test]
 fn inherited_admission_preserves_environment_owner_new_model_and_original_retry_identity() {
     let root =

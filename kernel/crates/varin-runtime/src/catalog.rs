@@ -525,8 +525,12 @@ impl Catalog {
                 if selection.child_dispatch_ref.is_none() {
                     selection.child_dispatch_ref = previous.selection.child_dispatch_ref;
                 }
-                selection.source = previous.selection.source;
-                if let Some(source) = selection.source.as_mut() {
+                // A Host may supply its default device directory for a source-less
+                // conversation. An existing source (including a remote or isolated
+                // one) always wins; its original tools are inherited with it.
+                let inherits_existing = previous.selection.source.is_some();
+                selection.source = previous.selection.source.or_else(|| selection.source.take());
+                if let Some(source) = selection.source.as_mut().filter(|_| inherits_existing) {
                     if source.mode == crate::SourceMode::Materialized
                         && source.environment_run_id.is_none()
                     {

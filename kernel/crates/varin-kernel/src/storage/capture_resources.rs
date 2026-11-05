@@ -703,7 +703,7 @@ impl Storage {
         let paths = paths
             .iter()
             .map(|path| {
-                let path = super::file_resources::normalized_relative_path(path, true)?.0;
+                let path = super::file_resources::resource_path(&root, path, grant, true)?;
                 if !seen.insert(path.clone()) {
                     return Err(KernelError::Operation("capture has duplicate paths".into()));
                 }

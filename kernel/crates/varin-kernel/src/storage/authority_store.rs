@@ -722,7 +722,13 @@ impl Storage {
                         || (method == "file.captureBatch" && field == "paths" && matches!(path,""|".")) {
                         String::new()
                     } else {
-                        Self::validate_path(path)?.join("/")
+                        if super::file_resources::device_access(&grant) && (method.starts_with("file.") || method.starts_with("recovery.") || (method == "storage.health" && params["rootId"].is_string())) {
+                            if let Some(root)=params["rootId"].as_str() {
+                                super::file_resources::resource_path(&self.admitted_file_root(root,&grant)?,path,&grant,true)?
+                            } else if Path::new(path).is_absolute() {
+                                super::file_resources::device_path(Path::new(""),path)?.to_string_lossy().replace('\\',"/")
+                            } else {Self::validate_path(path)?.join("/")}
+                        } else { Self::validate_path(path)?.join("/") }
                     };
                     if !(if metadata {
                         path_metadata_allowed_scopes(&grant.path_scopes, &canonical)
@@ -750,7 +756,13 @@ impl Storage {
                     || (method.starts_with("recovery.") && path == ".") {
                     String::new()
                 } else {
-                    Self::validate_path(path)?.join("/")
+                    if super::file_resources::device_access(&grant) && (method.starts_with("file.") || method.starts_with("recovery.")) {
+                        if let Some(root)=params["rootId"].as_str() {
+                            super::file_resources::resource_path(&self.admitted_file_root(root,&grant)?,path,&grant,true)?
+                        } else if Path::new(path).is_absolute() {
+                            super::file_resources::device_path(Path::new(""),path)?.to_string_lossy().replace('\\',"/")
+                        } else {Self::validate_path(path)?.join("/")}
+                    } else { Self::validate_path(path)?.join("/") }
                 };
             if !(if method == "branch.path.inspect" { path_metadata_allowed_scopes(&grant.path_scopes, &canonical) } else { path_allowed(&grant, &canonical) }) {
                 return Err(KernelError::Authorization(format!(

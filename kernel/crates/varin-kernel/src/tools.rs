@@ -92,10 +92,10 @@ impl ToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::FileRead => {
-                "Read an immutable attachment by ref, or a bounded UTF-8 range from the admitted source by path. For binary attachments the original bytes are returned as base64. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
+                "Read an immutable attachment by ref, or a bounded UTF-8 range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
             }
-            Self::FileList => "List paths in the admitted source with bounded pagination.",
-            Self::FileSearch => "Search text in the admitted source and return bounded matches.",
+            Self::FileList => "List files and directories with pagination. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
+            Self::FileSearch => "Search file text and return bounded matches. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
             Self::FileWrite => {
                 "Create a new file or replace an existing file using its read version."
             }
@@ -662,6 +662,7 @@ impl ResourceOperation {
                 // Revalidate the bound read grant and explicit scopes without inventing a root
                 // path or dispatching compute. Body reads receive separate per-file admission.
                 let mut params = json!({"workspaceId":binding.workspace_id});
+                if let Some(root) = &binding.root_id { params["rootId"] = json!(root); }
                 if let Some(paths) = &args.paths {
                     params["paths"] = json!(paths);
                 }
@@ -762,23 +763,20 @@ impl ResourceOperation {
     }
 }
 fn normalize_separators(path: &mut String) {
-    // Lexical only: leave absolute paths and parent components for the original
-    // resource admission to reject. Virtual Sources do not use local realpath.
+    // The resource Host resolves absolute paths; keep UNC/extended Windows roots.
     let value = path.replace('\\', "/");
     *path = value.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>().join("/");
     if value.starts_with('/') && !path.starts_with('/') { path.insert(0, '/'); }
+    if value.starts_with("//") { path.insert(0, '/'); }
+    if path.len() == 2 && path.ends_with(':') && value.as_bytes().get(2) == Some(&b'/') { path.push('/'); }
 }
 fn normalized_path(path: &str, root: bool) -> Result<(), ExecutionError> {
     if (path.is_empty() && !root)
-        || path.contains('\\')
         || path.contains('\0')
-        || path.split('/').any(|part| part == "." || part == "..")
-        || path.starts_with('/')
-        || path.contains(':')
     {
         return Err(ExecutionError::new(
             "invalid_tool_arguments",
-            "path must be a normalized relative resource path",
+            "path must be nonempty and contain no NUL characters",
         ));
     }
     Ok(())
@@ -2849,7 +2847,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["processId", "cols", "rows"],
         ),
         ToolKind::ProcessSpawn => (
-            json!({"cwd":{"type":"string","default":"","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string","minLength":1},"args":{"type":"array","items":{"type":"string"}},
+            json!({"cwd":{"type":"string","default":"","description":"Working directory on the execution Host. Live sources accept absolute paths and paths relative to the default directory; empty or . selects that directory. Isolated sources retain their own file view."},"command":{"type":"string","minLength":1},"args":{"type":"array","items":{"type":"string"}},
             "shellCommand":{"type":"string","minLength":1,"description":"Command text for the execution Host's published default Shell, or the selected shell. Mutually exclusive with command/args/windowsRawArguments. The body is passed unchanged."},
             "shell":{"type":"string","minLength":1,"description":"Shell ID from the execution Host's available shells (for example bash, pwsh, powershell, cmd). Omit or use auto for the published default. Only with shellCommand. Unavailable choices fail without replaying in another interpreter."},
             "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe until the process exits and its output finishes, or this interval elapses. Zero returns immediately. Never a kill timeout."},

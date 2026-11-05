@@ -22,8 +22,9 @@ import { restoreFilesWithEditors, type RecoveryEditors } from '../recovery/file-
 import {sameRecoveryFileTarget} from '../recovery/file-target.js';
 
 type PhysicalTarget = Extract<RecoveryFileTarget, { kind: 'physical' }>;
-interface AdmittedTarget { source: LaunchSource; target: PhysicalTarget; canDelete: boolean }
+interface AdmittedTarget { source: LaunchSource; target: PhysicalTarget; canDelete: boolean; deviceFileAccess: boolean }
 export interface ManagedRecoveryServiceOptions {
+  deviceFileAccess?: boolean;
   hostId: string;
   kernel: KernelClient;
   documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'> & RecoveryEditors;
@@ -47,7 +48,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       await options.documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
     }
   };
-  const fileResources = async ({ source, target, canDelete }: AdmittedTarget, signal?: AbortSignal) => {
+  const fileResources = async ({ source, target, canDelete, deviceFileAccess }: AdmittedTarget, signal?: AbortSignal) => {
     await registrations(source, signal);
     if (source.mode === 'live_root') {
       if (!source.live_root || source.live_root.rootId !== target.rootId
@@ -69,7 +70,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
     signal?.throwIfAborted();
     const authority = await options.storage.fileAuthorityContext({ owningWorkspaceId: source.workspace_id,
       executionWorkspaceId: source.execution_workspace_id, canonicalRoot: target.canonicalRoot,
-      purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance'] });
+      purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance', ...(deviceFileAccess ? ['filesystem.device'] : [])] });
     if (authority.rootId !== target.rootId
       || normalizePathIdentity(authority.canonicalRoot) !== normalizePathIdentity(target.canonicalRoot)) {
       return denied('Recovery registration differs from its original physical root');
@@ -142,7 +143,8 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       const target: PhysicalTarget = { kind: 'physical', workspaceId: source.workspace_id,
         executionWorkspaceId: source.execution_workspace_id, threadId: anchor.threadId, runId: anchor.runId,
         rootId: root.rootId, canonicalRoot: root.canonicalRoot, sourceMode: source.mode };
-      const admitted = { source, target, canDelete: principal.capabilities.includes('filesystem:delete') };
+      const admitted = { source, target, canDelete: principal.capabilities.includes('filesystem:delete'),
+        deviceFileAccess: source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length };
       // A retired/old-epoch original is evidence only. This obtains current
       // maintenance permission and never calls sourceAuthorityGrant or bind.
       await fileResources(admitted, signal);
