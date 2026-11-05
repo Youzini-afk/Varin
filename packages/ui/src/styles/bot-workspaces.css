@@ -1,10 +1,7 @@
 /* Varin's work spaces keep the conversation mounted beside the original owners. */
 .bot-workspace-area { display:flex; flex-direction:column; height:100%; min-height:0; min-width:0; container-type:inline-size; }
-.bot-workspace-area .bot-stage { height:218px; padding-bottom:10px; }
-.bot-workspace-area .bot-stage-figure { margin-bottom:0; }
-.bot-workspace-area .bot-stage-figure .bot-figure { max-height:166px; }
-.bot-workspace-area .bot-stage-name { font-size:17px; }
-.bot-workspace-area .bot-stage-state { font-size:12.5px; }
+/* The stage owns its figure and text dimensions in bot.css. Workspace width
+   changes the views below it, not the space reserved for the figure. */
 .bot-panel[data-workspace] { transition:width var(--motion-dur-glide) var(--motion-ease-glide); }
 .bot-panel[data-expanded][data-open=true] { position:absolute; inset:0; z-index:35; width:100% !important; --varin-context-panel-width:100% !important; }
 .bot-panel[data-expanded] > div:last-child { width:100% !important; }
@@ -137,8 +134,6 @@
   .bot-file-list { flex:none; max-height:38%; }
   .bot-file-preview { width:100%; flex:1; min-height:280px; border-left:0; border-top:1px solid var(--border); }
   .bot-work-detail-scroll { padding:18px; }
-  .bot-workspace-area .bot-stage { height:170px; }
-  .bot-workspace-area .bot-stage-figure { max-height:124px; }
 }
 @media (max-width:1023px) { .bot-panel[data-workspace][data-open=true] { width:100% !important; --varin-context-panel-width:100% !important; inset:0; max-width:100%; } }
 @media (prefers-reduced-motion:reduce) { .bot-space-page:not([hidden]) { animation:none; } }

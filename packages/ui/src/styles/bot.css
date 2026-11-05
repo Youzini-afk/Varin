@@ -118,7 +118,7 @@
 }
 .bot-stage-menu { position: absolute; top: 8px; right: 8px; z-index: 2; }
 /* The figure spans the stage; her ledge runs from edge to edge like a window sill. */
-.bot-stage-figure { position: relative; z-index: 1; align-self: stretch; margin: 0 -18px 10px; }
+.bot-stage-figure { position: relative; z-index: 1; display: flex; flex: none; align-self: stretch; margin: 0 -18px 10px; }
 /* A small round edit badge beside her name; the ledge belongs to her team (§5.7.2). */
 .bot-stage-title { display: flex; min-width: 0; max-width: 100%; align-items: center; gap: 4px; }
 .bot-stage-edit {
@@ -129,7 +129,7 @@
 .bot-stage-edit:hover { color: var(--foreground); background: var(--interactive-hover); }
 .bot-stage-edit:active { scale: .94; }
 .bot-stage-edit:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: 2px; }
-.bot-stage-text { position: relative; z-index: 1; display: flex; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 2px; }
+.bot-stage-text { position: relative; z-index: 1; display: flex; flex: none; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 2px; }
 .bot-stage-name { max-width: 100%; border-radius: 6px; padding: 0 4px; font-size: 20px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em; transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
 .bot-stage-name:hover { background: var(--interactive-hover); }
 .bot-stage-state { display: flex; min-height: 22px; max-width: 100%; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted-foreground); }
@@ -145,7 +145,7 @@
   .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
   .bot-stage-figure { align-self: auto; margin: 0; }
   .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
-  .bot-stage-text { align-items: flex-start; }
+  .bot-stage-text { flex: 1; align-items: flex-start; }
   .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
   .bot-stage-state { min-height: 18px; font-size: 12.5px; }
   .bot-stage-edit { display: none; }
@@ -157,7 +157,7 @@
 .mobile-bottom-sheet .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
 .mobile-bottom-sheet .bot-stage-figure { align-self: auto; margin: 0; }
 .mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
-.mobile-bottom-sheet .bot-stage-text { align-items: flex-start; }
+.mobile-bottom-sheet .bot-stage-text { flex: 1; align-items: flex-start; }
 .mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
 .mobile-bottom-sheet .bot-stage-state { min-height: 18px; font-size: 12.5px; }
 .mobile-bottom-sheet .bot-stage-edit { display: none; }
