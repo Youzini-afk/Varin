@@ -49,7 +49,7 @@
 ## 持续演进的设计
 
 - [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：2026-11-05 本轮方案，待实施；覆盖总助手聊天、独立插队默认、工作与成果入口、电脑查看、独立文件管理及分开部署的连接体验。
-- [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：方向已确认，待实施；Windows 改为随包原生 EXE，保留完整桌面操作、独立取消与释放输入，并接通平台构建、签名和 Host 生命周期。
+- [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：Windows 已改为随包原生 `VarinComputer.exe` 并接通构建、签名配置和 Host 生命周期；正式证书签名与平台实机验收仍待完成。
 - [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：核心链路已实施；记录正文交互、作品修订、草稿联动、状态继承与回收的设计及验收边界。当前合同见[交互内容](interactive-content.md)。
 - [联网检索后续验证与扩展](design/web-retrieval.md)：核心合同已接入，见[检索](retrieval.md#web学术与文档材料)；保留真实任务比较、平台验收和新增渠道的选择空间。
 - [增量上下文管理](design/incremental-context-management.md)：待讨论；摘要块、原文回读等为候选思路，需重新判断理解连续性、总成本与实现必要性，尚未确定实施方向。
@@ -62,5 +62,4 @@
   - [主管式桌宠](design/desktop-companion-director.md)、[主管演出](design/desktop-companion-director-performance.md)
   - [动作语言 v5](design/desktop-companion-motion-language-v5.md)、[虚拟案卷与身体接触](design/desktop-companion-prop-contact-v5.md)
   - [多任务注意力](design/desktop-companion-multitask-attention.md)：只读注意力和面板底座已实施，主管演出仍是候选。
-  - 已被取代、待并入后删除：[动画制作](design/desktop-companion-animation-production.md)、[动画路线调研](design/desktop-companion-animation-research.md)、[交互扩展](design/desktop-companion-interaction-expansion.md)。
   - 视觉资料与进度见独立仓库 Varin-companion-assets 的[桌宠素材索引](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/README.md)。

@@ -12,7 +12,7 @@
 
 ## 1. 审阅依据与边界
 
-已读仓库 `desktop-companion-director-performance.md`、`desktop-companion-interaction-expansion.md`、production-v4 README、suite-manifest，以及 coordination-expressions README；检查 suite-manifest 的逐帧源序列。已看 production-v4 `coordination/frames/present.png`、104 秒演示的 54.5、68、85 秒画面，以及用户批评结果摊掌的截图 `varin-user-feedback-20261030/image(20261030-011855).png`。这里是基于所看画面和源清单的设计判断，不声称已完整逐帧审完影片。
+已读仓库 `desktop-companion-director-performance.md`、当时的交互扩展稿（已并入桌宠总览后删除）、production-v4 README、suite-manifest，以及 coordination-expressions README；检查 suite-manifest 的逐帧源序列。已看 production-v4 `coordination/frames/present.png`、104 秒演示的 54.5、68、85 秒画面，以及用户批评结果摊掌的截图 `varin-user-feedback-20261030/image(20261030-011855).png`。这里是基于所看画面和源清单的设计判断，不声称已完整逐帧审完影片。
 
 可复核的重复：
 - `director-gather-present` 与 `director-intake` 的整条 source 序列相同。

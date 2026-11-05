@@ -1,6 +1,6 @@
 # 桌宠多任务关注、待办与子 agent 精灵
 
-状态：只读全局 attention、交互面板与主管式桌宠消费链已接入。当前动作资源及平台验证范围见[桌宠总览](desktop-companion.md)；本稿保留多任务关注与身份设计，早期候选联调记录不代表当前接入状态。继承[动画制作](desktop-companion-animation-production.md)、[交互扩展](desktop-companion-interaction-expansion.md)的单播放器、真实接触回收、只读观察和原 Host 边界。
+状态：只读全局 attention、交互面板与主管式桌宠消费链已接入。当前动作资源及平台验证范围见[桌宠总览](desktop-companion.md)；本稿保留多任务关注与身份设计，早期候选联调记录不代表当前接入状态。继承[桌宠总览](desktop-companion.md#12-动画编排与低打扰)的单播放器、真实接触回收、只读观察和原 Host 边界。
 
 > 角色方向更新：用户明确 Varin 是主管/秘书。本文的数据、待处理和身份安全方案继续沿用；“关注任务即身体执行主体”的旧叙事由[主管式项目台方案](desktop-companion-director.md)覆盖。检查选择不再把 Varin 变为某项目执行者。
 
