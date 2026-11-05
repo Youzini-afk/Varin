@@ -98,6 +98,16 @@ impl ControlCommands {
         target: varin_runtime::catalog::dispatch::TreeCancelTarget,
         expected_parent_thread_id: Option<&str>,
     ) -> Result<Value, KernelError> {
+        let (receipt, _worker) = self.start_tree_cancel(target, expected_parent_thread_id)?;
+        Ok(receipt)
+    }
+    // Admission and owner release precede the worker's final Catalog reconciliation.
+    // Keep its handle when the caller must wait before destroying the Catalog root.
+    fn start_tree_cancel(
+        &self,
+        target: varin_runtime::catalog::dispatch::TreeCancelTarget,
+        expected_parent_thread_id: Option<&str>,
+    ) -> Result<(Value, JoinHandle<()>), KernelError> {
         let capture = self
             .runtime
             .catalog()
@@ -117,7 +127,7 @@ impl ControlCommands {
         let resources = self.resources.clone();
         let models = self.models.clone();
         let tools = self.tools.clone();
-        thread::spawn(move || {
+        let worker = thread::spawn(move || {
             for run in &capture.run_ids {
                 if let Ok(run) = runtime.cancel(run) {
                     if run.state.terminal() && matches!(runtime.start_available(&run.id), Ok(true)) {
@@ -142,7 +152,7 @@ impl ControlCommands {
             }
             let _ = varin_runtime::catalog::child_delivery::reconcile_reports(&runtime.catalog());
         });
-        Ok(receipt)
+        Ok((receipt, worker))
     }
     fn finish_question(
         &self,
@@ -375,7 +385,14 @@ mod terminal_retention_tests {
                 models: crate::run_models::RunModels::new(runtime.catalog(), crate::credential_bridge::CredentialBridge::new(output)),
                 tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
             };
-            controls.admit_control("runtime.tree.cancel", &json!({"target":{"kind":"thread","thread_id":"thread"}})).unwrap();
+            let (_, worker) = controls
+                .start_tree_cancel(
+                    varin_runtime::catalog::dispatch::TreeCancelTarget::Thread {
+                        thread_id: "thread".into(),
+                    },
+                    None,
+                )
+                .unwrap();
             let mut released = std::collections::BTreeSet::new();
             for _ in 0..2 {
                 let frame = frames.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
@@ -384,6 +401,7 @@ mod terminal_retention_tests {
             }
             assert_eq!(released, std::collections::BTreeSet::from([first.run_id, next.run_id]));
             for id in released { assert!(runtime.catalog().lock().unwrap().run(&id).unwrap().state.terminal()); }
+            worker.join().expect("tree cancellation worker panicked");
         }
         std::fs::remove_dir_all(root).unwrap();
     }
