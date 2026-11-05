@@ -697,10 +697,10 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     onRequestClose?.();
   }, [mobileVariant, onRequestClose, setArchivePageOpen, setSessionSwitcherOpen]);
 
-  const handleOpenSettings = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
-    setSettingsDialogOpen(true, event.currentTarget);
+    setSettingsDialogOpen(true);
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const handleOpenShortcuts = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -709,11 +709,11 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     setHelpDialogOpen(true, event.currentTarget);
   }, [mobileVariant, onRequestClose, setHelpDialogOpen, setSessionSwitcherOpen]);
 
-  const handleOpenAbout = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleOpenAbout = React.useCallback(() => {
     setSettingsPage('about');
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
-    setSettingsDialogOpen(true, event.currentTarget);
+    setSettingsDialogOpen(true);
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen, setSettingsPage]);
 
   const handleOpenProjectSettings = React.useCallback((projectId: string) => {

@@ -1,0 +1,15 @@
+/* Native corner painting keeps borders, focus rings and shadows on the same
+   contour. Other engines retain the ordinary radius; no resize observers or
+   per-element masks are needed. Circular controls remain circular. */
+@supports (corner-shape: superellipse(1.6)) {
+  :where(.corner-continuous):not(.rounded-full) {
+    corner-shape: superellipse(1.6);
+  }
+  :where(.bot-nav-row, .settings-nav-pill, .sidebar-selection, .sidebar-hover, .menu-highlight) {
+    corner-shape: superellipse(1.6);
+  }
+}
+
+.bot-nav-list :is(.sidebar-selection, .sidebar-hover) {
+  border-radius: var(--radius-item);
+}

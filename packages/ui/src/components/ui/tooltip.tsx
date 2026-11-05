@@ -286,7 +286,7 @@ function TooltipContent({
             className={cn(
               // `motion-popover` grows the tooltip from its anchor. A grouped
               // tooltip that opens without waiting (data-instant) appears in place.
-              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 motion-popover z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 motion-popover z-50 w-fit origin-[var(--transform-origin)] corner-continuous rounded-control px-3 py-1.5 typography-meta text-balance overflow-hidden",
               className
             )}
             style={{ ...style }}

@@ -164,7 +164,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         onPointerDown={focusInnerTextarea}
         style={effectiveResizedHeight !== null ? { height: `${effectiveResizedHeight}px` } : undefined}
         className={cn(
-          "group/textarea relative flex w-full flex-col rounded-md border border-input bg-transparent pb-2.5",
+          "group/textarea relative flex w-full flex-col corner-continuous rounded-control border border-input bg-transparent pb-2.5",
           "transition-[border-color,box-shadow]",
           "has-[[disabled]]:pointer-events-none has-[[disabled]]:opacity-50",
           !hasError && [

@@ -70,17 +70,3 @@ export function staggerSettingsPage(scene: HTMLElement, direction: 1 | -1): void
   };
   run();
 }
-
-/** On opening the window, the navigation groups arrive one after another. */
-export function useNavEntrance(root: HTMLElement | null, enabled: boolean): void {
-  const played = React.useRef(false);
-  React.useLayoutEffect(() => {
-    if (played.current || !enabled || !root || documentMotionLevel() !== 'full' || typeof root.animate !== 'function') return;
-    [...root.querySelectorAll<HTMLElement>(':scope > .settings-nav-group')].slice(0, 6).forEach((group, index) => group.animate(
-      [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
-      { ...springTiming('glide'), delay: (0.06 + staggerDelay(index)) * 1000, fill: 'backwards' },
-    ));
-    // Once per mount: the window opening, not a list redrawn later.
-    played.current = true;
-  }, [root, enabled]);
-}

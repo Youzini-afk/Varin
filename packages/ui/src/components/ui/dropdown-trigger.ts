@@ -15,7 +15,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
  */
 export const dropdownTriggerVariants = cva(
   [
-    'border-input flex items-center justify-between gap-2 rounded-md border bg-transparent',
+    'border-input flex items-center justify-between gap-2 corner-continuous rounded-control border bg-transparent',
     'typography-ui-label whitespace-nowrap shadow-none outline-none text-left',
     'hover:bg-interactive-hover data-[popup-open]:bg-interactive-active',
     'focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',

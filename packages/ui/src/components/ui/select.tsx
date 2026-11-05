@@ -211,7 +211,7 @@ function SelectContent({
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
-            "pointer-events-auto motion-popover relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden rounded-md border border-border shadow-md shadow-black/10 dark:shadow-black/30",
+            "pointer-events-auto motion-popover relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden corner-continuous rounded-menu border border-border shadow-md shadow-black/10 dark:shadow-black/30",
             !alignItemWithTrigger &&
               "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
             fitContent && "w-max min-w-0",
@@ -263,7 +263,7 @@ function SelectItem({
     <BaseSelect.Item
       data-slot="select-item"
       className={cn(
-        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover data-[selected]:bg-interactive-selection data-[selected]:text-interactive-selection-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-8 pl-2 typography-ui-label outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover data-[selected]:bg-interactive-selection data-[selected]:text-interactive-selection-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 corner-continuous rounded-item py-1.5 pr-8 pl-2 typography-ui-label outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className
       )}
       {...props}

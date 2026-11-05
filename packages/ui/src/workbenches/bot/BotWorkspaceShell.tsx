@@ -65,8 +65,8 @@ const momentOf = (event: BotStageEvent, nameOf: (key: string) => string): BotTea
   return null;
 };
 
-const openSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
-  useUIStore.getState().setSettingsDialogOpen(true, event.currentTarget);
+const openSettings = () => {
+  useUIStore.getState().setSettingsDialogOpen(true);
 };
 
 function useMatchMedia(query: string): boolean {
@@ -583,6 +583,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     <BotNameDialog
       open={nameDialog !== null}
       title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
+      submitLabel={nameDialog?.mode === 'rename' ? t('settings.bots.save') : t('settings.bots.createAction')}
       name={nameDraft}
       busy={actionBusy !== null}
       error={error}

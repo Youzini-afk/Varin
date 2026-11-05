@@ -701,7 +701,7 @@ interface UIStore {
   setWorktreesPageProjectId: (projectId: string | null) => void;
   /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
   closeMainSurfaces: () => void;
-  setSettingsDialogOpen: (open: boolean, origin?: HTMLElement) => void;
+  setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
@@ -1562,8 +1562,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setSettingsDialogOpen: (open, origin) => {
-          if (open && !get().isSettingsDialogOpen) captureDialogOrigin('settings', origin);
+        setSettingsDialogOpen: (open) => {
           set((state) => {
             if (!open) {
               return { isSettingsDialogOpen: false };

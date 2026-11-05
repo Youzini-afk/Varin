@@ -278,7 +278,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
-    const conversationActive = shellActive && isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen;
+    // Desktop settings is an overlay: keep the conversation and editor alive
+    // underneath it. Mobile settings replaces the page and can suspend it.
+    const conversationActive = shellActive && isChatActive && !(isMobile && isSettingsDialogOpen) && !isSurfacePageOpen;
     const conversation = renderConversation
         ? renderConversation(conversationActive)
         : <RegularChatView active={conversationActive} />;

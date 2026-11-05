@@ -7,7 +7,7 @@ import { AnimatePresence, motion, useIsPresent, type Variants } from 'motion/rea
 import { SwapText } from '@/components/motion/SwapText';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { EASE_EXIT, TWEENS } from '@/lib/motion/tokens';
-import { staggerSettingsPage, useNavEntrance, useNavPill } from './settingsMotion';
+import { staggerSettingsPage, useNavPill } from './settingsMotion';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -46,8 +46,6 @@ interface SettingsViewProps {
   /** Restrict top-level settings navigation to a specific product surface. */
   visiblePageSlugs?: SettingsPageSlug[];
   initialMobileStage?: MobileStage;
-  /** The settings window opening: its navigation groups arrive one after another. */
-  animateEntrance?: boolean;
 }
 
 /**
@@ -97,7 +95,7 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav', animateEntrance }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
   const { t } = useI18n();
   const runtimeEpoch = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const deviceInfo = useDeviceInfo();
@@ -194,7 +192,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }
   const [navList, setNavList] = React.useState<HTMLDivElement | null>(null);
   useNavPill(navList, settingsSlug);
-  useNavEntrance(navList, Boolean(animateEntrance) && !isMobile);
 
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set());
   React.useEffect(() => {
@@ -433,7 +430,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <div className="px-3 pt-5">
-          <div className="flex h-10 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2 text-muted-foreground focus-within:ring-2 focus-within:ring-primary/40 sm:h-8">
+          <div className="flex h-10 items-center gap-1.5 corner-continuous rounded-item border border-border bg-background/70 px-2 text-muted-foreground focus-within:ring-2 focus-within:ring-primary/40 sm:h-8">
             <Icon name="search" className="h-4 w-4 shrink-0" />
             <input
               value={settingsSearchQuery}
@@ -485,7 +482,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                           }}
                           onClick={() => openSearchResult(result)}
                           className={cn(
-                            'flex w-full flex-col rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                            'flex w-full flex-col corner-continuous rounded-item px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                             hasDescription ? 'min-h-11 py-1.5' : 'py-2',
                             active ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
                           )}
@@ -548,7 +545,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             onClick={() => openPage(page.slug)}
                             aria-current={selected ? 'page' : undefined}
                             className={cn(
-                              'relative flex h-11 w-full items-center gap-2.5 rounded-lg px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
+                              'relative flex h-11 w-full items-center gap-2.5 corner-continuous rounded-control px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
                               selected
                                 ? 'bg-background text-foreground shadow-xs'
                                 : 'text-foreground hover:bg-interactive-hover'
@@ -585,7 +582,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   onClick={() => openPage(aboutPage.slug)}
                   aria-current={settingsSlug === aboutPage.slug ? 'page' : undefined}
                   className={cn(
-                    'flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-md px-3 sm:h-8 sm:gap-2 sm:px-2',
+                    'flex h-11 w-full items-center gap-2.5 overflow-hidden corner-continuous rounded-item px-3 sm:h-8 sm:gap-2 sm:px-2',
                     settingsSlug === aboutPage.slug
                       ? 'bg-background text-foreground shadow-xs'
                       : 'text-foreground hover:bg-interactive-hover',
@@ -689,7 +686,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               type="button"
               onClick={showBackButton ? handleBack : () => onClose && requestSettingsNavigation(onClose)}
               aria-label={mobileBackButtonLabel}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center corner-continuous rounded-control p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="arrow-left-s" className="h-5 w-5" />
             </button>
@@ -706,7 +703,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               type="button"
               onClick={handleOpenPageSidebar}
               aria-label={t('settings.view.actions.openSectionList')}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center corner-continuous rounded-control p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="list-unordered" className="h-5 w-5" />
             </button>
@@ -718,7 +715,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               onClick={() => onClose && requestSettingsNavigation(onClose)}
               aria-label={t('settings.view.actions.closeSettings')}
               title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center corner-continuous rounded-control p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="close" className="h-5 w-5" />
             </button>
@@ -732,7 +729,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 type="button"
                 onClick={handleBack}
                 aria-label={t('settings.view.actions.back')}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="inline-flex h-9 w-9 items-center justify-center corner-continuous rounded-control p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Icon name="arrow-left-s" className="h-5 w-5" />
               </button>
@@ -746,7 +743,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             onClick={() => onClose && requestSettingsNavigation(onClose)}
             aria-label={t('settings.view.actions.closeSettings')}
             title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="inline-flex h-7 w-7 items-center justify-center corner-continuous rounded-item p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <Icon name="close" className="h-5 w-5" />
           </button>

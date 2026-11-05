@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./styles/design-system.css";
+@import "./styles/shapes.css";
 @import "./styles/typography.css";
 @import "./styles/markdown.css";
 @import "./styles/mobile.css";

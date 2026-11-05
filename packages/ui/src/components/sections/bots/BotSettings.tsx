@@ -289,6 +289,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
     <BotNameDialog
       open={createDialogOpen}
       title={t(renaming ? 'settings.bots.rename' : 'settings.bots.create')}
+      submitLabel={t(renaming ? 'settings.bots.save' : 'settings.bots.createAction')}
       name={createName}
       busy={busy === 'create'}
       error={error}

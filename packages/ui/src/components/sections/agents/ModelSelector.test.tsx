@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelSelector } from './ModelSelector';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
+import { useModelPickerSectionsStore } from '@/stores/useModelPickerSectionsStore';
 import type { ModelChannel } from '@varin/application-client';
 import type { VarinEvent } from '@/lib/varinEvents';
 
@@ -45,6 +46,7 @@ beforeEach(() => {
   useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null });
   runtime.read.mockReset();
   runtime.showPicker = false; runtime.mobile = false;
+  useModelPickerSectionsStore.setState({ collapsedSections: {} });
 });
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
@@ -104,6 +106,24 @@ const renderPicker = () => act(async () => root!.render(<ModelSelector providerI
 const emit = (event: VarinEvent) => { for (const listener of runtime.events) listener(event); };
 
 describe('model catalog activation', () => {
+  it('guides an empty catalog toward configuration without advertising unavailable keyboard selection', async () => {
+    runtime.read.mockResolvedValue({ channels: [] });
+    const document = await mountPicker();
+    expect(document.body.textContent).toContain('settings.agents.modelSelector.state.noModelsConfigured');
+    expect(document.body.textContent).toContain('settings.models.addChannel');
+    expect(document.body.textContent).not.toContain('settings.agents.modelSelector.keyboardHints');
+  });
+
+  it('does not report missing models when the user collapses their provider', async () => {
+    runtime.read.mockResolvedValue(catalog(32768));
+    const document = await mountPicker();
+    await act(async () => useModelPickerSectionsStore.setState({ collapsedSections: { 'provider:local': true } }));
+    expect(document.body.textContent).toContain('Local');
+    expect(document.querySelector('[role="option"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('settings.agents.modelSelector.state.noModelsConfigured');
+    expect(document.body.textContent).not.toContain('settings.agents.modelSelector.state.noModelsFound');
+  });
+
   for (const mobile of [false, true]) {
     it(`refreshes saved capacity when the ${mobile ? 'mobile' : 'desktop'} composer returns from settings`, async () => {
       runtime.mobile = mobile;

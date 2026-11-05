@@ -339,7 +339,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         <div
           ref={inputFrameRef}
           className={cn(
-            'relative flex flex-col overflow-visible rounded-xl border border-border bg-muted',
+            'relative flex flex-col overflow-visible corner-continuous rounded-composer border border-border bg-muted',
             sending && 'opacity-80',
           )}
           data-conversation-composer-input-frame="true"

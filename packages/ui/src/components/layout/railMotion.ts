@@ -71,13 +71,30 @@ type CanvasGlide = { boundaries: Map<HTMLElement, number>; animations: Set<Anima
 const canvasGlides = new WeakMap<HTMLElement, CanvasGlide>();
 const outerWidth = (element: HTMLElement) => element.getBoundingClientRect().width + (Number.parseFloat(getComputedStyle(element).marginLeft) || 0);
 
+/** CSS shortens a reversed transition. Follow its actual remaining time rather
+ * than running a second full spring that gets cut off when the boundary ends. */
+function canvasTiming(state: CanvasGlide): KeyframeAnimationOptions {
+  let longest: { duration: number; easing: string } | undefined;
+  for (const boundary of state.boundaries.keys()) {
+    for (const animation of boundary.getAnimations?.() ?? []) {
+      if ((animation as CSSTransition).transitionProperty !== 'width' || !animation.effect) continue;
+      const timing = animation.effect.getComputedTiming();
+      const duration = Number(timing.endTime) - Number(animation.currentTime ?? 0);
+      if (duration > 0 && (!longest || duration > longest.duration)) longest = { duration, easing: animation.effect.getTiming().easing || 'linear' };
+    }
+  }
+  return longest ?? springTiming('glide');
+}
+
 /** Both sides can reverse independently. Their remaining widths contribute to
  * one content layout, so neither completion releases the other's width lock. */
 function placeCanvas(main: HTMLElement, state: CanvasGlide): void {
   const before = visibleColumn(main)?.getBoundingClientRect().left;
+  // Retarget from the painted position, not from stacked additive animations
+  // that would keep moving toward several obsolete destinations at once.
+  for (const animation of state.animations) animation.cancel();
+  state.animations.clear();
   if (!state.boundaries.size) {
-    for (const animation of state.animations) animation.cancel();
-    state.animations.clear();
     main.removeAttribute('data-width-gliding');
     main.style.removeProperty('--main-glide-width');
     canvasGlides.delete(main);
@@ -91,7 +108,7 @@ function placeCanvas(main: HTMLElement, state: CanvasGlide): void {
   const after = visibleColumn(main)?.getBoundingClientRect().left;
   const dx = before !== undefined && after !== undefined ? before - after : 0;
   if (Math.abs(dx) >= 0.5) for (const layer of main.querySelectorAll<HTMLElement>(':scope > .absolute.inset-0')) {
-    const animation = layer.animate([{ translate: `${dx}px 0` }, { translate: '0 0' }], { ...springTiming('glide'), composite: 'add' });
+    const animation = layer.animate([{ translate: `${dx}px 0` }, { translate: '0 0' }], canvasTiming(state));
     state.animations.add(animation);
     const done = () => state.animations.delete(animation);
     void animation.finished.then(done, done);

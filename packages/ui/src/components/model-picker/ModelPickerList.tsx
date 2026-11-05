@@ -11,7 +11,6 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
-import { Input } from '@/components/ui/input';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -325,6 +324,9 @@ interface ModelPickerListProps {
   labels: {
     searchPlaceholder: string;
     noResults: string;
+    noModelsConfigured?: string;
+    addServiceHint?: string;
+    noMatchHint?: string;
     favorites: string;
     recent: string;
     keyboardHint: string;
@@ -496,7 +498,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return items;
   }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents]);
 
-  const hasResults = flatModelList.length > 0;
+  // Collapsing every provider hides rows, but does not make the catalog empty.
+  const hasResults = filteredProviders.length > 0 || filteredFavorites.length > 0 || filteredRecents.length > 0;
   const favoriteSortingEnabled = Boolean(onReorderFavorite) && searchQuery.trim().length === 0 && filteredFavorites.length > 1;
   const providerSortingEnabled = Boolean(onReorderProvider) && searchQuery.trim().length === 0 && !allowedProviderSet && filteredProviders.length > 1;
   const favoriteLookup: Map<string, ModelPickerEntry> = React.useMemo(() => new Map(
@@ -607,13 +610,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               onMouseEnter={handleMouseActivity}
               onMouseMove={handleMouseActivity}
               className={cn(
-                'w-full text-left px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer',
+                'w-full text-left px-2.5 py-2 corner-continuous rounded-item typography-ui-label flex items-center gap-2 cursor-pointer',
                 !disabled && (isHighlighted ? 'bg-interactive-selection' : 'hover:bg-interactive-hover/50'),
                 disabled && 'cursor-not-allowed opacity-60',
                 rowClassName,
               )}
             >
-              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 {dragHandleProps ? (
                   <button type="button" ref={dragHandleProps.setActivatorNodeRef} {...dragHandleProps.attributes} {...dragHandleProps.listeners} disabled={disabled} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} className="model-favorite-drag-handle flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground disabled:pointer-events-none" aria-label={reorderFavoriteAriaLabel} title={reorderFavoriteTitle}>
                     <Icon name="draggable" className="size-3.5" />
@@ -739,19 +742,20 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   return (
     <>
-      <div className="px-2 py-1 border-b border-border/40">
-        <div className="relative">
-          <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
+      <div className="mx-1 mb-1 flex items-center gap-2 border-b border-border/60 px-2 py-2 transition-colors focus-within:border-[var(--interactive-border-focus)]">
+          <Icon name="search" className="size-4 shrink-0 text-muted-foreground" />
+          <input
             type="text"
+            aria-label={labels.searchPlaceholder}
             placeholder={labels.searchPlaceholder}
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-7 rounded-none bg-transparent pl-8 pr-0 typography-meta ring-0 hover:[&:not(:focus)]:bg-transparent focus:ring-0 focus-visible:ring-0"
+            className="h-7 min-w-0 flex-1 border-0 bg-transparent p-0 typography-markdown md:typography-ui-label text-foreground outline-none placeholder:text-muted-foreground"
+            autoComplete="off"
+            spellCheck={false}
             autoFocus={autoFocus}
           />
-        </div>
       </div>
 
       <ScrollableOverlay ref={scrollRef} outerClassName={maxHeightClassName} className="overlay-scrollbar-target--no-gutter" style={maxHeightStyle}>
@@ -760,7 +764,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
             <>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 typography-meta text-muted-foreground hover:bg-interactive-hover/50"
+                className="flex w-full items-center gap-2 corner-continuous rounded-item px-2.5 py-2 typography-ui-label text-muted-foreground hover:bg-interactive-hover/50"
                 onClick={onSelectNone}
               >
                 <Icon name="close" className="h-3.5 w-3.5" />
@@ -772,7 +776,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           ) : null}
 
           {!hasResults ? (
-            <div className="px-2 py-4 text-center typography-meta text-muted-foreground">{labels.noResults}</div>
+            <div role="status" className="px-4 py-6 text-center">
+              <p className="typography-ui-label text-foreground">{searchQuery.trim() ? labels.noResults : labels.noModelsConfigured ?? labels.noResults}</p>
+              {(searchQuery.trim() ? labels.noMatchHint : labels.addServiceHint) ? <p className="mt-1.5 typography-meta leading-relaxed text-muted-foreground">{searchQuery.trim() ? labels.noMatchHint : labels.addServiceHint}</p> : null}
+            </div>
           ) : null}
 
           {filteredFavorites.length > 0 ? (
@@ -825,9 +832,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         </div>
       </ScrollableOverlay>
 
-      <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
+      {flatModelList.length > 0 && <div className="px-3 py-2 typography-micro text-muted-foreground">
         <ModelPickerFooter store={selectionStore} flatModelList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />
-      </div>
+      </div>}
     </>
   );
 };

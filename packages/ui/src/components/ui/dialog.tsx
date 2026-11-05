@@ -94,7 +94,7 @@ function DialogContent({
           data-slot="dialog-content"
           data-state-slot="dialog"
           className={cn(
-            "relative pointer-events-auto bg-background text-foreground flex flex-col w-full max-w-lg max-h-full gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content origin-center",
+            "relative pointer-events-auto bg-background text-foreground flex flex-col w-full max-w-lg max-h-full gap-4 corner-continuous rounded-dialog border p-6 shadow-none overflow-y-auto pwa-dialog-content origin-center",
             "motion-dialog",
             // When a nested dialog opens on top of this one, dim this popup the
             // same way the page behind a dialog is dimmed (Base UI marks the

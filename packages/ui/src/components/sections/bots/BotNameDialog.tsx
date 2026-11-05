@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 interface BotNameDialogProps {
   open: boolean;
   title: string;
+  submitLabel?: string;
   name: string;
   busy?: boolean;
   error?: string | null;
@@ -24,6 +25,7 @@ interface BotNameDialogProps {
 export const BotNameDialog: React.FC<BotNameDialogProps> = ({
   open,
   title,
+  submitLabel,
   name,
   busy = false,
   error,
@@ -35,12 +37,12 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={onSubmit} className="space-y-5">
+      <DialogContent className="max-w-md">
+        <form onSubmit={onSubmit} className="flex flex-col gap-6">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
-          <label className="space-y-2">
+          <label className="flex flex-col gap-2">
             <span className="typography-ui-label font-medium">{t('settings.bots.name.label')}</span>
             <Input
               autoFocus
@@ -48,16 +50,16 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
               value={name}
               disabled={busy}
               onChange={(event) => onNameChange(event.target.value)}
-              placeholder={t('settings.bots.name.label')}
+              placeholder={t('settings.bots.name.placeholder')}
             />
           </label>
           {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
-              {t('dialog.common.actions.close')}
+              {t('settings.common.actions.cancel')}
             </Button>
-            <Button type="submit" disabled={busy || !name.trim()}>
-              {t('settings.bots.save')}
+            <Button type="submit" className="min-w-20" disabled={busy || !name.trim()}>
+              {submitLabel ?? t('settings.bots.save')}
             </Button>
           </DialogFooter>
         </form>

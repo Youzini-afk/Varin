@@ -212,6 +212,23 @@
   from { opacity: 0; translate: 0 2px; }
 }
 
+/* Settings stays at its final geometry, including during an interrupted close. */
+.motion-settings-window,
+.motion-settings-backdrop {
+  transition: opacity 200ms var(--motion-ease-out);
+}
+.motion-settings-window {
+  transition-property: opacity, filter;
+}
+.motion-settings-window:is([data-starting-style], [data-ending-style]),
+.motion-settings-backdrop:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+}
+.motion-settings-window[data-ending-style],
+.motion-settings-backdrop[data-ending-style] {
+  transition-duration: 160ms;
+}
+
 /* Dialogs: the backdrop fades; the window settles from 98.5% on glide and leaves on the exit tween. */
 .motion-dialog-backdrop {
   transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
@@ -271,7 +288,7 @@
   width: var(--highlight-width, 0);
   height: var(--highlight-height, 0);
   translate: var(--highlight-x, 0) var(--highlight-y, 0);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-item);
   background: var(--interactive-hover);
   pointer-events: none;
   transition: translate var(--motion-dur-snap) var(--motion-ease-snap), width var(--motion-dur-snap) var(--motion-ease-snap),

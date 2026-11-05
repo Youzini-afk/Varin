@@ -194,6 +194,12 @@
   --radius-md: 0.4375rem; /* 7px */
   --radius-lg: 0.5625rem; /* 9px */
   --radius-xl: 0.75rem; /* 12px */
+  /* Surface roles keep inset controls smaller than their enclosing window. */
+  --radius-control: 0.625rem;
+  --radius-item: 0.5rem;
+  --radius-menu: 0.875rem;
+  --radius-dialog: 1.25rem;
+  --radius-composer: 1.125rem;
   --radius-full: 9999px;
 
   /* Semantic spacing aliases (4/8px grid) */

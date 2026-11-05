@@ -891,7 +891,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   variant="ghost"
                   size="icon"
                   aria-label={t('workbench.ide.settingsAria')}
-                  onClick={event => setSettingsDialogOpen(true, event.currentTarget)}
+                  onClick={() => setSettingsDialogOpen(true)}
                 >
                   <Icon name="settings-3" className="size-4" />
                 </Button>

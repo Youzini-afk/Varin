@@ -104,8 +104,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }, [isActuallyMobile, onOpenChange, open]);
 
     React.useEffect(() => {
-        // Settings hides the composer and its subscription. Revalidate retained channels
-        // whenever the picker returns, including changes missed while it was unmounted.
+        // Revalidate on mount as well as Host events; mobile page navigation can
+        // unmount the picker while a model configuration changes.
         void loadProviders().catch(() => undefined);
         return subscribeVarinEvents(event => {
             if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings'
@@ -167,6 +167,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const labels = React.useMemo(() => ({
         searchPlaceholder: t('settings.agents.modelSelector.searchPlaceholder'),
         noResults: t('settings.agents.modelSelector.state.noModelsFound'),
+        noModelsConfigured: t('settings.agents.modelSelector.state.noModelsConfigured'),
+        addServiceHint: t('settings.agents.modelSelector.state.addServiceHint'),
+        noMatchHint: t('settings.agents.modelSelector.state.noMatchHint'),
         favorites: t('settings.agents.modelSelector.section.favorites'),
         recent: t('settings.agents.modelSelector.section.recent'),
         keyboardHint: t('settings.agents.modelSelector.keyboardHints'),
@@ -224,10 +227,10 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
         />
-        <div className="border-t border-border/50 p-1.5">
-            <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+        <div className="mx-1 border-t border-border/60 py-1.5">
+            <button type="button" className="flex w-full items-center gap-2 corner-continuous rounded-item px-2 py-2 text-left typography-ui-label text-foreground outline-none hover:bg-interactive-hover focus-visible:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => { closePicker(); useUIStore.getState().setSettingsPage('model-connections'); useUIStore.getState().setSettingsDialogOpen(true); }}>
-                <Icon name="add" className="size-3.5" />{t('settings.models.addChannel')}
+                <Icon name="add" className="size-4 shrink-0 text-muted-foreground" />{t('settings.models.addChannel')}
             </button>
         </div>
     </>;

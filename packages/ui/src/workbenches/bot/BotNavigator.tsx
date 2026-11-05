@@ -6,7 +6,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { BotMenu, type BotMenuAction } from '@/components/sections/bots/BotMenu';
 import { useHoverPill, useSelectionGlide } from '@/components/conversation/sidebarHighlights';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import { cn } from '@/lib/utils';
 import { BotFigure } from './BotFigure';
 import { isWaitingStatus, liveRun, runStatus, shortState, type BotFigureState, type BotSessionView } from './botPresentation';
@@ -57,6 +58,11 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   useHoverPill(list);
   const needle = query.trim().toLocaleLowerCase();
   const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle)) ?? null;
+  const titleCounts = new Map<string, number>();
+  for (const session of sessions ?? []) {
+    const title = sessionTitle(session);
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+  }
   const rowClass = 'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-ui-label text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50';
 
   return <nav className="flex h-full min-h-0 flex-col" aria-label={t('bot.sidebar.aria')}>
@@ -98,13 +104,13 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
               aria-label={isSelected ? t(open ? 'bot.sidebar.collapse' : 'bot.sidebar.expand', { name: bot.name }) : bot.name}
               className="bot-nav-row bot-nav-bot min-w-0 flex-1"
               onClick={() => isSelected ? setFolded(state => ({ ...state, [bot.id]: open })) : onSelectBot(bot.id)}>
+              <Icon name="arrow-down-s" className="bot-nav-chevron size-3 shrink-0" />
               <BotFigure state={figure} size={22} still />
               <span className="truncate">{bot.name}</span>
               {bot.pinnedAt ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" /> : null}
               <span className={cn('ml-auto shrink-0 text-[11.5px] font-normal', short?.tone === 'warn' ? 'text-[var(--status-warning)]' : 'text-muted-foreground')}>
                 {bot.deletion ? t(bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting') : short ? t(short.key) : ''}
               </span>
-              <Icon name="arrow-down-s" className="bot-nav-chevron size-3.5 shrink-0" />
             </button>
           </BotMenu>
           {isSelected ? <div className="bot-nav-sessions"><div>
@@ -113,10 +119,15 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
             {shownSessions?.map(session => {
               const main = session.identity;
               const mainCurrent = current?.threadId === main.threadId && current.branchId === main.branchId;
+              const title = sessionTitle(session);
+              const updated = session.thread.updated_at_ms;
               return <React.Fragment key={main.threadId}>
                 <button type="button" data-sidebar-row={rowId(main)} data-current={mainCurrent || undefined} aria-current={mainCurrent ? 'page' : undefined}
                   className="bot-nav-row bot-nav-session" disabled={busy && !mainCurrent} onClick={() => onSelectSession(main)}>
-                  <span className="min-w-0 truncate">{sessionTitle(session)}</span>
+                  <Icon name="chat-3" className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{title}</span>
+                  {(titleCounts.get(title) ?? 0) > 1 && Number.isFinite(updated) ? <time dateTime={new Date(updated).toISOString()} title={new Date(updated).toLocaleString(getCurrentIntlLocale())}
+                    className="shrink-0 typography-micro font-normal text-muted-foreground">{formatSessionCompactDateLabel(updated)}</time> : null}
                   <SessionMark waiting={session.waiting} running={session.running} unread={session.unread && !mainCurrent} />
                 </button>
                 {session.branches.map((branch, index) => {
@@ -124,6 +135,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
                   const status = runStatus(liveRun(session.thread, branch.branchId, null));
                   return <button key={branch.branchId} type="button" data-sidebar-row={rowId(branch)} data-current={branchCurrent || undefined} data-branch=""
                     aria-current={branchCurrent ? 'page' : undefined} className="bot-nav-row bot-nav-session" disabled={busy && !branchCurrent} onClick={() => onSelectSession(branch)}>
+                    <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 truncate">{t('bot.session.branch', { index: index + 1 })}</span>
                     <SessionMark waiting={isWaitingStatus(status)} running={status !== null && !isWaitingStatus(status)} unread={false} />
                   </button>;
