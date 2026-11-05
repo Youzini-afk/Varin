@@ -161,6 +161,8 @@ mod tests {
         let settings = call(&mut c, json!({"action":"settings"})).unwrap();
         assert_eq!(settings["agents"][0]["defaults"]["model"], "changed-default");
         assert_eq!(settings["capabilityCache"]["codex"]["agentVersion"], "v1");
+        assert_eq!(call(&mut c, json!({"action":"inspect_capabilities","configurationId":"codex",
+            "configuration":configuration})).unwrap()["generation"], first_generation);
         let second_generation = claim(&mut c);
         assert!(second_generation > first_generation);
         call(&mut c, cache("v2", second_generation)).unwrap();
@@ -194,6 +196,8 @@ mod tests {
         assert_eq!(call(&mut c, inspect.clone()).unwrap(), Value::Null);
         let claim = json!({"action":"claim_capabilities","configurationId":"codex","configuration":configuration});
         let old = call(&mut c, claim.clone()).unwrap();
+        // The initial claim itself must be durable before any capability write.
+        assert_eq!(call(&mut c, inspect.clone()).unwrap()["generation"], old);
         let cache = |generation: &Value, version: &str| json!({"action":"cache_capabilities","configurationId":"codex",
             "configuration":configuration,"generation":generation,"agentVersion":version,
             "capabilities":{"models":[{"id":version,"name":version}],"resume":true,"images":false,"steering":false}});
@@ -509,11 +513,20 @@ fn capability_cache(db: &Connection) -> Result<Value> {
     if !value.is_object() { return Err(RuntimeError::Invalid("invalid external capability cache".into())); }
     Ok(value)
 }
+/// These additive metadata rows may not exist in an already-opened Catalog. The
+/// general `put` helper only updates existing records and must not be used here.
+fn save_capability_metadata<T: Serialize>(tx: &Transaction<'_>, key: &str, value: &T) -> Result<()> {
+    tx.execute(
+        "INSERT INTO external_settings(id,body) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+        params![key, encode(value)?],
+    )?;
+    Ok(())
+}
 fn next_capability_generation(tx: &Transaction<'_>) -> Result<u64> {
     let previous: Option<String> = tx.query_row("SELECT body FROM external_settings WHERE id='capability_sequence'", [], |row| row.get(0)).optional()?;
     let previous: u64 = previous.map(|body| serde_json::from_str(&body)).transpose()?.unwrap_or(0);
     let generation = previous.checked_add(1).ok_or_else(|| RuntimeError::Invalid("external capability sequence exhausted".into()))?;
-    put(tx, "external_settings", "capability_sequence", &generation)?;
+    save_capability_metadata(tx, "capability_sequence", &generation)?;
     Ok(generation)
 }
 fn external_settings(db: &Connection) -> Result<Value> {
@@ -623,7 +636,7 @@ impl Catalog {
                         cache[&configuration_id] = json!({"configuration":configuration});
                     }
                     cache[&configuration_id]["generation"] = json!(generation);
-                    put(&tx, "external_settings", "capabilities", &cache)?;
+                    save_capability_metadata(&tx, "capabilities", &cache)?;
                     json!(generation)
                 } else { Value::Null }
             },
@@ -659,7 +672,7 @@ impl Catalog {
                         cache[&configuration_id] = json!({"configuration":configuration,
                             "agentVersion":agent_version,"generation":generation});
                     }
-                    put(&tx, "external_settings", "capabilities", &cache)?;
+                    save_capability_metadata(&tx, "capabilities", &cache)?;
                 }
                 Value::Null
             },
@@ -685,7 +698,7 @@ impl Catalog {
                 let mut cache = capability_cache(&tx)?;
                 cache.as_object_mut().unwrap().retain(|id, entry| value["agents"].as_array().unwrap().iter()
                     .any(|agent| agent["id"] == *id && capability_configuration(agent) == entry["configuration"]));
-                put(&tx, "external_settings", "capabilities", &cache)?;
+                save_capability_metadata(&tx, "capabilities", &cache)?;
                 value["revision"] = json!(expected_revision + 1);
                 put(&tx, "external_settings", "settings", &value)?;
                 event(
