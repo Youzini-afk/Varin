@@ -83,6 +83,18 @@ Varin 是陪你持續工作的個人 AI 助手。可以一起討論想法、快�
   <img src="assets/conversation-zh-CN.png" alt="同一段聊天中組合正文、可切換的回饋圖表、檔案與網頁來源，以及訊息輸入框" width="1100" />
 </p>
 
+**邊討論，邊選擇和補充。** 在分頁中比較不同寫法，多選要保留的內容，補充自己的想法，再調整參數。準備好後填入輸入框，繼續編輯和交流。
+
+<p align="center">
+  <img src="assets/conversation-choices-zh-CN.png" alt="同一段對話中切換開頭文案、多選內容、展開補充回答，並調整篇幅滑桿" width="1100" />
+</p>
+
+**圖文放在一起讀。** 圖片依自身比例排列，點擊放大；表格協助比較，補充細節可以收合在相關說明旁，保持正文連貫。
+
+<p align="center">
+  <img src="assets/conversation-reading-zh-CN.png" alt="說明段落間排列兩張圖片預覽，下方接著顯示比較表格和可展開的配圖文案" width="1100" />
+</p>
+
 [聊天與互動內容](../../docs/interactive-content.md)
 
 ## 完成一件事所需的工具

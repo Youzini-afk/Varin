@@ -83,6 +83,18 @@ Général, Programmation, Recherche et Bureautique sont des **orientations de t�
   <img src="assets/conversation-en.png" alt="Texte, graphique interactif, références et composeur dans la même conversation" width="1100" />
 </p>
 
+**Choisir et préciser au fil de l'explication.** Comparez des formulations dans les onglets, sélectionnez plusieurs priorités, ajoutez vos remarques et ajustez un paramètre. Insérez le résultat dans le composeur pour poursuivre la discussion.
+
+<p align="center">
+  <img src="assets/conversation-choices-en.png" alt="Formulations alternatives, choix multiples, réponse personnelle et réglage de la longueur dans une même conversation" width="1100" />
+</p>
+
+**Lire les images avec le texte.** Les aperçus conservent leurs proportions et s'ouvrent pour un examen détaillé. Les tableaux facilitent la comparaison ; les précisions peuvent rester repliées près de l'explication.
+
+<p align="center">
+  <img src="assets/conversation-reading-en.png" alt="Deux aperçus entre les paragraphes, suivis d'un tableau comparatif et de légendes à développer" width="1100" />
+</p>
+
 [Conversation et contenu interactif](../../docs/interactive-content.md)
 
 ## Des outils pour toute la tâche

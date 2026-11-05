@@ -1,7 +1,6 @@
 /* Layout fixtures surround the product's actual Markdown, choices, activity,
    avatars, Bot panel and editor. This stylesheet is never shipped with the app. */
 @source "./scenes.tsx";
-:root { --font-sans: "Segoe UI", "Microsoft YaHei UI", sans-serif; --font-mono: Consolas, monospace; }
 body { margin: 0; font-family: var(--font-sans); color: var(--foreground); background: var(--background); }
 * { box-sizing: border-box; }
 .readme-app { width: 1480px; height: 940px; overflow: hidden; background: var(--workbench-frame); }
@@ -20,22 +19,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--foreground); backg
 .nav-bottom { margin-top: auto; border-top: 1px solid var(--border); padding-top: 10px; }
 .sub-agent { display: flex; gap: 8px; align-items: center; padding: 10px 0 12px 30px; font-size: 11.5px; color: var(--muted-foreground); }
 .conversation { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--background); border-radius: 11px 0 0 0; border: 1px solid var(--border); border-bottom: 0; }
-.message-flow { flex: 1; min-height: 0; padding: 34px 40px 12px; overflow: hidden; }
-.message-flow .markdown-content { font-size: 15px; line-height: 1.8; }
-.message-flow .markdown-content h3 { font-size: 18px; margin-top: 18px; margin-bottom: 12px; }
+.message-flow { flex: 1; min-height: 0; padding: 28px 24px 12px; overflow: auto; scrollbar-width: thin; }
 .user-message { margin: 0 0 26px 50px; padding: 14px 18px; background: var(--muted); border-radius: 13px; font-size: 14px; line-height: 1.7; }
 .message-flow .dialogue-activity { margin: 20px 0 23px; }
-.file-row { display: flex; align-items: center; gap: 9px; width: fit-content; border: 1px solid var(--border); border-radius: 7px; padding: 10px 13px; font-size: 12.5px; margin: 17px 0 24px; }
-.file-row small { color: var(--muted-foreground); font-size: 11px; margin: 0 10px 0 7px; }
-.message-flow .conversation-ui-fragment { font-size: 14px; line-height: 1.65; }
-.message-flow .conversation-ui-fragment button { font-size: 13px; }
-.composer-wrap { padding: 15px 23px 22px; }
-.composer { border: 1px solid var(--border); border-radius: 15px; background: var(--muted); padding: 14px 15px 10px; box-shadow: 0 5px 18px #00000012; }
-.composer-placeholder { font-size: 14px; color: color-mix(in srgb, var(--muted-foreground) 65%, transparent); margin-bottom: 15px; }
-.composer-hints { font-size: 10px; color: var(--primary-base); opacity: .8; margin-bottom: 12px; }
-.composer-controls { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--muted-foreground); }
-.composer-controls span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.composer-controls .send { padding: 6px; border-radius: 50%; background: var(--primary-base); color: var(--primary-foreground); }
+.composer-wrap { flex-shrink: 0; padding-top: 12px; }
 .spacer { flex: 1; }
 .bot-area { width: 338px; flex-shrink: 0; border-left: 1px solid var(--border); background: var(--background); }
 .bot-area .bot-panel-body { height: 100%; }
@@ -43,24 +30,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--foreground); backg
 .bot-area .bot-pane { padding: 16px; }
 .panel-heading { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .collaboration { width: 370px; background: var(--background); display: flex; flex-direction: column; }
-.collab-message { display: flex; gap: 9px; margin: 24px 17px 0; font-size: 12.5px; }
-.collab-message > div { flex: 1; min-width: 0; }
-.participants { font-size: 11px; margin: 0 0 10px; }
-.participants small { margin: 0 6px; color: var(--muted-foreground); }
-.bubble { background: var(--muted); border: 1px solid var(--border); border-radius: 3px 14px 14px 14px; padding: 15px; line-height: 1.8; }
-.bubble small { color: var(--muted-foreground); }
-.bubble p { margin: 10px 0 17px; }
-.text-link { color: var(--muted-foreground); font-size: 11px; }
-.collab-input { margin: auto 15px 22px; padding: 18px 12px 50px; border: 1px solid var(--border); border-radius: 11px; font-size: 12px; color: var(--muted-foreground); }
-.diff { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 12px; margin: 20px 0; }
-.diff > div { display: flex; align-items: center; gap: 10px; padding: 12px; }
-.diff pre { font-size: 12px; padding: 9px 13px; margin: 0; }
-.removed { background: #d16d6d12; }.added { background: #5c95601a; }.green { color: #779d65; }.red { color: #bb7474; }
-.delegate { display: flex; align-items: center; gap: 9px; margin: 22px 0; font-size: 12px; }
-.delegate small { font-size: 11px; color: var(--muted-foreground); flex: 1; }
-.task-pair { display: flex; gap: 36px; margin: 18px 0 22px; }
-.task-pair .delegate { flex: 1; margin: 0; }
-.rich-flow { width: 920px; max-width: 100%; margin: 0 auto; padding-top: 28px; }
+.collaboration-feed { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 28px; overflow: auto; padding: 24px 14px; }
+.green { color: var(--status-success); }
+.delegated-work { margin-block: 18px; }
+.rich-flow { width: min(100%, var(--chat-content-width, 960px)); margin: 0 auto; padding-top: 28px; }
 .conversation .composer-wrap { width: 100%; }
 .conversation:not(.workbench) .chart { margin: 20px 0; }
 .chart { border: 1px solid var(--border); border-radius: 10px; padding: 22px 25px 15px; }
@@ -72,9 +45,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--foreground); backg
 .chart-note { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 18px; color: var(--muted-foreground); font-size: 10px; }
 .sources { display: flex; align-items: center; gap: 9px; color: var(--muted-foreground); font-size: 11px; margin-top: 18px; }.sources svg:not(:first-child) { margin-left: 16px; }
 .turn-end { display: flex; justify-content: space-between; color: var(--muted-foreground); margin-top: 20px; }.turn-end span { display: flex; gap: 14px; }.turn-end small { font-size: 10px; }
-.conversation .rich-flow + .composer-wrap { width: 920px; max-width: 100%; margin: 0 auto; }
+.choice-flow > .conversation-ui-fragment { margin-block: 18px; }
+.reading-flow .markdown-content h3 { margin-top: 0; }
 .editor-area { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--background); border: 1px solid var(--border); }
 .editor-tabs { display: flex; height: 44px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }.editor-tabs span { padding: 12px 18px; display: flex; align-items: center; gap: 8px; }.editor-tabs span:first-child { color: var(--foreground); border-bottom: 1px solid var(--primary-base); }
 .monaco-host { flex: 1; min-height: 0; }.terminal { height: 145px; border-top: 1px solid var(--border); font-size: 12px; padding: 15px 23px; }.terminal span { color: var(--muted-foreground); }.terminal pre { margin-top: 15px; line-height: 1.9; }
 .ide-chat { width: 460px; flex-shrink: 0; background: var(--background); display: flex; flex-direction: column; padding: 0 22px; }
-.ide-chat .panel-heading { margin: 0 -22px 26px; }.ide-chat .user-message { margin-left: 10px; font-size: 13px; }.ide-chat .markdown-content { font-size: 14px; line-height: 1.8; }.ide-chat .dialogue-activity { margin: 20px 0; }.ide-chat .composer-wrap { margin-top: auto; padding: 0 0 22px; }.ide-chat .composer-controls { gap: 7px; font-size: 10px; }.ide-chat .composer-hints { font-size: 9px; }
+.ide-chat .panel-heading { margin: 0 -22px 26px; }.ide-chat .user-message { margin-left: 10px; font-size: 13px; }.ide-chat .dialogue-activity { margin: 20px 0; }.ide-chat .composer-wrap { margin-top: auto; margin-inline: -22px; }
