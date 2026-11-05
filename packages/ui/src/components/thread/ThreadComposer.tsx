@@ -1,3 +1,4 @@
+import { externalAttachmentSupported } from './externalAttachments';
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import type { InteractionRange } from '@/components/chat/composer/editor/interactionRanges';
@@ -30,14 +31,17 @@ import { useMessageHistory } from '@/components/chat/composer/state/useMessageHi
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
+import { externalThinkingOptions } from './externalSessionChoice';
+import { ExternalModelControls, ExternalModeControls, ExternalOptionMenu, ExternalChoiceValidation, type ExternalComposerOptions } from './ExternalComposerControls';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity }: {
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
+  external?: ExternalComposerOptions; connectionStatus?: React.ReactNode;
   backendIdentity?: string; attachmentCandidates?: readonly ComposerAttachmentCandidate[];
   backendCommands?: Array<{ name: string; description: string; inputHint?: string }>;
   commandActions?: Record<string, ComposerCommandAction | undefined>;
@@ -75,7 +79,12 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const inputContentRef = React.useRef<HTMLDivElement>(null);
   useComposerHeightGlide(inputFrameRef, inputContentRef, value === '');
   // Files dragged over the conversation raise the drop field; anywhere in it takes them.
-  useFileDropField(inputFrameRef, { disabled: attachmentDisabled, onFiles });
+  useFileDropField(inputFrameRef, { disabled: attachmentDisabled || Boolean(external && !external.capabilities?.files && !external.capabilities?.images), onFiles: files => acceptFiles(files) });
+  const acceptFiles = (files: File[]) => {
+    if (attachmentDisabled) return;
+    if (external && files.some(file => !externalAttachmentSupported(external.capabilities, file))) { setCommandError(t(external.capabilities ? 'external.filesUnsupported' : 'external.capabilitiesUnknown')); return; }
+    onFiles(files);
+  };
   const bindEditor = React.useCallback((handle: ComposerEditorHandle | null) => {
     inputRef.current = handle;
     if (typeof editorRef === 'function') editorRef(handle); else if (editorRef) editorRef.current = handle;
@@ -132,7 +141,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const submit = (mode?: 'boundary' | 'next_run') => {
     if (references?.some(reference => reference.target.kind === 'backend-command' && value.slice(reference.from, reference.to) === reference.text && (reference.target.backend !== backendIdentity || reference.host !== getRuntimeEndpointGeneration()))) { setCommandError(t('composer.scope.changed')); return; }
     const backend = references?.some(reference => reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity && reference.host === getRuntimeEndpointGeneration() && value.slice(reference.from, reference.to) === reference.text && value.trim() === `/${reference.target.name}`);
-    const exact = !backend && knownCommands.find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
+    const exact = !backend && (external ? varinCommands : knownCommands).find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
     if (exact) { void runCommand(exact, { kind: 'command', query: exact.name, from: value.indexOf('/'), to: value.trimEnd().length }); return; }
     if (sendDisabled) return;
     if (ghostSuggestion) flushSync(acceptSuggestion);
@@ -162,6 +171,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         content: <div className="space-y-2"><p className="typography-meta text-muted-foreground">{t('composer.model.scope')}</p>{(selected?.thinkingLevels?.length ?? 0) > 1 ? selected!.thinkingLevels!.map(level => <button type="button" key={level} disabled={modelDisabled} className="flex w-full justify-between rounded px-2 py-2 hover:bg-interactive-hover" onClick={() => { void chooseModel(providerId, modelId, level, true); }}>{t(`settings.agents.thinking.${level}`)}{thinkingLevel === level && '✓'}</button>) : <p>{t('composer.model.noThinking')}</p>}</div> },
       permissions: { content: <ThreadPermissionControl workspacePath={permissionWorkspacePath} embedded /> },
     } : {}),
+    ...(external ? {
+      model: { content: (complete: () => void) => <ExternalOptionMenu options={external} kind="model" onComplete={complete} /> },
+      ...(externalThinkingOptions(external.choice, external.capabilities).levels?.length || external.capabilities?.modelsError && external.choice.thinking ? { thinking: { content: (complete: () => void) => <ExternalOptionMenu options={external} kind="thinking" onComplete={complete} /> } } : {}),
+      ...(external.capabilities?.modes?.length ? { mode: { content: (complete: () => void) => <ExternalOptionMenu options={external} kind="mode" onComplete={complete} /> } } : {}),
+    } : {}),
     ...commandActions,
   };
   const commandContext: WorkbenchCommandExecutionContext = { currentDirectory: workspacePath ?? null, isMobile,
@@ -170,6 +184,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     .map(item => { const meta = item.meta.composer!; const builtin = item.contributionId.startsWith('varin.builtin.'); const action = builtin ? actions[meta.name] : undefined; return { id: item.contributionId, name: builtin ? meta.name : `ext:${encodeURIComponent(item.contributionId)}:${meta.name}`, sourceLabel: builtin ? undefined : item.contributionId, label: item.meta.titleKey ? t(item.meta.titleKey) : item.meta.title,
       searchAliases: [meta.name, ...item.meta.keywords], source: item.contributionId.startsWith('varin.builtin.') ? 'varin' : 'extension',
       group: t(`composer.group.${meta.group}`), icon: item.meta.icon, next: Boolean(action?.content), disabled: action?.disabled ?? (item.implementation.isAvailable && !item.implementation.isAvailable(commandContext) ? t('composer.menu.unavailable') : undefined), value: action?.value }; });
+  if (external && actions.mode) knownCommands.push({ id: 'varin.external.mode', name: 'mode', label: t('external.mode'), source: 'varin', group: t('composer.group.execution'), next: true, icon: 'shield-user' });
   const varinCommands = knownCommands.filter(command => actions[command.name] || command.source === 'extension');
   for (const command of backendCommands ?? []) varinCommands.push({ id: `backend:${command.name}`, name: command.name.replace(/^\//, ''), label: `/${command.name.replace(/^\//, '')}`, description: command.description,
     source: 'backend', group: t('composer.group.backend') });
@@ -182,7 +197,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     if (scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || commandPending.current) return;
     if (command.disabled) { setCommandError(command.disabled); return; }
     const action = command.source === 'varin' ? actions[command.name] : undefined;
-    if (action?.content) { if (fragment) setAutocomplete(fragment); dismissed.current = undefined; setLayer(command); setCommandError(undefined); return; }
+    if (action?.content) { if (external && ['model', 'thinking', 'mode'].includes(command.name)) external.onInteract('menu'); if (fragment) setAutocomplete(fragment); dismissed.current = undefined; setLayer(command); setCommandError(undefined); return; }
     const registration = registrations.find(item => item.contributionId === command.id);
     if (!registration) { setCommandError(t('composer.menu.unavailable')); return; }
     const capturedScope = scope, host = getRuntimeEndpointGeneration(), originalText = value, originalReferences = references;
@@ -199,6 +214,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const languageContext = React.useMemo(() => ({ inputMode: 'normal' as const, knownAgentNames, confirmedMentions,
     knownSlashNames: new Set([...skills.map(name => `skill:${name}`), ...varinCommands.map(command => command.name)]), attachmentFilenames: attachmentNames }), [knownAgentNames, confirmedMentions, skills, varinCommands, attachmentNames]);
   const modelControls = <div className="conversation-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+        {external && <ExternalModelControls key={backendIdentity} options={external} />}
         {backendControls ?? <>
         {(selected?.thinkingLevels?.length ?? 0) > 1 && <DropdownMenu><DropdownMenuTrigger asChild>
           <button type="button" disabled={modelDisabled} className="flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover" aria-label={t('chat.modelControls.thinking')}>
@@ -219,11 +235,12 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         </>}
   </div>;
   const updateAutocomplete = React.useCallback((next: string, cursorPosition: number, inputSource: FileMentionAutocompleteInputSource = 'manual', insertedText?: string) => {
-    if (dismissed.current === next) return;
+    if (dismissed.current === next && next === value) return;
+    dismissed.current = undefined;
     const trigger = resolveAutocompleteTrigger(next, cursorPosition, { inputMode: 'normal', inputSource, insertedText, active: autocomplete });
     setAutocomplete(trigger);
     if (!trigger) setLayer(undefined);
-  }, [autocomplete]);
+  }, [autocomplete, value]);
   const handleCommandSelect = (command: CommandInfo, mode: 'confirm' | 'complete') => {
     if (!autocomplete || commandBusy || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
     if (command.source === 'backend') {
@@ -334,12 +351,13 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             const files = [...event.dataTransfer.files];
             if (files.length === 0) return;
             event.preventDefault();
-            onFiles(files);
+            acceptFiles(files);
           }}
         >
         {/* Measured by the height glide; the frame around it is what animates. */}
         <div ref={inputContentRef} className="flex min-w-0 shrink-0 flex-col" data-conversation-composer-input-content="true">
         {children}
+        {external && <ExternalChoiceValidation key={backendIdentity} options={external} />}
 
           {isMobile ? (
             <div className="flex min-w-0 items-center justify-end border-b border-border/40 px-2 py-1">
@@ -353,7 +371,9 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             references={references}
             autocomplete={autocomplete && !layer ? { id: menuId, activeId: activeOption } : undefined}
             interactions={interactions}
+            onFocus={() => external?.onInteract('focus')}
             onChange={(change) => {
+              external?.onInteract('input');
               latestDraft.current = { value: change.value, references: change.references };
               if (pendingHistoryTextRef.current === change.value) {
                 pendingHistoryTextRef.current = null;
@@ -380,7 +400,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
               const files = event.clipboardData ? [...event.clipboardData.files] : [];
               if (!files.length || attachmentDisabled) return;
               event.preventDefault();
-              onFiles(files);
+              acceptFiles(files);
             }}
             onKeyDown={handleEditorKeyDown}
             spellCheck={spellCheck}
@@ -438,11 +458,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" className="min-w-48">
-                  <DropdownMenuItem disabled={attachmentDisabled || imageDisabled} onClick={onAttachImages} className="gap-2.5 py-1.5">
+                  <DropdownMenuItem disabled={attachmentDisabled || imageDisabled} title={external && imageDisabled ? t(external.capabilities ? 'external.imagesUnsupported' : 'external.capabilitiesUnknown') : undefined} onClick={onAttachImages} className="gap-2.5 py-1.5">
                     <Icon name="attachment-2" className="size-4" />
                     {t('chat.fileAttachment.actions.chooseImages')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem disabled={attachmentDisabled} onClick={onAttachPdfs} className="gap-2.5 py-1.5">
+                  <DropdownMenuItem disabled={attachmentDisabled || Boolean(external && !external.capabilities?.files)} title={external && !external.capabilities?.files ? t(external.capabilities ? 'external.filesUnsupported' : 'external.capabilitiesUnknown') : undefined} onClick={onAttachPdfs} className="gap-2.5 py-1.5">
                     <Icon name="file" className="size-4" />{t('chat.attachments.choose')}
                   </DropdownMenuItem>
                   {onOpenHistory && <DropdownMenuItem onClick={onOpenHistory}><Icon name="git-branch" className="size-4" />{t('chat.timeline.title')}</DropdownMenuItem>}
@@ -452,9 +472,10 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {external && <ExternalModeControls key={backendIdentity} options={external} />}
               {backendControls === undefined && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
               {backendControls === undefined && goalEnabled && onGoal && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
-              {onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}
+
               <WorkbenchContributionSlot kind="composer-action" slot={VARIN_CONVERSATION_SLOTS.composerLeading} props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
             </div>
 
@@ -541,6 +562,10 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
           </div>
         </div>
         </div>
+        {(onWorkspace || connectionStatus) && <div className="flex min-w-0 items-center justify-between gap-2 px-1 pt-1" data-conversation-composer-status="true">
+          <div className="min-w-0">{onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}</div>
+          {connectionStatus}
+        </div>}
       </div>
     </motion.div>
   );

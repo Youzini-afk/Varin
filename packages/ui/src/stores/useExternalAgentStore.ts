@@ -5,6 +5,7 @@ import {
   getRuntimeEndpointGeneration,
   type ExternalAgentSettings,
   type ExternalConversation,
+  type ExternalConversationSnapshot,
   type ExternalDelegation,
 } from '@varin/application-client';
 import { useThreadStore } from './useThreadStore';
@@ -17,6 +18,9 @@ export const useExternalAgentStore = create<{
   conversations: ExternalConversation[];
   children: ExternalDelegation[];
   selectedId: string | null;
+  snapshots: Record<string, Pick<ExternalConversationSnapshot, 'contextUsage' | 'turns' | 'observationEpoch' | 'observationRevision'> & { source?: object }>;
+  setSnapshot(snapshot: ExternalConversationSnapshot, host: number, source?: object): void;
+  clearSnapshot(id: string, host: number, source?: object): void;
   error: string | null;
   refresh(): Promise<void>;
   select(id: string): void;
@@ -30,11 +34,26 @@ export const useExternalAgentStore = create<{
   conversations: [],
   children: [],
   selectedId: null,
+  snapshots: {},
   error: null,
+  setSnapshot(snapshot, host, source) {
+    if (host !== getRuntimeEndpointGeneration() || host !== get().host) return;
+    const id = snapshot.conversation.id, previous = get().snapshots[id];
+    if (previous?.observationEpoch === snapshot.observationEpoch &&
+        previous.observationRevision > snapshot.observationRevision) return;
+    set(state => ({ snapshots: { ...state.snapshots, [id]: {
+      contextUsage: snapshot.contextUsage, turns: snapshot.turns, source,
+      observationEpoch: snapshot.observationEpoch, observationRevision: snapshot.observationRevision,
+    } } }));
+  },
+  clearSnapshot(id, host, source) {
+    if (host !== get().host || get().snapshots[id]?.source !== source) return;
+    set(state => { const snapshots = { ...state.snapshots }; delete snapshots[id]; return { snapshots }; });
+  },
   async refresh() {
     const generation = getRuntimeEndpointGeneration();
     if (generation !== get().host)
-      set({ host: generation, settings: null, conversations: [], children: [], selectedId: null });
+      set({ host: generation, settings: null, conversations: [], children: [], selectedId: null, snapshots: {} });
     const api = createExternalAgentsHttpAPI(generation);
     try {
       const [settings, conversations, children] = await Promise.all([
@@ -82,6 +101,7 @@ useThreadStore.subscribe((state, previous) => {
       conversations: [],
       children: [],
       selectedId: null,
+      snapshots: {},
     });
   else if (
     (state.selectedIdentity !== previous.selectedIdentity && state.selectedIdentity) ||

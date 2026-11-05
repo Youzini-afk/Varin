@@ -20,6 +20,7 @@ import { ContextPanelControls } from './ContextPanelControls';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useSelectedThreadWorkspace } from '@/hooks/useSelectedThreadWorkspace';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
+import { ExternalContextUsage } from './ExternalContextUsage';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { contextPhaseLabels } from '@/lib/contextPresentation';
@@ -909,6 +910,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 self-stretch items-center gap-1">
+          {activeMainTab === 'chat' && <ExternalContextUsage />}
           {activeMainTab === 'chat' && contextUsage && contextUsage.totalTokens > 0 && <ContextUsageDisplay
             {...contextUsage}
             size="compact" hideIcon showPercentIcon
@@ -1043,6 +1045,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>}
 
           <div className="flex items-center gap-1 shrink-0">
+            {activeMainTab === 'chat' && <ExternalContextUsage />}
             {projectActionsContext && (
               <ProjectActionsButton
                 projectRef={projectActionsContext.projectRef}

@@ -276,7 +276,7 @@ fn catalog_upgrade_v78_preserves_history_queue_receipts_and_effect_fencing() {
         .unwrap();
     assert_eq!(
         catalog.execute_external(prepared).unwrap().load().unwrap(),
-        json!({"revision":0,"defaultAgent":null,"agents":[]})
+        json!({"revision":0,"defaultAgent":null,"agents":[],"capabilityCache":{}})
     );
     assert_eq!(fixture.bodies(), original_bodies);
     drop(catalog);

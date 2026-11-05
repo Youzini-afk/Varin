@@ -26,6 +26,26 @@ Host replacement, branch changes and unmount fence asynchronous file reads and p
 The selected model's supported thinking levels and image capability govern the controls; live model
 selection goes through the Run owner and its desired/active selection projection.
 
+## External composer
+
+External conversations use the same footer positions: backend-native modes and other options on the
+left, separate thinking/model menus beside the Harness selector on the right. The project action and
+connection details live below the input. Only the left group collapses when its measured content no
+longer fits. Boolean options toggle directly and retain an inheritance menu. These controls edit the
+next input, not the backend session; accepted and queued requests keep their original choices.
+
+Opening a draft only reads/observes an existing binding. Explicit Harness selection, focus, typing or
+opening a selector starts deduplicated preparation once a local directory is known; first send awaits
+that same operation. Cancellation resolves an in-flight create's identity before disconnecting. Backend
+or directory changes only delete a confirmed empty binding. Errors and login actions remain in the
+connection popover. Reconnect stops the old connection before restoring its native session; metadata
+model retries do not restart a healthy process.
+
+New drafts seed optional Host-configured defaults once, otherwise inheriting the Agent configuration.
+Cached capabilities are selectable and labelled; only a live catalogue invalidates stale choices.
+A failed model catalogue does not erase retained model/effort overrides. Attachment pickers and
+paste/drop enforce reported capabilities before upload, and send rechecks live capabilities.
+
 ## Input composition and delivery
 
 `CommandAutocomplete` exposes the original Workbench registry and one separate skill group. Only

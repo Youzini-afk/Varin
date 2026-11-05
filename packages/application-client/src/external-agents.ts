@@ -6,6 +6,12 @@ import {
 } from './transport/runtime-switch.js';
 
 export type ExternalHarness = 'codex' | 'claude' | 'pi' | 'acp';
+/** Explicit Host defaults for new drafts, never a remembered last-used choice. */
+export interface ExternalAgentDefaults {
+  model?: string;
+  thinking?: string;
+  mode?: string;
+}
 export interface ExternalAgentConfiguration {
   id: string;
   name: string;
@@ -13,6 +19,7 @@ export interface ExternalAgentConfiguration {
   enabled: boolean;
   command: string;
   args: string[];
+  defaults?: ExternalAgentDefaults;
 }
 export interface ExternalAgentProfile {
   id: string;
@@ -44,6 +51,13 @@ export interface ExternalAgentSettings {
   profiles?: ExternalAgentProfile[];
   defaultAgent: string | null;
   agents: ExternalAgentConfiguration[];
+  /** Last negotiated catalogue for the same launch configuration and program version. */
+  capabilityCache?: Record<string, ExternalAgentCapabilityCache>;
+}
+export interface ExternalAgentCapabilityCache {
+  capabilities: ExternalAgentCapabilities;
+  agentVersion?: string;
+  cachedAt: number;
 }
 export interface ExternalAgentDetection {
   id: string;
@@ -206,6 +220,15 @@ export interface ExternalInteraction {
     multiple?: boolean;
   }>;
 }
+/** Protocol-reported context occupancy, independent from billable token usage. */
+export interface ExternalContextUsage {
+  used: number;
+  size: number;
+}
+export interface ExternalConnectionState {
+  status: 'preparing' | 'connected' | 'disconnected' | 'reclaimed' | 'authentication_required' | 'failed';
+  error?: string;
+}
 export interface ExternalConversationSnapshot {
   observationEpoch: string;
   observationRevision: number;
@@ -215,6 +238,9 @@ export interface ExternalConversationSnapshot {
   previous?: number;
   connected: boolean;
   capabilities?: ExternalAgentCapabilities | undefined;
+  capabilitiesSource?: 'live' | 'cached';
+  connection?: ExternalConnectionState;
+  contextUsage?: ExternalContextUsage;
   interactions: ExternalInteraction[];
 }
 export type ExternalObservationChange =
