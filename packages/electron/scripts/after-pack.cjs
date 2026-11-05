@@ -48,6 +48,14 @@ module.exports = (context) => {
     || kernelManifest.kernelVersion !== '0.1.0') {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
+  if (context.electronPlatformName === 'win32') {
+    const { verifyHelper } = require('../../computer-driver/windows/helper-artifact.cjs');
+    verifyHelper(path.join(packagedWebRoot, 'server', 'computer-driver', 'windows'), { architecture: targetArchitecture,
+      version: context.packager.appInfo.version });
+    if (targetArchitecture === process.arch) execFileSync(process.env.VARIN_PACKAGING_NODE || process.execPath,
+      [path.resolve(__dirname, '../../computer-driver/windows/smoke-helper.mjs'), path.join(packagedWebRoot, 'server', 'computer-driver', 'windows')],
+      { stdio: 'inherit', windowsHide: true });
+  }
   if (context.electronPlatformName === 'darwin') {
     const workspace = path.join(resourcesPath, 'kernel', 'VarinWorkspace.app');
     for (const binary of ['Contents/MacOS/VarinWorkspace', 'Contents/PlugIns/VarinWorkspace.appex/Contents/MacOS/VarinWorkspace']) {

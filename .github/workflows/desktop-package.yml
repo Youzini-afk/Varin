@@ -46,6 +46,7 @@ jobs:
             packages/electron
             scripts
             kernel/protocol
+            packages/computer-driver/windows
           path: .release-automation
 
       - name: Record packaged source

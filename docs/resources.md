@@ -367,6 +367,10 @@ Service forward 有自己的 listener/bridge、原操作和清理。选择 Compu
 ComputerService 拥有发现、driver、物理输入 lane、assignment、人工控制和远端路由；执行绑定保留真实 Thread/Run。
 一个物理桌面同时只有一个 controller，可有多个 observer；不同窗口不是独立桌面。
 Windows 观察默认列出目标应用的可见实际窗口，过滤后台、cloaked 和辅助小窗口；显式选定的窗口始终保留在观察结果中。
+Windows Host 直接启动配套 `VarinComputer.exe`，构建阶段生成 x64/ARM64 产物，不在运行时加载 PowerShell、C# 或编译器。
+UIA 只由 helper 的 MTA 线程持有；同用户本机控制管道与 stdin EOF 监视独立于 UIA，先阻止旧输入再释放跟踪状态。
+取消一个请求可保留健康实例；撤权/退出仍等待原实例实际停止。独立 capture 角色不拥有输入或 UIA 状态。
+二进制按 Host candidate 发布并核验架构、摘要和真实签名状态；未知动作/旧输入释放状态不因替换 helper 自动清除。
 
 assignment 在资源 Host 预留成功后才发布 grant。输入使用原 assignment/epoch，handback 后需新观察；远端重启不会悄悄续旧 token。
 Browser/Office 读取与效果有不同工具合同，任意 JS evaluate 仍属效果，不因 caller 称其只读而变权限。

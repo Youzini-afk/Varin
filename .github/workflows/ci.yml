@@ -360,9 +360,13 @@ jobs:
           set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
           cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Test Windows input targeting without desktop access
+        name: Build and verify native Windows Computer helper without desktop input
         shell: pwsh
-        run: ./packages/computer-driver/windows/test-targeting.ps1
+        run: |
+          node packages/computer-driver/windows/build-helper.mjs --test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node packages/computer-driver/windows/smoke-helper.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # Successful compilation is reusable even if a later native assertion
       # fails. Save before acceptance: a red teardown must not force another
       # cold Rust build, and a cache never substitutes for those assertions.

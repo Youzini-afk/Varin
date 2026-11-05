@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/varin-kernel", "crates/varin-runtime"]
+members = ["crates/varin-kernel", "crates/varin-runtime", "crates/varin-computer-windows"]
 exclude = ["vendor/fuser"]
 resolver = "2"
 

@@ -9,6 +9,7 @@ import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import express, { type Express, type Request, type Response as ExpressResponse } from 'express';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
+import { computerDriverFixture } from '../computer/driver-fixture.test-helper.js';
 import { createComputerService, type ComputerServiceOptions } from '../computer/computer-service.js';
 import { registerBotRoutes } from '../bots/bot-routes.js';
 import type { BotService } from '../bots/bot-service.js';
@@ -92,7 +93,7 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
     interrupt: async () => { releases++; input.reject(new Error('original input interrupted without a final action response')); return { released: releaseSucceeds }; },
     async request(op, dispatch) {
       dispatch?.beforeDispatch?.(); calls.push(String(op.tool)); requests.push(structuredClone(op));
-      if (startupFailure && op.tool === 'release_input') throw new Error('Driver startup blocked by endpoint protection');
+      if (startupFailure && (op.tool === 'ping' || op.tool === 'release_input')) throw new Error('Driver startup blocked by endpoint protection');
       if (op.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready', ...(applicationTools ? { applicationTools } : {}) } });
       if (op.tool === 'get_app_state') return response({ snapshot: { app: { name: 'editor', pid: 3, windowTitle: 'Controlled' },
         windowBounds: { x: 0, y: 0, width: 100, height: 100 }, treeLines: ['0 Edit'], elements: [{ index: 0, name: 'Edit', controlType: 'Edit' }] } });
@@ -149,7 +150,7 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
   const runtime = { onReady: (listener: () => void) => observe(ready, listener), onEvent: (listener: (event: { stream: 'durable'; cursor: number }) => void) => observe(events, listener),
     run: async (id: string) => { const run = runRecord(id); if (terminal) for (const listener of toolReleased) listener(); return run; } };
 
-  const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, createDriver: () => driver, ...remote,
+  const computers = createComputerService({ client: kernel as never, hostId: 'host', platform: 'windows', dataDir, driverDir: computerDriverFixture(dataDir), createDriver: () => driver, ...remote,
     onControlEvent: async event => { await computer.acceptControlEvent(event); },
     onControlEventCancel: command => computer.cancelControlEvents(command),
     onAutomationInvalidated: event => { invalidations.push(parseComputerAutomationInvalidation(event)); },

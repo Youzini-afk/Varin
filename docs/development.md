@@ -143,7 +143,11 @@ runner 磁盘/安装服务失败单独标记基础设施原因，先修复输入
 Linux driver 的私有 D-Bus 协议测试使用
 `dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
 需要系统 `python3-gi` 与 `dbus`，不连接真实桌面或请求屏幕授权。
-Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows/test-targeting.ps1` 执行。
+Windows Computer helper 的可移植目标匹配与回执测试使用
+`cargo test --manifest-path kernel/Cargo.toml -p varin-computer-windows --locked`；Windows 同一入口额外运行
+真实 helper/命名管道和内存 WIC 编解码测试，不操作私人应用或注入输入。
+`bun run computer:build` 在 Windows 生成匹配架构的 EXE 和 manifest，Host 正式构建复用同一产物缓存。
+实际桌面行为、阻塞 UIA、多屏 DPI、签名安装包与性能仍按[原生 helper 验收](design/native-computer-helper.md)分别记录。
 
 ## 输出和 native 边界
 

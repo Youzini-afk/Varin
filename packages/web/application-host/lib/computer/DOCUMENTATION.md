@@ -212,10 +212,11 @@ The release acknowledgement and the old lane callback must both finish before cl
 A persistence/revocation failure after input release remains an actionable partial failure; it does
 not pretend that human-control persistence succeeded or restart the old queued input.
 
-Windows owns synthetic input in `input-controller.cs` on a thread separate from PowerShell's UIA
-calls. A release side channel fences the native owner and acknowledges key/button release before
-the Host closes that helper. The next operation starts a new helper. A crashed helper cannot prove
-release. Normal assignment completion restores the prior foreground only while the Agent's last
+Windows launches the matched `VarinComputer.exe` directly, after a side-effect-free version/build
+handshake. Its same-user local named pipe fences and releases tracked input independently of the MTA
+UIA worker. Ordinary cancellation can reuse a healthy helper; interrupt retires it permanently and
+the Host awaits actual process closure before replacement. Capture uses a separate read-only role,
+without UIA initialization. A crashed helper cannot prove release. Normal assignment completion restores the prior foreground only while the Agent's last
 target still owns focus; takeover does not reclaim focus from the user.
 
 `ComputerActionReceipt` separates effect (`none`, `dispatched`, `partial`, `verified`, `unknown`),
@@ -309,8 +310,8 @@ The ordinary-application Node tests drive the original authenticated Router dire
 listener), the shipped extension broker over child IPC, and controlled driver/VmExec responses. They
 cover peer reservation/re-observation, pre-dispatch rejection, original cancellation/drain, typed media
 and unknown effects independently of stopped input.
-The Windows targeting fixture invokes production functions with fake controls/input and checks visual
-events without desktop access. Those results do not establish real Windows overlay placement or
+The Rust portable targeting/receipt tests, Windows-only native pipe and WIC tests, and Host process
+fixtures validate their own boundaries without private desktop access. They do not establish real Windows overlay placement or
 Linux/macOS desktop input, VM installation, or an installed release's visual acceptance.
 
 ## Native capture session ownership

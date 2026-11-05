@@ -1,8 +1,9 @@
 # Varin Computer Use drivers
 
-The [native helper delivery design](../../docs/design/native-computer-helper.md) proposes replacing
-the Windows PowerShell runtime with a build-time Rust executable. It is not yet implemented;
-the platform entries and behavior below describe the current drivers.
+Windows uses the build-time Rust `VarinComputer.exe` helper. Production startup does not load
+PowerShell/C# driver sources, start an interpreter or compile code. Source and cross-target checks
+are separate from real Windows desktop and signed-package acceptance; see the
+[delivery and verification boundary](../../docs/design/native-computer-helper.md).
 
 Resident platform helpers for Computer Use (BC4). A driver runs inside the
 target desktop session and speaks a line-delimited JSON protocol on
@@ -81,23 +82,56 @@ same process holding global focus cannot redirect the bound application's text.
 responses retain uncertain/partial semantics. Native Linux/macOS behavior
 still needs validation on those platforms.
 
-Cancellation (BC4.A): stdin stays sequential, so the Host cannot interrupt a
-running op through it. Instead it writes
-`$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel`; long operations (tree walks,
-multi-click, drags, scrolls, key chords, type bursts) poll the flag at their
-internal checkpoints and abort with `{ok:false, cancelled:true, error}` whose
-message reports how much input already reached the desktop. A `cancelled`
-response is a partial outcome, not a clean rejection.
+Cancellation is out-of-band. Windows uses one persistent duplex named pipe per input helper,
+provided in `VARIN_DRIVER_CONTROL_PIPE`; its native owner rejects remote clients and grants only
+the current user's SID. Commands are `{id,command:"cancel",requestId}` or
+`{id,command:"interrupt",restoreFocus}` and responses are `{id,ok,released}`. A cancel fences
+that original request before releasing tracked keys/buttons; it does not permanently retire a
+healthy instance. Interrupt fences the whole instance and the Host waits for actual process exit.
+The short input gate never spans UIA, synchronous messages or screenshot work. The stdin monitor
+handles Host EOF independently of a stalled UIA worker. A new helper never releases blanket desktop
+keys to claim cleanup of a crashed predecessor.
+
+Linux/macOS retain `$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel` and their existing release/session
+semantics. A cancelled operation preserves actual partial or unknown effects, not a clean rejection.
 
 ## Platform hosts
 
 | platform | host entry | backend |
 | --- | --- | --- |
-| Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA element patterns + real pointer/keyboard input by default; explicit `app_post` for Win32 messages; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
+| Windows | `windows/VarinComputer.exe` (native UTF-8 NDJSON) | UIA element patterns + real pointer/keyboard input by default; explicit `app_post` for Win32 messages; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
 | Linux | `linux/driver-host.py` (python3, resident protocol reader) | X11 uses AT-SPI and Gdk. Wayland uses `portal_session.py`/`portal_backend.py`: one RemoteDesktop + ScreenCast authorization, retained GStreamer PipeWire capture, and negotiated D-Bus input. |
 | macOS | `macos/Varin Computer.app/Contents/MacOS/VarinComputer` | Native Swift helper: Accessibility tree/actions, retained ScreenCaptureKit streams, and CGEvent input. Separate input/capture queues share the stable `com.varin.computer` application identity. Native build and real-machine behavior still require macOS verification. |
 
 ### Native platform sessions
+
+Windows builds use the pinned Rust toolchain, Visual Studio C++ tools and Windows SDK, targeting
+`x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`. Run `bun run computer:build` on Windows for
+`windows/build/{VarinComputer.exe,manifest.json}`. The Application Host build consumes the same
+verified target cache and stages only those two files in its immutable candidate. Runtime startup
+never invokes the build entry. Missing artifacts produce a rebuild/reinstall instruction.
+
+`ping` and `capabilities` add `protocolVersion:1` and `build:{version,architecture,buildId}`. Host
+startup validates them against the staged manifest before desktop requests; readiness does not
+capture, focus, type or release keys. `VARIN_DRIVER_ROLE=capture` initializes no UIA state and rejects
+mutations; Windows keeps its separate, shared-by-viewers capture process. The input role owns the
+MTA UIA worker and its independent control connection.
+
+The cache includes native source, Cargo.lock, target, toolchain/SDK/resource compiler, flags, product
+version, manifest and icon. PE architecture and imported DLLs are verified; static CRT avoids an
+unbundled VC runtime dependency. `manifest.json` records the actual Authenticode state and digest.
+Standalone signing uses `VARIN_COMPUTER_SIGN_CERTIFICATE_SHA1` and
+`VARIN_COMPUTER_SIGN_TIMESTAMP`; `VARIN_COMPUTER_REQUIRE_SIGNATURE=1` rejects unsigned output.
+Development builds remain explicitly unsigned. Electron uses its existing publisher signing
+configuration for the helper too, then records the final signed-byte digest. Build-time signature
+inspection uses Windows PowerShell; installed Computer operations do not.
+
+The Electron helper lives in the real `app.asar.unpacked` path. Package hooks verify architecture,
+imports, signature and digest, then smoke both roles from that path without compiler/source access.
+Cross-architecture packaging does not claim execution on the other CPU. The helper carries an
+asInvoker/per-monitor-DPI manifest and stable Varin name, version resources and icon. It never
+self-updates or starts a service; each Host generation owns its matching helper.
+
 
 macOS builds require Xcode command-line tools and the macOS SDK. The Application
 Host build compiles the helper for the selected x64/arm64 target and stages it
@@ -235,7 +269,7 @@ document title containing an app's name must not override that running app.
 
 ## Provenance
 
-Substantial portions of `windows/runtime.ps1` and `linux/runtime.py` are
+The Windows Rust helper and `linux/runtime.py` retain behavior and portions
 adapted from [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use),
 MIT License (baseline `51f3a59`, 2026-09-28). Changes: persistent host loop,
 global SendInput paths, `PrintWindow` capture, `release_input`,
@@ -244,28 +278,22 @@ global SendInput paths, `PrintWindow` capture, `release_input`,
 The complete upstream notice is retained in
 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
-Host cancellation drops queued input and signals the in-flight op. On Windows,
-`native-win32.cs` declares the native API and `input-controller.cs` owns input,
-held-key tracking and a release channel independently of the MTA PowerShell UIA
-worker. A `<id>.release` command fences the owner and writes an atomic release
-acknowledgement before the Host closes the helper. Linux/macOS use the request
-cancel flag followed by `release_input`, keeping the original shared capture
-session alive during ordinary job cancellation. A crashed helper loses its
-tracking state; a replacement cannot safely send blanket key-up events because
-they could release a person's held keys or mouse buttons. A lost driver response
-therefore leaves the action effect and any held-input state unknown. Post-action
-capture failure preserves the input acceptance. Inspect the desktop before
-retrying.
-Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so publication replaces code and scripts together. Environment overrides remain explicit. On Debian and Ubuntu, the explicit Prepare Desktop operation installs the graphical session and its native packages. Existing local console desktops still require their own graphical session and platform packages.
+Host cancellation drops queued input and signals the original in-flight request. Windows tracks both
+SendInput and asynchronous app_post key/button pairs; release acknowledges only sends Windows accepted.
+UIA/SendMessage attempts retain unknown effects on failure, and only readable set_value verification
+reports `verified`. Post-action capture failure preserves input acceptance. A crashed helper loses its
+tracking state; a replacement cannot safely release a person's held keys. Lost responses therefore
+retain unknown action and held-input outcomes. Inspect the desktop before retrying.
 
-Packaged Electron Hosts pass the physical `app.asar.unpacked` driver directory
-to external interpreters. The Windows launcher configures UTF-8 input, output
-and error output before loading the driver, so both multilingual operations and
-startup failures use the same transport encoding.
+Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so
+publication replaces code and matching platform artifacts together. Only the target platform is shipped.
+Linux still requires its Python/native desktop packages; this Windows change does not remove Linux's
+interpreter dependency. Mobile and browser-only assets carry no desktop helper.
 
-Windows automatic selection excludes hidden, cloaked, shell/helper and 1×1 placeholder windows;
-it prefers the foreground application window, then a non-minimized titled window. Explicit handles
-retain their exact targets; ambiguous title selectors report the need to choose a handle.
-
-See [current platform limits](../../docs/resources.md#computer-use-与平台边界)
-and [runtime acceptance](../../docs/runtime-acceptance.md) for native/installed-product boundaries.
+Portable Rust tests cover relocation, ambiguity, window selection, Unicode/protocol and receipt state.
+Windows-only tests cover in-memory WIC PNG/JPEG encoding and the real helper/pipe handshake, cancellation,
+healthy reuse, retirement and EOF, without querying private applications or injecting input. Host tests
+cover protocol mismatch, correlation, unknown outcomes and independent release. Actual UIA provider
+hangs, Unicode editing, mixed DPI/multi-monitor input, installed x64/ARM64 execution, startup/memory
+measurements and publisher signing still require the corresponding Windows environment; cross-target
+`cargo check` and protocol fixtures do not establish those outcomes.
