@@ -1,0 +1,48 @@
+.question-field { min-width: 0; margin: 0; padding: 0; border: 0; }
+.question-field + .question-field { margin-top: 24px; }
+.question-field-title { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 0; margin-bottom: 10px; color: var(--foreground); font-weight: 500; font-size: var(--text-body); line-height: 1.65; }
+.question-field-title > span:not(.question-field-number, .question-field-meta) { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.question-field-number { flex-shrink: 0; color: var(--muted-foreground); font-size: var(--text-micro); font-variant-numeric: tabular-nums; font-weight: 400; }
+.question-field-meta { flex-shrink: 0; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--text-micro); font-weight: 400; }
+.question-choices { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.question-choice { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 9px 10px; border-radius: 7px; cursor: pointer; color: var(--foreground); font-size: var(--text-body); line-height: 1.65; transition: background-color var(--motion-dur-fade, 160ms) var(--motion-ease-out, ease); }
+.question-choice > input { position: absolute; inset-inline-start: 17px; top: 16px; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.question-choice-label { min-width: 0; flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.question-choice-mark { display: grid; place-items: center; flex: 0 0 16px; width: 16px; height: 16px; margin-top: calc((1em * 1.65 - 16px) / 2); border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, transparent); border-radius: 50%; transition: border-color var(--motion-dur-fade, 160ms), background-color var(--motion-dur-fade, 160ms); }
+.question-choice-mark[data-multiple="true"] { border-radius: 4px; }
+.question-choice-mark > :is(span, svg) { opacity: 0; transform: scale(.65); transition: opacity var(--motion-dur-fade, 160ms), transform var(--motion-dur-fade, 160ms) var(--motion-ease-out, ease); }
+.question-choice-mark > span { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+.question-choice-mark > svg { width: 12px; height: 12px; }
+.question-choice[data-selected="true"] { background: color-mix(in srgb, var(--primary) 4%, transparent); }
+.question-choice[data-selected="true"] .question-choice-mark { border-color: var(--primary); }
+.question-choice[data-selected="true"] .question-choice-mark[data-multiple="true"] { background: var(--primary); color: var(--primary-foreground); }
+.question-choice[data-selected="true"] .question-choice-mark > :is(span, svg) { opacity: 1; transform: scale(1); }
+.question-choice:not([data-disabled]):hover { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.question-choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.question-choice[data-disabled] { opacity: .6; cursor: default; }
+.question-supplement { min-width: 0; margin-top: 10px; padding-inline-start: 26px; }
+.question-supplement-toggle { display: flex; align-items: center; gap: 5px; max-width: 100%; color: var(--muted-foreground); font-size: var(--text-meta); line-height: 1.65; padding: 3px 0; border-radius: 3px; text-align: start; }
+.question-supplement-toggle > svg { flex: 0 0 14px; width: 14px; height: 14px; transition: transform var(--motion-dur-glide, 320ms) var(--motion-ease-glide, ease); }
+.question-supplement-toggle > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.question-supplement-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.question-supplement-toggle:not(:disabled):hover { color: var(--foreground); }
+.question-supplement-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 8px; }
+.question-supplement-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-dur-glide, 320ms) var(--motion-ease-glide, ease), opacity var(--motion-dur-fade, 160ms); }
+.question-supplement-reveal > div { min-height: 0; overflow: hidden; padding-inline: 3px; margin-inline: -3px; }
+.question-supplement[data-open="true"] .question-supplement-reveal { grid-template-rows: 1fr; opacity: 1; }
+.question-supplement[data-open="true"] .question-supplement-toggle > svg { transform: rotate(90deg); }
+.question-text-input { display: block; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--foreground) 2%, transparent); color: var(--foreground); font: inherit; font-size: var(--text-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; resize: vertical; field-sizing: content; }
+.question-text-input::placeholder { color: var(--muted-foreground); opacity: .75; }
+.question-text-input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.question-supplement .question-text-input { margin-block: 9px 3px; }
+.question-response-tools { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
+.question-response-tools > .question-supplement { flex: 1; margin-top: 0; }
+.question-clear { flex-shrink: 0; padding-block: 3px; color: var(--muted-foreground); font-size: var(--text-micro); line-height: 1.65; }
+.question-clear:not(:disabled):hover { color: var(--foreground); }
+.question-clear:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.thread-question-body > .question-field:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 4px; }
+@media (max-width: 480px) { .question-field-title { flex-wrap: wrap; column-gap: 8px; }.question-choice { padding-block: 11px; } }
+:root[data-motion="off"] :is(.question-choice, .question-choice-mark, .question-choice-mark > *, .question-supplement-toggle > svg, .question-supplement-reveal) { transition: none; }
+:root[data-motion="reduced"] :is(.question-choice-mark > *, .question-supplement-reveal) { transition-property: opacity; }
+@media (prefers-reduced-motion: reduce) { .question-choice-mark > *, .question-supplement-reveal { transition-property: opacity; }.question-supplement-toggle > svg { transition: none; } }
+@media (forced-colors: active) { .question-choice-mark { border-color: ButtonText; }.question-choice[data-selected="true"] .question-choice-mark { border-color: Highlight; }.question-choice-mark > span { background: Highlight; forced-color-adjust: none; }.question-choice[data-selected="true"] .question-choice-mark[data-multiple="true"] { background: Highlight; color: HighlightText; forced-color-adjust: none; } }

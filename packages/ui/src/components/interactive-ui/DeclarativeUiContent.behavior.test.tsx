@@ -46,7 +46,7 @@ async function render(value: unknown, branchId = 'main') {
 async function choose(index: number) {
   await act(async () => container.querySelectorAll<HTMLInputElement>('input')[index]!.click());
 }
-async function action() { await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Continue'))!.click()); }
+async function action() { await act(async () => container.querySelector<HTMLButtonElement>('[data-conversation-ui-action]')!.click()); }
 it('chooses locally, interleaves prose controls, and composes the exact labelled result with a fixed source', async () => {
   await render(choice); await choose(1);
   expect(compose).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
@@ -173,8 +173,16 @@ it('collects basic input and exact free-form additions into a single editable fo
     { type: 'input', key: 'count', label: 'Count', inputType: 'number', min: 0 },
   ] });
   await choose(0); await choose(1);
-  const other = container.querySelector<HTMLInputElement>('input[type="text"]')!, notes = container.querySelector('textarea')!, count = container.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const supplement = [...container.querySelectorAll('button')].find(button => button.textContent === 'ui.question.supplement')!;
+  expect(supplement.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => supplement.click());
+  const other = container.querySelector<HTMLTextAreaElement>('[aria-label="ui.question.supplement"]')!, notes = container.querySelector<HTMLTextAreaElement>('textarea:not([aria-label])')!, count = container.querySelector<HTMLInputElement>('input[type="number"]')!;
   await act(async () => { for (const [element, value] of [[other, '自己补充'], [notes, '  Keep my wording\nexactly.'], [count, '0']] as const) { element.value = value; element.dispatchEvent(new window.Event('input', { bubbles: true })); } });
+  await act(async () => supplement.click());
+  expect(supplement.getAttribute('aria-expanded')).toBe('false');
+  expect(supplement.textContent).toContain('自己补充');
+  await act(async () => supplement.click());
+  expect(other.value).toBe('自己补充');
   await action(); const text = compose.mock.lastCall?.[0].text;
   expect(text).toContain('Hair：Short、Long、自己补充'); expect(text).toContain('Notes：  Keep my wording\nexactly.'); expect(text).toContain('Count：0');
 });

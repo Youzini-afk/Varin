@@ -1,4 +1,17 @@
 .conversation-ui-fragment { --interaction-duration: var(--motion-dur-glide, 320ms); }
+.conversation-ui-fields { padding-block: 4px; }
+.conversation-ui-actions { margin-top: 14px; }
+.conversation-ui-actions[data-choice="true"] { padding-inline-start: 36px; }
+.conversation-ui-action-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 34px; }
+.conversation-ui-actions > .conversation-ui-disclosure { margin-bottom: 10px; font-size: var(--text-meta); color: var(--muted-foreground); }
+.conversation-ui-submit { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 34px; max-width: 100%; padding: 7px 12px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 7%, transparent); color: var(--foreground); font-size: var(--text-meta); line-height: 1.45; text-align: start; transition: background-color var(--motion-dur-fade, 160ms), color var(--motion-dur-fade, 160ms); }
+.conversation-ui-submit > span { min-width: 0; overflow-wrap: anywhere; }
+.conversation-ui-submit > svg, .conversation-ui-status > svg { width: 14px; height: 14px; flex-shrink: 0; }
+.conversation-ui-submit:not(:disabled):hover { background: color-mix(in srgb, var(--foreground) 11%, transparent); }
+.conversation-ui-submit:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.conversation-ui-submit:disabled { opacity: .55; }
+.conversation-ui-status { display: inline-flex; align-items: center; gap: 5px; min-height: 20px; color: var(--muted-foreground); font-size: var(--text-micro); }
+.conversation-ui-status > svg { color: var(--primary); }
 .conversation-ui-control, .conversation-ui-action {
   transition: background-color var(--motion-dur-fade, 160ms), border-color var(--motion-dur-fade, 160ms), color var(--motion-dur-fade, 160ms);
 }
@@ -15,5 +28,5 @@
 .conversation-ui-tabs [role="tabpanel"][aria-hidden="true"] { pointer-events: none; }
 .conversation-ui-tab[aria-selected="true"] { color: var(--primary); border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, transparent); }
 :root[data-motion="reduced"] .conversation-ui-reveal { transition-property: opacity; }
-:root[data-motion="off"] :is(.conversation-ui-reveal, .conversation-ui-control, .conversation-ui-action, .conversation-ui-disclosure > button > svg) { transition: none; }
+:root[data-motion="off"] :is(.conversation-ui-reveal, .conversation-ui-control, .conversation-ui-action, .conversation-ui-submit, .conversation-ui-disclosure > button > svg) { transition: none; }
 @media (prefers-reduced-motion: reduce) { .conversation-ui-reveal { transition-property: opacity; } .conversation-ui-disclosure > button > svg { transition: none; } }

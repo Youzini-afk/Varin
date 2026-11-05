@@ -12,6 +12,10 @@ import { toolMessagesEn } from './tool-interactions';
 import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict = {
+  'ui.question.supplement': 'Add your own thoughts…',
+  'ui.question.supplementPlaceholder': 'Add an answer or any context you want to share…',
+  'ui.question.multiple': 'Choose any',
+  'ui.fragment.compose': 'Fill into composer',
   "ui.content.latest": "View latest revision",
   "ui.content.alreadyLatest": "This is the latest revision.",
   "ui.content.cyclicEmbed": "Circular content reference",

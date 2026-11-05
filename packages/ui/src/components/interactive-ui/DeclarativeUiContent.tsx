@@ -10,6 +10,8 @@ import { NativeObjectContent } from './NativeObjectContent';
 import { useNativeObjectActions } from '@/lib/interactive-ui/native-object-actions';
 import { InteractionDisclosure } from './InteractionDisclosure';
 import { UiRevisionLink } from './UiRevisionLink';
+import { Icon } from '@/components/icon/Icon';
+import { QuestionChoices, QuestionSupplement } from '@/components/ui/question-controls';
 
 const controlClass = 'conversation-ui-control min-w-0 max-w-full rounded-md border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary';
 const buttonClass = 'conversation-ui-action rounded-md border border-border px-3 py-2 text-sm hover:bg-interactive-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
@@ -25,6 +27,7 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
   const id = React.useId();
   const surface = React.useRef<HTMLElement | null>(null);
   const [status, setStatus] = React.useState('');
+  const [statusText, setStatusText] = React.useState('');
   const [failure, setFailure] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
@@ -41,7 +44,7 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
   const run = async () => {
     if (!action || busyRef.current || action.type === 'send' && sentText === text) return;
     if (!pending.current && (missing.length || !surface.current || surface.current.tagName === 'FORM' && !(surface.current as HTMLFormElement).reportValidity())) { setFailure(t('ui.fragment.required')); return; }
-    busyRef.current = true; setBusy(true); setFailure(''); setStatus('');
+    busyRef.current = true; setBusy(true); setFailure(''); setStatus(''); setStatusText(text);
     try {
       if (action.type === 'open') { await objectActions.open(action.ref!); return; }
       if (action.type === 'copy') { const copied = await copyTextToClipboard(text); if (!copied.ok) throw new Error(copied.error); setStatus(t('ui.fragment.copied')); return; }
@@ -54,31 +57,27 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
         if (action.type === 'send') { pending.current = input; setPendingText(input.text); }
       }
       if (action.type === 'send') {
-        const receipt = await sendUiResult(input); setStatus(t(receipt.status === 'queued' ? 'ui.fragment.queued' : 'ui.fragment.sent'));
+        const receipt = await sendUiResult(input); setStatusText(input.text); setStatus(t(receipt.status === 'queued' ? 'ui.fragment.queued' : 'ui.fragment.sent'));
         setSentText(input.text); pending.current = undefined; setPendingText(undefined);
-      } else { await composeUiResult(input); setStatus(t('ui.fragment.filled')); }
+      } else { await composeUiResult(input); setStatusText(input.text); setStatus(t('ui.fragment.filled')); }
     } catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
     finally { busyRef.current = false; setBusy(false); }
   };
-  const renderField = (field: ConversationUiField) => {
+  const renderField = (field: ConversationUiField, index: number) => {
     const fieldId = `${id}:${field.key}`, value = view.values[field.key];
-    if (field.type === 'choice') return <fieldset key={field.key} className="space-y-2 min-w-0">
-      <legend className="font-medium mb-2">{field.label ?? field.key}{field.required ? ' *' : ''}</legend>
-      <div className="flex flex-col gap-2">{field.options.map(option => {
-        const checked = Array.isArray(value) ? value.includes(option.key) : value === option.key;
-        return <label key={option.key} className={`flex items-start gap-2 ${controlClass} ${checked ? 'border-primary bg-primary/5' : ''}`}>
-          <input type={field.multiple ? 'checkbox' : 'radio'} name={fieldId} checked={checked} className="mt-1 shrink-0 accent-primary"
-            onChange={() => { view.setValue(field.key, field.multiple ? checked ? (Array.isArray(value) ? value : []).filter(item => item !== option.key) : [...(Array.isArray(value) ? value : []), option.key] : option.key); setStatus(''); }} />
-          <span className="whitespace-pre-wrap break-words min-w-0">{option.label}</span>
-        </label>;
-      })}</div>
-      {field.allowOther && <label className="block text-sm">{t('ui.fragment.other')}<input className={`block w-full mt-1 ${controlClass}`} type="text" value={String(view.values[`${field.key}:other`] ?? '')}
-        onInput={event => view.setValue(`${field.key}:other`, event.currentTarget.value)} /></label>}
+    const heading = <>{fields.length > 1 && <span className="question-field-number">{String(index + 1).padStart(2, '0')}</span>}<span>{field.label ?? field.key}{field.type === 'input' && field.unit ? ` (${field.unit})` : ''}{field.required ? ' *' : ''}</span>{field.type === 'choice' && field.multiple && <span className="question-field-meta">{t('ui.question.multiple')}</span>}</>;
+    if (field.type === 'choice') return <fieldset key={field.key} className="question-field">
+      <legend id={`${fieldId}:label`} className="question-field-title">{heading}</legend>
+      <QuestionChoices name={fieldId} labelledBy={`${fieldId}:label`} options={field.options.map(option => ({ id: option.key, label: option.label }))}
+        selected={Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : typeof value === 'string' ? [value] : []} multiple={field.multiple}
+        onChange={selected => { view.setValue(field.key, field.multiple ? selected : selected[0] ?? ''); setStatus(''); }} />
+      {field.allowOther && <QuestionSupplement value={String(view.values[`${field.key}:other`] ?? '')}
+        onChange={value => { view.setValue(`${field.key}:other`, value); setStatus(''); }} />}
     </fieldset>;
     const inputProps = { id: fieldId, value: String(value ?? ''), placeholder: field.placeholder, required: field.required,
-      className: `block w-full mt-1 ${controlClass}`, onInput: (event: React.FormEvent<HTMLInputElement | HTMLTextAreaElement>) => view.setValue(field.key, event.currentTarget.value) };
-    return <div key={field.key}><label htmlFor={fieldId} className="font-medium">{field.label ?? field.key}{field.unit ? ` (${field.unit})` : ''}{field.required ? ' *' : ''}</label>
-      {field.inputType === 'textarea' ? <textarea {...inputProps} rows={3} /> : <input {...inputProps} type={field.inputType} min={field.min} max={field.max} step={field.step} />}
+      className: `block w-full mt-1 ${controlClass}`, onInput: (event: React.FormEvent<HTMLInputElement | HTMLTextAreaElement>) => { view.setValue(field.key, event.currentTarget.value); setStatus(''); } };
+    return <div key={field.key} className="question-field"><label htmlFor={fieldId} className="question-field-title">{heading}</label>
+      {field.inputType === 'textarea' ? <textarea {...inputProps} className="question-text-input" rows={3} /> : <input {...inputProps} type={field.inputType} min={field.min} max={field.max} step={field.step} />}
       {field.inputType === 'range' && <output htmlFor={fieldId}>{String(value ?? '')}</output>}
     </div>;
   };
@@ -88,7 +87,7 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     onFocusCapture={() => { focused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; setShown(props.node); } }}>
     {shown !== props.node && <p role="status" className="text-sm text-muted-foreground">{t('ui.fragment.updated')} <button type="button" className={buttonClass} onClick={() => { focused.current = false; setShown(props.node); }}>{t('ui.fragment.applyUpdate')}</button></p>}
     {shown.type === 'form' && shown.label && <p className="font-medium">{shown.label}</p>}
-    {fields.map(renderField)}
+    {fields.length > 0 && <div className="conversation-ui-fields">{fields.map(renderField)}</div>}
     {shown.type === 'disclosure' && <InteractionDisclosure open={view.state.controls.open === true} onOpenChange={open => view.setControl('open', open)} title={shown.label ?? t('ui.fragment.details')}>
       <SimpleMarkdownRenderer content={shown.content} variant="tool" />
     </InteractionDisclosure>}
@@ -102,13 +101,20 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     </div>}
     {shown.type === 'embed' && <EmbeddedUiContent refValue={shown.ref} sourceKey={props.sourceKey} />}
     {shown.type === 'object' && <NativeObjectContent refValue={shown.ref} />}
-    {action && <div className="space-y-2">
+    {action && <div className="conversation-ui-actions" data-choice={fields.length === 1 && fields[0]?.type === 'choice' || undefined}>
       {action.type === 'send' && <InteractionDisclosure title={t('ui.fragment.preview')}><p className="whitespace-pre-wrap text-sm">{pendingText ?? text}</p></InteractionDisclosure>}
-      <button type="button" className={buttonClass} disabled={busy || action.type === 'send' && sentText === text} onClick={() => void run()}>{action.type === 'send' ? `${t('ui.fragment.send')} · ${action.label}` : action.label}</button>
-      {(action.type === 'compose' || action.type === 'reference') && <span className="ml-2 text-xs text-muted-foreground">{t('ui.fragment.draftHint')}</span>}
+      <div className="conversation-ui-action-row">
+        <button type="button" className="conversation-ui-submit" data-conversation-ui-action={action.type}
+          title={action.type === 'compose' || action.type === 'reference' ? t('ui.fragment.compose') : undefined}
+          aria-label={action.type === 'compose' || action.type === 'reference' ? `${t('ui.fragment.compose')} · ${action.label}` : undefined}
+          disabled={busy || action.type === 'send' && sentText === text} onClick={() => void run()}>
+          <span>{typeof shown.action === 'string' ? t('ui.fragment.compose') : action.type === 'send' ? `${t('ui.fragment.send')} · ${action.label}` : action.label}</span>
+          <Icon name={busy ? 'loader-4' : action.type === 'send' ? 'arrow-up' : action.type === 'copy' ? 'file-copy' : 'arrow-right-up'} aria-hidden="true" className={busy ? 'animate-spin motion-reduce:animate-none' : undefined} />
+        </button>
+        <span className="conversation-ui-status" role="status">{status && statusText === text && <><Icon name="check" aria-hidden="true" />{status}</>}</span>
+      </div>
     </div>}
     {view.resetKeys.length > 0 && <p role="status" className="text-sm text-muted-foreground">{t('ui.fragment.reselect')}: {view.resetKeys.map(key => fields.find(field => field.key === key)?.label ?? key).join(', ')}</p>}
-    {status && <p role="status" className="text-sm text-muted-foreground">{status}</p>}
     {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
     {view.error && <p role="alert" className="text-sm text-destructive">{t('ui.fragment.unsaved')}: {view.error} <button type="button" className={buttonClass} onClick={view.retry}>{t('ui.fragment.retry')}</button></p>}
     {!props.session && shown.type !== 'embed' && shown.type !== 'object' && view.session && <UiRevisionLink session={view.session} />}

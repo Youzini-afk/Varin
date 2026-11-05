@@ -4,8 +4,7 @@ import type { QuestionAnswer, UserQuestion } from '@varin/protocol';
 export interface QuestionDraft {
   answers: Record<string, QuestionAnswer>;
   index: number;
-  review: boolean;
-  scroll: Record<string, number>;
+  scrollTop: number;
   busy: boolean;
   submitted: boolean;
   cancelled?: boolean;
@@ -16,7 +15,7 @@ export interface QuestionDraft {
 }
 export function newQuestionDraft(questions: readonly UserQuestion[]): QuestionDraft {
   return { answers: Object.fromEntries(questions.map(q => [q.id, { questionId: q.id, selectedOptionIds: [], text: '' }])),
-    index: 0, review: false, scroll: {}, busy: false, submitted: false };
+    index: 0, scrollTop: 0, busy: false, submitted: false };
 }
 /** Memory-only drafts, keyed by Host/Thread/branch and original Operation. */
 export const useQuestionDraftStore = create<{

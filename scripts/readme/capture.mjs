@@ -48,6 +48,7 @@ try {
     if (scene === 'ide') await page.waitForSelector('[data-editor-ready]');
     await page.evaluate(() => document.fonts.ready);
     if (scene === 'varin') await (await page.$('input[type="radio"], [role="radio"]'))?.click();
+    await page.mouse.move(20, 8);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await page.screenshot({ path: path.join(assets, `${scene}-${lang}.png`) });
     console.log(`Captured ${scene}-${lang}.png`);

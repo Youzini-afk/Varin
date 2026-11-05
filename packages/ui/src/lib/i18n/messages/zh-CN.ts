@@ -12,6 +12,10 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'ui.question.supplement': '补充自己的想法…',
+  'ui.question.supplementPlaceholder': '写下你的回答，或者补充一些背景…',
+  'ui.question.multiple': '可多选',
+  'ui.fragment.compose': '填入输入框',
   'ui.fragment.draftHint': '可在输入框中继续编辑',
   'ui.content.draftHint': '可在输入框中继续编辑',
   'ui.content.latest': '查看最新版本',

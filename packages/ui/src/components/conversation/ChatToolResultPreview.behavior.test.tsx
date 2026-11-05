@@ -210,6 +210,36 @@ it('compares actual Office readback and retains document dirty state after expor
   expect(container.textContent).not.toContain('Document saved');
 });
 
+it('shows a whole question set and submits selections and free text together', async () => {
+  const operation = { id: 'question-set', phase: 'waiting', intent: { call: { arguments: { questions: [
+    { id: 'audience', question: 'Choose the audiences', selection: 'multiple', required: true, options: [{ id: 'new', label: 'New users' }, { id: 'existing', label: 'Existing users' }] },
+    { id: 'notes', question: 'What should the introduction explain?', required: true, options: [] },
+  ] } } } } as unknown as import('@varin/protocol').Operation;
+  const answer = vi.fn(async () => ({ ...operation, phase: 'terminal', outcome: 'succeeded' } as import('@varin/protocol').Operation));
+  const renderQuestions = () => root.render(<ThreadQuestion scopeKey="whole-question-set" operation={operation} enabled onAnswer={answer} onRead={async () => operation} onCancel={async () => operation} />);
+  await act(async () => renderQuestions());
+  expect(container.textContent).toContain('Choose the audiences');
+  expect(container.textContent).toContain('What should the introduction explain?');
+  await act(async () => container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[0]!.click());
+  await act(async () => container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]!.click());
+  expect(answer).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  const notes = container.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby]')!;
+  await act(async () => { notes.value = 'Start with a complete example.'; notes.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
+  await act(async () => root.render(null));
+  await act(async () => renderQuestions());
+  const restoredNotes = container.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby]')!;
+  // React initializes a remounted textarea through defaultValue; linkedom does not mirror it to value.
+  expect(restoredNotes.defaultValue).toBe('Start with a complete example.');
+  expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
+  await act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+  expect(answer).toHaveBeenCalledWith([
+    { questionId: 'audience', selectedOptionIds: ['new', 'existing'], text: '', skipped: false },
+    { questionId: 'notes', selectedOptionIds: [], text: 'Start with a complete example.', skipped: false },
+  ]);
+});
+
 it('keeps long question choices intact and waits for explicit submission', async () => {
   const answer = vi.fn(async () => operation), option = '保留所有原始记录，并在报告中逐项解释原因。'.repeat(12) + '\n包含每个失败任务的处理建议。';
   const operation = { id: 'question', phase: 'waiting', intent: { call: { arguments: { questions: [{ id: 'question', question: '选择报告范围', options: [option, '只列摘要'].map((label,index) => ({ id: String(index), label })) }] } } } } as unknown as import('@varin/protocol').Operation;
