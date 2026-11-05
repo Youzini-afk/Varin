@@ -5,6 +5,7 @@ import { ComposerClosedError, interactionInsertion, interactionRanges } from '@/
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { addContentReference, removeEditorContextAttachment } from '@/lib/agent-editor/attachments';
+import { releaseUiSelection } from './selection-lifetime';
 
 export interface UiComposeInput { identity: ThreadIdentity; host: number; sourceKey: string; text: string; reference?: ContentReference }
 export interface UiComposeReceipt { status: 'filled'; updated: boolean }
@@ -60,5 +61,5 @@ export async function composeUiResult(input: UiComposeInput): Promise<UiComposeR
 export function sendUiResult(input: UiComposeInput): Promise<UiSendReceipt> {
   const sender = senders.get(scope(input));
   if (!sender) return Promise.reject(new Error('Open the original conversation before sending.'));
-  return sender(input);
+  return sender(input).then(receipt => { releaseUiSelection(input.reference, input.host); return receipt; });
 }

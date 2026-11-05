@@ -4,9 +4,9 @@ import type { JsonValue } from '@varin/protocol';
 import { useOptionalConversationPresentation } from '@/components/conversation/ConversationContext';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { useI18n } from '@/lib/i18n';
-import { uiSession } from './sessions';
+import { uiSession, type UiSession } from './sessions';
 
-export interface DeclarativeUiSource { node: ConversationUiNode; sourceKey: string; fragment?: UiFragmentRegistrationInput; source?: UiSourceIdentity; isStreaming?: boolean }
+export interface DeclarativeUiSource { node: ConversationUiNode; sourceKey: string; fragment?: UiFragmentRegistrationInput; source?: UiSourceIdentity; session?: UiSession; isStreaming?: boolean }
 const empty = (node?: ConversationUiNode): UiViewState => ({ data: node ? Object.fromEntries(conversationUiFields(node).filter(field => field.type === 'input' && field.inputType === 'range').map(field => [field.key, field.type === 'input' ? String(field.min ?? 0) : ''])) : {}, controls: {}, scroll: { x: 0, y: 0 } });
 function valuesOf(state: UiViewState): Record<string, JsonValue> {
   return state.data && typeof state.data === 'object' && !Array.isArray(state.data) ? state.data as Record<string, JsonValue> : {};
@@ -24,12 +24,12 @@ export function useDeclarativeUi(props: DeclarativeUiSource) {
   const conversation = useOptionalConversationPresentation();
   const { t } = useI18n();
   const host = getRuntimeEndpointGeneration();
-  const session = React.useMemo(() => conversation ? uiSession(`${threadComposerKey(threadHostKey(), conversation.identity)}:fragment:${props.sourceKey}`, conversation.identity, host) : undefined,
+  const session = React.useMemo(() => props.session ?? (conversation ? uiSession(`${threadComposerKey(threadHostKey(), conversation.identity)}:fragment:${props.sourceKey}`, conversation.identity, host) : undefined),
     // Identity, not the timeline projection object, owns the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversation?.identity.runtime, conversation?.identity.threadId, conversation?.identity.branchId, host, props.sourceKey]);
+    [props.session, conversation?.identity.runtime, conversation?.identity.threadId, conversation?.identity.branchId, host, props.sourceKey]);
   const api = React.useMemo(() => createInteractiveUiHttpAPI(host), [host]);
-  const [state, setState] = React.useState<UiViewState>(() => restore(session?.state, props.node));
+  const [state, setState] = React.useState<UiViewState>(() => restore(session?.state ?? session?.initialState, props.node));
   const [error, setError] = React.useState('');
   const [persistenceError, setPersistenceError] = React.useState('');
   const [resetKeys, setResetKeys] = React.useState<string[]>([]);
@@ -41,7 +41,7 @@ export function useDeclarativeUi(props: DeclarativeUiSource) {
   const dirty = React.useRef(Boolean(session?.state));
   // Schema updates migrate separately; only scope changes reset the local view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  React.useLayoutEffect(() => { const restored = restore(session?.state, props.node); latest.current = restored; setState(restored); dirty.current = Boolean(session?.state); setError(''); setPersistenceError(''); const resets = restored.controls.__varinResetKeys; setResetKeys(Array.isArray(resets) ? resets.filter((key): key is string => typeof key === 'string') : []); }, [session]);
+  React.useLayoutEffect(() => { const restored = restore(session?.state ?? session?.initialState, props.node); latest.current = restored; setState(restored); dirty.current = Boolean(session?.state); setError(''); setPersistenceError(''); const resets = restored.controls.__varinResetKeys; setResetKeys(Array.isArray(resets) ? resets.filter((key): key is string => typeof key === 'string') : []); }, [session]);
   const node = React.useRef(props.node); node.current = props.node;
   const previous = React.useRef(props.node);
   const mounted = React.useRef(true);
@@ -90,7 +90,7 @@ export function useDeclarativeUi(props: DeclarativeUiSource) {
         if (abort.signal.aborted) return;
         let preparedSource = props.source;
         if (!preparedSource && props.fragment) {
-          try { preparedSource = { ref: (await api.registerFragment(session.identity, props.fragment, abort.signal)).ref }; }
+          try { const registered = await api.registerFragment(session.identity, props.fragment, abort.signal); preparedSource = { ref: registered.ref }; session.source = registered; }
           catch (failure) {
             if (!props.isStreaming || !(failure instanceof InteractiveUiError) || failure.status !== 404) throw failure;
             preparedSource = { preview: { content: node.current, callId: `fragment:${props.fragment.messageId}:${props.fragment.contentIndex ?? 0}:${props.fragment.fragmentKey}`, sequence: 0,
@@ -103,9 +103,11 @@ export function useDeclarativeUi(props: DeclarativeUiSource) {
         registration = await api.attach(session.identity, preparedSource, session.viewRef, abort.signal);
         if (abort.signal.aborted) return;
         source.current = preparedSource; owner.current = registration; session.viewRef = registration.viewRef;
+        if (!props.session) session.display = { source: preparedSource, content: node.current, files: {}, assets: {}, entry: '', title: node.current.label ?? t('ui.content.title'), committed: Boolean(preparedSource.ref), status: '' };
         try { sessionStorage.setItem(`varin.ui-view:${session.key}`, registration.viewRef); } catch { /* memory still retains this view */ }
-        if (!dirty.current && registration.state) { latest.current = session.state = restore(registration.state, node.current); setState(latest.current); }
-        const resets = registration.state?.controls.__varinResetKeys;
+        if (!dirty.current) { latest.current = session.state = restore(registration.state ?? session.initialState, node.current); setState(latest.current); dirty.current = Boolean(!registration.state && session.initialState); }
+        delete session.initialState;
+        const resets = latest.current.controls.__varinResetKeys;
         if (Array.isArray(resets)) setResetKeys(resets.filter((key): key is string => typeof key === 'string'));
         if (dirty.current) await persist(latest.current);
         setError('');
@@ -138,7 +140,10 @@ export function useDeclarativeUi(props: DeclarativeUiSource) {
   };
   return { state, values: valuesOf(state), error: [error, persistenceError].filter(Boolean).join(' · '), resetKeys, session, host, reference,
     retry: () => { retryConnection(); },
-    setValue: (key: string, value: JsonValue) => update({ ...latest.current, data: { ...valuesOf(latest.current), [key]: value } }),
+    setValue: (key: string, value: JsonValue) => {
+      const remaining = resetKeys.filter(reset => reset !== key && `${reset}:other` !== key); setResetKeys(remaining);
+      update({ ...latest.current, data: { ...valuesOf(latest.current), [key]: value }, controls: { ...latest.current.controls, __varinResetKeys: remaining } });
+    },
     setControl: (key: string, value: JsonValue) => update({ ...latest.current, controls: { ...latest.current.controls, [key]: value } }),
   };
 }

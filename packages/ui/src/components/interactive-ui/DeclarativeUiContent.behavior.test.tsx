@@ -1,4 +1,4 @@
-import { flushUiSessions } from '@/lib/interactive-ui/sessions';
+import { flushUiSessions, uiSession } from '@/lib/interactive-ui/sessions';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -75,7 +75,7 @@ it('supports multi-select, local-only tabs and disclosure without invoking the c
   expect(compose).not.toHaveBeenCalled();
   await render({ type: 'tabs', label: 'Plans', tabs: [{ key: 'a', label: 'A', content: 'First plan' }, { key: 'b', label: 'B', content: 'Second plan' }] });
   await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.click());
-  expect(container.querySelector('[role="tabpanel"]')?.textContent).toBe('Second plan'); expect(send).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="tabpanel"][aria-hidden="false"]')?.textContent).toBe('Second plan'); expect(send).not.toHaveBeenCalled();
 });
 
 it('renders only assistant top-level fragments between original prose, and hides unfinished stream JSON', async () => {
@@ -105,6 +105,21 @@ it('restores durable view values and keeps local edits visible when saving fails
   api.state.mockRejectedValueOnce(new Error('Storage unavailable'));
   await choose(0); await act(async () => new Promise(resolve => setTimeout(resolve, 230)));
   expect(container.textContent).toContain('Storage unavailable');
+  await action(); expect(compose.mock.lastCall?.[0].text).toContain('Hair：Short');
+});
+it('uses the work session for revision seeds, prefers saved destination state and flushes the same owner', async () => {
+  const session = uiSession(`seed:${presentation.identity.threadId}`, presentation.identity, getRuntimeEndpointGeneration());
+  session.initialState = { data: { hair: 'label:Long' }, controls: {}, scroll: { x: 0, y: 0 } };
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}><DeclarativeUiContent node={normalizeConversationUi(choice)} sourceKey="work" session={session} source={{ ref: 'ui:work@2' }} /></ConversationContext.Provider>));
+  await action(); expect(compose.mock.lastCall?.[0].text).toContain('Hair：Long');
+  await choose(0); await act(async () => flushUiSessions(presentation.identity, getRuntimeEndpointGeneration()));
+  expect(session.state?.data).toMatchObject({ hair: 'label:Short' });
+  expect(api.state.mock.lastCall?.[3].data).toMatchObject({ hair: 'label:Short' });
+  await act(async () => root.render(null));
+  delete session.state;
+  session.initialState = { data: { hair: 'label:Long' }, controls: {}, scroll: { x: 0, y: 0 } };
+  saved = { data: { hair: 'label:Short' }, controls: {}, scroll: { x: 0, y: 0 } };
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}><DeclarativeUiContent node={normalizeConversationUi(choice)} sourceKey="work" session={session} source={{ ref: 'ui:work@2' }} /></ConversationContext.Provider>));
   await action(); expect(compose.mock.lastCall?.[0].text).toContain('Hair：Short');
 });
 it('shows required-field errors and resets a removed selected meaning without affecting other fields', async () => {

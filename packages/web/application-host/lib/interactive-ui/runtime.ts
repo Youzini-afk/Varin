@@ -14,6 +14,7 @@ import { READ_PAGE_CHUNK_BYTES } from '../harness/read-page.js';
 import type { MediaResourceStore } from '../harness/media-resources.js';
 import { threadMaterialScope } from '../kernel/material-storage.js';
 import { uiRecordTypes } from './lifecycle.js';
+import { createFragmentHistory } from './fragment-history.js';
 
 interface LiveView {
   root: string; token: string; source: UiSourceIdentity; clientId: string; branchScope?: UiBranchScope;
@@ -43,36 +44,29 @@ function sourcePage(text: string, input: UiReadInput, ref: string) {
   return { status: 'ready', ref, file: input.file, startLine: start, endLine: end, totalLines: lines.length,
     ...textPage(lines.slice(start - 1, end).join('\n'), input, { kind: 'ui', ref, view: 'source', file: input.file, startLine: start, endLine: end }) };
 }
-export function createInteractiveUiRuntime(options: { kernel: KernelClient; runtime: AgentRuntimeClient; media: MediaResourceStore }) {
+export function createInteractiveUiRuntime(options: { kernel: KernelClient; runtime: AgentRuntimeClient; media: MediaResourceStore; onCollectionNeeded?(): void }) {
   const requireOwner = async (identity: UiBranchScope) => {
     const thread = await options.runtime.thread(identity.threadId);
     if (thread.deleted_at_ms != null || !thread.branches.some(branch => branch.branch_id === identity.branchId)) throw new UiContentError('Conversation branch is unavailable', 404);
+    return thread;
   };
-  const store = createUiContentStore(options.kernel, () => console.error('[Interactive content] Temporary object cleanup requires attention'), requireOwner);
+  const store = createUiContentStore(options.kernel, () => console.error('[Interactive content] Temporary object cleanup requires attention'), async scope => { await requireOwner(scope); });
   const views = new Map<string, LiveView>();
+  const fragmentHistory = createFragmentHistory(options.runtime);
   const scope = async (threadId: string) => (await options.runtime.familyList({ callerThreadId: threadId, includeSelf: true })).rootThreadId;
   const target = async (identity: Pick<ThreadIdentity, 'threadId' | 'branchId'>) => {
     await requireOwner(identity);
     return scope(identity.threadId);
   };
   const registerFragment = async (identity: ThreadIdentity, input: UiFragmentRegistrationInput, signal?: AbortSignal) => {
-    const root = await target(identity);
+    const thread = await requireOwner(identity);
+    const root = await scope(identity.threadId);
     if (typeof input.messageId !== 'string' || !input.messageId || typeof input.fragmentKey !== 'string'
       || input.contentIndex !== undefined && (!Number.isSafeInteger(input.contentIndex) || input.contentIndex < 0)) throw new UiContentError('Invalid message fragment identity');
-    // Search the current branch's ancestry, never read an arbitrary client-supplied history ID.
-    let before: string | undefined, head: string | undefined;
-    let selected: Awaited<ReturnType<AgentRuntimeClient['historyPage']>>['items'][number] | undefined;
-    do {
-      const page = await options.runtime.historyPage({ branchId: identity.branchId, limit: 100, ...(head ? { headId: head } : {}), ...(before ? { beforeId: before } : {}) }, signal);
-      if (head && (page.head !== head || page.boundary_reset)) throw new UiContentError('Conversation history changed; reopen this fragment', 409);
-      head = page.head ?? undefined;
-      selected = page.items.find(item => item.id === input.messageId);
-      if (selected) break;
-      if (page.previous === before && before) throw new UiContentError('History reader did not advance', 503);
-      before = page.previous ?? undefined;
-    } while (before);
+    const selected = await fragmentHistory.find(identity.threadId, identity.branchId,
+      thread.branches.find(branch => branch.branch_id === identity.branchId)!.head, input.messageId, signal);
     if (!selected || selected.source !== 'assistant') throw new UiContentError('Assistant fragment is unavailable in this branch', 404);
-    const item = await options.runtime.historyItem(selected, signal);
+    const item = await fragmentHistory.body(selected, signal);
     const body = (item.content as { content?: { kind?: string; text?: unknown; output?: { parts?: { kind?: string; text?: unknown }[] } } })?.content;
     let text: unknown;
     if (body?.kind === 'text' && (input.contentIndex === undefined || input.contentIndex === 0)) text = body.text;
@@ -335,26 +329,29 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       // after their UI records are gone. Retry those exact hashes first.
       for (const root of roots) pending = (await store.cleanup(root, signal)).pending || pending;
       if (cleanupOnly) return { pending };
-      // Cheap ownership discovery first. Full UI tracing is opt-in, so ordinary
-      // material maintenance and a live UI family never scan every message body.
+      // Discover actual retirement work before requesting the full content graph.
       const plan = await options.runtime.materialRetention(undefined, signal);
       const retired = new Set(plan.threads.filter(thread => thread.release).map(thread => thread.threadId));
+      for (const threadId of retired) fragmentHistory.forget(threadId);
       const families = new Map<string, boolean>();
       for (const thread of plan.threads) families.set(thread.rootThreadId, (families.get(thread.rootThreadId) ?? true) && thread.release);
       for (const [ref, current] of views) if (families.get(current.root) || current.branchScope && retired.has(current.branchScope.threadId)) closeView(ref, current);
-      const candidates = [...roots].filter(root => families.get(root));
+      const candidates: string[] = [];
+      for (const root of roots) if (families.get(root) || await store.hasReleasedSelections(root)) candidates.push(root);
       if (!candidates.length) return { pending };
-      // Invoke only after native metadata retirement. The full Catalog projection
-      // protects queued, historical, shared and inherited references after restart.
-      const traced = await options.runtime.materialRetention(undefined, signal, true);
+      // Capture roots inside the candidate families' UI write barriers, after all
+      // retirement marks. Share one Catalog scan across this maintenance batch.
+      await store.collectFamilies(candidates, () => options.runtime.materialRetention(undefined, signal, true), signal);
       for (const root of candidates) {
-        signal?.throwIfAborted(); await store.collect(root, traced, signal);
         pending = (await store.cleanup(root, signal)).pending || pending;
       }
       return { pending };
     } finally { await options.kernel.revokeGrant(discovery.grantId); }
   };
   return { store, scope, target, registerFragment, renderForBranch, validateViewScope, captureBranch, capability, read, attach, poll, releaseDeleted,
+    async releaseSelection(root: string, ref: string, scope: UiBranchScope) {
+      const receipt = await store.releaseSelection(root, ref, scope); options.onCollectionNeeded?.(); return receipt;
+    },
     disconnect(root: string, ref: string, token: string) {
       const current = views.get(ref); if (current?.root === root && current.token === token) closeView(ref, current);
     },

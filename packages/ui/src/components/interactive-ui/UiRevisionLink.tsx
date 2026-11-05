@@ -30,7 +30,7 @@ export function UiRevisionLink({ session }: { session: UiSession }) {
     {latest && display && <Dialog open onOpenChange={open => { if (!open) setLatest(undefined); }}><DialogContent className="h-[94dvh] w-[96vw] max-w-none overflow-auto p-4">
       <DialogTitle>{display.title} · {display.source.ref}</DialogTitle>
       <ConversationContext.Provider value={dialogConversation}><UiEmbedAncestryContext.Provider value={[display.source.ref!]}>
-        {display.content ? <DeclarativeUiContent node={display.content} sourceKey={latest.key} source={display.source} />
+        {display.content ? <DeclarativeUiContent node={display.content} sourceKey={latest.key} session={latest} source={display.source} />
           : <UiWorkView session={latest} {...display} panel onReturn={() => setLatest(undefined)} />}
       </UiEmbedAncestryContext.Provider></ConversationContext.Provider>
     </DialogContent></Dialog>}

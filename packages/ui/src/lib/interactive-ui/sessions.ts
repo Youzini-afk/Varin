@@ -3,6 +3,9 @@ export interface UiDisplay { content?: UiSource['content']; source: UiSourceIden
 export interface UiSession {
   key: string; identity: ThreadIdentity; host: number; source?: UiSource;
   viewRef?: string; state?: UiViewState; placement: 'inline' | 'panel';
+  /** Used only when the destination view has no saved or locally edited state. */
+  initialState?: UiViewState;
+  inlineHeight?: number;
   sourceEntryId?: string;
   /** Mounted view flush only; durable storage remains owned by the Host. */
   flushState?: () => Promise<void>;

@@ -2114,7 +2114,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload), sendApnsToAllUiSessions(pushPayload)]);
     },
   });
-  const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
+  const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources, onCollectionNeeded: () => contentMaintenance.request() });
   const threadMaterialLifetime = createThreadMaterialLifetime({ runtime: agentRuntime, storage: materialStorage, materials: webMaterials,
     retainAttachments: (plan, signal) => threadAttachments.retain(plan, signal),
     reconcileAttachments: (plan, signal) => threadAttachments.reconcilePreparations(plan, signal),
