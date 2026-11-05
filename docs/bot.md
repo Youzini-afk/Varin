@@ -64,7 +64,7 @@ Bot 聊天不选择项目，也不挂载普通工作台的工作概览、项目�
 另有事项的明确关注。它与 Bot 面板共用这些归属、工作状态和待处理来源，陪伴哪个 Bot 由用户在桌宠菜单选择，
 不由工作台壳决定；见[主管式桌宠](design/desktop-companion-director.md)。
 
-界面与动效设计和尚未实施的部分见 [Bot 工作台设计](design/bot-ui.md)。
+界面与动效依据见 [Bot 工作台设计](design/bot-ui.md)。后续[总助手聊天、工作概览与设备空间](design/varin-conversation-and-workspaces.md)为待实施方案，覆盖独立插队默认及电脑、文件和连接体验；不作为当前已交付能力。
 
 ## 休眠、唤醒与归档
 

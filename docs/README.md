@@ -48,6 +48,7 @@
 
 ## 持续演进的设计
 
+- [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：2026-11-05 本轮方案，待实施；覆盖总助手聊天、独立插队默认、工作与成果入口、电脑查看、独立文件管理及分开部署的连接体验。
 - [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：方向已确认，待实施；Windows 改为随包原生 EXE，保留完整桌面操作、独立取消与释放输入，并接通平台构建、签名和 Host 生命周期。
 - [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：核心链路已实施；记录正文交互、作品修订、草稿联动、状态继承与回收的设计及验收边界。当前合同见[交互内容](interactive-content.md)。
 - [联网检索后续验证与扩展](design/web-retrieval.md)：核心合同已接入，见[检索](retrieval.md#web学术与文档材料)；保留真实任务比较、平台验收和新增渠道的选择空间。
