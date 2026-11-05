@@ -401,9 +401,13 @@ const ChatToolCard: React.FC<{
   if (call.name === 'render_ui') {
     const projected = conversation?.uiCards?.[call.id];
     if (projected?.compact) return <details className="my-1 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('ui.content.title')} · {t(projected.result?.isError ? 'ui.content.unsaved' : projected.result ? 'ui.content.updated' : 'ui.content.making')}</summary><RawJsonDetails value={projected.result?.details ?? call.arguments} /></details>;
-    return <InteractiveUiCard call={projected?.call ?? call} ownerCallId={call.id} cwd={cwd}
+    const embedded = Object.values(conversation?.uiEmbeds ?? {}).some(placement => placement.sessionId === call.id);
+    return <><InteractiveUiCard call={projected?.call ?? call} ownerCallId={call.id} cwd={cwd}
       generating={projected?.call.rawArguments !== undefined && !projected.call.interrupted || generating}
-      execution={projected ? conversation?.toolExecutions[projected.call.id] : execution} result={projected ? projected.result : result} />;
+      execution={projected ? conversation?.toolExecutions[projected.call.id] : execution} result={projected ? projected.result : result} />
+      {embedded && <details className="my-1 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('ui.content.activity')}</summary>
+        <RawJsonDetails value={{ callId: call.id, arguments: call.arguments, result: result?.details ?? execution?.result ?? null }} />
+      </details>}</>;
   }
   const mutationPhase = isFileChangeTool(call.name) ? fileChangePhase(execution, result, generating) : undefined;
   const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : invocationStatus(result, execution, generating);
@@ -693,7 +697,7 @@ const AssistantMessage: React.FC<{
     }
       if (content.type === 'text') {
         rendered.push(
-          <ChatTextSource key={`${entryId}:text:${index}`} entryId={entryId} text={content.text}
+          <ChatTextSource role="assistant" contentIdentity={content.id} contentIndex={content.contentIndex ?? index} key={`${entryId}:text:${index}`} entryId={entryId} text={content.text}
             offset={message.content.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
             <MarkdownRenderer
               content={content.text}
@@ -737,7 +741,7 @@ export const ChatDialogueBlock: React.FC<{
     if (part.kind === 'entry') return <ChatTimelineEntryList cwd={cwd} sessionId={sessionId} entries={[part.entry]}
       toolExecutions={executions} projectedResultByCallId={results} part="body" presentationMode="live" extensionPresentation={extensionPresentation} />;
     return <div className="min-w-0" data-conversation-entry-id={part.sourceId} data-conversation-message-role="assistant">
-      {part.kind === 'text' ? <ChatTextSource entryId={part.sourceId} text={part.content.text} offset={part.offset} contentIndex={part.contentIndex}>
+      {part.kind === 'text' ? <ChatTextSource role="assistant" contentIdentity={part.content.id} entryId={part.sourceId} text={part.content.text} offset={part.offset} contentIndex={part.contentIndex}>
         <MarkdownRenderer content={part.content.text} messageId={part.id} isStreaming={part.streaming} enableFileReferences={!preview} />
       </ChatTextSource> : part.kind === 'tool' ? <ChatToolCard call={part.call} cwd={cwd} generating={part.streaming}
         execution={executions[part.call.id]} executionById={executions} result={results.get(part.call.id)} />
@@ -848,8 +852,8 @@ export const ChatSortedActivityGroup: React.FC<{
                     streaming={item.streaming} label={hiddenThinkingLabel} />
                 ) : (
                   <div className="conversation-activity-prose" data-conversation-activity-kind="justification">
-                    <ChatTextSource entryId={item.sourceId} text={item.content.text} offset={0}
-                      contentIndex={Number(item.id.slice(item.id.lastIndexOf(':') + 1))}>
+                    <ChatTextSource role="assistant" contentIdentity={item.content.id} entryId={item.sourceId} text={item.content.text} offset={0}
+                      contentIndex={item.content.type === 'text' ? item.content.contentIndex ?? Number(item.id.slice(item.id.lastIndexOf(':') + 1)) : undefined}>
                       <MarkdownRenderer
                         content={item.content.text}
                         messageId={item.id}

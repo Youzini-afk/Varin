@@ -1,4 +1,8 @@
 import React from 'react';
+import { InlineUiViews } from '@/components/interactive-ui/InlineUiViews';
+import { presentInvocation, invocationData } from './toolInvocation';
+import { projectUiEmbeds } from '@/lib/interactive-ui/embed-projection';
+import { uiSession, notifyUiSessions } from '@/lib/interactive-ui/sessions';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadMemoryAPI } from '@varin/application-client';
 import type { ThreadHistoryItem as HistoryItem } from '@varin/application-client';
 import { ChatTimeline } from './ChatTimeline';
@@ -24,7 +28,7 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
+export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, onOpenSection, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
@@ -35,6 +39,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   onQuestion?(operationId: string): void;
+  onOpenSection?(section: 'plan' | 'recovery' | 'context' | 'threads'): void;
   header?: React.ReactNode; footer?: React.ReactNode;
   /** Independent viewport for an embedded conversation; content identity stays with its Thread. */
   viewId?: string;
@@ -75,19 +80,23 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     for (const entry of view.entries) {
       if (entry.type !== 'message') continue;
       if (entry.message.role === 'user') firstByWork.clear();
-      if (entry.message.role === 'assistant') for (const part of entry.message.content) if (part.type === 'toolCall' && part.name === 'render_ui') {
+      if (entry.message.role === 'assistant') for (const original of entry.message.content) {
+        const part = original.type === 'toolCall' ? presentInvocation(original) : original;
+        if (part.type !== 'toolCall' || part.name !== 'render_ui') continue;
         calls.set(part.id, part);
         cards[part.id] ??= { call: part, compact: false };
         const args = part.arguments as { ref?: string } | null;
         if (args?.ref && firstByWork.has(args.ref.split('@')[0]!)) admit(part, args.ref.split('@')[0]!);
       }
       if (entry.message.role === 'toolResult') {
-        const output = entry.message.details as { kind?: string; workRef?: string } | undefined;
         const call = calls.get(entry.message.toolCallId);
+        const data = invocationData(entry.message.details, call);
+        const output = data as { kind?: string; workRef?: string } | undefined;
+        const result = { ...entry.message, details: data as typeof entry.message.details };
         if (call) {
           const original = call.arguments as { ref?: string } | null;
           const work = output?.kind === 'ui' ? output.workRef : original?.ref?.split('@')[0];
-          if (work) admit(call, work, entry.message); else cards[call.id] = { call, result: entry.message, compact: false };
+          if (work) admit(call, work, result); else cards[call.id] = { call, result, compact: false };
         }
       }
     }
@@ -114,6 +123,21 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
       arguments: call.arguments ?? {}, gateway: call.gateway, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted, order: call.order })),
   ].sort((left, right) => (left.order ?? 0) - (right.order ?? 0)), snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
+  const uiPlacement = React.useMemo(() => projectUiEmbeds(view.entries, uiCards, liveAssistant), [view.entries, uiCards, liveAssistant]);
+  const previousTargets = React.useRef<Array<{ key: string; target: string }>>([]);
+  React.useLayoutEffect(() => {
+    for (const previous of previousTargets.current) {
+      const session = getUiSession(previous.key);
+      if (session?.inlineTarget === previous.target) { delete session.inlineTarget; delete session.inlineEntryId; }
+    }
+    previousTargets.current = Object.entries(uiPlacement.targets).map(([sessionId, target]) => {
+      const session = uiSession(`${key}:${sessionId}`, identity, getRuntimeEndpointGeneration());
+      session.inlineTarget = target;
+      session.inlineEntryId = uiPlacement.embeds[target]?.sourceEntryId;
+      return { key: session.key, target };
+    });
+    notifyUiSessions();
+  }, [key, identity, uiPlacement]);
   const entering = React.useRef<string | undefined>(undefined);
   const entryKey = `${timelineKey}:${historyReset}`;
   const [preparedEntry, setPreparedEntry] = React.useState<string>();
@@ -166,13 +190,14 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
-  const context = React.useMemo(() => ({ api, identity, head, fileDirectory: cwd, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
-    [api, identity, head, cwd, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, fileDirectory: cwd, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, snapshot, openSection: onOpenSection, toolExecutions: view.toolExecutions, uiCards, uiInlineViews: true, uiEmbeds: uiPlacement.embeds, sourceEntry, renderExtras }),
+    [api, identity, head, cwd, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, view.toolExecutions, uiCards, uiPlacement, snapshot, onOpenSection, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}>{preparedEntry === entryKey && <ChatTimeline key={entryKey} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     onScrollContainerChange={onScrollContainerChange}
     entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
     assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />}
+    <InlineUiViews prefix={`${key}:`} />
   </ConversationContext.Provider>;
 }

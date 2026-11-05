@@ -1471,7 +1471,28 @@ impl Storage {
         {
             workspace_ids.push(row?);
         }
+        if matches!(record_type, "ui.work" | "ui.view" | "ui.snapshot" | "ui.selection") {
+            for row in self.conn.prepare("SELECT DISTINCT w.workspace_id FROM operations o JOIN operation_owners w ON w.operation_id=o.operation_id
+                WHERE o.kind='storage.record.release' AND o.state='committed' AND json_extract(o.result_json,'$.uiCleanup.pending')=1
+                AND json_extract(o.result_json,'$.uiCleanup.recordType')=?1")?
+                .query_map([record_type], |row| row.get::<_, String>(0))? { workspace_ids.push(row?); }
+            workspace_ids.sort(); workspace_ids.dedup();
+        }
         Ok(json!({ "workspaceIds": workspace_ids }))
+    }
+
+    /// Capture only the UI record being retired, never a workspace-wide GC set.
+    pub(super) fn ui_record_release_objects(&self, params_value: &Value) -> Result<Option<(String, BTreeSet<String>)>, KernelError> {
+        let workspace = params_value.get("workspaceId").and_then(Value::as_str).unwrap_or("");
+        let record = params_value.get("recordId").and_then(Value::as_str).unwrap_or("");
+        let record_type: Option<String> = self.conn.query_row(
+            "SELECT record_type FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type IN ('ui.work','ui.view','ui.snapshot','ui.selection')",
+            params![workspace, record], |row| row.get(0)).optional()?;
+        let Some(record_type) = record_type else { return Ok(None); };
+        let references = self.conn.prepare("SELECT object_hash FROM domain_record_refs WHERE workspace_id=?1 AND record_id=?2")?
+            .query_map(params![workspace, record], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        Ok(Some((record_type, references)))
     }
 
     pub(super) fn domain_record_release(
@@ -1493,6 +1514,7 @@ impl Storage {
             .get("recordId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("recordId is required".to_string()))?;
+        let mut release_ui_receipts = false;
         if let Some(value) = self.domain_record_value(&workspace_id, record_id)? {
             if value["recordType"] == "workspace.filesystem" || value["recordType"] == "workspace.result-filesystem" || value["recordType"]=="workspace.filesystem-pin" || value["recordType"]=="workspace.revision-filesystem" {
                 return Err(KernelError::Authorization("filesystem metadata is released with its native branch".into()));
@@ -1506,6 +1528,7 @@ impl Storage {
                 .get("recordType")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            release_ui_receipts = matches!(record_type, "ui.work" | "ui.view" | "ui.snapshot" | "ui.selection");
             if !allow_working_record
                 && matches!(
                     record_type,
@@ -1525,6 +1548,21 @@ impl Storage {
             "DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
             params![record_id, workspace_id],
         )?;
+        if release_ui_receipts && deleted > 0 {
+            // UI retirement is final for this record. Its original put receipts
+            // contain interaction payloads too, not just replay identities. The
+            // enclosing storage dispatch transaction retires both atomically.
+            let retired: Vec<String> = self.conn.prepare("DELETE FROM operations WHERE kind='storage.record.put' AND state='committed'
+                AND json_extract(result_json,'$.workspaceId')=?1 AND json_extract(result_json,'$.recordId')=?2
+                AND json_extract(result_json,'$.recordType') IN ('ui.work','ui.view','ui.snapshot','ui.selection')
+                AND operation_id IN (SELECT operation_id FROM operation_owners WHERE workspace_id=?1)
+                AND NOT EXISTS(SELECT 1 FROM operation_owners owner WHERE owner.operation_id=operations.operation_id AND owner.workspace_id!=?1) RETURNING operation_id")?
+                .query_map(params![workspace_id, record_id], |row| row.get(0))?
+                .collect::<std::result::Result<_, _>>()?;
+            for operation in retired {
+                self.conn.execute("DELETE FROM operation_owners WHERE operation_id=?1", [operation])?;
+            }
+        }
         Ok(json!({"recordId": record_id, "released": deleted > 0}))
     }
 
@@ -2277,6 +2315,34 @@ mod artifact_page_tests {
         payload["specId"] = json!("immutable-spec");
         validate("running", &payload).unwrap();
     }
+    #[test]
+    fn ui_retirement_removes_only_its_original_put_payloads() {
+        let root = std::env::temp_dir().join(format!("ui-retirement-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        storage.issue_grant(&json!({"grantId":"owner","hostGeneration":"generation","capabilities":["storage.admin"],
+            "pathScopes":[]}), "host","generation",&root.to_string_lossy(),"epoch").unwrap();
+        let dispatch = |storage: &mut Storage, method: &str, input: &Value| {
+            let (grant, input) = storage.authorize(Some("owner"), "epoch", "host", "generation", method, input).unwrap();
+            storage.dispatch(method, &input, Some("owner"), &grant).unwrap()
+        };
+        let exists = |storage: &Storage, operation: &str| storage.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=?1)", [operation], |row| row.get::<_, bool>(0)).unwrap();
+        for kind in ["ui.work", "ui.view", "ui.snapshot", "ui.selection"] {
+            for (workspace, record, operation) in [("family", "removed", "original"), ("family", "retained", "retained"), ("other", "removed", "other")] {
+                let input = json!({"operationId":format!("{kind}-{operation}"),"workspaceId":workspace,"recordId":format!("{kind}:{record}"),
+                    "recordType":kind,"state":"active","payloadJson":"{\"private\":\"interaction\"}","references":[],"ownerIds":[]});
+                dispatch(&mut storage, "storage.record.put", &input);
+            }
+            dispatch(&mut storage, "storage.record.release", &json!({"operationId":format!("{kind}-release"),"workspaceId":"family","recordId":format!("{kind}:removed")}));
+            assert!(!exists(&storage, &format!("{kind}-original")));
+            assert!(exists(&storage, &format!("{kind}-retained")));
+            assert!(exists(&storage, &format!("{kind}-other")));
+            assert!(exists(&storage, &format!("{kind}-release")));
+            assert!(!storage.conn.query_row("SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1)", [format!("{kind}-original")], |row| row.get::<_, bool>(0)).unwrap());
+        }
+        drop(storage); std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn native_settings_operations_preserve_thread_branch_and_original_record_actor() {
         let root = std::env::temp_dir().join(format!("settings-operation-{}", Uuid::new_v4()));

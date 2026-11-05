@@ -895,8 +895,8 @@ export class AgentRuntimeClient {
   collectContent(signal?: AbortSignal): Promise<ContentCollectionReport> {
     return this.kernel.agentRuntimeRequest('runtime.content.collect', {}, signal);
   }
-  materialRetention(childThreadId?: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').MaterialRetention> {
-    return this.kernel.agentRuntimeRequest('runtime.material.retention', childThreadId ? { childThreadId } : {}, signal);
+  materialRetention(childThreadId?: string, signal?: AbortSignal, includeUiReferences = false): Promise<import('./protocol.generated.js').MaterialRetention> {
+    return this.kernel.agentRuntimeRequest('runtime.material.retention', { ...(childThreadId ? { childThreadId } : {}), ...(includeUiReferences ? { includeUiReferences: true } : {}) }, signal);
   }
   sourceRetirement(cleanupId: string, complete = false, signal?: AbortSignal): Promise<{claimed:boolean;completed?:boolean;source?:import('./protocol.generated.js').LaunchSource}> {
     return this.kernel.agentRuntimeRequest('runtime.source.retirement', {cleanupId,complete}, signal);

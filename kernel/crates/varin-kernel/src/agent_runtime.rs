@@ -859,7 +859,7 @@ pub(crate) fn spawn(
                             let done = finished.clone();
                             let runtime = runtime.clone();
                             thread::Builder::new().name("runtime-material-retention".into()).spawn(move || {
-                                let result = runtime.material_retention(p.child_thread_id.as_deref())
+                                let result = runtime.material_retention(p.child_thread_id.as_deref(), p.include_ui_references.unwrap_or(false))
                                     .map_err(|error| KernelError::Operation(error.to_string()))
                                     .and_then(|value| serde_json::to_value(value).map_err(Into::into));
                                 let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };

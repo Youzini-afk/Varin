@@ -352,6 +352,86 @@ impl ContentCollection {
         Ok(serde_json::from_slice(&bytes)?)
     }
     fn roots(&self, db: &Connection) -> WorkResult<CollectionRoots> {
+        capture_roots(db, &|| self.check(), &|| {
+            #[cfg(test)]
+            self.at(CollectionPoint::Roots);
+        })
+    }
+    fn sweep(
+        &self,
+        live: &HashSet<String>,
+        result: &mut ContentCollectionReport,
+    ) -> WorkResult<()> {
+        for shard in fs::read_dir(self.content.root.join("objects"))? {
+            self.check()?;
+            let shard = shard?;
+            if !shard.file_type()?.is_dir() {
+                continue;
+            }
+            let mut changed = false;
+            let removal = (|| -> WorkResult<()> {
+                for entry in fs::read_dir(shard.path())? {
+                    self.check()?;
+                    let entry = entry?;
+                    if !entry.file_type()?.is_file() {
+                        continue;
+                    }
+                    let hash = format!(
+                        "sha256-{}{}",
+                        shard.file_name().to_string_lossy(),
+                        entry.file_name().to_string_lossy()
+                    );
+                    // Unknown files are never garbage owned by this store.
+                    if object_path(&self.content.root, &hash).ok().as_ref() != Some(&entry.path())
+                        || live.contains(&hash)
+                    {
+                        continue;
+                    }
+                    let bytes = entry.metadata()?.len();
+                    self.check()?;
+                    fs::remove_file(entry.path())?;
+                    changed = true;
+                    result.removed_objects += 1;
+                    result.removed_bytes += bytes;
+                    #[cfg(test)]
+                    self.at(CollectionPoint::ObjectRemoved);
+                }
+                Ok(())
+            })();
+            // Even an interrupted pass flushes the actual completed unlinks before releasing the gate.
+            if changed {
+                sync_directory(&shard.path())?;
+            }
+            removal?;
+        }
+        self.check()
+    }
+    fn staging(&self, result: &mut ContentCollectionReport) -> WorkResult<()> {
+        let path = self.content.root.join("staging");
+        let mut changed = false;
+        let removal = (|| -> WorkResult<()> {
+            for entry in fs::read_dir(&path)? {
+                self.check()?;
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()).is_ok()
+                {
+                    self.check()?;
+                    fs::remove_file(entry.path())?;
+                    changed = true;
+                    result.removed_staging_files += 1;
+                }
+            }
+            self.check()
+        })();
+        if changed {
+            sync_directory(&path)?;
+        }
+        removal
+    }
+}
+
+fn capture_roots(db: &Connection, check: &dyn Fn() -> WorkResult<()>, at_root: &dyn Fn()) -> WorkResult<CollectionRoots> {
         // Thread metadata commands carry inline intents; only body-bearing commands
         // publish a ContentStore reference. A malformed present reference still fails decoding.
         let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
@@ -447,14 +527,13 @@ impl ContentCollection {
         let mut stmt = db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows {
-            self.check()?;
+            check()?;
             references.push(serde_json::from_str::<Reference>(&row?)?);
-            #[cfg(test)]
-            self.at(CollectionPoint::Roots);
+            at_root();
         }
         let mut jobs=db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='policy_model_job_v1'")?;
         for row in jobs.query_map([], |r| r.get::<_, String>(0))? {
-            self.check()?;
+            check()?;
             let op: crate::types::OperationMetadata = serde_json::from_str(&row?)?;
             crate::catalog::policy_model::model_metadata(&op)?
                 .ok_or_else(|| RuntimeError::Invalid("planning intent missing".into()))?;
@@ -475,7 +554,7 @@ impl ContentCollection {
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             let mut values = Vec::new();
             for row in rows {
-                self.check()?;
+                check()?;
                 values.push(serde_json::from_str(&row?)?);
             }
             Ok(values)
@@ -495,77 +574,67 @@ impl ContentCollection {
             driver_contexts,
             dispatches,
         })
+}
+
+/// Snapshot the same typed roots as native content GC. Loading is deferred until
+/// after the Catalog lock has been released. This projection grants no access.
+pub(crate) struct UiRetentionRead { roots: CollectionRoots }
+pub(crate) fn capture_ui_retention(db: &Connection) -> Result<UiRetentionRead> {
+    match capture_roots(db, &|| Ok(()), &|| {}) {
+        Ok(roots) => Ok(UiRetentionRead { roots }),
+        Err(Stopped::Failed(error)) => Err(error),
+        Err(_) => Err(RuntimeError::Invalid("UI retention capture interrupted".into())),
     }
-    fn sweep(
-        &self,
-        live: &HashSet<String>,
-        result: &mut ContentCollectionReport,
-    ) -> WorkResult<()> {
-        for shard in fs::read_dir(self.content.root.join("objects"))? {
-            self.check()?;
-            let shard = shard?;
-            if !shard.file_type()?.is_dir() {
-                continue;
+}
+impl UiRetentionRead {
+    pub(crate) fn load(self, content: &ContentStore) -> Result<Vec<String>> {
+        let CollectionRoots { mut references, requests, graphs, driver_contexts, dispatches } = self.roots;
+        // Dispatch snapshots can be nested in request/graph/context bodies. They
+        // are typed owner edges, never discovered from arbitrary user JSON.
+        let mut dispatches = dispatches;
+        for request in requests {
+            let body = content.load(&request)?;
+            if let Some(reference) = body.pointer("/view/binding/child_dispatch").filter(|v| !v.is_null()) {
+                dispatches.push(reference.clone());
             }
-            let mut changed = false;
-            let removal = (|| -> WorkResult<()> {
-                for entry in fs::read_dir(shard.path())? {
-                    self.check()?;
-                    let entry = entry?;
-                    if !entry.file_type()?.is_file() {
-                        continue;
-                    }
-                    let hash = format!(
-                        "sha256-{}{}",
-                        shard.file_name().to_string_lossy(),
-                        entry.file_name().to_string_lossy()
-                    );
-                    // Unknown files are never garbage owned by this store.
-                    if object_path(&self.content.root, &hash).ok().as_ref() != Some(&entry.path())
-                        || live.contains(&hash)
-                    {
-                        continue;
-                    }
-                    let bytes = entry.metadata()?.len();
-                    self.check()?;
-                    fs::remove_file(entry.path())?;
-                    changed = true;
-                    result.removed_objects += 1;
-                    result.removed_bytes += bytes;
-                    #[cfg(test)]
-                    self.at(CollectionPoint::ObjectRemoved);
-                }
-                Ok(())
-            })();
-            // Even an interrupted pass flushes the actual completed unlinks before releasing the gate.
-            if changed {
-                sync_directory(&shard.path())?;
-            }
-            removal?;
         }
-        self.check()
-    }
-    fn staging(&self, result: &mut ContentCollectionReport) -> WorkResult<()> {
-        let path = self.content.root.join("staging");
-        let mut changed = false;
-        let removal = (|| -> WorkResult<()> {
-            for entry in fs::read_dir(&path)? {
-                self.check()?;
-                let entry = entry?;
-                if entry.file_type()?.is_file()
-                    && uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()).is_ok()
-                {
-                    self.check()?;
-                    fs::remove_file(entry.path())?;
-                    changed = true;
-                    result.removed_staging_files += 1;
+        for graph in graphs {
+            let body = content.load(&graph)?;
+            if let Some(nodes) = body.get("nodes").and_then(Value::as_array) {
+                for node in nodes {
+                    if let Some(reference) = node.get("child_dispatch").filter(|v| !v.is_null()) {
+                        dispatches.push(reference.clone());
+                    }
                 }
             }
-            self.check()
-        })();
-        if changed {
-            sync_directory(&path)?;
         }
-        removal
+        for context in driver_contexts {
+            let frozen: crate::execution::FrozenToolContext = serde_json::from_value(content.load(&context)?)?;
+            if let Some(reference) = frozen.child_dispatch { dispatches.push(reference); }
+        }
+        for dispatch in dispatches {
+            let frozen: crate::catalog::dispatch::FrozenChildDispatch = serde_json::from_value(content.load(&dispatch)?)?;
+            references.push(serde_json::from_value(dispatch)?);
+            for value in [frozen.catalog_ref, Some(frozen.tools_ref), Some(frozen.extension_bindings_ref), frozen.mcp_binding_ref].into_iter().flatten() {
+                references.push(serde_json::from_value(value)?);
+            }
+        }
+        let pattern = regex::Regex::new(r"ui(?:-view|-snapshot|-selection)?:[a-zA-Z0-9_-]+(?:@[1-9][0-9]*)?")
+            .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
+        let mut retained = std::collections::BTreeSet::new();
+        let mut seen = HashSet::new();
+        while let Some(reference) = references.pop() {
+            if !seen.insert(reference.content_object.clone()) { continue; }
+            let manifest: Manifest = serde_json::from_slice(&content.read_bytes(&reference.content_object)?)?;
+            if manifest.version != 2 { return Err(RuntimeError::Invalid("unsupported content manifest".into())); }
+            references.extend(manifest.dependencies.into_iter().map(|content_object| Reference { content_object, ..Default::default() }));
+            let bytes = content.load_bytes(&serde_json::to_value(reference)?, &|| false)?;
+            // Media dependencies can be binary. Only persisted textual mentions
+            // are retention hints; neither strings nor hashes become authority.
+            if let Ok(text) = std::str::from_utf8(&bytes) {
+                retained.extend(pattern.find_iter(text).map(|matched| matched.as_str().to_owned()));
+            }
+        }
+        Ok(retained.into_iter().collect())
     }
 }

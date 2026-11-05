@@ -1,5 +1,6 @@
 import { init, parse } from 'es-module-lexer/minimal';
 import { uiFrameDocument } from './frame';
+import { UI_CONTROLS_MODULE } from './builtin-modules';
 import type { UiSource, UiViewState } from '@varin/application-client';
 export function workFilePath(from: string, ref: string): string | null {
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(ref)) return null;
@@ -15,20 +16,30 @@ export const uiModuleId = (file: string) => `ui-file:/${file.split('/').map(enco
  * string literals intact. Import maps resolve cycles without recursively bundling code. */
 export async function prepareUiFiles(files: Record<string, string>, entry: string) {
   await init;
+  const result = { ...files };
+  let controlsPath: string | undefined;
+  const builtin = (name: string) => {
+    if (name !== '@varin/ui') return null;
+    if (!controlsPath) {
+      controlsPath = '__varin_controls__.mjs';
+      while (Object.hasOwn(files, controlsPath)) controlsPath = `_${controlsPath}`;
+      result[controlsPath] = UI_CONTROLS_MODULE;
+    }
+    return controlsPath;
+  };
   const transform = (text: string, file: string) => {
     let imports: ReturnType<typeof parse>[0];
     try { [imports] = parse(text); } catch { return text; }
     const edits = imports.flatMap(specifier => {
       if (!specifier.n) return [];
-      const path = workFilePath(file, specifier.n);
-      if (!path || !Object.hasOwn(files, path)) return [];
+      const path = builtin(specifier.n) ?? workFilePath(file, specifier.n);
+      if (!path || !Object.hasOwn(result, path)) return [];
       const id = uiModuleId(path);
       return [{ start: specifier.s, end: specifier.e, text: specifier.d >= 0 ? JSON.stringify(id) : JSON.stringify(id).slice(1, -1) }];
     });
     for (const edit of edits.sort((a, b) => b.start - a.start)) text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
     return text;
   };
-  const result = { ...files };
   for (const [file, text] of Object.entries(files)) if (/\.[cm]?js$/i.test(file)) result[file] = transform(text, file);
   const parsed = new DOMParser().parseFromString(files[entry] ?? '', 'text/html');
   for (const script of parsed.querySelectorAll('script[type="module"]:not([src])')) script.textContent = transform(script.textContent ?? '', entry);

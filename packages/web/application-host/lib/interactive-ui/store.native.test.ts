@@ -43,3 +43,60 @@ it('saves atomic revisions, retains original receipts and selections after reope
     await rm(resolved, { recursive: true, force: true });
   }
 });
+
+it('persists declarative revisions and preview selections without creating HTML, and rejects mixed write payloads', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'varin-ui-content-'));
+  const repo = path.resolve(import.meta.dirname, '../../../../..');
+  const buildVersion = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version;
+  const options = { hostId: 'ui-content-test', storageRoot: path.join(root, 'kernel'), buildVersion,
+    kernelPath: process.env.VARIN_TEST_KERNEL_PATH!, allowCargoDevRunner: false };
+  let client = createKernelClient(options);
+  try {
+    await client.start(); let store = createUiContentStore(client);
+    const content = { type: 'form', fields: [{ type: 'input', label: '预算', inputType: 'number' }] };
+    const saved = await store.render('thread', { content }, 'content-1');
+    expect(saved.files).toEqual([]); expect(saved.entry).toBe('');
+    const source = await store.source('thread', saved.ref);
+    const observation = { preview: { content: source.content!, callId: 'stream', sequence: 1, title: '预览', entry: '', contents: {} },
+      viewRef: 'ui-view:preview', capturedAt: new Date().toISOString(), state: { data: { 'label:预算': 42 }, controls: {}, scroll: { x: 0, y: 0 } }, viewport: { width: 300, height: 200 } };
+    const selected = await store.select('thread', observation, { text: '预算：42' });
+    await expect(store.render('thread', { content, changes: [] }, 'mixed')).rejects.toThrow('exactly one');
+    await expect(store.render('thread', {}, 'empty')).rejects.toThrow('exactly one');
+    await expect(store.render('thread', { ref: saved.ref, changes: [] }, 'convert')).rejects.toThrow('cannot change');
+    await expect(store.render('thread', { content: { type: 'unknown' } }, 'invalid')).rejects.toThrow('Unknown');
+    await client.close(); client = createKernelClient(options); await client.start(); store = createUiContentStore(client);
+    expect((await store.source('thread', saved.ref)).definition).toEqual(content);
+    expect((await store.readSnapshot('thread', selected.snapshotRef)).preview?.content).toEqual(source.content);
+    expect((await store.readSnapshot('thread', selected.snapshotRef)).state.data).toEqual({ 'label:预算': 42 });
+  } finally { await client.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('freezes confirmed per-client fragment state before a fork and never recaptures later parent edits on retry', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'varin-ui-content-'));
+  const repo = path.resolve(import.meta.dirname, '../../../../..');
+  const buildVersion = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version;
+  const client = createKernelClient({ hostId: 'ui-fork-state', storageRoot: path.join(root, 'kernel'), buildVersion,
+    kernelPath: process.env.VARIN_TEST_KERNEL_PATH!, allowCargoDevRunner: false });
+  try {
+    await client.start(); const store = createUiContentStore(client);
+    const main = { threadId: 'thread', branchId: 'main' }, child = { threadId: 'thread', branchId: 'child' };
+    const fragment = { ...main, messageId: 'message', fragmentKey: 'offset:0', contentVersion: 'original' };
+    const content = { type: 'choice', label: '发型', options: ['短发', '长发'] };
+    const original = await store.render('family', { content }, 'original-fragment', undefined, fragment);
+    const initial = { data: { root: 'label:短发' }, controls: {}, scroll: { x: 0, y: 12 } };
+    await store.saveView('family', 'ui-view:original', { source: { ref: original.ref }, branchScope: main, state: initial, lease: { clientId: 'client-a', token: 'a' } });
+    await store.captureBranch('family', main, child, 'message', id => id === 'message');
+    await store.saveView('family', 'ui-view:original', { state: { ...initial, data: { root: 'label:长发' } } }, 'a');
+    await store.captureBranch('family', main, child, 'message', () => true);
+    const fork = await store.render('family', { content }, 'child-fragment', undefined, { ...fragment, ...child });
+    expect(await store.branchSeed('family', child, { ref: fork.ref }, 'client-a')).toMatchObject(initial);
+    expect(await store.branchSeed('family', child, { ref: fork.ref }, 'client-b')).toBeNull();
+    const excluded = { threadId: 'thread', branchId: 'before-message' };
+    await store.captureBranch('family', main, excluded, null, () => false);
+    expect(await store.branchSeed('family', excluded, { ref: fork.ref }, 'client-a')).toBeNull();
+    const later = { threadId: 'thread', branchId: 'later' };
+    await store.saveView('family', 'ui-view:ambiguous', { source: { ref: original.ref }, branchScope: main, state: initial, lease: { clientId: 'client-a', token: 'b' } });
+    await store.captureBranch('family', main, later, 'message', () => true);
+    expect(await store.branchSeed('family', later, { ref: fork.ref }, 'client-a')).toBeNull();
+  } finally { await client.close(); await rm(root, { recursive: true, force: true }); }
+});

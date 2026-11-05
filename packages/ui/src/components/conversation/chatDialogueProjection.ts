@@ -47,7 +47,7 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
       if (seen.has(id)) { if (content.type === 'text') offset += content.text.length + 1; return; }
       seen.add(id);
       if (content.type === 'text') {
-        if (content.text.trim()) { seal(); items.push({ ...source, kind: 'text', content, contentIndex: index, offset }); }
+        if (content.text.trim()) { seal(); items.push({ ...source, kind: 'text', content, contentIndex: content.contentIndex ?? index, offset }); }
         offset += content.text.length + 1;
       } else if (content.type === 'thinking') {
         if (showThinking && (content.redacted || content.thinking.trim())) append({ ...source, kind: 'thinking', content,

@@ -2114,6 +2114,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload), sendApnsToAllUiSessions(pushPayload)]);
     },
   });
+  const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
   const threadMaterialLifetime = createThreadMaterialLifetime({ runtime: agentRuntime, storage: materialStorage, materials: webMaterials,
     retainAttachments: (plan, signal) => threadAttachments.retain(plan, signal),
     reconcileAttachments: (plan, signal) => threadAttachments.reconcilePreparations(plan, signal),
@@ -2123,6 +2124,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
+    releaseCollectedResources: signal => interactiveUi.releaseDeleted(signal),
+    retryCollectedResources: signal => interactiveUi.releaseDeleted(signal, true),
     onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
   });
   requestSourceMaintenance=contentMaintenance.resourceIdle;
@@ -2190,7 +2193,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
   registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
-  const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
@@ -2240,6 +2242,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const model = await botAgentModel(bot);
     return model ? { homeDir: bot.homeDir, model } : null;
   });
+  threads.bindInteractiveUiFork(interactiveUi.captureBranch);
   threads.bindTitles(threadTitles);
   const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,
     readSettings: () => modelsService.readGlobalInferenceSettings(),

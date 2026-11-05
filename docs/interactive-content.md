@@ -1,9 +1,59 @@
 # 聊天交互内容与引用
 
-Agent 使用 `render_ui` 生成聊天内的 HTML 图表、计算器和其他交互内容。普通回答继续使用现有 Markdown、
-数学公式、表格与 Mermaid。HTML 默认直接排入消息正文，随内容撑高，使用会话的字体与透明底色；页面内操作在浏览器执行。
+助手正文支持明确标记的 `varin-ui` JSON 围栏，简单选择、输入和真实对象入口直接放在相关段落之间。
+复杂图表、计算器和自定义逻辑使用 `render_ui` 的 HTML/JS。普通回答继续使用现有 Markdown、数学公式、表格与 Mermaid。
+HTML 默认直接排入消息正文，随内容撑高，使用会话的字体与透明底色；页面内操作在浏览器执行。
 桌面通过右键或菜单键 / Shift+F10 打开源码、侧栏视图、复制、下载、重置和引用；触屏提供小型更多入口。
 选中文字时优先显示复制与引用，输入控件、图表及自定义菜单保留自身操作。源码在侧栏打开，正文继续保持原页面与交互状态。
+
+## 正文中的轻量交互
+
+只有助手正文顶层的专用围栏会执行。用户消息、工具原文、引用和外层代码示例保持普通文本；不扫描自然语言推断按钮。
+未完成的流式片段保留占位，无效或未知内容显示原文与可读错误，不自动请求模型修复。
+
+````markdown
+先选一个方向。
+
+```varin-ui
+{"type":"choice","label":"方向","options":["简洁","详细"],"action":"按这个方向继续"}
+```
+
+随后仍可以继续解释。
+````
+
+类型包括 `choice`（`multiple`、`allowOther` 可选）、`input`（`inputType` 为 text、textarea、number、range、date）、
+`form`（`fields` 共享一次操作）、`disclosure`（`content`）、`tabs`（`tabs: [{label,content}]`）、`embed` 和 `object`。
+静态片段不需要模型填写 ID。跨修订保留值时使用稳定 `key`；字段类型或含义改变时不套用旧选择。
+
+字段可用 `required`、数字边界和 `unit` 表达实际输入要求，不默认要求每个问题必答。
+
+字符串 `action` 默认准备可编辑输入；对象动作可指定 `type: compose | reference | copy | open | send`、`label` 和可选 `ref`。
+选择和本地视图变化不发送消息。明确发送仍由宿主按钮受理，复用原会话的输入、排队与失败重试。
+输入框中的既有文字和附件不因插入被替换；同源的未编辑段落可以再次填入更新，用户改过的段落不自动覆盖。
+
+`{"type":"embed","ref":"ui:实际作品ID@3"}` 使用真实工具回执中的固定修订。
+`{"type":"object","ref":"实际引用"}` 使用下述原生对象适配。正文叙述仍是当时的内容，对象状态可以随原 owner 更新。
+
+## 复制与导出
+
+整轮「复制」和会话 Markdown 导出将助手的有效片段转换成问题、可选项、动作意图和引用的可读文字。
+这一路径读取原助手消息，不猜测任何客户端尚未提交的选择。无效或未完成的围栏仍保留原文。
+片段自己的 `copy` 动作则复制该视图的当前输入与选择。JSON 导出保留原消息及原定义，不用展示投影改写历史。
+HTML 作品下载仍使用原导出路径，包含当时页面状态和本地资源；独立打开的导出页面没有宿主发送或持久保存通道。
+
+## 原生对象引用
+
+引用不授予新的访问资格，打开和读取仍交给现有会话、文件、材料或计划 owner。当前适配支持：
+
+- 任务和 Agent：原始 Thread ID 或当前会话的派发 operation ID。使用原 Catalog／会话快照中的名称、头像和执行状态，打开原会话。
+- 计划：原回执中的 `plan:…`。共享按 Host、Thread、branch 定界的计划读取和事件观察；旧引用与当前计划不匹配时明确说明未加载历史版本，不替换成最新计划。
+- 文件：`file:<encodeURIComponent(callId)>/<encodeURIComponent(path)>`。`callId` 是原文件工具调用，`path` 是它的实际文件路径；通过原调用定位的文件 owner 打开已有编辑器，不能把路径当成任意文件访问权限。
+- 材料：已有 `varin-material://…` 或 Web source citation，原材料阅读器继续验证会话范围和固定快照。
+- 恢复记录：`recovery:<原恢复 operation ID>`，只识别当前会话已有记录，进入恢复面板，不直接执行恢复。
+- 用量：`usage:<encodeURIComponent(threadId)>/<encodeURIComponent(branchId)>`，只呈现当前会话分支已有的上下文用量，不把它当作账单总用量。
+
+对象行不另建 Thread 观察或轮询。文件权限失败、对象不可用和未知引用保持可读，不降级为任意 URL 打开。
+引用对象进入草稿时冻结当时的标题、状态、原引用与捕获时间，作为输入引用文字；这不是可供 `resource_read` 读取的新 Host 资源，也不授予访问权限。
 
 ## 写入与修订
 
@@ -12,13 +62,17 @@ type RenderUiInput = {
   ref?: string;
   title?: string;
   entry?: string; // 默认 index.html
-  changes: (
+  content?: unknown; // 一个 varin-ui JSON 定义，与 changes 二选一
+  changes?: (
     | { file: string; op: "write" | "append"; text: string }
     | { file: string; op: "edit"; edits: { oldText: string; newText: string }[] }
     | { file: string; op: "delete" }
   )[];
 };
 ```
+
+Host 校验 `content` 与 `changes` 必须且只能提供一种，工具根 schema 保持 `object`。
+声明式定义直接保存为作品内容，`resource_read` 的 `source` 返回原定义，不生成等价 HTML 代存。
 
 省略 `ref` 新建作品；继续制作使用回执中的作品或修订引用。一次完整调用按顺序推演全部修改，整体成功后保存一个
 不可变修订。单次 `edit` 的所有替换匹配该步骤开始前的原文，要求唯一、不重叠。文件是作品内的相对路径，
@@ -42,6 +96,11 @@ type RenderUiInput = {
 同一修订在同一个 iframe 中只执行一次，观察连接重连不会重复运行作品脚本。
 预览速度取决于提供商实际输出；当前 Google 协议路径收到完整函数参数后一次呈现，不制造参数增量。
 
+正文显式 `embed` 和同轮工具回执通过同一作品修订投影配对，只挂载一份完整内联视图，其余位置提供定位入口。
+HTML 视图的位置变化复用同一 iframe；已有输入焦点时先保留原位置。历史投影先确定位置，再挂载内容。
+固定历史修订不会因后来更新而替换。「查看最新版本」只在点击后解析最新引用，并在独立视图中打开解析所得的固定修订；
+原历史视图和原探索状态不变。若引用形成循环，显示对应引用与可读提示，不递归挂载。
+
 视图会话独立于聊天虚拟列表，保留参数、控件值和滚动位置。展开到侧栏或全屏会恢复同一视图状态；不同客户端
 独立打开时分配不同视图身份。执行环境需重建时恢复显式状态，不保留任意 JavaScript 闭包、计时器或网络连接。
 源码投影可以在卡片卸载后继续更新已展开视图，无需让全部历史 iframe 常驻。
@@ -51,7 +110,8 @@ type RenderUiInput = {
 聊天内页不创建文档级滚动条，避免增量内容到达与外框撑高之间短暂挤窄正文、反复换行。
 测量按绘制帧合并，外框收到后直接更新高度；重建内页时保留已测高度，直到实际作品装入，空壳不回报零高度。
 同一视图保留上次测量的高度供虚拟列表重挂载使用；正文复用会话列表的阅读锚定与底部跟随，长内容随会话滚动。
-iframe 将滚轮和触屏阅读方向传给会话以释放自动跟随，滚动仍由浏览器执行；图表消费的事件和局部滚动区域保留自己的行为。
+iframe 将滚轮和触屏阅读方向传给会话以释放自动跟随；正文定位层中的非 iframe 控件也把滚轮、触屏和阅读按键交回原会话滚动容器。
+图表、范围输入和仍能滚动的局部区域保留自己的行为，编辑与控件按键不会被阅读转发吞掉。
 
 页面端的固定接口：
 
@@ -59,20 +119,58 @@ iframe 将滚轮和触屏阅读方向传给会话以释放自动跟随，滚动�
 const initial = window.varinUI.state; // 初始 JSON 状态，未保存时为 null
 await window.varinUI.saveState({ amount: 500000 }); // Host 持久保存后完成，保存失败时拒绝
 window.varinUI.setContext({ selectedPlan: "A", monthlyPayment: 2100 });
+const draft = await window.varinUI.compose({ text: "按方案 A 继续", includeContext: true });
+// draft: { status: "filled", updated: boolean }，不是发送回执
+const actions = await window.varinUI.requestActions([
+  { key: "continue", type: "send", label: "发送并继续", text: "按方案 A 继续", includeContext: true }
+]);
+// actions: { status: "presented" }，仅表示宿主已接受按钮定义
 ```
 
 控件值和滚动位置合并自动保存，复杂组件用 `saveState` 立即提交业务状态。调用后本页内存立即更新；
 返回的 Promise 在 Host 完成原 `ui.view` 持久写入后才成功。需要确认保存后再关闭或执行后续操作时应等待它，
-失败会回传给页面并显示在视图状态中。独立导出的 HTML 没有 Host 持久保存通道，业务状态只保留于该页面内存。
+失败会回传给页面并显示在视图状态中。独立导出的 HTML 没有 Host 持久保存通道，业务状态只保留于该页面内存，等待 `saveState` 会收到缺少持久保存宿主的拒绝。
 同一视图的保存按调用顺序提交；正常视图卸载会在已提交保存之后提交最后一份控件状态。
 `setContext` 提供“用当前参数继续讨论”的内容；
-该宿主操作只添加输入框引用，不自动发消息。页面没有模型请求、文件系统或 Host 凭据接口。
+该宿主操作只添加输入框引用，不自动发消息。`compose` 准备原会话的可编辑草稿；`requestActions` 只请求显示平台按钮，发送必须由用户点击宿主区域中的明确发送按钮。
+`compose` 和 `requestActions` 都返回 Promise，来源未保存、输入无效或宿主操作失败时拒绝。
+`requestActions` 接受 `{key,type,label,text?,ref?,includeContext?}[]`，`key` 在本组内唯一；
+`type` 为 `compose`、`reference`、`copy`、`open` 或 `send`，compose/copy/send 需要可读的 `text`，open 需要真实 `ref`。
+发送预览和明确带“发送”标记的按钮在 iframe 外的平台区域绘制，真正投递仍通过原会话的输入 owner。
+受理前固定待发送内容与引用；失败后继续使用原快照重试，页面后来调整的值不会改写它。
+动作提供真实 `ref` 时，引用、草稿或发送使用与声明式内容相同的原生对象适配器固定对象来源；
+未提供 `ref` 时固定当前 HTML 页面来源，`includeContext` 决定是否包含 `setContext` 的讨论数据。
+页面没有 `varinUI.send`，通信桥也没有接受直接发送命令；加载、状态恢复或重连不会重放平台按钮操作。
+页面没有模型请求、文件系统或 Host 凭据接口。
 
 HTML 在不共享主页面 origin 的 `allow-scripts` 沙盒运行。主题使用 Varin 的实际颜色、字体和减少动态效果偏好。
 `--background`、`--foreground`、`--muted`、`--muted-foreground`、`--primary`、`--primary-foreground`、
 `--border`、`--card`、`--card-foreground` 随应用主题更新，可用于同时适配亮色与暗色。
 透明底色是正文的默认值；作品明确设置的背景、文字、根节点样式和类名成套保留，避免只去掉暗色背景却留下浅色文字。
 相对样式、脚本、数据和静态模块导入解析到作品文件；字面量动态导入也支持，计算生成的模块路径不经过打包转换。
+`@varin/ui` 通过同一模块解析路径提供随应用发布的控件样式，不依赖外部 CDN。它导出 `install`、`button`、`field`、
+`status`，以及包含这四个函数的 `controls` 对象：
+
+```js
+import { controls } from '@varin/ui';
+const root = controls.install(document.getElementById('work'));
+const amount = document.createElement('input');
+amount.type = 'number';
+root.append(controls.field('金额', amount));
+root.append(controls.button('填入输入框', async () => {
+  try {
+    await window.varinUI.compose({ text: `按金额 ${amount.value} 继续` });
+    controls.status(root, '已填入输入框');
+  } catch (error) {
+    controls.status(root, String(error), true);
+  }
+}));
+```
+
+`install(root?)` 安装一次样式、给容器添加控件样式类并返回容器，省略时选择 `#work` 或 `document.body`。
+`button(label,onClick?)` 返回普通页面按钮；`field(label,input)` 返回关联输入的标签容器；
+`status(container,text,error=false)` 创建或更新带 `status`／`alert` 语义的提示。
+这些函数不产生发送权限，页面按钮只能执行本地逻辑或调用已有草稿接口。
 `media:<resourceId>` 使用当前会话已有图片资源，保存时固定其字节。模块名 `d3`、`chart.js/auto` 分别映射到固定的
 7.9.0、4.4.8 网络版本，按需加载；其他外部资源仍需要网络。下载生成包含本地文件、媒体和状态的 HTML，保留外部依赖。
 
@@ -129,7 +227,35 @@ resource_read({ kind: "ui", ref: "ui-selection:…", view: "structure" });
 Rust Storage 保存 `ui.work`、`ui.view`、`ui.snapshot`、`ui.selection` 与内容对象；Host 不另建文件数据库。
 访问按真实 Thread 的任务家族定界，引用本身不授予跨家族读取权。视图连接另有 client identity 与可替换 lease；
 重连后的旧 lease 不能再保存状态或提供观察，不以相同视图引用恢复旧客户端的写入资格。
+声明式片段登记、声明式修订与 HTML 共用上述 Host 权威、Rust 存储、视图 lease 与选择快照，不新建另一套作品库。
+Host 从原会话分支历史核验消息和片段位置；完整但尚未提交的流式片段使用明确的预览来源。
+分支视图隔离：其他分支的 viewRef 不能直接复用写入资格；声明式作品在另一分支继续修改时沿原 owner 创建分支作品。
+对话和会话树的分支入口先保存原作用域内已挂载的声明式视图，立即提交尚在等待合并写入的选择；保存失败或有改动的持久视图尚未取得 lease 时，不开始分支。纯预览和未修改的不可用视图不阻止分支。
+原生 fork 受理前，Host 冻结已经确认保存的声明式片段和 HTML 视图状态，范围限于选定历史切点的真实来源。
+子分支首次打开时，只有客户端、原消息、片段位置和来源版本均匹配且只有一个候选，才从该固定状态恢复；
+多个独立视图有歧义时不猜选哪个。恢复后使用子分支自己的视图与 lease，后续探索不写回父分支。
+这不是跨客户端草稿同步，也不从父分支之后的实时状态倒灌。初始声明式片段由原助手消息证明来源；HTML 与后续修订
+必须匹配切点祖先中的真实 `render_ui` 操作回执，或原助手正文明确嵌入的固定 `ui:…@N`。`tool_invoke` 还核验原嵌套
+操作的父子关系；普通文案和任意工具 JSON 中的引用不构成锚点。HTML 仅在同一固定修订恢复，不能把旧状态套到新版页面。
+分支修改通过原存储 owner 建立独立作品副本，保留固定源码及媒体。旧作品缺少 branch 归属时也先复制，不猜当前分支拥有原作品。
+
+## 删除与回收
+
+UI 作品的读取作用域仍是原任务家族。只隐藏、归档会话或卸载视图不删除来源；家族中仍有活跃成员时，作品、预览、快照
+及未发送草稿来源继续保留原访问寿命，不用时间阈值推断它们已无用途。会话删除会终止该会话的视图观察，拒绝后到的保存。
+
+整个家族已经删除且原执行 owner 确认停止后，内容维护先完成 Catalog 元数据退休，再按需读取原生内容保留根。
+该投影复用原 ContentStore 的历史、队列、请求、派发和继承上下文依赖，字符串引用只保留数据，不授予访问权限。
+Host 等待原 UI 读写实际完成，遍历作品、选区、固定快照与嵌入依赖，保留仍被存活内容引用的记录；快照中的旧 viewRef
+只是捕获出处，不会把后来变化的可变视图永久保留下来。缺少保留根或存储内容损坏时停止回收，不把未知当作空集合。
+
+Rust Storage 原子释放不再引用的 UI 记录及其原写入回执，只对这些记录的对象执行既有可达性检查，共享对象不删除。
+物理对象清理在提交后执行，失败或中断继续由原耐久清理队列和原释放回执负责；即使 UI 记录已消失，也能发现并按退避节奏
+重试确切对象，不依赖新的会话事件或重启。重启继续原清理，不重新制造作品或恢复已删除的交互内容。
+
 源码提交仅串行化同一作品，视图状态仅串行化同一实例。等待客户端观察不占全局执行锁，关闭观察不取消已受理写入。
 存储提交后丢失响应只核对原操作，不重新写入；未确认结果保持 unknown。
 
 工具列表不因开始制作或追加编辑而增长。引用与观察追加到原回执或新消息，不回插系统提示，也不强制生成后的检查流程。
+
+实现不等同于真实环境验收；浏览器焦点／布局、中文输入和原生持久化的验证边界见[运行时验收](runtime-acceptance.md#聊天交互内容)。

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ComposerClosedError, interactionRanges, interactionHistory, setInteractionRanges, interactionInsertion, type InteractionRange } from './interactionRanges';
 import { composerReferences, referenceHistory, setComposerReferences, addComposerReference, type ComposerReference } from './references';
 import { history, isolateHistory, historyKeymap, standardKeymap } from '@codemirror/commands';
 import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
@@ -26,10 +27,12 @@ export interface ComposerChange {
   fromPaste: boolean;
   insertedText: string;
   references: readonly ComposerReference[];
+  interactions: readonly InteractionRange[];
 }
 
 export interface ComposerEditorHandle {
   /** A paste destination that follows edits while attachment bytes are being read. */
+  composeInteraction(sourceKey: string, text: string, isCurrent?: () => boolean): Promise<{ updated: boolean }>;
   captureInsertion(): { insertText(text: string): void; dispose(): void };
   blur(): void;
   caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
@@ -47,6 +50,7 @@ export interface ComposerEditorHandle {
 interface ComposerEditorProps {
   value: string;
   references?: readonly ComposerReference[];
+  interactions?: readonly InteractionRange[];
   autocomplete?: { id: string; activeId?: string };
   onChange(change: ComposerChange): void;
   onSelectionChange?(selection: ComposerSelection): void;
@@ -111,6 +115,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const viewRef = React.useRef<EditorView | null>(null);
     const insertions = React.useRef(new Set<{ from: number; to: number }>());
+    const composition = React.useRef(false);
+    const knownCursor = React.useRef(false);
+    const deferred = React.useRef<Array<{ run(): void; reject(reason: Error): void }>>([]);
     const handlersRef = React.useRef(props);
     const lastRealEnterShiftRef = React.useRef(false);
     handlersRef.current = props;
@@ -119,6 +126,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       const host = hostRef.current;
       if (!host) return;
       const pendingInsertions = insertions.current;
+      const pendingCompositions = deferred.current;
 
       const interceptKeys: KeyBinding[] = [{
         any: (_view, event) => {
@@ -135,6 +143,8 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             history(),
             composerReferences.init(() => (handlersRef.current.references ?? []).filter(item => item.from >= 0 && item.to <= handlersRef.current.value.length && item.from < item.to && handlersRef.current.value.slice(item.from, item.to) === item.text)),
             referenceHistory,
+            interactionRanges.init(() => handlersRef.current.interactions ?? []),
+            interactionHistory,
             drawSelection(),
             composerNativeSelectionExtension,
             EditorView.lineWrapping,
@@ -166,14 +176,23 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                   fromPaste: update.transactions.some((transaction) => transaction.isUserEvent('input.paste')),
                   insertedText: update.transactions.map(insertedTextOf).join(''),
                   references: update.state.field(composerReferences),
+                  interactions: update.state.field(interactionRanges),
                 });
               } else if (update.selectionSet) {
+                knownCursor.current = true;
                 handlers.onSelectionChange?.(selection);
               }
             }),
             EditorView.domEventHandlers({
               blur: () => { handlersRef.current.onBlur?.(); return false; },
-              focus: () => { handlersRef.current.onFocus?.(); return false; },
+              focus: () => { knownCursor.current = true; handlersRef.current.onFocus?.(); return false; },
+              compositionstart: () => { composition.current = true; return false; },
+              compositionend: () => {
+                composition.current = false;
+                // Let CodeMirror apply the final IME transaction before inserting.
+                setTimeout(() => { if (!composition.current) for (const pending of pendingCompositions.splice(0)) pending.run(); }, 0);
+                return false;
+              },
               paste: (event) => { handlersRef.current.onPaste?.(event); return false; },
             }),
             EditorView.contentAttributes.of({
@@ -199,6 +218,8 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         view.contentDOM.removeEventListener('keydown', trackRealEnterShift);
         viewRef.current = null;
         pendingInsertions.clear();
+        for (const pending of pendingCompositions.splice(0)) pending.reject(new ComposerClosedError(knownCursor.current ? view.state.selection.main.head : view.state.doc.length));
+        composition.current = false;
         view.destroy();
       };
     }, []);
@@ -282,7 +303,29 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       else content.removeAttribute('aria-activedescendant');
     }, [props.autocomplete]);
 
+    React.useLayoutEffect(() => {
+      const view = viewRef.current;
+      if (view && props.interactions !== undefined && JSON.stringify(view.state.field(interactionRanges)) !== JSON.stringify(props.interactions)) {
+        view.dispatch({ effects: setInteractionRanges.of(props.interactions), annotations: Transaction.addToHistory.of(false) });
+      }
+    }, [props.interactions, value]);
+
     React.useImperativeHandle(ref, (): ComposerEditorHandle => ({
+      composeInteraction(sourceKey, text, isCurrent) {
+        return new Promise((resolve, reject) => {
+          const run = () => {
+            const view = viewRef.current;
+            if (!view) { reject(new Error('Composer closed')); return; }
+            if (isCurrent && !isCurrent()) { reject(new Error('Interaction source changed')); return; }
+            const insertion = interactionInsertion(view.state.doc.toString(), view.state.field(interactionRanges), sourceKey, text,
+              knownCursor.current ? view.state.selection.main.head : view.state.doc.length);
+            view.dispatch(insertion.spec);
+            resolve({ updated: insertion.updated });
+          };
+          if (composition.current || viewRef.current?.composing) deferred.current.push({ run, reject });
+          else run();
+        });
+      },
       insertReference(from, to, text, reference) {
         const view = viewRef.current;
         if (!view) return;

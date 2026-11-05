@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { assistant, HistoryPresentation } from './historyPresentation';
+import { projectChatDialogue } from './chatDialogueProjection';
 import type { ThreadHistoryItem, ThreadSnapshot } from '@varin/application-client';
 import { invocationStatus, operationInvocation } from './toolInvocation';
 import type { Operation } from '@varin/protocol';
@@ -76,4 +77,48 @@ it('keeps live and durable labels on the accepted request model without exposing
   expect(live).toMatchObject({ model: 'accepted-deployment', provider: '' });
   expect(history).toMatchObject({ type: 'message', message: { model: live.model, provider: live.provider } });
   expect(history).toMatchObject({ message: { content: [{ type: 'thinking', thinking: 'Visible thinking' }, { type: 'text', text: 'Answer' }] } });
+});
+
+it('retains native body indices for assistant output while leaving tool and agent output non-interactive', () => {
+  const output = { parts: [{ kind: 'text', text: 'Before' }, { kind: 'media', media: { media_type: 'image/png' } },
+    { kind: 'text', text: '```varin-ui\n{"type":"choice","options":["A","B"]}\n```' }], data: null };
+  const base = { parent: null, thread_id: 'thread', run_id: 'run', provider: null };
+  const history = ['assistant', 'tool', 'agent'].map(source => ({ ...base, source, id: source,
+    content: { id: 'native-output', content: { kind: 'output', output } } })) as ThreadHistoryItem[];
+  const view = new HistoryPresentation('thread').project(history, undefined);
+  expect(view.entries[0]).toMatchObject({ id: 'assistant', message: { role: 'assistant', content: [
+    { id: 'native-output:part:0', contentIndex: 0, text: 'Before' },
+    { id: 'native-output:part:2', contentIndex: 2, text: output.parts[2]!.text },
+  ] } });
+  const dialogue = projectChatDialogue(view.entries.filter(entry => entry.type === 'message' || entry.type === 'custom_message'));
+  expect(dialogue.filter(part => part.kind === 'text').map(part => ({ sourceId: part.sourceId, contentIndex: part.contentIndex }))).toEqual([
+    { sourceId: 'assistant', contentIndex: 0 }, { sourceId: 'assistant', contentIndex: 2 },
+  ]);
+  expect(view.entries[1]).toMatchObject({ message: { role: 'custom', customType: 'tool' } });
+  expect(view.entries[2]).toMatchObject({ type: 'custom_message', customType: 'thread-message' });
+  expect(history[0]?.content).toMatchObject({ content: { output: { parts: output.parts } } });
+});
+
+it('keeps a simple assistant body at native index zero when opaque thinking is prepended', () => {
+  const view = new HistoryPresentation('thread').project([{
+    id: 'history', parent: null, thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null,
+    content: { id: 'model-item:7:request:message', content: { kind: 'text', text: 'Body' },
+      opaque: { family: 'openai-completions', value: { reasoning_content: 'Thinking' } } },
+  }], undefined);
+  expect(view.entries[0]).toMatchObject({ message: { content: [
+    { type: 'thinking' }, { type: 'text', id: 'model-item:7:request:message', contentIndex: 0 },
+  ] } });
+});
+
+it('retains an extras-bearing row for media-only assistant outputs and anchors mixed output extras after visible text', () => {
+  const base = { parent: null, thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null };
+  const media = { kind: 'media', media: { media_type: 'image/png' } };
+  const entries = new HistoryPresentation('thread').project([
+    { ...base, id: 'image-only', content: { content: { kind: 'output', output: { data: null, parts: [media] } } } },
+    { ...base, id: 'mixed', content: { content: { kind: 'output', output: { data: null, parts: [{ kind: 'text', text: 'Caption' }, media, { kind: 'text', text: '  ' }] } } } },
+  ] as ThreadHistoryItem[], undefined).entries;
+  expect(entries[0]).toMatchObject({ message: { role: 'custom', customType: 'assistant' } });
+  const dialogue = projectChatDialogue(entries.filter(entry => entry.type === 'message' || entry.type === 'custom_message'));
+  expect(dialogue.some(part => part.kind === 'process' && part.activities.some(item => item.sourceId === 'image-only'))).toBe(true);
+  expect(dialogue.find(part => part.kind === 'text')).toMatchObject({ contentIndex: 0, extrasId: 'mixed' });
 });

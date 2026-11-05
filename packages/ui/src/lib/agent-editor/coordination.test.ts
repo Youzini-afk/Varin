@@ -239,3 +239,15 @@ test('acknowledges only the captured editor revision and original branch', () =>
   expect(listEditorContextAttachments(runtimeKey, 'session-a')).toEqual([]);
   expect(listEditorContextAttachments(runtimeKey, 'another-branch')).toEqual([other]);
 });
+
+test('keeps an old interactive selection as source evidence rather than overriding edited user text', () => {
+  const text = projectEditorContextAttachments('Actually, use long hair', [attachment({
+    kind: 'reference', ordinal: 1,
+    reference: { ref: 'ui:hair@snapshot:short', title: 'Hairstyle', text: 'Short hair',
+      source: { kind: 'ui', snapshotRef: 'ui:hair@snapshot:short', revisionRef: 'ui:hair@1' } },
+  })]);
+  expect(text.startsWith('Actually, use long hair')).toBe(true);
+  expect(text).toContain('Short hair');
+  expect(text).toContain('not an additional user instruction');
+  expect(text).toContain('may differ from this earlier selection');
+});

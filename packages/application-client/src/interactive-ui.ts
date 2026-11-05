@@ -1,21 +1,49 @@
+import type { ConversationUiNode } from './conversation-content.js';
 import type { JsonValue } from '@varin/protocol';
 import type { ThreadIdentity } from './threads.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import { RuntimeEventSource } from './transport/runtime-event-source.js';
 
+/** Trusted controls are rendered by the Host UI; this describes intent, never a script callback. */
+export interface UiHostAction { key: string; type: 'compose' | 'reference' | 'copy' | 'open' | 'send'; label: string; text?: string; ref?: string; includeContext?: boolean }
+export function normalizeUiHostActions(value: unknown): UiHostAction[] {
+  if (!Array.isArray(value)) throw new Error('Host actions must be an array');
+  const keys = new Set<string>();
+  return value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Invalid host action');
+    const input = item as Record<string, unknown>;
+    if (typeof input.key !== 'string' || !input.key.trim() || keys.has(input.key)) throw new Error('Host actions need unique nonempty keys');
+    keys.add(input.key);
+    if (!['compose', 'reference', 'copy', 'open', 'send'].includes(String(input.type))) throw new Error('Unknown host action');
+    if (typeof input.label !== 'string' || !input.label.trim()) throw new Error('Host action needs a label');
+    if (input.text !== undefined && typeof input.text !== 'string') throw new Error('Host action text must be a string');
+    if (['compose', 'copy', 'send'].includes(String(input.type)) && (typeof input.text !== 'string' || !input.text.trim())) throw new Error('This host action needs readable text');
+    if (input.ref !== undefined && (typeof input.ref !== 'string' || !input.ref.trim())) throw new Error('Host action reference must be nonempty text');
+    if (input.type === 'open' && !input.ref) throw new Error('Open action needs a reference');
+    if (input.includeContext !== undefined && typeof input.includeContext !== 'boolean') throw new Error('includeContext must be boolean');
+    return { key: input.key, type: input.type as UiHostAction['type'], label: input.label,
+      ...(input.text === undefined ? {} : { text: input.text as string }), ...(input.ref === undefined ? {} : { ref: input.ref as string }),
+      ...(input.includeContext === undefined ? {} : { includeContext: input.includeContext as boolean }) };
+  });
+}
+
 export type UiChange =
   | { file: string; op: 'write' | 'append'; text: string }
   | { file: string; op: 'edit'; edits: { oldText: string; newText: string }[] }
   | { file: string; op: 'delete' };
-export interface RenderUiInput { ref?: string; title?: string; entry?: string; changes: UiChange[] }
+export interface RenderUiInput { ref?: string; title?: string; entry?: string; changes?: UiChange[]; content?: unknown }
 export interface UiReceipt { kind: 'ui'; ref: string; workRef: string; title: string; revision: number; entry: string; files: string[] }
-export interface UiSource extends UiReceipt { contents: Record<string, string>; assets: Record<string, { mimeType: string; data: string }> }
+export interface UiMessageFragment { threadId: string; branchId: string; messageId: string; fragmentKey: string; contentIndex?: number; contentVersion: string }
+/** fragmentKey is a UTF-16 offset within the selected original text part, never the projected message aggregate. */
+export interface UiFragmentRegistrationInput { messageId: string; fragmentKey: string; contentIndex?: number; contentVersion?: string }
+export interface UiBranchScope { threadId: string; branchId: string }
+export interface UiSource extends UiReceipt { branchScope?: UiBranchScope; forkedFrom?: string; content?: ConversationUiNode; definition?: unknown; messageFragment?: UiMessageFragment; contents: Record<string, string>; assets: Record<string, { mimeType: string; data: string }> }
 export type UiReadView = 'summary' | 'source' | 'state' | 'screen' | 'structure';
 export interface UiReadInput { kind: 'ui'; ref: string; view?: UiReadView; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number }
 export interface UiSourceIdentity {
   ref?: string;
-  preview?: { callId: string; sequence: number; baseRef?: string; contents: Record<string, string>; entry: string; title: string };
+  preview?: { content?: ConversationUiNode; messageFragment?: UiMessageFragment; callId: string; sequence: number; baseRef?: string; contents: Record<string, string>; entry: string; title: string };
 }
 export interface UiViewState { data: JsonValue; scroll: { x: number; y: number }; controls: Record<string, JsonValue> }
 export interface UiStructureNode { tag: string; text?: string; value?: string; selector?: string; bounds: { x: number; y: number; width: number; height: number } }
@@ -51,6 +79,7 @@ export function createInteractiveUiHttpAPI(generation = getRuntimeEndpointGenera
     return result as T;
   };
   return {
+    registerFragment: (identity: ThreadIdentity, input: UiFragmentRegistrationInput, signal?: AbortSignal) => post<UiSource>('fragment/register', identity, input, signal),
     source: (identity: ThreadIdentity, ref: string, signal?: AbortSignal) => post<UiSource>('source', identity, { ref }, signal),
     attach: (identity: ThreadIdentity, source: UiSourceIdentity, viewRef?: string, signal?: AbortSignal) => post<UiViewRegistration>('view/attach', identity, { source, viewRef, clientId }, signal),
     detach: (identity: ThreadIdentity, viewRef: string, token: string, state?: UiViewState) => post<{ closed: true }>('view/detach', identity, { viewRef, token, state }),

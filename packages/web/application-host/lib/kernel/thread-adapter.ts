@@ -68,6 +68,8 @@ export class ThreadAdapter {
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
+  private captureInteractiveUiFork?: (identity: ThreadIdentity, targetBranchId: string, headId: string | null, signal?: AbortSignal) => Promise<void>;
+  bindInteractiveUiFork(capture: NonNullable<ThreadAdapter['captureInteractiveUiFork']>): void { this.captureInteractiveUiFork = capture; }
   private inputMaterials?: ThreadInputMaterials;
   private attachments?: ThreadAttachmentOwner;
   bindAttachments(owner: ThreadAttachmentOwner): void { this.attachments = owner; }
@@ -774,10 +776,12 @@ export class ThreadAdapter {
     return this.runtime.navigationReceipt({ threadId: input.threadId, branchId: input.branchId, key: input.key }, signal);
   }
   async fork(input: ThreadIdentity & { key: string; headId: string | null }, signal?: AbortSignal): Promise<ThreadIdentity> {
-    await this.requireIdentity(input);
+    const thread = await this.requireIdentity(input);
     await this.refreshContext(input);
     const digest = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.headId, input.key])).digest('hex');
     const targetBranchId = `branch:${digest}`;
+    // Never backfill an already-created branch from today's exploration state.
+    if (!thread.branches.some(branch => branch.branch_id === targetBranchId)) await this.captureInteractiveUiFork?.(input, targetBranchId, input.headId, signal);
     const capture = this.plans && await this.plans.supports(input)
       ? await this.plans.capture(input, input.headId, targetBranchId, signal) : undefined;
     const result = await this.runtime.forkBranch(input.branchId, targetBranchId, input.headId, signal, capture);

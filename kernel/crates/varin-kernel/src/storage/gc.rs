@@ -115,6 +115,52 @@ impl Storage {
         )
     }
 
+    /// Retry exactly the objects of an original UI retirement, including after
+    /// the source record disappeared. Never infer targets from caller text.
+    pub(super) fn retry_ui_cleanup_receipt(&mut self, operation: &str, receipt: Value) -> Result<Value, KernelError> {
+        if receipt.pointer("/uiCleanup/pending").and_then(Value::as_bool) != Some(true) { return Ok(receipt); }
+        let objects: BTreeSet<String> = serde_json::from_value(receipt["uiCleanup"]["objectHashes"].clone())?;
+        let readers = self.blob_read_roots.active_hashes().intersection(&objects).cloned().collect();
+        if !objects.is_empty() {
+            self.conn.execute_batch("BEGIN IMMEDIATE")?;
+            match self.gc_selected(Some(&objects)) {
+                Ok(_) => self.conn.execute_batch("COMMIT")?,
+                Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); return Err(error); }
+            }
+        }
+        self.finish_ui_cleanup_receipt(operation, receipt, &readers)
+    }
+
+    pub(super) fn finish_ui_cleanup_receipt(&mut self, operation: &str, mut receipt: Value, mark_readers: &BTreeSet<String>) -> Result<Value, KernelError> {
+        let objects: BTreeSet<String> = serde_json::from_value(receipt["uiCleanup"]["objectHashes"].clone())?;
+        let cleanup = self.drain_selected_gc_files(Some(&objects))?;
+        let mut pending = BTreeSet::new();
+        for hash in &objects {
+            let queued: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM pending_gc_files WHERE hash=?1)", [hash], |row| row.get(0))?;
+            if queued || mark_readers.contains(hash) || self.blob_read_roots.contains(hash) { pending.insert(hash.clone()); }
+        }
+        receipt["uiCleanup"]["pending"] = json!(!pending.is_empty());
+        receipt["uiCleanup"]["objectHashes"] = json!(pending);
+        receipt["uiCleanup"]["failures"] = cleanup["failures"].clone();
+        self.conn.execute("UPDATE operations SET result_json=?2,updated_at=?3 WHERE operation_id=?1 AND kind='storage.record.release' AND state='committed'",
+            params![operation, serde_json::to_string(&receipt)?, now_ms()])?;
+        Ok(receipt)
+    }
+
+    pub(super) fn ui_cleanup(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace = self.validate_domain_record_identity(params_value, grant_id)?;
+        let receipts: Vec<(String, String)> = self.conn.prepare("SELECT o.operation_id,o.result_json FROM operations o JOIN operation_owners w ON w.operation_id=o.operation_id
+            WHERE w.workspace_id=?1 AND o.kind='storage.record.release' AND o.state='committed' AND json_extract(o.result_json,'$.uiCleanup.pending')=1")?
+            .query_map([workspace], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+        let mut pending = false; let mut failures = Vec::new();
+        for (operation, receipt) in receipts {
+            let result = self.retry_ui_cleanup_receipt(&operation, serde_json::from_str(&receipt)?)?;
+            pending |= result["uiCleanup"]["pending"].as_bool().unwrap_or(false);
+            failures.extend(result["uiCleanup"]["failures"].as_array().into_iter().flatten().cloned());
+        }
+        Ok(json!({"pending":pending,"failures":failures}))
+    }
+
     pub(super) fn sweep_orphan_objects(&mut self) -> Result<(), KernelError> {
         for (objects_root, prefix) in [(self.root.join("objects"), ""), (self.root.join("file-versions").join("objects"), "ranges-")] {
         let Ok(shards) = fs::read_dir(&objects_root) else {
@@ -470,6 +516,117 @@ mod storage_settings_tests {
         invoke(storage, grant, "storage.blob.release", json!({"ownerId":blob["ownerId"],"workspaceId":"workspace"}));
     }
     fn close(storage: Storage, root: PathBuf) { drop(storage); fs::remove_dir_all(root).unwrap(); }
+
+    #[test]
+    fn ui_retirement_collects_only_unshared_record_objects() {
+        let (mut storage, grant, root) = fixture();
+        let shared = put(&mut storage, &grant, "ui-shared", b"shared ui content");
+        let unrelated = put(&mut storage, &grant, "ui-unrelated", b"unrelated abandoned body");
+        release(&mut storage, &grant, &unrelated);
+        for (record, owners) in [("ui:first", json!([shared["ownerId"]])), ("ui:second", json!([]))] {
+            invoke(&mut storage, &grant, "storage.record.put", json!({"operationId":record,"workspaceId":"workspace","recordId":record,
+                "recordType":"ui.work","state":"active","payloadJson":"{}","references":[{"slot":"source","objectHash":shared["hash"]}],"ownerIds":owners}));
+        }
+        let path = object_path(&root, shared["hash"].as_str().unwrap()).unwrap();
+        invoke(&mut storage, &grant, "storage.record.release", json!({"operationId":"release-first","workspaceId":"workspace","recordId":"ui:first"}));
+        assert!(path.exists(), "surviving UI record protects shared content");
+        invoke(&mut storage, &grant, "storage.record.release", json!({"operationId":"release-second","workspaceId":"workspace","recordId":"ui:second"}));
+        assert!(!path.exists(), "last UI owner releases physical content after commit");
+        assert!(object_path(&root, unrelated["hash"].as_str().unwrap()).unwrap().exists(), "UI retirement must not perform global collection");
+        close(storage, root);
+    }
+
+    #[test]
+    fn ui_retirement_failed_unlink_is_discoverable_and_retried_without_restart() {
+        let (mut storage, grant, root) = fixture();
+        storage.issue_grant(&json!({"grantId":"ui-maintenance","hostGeneration":"generation","capabilities":["storage.maintenance"],"pathScopes":[]}),
+            "host","generation",root.to_str().unwrap(),"epoch").unwrap();
+        storage.issue_grant(&json!({"grantId":"ui-read-only","hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.read"],"pathScopes":[]}),
+            "host","generation",root.to_str().unwrap(),"epoch").unwrap();
+        for mode in ["maintenance", "replay"] {
+            let blob = put(&mut storage, &grant, mode, mode.as_bytes());
+            let record = format!("ui:{mode}");
+            invoke(&mut storage, &grant, "storage.record.put", json!({"operationId":record,"workspaceId":"workspace","recordId":record,
+                "recordType":"ui.work","state":"active","payloadJson":"{}","references":[{"slot":"source","objectHash":blob["hash"]}],"ownerIds":[blob["ownerId"]]}));
+            let path = object_path(&root, blob["hash"].as_str().unwrap()).unwrap();
+            let held = root.join(format!("held-{mode}"));
+            fs::rename(&path, &held).unwrap(); fs::create_dir(&path).unwrap();
+            let release = json!({"operationId":format!("release-{mode}"),"workspaceId":"workspace","recordId":record});
+            let failed = invoke(&mut storage, &grant, "storage.record.release", release.clone());
+            assert_eq!(failed["uiCleanup"]["pending"], true);
+            assert!(!failed["uiCleanup"]["failures"].as_array().unwrap().is_empty());
+            assert!(storage.domain_record_value("workspace", &record).unwrap().is_none());
+            let foreign = storage.authorize(Some(&grant.grant_id), &grant.kernel_epoch, "host", "generation", "storage.ui.cleanup", &json!({"workspaceId":"foreign"}))
+                .and_then(|(authorized, params)| storage.dispatch("storage.ui.cleanup", &params, Some(&grant.grant_id), &authorized));
+            assert!(matches!(foreign, Err(KernelError::Authorization(_))));
+            assert!(matches!(storage.authorize(Some("ui-read-only"), "epoch", "host", "generation", "storage.ui.cleanup", &json!({"workspaceId":"workspace"})), Err(KernelError::Authorization(_))));
+            assert_eq!(storage.domain_record_workspaces(&json!({"recordType":"ui.work"}), "ui-maintenance").unwrap()["workspaceIds"], json!(["workspace"]));
+            fs::remove_dir(&path).unwrap(); fs::rename(held, &path).unwrap();
+            if mode == "maintenance" {
+                assert_eq!(invoke(&mut storage, &grant, "storage.ui.cleanup", json!({"workspaceId":"workspace"})), json!({"pending":false,"failures":[]}));
+            } else {
+                let recovered = invoke(&mut storage, &grant, "storage.record.release", release);
+                assert_eq!(recovered["uiCleanup"]["pending"], false);
+                assert_eq!(recovered["uiCleanup"]["objectHashes"], json!([]));
+                assert_eq!(recovered["uiCleanup"]["failures"], json!([]));
+            }
+            assert!(!path.exists());
+            assert_eq!(storage.domain_record_workspaces(&json!({"recordType":"ui.work"}), "ui-maintenance").unwrap()["workspaceIds"], json!([]));
+        }
+        close(storage, root);
+    }
+
+    #[test]
+    fn ui_retirement_keeps_original_reader_then_retries_mark_after_it_finishes() {
+        let (mut storage, grant, root) = fixture();
+        let blob = put(&mut storage, &grant, "ui-reader", b"read before retirement");
+        invoke(&mut storage, &grant, "storage.record.put", json!({"operationId":"ui-reader-record","workspaceId":"workspace","recordId":"ui:reader",
+            "recordType":"ui.work","state":"active","payloadJson":"{}","references":[{"slot":"source","objectHash":blob["hash"]}],"ownerIds":[blob["ownerId"]]}));
+        let reader = storage.prepare_blob_read(&json!({"hash":blob["hash"],"workspaceId":"workspace","recordId":"ui:reader","slot":"source"}), &grant,
+            Arc::new(AtomicBool::new(false))).unwrap();
+        let receipt = invoke(&mut storage, &grant, "storage.record.release", json!({"operationId":"release-reader","workspaceId":"workspace","recordId":"ui:reader"}));
+        assert_eq!(receipt["uiCleanup"]["pending"], true);
+        assert!(reader.run().is_ok(), "original reader survives record retirement");
+        assert_eq!(invoke(&mut storage, &grant, "storage.ui.cleanup", json!({"workspaceId":"workspace"}))["pending"], true);
+        // Deterministically stop after the native mark retained this reader,
+        // then drop it before the post-commit pending decision. The mark-time
+        // lease must survive this gap as a retry obligation.
+        let objects: BTreeSet<String> = serde_json::from_value(receipt["uiCleanup"]["objectHashes"].clone()).unwrap();
+        let mark_readers = storage.blob_read_roots.active_hashes().intersection(&objects).cloned().collect();
+        storage.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        storage.gc_selected(Some(&objects)).unwrap();
+        storage.conn.execute_batch("COMMIT").unwrap();
+        drop(reader);
+        let after_mark = storage.finish_ui_cleanup_receipt("release-reader", receipt, &mark_readers).unwrap();
+        assert_eq!(after_mark["uiCleanup"]["pending"], true, "mark-time reader cannot disappear from the retry obligation");
+        assert_eq!(after_mark["uiCleanup"]["objectHashes"], json!([blob["hash"]]));
+        assert_eq!(invoke(&mut storage, &grant, "storage.ui.cleanup", json!({"workspaceId":"workspace"})), json!({"pending":false,"failures":[]}));
+        assert!(!object_path(&root, blob["hash"].as_str().unwrap()).unwrap().exists());
+        close(storage, root);
+    }
+
+    #[test]
+    fn ui_retirement_committed_cleanup_survives_reopen_before_unlink() {
+        let (mut storage, grant, root) = fixture();
+        let blob = put(&mut storage, &grant, "ui-crash", b"private ui content");
+        invoke(&mut storage, &grant, "storage.record.put", json!({"operationId":"ui-crash-record","workspaceId":"workspace","recordId":"ui:crash",
+            "recordType":"ui.work","state":"active","payloadJson":"{}","references":[{"slot":"source","objectHash":blob["hash"]}],"ownerIds":[blob["ownerId"]]}));
+        let command = json!({"workspaceId":"workspace","recordId":"ui:crash"});
+        let objects = storage.ui_record_release_objects(&command).unwrap().unwrap().1;
+        // Stop at the actual durable boundary, before the normal post-commit unlink.
+        storage.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        storage.domain_record_release(&command, &grant.grant_id).unwrap();
+        storage.gc_selected(Some(&objects)).unwrap();
+        storage.conn.execute_batch("COMMIT").unwrap();
+        let path = object_path(&root, blob["hash"].as_str().unwrap()).unwrap();
+        assert!(path.exists());
+        assert_eq!(storage.conn.query_row("SELECT count(*) FROM pending_gc_files", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        drop(storage);
+        let reopened = Storage::open(&root, "host").unwrap();
+        assert!(!path.exists());
+        assert_eq!(reopened.conn.query_row("SELECT count(*) FROM pending_gc_files", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        close(reopened, root);
+    }
 
     #[test]
     fn preview_is_read_only_and_uses_the_same_recovery_and_temporary_roots() {

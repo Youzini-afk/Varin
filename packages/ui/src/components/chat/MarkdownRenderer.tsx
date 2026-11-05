@@ -1,6 +1,9 @@
 import React from 'react';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { cn } from '@/lib/utils';
+import { parseConversationContent } from '@varin/application-client';
+import { ConversationPreviewContext } from '@/components/conversation/ConversationContext';
+import { ChatTextSourceContext } from '@/components/conversation/chatTextSourceContext';
 import { loadMarkdownRendererModule } from './markdownRendererLoader';
 
 // Thin lazy wrapper around the MarkdownRenderer implementation.
@@ -24,14 +27,16 @@ const fallbackContentClassName = (variant: unknown): string => {
   return 'markdown-content leading-relaxed';
 };
 
-const MarkdownFallback = (props: { content?: unknown; className?: unknown; variant?: unknown }) => {
+const MarkdownFallback = (props: { content?: unknown; className?: unknown; variant?: unknown; isStreaming?: boolean }) => {
+  const source = React.useContext(ChatTextSourceContext);
+  const preview = React.useContext(ConversationPreviewContext);
   if (typeof props.content !== 'string' || props.content.length === 0) {
     return fallback;
   }
 
   return (
     <div className={cn('break-words w-full min-w-0 whitespace-pre-wrap', fallbackContentClassName(props.variant), typeof props.className === 'string' ? props.className : undefined)}>
-      {props.content}
+      {parseConversationContent(props.content, { role: !preview && source?.role === 'assistant' && (props.variant ?? 'assistant') === 'assistant' ? 'assistant' : 'text', streaming: props.isStreaming }).filter(part => part.kind !== 'pending').map(part => part.kind === 'markdown' ? part.text : part.raw).join('')}
     </div>
   );
 };

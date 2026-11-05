@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 80;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 81;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1569,6 +1569,7 @@ pub(crate) struct ModelSelectParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MaterialRetentionParams {
     pub(crate) child_thread_id: Option<String>,
+    pub(crate) include_ui_references: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2258,6 +2259,12 @@ pub(crate) struct KernelRecordReleaseParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelUiCleanupParams {
+    pub(crate) workspace_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5250,6 +5257,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "storage.ui.cleanup" => serde_json::from_value::<KernelUiCleanupParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "working.result.prepare" => {
             serde_json::from_value::<KernelWorkingResultPrepareParams>(params.clone())
                 .map(|_| ())

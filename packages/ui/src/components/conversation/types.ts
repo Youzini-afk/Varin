@@ -17,6 +17,8 @@ export interface ChatUsage {
 }
 
 export interface ChatTextContent {
+  /** Original native body part index; never the filtered/rendered array position. */
+  contentIndex?: number;
   /** Native provider-item identity, shared by transient and persisted rendering. */
   id?: string;
   text: string;

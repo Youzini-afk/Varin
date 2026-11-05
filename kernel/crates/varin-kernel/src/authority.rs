@@ -75,6 +75,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.materialize"
         | "storage.record.put"
         | "storage.record.release"
+        | "storage.ui.cleanup"
         | "working.result.prepare"
         | "working.result.publish"
         | "working.result.candidate.release"

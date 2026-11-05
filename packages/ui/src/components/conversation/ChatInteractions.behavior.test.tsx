@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatContextMenu, ChatTextSource } from './ChatContextMenu';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { ChatTurnNavigator } from './ChatTurnNavigator';
 import { ConversationContext, type ConversationPresentation } from './ConversationContext';
 import { projectChatTimeline } from './chatTimelineProjection';
@@ -13,6 +14,7 @@ import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 vi.mock('@/lib/i18n', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: (key: string) => key }),
 }));
+vi.mock('@/lib/clipboard', () => ({ copyTextToClipboard: vi.fn(async () => ({ ok: true })) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => true }));
 vi.mock('./ChatMemoryDialog', () => ({ ChatMemoryDialog: () => null }));
@@ -97,4 +99,46 @@ it('keeps one marker per Run and supports keyboard navigation and a preview with
   await act(async () => buttons[0]!.dispatchEvent(new window.Event('focusin', { bubbles: true })));
   expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('The complete Agent round');
   expect(readPreview).toHaveBeenCalledWith('run:1', expect.any(AbortSignal));
+});
+
+it('copies an assistant turn with readable options while preserving raw source for quoting', async () => {
+  const raw = 'Before\n\n```varin-ui\n{"type":"choice","label":"Hair","options":["Short","Long"],"action":"Continue"}\n```\n\nAfter';
+  const assistant: ChatSessionMessageEntry = { ...answer, message: { ...answer.message, role: 'assistant', content: [{ type: 'text', text: raw }] } } as ChatSessionMessageEntry;
+  const entries = [user, assistant], projected = projectChatTimeline(entries), turn = projected.items.find(item => item.kind === 'turn')!;
+  const presentation = { identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, head: answer.id, toolExecutions: {} } as unknown as ConversationPresentation;
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}><ChatContextMenu sessionId="conversation" entries={entries} projection={projected} onFork={() => {}} onRecover={() => {}} onRevealEntry={() => {}}>
+    <article data-turn-id={turn.id}><ChatTextSource entryId={answer.id} text={raw} offset={0} role="assistant"><p>Visible answer</p></ChatTextSource></article>
+  </ChatContextMenu></ConversationContext.Provider>));
+  await act(async () => container.querySelector('p')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.copyTurn')!.click());
+  expect(copyTextToClipboard).toHaveBeenCalledWith('Before\n\nContinue\n\nHair：\n- Short\n- Long\n\nAfter');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quote')!.click());
+  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), presentation.identity));
+  expect(references.at(-1)?.reference?.text).toBe(raw);
+});
+
+it('quotes selected prose with native part identity and exact offsets after interactive content', async () => {
+  vi.stubGlobal('NodeFilter', { SHOW_TEXT: 4 });
+  const raw = '```varin-ui\n{"type":"choice","label":"Repeat","options":["Repeat"]}\n```\nRepeat';
+  const assistant: ChatSessionMessageEntry = { ...answer, message: { ...answer.message, role: 'assistant', content: [
+    { type: 'thinking', thinking: 'Thinking' }, { type: 'text', id: 'first', contentIndex: 0, text: 'First' },
+    { type: 'text', id: 'native-part', contentIndex: 3, text: raw },
+  ] } } as ChatSessionMessageEntry;
+  const entries = [user, assistant], projected = projectChatTimeline(entries);
+  const presentation = { identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, head: answer.id, toolExecutions: {} } as unknown as ConversationPresentation;
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}><ChatContextMenu sessionId="conversation" entries={entries} projection={projected} onRevealEntry={() => {}}>
+    <article><ChatTextSource entryId={answer.id} text={raw} offset={0} contentIndex={3} contentIdentity="native-part" role="assistant">
+      <div data-conversation-ui-fragment="choice"><label>Repeat</label></div><p>Repeat</p>
+    </ChatTextSource></article>
+  </ChatContextMenu></ConversationContext.Provider>));
+  const paragraph = container.querySelector('p')!, node = paragraph.firstChild!;
+  const range = { startContainer: node, startOffset: 0, endContainer: node, endOffset: 6, commonAncestorContainer: node,
+    intersectsNode: (element: Node) => element === node || element.contains(node), toString: () => 'Repeat', cloneRange: () => range } as unknown as Range;
+  window.getSelection = () => ({ isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => 'Repeat' }) as unknown as Selection;
+  await act(async () => paragraph.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quote')!.click());
+  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), presentation.identity));
+  expect(references.at(-1)?.reference).toMatchObject({ text: 'Repeat', source: { kind: 'chat', passages: [
+    { entryId: answer.id, start: 6 + raw.lastIndexOf('Repeat'), text: 'Repeat' },
+  ] } });
 });

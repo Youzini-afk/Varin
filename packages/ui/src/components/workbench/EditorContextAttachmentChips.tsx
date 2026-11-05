@@ -36,7 +36,7 @@ export const EditorContextAttachmentChips: React.FC<EditorContextAttachmentChips
   const navigation = React.useContext(ReferenceNavigationContext);
   const openMaterial = React.useContext(MaterialLinkContext);
   const referenceSource = preview?.reference?.source;
-  const entryId = referenceSource && referenceSource.kind !== 'document' ? referenceSource.itemId
+  const entryId = referenceSource && (referenceSource.kind === 'ui' || referenceSource.kind === 'chat') ? referenceSource.itemId
     ?? (referenceSource.kind === 'chat' ? referenceSource.passages[0]?.entryId : undefined) : undefined;
   const canLocate = referenceSource?.kind === 'document' ? Boolean(openMaterial) : Boolean(entryId && navigation?.revealEntry
     && referenceSource?.thread?.threadId === navigation.identity.threadId && referenceSource.thread.branchId === navigation.identity.branchId);

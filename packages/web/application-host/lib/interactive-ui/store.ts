@@ -1,15 +1,17 @@
+import { normalizeConversationUi, migrateConversationUiState } from '@varin/application-client';
 import { createHash, randomUUID } from 'node:crypto';
-import type { RenderUiInput, UiReceipt, UiSource, UiObservation, UiSelection, UiViewState, UiSourceIdentity } from '@varin/application-client';
+import type { RenderUiInput, UiReceipt, UiSource, UiObservation, UiSelection, UiViewState, UiSourceIdentity, UiMessageFragment, UiBranchScope, ConversationUiNode } from '@varin/application-client';
 import type { KernelClient, KernelScopedClient } from '../kernel/kernel-client.js';
-import type { KernelRecordResult } from '../kernel/protocol.generated.js';
+import type { KernelRecordResult, MaterialRetention } from '../kernel/protocol.generated.js';
+import { createUiActivity, releaseUiRecords } from './lifecycle.js';
 
 /** code names a public, stable reason that survives the generic resource wrapper. */
 export class UiContentError extends Error { constructor(message: string, readonly status = 400, readonly code?: string) { super(message); } }
 export class UiMutationUnknownError extends UiContentError { constructor() { super('Save outcome is not confirmed; the original call was not repeated', 503); } }
 type FileObject = { hash: string; slot: string; mediaRefs?: string[] };
-type Revision = Omit<UiReceipt, 'kind' | 'files'> & { files: Record<string, FileObject>; assets: Record<string, FileObject & { mimeType: string }> };
+type Revision = Omit<UiReceipt, 'kind' | 'files'> & { branchScope?: UiBranchScope; forkedFrom?: string; content?: ConversationUiNode; definition?: unknown; messageFragment?: UiMessageFragment; files: Record<string, FileObject>; assets: Record<string, FileObject & { mimeType: string }> };
 export interface Work { versions: Revision[]; mutation: { intent: string; receipt: UiReceipt } }
-export interface ViewRecord { source: UiSourceIdentity; state: UiViewState | null; lease?: { token: string; clientId: string } | null }
+export interface ViewRecord { clientId?: string; branchScope?: UiBranchScope; source: UiSourceIdentity; state: UiViewState | null; lease?: { token: string; clientId: string } | null }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const canonical = (value: unknown): string => JSON.stringify(value, (_, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
@@ -33,7 +35,10 @@ export function applyUiEdits(text: string, edits: { oldText: string; newText: st
 }
 const receipt = (version: Revision): UiReceipt => ({ kind: 'ui', ref: version.ref, workRef: version.workRef, title: version.title,
   revision: version.revision, entry: version.entry, files: Object.keys(version.files) });
-export function createUiContentStore(kernel: KernelClient, onCleanupError: () => void = () => {}) {
+export function createUiContentStore(kernel: KernelClient, onCleanupError: () => void = () => {}, requireOwner?: (scope: UiBranchScope) => Promise<void>) {
+  const activity = createUiActivity();
+  const guarded = <A extends unknown[], R>(action: (root: string, ...args: A) => Promise<R>) =>
+    (root: string, ...args: A): Promise<R> => activity.run(root, () => action(root, ...args));
   const clients = new Map<string, Promise<KernelScopedClient>>();
   const connection = (scope: string) => {
     let pending = clients.get(scope);
@@ -80,13 +85,29 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
       [file, (await bytes(root, record.recordId, object)).toString('utf8')])));
     const assets = Object.fromEntries(await Promise.all(Object.entries(version.assets).map(async ([ref, object]) =>
       [ref, { mimeType: object.mimeType, data: (await bytes(root, record.recordId, object)).toString('base64') }])));
-    return { ...receipt(version), contents, assets };
+    return { ...receipt(version), contents, assets, ...(version.branchScope ? { branchScope: version.branchScope } : {}), ...(version.forkedFrom ? { forkedFrom: version.forkedFrom } : {}), ...(version.content ? { content: version.content, definition: version.definition } : {}), ...(version.messageFragment ? { messageFragment: version.messageFragment } : {}) };
+  };
+  const operationReceipt = async (root: string, origin: string): Promise<UiReceipt | null> => {
+    const operation = await (await connection(workspace(root))).getOperation(`ui-render:${hash(origin)}`);
+    if (!operation || operation.state !== 'committed') return null;
+    const record = operation.result as KernelRecordResult;
+    const saved = (JSON.parse(record.payloadJson) as Work).mutation.receipt;
+    if (saved.kind !== 'ui' || saved.workRef !== record.recordId) throw new UiContentError('Original UI operation receipt is invalid');
+    return saved;
   };
   const locks = new Map<string, Promise<unknown>>();
   const render = async (root: string, input: RenderUiInput, origin: string,
-    readMedia?: (resourceId: string) => Promise<{ mimeType: string; bytes: Uint8Array }>): Promise<UiReceipt> => {
+    readMedia?: (resourceId: string) => Promise<{ mimeType: string; bytes: Uint8Array }>, messageFragment?: UiMessageFragment, branchScope?: UiBranchScope, forkedFrom?: string): Promise<UiReceipt> => {
+    if ((input.changes !== undefined) === (input.content !== undefined)) throw new UiContentError('Supply exactly one of changes or content');
+    if (input.changes !== undefined && !Array.isArray(input.changes)) throw new UiContentError('changes must be an array');
+    let content: ConversationUiNode | undefined;
+    try { if (input.content !== undefined) content = normalizeConversationUi(input.content); }
+    catch (error) { throw new UiContentError(error instanceof Error ? error.message : 'Invalid content'); }
     // Capture the base at admission, before joining this work's commit sequence.
     const base = input.ref ? await resolve(root, input.ref) : null;
+    const owner = branchScope ?? messageFragment ?? base?.version.branchScope ?? base?.version.messageFragment;
+    if (owner) await requireOwner?.(owner);
+    if (base && Boolean(base.version.content) !== Boolean(content)) throw new UiContentError('A work cannot change between HTML and declarative content');
     const id = base?.version.workRef ?? `ui:${hash(origin).slice(0, 32)}`;
     const operationId = `ui-render:${hash(origin)}`;
     const intent = canonical(input);
@@ -114,7 +135,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         const object = base?.version.files[file];
         return object ? (await bytes(root, id, object)).toString('utf8') : '';
       };
-      for (const change of input.changes) {
+      for (const change of input.changes ?? []) {
         const file = uiPath(change.file);
         if (change.op === 'write') { paths.add(file); changedText.set(file, change.text); }
         else if (change.op === 'append') { changedText.set(file, (paths.has(file) ? await text(file) : '') + change.text); paths.add(file); }
@@ -122,8 +143,9 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         else if (change.op === 'edit') { if (!paths.has(file)) throw new UiContentError(`File not found: ${file}`, 404); changedText.set(file, applyUiEdits(await text(file), change.edits)); }
       }
       const title = input.title ?? base?.version.title ?? '交互内容';
-      const entry = uiPath(input.entry ?? base?.version.entry ?? 'index.html');
-      const changed = !base || title !== base.version.title || entry !== base.version.entry
+      if (content && input.entry !== undefined) throw new UiContentError('Declarative content does not have an HTML entry');
+      const entry = content ? '' : uiPath(input.entry ?? base?.version.entry ?? 'index.html');
+      const changed = !base || canonical(content ?? null) !== canonical(base.version.content ?? null) || title !== base.version.title || entry !== base.version.entry
         || paths.size !== Object.keys(base.version.files).length || [...paths].some(file => !base.version.files[file]
           || changedText.has(file) && base.version.files[file]!.hash !== `sha256-${hash(changedText.get(file)!)}`);
       const versions = base ? [...base.document.versions] : [];
@@ -150,7 +172,10 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
             const blob = await client.putBlob(image.bytes, `${operationId}:asset:${hash(ref)}`);
             owners.push(blob.ownerId); assets[ref] = { hash: blob.hash, slot: `r${revision}:asset:${ref}`, mimeType: image.mimeType };
           }
-          versions.push({ ref: `${id}@${revision}`, workRef: id, title, entry, revision, files, assets });
+          versions.push({ ref: `${id}@${revision}`, workRef: id, title, entry, revision, files, assets,
+            ...(content ? { content, definition: input.content } : {}),
+            ...((forkedFrom ?? base?.version.forkedFrom) ? { forkedFrom: (forkedFrom ?? base?.version.forkedFrom)! } : {}),
+            ...((branchScope ?? base?.version.branchScope ?? messageFragment) ? { branchScope: { threadId: (branchScope ?? base?.version.branchScope ?? messageFragment)!.threadId, branchId: (branchScope ?? base?.version.branchScope ?? messageFragment)!.branchId } } : {}), ...((messageFragment ?? base?.version.messageFragment) ? { messageFragment: (messageFragment ?? base?.version.messageFragment)! } : {}) });
         }
         const result = receipt(versions.at(-1)!);
         const document: Work = { versions, mutation: { intent, receipt: result } };
@@ -174,14 +199,16 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
   const view = async (root: string, ref: string) => {
     const record = await viewRecord(root, ref); return record ? JSON.parse(record.payloadJson) as ViewRecord : null;
   };
-  const saveView = async (root: string, ref: string, patch: { source?: UiSourceIdentity; state?: UiViewState | null; lease?: { token: string; clientId: string } | null }, expectedLease?: string) => {
+  const saveView = async (root: string, ref: string, patch: { branchScope?: UiBranchScope; source?: UiSourceIdentity; state?: UiViewState | null; lease?: { token: string; clientId: string } | null }, expectedLease?: string) => {
     const key = `${root}:${ref}`;
     const task = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
       const record = await viewRecord(root, ref), previous = record ? JSON.parse(record.payloadJson) as ViewRecord : null;
+      const owner = patch.branchScope ?? previous?.branchScope;
+      if (owner) await requireOwner?.(owner);
       if (expectedLease !== undefined && previous?.lease?.token !== expectedLease) throw new UiContentError('View connection changed', 409);
       let source = patch.source ?? previous?.source;
       if (source?.preview) source = { preview: { ...source.preview, contents: {} } };
-      const value = { source, state: patch.state === undefined ? previous?.state ?? null : patch.state,
+      const value = { ...((patch.lease?.clientId ?? previous?.clientId ?? previous?.lease?.clientId) ? { clientId: (patch.lease?.clientId ?? previous?.clientId ?? previous?.lease?.clientId)! } : {}), ...((patch.branchScope ?? previous?.branchScope) ? { branchScope: (patch.branchScope ?? previous?.branchScope)! } : {}), source, state: patch.state === undefined ? previous?.state ?? null : patch.state,
         lease: patch.lease === undefined ? previous?.lease ?? null : patch.lease };
       if (!value.source) throw new UiContentError('View has no source');
       if (value.source.ref) await resolve(root, value.source.ref);
@@ -193,7 +220,14 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     locks.set(key, task);
     try { return await task; } finally { if (locks.get(key) === task) locks.delete(key); }
   };
-  const snapshot = async (root: string, observation: UiObservation) => {
+  const snapshot = async (root: string, observation: UiObservation, branchScope?: UiBranchScope) => {
+    branchScope ??= (await view(root, observation.viewRef))?.branchScope;
+    if (branchScope) await requireOwner?.(branchScope);
+    if (observation.ref && observation.preview) throw new UiContentError('Observation must have exactly one source');
+    if (observation.preview?.content) {
+      try { observation = { ...observation, preview: { ...observation.preview, content: normalizeConversationUi(observation.preview.content) } }; }
+      catch { throw new UiContentError('Invalid declarative preview'); }
+    }
     if (observation.ref) { const selected = await resolve(root, observation.ref); observation = { ...observation, ref: selected.version.ref }; }
     else if (!observation.preview) throw new UiContentError('Observation has no source');
     const id = `ui-snapshot:${randomUUID()}`;
@@ -211,8 +245,8 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         const blob = await client.putBlob(Buffer.from(image.data, 'base64'), `${id}:image`);
         owners.push(blob.ownerId); object = { hash: blob.hash, slot: 'image' }; refs.push({ slot: 'image', objectHash: blob.hash });
       }
-      await put(root, id, 'ui.snapshot', { ...value,
-        ...(preview ? { preview: { callId: preview.callId, sequence: preview.sequence, baseRef: preview.baseRef, entry: preview.entry, title: preview.title, files } } : {}),
+      await put(root, id, 'ui.snapshot', { ...value, ...(branchScope ? { branchScope } : {}),
+        ...(preview ? { preview: { provenance: 'client-preview', callId: preview.callId, sequence: preview.sequence, baseRef: preview.baseRef, entry: preview.entry, title: preview.title, files, ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}) } } : {}),
         ...(image ? { image: { ...object, mimeType: image.mimeType, method: image.method, capturedAt: image.capturedAt, bounds: image.bounds } } : {}) }, id, refs, owners);
       return id;
     } finally { const cleanup = await Promise.allSettled(owners.map(owner => client.releaseBlob(owner))); if (cleanup.some(value => value.status === 'rejected')) onCleanupError(); }
@@ -227,13 +261,14 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     const { image, preview, ...rest } = value;
     const contents = Object.fromEntries(await Promise.all(Object.entries(preview?.files ?? {}).map(async ([file, object]) => [file, (await bytes(root, ref, object)).toString('utf8')])));
     return { ...rest, ...(preview ? { preview: { callId: preview.callId, sequence: preview.sequence, entry: preview.entry, title: preview.title,
-      ...(preview.baseRef ? { baseRef: preview.baseRef } : {}), contents } } : {}),
+      ...(preview.baseRef ? { baseRef: preview.baseRef } : {}), ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}), contents } } : {}),
       ...(image ? { image: { mimeType: image.mimeType, method: image.method, ...(image.capturedAt ? { capturedAt: image.capturedAt } : {}), ...(image.bounds ? { bounds: image.bounds } : {}), data: (await bytes(root, ref, image)).toString('base64') } } : {}) };
   };
-  const select = async (root: string, observation: UiObservation, selected: { text?: string; region?: UiSelection['region'] }): Promise<UiSelection> => {
-    const snapshotRef = await snapshot(root, observation);
+  const select = async (root: string, observation: UiObservation, selected: { text?: string; region?: UiSelection['region'] }, branchScope?: UiBranchScope): Promise<UiSelection> => {
+    branchScope ??= (await view(root, observation.viewRef))?.branchScope;
+    const snapshotRef = await snapshot(root, observation, branchScope);
     const ref = `ui-selection:${randomUUID()}`;
-    await put(root, ref, 'ui.selection', { snapshotRef, ...selected }, ref);
+    await put(root, ref, 'ui.selection', { snapshotRef, ...selected, ...(branchScope ? { branchScope } : {}) }, ref);
     return selection(root, ref);
   };
   const selection = async (root: string, ref: string): Promise<UiSelection> => {
@@ -248,9 +283,69 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         return a.x < b.x + b.width && a.y < b.y + b.height && a.x + a.width > b.x && a.y + a.height > b.y;
       }) : observed.structure } : {}) };
   };
-  return { source, render, resolve, view, saveView, snapshot, readSnapshot, select, selection,
-    async file(root: string, ref: string, file: string) { const { record, version } = await resolve(root, ref); const object = version.files[file];
-      if (!object) throw new UiContentError('Work file not found', 404); return (await bytes(root, record.recordId, object)).toString('utf8'); },
+  type BranchCapture = { kind: 'branch-state'; source: UiBranchScope; target: UiBranchScope; headId: string | null; capturedAt: string;
+    views: { clientId: string; viewRef: string; sourceRef: string; confirmedAt: number; fragment?: UiMessageFragment; content?: ConversationUiNode; state: UiViewState }[] };
+  const captureId = (target: UiBranchScope) => `ui-branch-state:${hash(canonical(target))}`;
+  const captureBranch = async (root: string, from: UiBranchScope, target: UiBranchScope, headId: string | null, containsMessage: (messageId: string) => boolean, containsRevision: (ref: string) => boolean = () => false) => {
+    await requireOwner?.(from);
+    const id = captureId(target), key = `${root}:${id}`;
+    const work = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const existing = await get(root, id);
+      if (existing) {
+        const capture = JSON.parse(existing.payloadJson) as BranchCapture;
+        if (canonical(capture.source) !== canonical(from) || capture.headId !== headId) throw new UiContentError('Fork capture belongs to another source', 409);
+        return;
+      }
+      const captured: BranchCapture = { kind: 'branch-state', source: from, target, headId, capturedAt: new Date().toISOString(), views: [] };
+      const client = await connection(workspace(root)); let cursor: number | undefined;
+      do {
+        const page = await client.listRecords({ workspaceId: workspace(root), recordType: 'ui.view', ...(cursor === undefined ? {} : { cursor }) });
+        for (const record of page.records) {
+          if (record.state !== 'active') continue;
+          const saved = JSON.parse(record.payloadJson) as ViewRecord;
+          const clientId = saved.clientId ?? saved.lease?.clientId;
+          if (!saved.state || !clientId || !saved.source.ref || saved.branchScope?.threadId !== from.threadId || saved.branchScope.branchId !== from.branchId) continue;
+          const original = (await resolve(root, saved.source.ref)).version;
+          const fragment = original.content && original.messageFragment && containsMessage(original.messageFragment.messageId)
+            && (original.revision === 1 && !original.forkedFrom || containsRevision(original.ref)) ? original.messageFragment : undefined;
+          if (!fragment && !containsRevision(original.ref)) continue;
+          captured.views.push({ clientId, viewRef: record.recordId, sourceRef: original.ref, confirmedAt: record.updatedAt,
+            ...(fragment ? { fragment } : {}), ...(original.content ? { content: original.content } : {}), state: saved.state });
+        }
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+      // Existing ui.snapshot authority, not a parallel state writer. This immutable capture
+      // precedes Catalog's fork; only an existing target branch can later attach a view.
+      await put(root, id, 'ui.snapshot', captured, id);
+    });
+    locks.set(key, work);
+    try { await work; } finally { if (locks.get(key) === work) locks.delete(key); }
+  };
+  const branchSeed = async (root: string, target: UiBranchScope, sourceIdentity: UiSourceIdentity, clientId: string): Promise<UiViewState | null> => {
+    if (!sourceIdentity.ref) return null;
+    const record = await get(root, captureId(target)); if (!record) return null;
+    const capture = JSON.parse(record.payloadJson) as BranchCapture;
+    if (capture.kind !== 'branch-state' || canonical(capture.target) !== canonical(target)) throw new UiContentError('Invalid branch state capture');
+    const current = (await resolve(root, sourceIdentity.ref)).version, fragment = current.messageFragment;
+    const matches = capture.views.filter(view => view.clientId === clientId && (fragment && current.content
+      ? view.fragment?.messageId === fragment.messageId && view.fragment.fragmentKey === fragment.fragmentKey
+        && (view.fragment.contentIndex ?? 0) === (fragment.contentIndex ?? 0) && view.fragment.contentVersion === fragment.contentVersion
+      : view.sourceRef === current.ref && Boolean(view.content) === Boolean(current.content)));
+    // Multiple independent views can have different explorations. Never select an arbitrary one.
+    if (matches.length !== 1) return null;
+    const seed = matches[0]!, data = seed.state.data;
+    if (!current.content || !seed.content) return seed.state;
+    const migrated = migrateConversationUiState(seed.content, current.content, data && typeof data === 'object' && !Array.isArray(data) ? data : {});
+    return { ...seed.state, data: migrated.values, controls: { ...seed.state.controls, __varinResetKeys: migrated.resetKeys } };
+  };
+  return { source: guarded(source), render: guarded(render), resolve: guarded(resolve), view: guarded(view), saveView: guarded(saveView),
+    snapshot: guarded(snapshot), operationReceipt: guarded(operationReceipt), captureBranch: guarded(captureBranch), branchSeed: guarded(branchSeed), readSnapshot: guarded(readSnapshot), select: guarded(select), selection: guarded(selection),
+    cleanup: (root: string, signal?: AbortSignal) => activity.exclusive(root, async () =>
+      (await connection(workspace(root))).uiCleanup(workspace(root), signal)),
+    collect: (root: string, plan: MaterialRetention, signal?: AbortSignal) => activity.exclusive(root, async () =>
+      releaseUiRecords(await connection(workspace(root)), workspace(root), plan, signal)),
+    file: guarded(async (root: string, ref: string, file: string) => { const { record, version } = await resolve(root, ref); const object = version.files[file];
+      if (!object) throw new UiContentError('Work file not found', 404); return (await bytes(root, record.recordId, object)).toString('utf8'); }),
   };
 }
 export type UiContentStore = ReturnType<typeof createUiContentStore>;

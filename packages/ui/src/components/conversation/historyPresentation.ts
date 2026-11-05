@@ -150,7 +150,7 @@ export class HistoryPresentation {
         } else if (content.kind === 'text' || content.kind === 'reasoning_summary') {
           const text = String(content.text ?? '');
           const id = typeof envelope.id === 'string' ? envelope.id : item.id;
-          entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', id, text } : { type: 'thinking', id, thinking: text }], configuration) };
+          entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', id, text, contentIndex: 0 } : { type: 'thinking', id, thinking: text }], configuration) };
         } else if (content.kind === 'tool_call') {
           entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'toolCall', id: callKey(item.run_id, request ?? item.id, String(call.call_id)),
             name: String(call.name), arguments: json(call.arguments),
@@ -180,6 +180,15 @@ export class HistoryPresentation {
               ...(typeof sender === 'string' ? { senderThreadId: sender } : {}), targetThreadId: item.thread_id,
               ...(typeof envelope.id === 'string' ? { messageId: envelope.id } : {}),
             } };
+        } else if (content.kind === 'output' && item.source === 'assistant'
+          && (content.output as OutputBody).parts.some(part => part.kind === 'text' && part.text.trim())) {
+          const output = content.output as OutputBody;
+          const sourceId = typeof envelope.id === 'string' ? envelope.id : item.id;
+          // Text projection retains the native part index even when media/attachments
+          // are rendered by the history extras owner. The Host resolves that exact part.
+          entry = { ...base, type: 'message', message: assistant(item.id,
+            output.parts.flatMap((part, contentIndex) => part.kind === 'text' && part.text.trim()
+              ? [{ type: 'text' as const, id: `${sourceId}:part:${contentIndex}`, contentIndex, text: part.text }] : []), configuration) };
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };

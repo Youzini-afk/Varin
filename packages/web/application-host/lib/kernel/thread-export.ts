@@ -1,7 +1,7 @@
 import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ThreadExportSelection, ThreadIdentity } from '@varin/application-client';
+import { conversationContentText, type ThreadExportSelection, type ThreadIdentity } from '@varin/application-client';
 import type { HistoryItem, HistoryReference, StoredMedia } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 
@@ -18,17 +18,18 @@ const media = (value: unknown): value is StoredMedia => typeof object(value).med
 
 /** Only named public semantic boundaries are exported. Provider originals, opaque continuations,
  * resource snapshots, checkpoints and arbitrary outer history fields never enter this projection. */
-export function exportPublicMessage(item: HistoryItem, includeTools: boolean): PublicMessage | null {
+export function exportPublicMessage(item: HistoryItem, includeTools: boolean, format: ThreadExportSelection['format'] = 'json'): PublicMessage | null {
   if (item.source === 'compaction' || item.source === 'tool' && !includeTools) return null;
   const result: PublicMessage = { text: '', attachments: [] };
   const addMedia = (value: unknown, partIndex: number) => { if (media(value)) result.attachments.push({ filename: `media-${partIndex + 1}.${value.media_type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin'}`, mimeType: value.media_type, media: value, partIndex }); };
   const addFile = (value: unknown) => { if (file(value)) result.attachments.push({ filename: value.filename, mimeType: value.mimeType, byteLength: value.byteLength, file: value }); };
-  const output = (value: unknown) => {
+  const readable = (text: string) => format === 'markdown' && item.source === 'assistant' ? conversationContentText(text, { role: 'assistant' }) : text;
+  const output = (value: unknown, assistantBody = false) => {
     const body = object(value);
     if (includeTools && body.data !== undefined) result.details = body.data;
     if (Array.isArray(body.parts)) body.parts.forEach((part, index) => {
       const entry = object(part);
-      if (entry.kind === 'text' && typeof entry.text === 'string') result.text += `${result.text ? '\n' : ''}${entry.text}`;
+      if (entry.kind === 'text' && typeof entry.text === 'string') result.text += `${result.text ? '\n' : ''}${assistantBody ? readable(entry.text) : entry.text}`;
       if (entry.kind === 'media') addMedia(entry.media, index);
       if (entry.kind === 'attachment') addFile(entry.attachment);
     });
@@ -42,9 +43,10 @@ export function exportPublicMessage(item: HistoryItem, includeTools: boolean): P
   }
   const content = object(object(item.content).content);
   switch (content.kind) {
-    case 'text': case 'reasoning_summary': result.text = typeof content.text === 'string' ? content.text : ''; break;
+    case 'text': result.text = typeof content.text === 'string' ? readable(content.text) : ''; break;
+    case 'reasoning_summary': result.text = typeof content.text === 'string' ? content.text : ''; break;
     case 'media': addMedia(content.media, 0); break;
-    case 'output': output(content.output); break;
+    case 'output': output(content.output, true); break;
     case 'tool_call': if (!includeTools) return null; result.details = content.call; break;
     case 'tool_result': {
       if (!includeTools) return null;
@@ -99,7 +101,7 @@ export async function* exportThreadConversation(owners: ThreadExportOwners, sele
         signal?.throwIfAborted();
         if (reference.source === 'compaction' || reference.source === 'tool' && !selection.includeTools) continue;
         const item = await owners.runtime.historyItem(reference, signal);
-        const message = exportPublicMessage(item, selection.includeTools); if (!message) continue;
+        const message = exportPublicMessage(item, selection.includeTools, selection.format); if (!message) continue;
         const record = { id: item.id, source: item.source, runId: item.run_id, text: message.text, ...(message.details !== undefined ? { details: message.details } : {}) };
         if (selection.format === 'json') yield encode(`${first ? '' : ','}\n${JSON.stringify(record).slice(0, -1)},"attachments":[`);
         else {
