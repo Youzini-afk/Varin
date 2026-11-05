@@ -458,7 +458,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const search = captured.value.web.settings?.search;
       const configured = search === undefined ? undefined : parseHarnessWebSearchSettings(search);
       return descriptor.tool!.name !== 'websearch' || (!captured.value.web.searchError
-        && (configured === undefined || Boolean(configured && configured.enabled !== false && configured.connections.some(connection => connection.enabled))));
+        && (configured === undefined || Boolean(configured && configured.enabled !== false && (configured.connections === undefined || configured.connections.some(connection => connection.enabled)))));
     });
   };
   const snapshotCapability = createMaterialToolOwner(options.materials, async (invocation, signal) => (await invocationScope(invocation, signal)).authority);

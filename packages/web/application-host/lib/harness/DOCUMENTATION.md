@@ -68,6 +68,9 @@ actual adapter capabilities. Missing settings enable the keyless Exa/Parallel ro
 empty connections and invalid settings do not. Objective guides queries without an extra request. Exact
 connection selection never falls back; valid empty results differ from failures. Applied filters retain
 upstream/post-filter/ranking semantics and time basis. Source preferences cannot relax network policy.
+Selection-only preferences retain the anonymous route; an explicit empty connection list still disables
+all connections. Upstream pages are retained whole: display cursors consume the current filtered page
+before advancing, reuse its response cache, and reject changed page ordering after a refetch.
 
 Search and scholarly metadata observations use `web-sources.ts` and the original material owner. They
 remain distinguishable from downloaded pages/full papers. Fixed citations carry revision/range, while
@@ -77,6 +80,9 @@ paged history and compaction carry only sources acquired through that typed ance
 `web-fetch.ts` separates acquisition, extraction and display completeness. Question-guided selection
 returns original ranges, structure and continuation. Optional assistance uses original purpose-scoped
 inference receipts, validates connection/range output, and never replays an unknown paid operation.
+Pages that fit the requested display return directly without assistance. Longer sources include unmatched
+structural blocks as well as lexical candidates; actual model capacity determines full versus partial
+coverage. Partial packs interleave relevance with page-wide coverage and use logarithmic token counting.
 GET/HEAD rendering belongs to the actual BrowserOwner through Host egress, including every resource and
 redirect. Electron's temporary capture session denies independent network, worker/frame/socket and
 interactive requests; login-dependent work needing those capabilities continues through Browser Use.

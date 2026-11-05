@@ -424,6 +424,31 @@ describe("configured web search providers", () => {
     expect(second.items[0]?.nextCursor).toBeUndefined();
   });
 
+  it("delivers every filtered SearXNG result before advancing the upstream page", async () => {
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const page = new URL(String(input)).searchParams.get("pageno") ?? "1";
+      return jsonResponse({ results: [
+        { title: "blocked", url: "https://blocked.example/a" },
+        ...Array.from({ length: 5 }, (_, index) => ({ title: `${page}:${index}`, url: `https://docs.example/${page}/${index}`, content: `Source ${index}` })),
+      ] });
+    });
+    const provider = createConfiguredSearchProvider({ provider: "searxng", endpoint: "https://search.example" }, { fetch });
+    const service = createWebSearchService(async () => provider);
+    try {
+      const first = await service.handle({ query: "q", limit: 2, blockedDomains: ["blocked.example"] }, context);
+      const second = await service.handle({ cursor: first.items[0]!.nextCursor! }, context);
+      const third = await service.handle({ cursor: second.items[0]!.nextCursor! }, context);
+      expect([first, second, third].flatMap(result => result.items[0]!.results!.map(hit => hit.title))).toEqual(["1:0", "1:1", "1:2", "1:3", "1:4"]);
+      expect(fetch).toHaveBeenCalledOnce();
+      const next = await service.handle({ cursor: third.items[0]!.nextCursor! }, context);
+      expect(next.items[0]!.results!.map(hit => hit.title)).toEqual(["2:0", "2:1"]);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      fetch.mockImplementation(async () => jsonResponse({ results: [{ title: "changed", url: "https://docs.example/new" }] }));
+      const changed = await service.handle({ cursor: first.items[0]!.nextCursor!, refresh: true }, context);
+      expect(changed.items[0]).toMatchObject({ status: "failed", detail: expect.stringContaining("without skipping results") });
+    } finally { await service.dispose(); }
+  });
+
   it("rejects cursors on non-paginating providers and cursors minted by another provider", async () => {
     const service = createWebSearchService(async () => ({
       id: "default-exa",
@@ -578,6 +603,37 @@ describe("connection routing and observation semantics", () => {
     expect(result.items[0]).toMatchObject({ status: "failed", failure: { kind: "protocol" } });
     expect(JSON.stringify(result)).not.toContain("private failure");
     await service.dispose();
+  });
+
+  it("falls back on malformed Brave results but preserves a genuinely absent web vertical", async () => {
+    let payload: unknown = { web: { results: "invalid" } };
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => String(input).includes("brave") ? jsonResponse(payload)
+      : jsonResponse({ results: [{ title: "Backup", url: "https://docs.example/a", content: "Source" }] }));
+    const settings = connectionSettings(); settings.connections[0]!.provider = "brave";
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings, auth: credentials, fetch }));
+    try {
+      expect((await service.handle({ query: "q" }, context)).items[0]).toMatchObject({ connectionId: "backup", status: "ok",
+        attempts: [{ failure: { kind: "protocol" } }, { status: "ok" }] });
+      expect((await service.handle({ query: "q", connectionId: "primary" }, context)).items[0]).toMatchObject({ status: "failed", failure: { kind: "protocol" } });
+      payload = { query: { more_results_available: false } };
+      expect((await service.handle({ query: "empty", connectionId: "primary" }, context)).items[0]).toMatchObject({ status: "empty" });
+      payload = { type: "search", query: null, web: null };
+      expect((await service.handle({ query: "nullable", connectionId: "primary" }, context)).items[0]).toMatchObject({ status: "empty" });
+      payload = { error: { message: "private provider detail" } };
+      expect((await service.handle({ query: "error", connectionId: "primary" }, context)).items[0]).toMatchObject({ status: "failed", failure: { kind: "protocol" } });
+    } finally { await service.dispose(); }
+  });
+
+  it("enables selection on anonymous connections without replacing them with an empty catalogue", async () => {
+    const selectConnection = vi.fn(async (_input: { connections: Array<{ id: string }> }) => ({ connectionId: "default-parallel" }));
+    const fetch = vi.fn(async () => mcpResponse({ content: [{ type: "text", text: JSON.stringify({ results: [] }) }] }));
+    const service = createWebSearchService(async () => resolveConfiguredSearchProvider({ settings: { smartSelection: true }, auth: {}, fetch }), undefined, { selectConnection });
+    try {
+      const result = await service.handle({ query: "q" }, context);
+      expect(selectConnection).toHaveBeenCalledOnce();
+      expect(selectConnection.mock.calls[0]?.[0].connections.map((connection: { id: string }) => connection.id)).toEqual(["default-exa", "default-parallel"]);
+      expect(result.items[0]?.connectionId).toBe("default-parallel");
+    } finally { await service.dispose(); }
   });
 });
 

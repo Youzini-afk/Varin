@@ -528,8 +528,11 @@ export interface WebSearchCursorPayload {
   q: string;
   /** Pagination mechanism the provider actually supports. */
   k: "offset" | "page";
-  /** Next offset page index or page number, depending on k. */
+  /** Upstream offset page index or page number, depending on k. */
   n: number;
+  /** Unconsumed results in this upstream page, bound to its filtered ordering. */
+  resultOffset?: number;
+  pageHash?: string;
   allow?: string[];
   block?: string[];
   prefer?: string[];
@@ -571,6 +574,9 @@ export const parseSearchCursor = (raw: string): WebSearchCursorPayload | null =>
     if (payload.v !== 1 || typeof payload.p !== "string" || typeof payload.q !== "string") return null;
     if (payload.k !== "offset" && payload.k !== "page") return null;
     if (typeof payload.n !== "number" || !Number.isSafeInteger(payload.n) || payload.n < 0) return null;
+    if ((payload.resultOffset === undefined) !== (payload.pageHash === undefined)) return null;
+    if (payload.resultOffset !== undefined && (!Number.isSafeInteger(payload.resultOffset) || Number(payload.resultOffset) < 1
+      || typeof payload.pageHash !== "string" || !/^[a-f0-9]{64}$/.test(payload.pageHash))) return null;
     const list = (entry: unknown): string[] | undefined => (
       Array.isArray(entry) && entry.every((item) => typeof item === "string") ? entry as string[] : undefined
     );
@@ -592,6 +598,7 @@ export const parseSearchCursor = (raw: string): WebSearchCursorPayload | null =>
       ...(typeof payload.strictFilters === "boolean" ? { strictFilters: payload.strictFilters } : {}),
       k: payload.k,
       n: payload.n,
+      ...(typeof payload.resultOffset === "number" && typeof payload.pageHash === "string" ? { resultOffset: payload.resultOffset, pageHash: payload.pageHash } : {}),
       ...(payload.allow !== undefined ? { allow: list(payload.allow) ?? [] } : {}),
       ...(payload.block !== undefined ? { block: list(payload.block) ?? [] } : {}),
       ...(payload.prefer !== undefined ? { prefer: list(payload.prefer) ?? [] } : {}),

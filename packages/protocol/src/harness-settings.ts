@@ -108,7 +108,8 @@ export interface HarnessWebSearchConnection extends HarnessWebSearchSettings {
 }
 
 export interface HarnessWebSearchConfiguration {
-  connections: HarnessWebSearchConnection[];
+  /** Omitted keeps anonymous connections; an explicit empty array enables none. */
+  connections?: HarnessWebSearchConnection[];
   defaultConnectionId?: string;
   fallbackConnectionIds: string[];
   enabled?: boolean;
@@ -120,6 +121,12 @@ export interface HarnessWebSearchConfiguration {
 export function parseHarnessWebSearchSettings(value: unknown): HarnessWebSearchConfiguration | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
+  if ((input.enabled !== undefined && typeof input.enabled !== "boolean")
+    || (input.smartSelection !== undefined && typeof input.smartSelection !== "boolean")) return null;
+  const preferences = {
+    ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
+    ...(typeof input.smartSelection === "boolean" ? { smartSelection: input.smartSelection } : {}),
+  };
   const adapter = (entry: unknown): HarnessWebSearchSettings | null => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
     const item = entry as Record<string, unknown>;
@@ -131,14 +138,17 @@ export function parseHarnessWebSearchSettings(value: unknown): HarnessWebSearchC
     return { provider, ...(endpoint ? { endpoint } : {}), ...(credentialRef ? { credentialRef } : {}) };
   };
   if (!("connections" in input)) {
+    if (!("provider" in input)) {
+      if (!Object.keys(preferences).length || Object.keys(input).some(key => !["enabled", "smartSelection", "fallbackConnectionIds"].includes(key))
+        || (input.fallbackConnectionIds !== undefined && (!Array.isArray(input.fallbackConnectionIds) || input.fallbackConnectionIds.length))) return null;
+      return { ...preferences, fallbackConnectionIds: [] };
+    }
     const legacy = adapter(input);
     if (!legacy) return null;
     const id = `configured-${legacy.provider}`;
-    return { connections: [{ ...legacy, id, name: legacy.provider, enabled: true }], defaultConnectionId: id, fallbackConnectionIds: [] };
+    return { connections: [{ ...legacy, id, name: legacy.provider, enabled: true }], defaultConnectionId: id, fallbackConnectionIds: [], ...preferences };
   }
   if (!Array.isArray(input.connections)
-    || (input.enabled !== undefined && typeof input.enabled !== "boolean")
-    || (input.smartSelection !== undefined && typeof input.smartSelection !== "boolean")
     || (input.defaultConnectionId !== undefined && typeof input.defaultConnectionId !== "string")
     || !Array.isArray(input.fallbackConnectionIds) || !input.fallbackConnectionIds.every(id => typeof id === "string")) return null;
   const connections: HarnessWebSearchConnection[] = [];
@@ -157,9 +167,7 @@ export function parseHarnessWebSearchSettings(value: unknown): HarnessWebSearchC
   const defaultConnectionId = typeof input.defaultConnectionId === "string" ? input.defaultConnectionId : undefined;
   const fallbackConnectionIds = [...new Set(input.fallbackConnectionIds as string[])];
   if ((defaultConnectionId !== undefined && !ids.has(defaultConnectionId)) || fallbackConnectionIds.some(id => !ids.has(id))) return null;
-  return { connections, ...(defaultConnectionId === undefined ? {} : { defaultConnectionId }), fallbackConnectionIds,
-    ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
-    ...(typeof input.smartSelection === "boolean" ? { smartSelection: input.smartSelection } : {}) };
+  return { connections, ...(defaultConnectionId === undefined ? {} : { defaultConnectionId }), fallbackConnectionIds, ...preferences };
 }
 
 /** Search ranking/exclusion defaults, never a network-access authorization. */
