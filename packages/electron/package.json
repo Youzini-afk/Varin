@@ -279,6 +279,7 @@
         "libsecret",
         "fuse3"
       ]
-    }
+    },
+    "afterSign": "scripts/after-sign.cjs"
   }
 }

@@ -49,7 +49,7 @@ export function createDesktopDriverPool(options: {
       // A new helper only releases keys it owns; it cannot safely reset the
       // physical keyboard after a previous process crashed.
       try {
-        const ready = await driver.request({ tool: purpose === 'input' ? 'release_input' : 'ping' });
+        const ready = await driver.request({ tool: purpose === 'input' && !spec.nativeWindows ? 'release_input' : 'ping' });
         if (!ready.ok) throw new Error(ready.error ?? 'Desktop helper initialization failed');
         if (closed) throw new Error('Desktop driver owner has stopped');
         return { driver, desktop };

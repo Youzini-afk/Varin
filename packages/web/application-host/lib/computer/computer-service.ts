@@ -1538,7 +1538,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const spec = desktop.managed === "linux-xvnc" ? await linuxDesktop.driverSpec()
       : localDriverSpawnSpec(machine.platform, options.driverDir ?? computerDriverDir());
     if (!spec) {
-      throw new HarnessServiceError("unavailable", `No ${machine.platform} driver is packaged for desktop "${desktopId}"`);
+      throw new HarnessServiceError("unavailable", `No ${machine.platform} driver is packaged for desktop "${desktopId}"`
+        + (machine.platform === "windows" ? ". Build the native helper with bun run computer:build on Windows, or reinstall the matching Windows package." : ""));
     }
     return { spec, desktop };
   };

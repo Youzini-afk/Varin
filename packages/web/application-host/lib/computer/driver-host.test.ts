@@ -1,14 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { createDriverSession, computerDriverDir, localDriverSpawnSpec } from "./driver-host.js";
 
 /**
  * Driver supervisor tests run against a real child process speaking the
- * line-delimited protocol — the same contract the PowerShell/Python drivers
+ * line-delimited protocol — the same contract the native/Python drivers
  * implement — so queueing, correlation, and exit handling are exercised for
  * real, not against a mock of the module under test.
  */
@@ -76,10 +74,6 @@ describe("computer driver host (BC4)", () => {
       expect((await driver.request({ tool: 'click', visual_feedback: true }, { onGesture: event => progress.push(event) })).ok).toBe(true);
       expect(progress).toEqual([{ phase: 'target', point: { x: 42, y: 73 } }, { phase: 'dispatched' }]);
     } finally { await driver.dispose(); }
-  });
-  it.skipIf(process.platform !== 'win32')('checks Windows relocation, geometry and capture modes without native desktop input', () => {
-    const script = fileURLToPath(new URL('../../../../computer-driver/windows/test-targeting.ps1', import.meta.url));
-    expect(execFileSync('powershell.exe', ['-NoProfile', '-File', script], { encoding: 'utf8' })).toContain('Windows targeting checks passed');
   });
   it("correlates concurrent requests and serializes them on the wire", async () => {
     const driver = createDriverSession(echoSpec());
@@ -225,10 +219,13 @@ describe("computerDriverDir (BC9 packaging)", () => {
     const logical = join(root, 'app.asar', 'server', 'computer-driver');
     const physical = join(root, 'app.asar.unpacked', 'server', 'computer-driver');
     mkdirSync(join(physical, 'windows'), { recursive: true });
-    writeFileSync(join(physical, 'windows', 'driver-host.ps1'), '# fixture');
+    writeFileSync(join(physical, 'windows', 'VarinComputer.exe'), 'native fixture');
+    writeFileSync(join(physical, 'windows', 'manifest.json'), JSON.stringify({ schema: 1, protocolVersion: 1, executable: 'VarinComputer.exe', version: '1.2.3', architecture: process.arch, buildId: 'test' }));
     try {
       const spec = localDriverSpawnSpec('windows', logical);
-      expect(spec?.env?.VARIN_COMPUTER_DRIVER_ENTRY).toBe(join(physical, 'windows', 'driver-host.ps1'));
+      expect(spec?.command).toBe(join(physical, 'windows', 'VarinComputer.exe'));
+      expect(spec?.args).toEqual([]);
+      expect(spec?.nativeWindows?.version).toBe('1.2.3');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -239,72 +236,12 @@ describe("computerDriverDir (BC9 packaging)", () => {
       expect(computerDriverDir()).toBe("/override/dir");
       delete process.env.VARIN_COMPUTER_DRIVER_DIR;
       const resolved = computerDriverDir();
-      // Source checkout or staged package copy — either way the Windows
-      // driver script must exist at the resolved location.
-      expect(existsSync(join(resolved, "windows", "driver-host.ps1"))).toBe(true);
+      // Source checkout or staged package copy owns the driver directory.
+      expect(existsSync(resolved)).toBe(true);
     } finally {
       if (original === undefined) delete process.env.VARIN_COMPUTER_DRIVER_DIR;
       else process.env.VARIN_COMPUTER_DRIVER_DIR = original;
     }
-  });
-});
-
-describe.skipIf(process.platform !== 'win32')('Windows driver transport', () => {
-  it('resolves exact app names before unrelated window titles without touching the desktop', () => {
-    const result = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
-$ErrorActionPreference = 'Stop'
-$tokens = $null; $errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:VARIN_TEST_DRIVER_RUNTIME, [ref]$tokens, [ref]$errors)
-if ($errors.Count) { throw $errors[0] }
-foreach ($functionName in @('Get-AppWindows', 'Resolve-App', 'Resolve-AppWindow')) {
-    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
-    Invoke-Expression $definition.Extent.Text
-}
-Add-Type 'public static class VarinWin32 { public static System.IntPtr GetForegroundWindow() { return System.IntPtr.Zero; } }'
-function ConvertTo-ObjectArray($value) { return ,@($value) }
-function Get-Process {
-    [pscustomobject]@{ Id = 1; ProcessName = 'explorer'; MainWindowTitle = 'Varin' }
-    [pscustomobject]@{ Id = 4; ProcessName = 'Varin'; MainWindowTitle = ''; MainWindowHandle = 40 }
-    [pscustomobject]@{ Id = 2; ProcessName = 'Varin'; MainWindowTitle = 'Project'; MainWindowHandle = 20 }
-    [pscustomobject]@{ Id = 3; ProcessName = 'editor'; MainWindowTitle = 'Notes' }
-}
-function Get-WindowProcessMap {
-    $window = @{ visible = $true; minimized = $false; bounds = @{ width = 800; height = 600 } }
-    return @{ 1 = @([pscustomobject](@{ title = 'Varin' } + $window), [pscustomobject](@{ title = 'Notes backup' } + $window));
-        2 = @([pscustomobject]@{ title = ''; handle = 20; visible = $false; bounds = @{ width = 0; height = 0 } },
-            [pscustomobject](@{ title = 'Project'; handle = 21 } + $window));
-        3 = @([pscustomobject](@{ title = 'Notes' } + $window));
-        4 = @([pscustomobject]@{ title = ''; handle = 40; visible = $false; bounds = @{ width = 0; height = 0 } }) }
-}
-@((Resolve-App 'Varin').Id, (Resolve-App 'VARIN.exe').Id, (Resolve-App '1').Id, (Resolve-App 'Notes').Id, (Resolve-App 'backup').Id,
-    (Resolve-App '4').Id, (Resolve-AppWindow (Resolve-App 'Varin') $null).ToInt64(),
-    (Resolve-AppWindow (Resolve-App 'Varin') '20').ToInt64()) | ConvertTo-Json -Compress
-`], { encoding: 'utf8', windowsHide: true, env: { ...process.env,
-      VARIN_TEST_DRIVER_RUNTIME: fileURLToPath(new URL('../../../../computer-driver/windows/runtime.ps1', import.meta.url)),
-    } });
-    expect(JSON.parse(result.trim())).toEqual([2, 2, 1, 3, 1, 4, 21, 20]);
-  });
-
-  it('round-trips multilingual input and reports readable startup errors from unpacked scripts', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'varin-computer-windows-'));
-    const logical = join(root, 'app.asar', "桌面'日本語", 'computer-driver');
-    const physical = join(root, 'app.asar.unpacked', "桌面'日本語", 'computer-driver');
-    const script = join(physical, 'windows', 'driver-host.ps1');
-    mkdirSync(join(physical, 'windows'), { recursive: true });
-    let driver: ReturnType<typeof createDriverSession> | undefined;
-    try {
-      writeFileSync(script, '\ufeff' + `
-$request = [Console]::In.ReadLine() | ConvertFrom-Json
-[Console]::Out.WriteLine((@{ id = $request.id; ok = $true; text = $request.text } | ConvertTo-Json -Compress))
-`);
-      driver = createDriverSession(localDriverSpawnSpec('windows', logical)!);
-      const text = '中文 · 日本語 · 한국어 · café';
-      expect((await driver.request({ tool: 'ping', text })).text).toBe(text);
-      await driver.dispose();
-      writeFileSync(script, '\ufeffthrow "启动失败：缺少组件，日本語，한국어"');
-      driver = createDriverSession(localDriverSpawnSpec('windows', logical)!);
-      await expect(driver.request({ tool: 'ping' })).rejects.toThrow('启动失败：缺少组件，日本語，한국어');
-    } finally { await driver?.dispose(); rmSync(root, { recursive: true, force: true }); }
   });
 });
 
@@ -387,5 +324,145 @@ describe('shared native desktop session', () => {
       expect(spec?.args).toEqual([]);
       expect(spec?.sharedDesktopSession).toBe(true);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+const NATIVE_DRIVER = `
+const net = require('net');
+const fs = require('fs');
+const input = require('readline').createInterface({input: process.stdin});
+input.pause();
+const held = new Map();
+const reply = value => console.log(JSON.stringify(value));
+let fenced = false;
+const server = process.env.VARIN_DRIVER_ROLE === 'capture' ? null : net.createServer(socket => {
+  let buffer = '';
+  socket.on('data', chunk => {
+    buffer += chunk;
+    while (buffer.includes('\\n')) {
+      const at = buffer.indexOf('\\n'); const op = JSON.parse(buffer.slice(0, at)); buffer = buffer.slice(at+1);
+      if (op.command === 'interrupt') { fenced = true; if (process.env.CONTROL_LOG) fs.appendFileSync(process.env.CONTROL_LOG, 'interrupt\\n'); }
+      socket.write(JSON.stringify({id:op.id,ok:true,released:process.env.FAIL_RELEASE !== '1'})+'\\n');
+      for (const [id, request] of held) if (op.command === 'interrupt' || op.requestId === id) {
+        if (request.tool !== 'wedged') { held.delete(id); reply({id,ok:false,cancelled:true,receipt:{effect:'partial'}}); }
+      }
+    }
+  });
+});
+function start() {
+  input.on('line', line => {
+    const op = JSON.parse(line);
+    if (op.tool === 'ping' || op.tool === 'capabilities') {
+      reply({id:op.id,ok:true,protocolVersion:Number(process.env.PROTOCOL || 1),build:{version:'1.2.3',architecture:process.arch,buildId:'test'},text:process.env.VARIN_DRIVER_ROLE}); return;
+    }
+    if (op.tool === 'exit') process.exit(9);
+    if (op.tool === 'awaitcancel' || op.tool === 'wedged') { held.set(op.id, op); return; }
+    if (op.tool === 'click' && process.env.DISPATCH_LOG) fs.appendFileSync(process.env.DISPATCH_LOG,'click\\n');
+    reply({id:op.id,ok:!fenced,text:'did:'+op.tool});
+  });
+  input.resume();
+}
+if (server) server.listen(process.env.VARIN_DRIVER_CONTROL_PIPE,start); else start();
+input.on('close',()=>process.exit(0));
+`;
+
+function nativeFixture(environment: NodeJS.ProcessEnv = {}, role = 'input') {
+  const directory = mkdtempSync(join(tmpdir(), 'varin-native-wire-'));
+  const spec = { command: process.execPath, args: ['-e', NATIVE_DRIVER],
+    nativeWindows: { version: '1.2.3', architecture: process.arch as 'x64' | 'arm64', buildId: 'test' },
+    controlPipe: process.platform === 'win32' ? `\\\\.\\pipe\\varin-test-${directory.split(/[\\/]/).at(-1)}` : join(directory, 'control.sock'),
+    env: { ...process.env, VARIN_DRIVER_ROLE: role, ...environment } as NodeJS.ProcessEnv };
+  const driver = createDriverSession(spec);
+  return { driver, spec, directory, async dispose() { await driver.dispose(); rmSync(directory, { recursive: true, force: true }); } };
+}
+
+describe('Windows native helper contract', () => {
+  it('rejects an incompatible handshake before delivering any desktop action', async () => {
+    const fixture = nativeFixture({ PROTOCOL: '99' }, 'capture');
+    try {
+      await expect(fixture.driver.request({ tool: 'click' })).rejects.toThrow('protocol or build identity');
+      expect(fixture.driver.alive()).toBe(false);
+    } finally { await fixture.dispose(); }
+  });
+
+  it.skipIf(process.platform !== 'win32')('cancels through the existing control connection and reuses the healthy original helper', async () => {
+    const fixture = nativeFixture();
+    try {
+      expect((await fixture.driver.request({ tool: 'ping' })).text).toBe('input');
+      for (let i = 0; i < 2; i++) {
+        const action = fixture.driver.request({ tool: 'awaitcancel' });
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(fixture.driver.cancel()).toBe(true);
+        expect((await action).cancelled).toBe(true);
+        expect((await fixture.driver.request({ tool: 'click' })).ok).toBe(true);
+      }
+      expect(await fixture.driver.interrupt!({ restoreFocus: false })).toEqual({ released: true });
+      expect(fixture.driver.alive()).toBe(false);
+    } finally { await fixture.dispose(); }
+  });
+
+  it.skipIf(process.platform !== 'win32')('confirms independent release and actual exit even when the original request never answers', async () => {
+    const fixture = nativeFixture();
+    try {
+      await fixture.driver.request({ tool: 'ping' });
+      const action = fixture.driver.request({ tool: 'wedged' });
+      const queued = fixture.driver.request({ tool: 'click' });
+      const outcomes = Promise.allSettled([action, queued]);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(await fixture.driver.interrupt!()).toEqual({ released: true });
+      expect((await outcomes).every(result => result.status === 'rejected')).toBe(true);
+      await expect(fixture.driver.request({ tool: 'click' })).rejects.toThrow(/disposed|interrupted/);
+      expect(fixture.driver.alive()).toBe(false);
+    } finally { await fixture.dispose(); }
+  });
+
+  it.skipIf(process.platform !== 'win32')('never converts failed release or a lost original helper into a release acknowledgement', async () => {
+    const failed = nativeFixture({ FAIL_RELEASE: '1' });
+    const crashed = nativeFixture();
+    try {
+      await failed.driver.request({ tool: 'ping' });
+      expect(await failed.driver.interrupt!()).toEqual({ released: false });
+      // Process close and pipe close can arrive in either order. Both lose the
+      // original effect receipt; neither can acknowledge release or replay it.
+      await expect(crashed.driver.request({ tool: 'exit' })).rejects.toThrow(
+        /Computer driver exited \(code 9\)|Computer input control channel closed; original input outcome is unknown/,
+      );
+      expect(crashed.driver.alive()).toBe(false);
+      await expect(crashed.driver.request({ tool: 'click' })).rejects.toThrow('original Computer input helper exited');
+      expect(await crashed.driver.interrupt!()).toEqual({ released: false });
+    } finally { await failed.dispose(); await crashed.dispose(); }
+  });
+
+  it.skipIf(process.platform !== 'win32')('releases the original native owner before direct disposal without claiming a higher-level receipt', async () => {
+    const fixture = nativeFixture();
+    const log = join(fixture.directory, 'control.log');
+    fixture.spec.env.CONTROL_LOG = log;
+    try {
+      await fixture.driver.request({ tool: 'ping' });
+      await fixture.driver.dispose();
+      expect(readFileSync(log, 'utf8')).toBe('interrupt\n');
+      expect(fixture.driver.alive()).toBe(false);
+    } finally { await fixture.dispose(); }
+  });
+
+  it('starts the read-only capture role without an input channel and validates a replacement handshake', async () => {
+    const fixture = nativeFixture({}, 'capture');
+    try {
+      expect(fixture.driver.interrupt).toBeUndefined();
+      expect((await fixture.driver.request({ tool: 'ping' })).text).toBe('capture');
+      await expect(fixture.driver.request({ tool: 'exit' })).rejects.toThrow('exited');
+      expect((await fixture.driver.request({ tool: 'capture_frame' })).ok).toBe(true);
+    } finally { await fixture.dispose(); }
+  });
+
+  it('does not start PowerShell or compile when the native artifact is missing', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'varin-native-missing-'));
+    try {
+      mkdirSync(join(directory, 'windows'));
+      writeFileSync(join(directory, 'windows', 'driver-host.ps1'), 'retired fixture');
+      expect(localDriverSpawnSpec('windows', directory)).toBeNull();
+      writeFileSync(join(directory, 'windows', 'VarinComputer.exe'), 'fixture');
+      expect(() => localDriverSpawnSpec('windows', directory)).toThrow('manifest');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

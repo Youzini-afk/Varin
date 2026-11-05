@@ -12,8 +12,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, watch } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
+import { createConnection, type Socket } from "node:net";
 import path from "node:path";
 import type { ComputerCapabilities, ComputerPlatform, ComputerGesture, ComputerActionReceipt } from "@varin/protocol";
 export type DriverGesture = Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target' | 'mechanism'>;
@@ -23,17 +24,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 const STDERR_TAIL_MAX_CHARS = 4000;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 
-// Set the transport encoding before PowerShell loads a file: startup failures
-// must use the same UTF-8 protocol as successful driver responses.
-const WINDOWS_DRIVER_BOOTSTRAP = `
-$ErrorActionPreference = 'Stop'
-$utf8 = New-Object System.Text.UTF8Encoding $false
-[Console]::InputEncoding = $utf8
-[Console]::OutputEncoding = $utf8
-$OutputEncoding = $utf8
-try { & $env:VARIN_COMPUTER_DRIVER_ENTRY }
-catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
-`;
+/** Versioned native Windows contract; Linux/macOS retain their existing wire. */
+export const WINDOWS_COMPUTER_PROTOCOL_VERSION = 1;
 
 /** The op vocabulary shared by every platform driver (README.md). */
 export interface DriverRequest {
@@ -64,6 +56,8 @@ export interface DriverRequest {
 }
 
 export interface DriverResponse {
+  protocolVersion?: number;
+  build?: { version: string; architecture: string; buildId?: string };
   receipt?: ComputerActionReceipt;
   /** Preflight rejection proved no input was sent; other failed responses remain uncertain. */
   rejected?: boolean;
@@ -93,7 +87,10 @@ export interface DriverResponse {
 }
 
 export interface DriverSpawnSpec {
-  independentInputRelease?: boolean;
+  /** Windows native build identity, verified before dispatching desktop work. */
+  nativeWindows?: { version: string; architecture: 'x64' | 'arm64'; buildId?: string };
+  /** Optional transport address for controlled process fixtures. Production uses a random named pipe. */
+  controlPipe?: string;
   /** One platform authorization/capture owner, with a separate read-only wire lane. */
   sharedDesktopSession?: boolean;
   command: string;
@@ -118,17 +115,27 @@ export function computerDriverDir(): string {
 
 /** Spawn spec for this platform's resident driver, or null when unsupported. */
 export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = computerDriverDir()): DriverSpawnSpec | null {
-  // Node can read virtual ASAR paths; external interpreters require real files.
+  // Node can read virtual ASAR paths; native executables and interpreters need real files.
   driverDir = remapAsarUnpackedPath(driverDir);
   if (platform === "windows") {
-    const script = path.join(driverDir, "windows", "driver-host.ps1");
-    if (!existsSync(script)) return null;
-    return {
-      command: "powershell.exe",
-      independentInputRelease: true,
-      args: ["-NoProfile", "-NonInteractive", "-MTA", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_DRIVER_BOOTSTRAP],
-      env: { ...process.env, VARIN_COMPUTER_DRIVER_ENTRY: script },
-    };
+    const windowsDir = existsSync(path.join(driverDir, "windows", "VarinComputer.exe"))
+      ? path.join(driverDir, "windows") : path.join(driverDir, "windows", "build");
+    const executable = path.join(windowsDir, "VarinComputer.exe");
+    if (!existsSync(executable)) return null;
+    const manifestPath = path.join(windowsDir, "manifest.json");
+    let manifest: Record<string, unknown>;
+    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>; }
+    catch { throw new Error(`Windows Computer helper manifest is missing or invalid: ${manifestPath}. Run bun run computer:build on Windows.`); }
+    if (manifest.schema !== 1 || manifest.protocolVersion !== WINDOWS_COMPUTER_PROTOCOL_VERSION
+      || manifest.executable !== 'VarinComputer.exe' || typeof manifest.version !== 'string'
+      || !['x64', 'arm64'].includes(String(manifest.architecture)) || typeof manifest.buildId !== 'string') {
+      throw new Error('Windows Computer helper build/protocol manifest is incompatible; rebuild this Application Host');
+    }
+    if (process.platform === 'win32' && manifest.architecture !== process.arch) {
+      throw new Error(`Windows Computer helper architecture ${manifest.architecture} does not match this Host (${process.arch})`);
+    }
+    return { command: executable, args: [], cwd: path.dirname(executable),
+      nativeWindows: { version: manifest.version, architecture: manifest.architecture as 'x64' | 'arm64', buildId: manifest.buildId } };
   }
   if (platform === "linux") {
     const script = path.join(driverDir, "linux", "driver-host.py");
@@ -164,8 +171,8 @@ export interface ComputerDriverSession {
   request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number; onGesture?: (event: DriverGesture) => void; beforeDispatch?: () => void }): Promise<DriverResponse>;
   /**
    * Interrupt the in-flight request at the driver's next internal checkpoint
-   * (BC4.A). stdin stays sequential, so cancellation travels through a flag
-   * file the long operations poll; returns false when nothing is in flight.
+   * (BC4.A). Windows uses its persistent native control pipe; other platforms
+   * retain their flag-file channel. Returns false when nothing is in flight.
    */
   cancel(): boolean;
   /** Read-only capture on the same native session, independent of ordered input. */
@@ -188,11 +195,24 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
   let disposed = false;
+  let disposal: Promise<void> | undefined;
   let started = false;
   let interruption: Promise<{ released: boolean }> | undefined;
+  let initialization: Promise<void> | undefined;
+  let control: Socket | null = null;
+  let controlBuffer = '';
+  const controlPending = new Map<string, { resolve(value: { released: boolean }): void; reject(error: Error): void; timeout: ReturnType<typeof setTimeout> }>();
+  const role = spec.env?.VARIN_DRIVER_ROLE ?? 'input';
+  const controlPipe = spec.nativeWindows && role === 'input'
+    ? spec.controlPipe ?? `\\\\.\\pipe\\varin-computer-${randomUUID()}` : undefined;
+  const closeControl = (error: Error) => {
+    const socket = control; control = null; socket?.destroy();
+    for (const pending of controlPending.values()) { clearTimeout(pending.timeout); pending.reject(error); }
+    controlPending.clear(); controlBuffer = '';
+  };
   const retiring = new Set<Promise<unknown>>();
-  // Side-channel cancellation: long native ops poll <dir>/<id>.cancel so a
-  // cancel lands mid-operation even while stdin is unread.
+  // Linux/macOS keep their existing per-request flag cancellation channel.
+  // Windows owns one duplex control pipe and never creates these files.
   const cancelDir = path.join(os.tmpdir(), `varin-computer-driver-${process.pid}-${randomUUID()}`);
   const clearCancelDir = () => {
     try { rmSync(cancelDir, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -246,7 +266,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   };
 
   const pump = () => {
-    if (disposed || active || queue.length === 0) return;
+    if (disposed || interruption || active || queue.length === 0) return;
     const next = queue.shift()!;
     active = next;
     try { next.beforeDispatch?.(); }
@@ -270,6 +290,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   const stop = (error: Error): void => {
     const target = child;
     child = null;
+    closeControl(error);
+    if (role === 'capture') initialization = undefined;
     failAll(error);
     if (target) {
       // A failed caller wait does not prove the native helper stopped emitting
@@ -286,10 +308,12 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     if (started && spec.env?.VARIN_DRIVER_ROLE !== 'capture') throw new Error('The original Computer input helper exited; acquire a new session without reusing its physical release identity');
     buffer = "";
     stderrTail = "";
-    mkdirSync(cancelDir, { recursive: true });
+    if (!spec.nativeWindows) mkdirSync(cancelDir, { recursive: true });
     const spawned = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
-      env: { ...(spec.env ?? process.env), VARIN_DRIVER_CANCEL_DIR: cancelDir },
+      env: { ...(spec.env ?? process.env), ...(spec.nativeWindows
+        ? { VARIN_DRIVER_ROLE: role, ...(controlPipe ? { VARIN_DRIVER_CONTROL_PIPE: controlPipe } : {}) }
+        : { VARIN_DRIVER_CANCEL_DIR: cancelDir }) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -317,13 +341,15 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       if (child !== spawned) return;
       stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_CHARS);
     });
-    spawned.on("error", () => {
+    spawned.on("error", (error) => {
       if (child !== spawned) return;
-      stop(new Error(`Computer driver failed to start: ${spec.command}`));
+      stop(new Error(`Computer driver failed to start: ${spec.command}: ${error.message}`, { cause: error }));
     });
     spawned.on("close", (code, signal) => {
       if (child !== spawned) return;
       child = null;
+      if (role === 'capture') initialization = undefined;
+      closeControl(new Error("Computer control connection closed with its original helper"));
       const tail = stderrTail.trim();
       failAll(new Error(
         `Computer driver exited (code ${code ?? "null"}${signal ? `, signal ${signal}` : ''})`
@@ -334,8 +360,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   };
 
   const request: ComputerDriverSession["request"] = (op, options = {}) => new Promise<DriverResponse>((resolve, reject) => {
-    if (disposed) {
-      reject(new Error("Computer driver session is disposed"));
+    if (disposed || interruption) {
+      reject(new Error("Computer driver session is disposed or interrupted"));
       return;
     }
     queue.push({ id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject,
@@ -343,16 +369,74 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     pump();
   });
 
+  const sendControl = (command: Record<string, unknown>): Promise<{ released: boolean }> => new Promise((resolve, reject) => {
+    if (!control || control.destroyed) { reject(new Error('Computer input control channel is unavailable')); return; }
+    const id = randomUUID();
+    const timeout = setTimeout(() => { controlPending.delete(id); reject(new Error('Computer input release acknowledgement timed out')); }, DEFAULT_REQUEST_TIMEOUT_MS);
+    controlPending.set(id, { resolve, reject, timeout });
+    control.write(JSON.stringify({ ...command, id }) + '\n', error => {
+      if (!error) return;
+      const pending = controlPending.get(id);
+      if (pending) { clearTimeout(pending.timeout); controlPending.delete(id); pending.reject(error); }
+    });
+  });
+
+  const connectControl = (): Promise<void> => new Promise((resolve, reject) => {
+    if (!controlPipe) { resolve(); return; }
+    const socket = createConnection(controlPipe);
+    control = socket; socket.setEncoding('utf8');
+    const deadline = setTimeout(() => { socket.destroy(); reject(new Error('Computer input control connection timed out')); }, DEFAULT_REQUEST_TIMEOUT_MS);
+    socket.once('connect', () => { clearTimeout(deadline); resolve(); });
+    socket.on('error', error => { clearTimeout(deadline); reject(error); if (control === socket) stop(error); });
+    socket.on('close', () => { clearTimeout(deadline); if (control === socket) stop(new Error('Computer input control channel closed; original input outcome is unknown')); });
+    socket.on('data', (chunk: string) => {
+      if (control !== socket) return;
+      controlBuffer += chunk;
+      if (Buffer.byteLength(controlBuffer) > MAX_FRAME_BYTES) { stop(new Error('Computer control response exceeded the frame limit')); return; }
+      for (;;) {
+        const newline = controlBuffer.indexOf('\n'); if (newline < 0) break;
+        const line = controlBuffer.slice(0, newline); controlBuffer = controlBuffer.slice(newline + 1);
+        let message: { id?: string; ok?: boolean; released?: boolean; error?: string };
+        try { message = JSON.parse(line); } catch { stop(new Error('Malformed Computer control response')); return; }
+        const pending = message.id && controlPending.get(message.id);
+        if (!pending) continue;
+        clearTimeout(pending.timeout); controlPending.delete(message.id!);
+        if (message.ok !== true || typeof message.released !== 'boolean') pending.reject(new Error(message.error ?? 'Computer input release failed'));
+        else pending.resolve({ released: message.released });
+      }
+    });
+  });
+
+  const initialize = (): Promise<void> => {
+    if (!spec.nativeWindows) return Promise.resolve();
+    if (!initialization) initialization = (async () => {
+      const ready = await request({ tool: 'ping' });
+      const expected = spec.nativeWindows!;
+      if (!ready.ok || ready.protocolVersion !== WINDOWS_COMPUTER_PROTOCOL_VERSION
+        || ready.build?.version !== expected.version || ready.build?.architecture !== expected.architecture
+        || (expected.buildId && ready.build?.buildId !== expected.buildId)) {
+        throw new Error(ready.error ?? 'Windows Computer helper protocol or build identity does not match this Host');
+      }
+      await connectControl();
+    })().catch(error => { stop(error instanceof Error ? error : new Error(String(error))); throw error; });
+    return initialization;
+  };
+
   const cancel: ComputerDriverSession["cancel"] = () => {
     const inFlight = active;
     if (!inFlight) return false;
+    if (spec.nativeWindows) {
+      if (!control || control.destroyed) return false;
+      void sendControl({ command: 'cancel', requestId: inFlight.id }).catch(error => {
+        if (!disposed) stop(error instanceof Error ? error : new Error(String(error)));
+      });
+      return true;
+    }
     try {
       mkdirSync(cancelDir, { recursive: true });
       writeFileSync(path.join(cancelDir, `${inFlight.id}.cancel`), "cancel\n");
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   };
 
   // Coalesce concurrent viewers, but never queue their frame behind a long input.
@@ -378,6 +462,10 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   // Wrap: cache the capabilities probe per session lifetime.
   const wrapped: ComputerDriverSession = {
     request: async (op, options) => {
+      if (spec.nativeWindows) {
+        await Promise.allSettled([...retiring]);
+        await initialize();
+      }
       const response = await request(op, options);
       if (op.tool === "capabilities" && response.ok && response.capabilities) {
         caps = response.capabilities as unknown as ComputerCapabilities;
@@ -386,28 +474,18 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     },
     cancel,
     ...(spec.sharedDesktopSession ? { capture } : {}),
-    ...(spec.independentInputRelease ? { interrupt: (options?: { restoreFocus?: boolean }) => {
+    ...(spec.nativeWindows && role === 'input' ? { interrupt: (options?: { restoreFocus?: boolean }) => {
       if (interruption) return interruption;
       interruption = (async () => {
         if (!isAlive()) return { released: !started };
-        const signalPath = path.join(cancelDir, `${randomUUID()}.release`);
-        const ackPath = `${signalPath}.ack`;
-        const released = await new Promise<boolean>((resolve) => {
-          let finished = false;
-          const finish = (result: boolean) => {
-            if (finished) return; finished = true;
-            observer.close(); clearTimeout(deadline); resolve(result);
-          };
-          const inspect = () => {
-            try { const value = JSON.parse(readFileSync(ackPath, 'utf8')) as { released?: boolean }; finish(value.released === true); } catch { /* wait for the atomic receipt */ }
-          };
-          const observer = watch(cancelDir, (_event, name) => { if (name?.toString() === path.basename(ackPath)) inspect(); });
-          const deadline = setTimeout(() => finish(false), DEFAULT_REQUEST_TIMEOUT_MS);
-          observer.on('error', () => finish(false));
-          try { writeFileSync(signalPath, options?.restoreFocus === false ? 'release\n' : 'restore\n'); inspect(); } catch { finish(false); }
-        });
-        // The native owner is fenced before this receipt. Closing its UIA worker
-        // prevents a stalled call from later starting the rest of an old script.
+        let released = false;
+        try {
+          // Startup may still be establishing the same original control connection.
+          await initialization;
+          released = (await sendControl({ command: 'interrupt', restoreFocus: options?.restoreFocus !== false })).released;
+        } catch { /* Failure is not proof of physical release. */ }
+        // The original native owner is fenced before its acknowledgement; actual
+        // process closure is also required before another owner can be acquired.
         await wrapped.dispose();
         return { released };
       })();
@@ -415,11 +493,24 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     } } : {}),
     get capabilities() { return caps; },
     alive: isAlive,
-    dispose: async () => {
+    dispose: () => {
+      if (disposal) return disposal;
+      // Fence new requests synchronously, including queued callbacks. Direct
+      // reset/disposal also asks the original native input owner to release;
+      // this does not manufacture a release receipt for higher-level callers.
       disposed = true;
-      stop(new Error("Computer driver disposed"));
-      await Promise.allSettled([...retiring]);
-      clearCancelDir();
+      disposal = (async () => {
+        if (spec.nativeWindows && role === 'input' && !interruption && isAlive()) {
+          try {
+            await initialization;
+            await sendControl({ command: 'interrupt', restoreFocus: false });
+          } catch { /* Preserve unknown cleanup; still await the original exit. */ }
+        }
+        stop(new Error("Computer driver disposed"));
+        await Promise.allSettled([...retiring]);
+        clearCancelDir();
+      })();
+      return disposal;
     },
   };
   return wrapped;

@@ -106,7 +106,7 @@ test('kernel staging and Electron packaging consume the owning wire version', ()
     assert.equal(manifest.protocolVersion, protocolVersion);
     process.env.VARIN_TARGET_ARCH = 'x64'; process.env.VARIN_TARGET_TRIPLE = 'x86_64-unknown-linux-gnu';
     const afterPack = require('./after-pack.cjs');
-    const context = { electronPlatformName: 'linux', appOutDir: temporary };
+    const context = { electronPlatformName: 'linux', arch: 1, appOutDir: temporary };
     fs.mkdirSync(path.join(temporary, 'resources', 'app.asar.unpacked', 'node_modules', '@varin', 'web'), { recursive: true });
     // Reaching the next payload check proves the original staged manifest was accepted.
     assert.throws(() => afterPack(context), /Missing target TriviumDB binary/);
@@ -118,3 +118,40 @@ test('kernel staging and Electron packaging consume the owning wire version', ()
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 });
+
+for (const [architecture, builderArch, machine] of [['arm64', 3, 0xaa64], ['x64', 1, 0x8664]]) {
+  test(`afterPack validates the ${architecture} Windows target from context without relying on the host or environment`, () => {
+    const root = fileURLToPath(new URL('../../../', import.meta.url));
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-package-target-'));
+    const previousArch = process.env.VARIN_TARGET_ARCH, previousTriple = process.env.VARIN_TARGET_TRIPLE;
+    try {
+      delete process.env.VARIN_TARGET_ARCH; delete process.env.VARIN_TARGET_TRIPLE;
+      const header = Buffer.alloc(0x80);
+      header.write('MZ'); header.writeUInt32LE(0x40, 0x3c); header.write('PE\0\0', 0x40); header.writeUInt16LE(machine, 0x44);
+      const prebuilt = path.join(temporary, 'fixture-kernel.exe');
+      fs.writeFileSync(prebuilt, header);
+      execFileSync(process.execPath, [path.join(root, 'scripts/build-kernel.mjs'), '--stage', path.join(temporary, 'resources/kernel'),
+        '--platform', 'win32', '--arch', architecture, '--target', defaultKernelTargetTriple('win32', architecture)], {
+        env: { ...process.env, VARIN_KERNEL_PREBUILT: prebuilt }, stdio: 'pipe',
+      });
+      const packagedWeb = path.join(temporary, 'resources/app.asar.unpacked/node_modules/@varin/web');
+      fs.mkdirSync(packagedWeb, { recursive: true });
+      const afterPack = require('./after-pack.cjs');
+      const context = { electronPlatformName: 'win32', arch: builderArch, appOutDir: temporary,
+        packager: { appInfo: { version: '1.2.3' } } };
+      // The next owner's missing helper proves the target kernel was accepted;
+      // this deliberately does not pretend the header fixture is executable.
+      assert.throws(() => afterPack(context), error => error.code === 'ENOENT'
+        && error.path === path.join(packagedWeb, 'server/computer-driver/windows/manifest.json'));
+      process.env.VARIN_TARGET_ARCH = architecture === 'arm64' ? 'x64' : 'arm64';
+      assert.throws(() => afterPack(context), /Package architecture .* conflicts with VARIN_TARGET_ARCH=/);
+      delete process.env.VARIN_TARGET_ARCH;
+      assert.throws(() => afterPack({ ...context, arch: 0 }), /Unsupported package architecture: 0/);
+      assert.throws(() => afterPack({ ...context, arch: undefined }), /Unsupported package architecture: undefined/);
+    } finally {
+      if (previousArch === undefined) delete process.env.VARIN_TARGET_ARCH; else process.env.VARIN_TARGET_ARCH = previousArch;
+      if (previousTriple === undefined) delete process.env.VARIN_TARGET_TRIPLE; else process.env.VARIN_TARGET_TRIPLE = previousTriple;
+      fs.rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+}

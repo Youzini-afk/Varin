@@ -31,7 +31,7 @@ export async function prepareDesktopProduct({ platform, architecture }) {
       build() { runBuild('scripts/build-vm-guest-bundle.mjs'); },
     });
   }
-  const host = await prepareHost();
+  const host = await prepareHost(platform, architecture);
   const kernel = await prepareKernel(platform, architecture);
   runBuild('packages/electron/scripts/prepare-native-runtime.mjs', [], { VARIN_TARGET_PLATFORM: platform, VARIN_TARGET_ARCH: architecture });
   const bundle = await cache.task(`desktop-bundle-${target}`, {

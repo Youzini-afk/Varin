@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { computerDriverFixture } from "./driver-fixture.test-helper.js";
 import { createComputerService as createOwner, type ComputerServiceOptions } from "./computer-service.js";
 import type { ComputerActor } from '@varin/protocol';
 import express from 'express';
@@ -138,7 +139,8 @@ const createComputerService = (options: ComputerServiceOptions) => {
   const resolveScope: NonNullable<ComputerServiceOptions['resolveScope']> = options.resolveScope ?? (async work => {
     const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
   });
-  const service = createOwner({ ...options, resolveActor, resolveScope }) as ReturnType<typeof createOwner> & { [K in 'observe' | 'act' | 'open' | 'browser' | 'office']: (params: Parameters<ReturnType<typeof createOwner>[K]>[0] & { fixtureThreadId?: string }) => ReturnType<ReturnType<typeof createOwner>[K]> };
+  const service = createOwner({ ...options, resolveActor, resolveScope,
+    ...(options.createDriver && options.platform === "windows" && !options.driverDir ? { driverDir: computerDriverFixture(newDataDir()) } : {}) }) as ReturnType<typeof createOwner> & { [K in 'observe' | 'act' | 'open' | 'browser' | 'office']: (params: Parameters<ReturnType<typeof createOwner>[K]>[0] & { fixtureThreadId?: string }) => ReturnType<ReturnType<typeof createOwner>[K]> };
   directActions.set(service, service.act);
   // Direct owner tests enter through the same real assignment admission as product tools.
   for (const name of ['observe', 'act', 'open', 'browser', 'office'] as const) {

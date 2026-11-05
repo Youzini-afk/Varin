@@ -12,6 +12,7 @@ import { afterEach, expect, it } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { configureRuntimeUrlResolver, createThreadsHttpAPI, setRuntimeExtraHeaders } from '@varin/application-client';
+import { computerDriverFixture } from '../computer/driver-fixture.test-helper.js';
 import { createComputerService } from '../computer/computer-service.js';
 import type { ComputerDriverSession, DriverResponse } from '../computer/driver-host.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
@@ -82,7 +83,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
     },
   };
   const computers = createComputerService({ client: kernel, hostId: kernelOptions.hostId, dataDir: path.join(root, 'computer'), platform: 'windows',
-    createDriver: () => driver,
+    driverDir: computerDriverFixture(root), createDriver: () => driver,
     onControlEvent: event => computer.acceptControlEvent(event).then(() => {}),
     onControlEventCancel: command => computer.cancelControlEvents(command),
     resolveActor: async work => work.runtime === 'agent' ? (await computer.resolve(work)).actor : null,

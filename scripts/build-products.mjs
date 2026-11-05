@@ -66,14 +66,19 @@ export async function exportFrontend(directory) {
   await cache.export('frontend', directory, built.directory);
 }
 
-export async function prepareHost() {
+export async function prepareHost(platform = process.env.VARIN_TARGET_PLATFORM || process.platform,
+  arch = process.env.VARIN_TARGET_ARCH || process.arch) {
+  arch = kernelIdentity.normalizeKernelArchitecture(arch);
+  const windowsBuild = platform === 'win32' ? await import('../packages/computer-driver/windows/build-helper.mjs') : null;
+  const computerBuild = windowsBuild?.windowsHelperBuildIdentity({ architecture: arch });
   const runtime = await prepareRuntime();
-  const directory = path.join(productRoot, `host-${process.platform}-${process.arch}`, 'server');
-  const result = await cache.task(`host-${process.platform}-${process.arch}`, {
+  const directory = path.join(productRoot, `host-${platform}-${arch}`, 'server');
+  const result = await cache.task(`host-${platform}-${arch}`, {
     inputs: [...sharedInputs, 'packages/web/application-host', 'packages/web/scripts', 'packages/web/tsconfig.application-host.json',
-      'packages/computer-driver', 'scripts/host-production-boundary.mjs', 'scripts/refresh-grammar-manifest.mjs'],
-    values: { ...environment, platform: process.platform, arch: process.arch, runtime: runtime.digest }, outputs: [directory],
-    build() { runBuild('packages/web/scripts/build-application-host.mjs', ['--output', directory]); },
+      'packages/computer-driver', 'scripts/host-production-boundary.mjs', 'scripts/refresh-grammar-manifest.mjs',
+      ...(windowsBuild?.windowsHelperInputs ?? [])],
+    values: { ...environment, platform, arch, runtime: runtime.digest, computerBuild: computerBuild?.buildId ?? null }, outputs: [directory],
+    build() { runBuild('packages/web/scripts/build-application-host.mjs', ['--output', directory], { VARIN_TARGET_PLATFORM: platform, VARIN_TARGET_ARCH: arch }); },
   });
   return { directory, ...result };
 }

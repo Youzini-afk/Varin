@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 import { createKernelClient } from '../kernel/kernel-client.js';
+import { computerDriverFixture } from './driver-fixture.test-helper.js';
 import { createComputerService } from './computer-service.js';
 
 it('persists computer steps in the real kernel, pages every seq and survives reopening', async () => {
@@ -18,7 +19,7 @@ it('persists computer steps in the real kernel, pages every seq and survives reo
     const client = createKernelClient({ hostId: 'evidence-host', storageRoot: join(directory, 'kernel'), buildVersion: version,
       kernelPath, allowCargoDevRunner: false });
     await client.start();
-    const service = createComputerService({ client, hostId: 'evidence-host', dataDir: directory, platform: 'windows',
+    const service = createComputerService({ client, hostId: 'evidence-host', dataDir: directory, platform: 'windows', driverDir: computerDriverFixture(directory),
       resolveActor: async () => ({ execution, rootWork: work, rootExecution: execution, label: 'Evidence fixture' }),
       resolveScope: async () => ({ work, rootWork: work, currentExecution: execution, currentRootExecution: execution }),
       createDriver: () => ({ request: async () => ({ id: 'driver', ok: true, pid: 123 }),

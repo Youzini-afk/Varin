@@ -4,6 +4,10 @@ Each Application Host owns one packaged `varin-kernel` executable. It combines t
 with the native Agent runtime, using separate domain authorities inside the same private component.
 It has no public TCP server and is shared by Web, Electron and remote Hosts.
 
+The workspace also contains [varin-computer-windows](crates/varin-computer-windows/README.md), a
+separate lightweight desktop executable. It shares the toolchain/lockfile, not kernel storage or Agent
+ownership, and is built and packaged through the Computer driver platform entry.
+
 - [System architecture](../docs/architecture.md): product processes and state ownership
 - [Resources and recovery](../docs/resources.md): source selection, files, processes and journals
 - [Agent runtime](crates/varin-runtime/README.md): Catalog, execution, context and provider contracts

@@ -1,283 +1,78 @@
 # Computer Use 原生辅助程序与构建交付
 
-状态：设计方向已确认，待实施。2026-11-05。
+状态：Windows 原生实现与 Host/交付接线已落地，平台实机验收仍待完成。2026-11-05。
 
-本轮目标是将 Windows Computer Use 的生产执行入口迁移为构建阶段生成、随对应平台包交付的独立原生程序。当前 Windows 仍使用 PowerShell 常驻驱动。
+## 当前实现
 
-## 1. 设计决定
+Windows 的生产入口是构建阶段生成的 `VarinComputer.exe`，Application Host 直接启动随本代产物发布的
+程序。旧 PowerShell/C# 桌面驱动与动态编译入口已移除。Linux 仍使用 Python；macOS 保持现有 Swift helper。
 
-Windows 使用 Rust 和系统 Win32 / UI Automation 接口，实现小型独立程序 `VarinComputer.exe`。Application Host 直接启动该程序；用户运行产品时不再加载桌面驱动脚本、启动 PowerShell 或通过 `Add-Type` 编译 C#。
+原设计的执行责任不变：ComputerService、Agent 身份、控制权、输入排序、观察记录、工具回执和远端路由仍由
+现有 owner 管理。辅助程序只持有本次进程的 Windows API/COM、截图资源和合成输入状态，不创建另一套 runtime、
+权限服务、会话数据库、自更新服务或监听端口。
 
-继续使用现有 ComputerService、Agent 身份、桌面控制权、输入顺序、远端路由、观察记录及工具回执。辅助程序承担具体 Windows 桌面操作，不拥有另一套 Agent runtime、资源授权服务或会话数据库。
-
-选择 Rust 的依据是项目已有相应构建工具链，且 Windows 原生 API 可以直接调用。辅助程序只引入协议解析、Windows 绑定及实际必要的依赖，不链接 `varin-runtime`、Storage、TDB、Wasmtime 或整个内核。C# 是可行路线，但现有主要逻辑仍在 PowerShell；为复用少量 C# 接口声明而继续承担托管运行时交付，不是本方案的优先选择。
-
-本次迁移完整保留当前 Windows 桌面能力。现有行为有确认缺陷时，按具体问题调整，不把重写当成缩减能力、改变工具含义或增加默认权限限制的理由。
-
-具体杀软名称不作为架构改造的前置条件。可以确定消除的是运行时脚本加载、解释器启动和动态编译这条依赖链；后续若出现针对新二进制的具体误报，再依据该产物和检测信息处理。
-
-## 2. 当前实现与证据
-
-当前 Windows 启动过程为：
-
-```text
-Application Host
-  → powershell.exe
-  → driver-host.ps1
-  → 加载 runtime.ps1 与 .NET UIAutomation 等程序集
-  → Add-Type 编译 native-win32.cs / input-controller.cs
-  → 接收逐行 JSON 请求
-```
-
-驱动本身已经常驻，不是每次操作都启动 PowerShell。需要消除的启动成本发生在每个驱动实例创建时；截图实例也会付出相应初始化成本。
-
-| 现有入口 | 实际职责 |
+| 责任 | 当前入口 |
 | --- | --- |
-| [driver-host.ts](../../packages/web/application-host/lib/computer/driver-host.ts) | 定位驱动、按平台启动、请求队列、取消、释放输入、进程退出与回执 |
-| [desktop-drivers.ts](../../packages/web/application-host/lib/computer/desktop-drivers.ts) | 按桌面复用输入/截图实例，协调启动与关闭 |
-| [Windows driver-host.ps1](../../packages/computer-driver/windows/driver-host.ps1) | 常驻请求循环、操作完成及失败响应 |
-| [Windows runtime.ps1](../../packages/computer-driver/windows/runtime.ps1) | 窗口与控件查询、目标定位、截图、输入和能力声明 |
-| [input-controller.cs](../../packages/computer-driver/windows/input-controller.cs) | 独立于 UIA 请求线程的输入跟踪、取消与释放回执 |
-| [build-application-host.mjs](../../packages/web/scripts/build-application-host.mjs) | 将驱动放入当前 Host 构建目录；macOS 已在此调用辅助程序构建 |
-| [macOS build-helper.mjs](../../packages/computer-driver/macos/build-helper.mjs) | 按架构编译 Swift helper、签名、验证并发布候选 bundle |
-| [Electron after-pack.cjs](../../packages/electron/scripts/after-pack.cjs) | 检查运行时布局及 macOS helper 的架构、签名 |
-
-Windows 当前已实现目标重新定位、窗口/DPI 检查、输入事件回执和独立释放按键通道。迁移必须复用这些行为知识，不能只实现“截图与点击”。平台合同见 [Computer Driver README](../../packages/computer-driver/README.md) 和 [Host Computer 文档](../../packages/web/application-host/lib/computer/DOCUMENTATION.md)。
-
-## 3. 职责与部署位置
-
-```text
-Agent / 用户
-    ↓
-Rust Catalog 与现有 ComputerService
-    控制权、原调用身份、输入排序、观察与结果记录
-    ↓
-实际目标 Host 的平台适配器
-    ↓
-VarinComputer.exe
-    Windows 窗口、UIA、截图、输入、取消与释放
-```
-
-### 3.1 Application Host
-
-Host 继续决定哪个工作可以访问哪个桌面，维护用户接管与交还、观察关联、远端身份、队列和退出生命周期。它负责启动与回收辅助程序，并将实际执行回执接回原工具调用。
-
-辅助程序不自行连接模型、不判断 Bot/主 Agent/子 Agent 的产品角色，也不读取用户提供商配置。它只执行已进入现有 ComputerService 的桌面请求。
-
-### 3.2 辅助程序
-
-辅助程序拥有自己的 Windows API 对象、截图资源、当前请求和自己注入的按键/鼠标状态。它不创建永久服务，不要求普通用户安装编译器、PowerShell 模块或额外托管运行时。
-
-普通桌面操作以当前交互用户身份运行。目标程序的权限状态仍由 Windows 决定；遇到系统权限问题时给出相应执行结果，不通过默认提升整个 Varin 进程来处理。
-
-### 3.3 本地、Web 与远端
-
-- Electron 使用内嵌 Application Host 所带的辅助程序。
-- 独立 Web Host 同样可以使用辅助程序，是否可操作桌面取决于该 Host 所在系统及实际交互会话。
-- 远端操作由目标 Host 启动目标平台的辅助程序，客户端浏览器或协调 Host 不代替它执行。
-- 无交互桌面的服务器可以继续提供文件、命令和其他能力；桌面能力显示实际不可用原因。
-- 现有文件工具、终端、Electron Browser Use 及应用级桥接保留原 owner。此 EXE 专门承担 Windows 桌面后端。
-
-## 4. Windows 实现结构
-
-建议新增独立的 `varin-computer-windows` Rust crate，纳入现有 Rust 工具链与依赖维护。原生入口仅在 Windows 目标构建；可移植的协议、目标匹配与回执逻辑可以单独测试，不让其他平台的常规构建被迫链接 Windows GUI 库。
-
-内部按职责划分模块，而非增加进程服务层：
-
-| 模块 | 职责 |
-| --- | --- |
-| 协议入口 | UTF-8 请求解析、响应与进度输出、启动握手、Host 连接寿命 |
-| 窗口与目标 | 进程/窗口枚举、选择、HWND 与原观察目标核对 |
-| UI Automation | 控件树、属性、pattern、焦点和值读取及语义操作 |
-| 输入所有者 | 鼠标/键盘事件、已按下状态、取消、释放与事件结果 |
-| 截图 | 窗口截图、屏幕回退、桌面帧、图像编码及资源释放 |
-
-调用系统宽字符接口处理名称、路径与文本；传输始终使用 UTF-8，图像继续遵守现有协议。输入 Unicode 文本时正确处理 UTF-16 代理对，不依赖 Windows 当前代码页。
-
-PNG/JPEG 编码优先使用系统 WIC。截图沿用已有 `PrintWindow` 与屏幕复制行为，并保留截图来源和坐标核对；更换截图后端应作为有单独行为依据的后续优化，不夹带进本次入口迁移。
-
-应用清单使用普通用户运行级别和与坐标实现一致的 DPI 声明。可执行文件有稳定的产品名、文件描述、版本资源和图标，避免运行中的进程变成临时脚本或随机名称。
-
-## 5. 并发、取消与生命周期
-
-### 5.1 普通操作与 UIA
-
-一个桌面仍只有一个有序输入所有者。普通操作按现有顺序执行，不并行竞争前台窗口或鼠标键盘。
-
-UIA 在专门的 MTA 线程中运行。UIA 对象由该线程创建和使用，跨线程传递序列化后的数据与目标描述，不随意传递原始 COM 对象。属性读取使用适合当前查询的 UIA 缓存请求，减少逐个属性的跨进程往返。
-
-协议读取、取消通知和输入释放不能依赖 UIA 工作线程继续运行。尤其不能在持有输入状态锁时调用可能等待目标应用的 UIA、窗口消息或截图接口。
-
-### 5.2 Windows 控制通道
-
-保留 Host 现有 `cancel()` / `interrupt()` 的外部职责，Windows 内部使用一个实例级、本机控制管道交付取消和释放命令。普通请求继续使用 stdin/stdout 的逐行 JSON。
-
-控制管道由对应辅助程序实例拥有，限制为本机和所属用户，地址随本次进程启动交付。它不作为公开 RPC 服务，不新增端口、远端身份或独立账号体系。每个输入实例只有一条控制连接，不为每次点击创建通道。
-
-一次取消的处理顺序：
-
-1. 标记原请求取消；后续输入事件检查该状态。
-2. 通过输入所有者释放该实例仍持有的合成按键/按钮。
-3. 返回实际释放结果；原请求在可退出的位置返回已执行部分及取消结果。
-4. 若原生调用已经无法退出，Host 按现有停止流程结束旧实例，确认退出后才创建替代实例。
-
-释放输入的短临界区与每次实际输入发送协调，确保“释放完成”之后旧请求不能再继续发送剩余动作。释放通道不排在普通请求队列末尾。
-
-普通请求取消不必永久关闭健康实例。整个实例被撤销、用户接管或 Host 关闭时，先阻止后续输入，再执行释放与退出。
-
-### 5.3 截图与资源寿命
-
-Windows 沿用独立截图实例：需要实时查看器时按需创建，截图只读实例不拥有物理输入控制权。输入/观察工作线程被目标应用阻塞时，查看器不因此排队等待。
-
-同一 EXE 可以承担输入或截图角色。按角色只初始化实际需要的资源，截图实例不加载整套 UIA 操作状态。并发查看器继续复用现有帧读取，不创建多个桌面控制者；观看结束后按现有持有关系释放实例。
-
-### 5.4 Host 退出与异常终止
-
-独立的连接监视负责发现 Host 管道关闭，触发输入停止、资源释放和辅助程序退出，不能等某次 UIA 调用结束后才发现 EOF。Host 现有进程回收逻辑继续等待真实退出；不得留下后台孤儿 helper。
-
-进程崩溃可能丢失其内存中的按键跟踪。新实例不能通过向整个桌面发送一遍“抬起所有键”来假装完成旧实例清理；应保留原有未知状态。这样不会把用户本人正在按住的键当作 Varin 的输入释放掉。
-
-## 6. 协议和执行结果
-
-继续使用现有操作名、请求关联 ID、响应正文、gesture 进度及输入回执。此次不要求 Agent 改写工具参数，也不新增模型可见的“原生驱动选择”工具。
-
-启动握手复用 `ping` / `capabilities`，携带必要的协议版本和程序构建信息，使 Host 能识别安装缺件、架构错误和协议不匹配。具体协议变更集中在原驱动契约中维护，避免多个平台各维护一份互相漂移的定义。
-
-结果必须保留实际差别：
-
-- 辅助程序尚未启动、请求未交付或目标检查明确拒绝：未执行桌面输入。
-- 输入事件已被系统接受：报告实际发送情况，不把它直接当成目标应用已完成业务操作。
-- 执行中取消：报告已有部分效果及输入释放状态。
-- 动作执行后补充截图失败：保留动作本身的回执，单独反馈观察失败。
-- 请求已交付但响应丢失、进程异常终止：保留未知结果，不能自动重发原点击或文本。
-
-协议 stdout 只输出协议内容；诊断走 stderr。诊断保留启动和系统 API 错误，不记录用户输入正文、剪贴板内容或截图内容。
-
-## 7. 功能迁移范围
-
-| 当前能力 | 原生实现的完成要求 |
-| --- | --- |
-| 应用与窗口列表 | 保留 PID、进程名、标题及多窗口选择；排除当前已识别的隐藏/占位窗口 |
-| 控件树与文本 | 保留可读树、元素记录、控件类型、值、可用 pattern 和现有读取参数 |
-| 元素重新定位 | 保留 RuntimeId 优先、唯一 AutomationId/类型、唯一名称/类型的规则；歧义返回给上层 |
-| 点击、拖动与滚动 | 保留全局输入、明确请求的 accessibility 与兼容控件的 app_post 路径 |
-| 文本、组合键和值设置 | 保留中文/Unicode、目标窗口内焦点定位、值设置与实际读取反馈 |
-| 窗口与桌面截图 | 保留截图来源、窗口几何、像素尺寸、多显示器及缩放信息 |
-| 用户操作查看器 | 保留跨帧拖动/按键状态、实时帧及与 Agent 输入共享的控制权关系 |
-| 自动操作视觉反馈 | 保留目标和已发送阶段的 gesture 事件，不泄露输入文本 |
-| 取消、释放与关闭 | 保留取消部分结果、独立释放确认、实际退出及后续重新观察要求 |
-| 能力声明 | 仅声明已实现能力；Windows 原来未实现的 browser/office 专用协议不因更换 EXE 就变成可用 |
-
-窗口、控件与截图坐标继续绑定原观察。在真正输入前核对相关窗口、几何、DPI 和目标归属，不能把旧观察索引直接解释成新窗口中的另一个控件。
-
-保留这些规则所针对的实际失败场景，同时不新增任意节点、文本、时间或并发上限。现有参数在迁移时维持含义，是否调整根据具体行为与负载另行判断。
-
-## 8. 构建、交付与版本配套
-
-### 8.1 构建产物
-
-构建 Windows x64、ARM64 对应的 release helper。编译器和 SDK 是构建环境依赖；最终运行包只依赖项目已经支持的 Windows 系统能力和随包的必要运行文件。检查原生链接依赖，避免遗漏需要另行安装的 VC runtime 或其他 DLL。
-
-辅助程序构建由平台 Host 构建接线调用，生成到该次不可变 Host candidate 中。Windows 上只有辅助程序构建和产物核验成功，候选 Host 才能正常发布。失败保留原有可用构建，不能发布新 Host 配旧 helper。
-
-产物缓存依据实际源码、Cargo.lock、目标架构、工具链与清单资源输入。复用同目标已构建产物，不在 Electron、Web Host、安装包组装阶段重复编译。不同架构不能共用同一个最终 EXE。
-
-开发环境通过明确的构建入口生成 helper；运行时找不到产物时提示缺失及对应开发构建方式，不临时启动编译器。
-
-### 8.2 包布局与分发
-
-目标布局保持现有平台入口关系，例如：
-
-```text
-Application Host generation/
-  computer-driver/
-    windows/
-      VarinComputer.exe
-      必要的产物/协议描述
-```
-
-这是目标示意，实际命名和现有打包契约一起落地。仅交付目标平台需要的运行文件，不把另一架构 EXE、Rust 源码、构建缓存或测试程序混入安装包。
-
-Electron 中 EXE 位于真实可执行的 unpacked 路径；不能把 ASAR 的逻辑路径交给系统启动。独立 Windows Host 的发行布局也必须包含同一 helper，避免只在 Electron 安装包里能用。远端 Host 消费它自己的平台产物。
-
-移动端和纯浏览器资源不携带桌面辅助程序。
-
-### 8.3 签名和更新
-
-正式发行的签名接线覆盖辅助程序本身，并在最终字节确定后生成摘要。产品名、文件版本和发行者身份保持稳定；不能只签安装器而遗漏实际被执行的程序。
-
-开发构建和正式发行使用各自已有的签名配置。证书配置不阻塞源码实现，但发布流程必须明确产物实际签名状态，不将开发签名或未签名描述成正式身份。
-
-更新使用现有 Host/安装代际切换：旧实例退出后释放旧产物，新 Host 启动与自己配套的 helper。不覆盖仍在执行的 EXE，不引入一个独立自更新的桌面服务。
-
-源码检查、编译、打包和实际运行观察保持可区分。签名证明发行者和产物完整性；具体安全软件仍按其规则判断运行行为。
-
-## 9. 错误表现和权限
-
-沿用已有 Computer 错误出口，将程序缺失、启动失败、协议不匹配、桌面会话不可用、目标失效与执行中断分别表达。具体原因来自实际调用链，不能一律归为参数错误或要求 Agent 重新请求控制权。
-
-桌面控制权、操作系统访问能力、驱动可用性是三件事。`computer_control` 获得产品控制权后，驱动初始化仍可能失败；`computer_request` 继续表示子任务向根任务申请分配，不成为安装组件或系统授权对话框。
-
-普通流程使用 `asInvoker`。对更高完整性级别目标的输入受 Windows UIPI 约束。系统返回值不足以确定具体原因时，保留原始结果并结合可读取的目标权限状态说明，不伪造“确定被某项权限拦截”的结论，也不自动提升整个应用。
-
-启动握手用于能力准备，不顺带截图、抢焦点或发送按键。需要用户授权的平台仍在对应真实操作发生时使用该平台的正常授权机制。
-
-## 10. 性能目标
-
-本次应取得的直接变化是：Windows helper 启动无需 PowerShell 解释器、CLR 程序集初始化和动态 C# 编译；截图实例可以只初始化截图所需资源；UIA 读取减少不必要的逐属性跨进程请求。
-
-辅助程序按需启动并复用，不在 Varin 开屏时预热所有桌面或遍历所有应用。使用完毕按实际持有关系回收，关闭查看器不影响仍在执行的输入，任务停止也不错误释放其他有效观看者。
-
-只做用于判断迁移效果的定向比较：首次可用时间、复用操作延迟、闲置内存、查看器工作时的资源变化，以及阻塞 UIA 时取消能否响应。用结果指导实现，不预设没有数据依据的硬性性能数字或常驻评测系统。
-
-## 11. 跨平台安排
-
-| 平台 | 当前情况 | 本方案安排 |
-| --- | --- | --- |
-| Windows | PowerShell + .NET UIA + 动态 C# 编译 | 完整改为构建时生成的独立原生 EXE |
-| macOS | 已构建 Swift app helper，独立 Accessibility/Screen Recording 权限与原生采集 | 保持现有平台实现与稳定应用身份；共用 Host 协议、产物配套和生命周期约定 |
-| Linux X11 | Python、AT-SPI、Gdk 及本地桌面组件 | 保留现有实际能力及交付依赖；原生化需要独立核对相应后端 |
-| Linux Wayland | Portal 授权、PipeWire/GStreamer 采集及已协商输入 | 保留系统授权与会话所有权，不能把 Windows 的调用方式套过来 |
-
-统一的对象是“一个由目标 Host 管理、可独立构建和交付的平台辅助程序”及其协议，不强制各平台使用同一种语言，也不把所有 OS 依赖塞进一个跨平台万能二进制。
-
-Linux 原生化不是本轮 Windows 修复的前置条件。本轮完成后，应明确保留 Linux 仍使用 Python 的事实，不能宣称所有平台都已移除解释器依赖。
-
-## 12. 实施顺序与交付范围
-
-1. **辅助程序骨架与构建接线。** 建立最小 crate、普通用户/DPI 清单、JSON 协议、能力握手、控制通道与实际进程关闭；接入 x64/ARM64 平台构建和 Host candidate。
-2. **完整迁移读取能力。** 窗口列表、多窗口选择、控件树、文本、属性缓存、窗口与桌面截图；保留真实来源及定位信息。
-3. **完整迁移输入与终止。** 点击、拖动、滚动、文本、按键、值设置、语义与消息路径、gesture 回执、取消及独立释放。重点消除跨 UIA 调用持锁导致停止失效的问题。
-4. **切换生产入口。** `localDriverSpawnSpec` 直接启动原生程序；接通输入/截图角色、启动错误和 Host 退出；更新独立 Host、Electron unpack、签名及各架构验收入口。
-5. **删除退役执行路径并收敛文档。** 生产包删除 PowerShell/C# 驱动源码及相应启动 bootstrap；迁移有效测试，删除仅验证旧脚本实现细节的测试。将已落实合同更新至 Computer Driver README、Host 文档及资源文档。
-
-阶段是施工顺序。最终交付包括原生能力、Host 接线和分发，不以只编译出一个能响应 `ping` 的程序宣告完成。
-
-原实现及改写涉及的 MIT 来源、授权和第三方声明按实际复用关系保留。删除旧执行文件不删除来源义务。
-
-## 13. 针对性验收
-
-验证按真实失败类别选择，复用现有协议与行为测试，不建设一套重复的桌面框架。
-
-| 需要证明的行为 | 适合的证据 |
-| --- | --- |
-| 请求关联、能力声明、错误/进度协议 | 现有 Host driver 测试接入真实 helper 或最小协议替身；替身不代证 Windows API |
-| 原生入口可交付 | x64/ARM64 构建及产物架构核验；从最终包路径启动并完成握手 |
-| 不再依赖脚本与现场编译 | 最终产物检查及无源码/编译器路径的启动；确认实际启动命令是 helper EXE |
-| 目标选择与原功能保持 | 迁移现有 targeting 用例；用可控窗口覆盖多窗口、焦点变化和元素歧义 |
-| 取消可打断长操作 | 阻塞 UIA 读取时仍取得释放结果；释放后原操作不再注入；旧进程确实退出 |
-| 中文和显示坐标 | Unicode 输入、中文安装路径、不同 DPI、多屏原生操作；只对实际执行的平台记录通过 |
-| 回执准确 | 发送前失败、部分输入、响应丢失、输入成功后截图失败分别保留原结果 |
-| 原 Host 行为保持 | 用户接管、远端分配、查看器、窗口关闭及应用退出仍由原 owner 协调 |
-
-验收不用操作用户的私人应用或实际内容；优先使用临时目录和可控测试窗口。真实桌面、权限与发行签名的结果按运行环境记录，编译通过不替代这些观察。
-
-完成标准：在没有旧桌面驱动脚本、没有 C# 源码、没有开发编译器的安装环境中，对应 Windows 包能完成桌面观察、输入、取消、输入释放和关闭；生产路径直接运行随包原生程序，协议、身份和现有工具行为连续。
-
-## 14. 外部依据
-
-- [Microsoft：UI Automation threading issues](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading)：全桌面 UIA 客户端使用独立 MTA 线程，以及 COM 对象寿命约束。
-- [Microsoft：SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)：实际发送事件数、输入状态与 UIPI 行为。
-- [Microsoft Windows Rust bindings：Accessibility](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/UI/Accessibility/index.html)：原生 UI Automation 接口的 Rust 绑定。
-
-以上资料用于接口选择和行为设计；实际依赖版本由实现时的锁文件和项目工具链确定。
+| 独立原生 crate、协议和可移植目标规则 | [varin-computer-windows](../../kernel/crates/varin-computer-windows) |
+| HWND/进程与多窗口选择 | [window.rs](../../kernel/crates/varin-computer-windows/src/windows/window.rs) |
+| MTA UIA、属性缓存、树、重定位与焦点 | [uia.rs](../../kernel/crates/varin-computer-windows/src/windows/uia.rs) |
+| 合成输入、状态与释放 | [input.rs](../../kernel/crates/varin-computer-windows/src/windows/input.rs) |
+| 同用户本机控制管道 | [control.rs](../../kernel/crates/varin-computer-windows/src/windows/control.rs) |
+| PrintWindow/屏幕复制与 WIC PNG/JPEG | [capture.rs](../../kernel/crates/varin-computer-windows/src/windows/capture.rs) |
+| 工具操作与回执协调 | [operations.rs](../../kernel/crates/varin-computer-windows/src/windows/operations.rs) |
+| Host 启动、关联、取消和真实退出 | [driver-host.ts](../../packages/web/application-host/lib/computer/driver-host.ts) |
+| 构建、缓存和产物核验 | [build-helper.mjs](../../packages/computer-driver/windows/build-helper.mjs) |
+
+## 不变合同与边界
+
+- 保留原工具名、参数、NDJSON 请求 ID、gesture 进度与输入回执，不增加模型可见的原生后端选择。
+- UIA 对象只在专用 MTA 工作线程创建和使用；缓存请求批量取当前查询所需属性。跨线程只传请求和序列化结果。
+- 独立 stdin 监视处理 Host EOF；控制管道不排在普通请求或 UIA 后。管道仅本机、当前用户 SID、单实例单连接。
+- 取消先标记原请求，再与实际 SendInput/PostMessage 共用短临界区释放已跟踪按键/按钮。UIA、同步窗口消息、截图不持有输入锁。
+- 普通取消不永久退役健康进程；撤权/关闭先 fence 再取得释放确认，Host 等原进程真正退出。未知动作与 writer 已停止是不同事实。
+- Windows 查看器使用单独 capture 角色，不初始化 UIA，不接受输入；并发观看者复用现有帧读取与持有关系。
+- 元素按 RuntimeId、唯一 AutomationId/类型、唯一名称/类型重新定位，歧义拒绝。焦点和控件归属绑定所选窗口而不只绑定 PID。
+- 输入前核对窗口身份、几何、DPI、焦点及指针归属。截图来源、物理尺寸、多屏负原点和缩放信息保留。
+- 默认真实输入保留 Unicode/UTF-16 代理对、组合键、点击、拖动与滚动；显式 accessibility 和兼容原生控件 app_post 路径保留。
+- SendInput 接受不等于应用业务完成。set_value 只有可读反馈一致才为 verified；取消保留部分效果，响应丢失保持 unknown，不自动重发。
+- 动作成功而补充观察失败保留动作回执。新实例不能发送“抬起所有键”假装清理旧实例，否则会影响用户实际按住的键。
+- stdout 只有协议；诊断不输出键入正文、截图、剪贴板或 provider 返回的潜在私密描述。来源 MIT 声明继续保留。
+- asInvoker 与 per-monitor DPI manifest 不请求提升。UIPI 等系统拒绝保留原始 API 结果，不伪造确定原因或自动抬升整个应用。
+
+## 交付
+
+`bun run computer:build` 在 Windows 使用固定 Rust 工具链、Visual Studio C++ 工具与 Windows SDK，支持
+x64/ARM64。crate 不链接 varin-runtime、Storage、TDB 或 Wasmtime。仅 Windows 目标链接系统 GUI/COM 库。
+
+开发产物位于 `packages/computer-driver/windows/build`；正式 Host candidate 仅携带
+`computer-driver/windows/{VarinComputer.exe,manifest.json}`。缓存依据源码、Cargo.lock、目标架构、工具链、
+SDK/资源编译器、构建参数、版本、清单和图标。失败不发布不配套的新 Host，也不覆盖上一有效代。
+
+启动以 ping/capabilities 核对协议版本和构建身份，不截图、抢焦点或发送/释放输入。运行时缺件提示显式构建或重新安装，
+不启动编译器。Electron 使用真实 app.asar.unpacked 路径，独立 Host 和远端 Host 消费自己的目标平台产物；
+移动端和纯浏览器资源不携带 helper。
+
+PE 核验包括架构和 DLL 导入，构建使用静态 CRT。开发产物明确标识 unsigned；独立 Host 可配置证书指纹与时间戳签名，
+Electron 沿用其发行配置覆盖 helper 本身，摘要在最终签名字节确定后更新。构建阶段可用 Windows PowerShell 检查
+Authenticode，这不重新引入运行时桌面脚本。签名身份与某款安全软件是否误报仍是不同证据。
+
+## 验证与剩余验收
+
+可移植测试覆盖实际协议、回执状态、Unicode 边界、歧义重定位和窗口选择函数。Windows 原生测试额外覆盖真实
+EXE/控制管道的握手、提前取消、健康重用、永久退役、EOF 退出，以及不读取屏幕的 WIC PNG/JPEG 内存编码/解码。
+Host 测试覆盖版本不符、消息关联、响应丢失和独立释放。构建测试覆盖 PE、签名字节摘要、缓存和失败保留旧代。
+
+这些测试不替代以下目标平台证据，不能将跨目标 cargo check 描述为实际运行通过：
+
+1. 从最终 Windows x64/ARM64 安装路径启动，无旧脚本/C# 源码或编译器，完成观察、输入、取消、释放、关闭。
+2. 使用临时可控窗口验证 UIA 多窗口/歧义、输入后的焦点变化、中文与补充平面字符、不同 DPI/多屏坐标。
+3. 真正阻塞的 UIA provider 下仍取得释放结果，释放后旧请求不再注入，旧进程确实退出。
+4. 发送前拒绝、部分输入、响应丢失和动作成功后的截图失败各保留其真实结果。
+5. 用户接管、远端分配、查看器持有关系、关闭窗口与应用退出仍由原 owner 完成。
+6. 正式证书签名、完整安装/升级产物、首次可用时间、复用延迟、闲置内存和查看器资源变化。
+
+实机验收只操作临时目录和可控测试窗口，不使用用户私人应用或内容。源码实施、编译检查、平台测试、签名和安装包
+观察分别记录；没有取得的证据保持待验收，不用替身或未执行的命令补成通过。
+
+完整平台合同见 [Computer Driver README](../../packages/computer-driver/README.md)、
+[Host Computer 文档](../../packages/web/application-host/lib/computer/DOCUMENTATION.md) 和[资源](../resources.md)。

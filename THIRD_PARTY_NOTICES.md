@@ -72,7 +72,8 @@ SOFTWARE.
 
 ## Open Computer Use platform drivers
 
-The Windows and Linux runtime files in `packages/computer-driver` incorporate
+The Windows native helper in `kernel/crates/varin-computer-windows` and the Linux
+runtime files in `packages/computer-driver` incorporate
 portions of [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use),
 baseline `51f3a59`, modified for Varin's resident driver protocol and input handling.
 
