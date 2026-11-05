@@ -82,13 +82,13 @@ Read, compare, choose and refine a result in the conversation itself.
 - **Room to change direction.** Conversation branches and file recovery keep earlier work accessible. The composer supports references, commands and editable next-message suggestions.
 
 <p align="center">
-  <img src=".github/readme/assets/conversation-en.png" alt="Prose, an interactive feedback chart, file and web references, and the composer share one conversation" width="1100" />
+  <img src=".github/readme/assets/conversation-en.png" alt="A weekly workload estimate with a live comparison chart and two adjustable assumptions, rendered inside the conversation" width="1100" />
 </p>
 
-**Choose and refine without leaving the explanation.** Compare alternative wording in tabs, select several priorities, add your own thoughts and adjust a parameter. Fill the result into the composer when you are ready to continue.
+**Choose and refine without leaving the explanation.** Read alternative drafts in lightweight tabs, select the points to develop and add your own thoughts. Prepare the next message when you are ready to continue.
 
 <p align="center">
-  <img src=".github/readme/assets/conversation-choices-en.png" alt="Alternative openings in tabs, a multiple-choice question, an expanded personal answer and a length slider in the same conversation" width="1100" />
+  <img src=".github/readme/assets/conversation-choices-en.png" alt="Complete draft openings in text tabs, followed by unboxed multiple choices and an optional personal answer" width="1100" />
 </p>
 
 **Read images and text together.** Image previews keep their proportions and open for a closer look. Tables make comparisons scannable; supporting details can stay folded beside the explanation.

@@ -76,9 +76,20 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     </fieldset>;
     const inputProps = { id: fieldId, value: String(value ?? ''), placeholder: field.placeholder, required: field.required,
       className: `block w-full mt-1 ${controlClass}`, onInput: (event: React.FormEvent<HTMLInputElement | HTMLTextAreaElement>) => { view.setValue(field.key, event.currentTarget.value); setStatus(''); } };
+    if (field.inputType === 'range') {
+      const min = field.min ?? 0, max = field.max ?? 100;
+      const number = Number(value ?? min), current = Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : min;
+      const progress = max > min ? (current - min) / (max - min) * 100 : 0;
+      return <div key={field.key} className="question-field conversation-ui-range">
+        <div className="conversation-ui-range-heading"><label htmlFor={fieldId} className="question-field-title">
+          {fields.length > 1 && <span className="question-field-number">{String(index + 1).padStart(2, '0')}</span>}<span>{field.label ?? field.key}{field.required ? ' *' : ''}</span>
+        </label><output htmlFor={fieldId}>{current}{field.unit && <span> {field.unit}</span>}</output></div>
+        <input {...inputProps} className="conversation-ui-range-input" type="range" value={String(current)} min={min} max={max} step={field.step}
+          style={{ '--range-progress': `${progress}%` } as React.CSSProperties} />
+      </div>;
+    }
     return <div key={field.key} className="question-field"><label htmlFor={fieldId} className="question-field-title">{heading}</label>
       {field.inputType === 'textarea' ? <textarea {...inputProps} className="question-text-input" rows={3} /> : <input {...inputProps} type={field.inputType} min={field.min} max={field.max} step={field.step} />}
-      {field.inputType === 'range' && <output htmlFor={fieldId}>{String(value ?? '')}</output>}
     </div>;
   };
   const selectedTab = shown.type === 'tabs' ? shown.tabs.find(tab => tab.key === view.state.controls.tab) ?? shown.tabs[0] : undefined;
@@ -91,13 +102,13 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     {shown.type === 'disclosure' && <InteractionDisclosure open={view.state.controls.open === true} onOpenChange={open => view.setControl('open', open)} title={shown.label ?? t('ui.fragment.details')}>
       <SimpleMarkdownRenderer content={shown.content} variant="tool" />
     </InteractionDisclosure>}
-    {shown.type === 'tabs' && <div><div role="tablist" aria-label={shown.label} className="flex flex-wrap gap-2">{shown.tabs.map(tab => <button type="button" key={tab.key} role="tab" id={`${id}:tab:${tab.key}`} aria-controls={`${id}:panel:${tab.key}`} aria-selected={selectedTab?.key === tab.key} tabIndex={selectedTab?.key === tab.key ? 0 : -1}
-      className={`conversation-ui-tab ${buttonClass}`} onClick={() => view.setControl('tab', tab.key)} onKeyDown={event => {
+    {shown.type === 'tabs' && <div><div role="tablist" aria-label={shown.label} className="conversation-ui-tablist">{shown.tabs.map(tab => <button type="button" key={tab.key} role="tab" id={`${id}:tab:${tab.key}`} aria-controls={`${id}:panel:${tab.key}`} aria-selected={selectedTab?.key === tab.key} tabIndex={selectedTab?.key === tab.key ? 0 : -1}
+      className="conversation-ui-tab" onClick={() => view.setControl('tab', tab.key)} onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault();
         const index = shown.tabs.findIndex(item => item.key === tab.key), next = event.key === 'Home' ? 0 : event.key === 'End' ? shown.tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + shown.tabs.length) % shown.tabs.length;
         view.setControl('tab', shown.tabs[next]!.key); document.getElementById(`${id}:tab:${shown.tabs[next]!.key}`)?.focus();
       }}>{tab.label}</button>)}</div>
-      <div className="conversation-ui-tabs">{shown.tabs.map(tab => <div key={tab.key} className="conversation-ui-reveal" data-open={selectedTab?.key === tab.key} role="tabpanel" id={`${id}:panel:${tab.key}`} aria-labelledby={`${id}:tab:${tab.key}`} aria-hidden={selectedTab?.key !== tab.key} inert={selectedTab?.key !== tab.key}><div><SimpleMarkdownRenderer content={tab.content} variant="tool" /></div></div>)}</div>
+      <div className="conversation-ui-tabs">{shown.tabs.map(tab => <div key={tab.key} className="conversation-ui-reveal" data-open={selectedTab?.key === tab.key} role="tabpanel" id={`${id}:panel:${tab.key}`} aria-labelledby={`${id}:tab:${tab.key}`} aria-hidden={selectedTab?.key !== tab.key} inert={selectedTab?.key !== tab.key}><div><div className="conversation-ui-tab-content"><SimpleMarkdownRenderer content={tab.content} /></div></div></div>)}</div>
     </div>}
     {shown.type === 'embed' && <EmbeddedUiContent refValue={shown.ref} sourceKey={props.sourceKey} />}
     {shown.type === 'object' && <NativeObjectContent refValue={shown.ref} />}

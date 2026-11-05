@@ -13,11 +13,11 @@
 .question-choice-mark > :is(span, svg) { opacity: 0; transform: scale(.65); transition: opacity var(--motion-dur-fade, 160ms), transform var(--motion-dur-fade, 160ms) var(--motion-ease-out, ease); }
 .question-choice-mark > span { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
 .question-choice-mark > svg { width: 12px; height: 12px; }
-.question-choice[data-selected="true"] { background: color-mix(in srgb, var(--primary) 4%, transparent); }
+.question-choice[data-selected="true"] .question-choice-label { color: var(--foreground); }
 .question-choice[data-selected="true"] .question-choice-mark { border-color: var(--primary); }
 .question-choice[data-selected="true"] .question-choice-mark[data-multiple="true"] { background: var(--primary); color: var(--primary-foreground); }
 .question-choice[data-selected="true"] .question-choice-mark > :is(span, svg) { opacity: 1; transform: scale(1); }
-.question-choice:not([data-disabled]):hover { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.question-choice:not([data-disabled]):hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
 .question-choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .question-choice[data-disabled] { opacity: .6; cursor: default; }
 .question-supplement { min-width: 0; margin-top: 10px; padding-inline-start: 26px; }

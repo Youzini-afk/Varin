@@ -16,7 +16,10 @@ import type { BotPanelModel } from '@/workbenches/bot/botPanelModel';
 import { BotWorkspaceNavigationContext, type BotWorkspaceNavigation } from '@/workbenches/bot/botWorkspaceViews';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { DeclarativeUiContent } from '@/components/interactive-ui/DeclarativeUiContent';
-import { createThreadsHttpAPI, normalizeConversationUi, type ThreadThinkingLevel } from '@varin/application-client';
+import { createThreadsHttpAPI, getRuntimeEndpointGeneration, normalizeConversationUi, type ThreadThinkingLevel } from '@varin/application-client';
+import { UiWorkView } from '@/components/interactive-ui/InteractiveUiCard';
+import { uiSession } from '@/lib/interactive-ui/sessions';
+import { workEstimateHtml } from './work-estimate.mjs';
 import { ChatDialogueActivity } from '@/components/conversation/ChatDialogueActivity';
 import type { DialogueProcess } from '@/components/conversation/chatDialogueProjection';
 import type { ChatToolResultMessage } from '@/components/conversation/types';
@@ -77,7 +80,7 @@ function Row({ icon, children, active = false, end }: { icon: IconName; children
 }
 function Header() { return <header className="frame-header">
   <I name="menu-2" /><I name="layout-left" /><span className="mode">{botScene ? <VarinLogo decorative width={17} height={17} /> : <I name={scene === 'workbench' ? 'workbench-agent' : 'code'} />}{scene === 'workbench' ? text('Workbench', '工作台') : scene === 'ide' ? 'IDE' : 'Varin'}<I name="arrow-down-s" size={13} /></span>
-  <div className="frame-title">{scene === 'ide' || scene === 'workbench' ? text('A clearer release page', '让发布页面更清晰') : text('Getting ready for Friday', '准备周五的发布')}<small>{scene === 'ide' || scene === 'workbench' ? 'launch-site' : 'Varin'}</small></div>
+  <div className="frame-title">{scene === 'ide' || scene === 'workbench' ? text('A clearer release page', '让发布页面更清晰') : scene === 'conversation' ? text('Making room in the week', '每周能腾出多少时间') : text('Getting ready for Friday', '准备周五的发布')}<small>{scene === 'ide' || scene === 'workbench' ? 'launch-site' : 'Varin'}</small></div>
   <div className="frame-end"><I name="stack" />Local<BotFigure state="idle" size={25} still /><I name="layout-right" /><span className="window-controls">— □ ×</span></div>
 </header>; }
 function Sidebar() { const bot = scene === 'varin' || scene === 'conversation'; return <aside className="nav">
@@ -154,33 +157,30 @@ function WorkbenchConversation() { return <section className="conversation"><div
   <Delegate completed name={text('Accessibility check', '无障碍检查')} id="accessibility-review" task={text('Keyboard, contrast and narrow layouts', '键盘、对比度和窄屏布局')} />
   <M>{text('The feedback is back: two links need clearer focus styling. I’m applying that before the final review.', '检查结果已经回来了：有两处链接需要更清晰的焦点样式。我正在补上，然后再看一遍最终效果。')}</M>
 </div><Composer bot={false} /></section>; }
-function Chart() { const [series, setSeries] = React.useState('all'); const values = series === 'all' ? [38, 26, 22, 14] : [44, 29, 18, 9]; return <div className="chart">
-  <div className="chart-heading"><div><b>{text('What people want to find first', '大家希望先看到什么')}</b><small>{text('Grouped feedback · share of mentions', '反馈归类 · 提及占比')}</small></div><select value={series} onChange={e => setSeries(e.target.value)}><option value="all">{text('All feedback', '全部反馈')}</option><option value="new">{text('New users', '新用户')}</option></select></div>
-  {[text('Getting started', '如何开始'), text('Working examples', '实际使用场景'), text('Model support', '模型支持'), text('Deployment', '部署方式')].map((name, i) => <div className="chart-bar" key={name}><span>{name}</span><div><i style={{ width: `${values[i] * 2}%`, opacity: 1 - i * .17 }} /></div><b>{values[i]}%</b></div>)}
-  <div className="chart-note">feedback.csv · {text('Group by topic', '按主题归类')}</div>
-</div>; }
+function Estimate() {
+  const session = React.useMemo(() => uiSession('readme-work-estimate', identity, getRuntimeEndpointGeneration()), []);
+  const files = React.useMemo(() => ({ 'index.html': workEstimateHtml(zh) }), []);
+  const source = React.useMemo(() => ({ ref: 'ui:readme-work-estimate@1' }), []);
+  return <UiWorkView session={session} source={source} files={files} entry="index.html" title={text('Weekly document work', '每周材料整理')} committed />;
+}
 function RichConversation() { return <section className="conversation"><div className="message-flow rich-flow">
-  <User>{text('Which parts of the feedback should shape our introduction? Show me the comparison so we can decide.', '哪些反馈最值得放进简介里？帮我对比一下，我们一起决定。')}</User>
-  <Activity />
-  <M>{text('### Start with a concrete first task\nThe feedback keeps returning to **how to start** and **what a finished result looks like**. I grouped the comments so you can compare the themes.', '### 从一个具体的首次任务开始\n反馈里反复出现的是**如何开始**和**做完是什么样子**。我把提及的主题整理成了一个可以切换查看的图表。')}</M>
-  <Chart />
-  <M>{text('A short walkthrough can cover both: ask Varin a question, refine the answer in the conversation, then open the work when you want more detail.', '一段简短的使用过程就能把两件事讲清楚：向 Varin 提出问题，在对话里完善结果，需要细节时再进入正在做的工作。')}</M>
-  <div className="sources"><I name="file-text" />feedback.csv<I name="global" />{text('Community discussion', '社区讨论')}<I name="arrow-right-s" size={14} /></div>
+  <User>{text('Six of us each process 15 documents a week, about 30 minutes each. If Agents handle some and we review their work, how much time could that free up?', '我们 6 个人，每人每周整理 15 份材料，一份大概半小时。如果交给 Agent 做一部分，我们来检查，能腾出多少时间？')}</User>
+  <M>{text('### Review time makes the difference\nThat is **45 hours of human work per week** today. Handing over 60% of the documents and spending 5 minutes reviewing each would free up **22.5 hours**. You can adjust both assumptions below.', '### 关键在于，检查一份还要花多久\n按你给的数量，目前每周需要 **45 小时人工投入**。先按交办 60%、每份检查 5 分钟估算，可以腾出 **22.5 小时**。下面两项都可以调整。')}</M>
+  <Estimate />
+  <M>{text('Start with the documents whose format is already stable. A first batch will give you a better review-time estimate before you hand over more.', '可以先从格式稳定的材料开始。做完第一批，用实际检查时间重新算一遍，再决定要交办多少。')}</M>
   <div className="turn-end"><span><I name="file-copy" /><I name="git-branch" /><I name="more" /></span><small>↓ 8,420 ↑ 1,106 {text('Cache', '缓存率')} 84%</small></div>
 </div><Composer /></section>; }
 function ChoiceConversation() {
   const versions = normalizeConversationUi({ type: 'tabs', label: text('Opening paragraph', '开头的两种写法'), tabs: [
-    { label: text('A clear first step', '从具体用途开始'), content: text('**Start with something you want to get done.** Talk it through with Varin, let work continue alongside the conversation, and open a task whenever you want a closer look.', '**从一件想完成的事开始。** 和 Varin 商量，工作在对话旁继续推进；想看细节时，随时进入任务。') },
-    { label: text('What changed', '从这次更新开始'), content: text('**Keep the work moving, keep the conversation open.** This release brings task follow-ups, richer results and connected workspaces into the same conversation.', '**工作继续，交流也继续。** 这次更新把任务跟进、丰富的结果呈现和连接的工作区带进了同一段对话。') },
+    { label: text('Start with a small task', '从一件小事开始'), content: text('### Bring something you want to get done.\nA folder of notes, a page to improve, or an idea you want to talk through. Start a conversation with Varin and work toward a useful result.\n\nSmall tasks can be handled right there. Longer work can go to Agents while the conversation continues. Whenever you want the detail, open the task and step in.', '### 带着一件想做的事，来找 Varin。\n一份待整理的资料，一个想改好的页面，或者一个还没想清楚的念头。先聊起来，再把它慢慢变成有用的结果。\n\n小事就在对话里处理。需要时间的工作交给 Agent 推进，你可以继续讨论，也随时能打开任务，看看它做到了哪一步。') },
+    { label: text('Start with ongoing work', '从持续的工作开始'), content: text('### Keep the conversation going as the work grows.\nVarin brings together the things you are discussing and the work already in progress. Refine a result, pick up an earlier task, or hand over something new.\n\nYou can follow the details whenever you want: read an Agent’s conversation, inspect a file, or continue editing in the workspace.', '### 工作不断往前，交流也不用重新开始。\n和 Varin 商量手头的事，接着完善已有的结果，或者交办新的工作。之前聊过的背景、还在进行的任务，都有地方可以接上。\n\n想看细节时，打开 Agent 的对话、检查文件，或者进入工作区继续编辑。') },
   ] });
-  const preferences = normalizeConversationUi({ type: 'form', fields: [
-    { type: 'choice', key: 'focus', label: text('What should the short announcement include?', '简短的发布消息里，哪些值得保留？'), multiple: true, allowOther: true,
-      options: [text('A concrete task someone can try right away', '一个读完就能尝试的具体任务'), text('A picture showing the conversation and ongoing work together', '一张把聊天与进行中的工作放在一起的配图'), text('Installation steps and the full technical change list', '安装步骤和完整的技术改动清单')] },
-    { type: 'input', key: 'length', label: text('Approximate length', '期望篇幅'), inputType: 'range', unit: text('words', '字'), min: 200, max: 800, step: 50 },
-  ], action: text('Draft the announcement with these preferences', '按这些偏好写一版发布消息') });
+  const preferences = normalizeConversationUi({ type: 'choice', key: 'focus', label: text('What would you like the rest to emphasize?', '后面你更想突出哪些？'), multiple: true, allowOther: true,
+    options: [text('Turn source material into something you can discuss', '把资料读懂，做成可以继续讨论的结果'), text('Hand over longer tasks and follow their progress', '交办耗时工作，随时看 Agent 的进展'), text('Open the workspace and keep editing yourself', '进入工作区，接着亲自编辑文件')],
+    action: { type: 'compose', label: text('Draft the full post in this direction', '按这个方向写完整稿') } });
   return <section className="conversation"><div className="message-flow rich-flow choice-flow">
-    <User>{text('Show me two openings first. Let me choose what to keep before you write the full announcement.', '先给我看看两种开头，正文里保留哪些内容，我选一下你再写。')}</User>
-    <M>{text('I’d lead with a task people can recognize. You can switch between the openings, then adjust what goes into the short version.', '我倾向先讲一件读者能理解的具体事情。两种开头可以切换着看，再选短版里要保留的内容。')}</M>
+    <User>{text('I want to introduce Varin to the community. Keep it natural—show me a couple of openings first.', '准备把 Varin 发到社区，语气自然一点，先给我看看两种开头。')}</User>
+    <M>{text('I’d start with something the reader wants to do. Here are two openings; the first gives people a more immediate way in.', '我倾向从读者想做的事情开始。这里有两种开头，第一种更容易让人代入。')}</M>
     <DeclarativeUiContent node={versions} sourceKey="readme-openings" />
     <DeclarativeUiContent node={preferences} sourceKey="readme-announcement-preferences" />
   </div><Composer /></section>;

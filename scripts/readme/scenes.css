@@ -35,15 +35,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--foreground); backg
 .delegated-work { margin-block: 18px; }
 .rich-flow { width: min(100%, var(--chat-content-width, 960px)); margin: 0 auto; padding-top: 28px; }
 .conversation .composer-wrap { width: 100%; }
-.conversation:not(.workbench) .chart { margin: 20px 0; }
-.chart { border: 1px solid var(--border); border-radius: 10px; padding: 22px 25px 15px; }
-.chart-heading { display: flex; align-items: start; justify-content: space-between; font-size: 14px; margin-bottom: 20px; }
-.chart-heading small { display: block; color: var(--muted-foreground); font-size: 11px; margin-top: 6px; }
-.chart select { background: var(--background); border: 1px solid var(--border); border-radius: 5px; padding: 6px 9px; color: var(--foreground); font-size: 11px; }
-.chart-bar { display: flex; align-items: center; gap: 20px; font-size: 12px; margin: 14px 0; }
-.chart-bar > span { width: 132px; }.chart-bar > div { flex: 1; }.chart-bar i { display: block; height: 13px; border-radius: 3px; background: var(--primary-base); }.chart-bar b { font-size: 11px; font-weight: 500; width: 30px; }
-.chart-note { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 18px; color: var(--muted-foreground); font-size: 10px; }
-.sources { display: flex; align-items: center; gap: 9px; color: var(--muted-foreground); font-size: 11px; margin-top: 18px; }.sources svg:not(:first-child) { margin-left: 16px; }
 .turn-end { display: flex; justify-content: space-between; color: var(--muted-foreground); margin-top: 20px; }.turn-end span { display: flex; gap: 14px; }.turn-end small { font-size: 10px; }
 .choice-flow > .conversation-ui-fragment { margin-block: 18px; }
 .reading-flow .markdown-content h3 { margin-top: 0; }

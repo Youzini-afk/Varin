@@ -80,13 +80,13 @@ Général, Programmation, Recherche et Bureautique sont des **orientations de t�
 - **La possibilité de changer de direction.** Branches de conversation et restauration de fichiers gardent le travail précédent accessible. Le composeur propose références, commandes et suggestions de message modifiables.
 
 <p align="center">
-  <img src="assets/conversation-en.png" alt="Texte, graphique interactif, références et composeur dans la même conversation" width="1100" />
+  <img src="assets/conversation-en.png" alt="Estimation du travail hebdomadaire avec graphique comparatif et hypothèses ajustables dans la conversation" width="1100" />
 </p>
 
-**Choisir et préciser au fil de l'explication.** Comparez des formulations dans les onglets, sélectionnez plusieurs priorités, ajoutez vos remarques et ajustez un paramètre. Insérez le résultat dans le composeur pour poursuivre la discussion.
+**Choisir et préciser au fil de l'explication.** Lisez les propositions dans des onglets discrets, sélectionnez les points à développer et ajoutez vos remarques. Préparez le prochain message pour poursuivre la discussion.
 
 <p align="center">
-  <img src="assets/conversation-choices-en.png" alt="Formulations alternatives, choix multiples, réponse personnelle et réglage de la longueur dans une même conversation" width="1100" />
+  <img src="assets/conversation-choices-en.png" alt="Propositions rédigées dans des onglets, puis choix multiples sans encadrés et complément personnel facultatif" width="1100" />
 </p>
 
 **Lire les images avec le texte.** Les aperçus conservent leurs proportions et s'ouvrent pour un examen détaillé. Les tableaux facilitent la comparaison ; les précisions peuvent rester repliées près de l'explication.

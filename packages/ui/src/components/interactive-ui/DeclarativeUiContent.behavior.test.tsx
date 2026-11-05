@@ -76,6 +76,8 @@ it('supports multi-select, local-only tabs and disclosure without invoking the c
   await render({ type: 'tabs', label: 'Plans', tabs: [{ key: 'a', label: 'A', content: 'First plan' }, { key: 'b', label: 'B', content: 'Second plan' }] });
   await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.click());
   expect(container.querySelector('[role="tabpanel"][aria-hidden="false"]')?.textContent).toBe('Second plan'); expect(send).not.toHaveBeenCalled();
+  await act(async () => container.querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(Object.assign(new window.Event('keydown', { bubbles: true }), { key: 'Home' })));
+  expect(container.querySelector('[role="tabpanel"][aria-hidden="false"]')?.textContent).toBe('First plan');
 });
 
 it('renders only assistant top-level fragments between original prose, and hides unfinished stream JSON', async () => {
@@ -124,12 +126,14 @@ it('uses the work session for revision seeds, prefers saved destination state an
 });
 it('shows required-field errors and resets a removed selected meaning without affecting other fields', async () => {
   const form = { type: 'form', label: 'Details', action: 'Continue', fields: [
-    { ...choice, required: true, action: undefined }, { type: 'input', key: 'budget', label: 'Budget', inputType: 'range', min: 10, max: 100 }
+    { ...choice, required: true, action: undefined }, { type: 'input', key: 'budget', label: 'Budget', inputType: 'range', min: 10, max: 100, unit: 'hours' }
   ] };
   await render(form); await action(); expect(compose).not.toHaveBeenCalled(); expect(container.textContent).toContain('ui.fragment.required');
   await choose(0); await action(); expect(compose.mock.lastCall?.[0].text).toContain('Budget：10');
+  await act(async () => { const input = container.querySelector<HTMLInputElement>('input[type="range"]')!; input.value = '35'; input.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(container.querySelector('output')?.textContent).toBe('35 hours');
   await render({ ...form, fields: [{ ...form.fields[0], options: ['Long'] }, form.fields[1]] });
-  expect(container.textContent).toContain('ui.fragment.reselect'); expect(container.querySelector('output')?.textContent).toBe('10');
+  expect(container.textContent).toContain('ui.fragment.reselect'); expect(container.querySelector('output')?.textContent).toBe('35 hours');
 });
 
 it('supports complete streamed previews then aligns the same values with the committed source', async () => {

@@ -10,4 +10,7 @@ export const responses = {
   '/api/external-agents/settings': { revision: 1, defaultAgent: null, agents: [] },
   '/api/external-agents/list': [],
   '/api/external-agents/children': [],
+  '/api/interactive-ui/view/attach': { viewRef: 'ui-view:readme-estimate', token: 'readme', state: null },
+  '/api/interactive-ui/view/state': { saved: true },
+  '/api/interactive-ui/view/detach': { closed: true },
 };
