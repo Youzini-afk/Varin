@@ -36,4 +36,4 @@ globset = "0.4.16"
 tree-sitter = { version = "=0.27.1", features = ["wasm"] }
 streaming-iterator = "0.1.9"
 
-wasmparser = "0.262.0"
+wasmparser = "0.263.0"
