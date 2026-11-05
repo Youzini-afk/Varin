@@ -31,6 +31,9 @@ import { ChatDelegation } from '@/components/conversation/ChatDelegation';
 import { ChatFileChangePreview } from '@/components/conversation/ChatFileChangePreview';
 import { CollaborationMessage } from '@/components/thread/CollaborationMessage';
 import { CollaborationComposer } from '@/components/thread/CollaborationComposer';
+import { ContextPanelRail } from '@/components/layout/ContextPanelRail';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { CollaborationFeedItem, CollaborationMember } from '@/components/thread/collaborationFeed';
 import workbenchImageEn from '../../.github/readme/assets/workbench-en.png?url';
 import workbenchImageZh from '../../.github/readme/assets/workbench-zh-CN.png?url';
@@ -48,6 +51,11 @@ const style = document.createElement('style');
 style.textContent = `:root { ${new CSSVariableGenerator().generate(theme as Theme)} }`;
 document.head.appendChild(style);
 await useI18nStore.getState().setLocale(zh ? 'zh-CN' : 'en');
+if (scene === 'workbench') {
+  const directoryKey = normalizeContextPanelDirectoryKey(useDirectoryStore.getState().currentDirectory);
+  const ui = useUIStore.getState(), panel = ui.contextPanelByDirectory[directoryKey];
+  if (!panel?.isOpen || panel.tabs.find(tab => tab.id === panel.activeTabId)?.mode !== 'threads') ui.openContextSurface(directoryKey, 'threads');
+}
 
 const taskNames = [text('Launch page', '发布页面'), text('Customer feedback', '用户反馈整理'), text('Release notes', '版本说明')];
 const noop = () => {};
@@ -210,6 +218,6 @@ function Editor() { const host = React.useRef<HTMLDivElement>(null); React.useEf
     document.body.dataset.editorReady = 'true';
   }); return () => { cancelled = true; editor?.dispose(); }; }, []); return <div className="editor-area"><div className="editor-tabs"><span><I name="file-code" />ReleaseSummary.tsx ×</span><span>release.css</span></div><div ref={host} className="monaco-host" /><div className="terminal"><div>{text('Terminal', '终端')} <span>{text('Problems', '问题')} 0</span></div><pre>$ bun run build<br /><span className="green">✓</span> {text('Build completed', '构建完成')}<br />$ <span className="cursor">▌</span></pre></div></div>; }
 function IdeChat() { return <div className="ide-chat"><div className="panel-heading"><I name="chat-3" />{text('Conversation', '对话')}</div><User>{text('The order looks good. Keep the focus styles consistent with the rest of the site.', '顺序看着不错，焦点样式也和站点其他部分保持一致。')}</User><M>{text('I’ll reuse the existing focus treatment. The content order stays as we agreed.', '我会复用已有的焦点样式，内容顺序保持刚才商量的版本。')}</M><Activity kind="code" /><M>{text('The changes are in `ReleaseSummary.tsx` and `release.css`. You can edit the files here while we keep discussing the page.', '改动在 `ReleaseSummary.tsx` 和 `release.css`。你可以直接在这里编辑，我们继续讨论页面。')}</M><Files /><Composer bot={false} /></div>; }
-export function App() { return <I18nProvider><div className={`readme-app ${scene}`}><Header /><div className="frame-body">{!botScene && <Sidebar />}{scene === 'varin' ? <><VarinConversation /><aside className="bot-area"><BotWorkspaceNavigationContext.Provider value={navigation}><BotPanelBody model={model} /></BotWorkspaceNavigationContext.Provider></aside></> : scene === 'workbench' ? <><WorkbenchConversation /><Collaboration /></> : scene === 'ide' ? <><Editor /><IdeChat /></> : scene === 'conversation-choices' ? <ChoiceConversation /> : scene === 'conversation-reading' ? <ReadingConversation /> : <RichConversation />}</div></div></I18nProvider>; }
+export function App() { return <I18nProvider><div className={`readme-app ${scene}`}><Header /><div className="frame-body">{!botScene && <Sidebar />}{scene === 'varin' ? <><VarinConversation /><aside className="bot-area"><BotWorkspaceNavigationContext.Provider value={navigation}><BotPanelBody model={model} /></BotWorkspaceNavigationContext.Provider></aside></> : scene === 'workbench' ? <><WorkbenchConversation /><Collaboration /><ContextPanelRail /></> : scene === 'ide' ? <><Editor /><IdeChat /></> : scene === 'conversation-choices' ? <ChoiceConversation /> : scene === 'conversation-reading' ? <ReadingConversation /> : <RichConversation />}</div></div></I18nProvider>; }
 createRoot(document.getElementById('root')!).render(<ThemeSystemContext.Provider value={themeContext}><TooltipProvider><App /></TooltipProvider></ThemeSystemContext.Provider>);
 document.body.dataset.readmeReady = 'true';
