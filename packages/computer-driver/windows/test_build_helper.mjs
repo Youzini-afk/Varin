@@ -68,8 +68,9 @@ test('bootstraps the SDK through cmd from a batch path containing spaces', { ski
     fs.mkdirSync(path.dirname(script), { recursive: true });
     fs.writeFileSync(script, [
       '@echo off',
-      'if not "%1"=="-arch=x64" exit /b 1',
-      `if not "%2"=="-host_arch=${process.arch}" exit /b 1`,
+      // Batch positional parameters split unquoted '='. The raw argument tail
+      // preserves the developer command's -arch=value syntax.
+      'set "VARIN_FIXTURE_ARGS=%*"',
       'set "INCLUDE=fixture SDK include"',
       'set "WindowsSdkDir=fixture SDK"',
       'set "WindowsSDKVersion=fixture SDK version"',
@@ -83,6 +84,7 @@ test('bootstraps the SDK through cmd from a batch path containing spaces', { ski
     const run = (command, args, options) => {
       if (path.basename(command) === 'vswhere.exe') return installation;
       if (command === 'cmd.exe') return execFileSync(command, args, options);
+      assert.equal(options.env.VARIN_FIXTURE_ARGS.trim(), `-arch=x64 -host_arch=${process.arch}`);
       assert.equal(options.env.INCLUDE, 'fixture SDK include');
       assert.equal(options.env.WindowsSdkDir, 'fixture SDK');
       bootstrapped = true;
@@ -93,6 +95,28 @@ test('bootstraps the SDK through cmd from a batch path containing spaces', { ski
     assert.equal(identity.values.sdk, 'fixture SDK version');
     assert.equal(identity.values.target, 'x86_64-pc-windows-msvc');
   } finally { f.close(); }
+});
+
+test('reads a real unsigned file with built-in PowerShell modules despite an inherited module path', { skip: process.platform !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-signature-check-'));
+  const previous = process.env.PSModulePath;
+  try {
+    const modules = path.join(root, 'inherited modules');
+    const security = path.join(modules, 'Microsoft.PowerShell.Security');
+    fs.mkdirSync(security, { recursive: true });
+    fs.writeFileSync(path.join(security, 'Microsoft.PowerShell.Security.psd1'),
+      "@{ ModuleVersion='1.0'; RootModule='security.psm1'; FunctionsToExport=@('Get-AuthenticodeSignature') }\r\n");
+    fs.writeFileSync(path.join(security, 'security.psm1'), "throw 'Inherited module must not be loaded'\r\n");
+    const unsigned = path.join(root, 'unsigned fixture.ps1');
+    fs.writeFileSync(unsigned, '# Signature inspection fixture. Never executed.\r\n');
+    process.env.PSModulePath = modules;
+    assert.deepEqual(artifact.readSignature(unsigned), { status: 'unsigned' });
+    assert.equal(process.env.PSModulePath, modules);
+  } finally {
+    if (previous === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('native helper cache includes source, lockfile, manifest, icon, actual toolchain, flags and target', () => {
@@ -134,7 +158,7 @@ test('failed preparation preserves the previous generation byte-for-byte', () =>
     fs.appendFileSync(path.join(f.root, 'kernel/Cargo.lock'), 'change'); f.fail = true;
     assert.throws(() => buildWindowsComputerHelper(f.options), /compiler failed/);
     assert.deepEqual(fs.readFileSync(path.join(first.directory, 'manifest.json')), oldManifest);
-    assert.equal(artifact.verifyHelper(first.directory).buildId, first.manifest.buildId);
+    assert.equal(artifact.verifyHelper(first.directory, { run: f.options.run }).buildId, first.manifest.buildId);
   } finally { f.close(); }
 });
 

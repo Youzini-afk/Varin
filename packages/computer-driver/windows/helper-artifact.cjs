@@ -55,9 +55,14 @@ function inspectExecutable(bytes, architecture) {
 }
 
 function readSignature(executable, run = execFileSync) {
+  const env = { ...process.env, VARIN_SIGNATURE_FILE: executable };
+  // A build launched from pwsh can inherit its incompatible module path.
+  // Use Windows PowerShell's own built-ins only, without changing the caller.
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  env.PSModulePath = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
   const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     "$ErrorActionPreference='Stop'; $s=Get-AuthenticodeSignature -LiteralPath $env:VARIN_SIGNATURE_FILE; @{ status=$s.Status.ToString(); subject=$s.SignerCertificate.Subject; thumbprint=$s.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress"],
-  { encoding: 'utf8', windowsHide: true, env: { ...process.env, VARIN_SIGNATURE_FILE: executable } });
+  { encoding: 'utf8', windowsHide: true, env });
   const signature = JSON.parse(String(result).trim());
   if (signature.status === 'NotSigned') return { status: 'unsigned' };
   if (signature.status !== 'Valid' || !signature.thumbprint) throw new Error(`Computer helper Authenticode verification failed: ${signature.status}`);
