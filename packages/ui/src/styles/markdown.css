@@ -154,16 +154,20 @@
   & :is(strong, b) { font-weight: 600; color: var(--markdown-bold, var(--foreground)); }
 
   & code[data-markdown="inline-code"] {
-    font-size: 0.875em;
+    font-size: 0.9em;
     font-weight: 400;
     line-height: inherit;
-    padding: 0.12em 0.3em;
+    padding: 0.05em 0.2em;
     border-radius: 3px;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     font-variant-ligatures: none;
   }
-  & :is(strong, b) code[data-markdown="inline-code"] { font-weight: 600; }
+  & :is(strong, b, h1, h2, h3, h4, h5, h6) code[data-markdown="inline-code"] {
+    font-weight: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
 
   & :is(a, [data-varin-file-link="true"]) {
     text-decoration: underline;
@@ -174,7 +178,7 @@
   }
   & :is(a, [data-varin-file-link="true"]):hover { text-decoration-color: currentColor; }
   & a code[data-markdown="inline-code"],
-  & code[data-varin-file-link="true"] { color: var(--markdown-link, var(--primary)); }
+  & code[data-varin-file-link="true"] { color: var(--markdown-link, var(--primary)); background-color: transparent; }
   & a:hover code[data-markdown="inline-code"],
   & code[data-varin-file-link="true"]:hover { color: var(--markdown-link-hover, var(--primary)); }
 

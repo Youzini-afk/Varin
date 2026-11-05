@@ -43,7 +43,38 @@ async function render(history: ThreadHistoryItem[], sessionId = 'headings') {
     entries={projection.entries} toolExecutions={projection.toolExecutions} />));
 }
 const summaries = () => [...container.querySelectorAll<HTMLDetailsElement>('details[data-conversation-tool-disclosure^="tool:"]')]
-  .map(node => ({ open: node.open, text: node.querySelector('summary')!.textContent! }));
+  .map(node => ({ open: node.hasAttribute('open'), text: node.querySelector('summary')!.textContent! }));
+
+it.each(['dialogue', 'sorted', 'live'] as const)('keeps source work scannable in %s and preserves an explicit expansion', async mode => {
+  useUIStore.setState({ chatRenderMode: mode, activityRenderMode: 'summary' });
+  const history = [
+    ...call('sources', 'websearch', { queries: ['terminal input'] }, { items: [{ results: [
+      { title: 'A useful source', url: 'https://example.com/guide', snippet: 'A short excerpt helps choose a source.', contentKind: 'provider-excerpt' },
+      { summary: 'An answer without title or URL.', contentKind: 'generated-answer' },
+    ] }] }),
+    ...call('page', 'webfetch', { url: 'https://example.com/notes' }, { markdown: 'Readable page body without paper metadata.' }),
+  ];
+  await render(history, 'sources-' + mode);
+  const activity = container.querySelector<HTMLDetailsElement>('.dialogue-activity');
+  if (activity) await act(async () => { activity.open = true; activity.dispatchEvent(new window.Event('toggle')); });
+  expect(summaries()[0]?.text).toContain('terminal input');
+  expect(summaries()[0]?.text).toContain('2 entries');
+  expect(summaries()[0]?.open).toBe(mode === 'live');
+  if (mode !== 'live') expect(container.textContent).not.toContain('A useful source');
+  const source = container.querySelector<HTMLDetailsElement>('details[data-conversation-tool-disclosure^="tool:"]')!;
+  await act(async () => { source.open = true; source.dispatchEvent(new window.Event('toggle')); });
+  expect(container.textContent).toContain('A short excerpt helps choose a source.');
+  expect(container.textContent).toContain('An answer without title or URL.');
+  expect(container.textContent).not.toContain(dict['chat.tools.sourceExcerpt']);
+  const page = container.querySelectorAll<HTMLDetailsElement>('details[data-conversation-tool-disclosure^="tool:"]')[1]!;
+  await act(async () => { page.open = true; page.dispatchEvent(new window.Event('toggle')); });
+  expect(container.textContent).toContain('Readable page body without paper metadata.');
+  await act(async () => { source.open = false; source.dispatchEvent(new window.Event('toggle')); });
+  await render([], 'sources-' + mode);
+  await render(history, 'sources-' + mode);
+  expect(summaries()[0]?.open).toBe(false);
+  expect(summaries()[1]?.open).toBe(true);
+});
 
 it('shows the target, actual input and returned state before opening native process calls', async () => {
   const processId = 'request:tool:spawn';

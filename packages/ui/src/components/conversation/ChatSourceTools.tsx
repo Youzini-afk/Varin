@@ -6,6 +6,9 @@ import { useI18n } from '@/lib/i18n';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
 import { ToolResultNotice } from './ChatResourceTools';
 import { toolRecord, toolText } from './toolInvocation';
+import { ToolHeadingText } from './ToolHeadingText';
+import { ToolExcerpt } from './ToolExcerpt';
+import { useUIStore } from '@/stores/useUIStore';
 import type { ToolViewProps } from './toolViewTypes';
 
 export function SourceLink({ url, children }: { url: string; children: React.ReactNode }) {
@@ -18,7 +21,8 @@ const domain = (value: string) => { try { return new URL(value).hostname; } catc
 
 export function ChatWebTools({ call, execution, result, status, generating, output, details }: ToolViewProps) {
   const { t } = useI18n();
-  const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
+  const detailed = useUIStore(state => state.chatRenderMode === 'live');
+  const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result ?? execution?.partialResult);
   const research = call.name === 'research_search', decision = call.name === 'research_decide';
   const search = call.name === 'websearch' || research;
   const items = list(data.items), papers = list(data.papers);
@@ -42,19 +46,24 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
     'paper-metadata': 'chat.tools.contentKind.paper-metadata', 'page-text': 'chat.tools.contentKind.page-text' } as const;
   const contentKind = (kind: string) => kind in contentLabels ? t(contentLabels[kind as keyof typeof contentLabels]) : kind ? t('chat.tools.contentKind.unknown') : '';
   const diagnostics = items.filter(item => list(item.attempts).length > 1 || list(item.appliedFilters).length || (Array.isArray(item.notices) && item.notices.length));
+  const resultCount = search && (Array.isArray(data.papers) || Array.isArray(data.items)) && (results.length > 0 || status === 'success') ? results.length : undefined;
   return <section className="tool-source-activity">
-    <div className="tool-source-heading"><Icon name={decision ? 'list-check-2' : search ? 'search' : 'global'} className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 break-words typography-meta">{title || t(search ? 'chat.tools.searchSources' : 'chat.tools.readSource')}</span>
+    <ToolDisclosure id={'tool:' + call.id} className="tool-source-disclosure" initiallyExpanded={detailed || status === 'error'}>
+    <summary className="tool-source-heading"><Icon name={decision ? 'list-check-2' : search ? 'search' : 'global'} className="size-3.5 shrink-0" />
+      <ToolHeadingText label={t(search ? 'chat.tools.searchSources' : 'chat.tools.readSource')} subject={title}
+        receipt={resultCount !== undefined ? t('chat.tools.entries', { count: resultCount }) : undefined} />
       {status !== 'success' && <ToolStatus status={status} generating={generating} />}
-    </div>
+      <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5 shrink-0" />
+    </summary>
+    <div className="tool-source-content">
     {results.length > 0 && <ol className="tool-source-results">
       {results.map((item, index) => <li key={item.url + ':' + index}>
         <span className="tool-source-number">{index + 1}</span><div className="min-w-0">
-          <SourceLink url={item.url}>{item.title || item.url}</SourceLink>
-          <p className="typography-micro text-muted-foreground">{[domain(item.url), item.provenance, contentKind(item.contentKind)].filter(Boolean).join(' · ')}</p>
-          {item.snippet && <ToolDisclosure id={'source:' + call.id + ':' + item.url + ':' + index} className="tool-document-text" initiallyExpanded={item.snippet.length < 700}>
-            <summary className="typography-micro text-muted-foreground">{t('chat.tools.sourceExcerpt')}</summary><p className="whitespace-pre-wrap break-words typography-meta">{item.snippet}</p>
-          </ToolDisclosure>}
+          {(item.title || item.url) && <SourceLink url={item.url}>{item.title || item.url}</SourceLink>}
+          {(item.url || item.provenance || item.contentKind) && <p className="tool-source-metadata typography-micro" title={[domain(item.url), item.provenance, contentKind(item.contentKind)].filter(Boolean).join(' · ')}>
+            {[domain(item.url), item.provenance, contentKind(item.contentKind)].filter(Boolean).join(' · ')}
+          </p>}
+          {item.snippet && <ToolExcerpt id={'source:' + call.id + ':' + item.url + ':' + index} text={item.snippet} />}
           {item.citation && <MarkdownRenderer content={`[${t('chat.tools.pinnedSource')}](${item.citation})`} messageId={call.id + ':source:' + index} variant="tool" enableFileReferences={false} />}
         </div></li>)}
     </ol>}
@@ -86,10 +95,7 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
       {typeof data.citation === 'string' && <MarkdownRenderer content={`[${t('chat.tools.pinnedSource')}](${data.citation})`} messageId={call.id + ':citation'} variant="tool" enableFileReferences={false} />}
       {list(data.findHits).map((hit, index) => <div key={index} className="tool-document-match"><span className="typography-micro text-muted-foreground">{t('chat.tools.page', { page: typeof hit.page === 'number' ? hit.page : '' })}</span><p className="typography-meta">{toolText(hit.snippet)}</p></div>)}
       {Boolean(data.nextRead) && <p className="typography-micro text-muted-foreground">{t('chat.tools.moreSourceContent')}</p>}
-      {markdown && <ToolDisclosure id={'document:' + call.id} className="tool-document-text" initiallyExpanded>
-        <summary className="typography-micro text-muted-foreground">{t('chat.tools.sourceExcerpt')}</summary>
-        <div className="tool-result-scroll" data-conversation-tool-scroll="true"><MarkdownRenderer content={markdown} messageId={call.id + ':document'} variant="tool" enableFileReferences={false} /></div>
-      </ToolDisclosure>}
+      {markdown && <ToolExcerpt id={'document:' + call.id} text={markdown} markdown />}
     </div>}
     {documents.map((document, index) => <ToolDisclosure id={'fetched:' + call.id + ':' + index} key={index} className="tool-document-text">
       <summary className="typography-meta">{toolText(document.title) || toolText(document.finalUrl) || toolText(document.url)}</summary>
@@ -103,11 +109,13 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
         {typeof candidate?.detail === 'string' && <p className="tool-source-snippet">{candidate.detail}</p>}</div></li>;
     })}</ol>}
     {decision && Boolean(data.fallback) && <p className="typography-micro text-muted-foreground">{t('chat.tools.orderFallback')}</p>}
-    <ToolResultNotice data={data} status={status} />
     {research && list(data.issues).length > 0 && <ToolDisclosure id={'source-issues:' + call.id} className="tool-document-text">
       <summary className="typography-micro text-muted-foreground">{t('chat.tools.partialResult')}</summary>
       <div className="space-y-1 typography-meta text-muted-foreground">{list(data.issues).map((issue, index) => <p key={index} className="break-words">{toolText(issue.message)}</p>)}</div>
     </ToolDisclosure>}
     {output}{details}
+    </div>
+    </ToolDisclosure>
+    <ToolResultNotice data={data} status={status} />
   </section>;
 }

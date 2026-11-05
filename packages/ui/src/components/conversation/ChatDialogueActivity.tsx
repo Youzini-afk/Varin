@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
 import { AnimatePresence, motion } from 'motion/react';
@@ -34,7 +35,12 @@ const actions: Record<string, I18nKey> = {
   recovery_points: 'chat.dialogue.recovery', file_restore: 'chat.dialogue.restore',
   image_generate: 'chat.dialogue.image', image_edit: 'chat.dialogue.image',
 };
-type Category = 'reads' | 'searches' | 'changes' | 'drafts' | 'branches' | 'commands' | 'scripts' | 'processes' | 'web' | 'collaboration' | 'plans' | 'memory' | 'other';
+type Category = 'reads' | 'searches' | 'changes' | 'drafts' | 'branches' | 'commands' | 'scripts' | 'processes' | 'web' | 'collaboration' | 'plans' | 'memory' | 'discovery' | 'other';
+const categoryIcons: Record<Category, IconName> = {
+  reads: 'file-text', searches: 'search', changes: 'edit', drafts: 'file-edit', branches: 'git-branch', commands: 'terminal',
+  scripts: 'code', processes: 'terminal', web: 'global', collaboration: 'chat-3', plans: 'list-check-2', memory: 'database-2',
+  discovery: 'file-list-2', other: 'tools',
+};
 const category = (name: string): Category => {
   if (name === 'file_read') return 'reads';
   if (name === 'office_read' || name === 'office_render') return 'reads';
@@ -46,6 +52,7 @@ const category = (name: string): Category => {
   if (name.startsWith('process_') || name === 'wait_process') return 'processes';
   if (name.startsWith('browser_') || ['websearch', 'webfetch', 'document_read', 'research_search'].includes(name)) return 'web';
   if (name.startsWith('child_') || ['wait_child', 'threads', 'read_thread', 'send', 'submit_code', 'update', 'agent_rename'].includes(name)) return 'collaboration';
+  if (['tool_describe', 'settings_search', 'settings_read', 'runtime_contract'].includes(name)) return 'discovery';
   return name === 'todo' ? 'plans' : name === 'memory' ? 'memory' : 'other';
 };
 
@@ -107,7 +114,12 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   const pending = tools.filter(row => row.counted && ['running', 'waiting', 'background'].includes(row.status));
   const uncertain = tools.filter(row => row.status === 'unknown' || row.status === 'success' && row.phase === 'preview').length;
   const cancelled = tools.filter(row => row.status === 'cancelled').length;
-  const summary = [...counts].map(([kind, count]) => t(kind === 'reads' ? 'chat.activity.reads' : kind === 'changes' ? 'chat.activity.changes' : `chat.dialogue.count.${kind}`, { count })).join(' · ')
+  // The folded row is a reading cue. Full counts stay available in its title;
+  // rank completed categories by observed work, with generic operations last.
+  const kinds = [...counts].sort(([a, ac], [b, bc]) => Number(a === 'other') - Number(b === 'other') || bc - ac);
+  const featured = kinds.slice(0, 2);
+  const fullSummary = kinds.map(([kind, count]) => `${t(`chat.dialogue.summary.${kind}`)} × ${count}`).join(' · ');
+  const summary = featured.map(([kind]) => t(`chat.dialogue.summary.${kind}`)).join(' · ')
     || t(tools.length ? 'chat.dialogue.tools' : process.activities.some(item => item.kind === 'thinking') ? 'chat.dialogue.thinking' : 'chat.dialogue.records');
   const last = process.activities.at(-1);
   const liveThinking = process.tail && active && last?.kind === 'thinking' && last.streaming;
@@ -132,10 +144,16 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     if (subject === call.name) subject = '';
   }
   const busy = liveThinking || current?.item.streaming || pending.some(row => row.status === 'running');
-  const title = [label, subject].filter(Boolean).join(' · ');
+  const title = current || thinking ? [label, subject].filter(Boolean).join(' · ') : fullSummary || label;
+  const icons: IconName[] = thinking ? ['brain'] : current ? [categoryIcons[category(current.item.call.name)]]
+    : [...new Set(featured.map(([kind]) => categoryIcons[kind]))];
+  const remainingKinds = !current && !thinking ? kinds.length - featured.length : 0;
   const row = <ToolDisclosure id={`dialogue:${process.id}`} className="dialogue-activity" open={expanded} onOpenChange={onExpandedChange}>
     <summary className="dialogue-activity-heading">
       <Icon name="arrow-right-s" className="dialogue-activity-chevron size-3.5 shrink-0" />
+      {icons.length > 0 && <span className="dialogue-activity-icons" aria-hidden="true">
+        {icons.map(icon => <Icon key={icon} name={icon} className="size-3.5 shrink-0" />)}
+      </span>}
       {/* One label for the whole segment: actions, thinking and the closing
           receipt change in place, and a running label carries the shimmer. */}
       <span className="dialogue-activity-label" title={title} data-thinking={thinking ? true : undefined}>
@@ -144,13 +162,15 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
         {thinking ? thinking.content.redacted ? <span className="min-w-0 truncate">{t('chat.reasoningTrace.unavailable')}</span>
           : <ThinkingPreview text={thinking.content.thinking} streaming={Boolean(liveThinking)} active /> : null}
       </span>
+      {remainingKinds > 0 && <span className="dialogue-activity-more typography-micro" title={fullSummary}
+        aria-label={t('chat.dialogue.moreKinds', { count: remainingKinds })}>+{remainingKinds}</span>}
       {failures > 0 && <span className="shrink-0 typography-micro text-destructive">{t('chat.dialogue.failures', { count: failures })}</span>}
       {uncertain > 0 && <span className="shrink-0 typography-micro text-status-warning">{t('chat.dialogue.uncertain', { count: uncertain })}</span>}
       {cancelled > 0 && <span className="shrink-0 typography-micro">{t('chat.dialogue.stopped', { count: cancelled })}</span>}
       {!current && pending.length > 0 && <span className="shrink-0 typography-micro">{t('chat.dialogue.pending', { count: pending.length })}</span>}
       {current && pending.length > 1 && <span className="shrink-0 typography-micro">{t('chat.activity.otherPending', { count: pending.length - 1 })}</span>}
     </summary>
-    <div className="dialogue-activity-body">{process.activities.map(item => <React.Fragment key={item.id}>{renderActivity(item)}</React.Fragment>)}</div>
+    <div className="dialogue-activity-body">{process.activities.map(item => <div key={item.id} className="dialogue-activity-entry" data-activity-kind={item.kind}>{renderActivity(item)}</div>)}</div>
   </ToolDisclosure>;
   // Expanded, the cards are in the body; the tray only serves the folded row.
   const trayItems = !expanded && tray.batch

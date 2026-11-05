@@ -417,7 +417,9 @@ const ChatToolCard: React.FC<{
     call, cwd, generating, execution, result, status,
     output: result ? <ToolResultContent messageId={'tool-result:' + call.id} result={result} hideDetails /> : null,
     details: <ToolDisclosure id={'raw:' + call.id} className="tool-invocation-details">
-      <summary>{t('chat.tools.details')}</summary>
+      <summary title={t('chat.tools.details')} aria-label={t('chat.tools.details')}>
+        <Icon name="code-sslash" className="size-3.5" /><span>{t('chat.tools.details')}</span>
+      </summary>
       <div><p className="font-mono typography-micro">{call.gateway?.name ?? call.name}</p>
         <RawJsonDetails label={t('chat.tools.input')} value={call.gateway?.arguments ?? call.arguments} />
         {details !== undefined && <RawJsonDetails label={t('chat.tools.result')} value={result?.originalDetails ?? details} />}

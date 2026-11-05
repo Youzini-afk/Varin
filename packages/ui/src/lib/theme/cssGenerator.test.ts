@@ -14,10 +14,12 @@ describe('Markdown theme accents', () => {
       expect(css.get('--primary-base')).toBe(theme.colors.primary.base);
       expect(css.get('--markdown-link'), theme.metadata.id).toContain('var(--primary-base)');
       expect(css.get('--markdown-link-hover'), theme.metadata.id).toContain('var(--primary-hover)');
-      for (const property of ['inline-code', 'inline-code-bg', 'blockquote-border', 'selection']) {
+      for (const property of ['blockquote-border', 'selection']) {
         expect(css.get(`--markdown-${property}`), `${theme.metadata.id}: ${property}`)
           .toContain('var(--primary-base)');
       }
+      expect(css.get('--markdown-inline-code')).toBe('var(--markdown-body)');
+      expect(css.get('--markdown-inline-code-bg')).not.toContain('var(--primary');
       expect(css.get('--syntax-keyword')).toBe(theme.colors.syntax.base.keyword);
       expect(css.get('--status-error')).toBe(theme.colors.status.error);
     }

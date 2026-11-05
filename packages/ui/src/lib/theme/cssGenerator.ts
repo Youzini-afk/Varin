@@ -45,14 +45,14 @@ const luminance = (rgb: number[]): number => {
 
 // Some light themes use pastel button fills. Bring their reading ink toward
 // the theme's text color until small text reaches 4.5:1 on both prose and the
-// tinted inline-code surface. The CSS still references the live accent.
+// neutral inline-code surface. The CSS still references the live accent.
 const readingAccent = (theme: Theme, variable: string, color: string): string => {
-  const channels = [color, theme.colors.surface.foreground, theme.colors.surface.background,
-    theme.colors.primary.base].map((value) => hexToRgb(value)?.split(' ').map(Number));
-  const [accent, foreground, background, primary] = channels;
+  const channels = [color, theme.colors.surface.foreground, theme.colors.surface.background]
+    .map((value) => hexToRgb(value)?.split(' ').map(Number));
+  const [accent, foreground, background] = channels;
   let weight = 85;
-  if (accent && foreground && background && primary) {
-    const surfaces = [background, mixRgb(primary, background, 0.1)].map(luminance);
+  if (accent && foreground && background) {
+    const surfaces = [background, mixRgb(foreground, background, 0.05)].map(luminance);
     for (; weight > 0; weight -= 1) {
       const ink = luminance(mixRgb(accent, foreground, weight / 100));
       if (surfaces.every((surface) => (Math.max(ink, surface) + 0.05) / (Math.min(ink, surface) + 0.05) >= 4.5)) break;
@@ -429,8 +429,8 @@ export class CSSVariableGenerator {
     vars.push(`  --markdown-heading4: ${markdown.heading4 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${markdown.link || accentInk};`);
     vars.push(`  --markdown-link-hover: ${markdown.linkHover || hoverInk};`);
-    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || accentInk};`);
-    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || `color-mix(in srgb, ${accent} 10%, transparent)`};`);
+    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || 'var(--markdown-body)'};`);
+    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || 'color-mix(in srgb, var(--surface-foreground) 5%, transparent)'};`);
     vars.push(`  --markdown-blockquote: ${markdown.blockquote || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || `color-mix(in srgb, ${accent} 35%, var(--interactive-border))`};`);
     vars.push(`  --markdown-list-marker: ${markdown.listMarker || theme.colors.surface.mutedForeground};`);

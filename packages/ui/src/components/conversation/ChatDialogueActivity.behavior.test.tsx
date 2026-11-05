@@ -12,7 +12,7 @@ vi.mock('@/lib/i18n', async original => ({
   ...await original<typeof import('@/lib/i18n')>(),
   useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => key + (values ? JSON.stringify(values) : '') }),
 }));
-vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/icon/Icon', () => ({ Icon: ({ name }: { name: string }) => <svg data-icon={name} /> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => false }));
 let root: Root, container: HTMLElement, height: number, message: ChatAssistantMessage;
@@ -97,10 +97,24 @@ test('tool activity replaces the thinking preview and a completed mixed segment 
   message = { ...message, stopReason: 'stop' };
   await render(true);
   await settle();
-  expect(heading().textContent).toContain('chat.activity.reads{"count":1}');
+  expect(heading().textContent).toContain('chat.dialogue.summary.reads');
   expect(heading().querySelector('.thinking-preview')).toBeNull();
   // The receipt replaces the action in the same label instead of remounting it.
   expect(heading().querySelector('.swap-text')).toBe(label);
+});
+
+test('a mixed completed segment keeps a short visual cue, full counts and unresolved state', async () => {
+  const names = ['file_read', 'process_spawn', 'websearch', 'todo', 'memory', 'tool_describe', 'custom_tool'];
+  message = { ...message, stopReason: 'stop', content: names.map(name => ({ type: 'toolCall' as const, id: name, name, arguments: {} })) };
+  executions = Object.fromEntries(names.map(name => [name, { toolCallId: name, name, args: {}, status: 'success' as const }]));
+  executions.custom_tool = { ...executions.custom_tool!, status: 'error' };
+  await render(true);
+  await settle();
+  expect(heading().querySelectorAll('.dialogue-activity-icons svg')).toHaveLength(2);
+  expect(heading().textContent).toContain('chat.dialogue.summary.reads · chat.dialogue.summary.commands');
+  expect(heading().textContent).not.toContain('chat.dialogue.summary.memory');
+  expect(heading().querySelector('.dialogue-activity-more')?.getAttribute('title')).toContain('chat.dialogue.summary.memory × 1');
+  expect(heading().textContent).toContain('chat.dialogue.failures{"count":1}');
 });
 
 test('a quick action stays readable before the next one replaces it', async () => {
