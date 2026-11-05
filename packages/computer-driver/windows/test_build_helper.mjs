@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { buildWindowsComputerHelper, windowsHelperBuildIdentity } from './build-helper.mjs';
 import artifact from './helper-artifact.cjs';
 
@@ -57,6 +58,41 @@ test('Windows PE identity and imports reject wrong architecture and missing VC r
   assert.throws(() => artifact.inspectExecutable(pe(), 'arm64'), /architecture/);
   assert.throws(() => artifact.inspectExecutable(pe('x64', 'VCRUNTIME140.dll'), 'x64'), /unbundled/);
   assert.throws(() => artifact.inspectExecutable(pe().subarray(0, 180), 'x64'), /truncated|header/);
+});
+
+test('bootstraps the SDK through cmd from a batch path containing spaces', { skip: process.platform !== 'win32' }, () => {
+  const f = fixture();
+  try {
+    const installation = path.join(f.root, 'Visual Studio (fixture & tools)');
+    const script = path.join(installation, 'Common7', 'Tools', 'VsDevCmd.bat');
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, [
+      '@echo off',
+      'if not "%1"=="-arch=x64" exit /b 1',
+      `if not "%2"=="-host_arch=${process.arch}" exit /b 1`,
+      'set "INCLUDE=fixture SDK include"',
+      'set "WindowsSdkDir=fixture SDK"',
+      'set "WindowsSDKVersion=fixture SDK version"',
+      'set "VSCMD_ARG_TGT_ARCH=x64"',
+      'exit /b 0',
+      '',
+    ].join('\r\n'));
+    const environment = { ...process.env };
+    for (const name of ['INCLUDE', 'WindowsSdkDir', 'VSCMD_ARG_TGT_ARCH']) delete environment[name];
+    let bootstrapped = false;
+    const run = (command, args, options) => {
+      if (path.basename(command) === 'vswhere.exe') return installation;
+      if (command === 'cmd.exe') return execFileSync(command, args, options);
+      assert.equal(options.env.INCLUDE, 'fixture SDK include');
+      assert.equal(options.env.WindowsSdkDir, 'fixture SDK');
+      bootstrapped = true;
+      return f.options.run(command, args, options);
+    };
+    const identity = windowsHelperBuildIdentity({ ...f.options, environment, run });
+    assert.equal(bootstrapped, true);
+    assert.equal(identity.values.sdk, 'fixture SDK version');
+    assert.equal(identity.values.target, 'x86_64-pc-windows-msvc');
+  } finally { f.close(); }
 });
 
 test('native helper cache includes source, lockfile, manifest, icon, actual toolchain, flags and target', () => {

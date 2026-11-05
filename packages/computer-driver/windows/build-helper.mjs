@@ -30,8 +30,10 @@ function windowsEnvironment(architecture, run, environment) {
   const installation = String(run(installer, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8', env: environment })).trim();
   if (!installation) throw new Error('Visual Studio C++ build tools and the Windows SDK are required to build VarinComputer');
   const script = path.join(installation, 'Common7', 'Tools', 'VsDevCmd.bat');
+  // cmd.exe parses this command, not the C runtime. Node's default argument
+  // escaping turns the quoted batch path into literal backslash-quotes.
   const output = String(run('cmd.exe', ['/d', '/s', '/c', `call "%VARIN_VSDEVCMD%" -arch=${architecture} -host_arch=${process.arch} >nul && set`],
-    { encoding: 'utf8', windowsHide: true, env: { ...environment, VARIN_VSDEVCMD: script } }));
+    { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, env: { ...environment, VARIN_VSDEVCMD: script } }));
   const env = { ...environment };
   for (const line of output.split(/\r?\n/)) { const split = line.indexOf('='); if (split > 0) env[line.slice(0, split)] = line.slice(split + 1); }
   return env;

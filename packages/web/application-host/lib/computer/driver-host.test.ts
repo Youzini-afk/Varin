@@ -422,7 +422,13 @@ describe('Windows native helper contract', () => {
     try {
       await failed.driver.request({ tool: 'ping' });
       expect(await failed.driver.interrupt!()).toEqual({ released: false });
-      await expect(crashed.driver.request({ tool: 'exit' })).rejects.toThrow('exited');
+      // Process close and pipe close can arrive in either order. Both lose the
+      // original effect receipt; neither can acknowledge release or replay it.
+      await expect(crashed.driver.request({ tool: 'exit' })).rejects.toThrow(
+        /Computer driver exited \(code 9\)|Computer input control channel closed; original input outcome is unknown/,
+      );
+      expect(crashed.driver.alive()).toBe(false);
+      await expect(crashed.driver.request({ tool: 'click' })).rejects.toThrow('original Computer input helper exited');
       expect(await crashed.driver.interrupt!()).toEqual({ released: false });
     } finally { await failed.dispose(); await crashed.dispose(); }
   });
