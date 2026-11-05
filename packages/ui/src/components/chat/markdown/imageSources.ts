@@ -36,12 +36,13 @@ export function markdownImagePlaceholder(href: string, alt: string, title?: stri
 }
 
 /** Consecutive image paragraphs are one gallery; prose always ends the group. */
+const galleryStart = /^<p data-md-image-gallery(?:=""|='')?>/;
 export function groupMarkdownImageBlocks<T extends { id: string; html: string }>(blocks: T[]): T[] {
   const result: T[] = [];
   for (const block of blocks) {
     const previous = result.at(-1);
-    if (previous && /^<p data-md-image-gallery>/.test(previous.html) && /^<p data-md-image-gallery>/.test(block.html)) {
-      result[result.length - 1] = { ...previous, id: `${previous.id}|${block.id}`, html: previous.html.replace(/<\/p>\s*$/, '') + block.html.replace(/^<p data-md-image-gallery>/, '') };
+    if (previous && galleryStart.test(previous.html) && galleryStart.test(block.html)) {
+      result[result.length - 1] = { ...previous, id: `${previous.id}|${block.id}`, html: previous.html.replace(/<\/p>\s*$/, '') + block.html.replace(galleryStart, '') };
     } else result.push(block);
   }
   return result;

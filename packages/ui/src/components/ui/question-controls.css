@@ -1,11 +1,11 @@
 .question-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .question-field + .question-field { margin-top: 24px; }
-.question-field-title { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 0; margin-bottom: 10px; color: var(--foreground); font-weight: 500; font-size: var(--text-body); line-height: 1.65; }
+.question-field-title { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 0; margin-bottom: 10px; color: var(--foreground); font-weight: 500; font-size: var(--text-markdown); line-height: 1.65; }
 .question-field-title > span:not(.question-field-number, .question-field-meta) { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .question-field-number { flex-shrink: 0; color: var(--muted-foreground); font-size: var(--text-micro); font-variant-numeric: tabular-nums; font-weight: 400; }
 .question-field-meta { flex-shrink: 0; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--text-micro); font-weight: 400; }
 .question-choices { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.question-choice { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 9px 10px; border-radius: 7px; cursor: pointer; color: var(--foreground); font-size: var(--text-body); line-height: 1.65; transition: background-color var(--motion-dur-fade, 160ms) var(--motion-ease-out, ease); }
+.question-choice { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 9px 10px; border-radius: 7px; cursor: pointer; color: var(--foreground); font-size: var(--text-markdown); line-height: 1.65; transition: background-color var(--motion-dur-fade, 160ms) var(--motion-ease-out, ease); }
 .question-choice > input { position: absolute; inset-inline-start: 17px; top: 16px; width: 1px; height: 1px; margin: 0; opacity: 0; }
 .question-choice-label { min-width: 0; flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
 .question-choice-mark { display: grid; place-items: center; flex: 0 0 16px; width: 16px; height: 16px; margin-top: calc((1em * 1.65 - 16px) / 2); border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, transparent); border-radius: 50%; transition: border-color var(--motion-dur-fade, 160ms), background-color var(--motion-dur-fade, 160ms); }
@@ -31,7 +31,7 @@
 .question-supplement-reveal > div { min-height: 0; overflow: hidden; padding-inline: 3px; margin-inline: -3px; }
 .question-supplement[data-open="true"] .question-supplement-reveal { grid-template-rows: 1fr; opacity: 1; }
 .question-supplement[data-open="true"] .question-supplement-toggle > svg { transform: rotate(90deg); }
-.question-text-input { display: block; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--foreground) 2%, transparent); color: var(--foreground); font: inherit; font-size: var(--text-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; resize: vertical; field-sizing: content; }
+.question-text-input { display: block; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--foreground) 2%, transparent); color: var(--foreground); font: inherit; font-size: var(--text-markdown); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; resize: vertical; field-sizing: content; }
 .question-text-input::placeholder { color: var(--muted-foreground); opacity: .75; }
 .question-text-input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .question-supplement .question-text-input { margin-block: 9px 3px; }

@@ -3,7 +3,7 @@ import { parseHTML } from 'linkedom';
 import morphdom from 'morphdom';
 import { MarkdownBlockStream, renderMarkdownBlocks, renderMarkdownSync } from './markdownCore';
 import { decorateMarkdownImages, MarkdownImageRegistry, preserveMarkdownImage } from './markdownImages';
-import { resolveMarkdownImageSource } from './imageSources';
+import { groupMarkdownImageBlocks, resolveMarkdownImageSource } from './imageSources';
 
 // This suite exercises parser/layout/ownership. Sanitization has its own boundary tests.
 vi.mock('dompurify', () => ({ default: { isSupported: true, addHook() {}, sanitize: (html: string) => html } }));
@@ -36,6 +36,16 @@ test('does not load a URL healed from incomplete streaming Markdown', async () =
   expect(partial.map(block => block.html).join('')).not.toContain('data-md-image-src');
   const complete = await renderMarkdownBlocks('![Screen](https://example.test/screen.png)', true, 'incomplete-test', stream);
   expect(complete.map(block => block.html).join('')).toContain('data-md-image-src="https://example.test/screen.png"');
+});
+
+test('groups adjacent images after the sanitizer serializes empty attributes', () => {
+  const blocks = ['![First](a.png)', '![Second](b.png)', 'Explanation', '![Third](c.png)'].map((markdown, index) => ({
+    id: String(index), html: renderMarkdownSync(markdown).replaceAll('data-md-image-gallery>', 'data-md-image-gallery="">'),
+  }));
+  const grouped = groupMarkdownImageBlocks(blocks);
+  expect(grouped).toHaveLength(3);
+  expect(root(grouped[0]!.html).querySelectorAll('[data-md-image-src]')).toHaveLength(2);
+  expect(grouped[1]!.html).toContain('Explanation');
 });
 
 test('resolves image paths against their conversation and leaves unknown schemes inert', () => {

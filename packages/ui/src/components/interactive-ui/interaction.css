@@ -15,6 +15,7 @@
 .conversation-ui-control, .conversation-ui-action {
   transition: background-color var(--motion-dur-fade, 160ms), border-color var(--motion-dur-fade, 160ms), color var(--motion-dur-fade, 160ms);
 }
+.conversation-ui-control[type="range"] { accent-color: var(--primary); }
 .conversation-ui-disclosure > button { display: flex; align-items: center; gap: .35rem; text-align: start; border-radius: .25rem; }
 .conversation-ui-disclosure > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .conversation-ui-disclosure > button > svg { transition: transform var(--motion-dur-glide, 320ms) var(--motion-ease-glide, ease); }
