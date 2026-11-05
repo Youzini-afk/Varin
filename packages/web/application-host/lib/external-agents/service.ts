@@ -28,6 +28,7 @@ import type { HarnessConnection } from './adapter.js';
 import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
 import { assertProfilePlatform, profileVersionArguments } from './profile-launch.js';
 import { findInstalledExternalExecutable } from './installed-executable.js';
+import { cacheableCapabilities, capabilityConfiguration } from './capability-cache.js';
 import { connectCodex } from './codex.js';
 import { connectPi } from './pi.js';
 import { connectAcp } from './acp.js';
@@ -45,6 +46,11 @@ const defaults: ExternalAgentConfiguration[] = [
 type Spawn = ReturnType<typeof createKernelProcessService>['spawn'];
 interface Live {
   generation: string;
+  configuration: ExternalAgentConfiguration;
+  agentVersion?: string;
+  capabilityGeneration: number | null;
+  idleSince?: number | undefined;
+  closing?: boolean;
   failure?: Error;
   dispose: Array<() => void>;
   launchKey: string;
@@ -79,11 +85,16 @@ export class ExternalAgentsService {
   private readonly revisions = new Map<string, number>();
   private readonly environment = createPlatformEnvironmentRuntime();
   private stopping = false;
+  private readonly connectionStates = new Map<string, NonNullable<ExternalConversationSnapshot['connection']>>();
+  private readonly reclaiming = new Map<string, Promise<void>>();
+  private readonly cacheWrites = new Set<Promise<void>>();
+  private readonly idleTimer: ReturnType<typeof setInterval>;
+  private sweeping: Promise<void> | undefined;
   private sources?: ReturnType<typeof createExternalSourceOwner>;
   private removeChildrenListener?: () => void;
   private readonly childTasks = new Map<
     string,
-    { controller: AbortController; work: Promise<void>; recheck: boolean }
+    { conversationId: string; controller: AbortController; work: Promise<void>; recheck: boolean }
   >();
   private discoveringChildren = false;
   private childrenDirty = false;
@@ -128,8 +139,15 @@ export class ExternalAgentsService {
       directory: string;
       resolveWorkspace(cwd: string): Promise<{ workspaceId: string; root: string }>;
       onError?(operationId: string, error: unknown): void;
+      /** Host policy defaults, injectable without changing the durable input contract. */
+      idle?: { preparedMs?: number; conversationMs?: number; sweepMs?: number };
     },
-  ) {}
+  ) {
+    this.idleTimer = setInterval(() => {
+      void this.sweepIdle().catch(error => this.deps.onError?.('external-idle', error));
+    }, deps.idle?.sweepMs ?? 60_000);
+    this.idleTimer.unref();
+  }
   startChildren(sources: ReturnType<typeof createExternalSourceOwner>) {
     this.sources = sources;
     this.removeChildrenListener = this.deps.kernel.onAgentRuntimeEvent((event) => {
@@ -175,7 +193,7 @@ export class ExternalAgentsService {
             continue;
           }
           const controller = new AbortController();
-          const task = { controller, work: Promise.resolve(), recheck: false };
+          const task = { conversationId: child.conversation_id, controller, work: Promise.resolve(), recheck: false };
           this.childTasks.set(child.operation_id, task);
           task.work = this.advanceChild(child, controller.signal)
             .catch((error) => {
@@ -321,21 +339,111 @@ export class ExternalAgentsService {
     if (catalog && id !== '*') this.revisions.set('*', (this.revisions.get('*') ?? 0) + 1);
     for (const listener of this.observers.get(id) ?? [])
       if (!listener({ ...change, epoch: this.observationEpoch, revision }))
-        this.observers.get(id)?.delete(listener);
+        this.removeObserver(id, listener);
+    this.touchActivity(id);
     if (catalog && id !== '*')
       for (const listener of this.observers.get('*') ?? [])
         if (!listener({ kind: 'refresh', epoch: this.observationEpoch, revision: this.revisions.get('*')! }))
           this.observers.get('*')?.delete(listener);
   }
+  private removeObserver(id: string, listener: (event: ExternalObservation) => boolean) {
+    const listeners = this.observers.get(id);
+    if (!listeners?.delete(listener)) return;
+    if (!listeners.size) { this.observers.delete(id); this.touchActivity(id); }
+  }
+  private touchActivity(id: string) {
+    const live = this.connections.get(id);
+    if (live) live.idleSince = this.observers.get(id)?.size ? undefined : Date.now();
+  }
   subscribe(id: string, listener: (event: ExternalObservation) => boolean): () => void {
     const listeners = this.observers.get(id) ?? new Set();
     this.observers.set(id, listeners);
     listeners.add(listener);
-    listener({ kind: 'refresh', epoch: this.observationEpoch, revision: this.revisions.get(id) ?? 0 });
-    return () => {
-      listeners.delete(listener);
-      if (!listeners.size) this.observers.delete(id);
-    };
+    this.touchActivity(id);
+    if (!listener({ kind: 'refresh', epoch: this.observationEpoch, revision: this.revisions.get(id) ?? 0 }))
+      this.removeObserver(id, listener);
+    return () => this.removeObserver(id, listener);
+  }
+  private async claimCapabilities(configuration: ExternalAgentConfiguration) {
+    return this.command<number | null>({ action: 'claim_capabilities', configurationId: configuration.id,
+      configuration: capabilityConfiguration(configuration) });
+  }
+  private async invalidateCapabilities(configuration: ExternalAgentConfiguration, generation: number) {
+    await this.command({ action: 'cache_capabilities', configurationId: configuration.id,
+      configuration: capabilityConfiguration(configuration), generation, invalidate: true });
+    this.notify('*');
+  }
+  private cacheCapabilities(live: Live): Promise<void> {
+    const capabilities = live.connection.capabilities;
+    const agentVersion = live.agentVersion ?? capabilities.protocol?.agentVersion;
+    // Failed discovery and unknown program versions are not reusable capability catalogs.
+    if (live.closing || live.failure || live.capabilityGeneration === null) return Promise.resolve();
+    const work = this.command<void>({ action: 'cache_capabilities', configurationId: live.configuration.id,
+      configuration: capabilityConfiguration(live.configuration), agentVersion, generation: live.capabilityGeneration,
+      ...(agentVersion && !capabilities.modelsError ? { capabilities: cacheableCapabilities(capabilities) } : {}) })
+      .then(() => this.notify('*'))
+      .catch(error => this.deps.onError?.('external-capabilities', error))
+      .finally(() => this.cacheWrites.delete(work));
+    this.cacheWrites.add(work);
+    return work;
+  }
+  private idleBlocked(id: string, live: Live): boolean {
+    // A retained binding cannot be replaced with a new native session. Keep a non-resumable
+    // connection alive: automatic reclamation would otherwise destroy the only continuation.
+    return Boolean(!live.connection.capabilities.resume || this.stopping || live.closing || live.failure || live.peer.disconnected || live.connection.failure ||
+      this.observers.get(id)?.size || this.connecting.has(id) || this.running.has(id) || this.retiring.has(id) ||
+      this.authenticating.has(id) || this.inputAdmissions.get(id)?.size || this.attachmentPreparations.has(id) ||
+      live.interactions.size || live.connection.backgroundTasks ||
+      [...this.childTasks.values()].some(task => task.conversationId === id));
+  }
+  /** Reclamation is a process-owner close, never observer cancellation or binding deletion. */
+  private sweepIdle(): Promise<void> {
+    if (this.sweeping) return this.sweeping;
+    const work = (async () => {
+      for (const [id, live] of this.connections) {
+        if (this.idleBlocked(id, live)) { live.idleSince = undefined; continue; }
+        live.idleSince ??= Date.now();
+        const idleSince = live.idleSince;
+        // Read the durable queue and delegation receipts, not just transient Host tasks.
+        const snapshot = await this.read(id);
+        const children = await this.children(true);
+        if (snapshot.conversation.activeTurn || snapshot.turns.some(turn => !ended(turn)) ||
+          children.some(child => child.conversation_id === id && !child.report)) {
+          live.idleSince = undefined;
+          continue;
+        }
+        const timeout = snapshot.turns.length ? this.deps.idle?.conversationMs ?? 15 * 60_000
+          : this.deps.idle?.preparedMs ?? 5 * 60_000;
+        // Any observation, input admission, native activity or generation change during those
+        // reads defeats this candidate. The reservation below seals new Host admissions.
+        if (this.connections.get(id) !== live || this.idleBlocked(id, live) || live.idleSince !== idleSince ||
+          Date.now() - idleSince < timeout) continue;
+        this.retiring.add(id);
+        const reclaim = Promise.resolve().then(async () => {
+          // An observer can arrive between reservation and this microtask. Do not close then.
+          if (this.observers.get(id)?.size || live.connection.backgroundTasks || live.idleSince !== idleSince) return;
+          live.closing = true;
+          await live.connection.close();
+          for (const dispose of live.dispose) dispose();
+          if (this.connections.get(id) === live) this.connections.delete(id);
+          this.connectionStates.set(id, { status: 'reclaimed' });
+          this.notify(id);
+        }).catch(error => {
+          this.connectionStates.set(id, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
+          this.notify(id);
+          throw error;
+        }).finally(() => {
+          this.retiring.delete(id);
+          if (this.reclaiming.get(id) === reclaim) this.reclaiming.delete(id);
+          // Native delegations accepted while close was joining remain durable and may now advance.
+          if (!this.stopping) this.advance(id);
+        });
+        this.reclaiming.set(id, reclaim);
+        await reclaim;
+      }
+    })().finally(() => { if (this.sweeping === work) this.sweeping = undefined; });
+    this.sweeping = work;
+    return work;
   }
   async settings(signal?: AbortSignal): Promise<ExternalAgentSettings> {
     const value = await this.command<ExternalAgentSettings>({ action: 'settings' }, signal);
@@ -356,7 +464,7 @@ export class ExternalAgentsService {
       if (
         !a ||
         Object.keys(a).some(
-          (key) => !['id', 'name', 'harness', 'enabled', 'command', 'args'].includes(key),
+          (key) => !['id', 'name', 'harness', 'enabled', 'command', 'args', 'defaults'].includes(key),
         ) ||
         !text(a.id).trim() ||
         !text(a.name).trim() ||
@@ -364,7 +472,9 @@ export class ExternalAgentsService {
         !['codex', 'claude', 'pi', 'acp'].includes(a.harness) ||
         typeof a.enabled !== 'boolean' ||
         !Array.isArray(a.args) ||
-        !a.args.every((v) => typeof v === 'string')
+        !a.args.every((v) => typeof v === 'string') ||
+        (a.defaults !== undefined && (!a.defaults || typeof a.defaults !== 'object' || Array.isArray(a.defaults) ||
+          Object.entries(a.defaults).some(([key, value]) => !['model', 'thinking', 'mode'].includes(key) || typeof value !== 'string' || !value.trim())))
       )
         throw new ExternalAgentError('invalid_settings', 'Invalid external Agent configuration');
     }
@@ -429,22 +539,36 @@ export class ExternalAgentsService {
     child.stderr.resume();
     try {
       await child.completion;
+      if (!child.exitConfirmed) throw new Error('Program version query exit is unconfirmed');
       signal?.throwIfAborted();
       if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
       if (child.exitCode !== 0) throw new Error(`Program version check exited with ${child.exitCode}`);
-      return Buffer.concat(stdout).toString('utf8').trim();
+      const version = Buffer.concat(stdout).toString('utf8').trim();
+      if (!version) throw new Error('Program version query returned no version');
+      return version;
+    } catch (error) {
+      if (!child.exitConfirmed) throw new AggregateError([error], 'Program version query failed and process exit is unconfirmed');
+      throw error;
     } finally {
       if (child.exitConfirmed) await child.release();
     }
   }
   async detect(id: string, signal?: AbortSignal) {
     const config = await this.configuration(id);
+    // Observe before external work; a slow old probe must not obtain a newer claim and
+    // invalidate capabilities established by a later connection while it was running.
+    const observed = await this.command<{ generation: number; agentVersion?: string } | null>({
+      action: 'inspect_capabilities', configurationId: id, configuration: capabilityConfiguration(config),
+    }, signal);
     try {
       const launch = await this.executable(config);
       const version = await this.probeVersion(launch, signal, getAcpProfile(config.id));
+      if (observed?.agentVersion && observed.agentVersion !== version)
+        await this.invalidateCapabilities(config, observed.generation);
       return { id, status: 'available' as const, executable: launch.executable, version };
     } catch (error) {
       if (signal?.aborted) throw error;
+      if (observed) await this.invalidateCapabilities(config, observed.generation);
       return {
         id,
         status:
@@ -504,21 +628,29 @@ export class ExternalAgentsService {
     const items = new Map(value.items.map((v) => [v.id, v]));
     if (before === undefined)
       for (const item of this.projectedItems.get(id)?.values() ?? []) items.set(item.id, item);
+    const connected = Boolean(live && !live.closing && !live.failure && !live.peer.disconnected && !live.connection.failure);
+    const cached = connected ? undefined : (await this.settings(signal)).capabilityCache?.[value.conversation.configurationId];
+    const state = this.connectionStates.get(id);
     return {
       ...value,
       observationEpoch: this.observationEpoch,
       observationRevision: this.revisions.get(id) ?? 0,
       items: [...items.values()],
-      connected: Boolean(live && !live.failure && !live.peer.disconnected && !live.connection.failure),
-      capabilities: live?.connection.capabilities,
+      connected,
+      capabilities: connected ? live!.connection.capabilities : cached?.capabilities,
+      ...(connected || cached ? { capabilitiesSource: connected ? 'live' as const : 'cached' as const } : {}),
+      connection: connected ? { status: 'connected' } : state?.status === 'connected' ? { status: 'disconnected' } : state ?? { status: 'disconnected' },
+      ...(connected && live!.connection.contextUsage ? { contextUsage: live!.connection.contextUsage } : {}),
       interactions: [...(live?.interactions.values() ?? [])].map((v) => v.request),
     };
   }
   async connect(id: string) {
     const previous = this.connections.get(id);
     const live = await this.connection(id);
-    if (previous === live && live.connection.capabilities.modelsError && live.connection.capabilities.modelsRefresh)
+    if (previous === live && live.connection.capabilities.modelsError && live.connection.capabilities.modelsRefresh) {
       await live.connection.refreshCapabilities?.();
+      await this.cacheCapabilities(live);
+    }
     this.notify(id, true);
     return live.connection.capabilities;
   }
@@ -529,17 +661,19 @@ export class ExternalAgentsService {
     this.retiring.add(id);
     const work = Promise.resolve().then(async () => {
       const snapshot = await this.read(id);
-      if (snapshot.conversation.activeTurn || snapshot.turns.some((turn) => turn.status === 'queued'))
+      if (snapshot.conversation.activeTurn || snapshot.turns.some((turn) => !ended(turn)) || this.inputAdmissions.get(id)?.size)
         throw new ExternalAgentError('turn_active', 'Stop active or queued turns before disconnecting');
       this.connectionControllers.get(id)?.abort(new ExternalAgentError('connection_cancelled', 'External connection preparation cancelled'));
       await this.connecting.get(id)?.catch(() => {});
       const live = this.connections.get(id);
       if (live) {
         this.cancelInteractions(live);
+        live.closing = true;
         await live.connection.close();
         for (const dispose of live.dispose) dispose();
         if (this.connections.get(id) === live) this.connections.delete(id);
       }
+      this.connectionStates.set(id, { status: 'disconnected' });
       this.notify(id);
     }).finally(() => {
       this.retiring.delete(id);
@@ -577,6 +711,8 @@ export class ExternalAgentsService {
     launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>,
     authMethodId?: string,
   ): Promise<Live> {
+    const reclaim = this.reclaiming.get(id);
+    if (reclaim) await reclaim;
     if (this.retiring.has(id) || (this.authenticating.has(id) && authMethodId === undefined))
       throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     const pending = this.connecting.get(id);
@@ -589,14 +725,26 @@ export class ExternalAgentsService {
     const opening = Promise.resolve()
       .then(async () => {
         const live = this.connections.get(id);
-        if (live && !authMethodId && !live.failure && !live.peer.disconnected && !live.connection.failure && (!launch || live.launchKey === launchKey(launch))) return live;
+        if (live && !authMethodId && !live.closing && !live.failure && !live.peer.disconnected && !live.connection.failure && (!launch || live.launchKey === launchKey(launch))) return live;
+        this.connectionStates.set(id, { status: 'preparing' });
+        this.notify(id);
         if (live) {
+          live.closing = true;
           await live.connection.close();
           for (const dispose of live.dispose) dispose();
           if (this.connections.get(id) === live) this.connections.delete(id);
         }
         controller.signal.throwIfAborted();
         return this.open(id, controller.signal, launch, authMethodId);
+      })
+      .catch(error => {
+        this.connectionStates.set(id, {
+          status: error instanceof ExternalAgentError && error.code === 'authentication_required' ? 'authentication_required'
+            : controller.signal.aborted ? 'disconnected' : 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.notify(id);
+        throw error;
       })
       .finally(() => {
         if (this.connecting.get(id) === opening) {
@@ -652,8 +800,12 @@ export class ExternalAgentsService {
     if (config.harness !== c.harness)
       throw new ExternalAgentError('backend_changed', 'This configuration now points to another harness');
     const { admittedSource, executionCwd } = await this.executionSource(c, signal);
+    const capabilityGeneration = await this.claimCapabilities(config);
     const launch = await this.executable(config);
-    const version = config.harness === 'pi' ? await this.probeVersion(launch, signal) : undefined;
+    const version = await this.probeVersion(launch, signal, getAcpProfile(config.id)).catch(error => {
+      if (signal.aborted || config.harness === 'pi' || error instanceof AggregateError) throw error;
+      return undefined;
+    });
     const command = config.harness === 'claude' ? process.execPath : launch.command;
     const args =
       config.harness === 'claude'
@@ -687,14 +839,22 @@ export class ExternalAgentsService {
             : config.harness === 'claude'
               ? await connectClaude(peer, { command: launch.command, args: launch.args }, executionCwd, c.sessionId)
               : await connectAcp(peer, executionCwd, c.sessionId, { profile: getAcpProfile(c.configurationId), authMethodId });
+      const agentVersion = version ?? connection.capabilities.protocol?.agentVersion;
+      signal.throwIfAborted();
       await this.command({ action: 'bind', id, sessionId: connection.sessionId });
       if (this.stopping) throw new Error('External Agent service stopped during connection');
-      const live: Live = { generation: randomUUID(), dispose: [], connection, peer, interactions: new Map(), launchKey: launchKey(config) };
+      const live: Live = { generation: randomUUID(), configuration: config, capabilityGeneration, ...(agentVersion ? { agentVersion } : {}),
+        dispose: [], connection, peer, interactions: new Map(), launchKey: launchKey(config) };
+      await this.cacheCapabilities(live);
+      signal.throwIfAborted();
+      if (this.stopping) throw new Error('External Agent service stopped during connection');
       if (connection.failure) throw connection.failure;
       this.connections.set(id, live);
+      this.connectionStates.set(id, { status: 'connected' });
       const retire = (error: Error) => {
-        if (live.failure) return;
+        if (live.failure || live.closing) return;
         live.failure = error;
+        this.connectionStates.set(id, { status: 'failed', error: error.message });
         // A fatal protocol/session failure also owns the process tree until it is joined.
         this.cancelInteractions(live, undefined, error);
         void connection.close().then(() => {
@@ -707,7 +867,15 @@ export class ExternalAgentsService {
       live.dispose.push(peer.onExit(retire));
       if (connection.onFailure) live.dispose.push(connection.onFailure(retire));
       if (connection.onCapabilities) live.dispose.push(connection.onCapabilities(() => {
+        if (this.connections.get(id) !== live) return;
+        void this.cacheCapabilities(live);
+        this.notify(id);
+      }));
+      if (connection.onContextUsage) live.dispose.push(connection.onContextUsage(() => {
         if (this.connections.get(id) === live) this.notify(id);
+      }));
+      if (connection.onActivity) live.dispose.push(connection.onActivity(() => {
+        if (this.connections.get(id) === live) this.touchActivity(id);
       }));
       this.notify(id, true);
       return live;
@@ -725,6 +893,8 @@ export class ExternalAgentsService {
     }
   }
   async send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn> {
+    const reclaim = this.reclaiming.get(id);
+    if (reclaim) await reclaim;
     if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
@@ -1246,6 +1416,7 @@ export class ExternalAgentsService {
   }
   async close() {
     this.stopping = true;
+    clearInterval(this.idleTimer);
     await Promise.all([...this.inputAdmissions.keys()].map(id => this.drainInputAdmissions(id)));
     for (const preparation of this.attachmentPreparations.values()) preparation.controller.abort(new Error('Application Host is stopping'));
     this.removeChildrenListener?.();
@@ -1258,6 +1429,9 @@ export class ExternalAgentsService {
       [...this.connections.values()].map((live) => live.connection.close()),
     );
     await Promise.allSettled([...this.connecting.values()]);
+    await Promise.allSettled([...this.reclaiming.values()]);
+    if (this.sweeping) await this.sweeping;
+    await Promise.allSettled([...this.cacheWrites]);
     const results = await closing;
     await Promise.allSettled([...this.childTasks.values()].map((task) => task.work));
     await Promise.allSettled([...this.running.values()]);

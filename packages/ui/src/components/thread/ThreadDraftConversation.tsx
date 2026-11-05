@@ -1,3 +1,4 @@
+import { externalAttachmentSupported } from './externalAttachments';
 import { selectComposerFile, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { composerInputReferences } from '@/components/chat/composer/submit/references';
@@ -5,9 +6,8 @@ import React from 'react';
 import { createExternalAgentsHttpAPI, ExternalAgentError } from '@varin/application-client';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { HarnessSelector } from './HarnessSelector';
-import { ExternalSessionControls } from './ExternalSessionControls';
-import { externalSessionInput, type ExternalSessionChoice } from './externalSessionChoice';
-import { ExternalAuthentication } from './ExternalAuthentication';
+import { ExternalConnectionStatus } from './ExternalConnectionStatus';
+import { externalSessionInput, normalizeExternalSessionChoice, type ExternalSessionChoice } from './externalSessionChoice';
 import { useExternalDraftPreparation } from './useExternalDraftPreparation';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
@@ -50,6 +50,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const externalSending = React.useRef(false);
   const [externalFailure, setExternalFailure] = React.useState<unknown>();
   const { t } = useI18n();
+  const snapshotPublisher = React.useRef({}).current;
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath);
   const patch = React.useCallback((value: Parameters<ReturnType<typeof useThreadDraftStore.getState>['patch']>[1]) => useThreadDraftStore.getState().patch(draftKey, value), [draftKey]);
@@ -69,18 +70,39 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
   const referenceScope = JSON.stringify([generation, draftKey, draft.sourceSelection ?? draft.workspacePath]);
   const preparation = useExternalDraftPreparation({ draftKey, host: generation, configurationId: draft.harnessId, cwd: sourcePath, name: external?.name });
-  const capabilities = preparation.snapshot?.capabilities;
-  const backendIdentity = draft.harnessId ? `${draft.harnessId}:${preparation.snapshot?.conversation.id ?? 'unprepared'}` : undefined;
-  const externalReady = Boolean(preparation.snapshot?.connected && capabilities && !preparation.snapshot.conversation.needsReview);
-  const externalChoice = draft.harnessId ? { model: draft.externalModels?.[draft.harnessId], ...draft.externalOptions?.[draft.harnessId] } : {};
+  const capabilities = preparation.snapshot?.capabilities ?? (draft.harnessId ? externalSettings?.capabilityCache?.[draft.harnessId]?.capabilities : undefined);
+  const capabilitiesSource = preparation.snapshot?.capabilities ? preparation.snapshot.capabilitiesSource ?? (preparation.snapshot.connected ? 'live' : 'cached') : capabilities ? 'cached' : undefined;
+  const backendIdentity = draft.harnessId ? JSON.stringify([draft.harnessId, draftKey, sourcePath]) : undefined;
+  const externalChoice = draft.harnessId ? { model: draft.externalModels?.[draft.harnessId] ?? external?.defaults?.model ?? '', ...(draft.externalOptions?.[draft.harnessId] ?? { thinking: external?.defaults?.thinking, mode: external?.defaults?.mode }) } : {};
   const changeExternalChoice = (choice: ExternalSessionChoice) => {
     if (!draft.harnessId) return;
     patch({ externalModels: { ...draft.externalModels, [draft.harnessId]: choice.model ?? '' },
       externalOptions: { ...draft.externalOptions, [draft.harnessId]: { thinking: choice.thinking, mode: choice.mode, config: choice.config } } });
   };
+  React.useEffect(() => {
+    if (!external || Object.prototype.hasOwnProperty.call(draft.externalModels ?? {}, external.id)) return;
+    patch(current => ({ externalModels: { ...current.externalModels, [external.id]: external.defaults?.model ?? '' },
+      externalOptions: { ...current.externalOptions, [external.id]: { thinking: external.defaults?.thinking, mode: external.defaults?.mode } } }));
+  }, [external, draft.externalModels, patch]);
+  const [interactionScope, setInteractionScope] = React.useState<string>();
+  const connectionScope = JSON.stringify([generation, draftKey, draft.harnessId, sourcePath]);
+  const prepare = (force: boolean | 'models' = false) => {
+    if (!draft.harnessId || !external?.enabled || !sourcePath) return Promise.resolve(undefined);
+    if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return Promise.resolve(undefined); }
+    setExternalFailure(undefined);
+    return preparation.prepare(force);
+  };
+  const prepareRef = React.useRef(prepare); prepareRef.current = prepare;
+  // This marker is set only by a selector action, never by opening/restoring a draft.
+  React.useEffect(() => {
+    if (interactionScope !== connectionScope) return;
+    setInteractionScope(undefined); void prepareRef.current().catch(() => {});
+  }, [interactionScope, connectionScope]);
+  React.useEffect(() => { if (preparation.snapshot) useExternalAgentStore.getState().setSnapshot(preparation.snapshot, generation, snapshotPublisher); }, [preparation.snapshot, generation, snapshotPublisher]);
+  const preparedId = preparation.snapshot?.conversation.id;
+  React.useEffect(() => () => { if (preparedId) useExternalAgentStore.getState().clearSnapshot(preparedId, generation, snapshotPublisher); }, [preparedId, generation, snapshotPublisher]);
+  const preparationHasWork = preparation.snapshot?.turns.some(turn => ['queued', 'preparing', 'running', 'waiting_user', 'stopping'].includes(turn.status)) ?? false;
   const preparationFailure = externalFailure ?? preparation.error;
-  const authentication = preparationFailure instanceof ExternalAgentError ? preparationFailure.details?.authentication : undefined;
-  const preparationError = preparationFailure instanceof Error ? preparationFailure.message : preparationFailure ? String(preparationFailure) : undefined;
   const reducedMotion = usePrefersReducedMotion();
   React.useLayoutEffect(() => { handoff.select(String(generation), draftKey, true, reducedMotion); }, [handoff, generation, draftKey, reducedMotion]);
   const mounted = React.useRef(true);
@@ -129,17 +151,20 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
   const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.selectedAttachments?.length || editorContext.length || inlineDrafts.length);
   const acceptsImages = draft.harnessId ? capabilities?.images : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
-  const sending = externalBusy || preparation.busy || draft.firstSend?.status === 'sending';
-  const locked = externalBusy || preparation.busy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
+  const sending = externalBusy || draft.firstSend?.status === 'sending';
+  const locked = externalBusy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
   const changeHarness = (harnessId: string | null) => {
     if (harnessId === draft.harnessId || externalSending.current) return;
     setError(undefined); setExternalFailure(undefined);
-    void preparation.change({ harnessId });
+    void preparation.change({ harnessId }).then(changed => {
+      if (changed && harnessId) setInteractionScope(JSON.stringify([generation, draftKey, harnessId, sourcePath]));
+    });
   };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
     const latest = useThreadDraftStore.getState().drafts[draftKey];
-    if (!files.length || reading.current || latest?.firstSend || latest?.externalInput || externalSending.current || preparation.busy) return;
+    if (!files.length || reading.current || latest?.firstSend || latest?.externalInput || externalSending.current) return;
+    if (draft.harnessId && files.some(file => !externalAttachmentSupported(capabilities, file))) { setError(t(capabilities ? 'external.filesUnsupported' : 'external.capabilitiesUnknown')); return; }
     const token = {};
     const current = () => mounted.current && currentDraft.current === draftKey && generation === getRuntimeEndpointGeneration() && reading.current === token;
     reading.current = token; setReadingFiles(true); setError(undefined);
@@ -157,7 +182,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   };
   const ignorePrepared = React.useCallback(() => {}, []);
   const unsupportedReferences = Boolean(draft.harnessId && (draft.selectedAttachments?.length || draft.references?.some(reference => reference.target.kind !== 'draft-file' && !(reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity) && draft.text.slice(reference.from, reference.to) === reference.text)));
-  const sendDisabled = sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !externalReady : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
+  const sendDisabled = sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !sourcePath : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -180,13 +205,17 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           externalSending.current = true; setExternalBusy(true); setError(undefined); setExternalFailure(undefined);
           void (async () => {
             const externalApi = createExternalAgentsHttpAPI(owner);
-            const conversation = preparation.snapshot!.conversation;
-            if (draft.externalConversationHost !== owner || conversation.id !== draft.externalConversationId) throw new Error(t('external.prepareHint'));
+            const ready = await prepare();
+            if (!ready || !current()) return;
+            if (!ready.connected || !ready.capabilities || ready.capabilitiesSource === 'cached' || ready.conversation.needsReview) throw new Error(t(ready.conversation.needsReview ? 'external.review' : 'external.prepareHint'));
+            const conversation = ready.conversation;
+            if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
+            if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
             const attachments = draft.externalInput ? [] : await prepareDraftFiles(draftKey, draft.files ?? [], `external:${conversation.id}`,
               (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
             if (!current()) return;
             const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-              images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(externalChoice, capabilities) };
+              images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
             patch({ externalInput: request });
             await externalApi.send(conversation.id, request.key, request);
             if (!current()) return;
@@ -218,42 +247,33 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         }, () => { handoff.cancelSubmission(request.key); });
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError || preparationError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || preparationError || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError}</p>}
+        {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError}</p>}
         {unsupportedReferences && <p role="alert" className="chat-input-column text-sm text-destructive">{t('composer.references.external')}</p>}
         {draft.harnessId && <div className="chat-input-column space-y-3">
-          {authentication && <ExternalAuthentication authentication={authentication} pending={sending} authenticate={methodId => {
-            setExternalFailure(undefined); void preparation.authenticate(methodId);
-          }} />}
-          {!externalReady && <div className="space-y-2 typography-meta text-muted-foreground">
-            <p>{t('external.prepareHint')}</p>
-            <Button type="button" variant="outline" disabled={sending || !external?.enabled} onClick={() => {
-              setError(undefined); setExternalFailure(undefined);
-              if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
-              void preparation.prepare();
-            }}>{t(preparation.busy ? 'external.connecting' : 'external.prepare')}</Button>
-            {preparation.busy && draft.externalConversationId && draft.externalConversationHost === generation && <Button type="button" variant="ghost" disabled={preparation.cancelling}
-              onClick={() => void preparation.cancel()}>{t('external.cancelConnection')}</Button>}
-          </div>}
           {Boolean(preparation.snapshot?.turns.length) && <Button type="button" variant="outline" disabled={sending} onClick={() => {
             const id = preparation.snapshot!.conversation.id;
             void useExternalAgentStore.getState().refresh().then(() => {
               if (mounted.current && currentDraft.current === draftKey && generation === getRuntimeEndpointGeneration()) useExternalAgentStore.getState().select(id);
             }).catch(cause => { if (generation === getRuntimeEndpointGeneration()) setError(String(cause)); });
           }}>{t('external.openPrepared')}</Button>}
-          {capabilities && <ExternalSessionControls capabilities={capabilities} choice={externalChoice} disabled={locked} onChange={changeExternalChoice}
-            onRetryModels={() => void preparation.prepare()}
-            onCommand={text => { patch({ text: `${draft.text}${draft.text ? '\n' : ''}${text}` }); editor.current?.focus(); }} />}
+
         </div>}
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer backendIdentity={backendIdentity} onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id }))} pendingSource={draft.sourceSelection ? { resourceOwner: draft.sourceSelection.resourceOwner, path: draft.sourceSelection.path } : sourcePath ? { resourceOwner: { kind: 'local' }, path: sourcePath } : undefined} referenceScope={referenceScope} editorRef={editor} value={draft.text} onChange={(text, references) => patch({ text, references })} references={draft.references} api={api} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
+          external={draft.harnessId ? { capabilities, source: capabilitiesSource, choice: externalChoice, disabled: locked, retryDisabled: preparationHasWork, retryDisabledReason: preparation.snapshot?.connected && capabilities?.resume === false && !capabilities.modelsRefresh ? t('external.reconnectUnsupported') : undefined, onChange: changeExternalChoice,
+            onInteract: kind => { if (kind !== 'input' || !preparationFailure) void prepare().catch(() => {}); }, onRetryModels: () => { void prepare(capabilities?.modelsRefresh ? 'models' : true).catch(() => {}); } } : undefined}
+          connectionStatus={draft.harnessId ? <ExternalConnectionStatus snapshot={preparation.snapshot} name={external?.name} cwd={sourcePath}
+            busy={preparation.busy} cancelling={preparation.cancelling} error={preparationFailure} reconnectDisabled={!external?.enabled || !sourcePath || externalBusy || preparationHasWork || Boolean(draft.externalInput)}
+            onReconnect={() => { void prepare(true).catch(() => {}); }} onCancel={() => { void preparation.cancel(); }}
+            onAuthenticate={methodId => { setExternalFailure(undefined); void preparation.authenticate(methodId).catch(() => {}); }} /> : undefined}
           backendCommands={capabilities?.commands}
           backendControls={draft.harnessId ? <HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /> : undefined}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
-          modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={false}
+          modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={draft.harnessId ? !capabilities?.images : acceptsImages === false}
           sendDisabled={sendDisabled} pending={sending} active={false} retrying={locked} hasInput={hasInput}
           onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}

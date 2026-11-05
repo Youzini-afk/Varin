@@ -6,6 +6,8 @@ import {
   type ExternalAgentProfile,
   type ExternalAgentConfiguration,
   type ExternalAgentDetection,
+  type ExternalAgentCapabilityCache,
+  type ExternalAgentDefaults,
 } from '@varin/application-client';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -18,6 +20,55 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { useI18n } from '@/lib/i18n';
 import { HarnessIcon } from '@/components/thread/HarnessIcon';
 import { openExternalUrl } from '@/lib/url';
+import { externalThinkingOptions } from '@/components/thread/externalSessionChoice';
+
+function AgentDefaultsFields({ value, cache, disabled, onChange }: {
+  value: ExternalAgentDefaults | undefined;
+  cache: ExternalAgentCapabilityCache | undefined;
+  disabled: boolean;
+  onChange(value: ExternalAgentDefaults | undefined): void;
+}) {
+  const { t } = useI18n();
+  const capabilities = cache?.capabilities;
+  const levels = externalThinkingOptions(value ?? {}, capabilities).levels ?? [];
+  const fields = [
+    { key: 'model' as const, label: t('external.model'), options: capabilities?.models ?? [] },
+    { key: 'thinking' as const, label: t('chat.context.thinking'), options: levels.map(id => ({ id, name: id })) },
+    { key: 'mode' as const, label: t('external.mode'), options: capabilities?.modes ?? [] },
+  ];
+  const change = (key: keyof ExternalAgentDefaults, selected: string) => {
+    const next = { ...value };
+    if (selected === 'inherit') delete next[key]; else next[key] = selected.slice('value:'.length);
+    // Effort belongs to a particular model. Never leave a hidden override behind.
+    if (key === 'model' && next.thinking && !externalThinkingOptions(next, capabilities).levels?.includes(next.thinking)) delete next.thinking;
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  return <fieldset className="space-y-3 rounded-lg border border-border/60 p-3" disabled={disabled}>
+    <legend className="px-1 typography-meta font-medium">{t('external.defaultsTitle')}</legend>
+    <p className="typography-meta text-muted-foreground">{t('external.defaultsHint')}</p>
+    <p className="typography-meta text-muted-foreground">{cache
+      ? `${t('external.defaultsCached')}${cache.agentVersion ? ` · ${cache.agentVersion}` : ''}`
+      : t('external.defaultsUnavailable')}</p>
+    {fields.filter(field => field.key !== 'thinking' || field.options.length || value?.thinking).map(field => {
+      const selected = value?.[field.key];
+      const stale = Boolean(selected && !field.options.some(option => option.id === selected));
+      return <div key={field.key} className="space-y-1">
+        <SettingsFieldRow label={field.label}>
+          <Select value={selected ? `value:${selected}` : 'inherit'} disabled={disabled || (!field.options.length && !selected)}
+            onValueChange={next => change(field.key, next)}>
+            <SelectTrigger className="w-56 max-w-full" aria-label={`${t('external.defaultsTitle')} · ${field.label}`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">{t('external.inherit')}</SelectItem>
+              {stale && <SelectItem value={`value:${selected}`} disabled>{selected} · {t('external.notReported')}</SelectItem>}
+              {field.options.map(option => <SelectItem key={option.id} value={`value:${option.id}`}>{option.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
+        {stale && <p role="status" className="typography-meta text-muted-foreground">{t('external.defaultsStale')}</p>}
+      </div>;
+    })}
+  </fieldset>;
+}
 
 export function ExternalAgentDefault() {
   const { t } = useI18n();
@@ -70,12 +121,14 @@ function ConfigurationRow({
   configuration,
   busy,
   profile,
+  capabilityCache,
   save,
   remove,
 }: {
   configuration: ExternalAgentConfiguration;
   busy: boolean;
   profile?: ExternalAgentProfile;
+  capabilityCache?: ExternalAgentCapabilityCache;
   save(value: ExternalAgentConfiguration): Promise<void>;
   remove(): Promise<void>;
 }) {
@@ -88,11 +141,16 @@ function ConfigurationRow({
   const [detecting, setDetecting] = React.useState(false);
   const [error, setError] = React.useState('');
   const controller = React.useRef<AbortController | null>(null);
+  const configurationKey = JSON.stringify(configuration);
+  const lastConfigurationKey = React.useRef(configurationKey);
   React.useEffect(() => () => controller.current?.abort(), []);
   React.useEffect(() => {
+    // A capability-cache refresh is not a settings edit. Preserve an unsaved form.
+    if (lastConfigurationKey.current === configurationKey) return;
+    lastConfigurationKey.current = configurationKey;
     setDraft(configuration);
     setArgs(JSON.stringify(configuration.args));
-  }, [configuration]);
+  }, [configuration, configurationKey]);
   const detect = React.useCallback(async () => {
     controller.current?.abort();
     const request = new AbortController();
@@ -209,6 +267,13 @@ function ConfigurationRow({
               <span>{t('external.arguments')}</span>
               <Input value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
             </label>
+            <AgentDefaultsFields value={draft.defaults} disabled={busy}
+              cache={draft.command === configuration.command && args === JSON.stringify(configuration.args) ? capabilityCache : undefined}
+              onChange={defaults => setDraft(value => {
+                const next = { ...value };
+                if (defaults) next.defaults = defaults; else delete next.defaults;
+                return next;
+              })} />
             {detection?.executable && (
               <p className="break-all typography-meta text-muted-foreground">{detection.executable}</p>
             )}
@@ -265,8 +330,8 @@ function ExternalAgentsSettings({ host }: { host: number }) {
     }
   };
   const save = async (configuration: ExternalAgentConfiguration) => {
-    if (!settings) return;
-    const generation = getRuntimeEndpointGeneration();
+    if (!settings || host !== getRuntimeEndpointGeneration()) return;
+    const generation = host;
     setSaving(true);
     try {
       const agents = settings.agents.some((v) => v.id === configuration.id)
@@ -294,6 +359,7 @@ function ExternalAgentsSettings({ host }: { host: number }) {
         <ConfigurationRow
           key={configuration.id}
           configuration={configuration}
+          capabilityCache={settings.capabilityCache?.[configuration.id]}
           profile={settings.profiles?.find(profile => profile.id === configuration.id)}
           busy={saving}
           save={save}

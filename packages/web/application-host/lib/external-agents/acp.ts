@@ -14,6 +14,7 @@ import {
   clientInfo,
   type RecordValue,
 } from './transport.js';
+import { ContextUsage } from './context-usage.js';
 import { AcpOptions } from './acp-options.js';
 import { acpContent, acpToolItem } from './acp-content.js';
 import {
@@ -110,6 +111,19 @@ export async function connectAcp(
     },
     options.profile?.id === 'grok' ? 'grok' : undefined,
   );
+  const context = new ContextUsage();
+  const runningTools = new Set<string>();
+  const activity = new Set<() => void>();
+  const observeSession = (update: RecordValue) => {
+    if (update.sessionUpdate === 'usage_update') context.update(update.used, update.size);
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const id = text(update.toolCallId);
+      if (!id) return;
+      if (update.status === 'completed' || update.status === 'failed') runningTools.delete(id);
+      else if (update.status === 'pending' || update.status === 'in_progress') runningTools.add(id);
+      for (const listener of activity) listener();
+    }
+  };
   let opening = true;
   const early = new Map<string, RecordValue>();
   const withdraw = () => {
@@ -145,13 +159,17 @@ export async function connectAcp(
           'config_option_update',
           'current_mode_update',
           'available_commands_update',
+          'usage_update',
+          'tool_call',
+          'tool_call_update',
         ].includes(kind)
       )
-        early.set(`${text(params.sessionId)}:${kind}`, params);
+        early.set(`${text(params.sessionId)}:${kind}:${text(update.toolCallId)}`, params);
       return;
     }
     if (params.sessionId !== sessionId) return;
     state.update(update);
+    observeSession(update);
     if (!sink || !dispatched) return;
     if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
       if (lastKind !== kind) segment++;
@@ -192,7 +210,6 @@ export async function connectAcp(
           .join('\n'),
       });
     }
-    // usage_update.used/size is context occupancy, not billable input/output tokens.
   });
 
   async function answer(
@@ -340,7 +357,10 @@ export async function connectAcp(
     state.adopt(opened);
     opening = false;
     for (const params of early.values())
-      if (params.sessionId === sessionId) state.update(record(params.update));
+      if (params.sessionId === sessionId) {
+        state.update(record(params.update));
+        observeSession(record(params.update));
+      }
     early.clear();
     if (failure) throw failure;
   } catch (error) {
@@ -354,6 +374,10 @@ export async function connectAcp(
   return {
     sessionId,
     capabilities,
+    get contextUsage() { return context.value; },
+    onContextUsage: context.subscribe,
+    get backgroundTasks() { return runningTools.size; },
+    onActivity(listener) { activity.add(listener); return () => { activity.delete(listener); }; },
     get failure() {
       return failure;
     },

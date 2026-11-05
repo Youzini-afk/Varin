@@ -251,6 +251,12 @@ export class ClaudeBridge {
       }
     }
     if (!this.session) throw new Error('Claude bridge has not initialized');
+    if (message.method === 'context_usage') {
+      // Native summary avoids extra token-count API requests. Older CLIs may
+      // reject this control; the caller keeps occupancy unknown in that case.
+      const usage = await this.session.getContextUsage({ detail: 'summary' });
+      return { sessionId: this.sessionId, used: usage.totalTokens, size: usage.rawMaxTokens };
+    }
     if (message.method === 'configure') {
       if (this.turnId) throw new Error('Claude is already running');
       if (p.mode !== undefined || Object.keys(record(p.config)).length)
@@ -364,6 +370,10 @@ export class ClaudeBridge {
             method: 'capabilities',
             params: { sessionId: this.sessionId, commands: event.commands },
           });
+        if (event.type === 'system' &&
+            ['background_tasks_changed', 'task_started', 'task_progress', 'task_notification'].includes(text(event.subtype)))
+          this.emit({ jsonrpc: '2.0', method: 'activity',
+            params: { sessionId: this.sessionId, message: event } });
         const turnId = this.turnId;
         if (!turnId) continue;
         const user = text(event.user_message_uuid);

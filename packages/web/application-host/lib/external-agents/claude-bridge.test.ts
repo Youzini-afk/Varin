@@ -579,3 +579,18 @@ it('correlates coalesced native tool/control frames through the real pinned SDK 
     finishChild();
   }
 });
+
+it('bridges session background levels without an active turn and queries only native context summary', async () => {
+  const f = fixture();
+  const getContextUsage = vi.fn(async () => ({ totalTokens: 123, rawMaxTokens: 1000 }));
+  Object.assign(f.sdk, { getContextUsage });
+  await f.initialize();
+  await expect(f.bridge.handle({ method: 'context_usage' })).resolves.toEqual({ sessionId, used: 123, size: 1000 });
+  expect(getContextUsage).toHaveBeenCalledWith({ detail: 'summary' });
+  await f.emit({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'background' }] });
+  expect(f.frames).toContainEqual(expect.objectContaining({ method: 'activity', params: expect.objectContaining({ sessionId,
+    message: expect.objectContaining({ subtype: 'background_tasks_changed', tasks: [{ task_id: 'background' }] }),
+  }) }));
+  expect(f.frames.filter(frame => frame.method === 'message')).toHaveLength(0);
+  f.bridge.close();
+});

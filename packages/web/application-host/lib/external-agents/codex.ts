@@ -4,6 +4,7 @@ import type {
   ExternalInteractionResponse,
 } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink, HarnessInput } from './adapter.js';
+import { ContextUsage } from './context-usage.js';
 import { formInteraction } from './interaction-form.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
@@ -14,6 +15,11 @@ export async function connectCodex(
   cwd: string,
   existing?: string,
 ): Promise<HarnessConnection> {
+  // Resume/start may publish occupancy before its response or the model catalog.
+  const early: RecordValue[] = [];
+  const stopEarly = peer.onMessage(message => {
+    if (['thread/tokenUsage/updated', 'thread/status/changed', 'item/started', 'item/completed'].includes(text(message.method))) early.push(message);
+  });
   await peer.request('initialize', { clientInfo });
   await peer.send({ jsonrpc: '2.0', method: 'initialized' });
   const opened = await peer.request(
@@ -156,10 +162,68 @@ export async function connectCodex(
         },
       });
   };
+  const context = new ContextUsage();
+  const activity = new Set<() => void>();
+  const tasks = new Set<string>();
+  const children = new Set<string>();
+  let latestTurn: string | undefined;
+  const tokenUsage = (params: RecordValue, owner?: HarnessSink) => {
+    if (!text(params.turnId)) return;
+    const native = record(params.tokenUsage);
+    // `last.totalTokens` is Codex's current window usage, not the session total.
+    context.update(record(native.last).totalTokens, native.modelContextWindow);
+    const usage = record(native.total);
+    const valid = (value: unknown): value is number =>
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    if (!valid(usage.inputTokens) || !valid(usage.outputTokens)) return;
+    if (usage.cachedInputTokens != null && !valid(usage.cachedInputTokens) ||
+        usage.cacheWriteInputTokens != null && !valid(usage.cacheWriteInputTokens)) return;
+    cumulative = {
+      input: usage.inputTokens, output: usage.outputTokens,
+      cachedInput: (usage.cachedInputTokens as number | undefined) ?? 0,
+      cacheCreated: (usage.cacheWriteInputTokens as number | undefined) ?? 0,
+    };
+    const base = baseline;
+    const difference = base && (Object.keys(cumulative) as Array<keyof Counters>)
+      .every(key => cumulative![key] >= base[key]);
+    owner?.usage({
+      ...Object.fromEntries(Object.entries(cumulative).map(([key, value]) =>
+        [key, difference ? value - base![key as keyof Counters] : value])),
+      inputIncludesCache: true,
+      scope: difference ? 'turn' : 'conversation',
+    });
+  };
   const receive = (message: RecordValue) => {
-    if (!sink || !dispatched || settled) return;
     const params = record(message.params);
+    if (message.method === 'thread/status/changed' && children.has(text(params.threadId))) {
+      const status = record(params.status).type;
+      if (status === 'idle' || status === 'notLoaded' || status === 'systemError')
+        tasks.delete(`child:${text(params.threadId)}`);
+      else if (status === 'active') tasks.add(`child:${text(params.threadId)}`);
+      for (const listener of activity) listener();
+    }
     if (params.threadId !== sessionId) return;
+    if (message.method === 'item/started' || message.method === 'item/completed') {
+      const item = record(params.item), id = text(item.id);
+      if (item.type === 'commandExecution' && id) {
+        if (item.status === 'inProgress') tasks.add(`command:${id}`);
+        else if (['completed', 'failed', 'declined'].includes(text(item.status))) tasks.delete(`command:${id}`);
+      }
+      if (item.type === 'collabAgentToolCall' && item.senderThreadId === sessionId) {
+        for (const [id, state] of Object.entries(record(item.agentsStates))) {
+          children.add(id);
+          const status = text(record(state).status);
+          if (['pendingInit', 'running'].includes(status)) tasks.add(`child:${id}`);
+          else if (['completed', 'errored', 'shutdown', 'notFound'].includes(status)) tasks.delete(`child:${id}`);
+        }
+      }
+      for (const listener of activity) listener();
+    }
+    if (!sink || !dispatched || settled) {
+      if (!sink && message.method === 'thread/tokenUsage/updated' &&
+          (!latestTurn || params.turnId === latestTurn)) tokenUsage(params);
+      return;
+    }
     if (message.method === 'serverRequest/resolved') {
       pendingInteractions
         .get(String(params.requestId))
@@ -206,33 +270,7 @@ export async function connectCodex(
       const tool = items.get(id)?.tool;
       if (tool) publish(id, { tool: { ...tool, output: text(tool.output) + text(params.delta) } });
     }
-    if (method === 'thread/tokenUsage/updated') {
-      const usage = record(record(params.tokenUsage).total);
-      if (typeof usage.inputTokens === 'number' && typeof usage.outputTokens === 'number') {
-        cumulative = {
-          input: usage.inputTokens,
-          output: usage.outputTokens,
-          cachedInput: Number(usage.cachedInputTokens ?? 0),
-          cacheCreated: Number(usage.cacheWriteInputTokens ?? 0),
-        };
-        const base = baseline;
-        const difference =
-          base &&
-          (Object.keys(cumulative) as Array<keyof Counters>).every(
-            (key) => cumulative![key] >= base[key],
-          );
-        sink.usage({
-          ...Object.fromEntries(
-            Object.entries(cumulative).map(([key, value]) => [
-              key,
-              difference ? value - base![key as keyof Counters] : value,
-            ]),
-          ),
-          inputIncludesCache: true,
-          scope: difference ? 'turn' : 'conversation',
-        });
-      }
-    }
+    if (method === 'thread/tokenUsage/updated') tokenUsage(params, sink);
     if (method === 'turn/completed') {
       const turn = record(params.turn);
       finish?.({
@@ -247,7 +285,9 @@ export async function connectCodex(
       });
     }
   };
+  stopEarly();
   peer.onMessage(receive);
+  for (const event of early) receive(event);
   peer.onExit(markFailed);
   peer.onRequest(async (message) => {
     const params = record(message.params);
@@ -433,6 +473,10 @@ export async function connectCodex(
   return {
     sessionId,
     capabilities,
+    get contextUsage() { return context.value; },
+    onContextUsage: context.subscribe,
+    get backgroundTasks() { return tasks.size; },
+    onActivity(listener) { activity.add(listener); return () => { activity.delete(listener); }; },
     get failure() {
       return failure;
     },
@@ -507,6 +551,7 @@ export async function connectCodex(
           markFailed(error);
           throw error;
         }
+        latestTurn = turnId;
         const current = { ...capabilities.current };
         // turn/start acceptance is not an effective-option receipt. Preserve
         // unchanged observations, but do not relabel requests/aliases as facts.

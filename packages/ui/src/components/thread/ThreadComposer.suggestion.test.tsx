@@ -62,8 +62,9 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
-function Harness({ initial = '', workspace = true, actions, identityKey = 'original', composerKey, backendIdentity, backendCommands, onDraftChange }: {
+function Harness({ initial = '', workspace = true, actions, identityKey = 'original', composerKey, backendIdentity, backendCommands, external, onDraftChange }: {
   initial?: string; workspace?: boolean; actions?: Record<string, ComposerCommandAction | undefined>; identityKey?: string;
+  external?: React.ComponentProps<typeof ThreadComposer>['external'];
   composerKey?: string; backendIdentity?: string; backendCommands?: React.ComponentProps<typeof ThreadComposer>['backendCommands'];
   onDraftChange?(value: string): void;
 }) {
@@ -72,7 +73,7 @@ function Harness({ initial = '', workspace = true, actions, identityKey = 'origi
   const [suggestion, setSuggestion] = React.useState<string | undefined>('好，继续完善吧');
   return <form ref={form => { if (form) form.requestSubmit = () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }; }}
     onSubmit={event => { event.preventDefault(); sent.push(value); }}>
-    <ThreadComposer key={composerKey} commandActions={actions} identityKey={identityKey} backendIdentity={backendIdentity} backendCommands={backendCommands}
+    <ThreadComposer key={composerKey} commandActions={actions} identityKey={identityKey} backendIdentity={backendIdentity} backendCommands={backendCommands} external={external} backendControls={external ? <span>External harness</span> : undefined}
       editorRef={null} value={value} references={references} onChange={(next, nextReferences) => { setValue(next); setReferences(nextReferences ?? []); onDraftChange?.(next); }} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
       modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={false} retrying={false}
@@ -242,4 +243,35 @@ it.each(['original', 'other-harness:session', undefined])('retains backend comma
   expect(execute).not.toHaveBeenCalled(); expect(editor.props!.value).toBe('/compact');
   expect(sent).toEqual(destination === 'original' ? ['/compact'] : []);
   if (destination !== 'original') expect(container.textContent).toContain('composer.scope.changed');
+});
+
+
+it('keeps external /model and /mode layers separate from same-named backend commands', async () => {
+  editor.registrations = [command('model'), command('thinking'), command('permissions'), command('goal'), command('compact')];
+  const change = vi.fn(), interact = vi.fn();
+  const external: NonNullable<React.ComponentProps<typeof ThreadComposer>['external']> = {
+    capabilities: { resume: true, images: false, steering: false, models: [{ id: 'one', name: 'First external', thinkingLevels: ['low', 'high'] }, { id: 'two', name: 'Second external' }], current: { model: 'one', mode: 'plan' }, modes: [{ id: 'plan', name: 'Plan backend' }] },
+    source: 'live', choice: {}, onChange: change, onInteract: interact,
+  };
+  await act(async () => root.render(<Harness external={external} backendIdentity="agent:session" backendCommands={[{ name: 'model', description: 'Agent model command' }, { name: 'mode', description: 'Agent mode command' }]} />));
+  await type('/mod');
+  expect(editor.commandProps!.additionalCommands.filter(item => item.name === 'model').map(item => item.source)).toEqual(['varin', 'backend']);
+  expect(editor.commandProps!.additionalCommands.filter(item => item.name === 'mode').map(item => item.source)).toEqual(['varin', 'backend']);
+  expect(editor.commandProps!.additionalCommands.some(item => ['permissions', 'goal', 'compact'].includes(item.name))).toBe(false);
+  await act(async () => editor.commandProps!.onCommandSelect(editor.commandProps!.additionalCommands.find(item => item.name === 'model' && item.source === 'varin')!, 'confirm'));
+  expect(interact).toHaveBeenCalledWith('menu');
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Second external')!.click());
+  expect(change).toHaveBeenCalledWith(expect.objectContaining({ model: 'two' })); expect(editor.props!.value).toBe(''); expect(sent).toEqual([]);
+  await type('/mod');
+  await act(async () => editor.commandProps!.onCommandSelect(editor.commandProps!.additionalCommands.find(item => item.name === 'model' && item.source === 'backend')!, 'confirm'));
+  expect(editor.props!.value).toBe('/model '); expect(sent).toEqual([]);
+  await key('Enter'); expect(sent).toEqual(['/model ']);
+});
+
+it('starts external preparation on focus or typing but not while mounting the composer', async () => {
+  const interact = vi.fn();
+  await act(async () => root.render(<Harness external={{ choice: {}, onChange: () => {}, onInteract: interact }} />));
+  expect(interact).not.toHaveBeenCalled();
+  await act(async () => editor.props!.onFocus?.()); expect(interact).toHaveBeenLastCalledWith('focus');
+  await type('hello'); expect(interact).toHaveBeenLastCalledWith('input');
 });

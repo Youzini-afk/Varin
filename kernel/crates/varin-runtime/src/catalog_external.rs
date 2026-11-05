@@ -11,6 +11,24 @@ use serde::Deserialize;
 )]
 pub enum ExternalCommand {
     Settings,
+    /// Host-observed metadata, separate from user configuration and its revision.
+    InspectCapabilities {
+        configuration_id: String,
+        configuration: Value,
+    },
+    ClaimCapabilities {
+        configuration_id: String,
+        configuration: Value,
+    },
+    CacheCapabilities {
+        configuration_id: String,
+        configuration: Value,
+        generation: u64,
+        /// A detection invalidation compares this original generation, then fences old writers.
+        invalidate: Option<bool>,
+        agent_version: Option<String>,
+        capabilities: Option<Value>,
+    },
     Configure {
         key: String,
         expected_revision: u64,
@@ -113,6 +131,106 @@ mod tests {
     }
     fn create(c: &mut Catalog, id: &str) {
         call(c,json!({"action":"create","id":id,"key":id,"configurationId":"codex","harness":"codex","title":"Task","cwd":"/workspace"})).unwrap();
+    }
+    #[test]
+    fn external_capability_cache_preserves_defaults_and_fences_launch_and_version_changes() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        let mut agent = json!({"id":"codex","name":"Codex","harness":"codex","enabled":true,
+            "command":"codex","args":[],"defaults":{"model":"chosen","thinking":"high"}});
+        let configure = |agent: &Value, revision: u64| json!({"action":"configure","key":format!("settings-{revision}"),
+            "expectedRevision":revision,"value":{"agents":[agent],"defaultAgent":"codex"}});
+        call(&mut c, configure(&agent, 0)).unwrap();
+        let configuration = capability_configuration(&agent);
+        let claim = |catalog: &mut Catalog| call(catalog, json!({"action":"claim_capabilities","configurationId":"codex","configuration":configuration})).unwrap().as_u64().unwrap();
+        let cache = |version: &str, generation: u64| json!({"action":"cache_capabilities","configurationId":"codex",
+            "configuration":configuration,"agentVersion":version,"generation":generation,
+            "capabilities":{"models":[{"id":version,"name":version}],"images":true,"resume":true,"steering":false}});
+        let first_generation = claim(&mut c);
+        call(&mut c, cache("v1", first_generation)).unwrap();
+        let settings = call(&mut c, json!({"action":"settings"})).unwrap();
+        assert_eq!(settings["revision"], 1);
+        assert_eq!(settings["capabilityCache"]["codex"]["agentVersion"], "v1");
+        assert!(settings["capabilityCache"]["codex"].get("configuration").is_none());
+        assert!(settings["capabilityCache"]["codex"].get("generation").is_none());
+        agent["defaults"]["model"] = json!("changed-default");
+        agent["name"] = json!("Renamed");
+        call(&mut c, configure(&agent, 1)).unwrap();
+        drop(c);
+        let mut c = Catalog::open(directory.path()).unwrap();
+        let settings = call(&mut c, json!({"action":"settings"})).unwrap();
+        assert_eq!(settings["agents"][0]["defaults"]["model"], "changed-default");
+        assert_eq!(settings["capabilityCache"]["codex"]["agentVersion"], "v1");
+        let second_generation = claim(&mut c);
+        assert!(second_generation > first_generation);
+        call(&mut c, cache("v2", second_generation)).unwrap();
+        call(&mut c, json!({"action":"cache_capabilities","configurationId":"codex",
+            "configuration":configuration,"generation":second_generation,"agentVersion":"v2"})).unwrap();
+        // A known-version metadata-query failure retains its earlier real catalog.
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"]["codex"]["agentVersion"], "v2");
+        call(&mut c, cache("v1", first_generation)).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"]["codex"]["agentVersion"], "v2");
+        let invalidation_generation = claim(&mut c);
+        call(&mut c, json!({"action":"cache_capabilities","configurationId":"codex",
+            "configuration":configuration,"generation":invalidation_generation})).unwrap();
+        call(&mut c, cache("v2", second_generation)).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"], json!({}));
+        let third_generation = claim(&mut c);
+        call(&mut c, cache("v3", third_generation)).unwrap();
+        agent["args"] = json!(["--new-launch"]);
+        call(&mut c, configure(&agent, 2)).unwrap();
+        call(&mut c, cache("v3", third_generation)).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"], json!({}));
+    }
+    #[test]
+    fn external_detection_invalidates_only_its_original_capability_generation() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        let agent = json!({"id":"codex","harness":"codex","command":"codex","args":[]});
+        let configuration = capability_configuration(&agent);
+        call(&mut c, json!({"action":"configure","key":"settings","expectedRevision":0,
+            "value":{"agents":[agent],"defaultAgent":null}})).unwrap();
+        let inspect = json!({"action":"inspect_capabilities","configurationId":"codex","configuration":configuration});
+        assert_eq!(call(&mut c, inspect.clone()).unwrap(), Value::Null);
+        let claim = json!({"action":"claim_capabilities","configurationId":"codex","configuration":configuration});
+        let old = call(&mut c, claim.clone()).unwrap();
+        let cache = |generation: &Value, version: &str| json!({"action":"cache_capabilities","configurationId":"codex",
+            "configuration":configuration,"generation":generation,"agentVersion":version,
+            "capabilities":{"models":[{"id":version,"name":version}],"resume":true,"images":false,"steering":false}});
+        call(&mut c, cache(&old, "v1")).unwrap();
+        let observed = call(&mut c, inspect.clone()).unwrap();
+        assert_eq!(observed["generation"], old);
+        // Looking at a same-version catalog is read-only and does not fence live updates.
+        call(&mut c, inspect.clone()).unwrap();
+        call(&mut c, cache(&old, "v1")).unwrap();
+        assert_eq!(call(&mut c, inspect.clone()).unwrap()["generation"], old);
+        let latest = call(&mut c, claim.clone()).unwrap();
+        call(&mut c, cache(&latest, "v2")).unwrap();
+        let invalidate = |generation: &Value| json!({"action":"cache_capabilities","configurationId":"codex",
+            "configuration":configuration,"generation":generation,"invalidate":true});
+        // A slow old detection returns after the newer connection has populated its catalog.
+        call(&mut c, invalidate(&observed["generation"])).unwrap();
+        assert_eq!(call(&mut c, inspect.clone()).unwrap()["generation"], latest);
+        call(&mut c, cache(&latest, "v2")).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"]["codex"]["agentVersion"], "v2");
+        // A current failed/changed detection clears the catalog and also fences its old writer.
+        call(&mut c, invalidate(&latest)).unwrap();
+        call(&mut c, cache(&latest, "v2")).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"settings"})).unwrap()["capabilityCache"], json!({}));
+        assert!(call(&mut c, inspect).unwrap()["generation"].as_u64().unwrap() > latest.as_u64().unwrap());
+    }
+    #[test]
+    fn external_defaults_do_not_reinterpret_admitted_input() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:defaults");
+        let receipt = call(&mut c, json!({"action":"admit","id":"external:defaults","key":"first",
+            "input":{"text":"original","model":"frozen"}})).unwrap();
+        call(&mut c, json!({"action":"configure","key":"settings","expectedRevision":0,"value":{
+            "agents":[{"id":"codex","harness":"codex","command":"codex","args":[],
+                "defaults":{"model":"new-default","mode":"plan"}}],"defaultAgent":"codex"}})).unwrap();
+        assert_eq!(call(&mut c, json!({"action":"input","id":"external:defaults","turnId":receipt["id"]})).unwrap(),
+            json!({"text":"original","model":"frozen"}));
     }
     #[test]
     fn external_conversations_preserve_input_receipts_history_and_restart_state() {
@@ -382,6 +500,40 @@ impl ExternalRead {
         Ok(self.result)
     }
 }
+fn capability_configuration(agent: &Value) -> Value {
+    json!({"harness":agent["harness"],"command":agent["command"],"args":agent["args"]})
+}
+fn capability_cache(db: &Connection) -> Result<Value> {
+    let body: Option<String> = db.query_row("SELECT body FROM external_settings WHERE id='capabilities'", [], |row| row.get(0)).optional()?;
+    let value: Value = body.map(|body| serde_json::from_str(&body)).transpose()?.unwrap_or_else(|| json!({}));
+    if !value.is_object() { return Err(RuntimeError::Invalid("invalid external capability cache".into())); }
+    Ok(value)
+}
+fn next_capability_generation(tx: &Transaction<'_>) -> Result<u64> {
+    let previous: Option<String> = tx.query_row("SELECT body FROM external_settings WHERE id='capability_sequence'", [], |row| row.get(0)).optional()?;
+    let previous: u64 = previous.map(|body| serde_json::from_str(&body)).transpose()?.unwrap_or(0);
+    let generation = previous.checked_add(1).ok_or_else(|| RuntimeError::Invalid("external capability sequence exhausted".into()))?;
+    put(tx, "external_settings", "capability_sequence", &generation)?;
+    Ok(generation)
+}
+fn external_settings(db: &Connection) -> Result<Value> {
+    let mut settings: Value = record(db, "external_settings", "settings")?;
+    let cache = capability_cache(db)?;
+    let mut visible = serde_json::Map::new();
+    for agent in settings["agents"].as_array().into_iter().flatten() {
+        let Some(id) = agent["id"].as_str() else { continue };
+        let entry = &cache[id];
+        if entry["configuration"] == capability_configuration(agent) && entry["capabilities"].is_object()
+            && entry["agentVersion"].as_str().is_some_and(|version| !version.is_empty()) {
+            let mut entry = entry.clone();
+            entry.as_object_mut().unwrap().remove("configuration");
+            entry.as_object_mut().unwrap().remove("generation");
+            visible.insert(id.to_owned(), entry);
+        }
+    }
+    settings["capabilityCache"] = Value::Object(visible);
+    Ok(settings)
+}
 fn conversation(db: &Connection, id: &str) -> Result<Value> {
     let v: Value = record(db, "external_conversations", id)?;
     if v["deleted"] == true {
@@ -452,7 +604,65 @@ impl Catalog {
             }
         }
         let result = match p.command {
-            ExternalCommand::Settings => record(&tx, "external_settings", "settings")?,
+            ExternalCommand::Settings => external_settings(&tx)?,
+            ExternalCommand::InspectCapabilities { configuration_id, configuration } => {
+                let cache = capability_cache(&tx)?;
+                let entry = &cache[&configuration_id];
+                if entry["configuration"] == configuration && entry["generation"].as_u64().is_some() {
+                    json!({"generation":entry["generation"],"agentVersion":entry["agentVersion"]})
+                } else { Value::Null }
+            },
+            ExternalCommand::ClaimCapabilities { configuration_id, configuration } => {
+                let settings: Value = record(&tx, "external_settings", "settings")?;
+                let current = settings["agents"].as_array().and_then(|agents|
+                    agents.iter().find(|agent| agent["id"] == configuration_id));
+                if current.is_some_and(|agent| capability_configuration(agent) == configuration) {
+                    let generation = next_capability_generation(&tx)?;
+                    let mut cache = capability_cache(&tx)?;
+                    if cache[&configuration_id]["configuration"] != configuration {
+                        cache[&configuration_id] = json!({"configuration":configuration});
+                    }
+                    cache[&configuration_id]["generation"] = json!(generation);
+                    put(&tx, "external_settings", "capabilities", &cache)?;
+                    json!(generation)
+                } else { Value::Null }
+            },
+            ExternalCommand::CacheCapabilities { configuration_id, configuration, generation, invalidate, agent_version, capabilities } => {
+                let settings: Value = record(&tx, "external_settings", "settings")?;
+                // A late reply from an old process must not replace a newer launch's metadata.
+                let current = settings["agents"].as_array().and_then(|agents|
+                    agents.iter().find(|agent| agent["id"] == configuration_id));
+                if current.is_some_and(|agent| capability_configuration(agent) == configuration) {
+                    let mut cache = capability_cache(&tx)?;
+                    let entry = &cache[&configuration_id];
+                    // The original Catalog assigns this claim before probing/connecting. Wall
+                    // clocks, slow handshakes and late old-version callbacks cannot defeat it.
+                    let stale = entry["generation"].as_u64() != Some(generation);
+                    if stale { return Ok(ExternalRead { result: Value::Null, content: self.content.clone(), _publication: p._publication }); }
+                    if invalidate == Some(true) {
+                        let generation = next_capability_generation(&tx)?;
+                        cache[&configuration_id] = json!({"configuration":configuration,"generation":generation});
+                    } else if let Some(capabilities) = capabilities {
+                        let version = agent_version.as_deref().filter(|version| !version.trim().is_empty())
+                            .ok_or_else(|| RuntimeError::Invalid("capability cache requires an actual program version".into()))?;
+                        if !capabilities.is_object() || !capabilities["models"].is_array() {
+                            return Err(RuntimeError::Invalid("invalid external capabilities".into()));
+                        }
+                        cache[&configuration_id] = json!({"configuration":configuration,
+                            "agentVersion":version,"generation":generation,"capabilities":capabilities,"cachedAt":now()});
+                    } else if agent_version.is_some() && cache[&configuration_id]["agentVersion"].as_str() == agent_version.as_deref()
+                        && cache[&configuration_id]["capabilities"].is_object() {
+                        // A transient metadata-query failure does not invalidate a known catalog
+                        // from this exact program version. It remains explicitly cached, not ready.
+                        cache[&configuration_id]["generation"] = json!(generation);
+                    } else {
+                        cache[&configuration_id] = json!({"configuration":configuration,
+                            "agentVersion":agent_version,"generation":generation});
+                    }
+                    put(&tx, "external_settings", "capabilities", &cache)?;
+                }
+                Value::Null
+            },
             ExternalCommand::Configure {
                 expected_revision,
                 mut value,
@@ -469,6 +679,13 @@ impl Catalog {
                         "invalid external Agent settings".into(),
                     ));
                 }
+                // Clients configure defaults, never metadata. Retain only cache belonging to
+                // unchanged launch identities; defaults/name/enabled edits are independent.
+                value.as_object_mut().unwrap().remove("capabilityCache");
+                let mut cache = capability_cache(&tx)?;
+                cache.as_object_mut().unwrap().retain(|id, entry| value["agents"].as_array().unwrap().iter()
+                    .any(|agent| agent["id"] == *id && capability_configuration(agent) == entry["configuration"]));
+                put(&tx, "external_settings", "capabilities", &cache)?;
                 value["revision"] = json!(expected_revision + 1);
                 put(&tx, "external_settings", "settings", &value)?;
                 event(
@@ -478,7 +695,7 @@ impl Catalog {
                     "external.settings",
                     Value::Null,
                 )?;
-                value
+                external_settings(&tx)?
             }
             ExternalCommand::Create {
                 id,
