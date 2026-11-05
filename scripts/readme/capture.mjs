@@ -68,12 +68,12 @@ try {
   await page.setViewport({ width: 1480, height: 940, deviceScaleFactor: 1.5 });
   const { port } = server.httpServer.address();
   const assets = path.join(root, '.github/readme/assets');
-  for (const lang of ['en', 'zh-CN']) for (const scene of ['varin', 'workbench', 'ide', 'conversation', 'conversation-choices', 'conversation-reading']) {
+  for (const lang of ['en', 'zh-CN']) for (const scene of ['varin', 'workbench', 'ide', 'conversation', 'conversation-chart', 'conversation-choices', 'conversation-reading']) {
     if (process.env.README_SCENE && !process.env.README_SCENE.split(',').includes(scene)) continue;
     if (process.env.README_LANG && lang !== process.env.README_LANG) continue;
     console.log(`Rendering ${scene} (${lang})`);
     pageErrors.length = 0;
-    await page.goto(`http://127.0.0.1:${port}/?scene=${scene}&lang=${lang}`, { waitUntil: scene === 'conversation' ? 'networkidle2' : 'networkidle0' });
+    await page.goto(`http://127.0.0.1:${port}/?scene=${scene}&lang=${lang}`, { waitUntil: scene === 'conversation' || scene === 'conversation-chart' ? 'networkidle2' : 'networkidle0' });
     await page.waitForSelector('[data-readme-ready]');
     await page.waitForSelector('[data-conversation-composer-input-frame] .cm-content');
     await page.waitForFunction(() => !document.querySelector('[data-conversation-composer-input-frame] button[aria-busy="true"]'));
@@ -91,6 +91,14 @@ try {
       await frame.$eval('#share', input => { input.value = '40'; input.dispatchEvent(new Event('input', { bubbles: true })); });
       await frame.waitForFunction(() => document.getElementById('saved').textContent === '15');
       await frame.$eval('#share', input => { input.value = '60'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
+    }
+    if (scene === 'conversation-chart') {
+      const frame = await (await page.waitForSelector('iframe')).contentFrame();
+      await frame.waitForSelector('[data-chart-ready]');
+      await frame.select('#audience', 'new');
+      await frame.waitForFunction(() => document.getElementById('value-0').textContent === '44%');
+      await frame.select('#audience', 'all');
+      await frame.waitForFunction(() => document.getElementById('value-0').textContent === '38%');
     }
     if (scene === 'conversation-reading') await page.waitForFunction(() => document.querySelectorAll('[data-image-state="loaded"]').length === 2);
     await page.mouse.move(20, 8);

@@ -20,7 +20,9 @@ import { createThreadsHttpAPI, getRuntimeEndpointGeneration, normalizeConversati
 import { UiWorkView } from '@/components/interactive-ui/InteractiveUiCard';
 import { uiSession } from '@/lib/interactive-ui/sessions';
 import { workEstimateHtml } from './work-estimate.mjs';
+import { feedbackChartHtml } from './feedback-chart.mjs';
 import { ChatDialogueActivity } from '@/components/conversation/ChatDialogueActivity';
+import { ChatTurnUserMessage } from '@/components/conversation/ChatTimelineEntries';
 import type { DialogueProcess } from '@/components/conversation/chatDialogueProjection';
 import type { ChatToolResultMessage } from '@/components/conversation/types';
 import { ThreadComposer } from '@/components/thread/ThreadComposer';
@@ -108,7 +110,9 @@ function Activity({ kind = 'search' }: { kind?: 'search' | 'code' }) {
   const results = new Map(process.activities.map(a => [a.id, { role: 'toolResult', toolCallId: a.id, toolName: '', content: [], details: { status: 'applied' }, isError: false, timestamp: 0 } as ChatToolResultMessage]));
   return <ChatDialogueActivity process={process} executions={{}} results={results} active={false} renderActivity={() => null} />;
 }
-function User({ children }: { children: React.ReactNode }) { return <div className="user-message">{children}</div>; }
+function User({ children }: { children: string }) {
+  return <div className="readme-user-turn"><ChatTurnUserMessage cwd="" message={{ role: 'user', content: children, timestamp: 0 }} /></div>;
+}
 function Files() { return <M>{'[release-notes.md](release-notes.md)'}</M>; }
 function Delegate({ name, id, task, completed = false }: { name: string; id: string; task: string; completed?: boolean }) {
   return <ChatDelegation call={{ type: 'toolCall', id, name: 'dispatch', arguments: { name, task } }}
@@ -165,17 +169,26 @@ function WorkbenchConversation() { return <section className="conversation"><div
   <Delegate completed name={text('Accessibility check', '无障碍检查')} id="accessibility-review" task={text('Keyboard, contrast and narrow layouts', '键盘、对比度和窄屏布局')} />
   <M>{text('The feedback is back: two links need clearer focus styling. I’m applying that before the final review.', '检查结果已经回来了：有两处链接需要更清晰的焦点样式。我正在补上，然后再看一遍最终效果。')}</M>
 </div><Composer bot={false} /></section>; }
-function Estimate() {
-  const session = React.useMemo(() => uiSession('readme-work-estimate', identity, getRuntimeEndpointGeneration()), []);
-  const files = React.useMemo(() => ({ 'index.html': workEstimateHtml(zh) }), []);
-  const source = React.useMemo(() => ({ ref: 'ui:readme-work-estimate@1' }), []);
-  return <UiWorkView session={session} source={source} files={files} entry="index.html" title={text('Weekly document work', '每周材料整理')} committed />;
+function HtmlWork({ id, html, title }: { id: string; html: string; title: string }) {
+  const session = React.useMemo(() => uiSession(id, identity, getRuntimeEndpointGeneration()), [id]);
+  const files = React.useMemo(() => ({ 'index.html': html }), [html]);
+  const source = React.useMemo(() => ({ ref: `ui:${id}@1` }), [id]);
+  return <UiWorkView session={session} source={source} files={files} entry="index.html" title={title} committed />;
 }
 function RichConversation() { return <section className="conversation"><div className="message-flow rich-flow">
   <User>{text('Six of us each process 15 documents a week, about 30 minutes each. If Agents handle some and we review their work, how much time could that free up?', '我们 6 个人，每人每周整理 15 份材料，一份大概半小时。如果交给 Agent 做一部分，我们来检查，能腾出多少时间？')}</User>
   <M>{text('### Review time makes the difference\nThat is **45 hours of human work per week** today. Handing over 60% of the documents and spending 5 minutes reviewing each would free up **22.5 hours**. You can adjust both assumptions below.', '### 关键在于，检查一份还要花多久\n按你给的数量，目前每周需要 **45 小时人工投入**。先按交办 60%、每份检查 5 分钟估算，可以腾出 **22.5 小时**。下面两项都可以调整。')}</M>
-  <Estimate />
+  <HtmlWork id="readme-work-estimate" html={workEstimateHtml(zh)} title={text('Weekly document work', '每周材料整理')} />
   <M>{text('Start with the documents whose format is already stable. A first batch will give you a better review-time estimate before you hand over more.', '可以先从格式稳定的材料开始。做完第一批，用实际检查时间重新算一遍，再决定要交办多少。')}</M>
+  <div className="turn-end"><span><I name="file-copy" /><I name="git-branch" /><I name="more" /></span><small>↓ 8,420 ↑ 1,106 {text('Cache', '缓存率')} 84%</small></div>
+</div><Composer /></section>; }
+function ChartConversation() { return <section className="conversation"><div className="message-flow rich-flow">
+  <User>{text('Which parts of the feedback should shape our introduction? Show me the comparison so we can decide.', '哪些反馈最值得放进简介里？帮我对比一下，我们一起决定。')}</User>
+  <Activity />
+  <M>{text('### Start with a concrete first task\nThe feedback keeps returning to **how to start** and **what a finished result looks like**. I grouped the comments so you can compare the themes.', '### 从一个具体的首次任务开始\n反馈里反复出现的是**如何开始**和**做完是什么样子**。我把提及的主题整理成了一个可以切换查看的图表。')}</M>
+  <HtmlWork id="readme-feedback-chart" html={feedbackChartHtml(zh)} title={text('What people want to find first', '大家希望先看到什么')} />
+  <M>{text('A short walkthrough can cover both: ask Varin a question, refine the answer in the conversation, then open the work when you want more detail.', '一段简短的使用过程就能把两件事讲清楚：向 Varin 提出问题，在对话里完善结果，需要细节时再进入正在做的工作。')}</M>
+  <div className="sources"><I name="file-text" />feedback.csv<I name="global" />{text('Community discussion', '社区讨论')}<I name="arrow-right-s" size={14} /></div>
   <div className="turn-end"><span><I name="file-copy" /><I name="git-branch" /><I name="more" /></span><small>↓ 8,420 ↑ 1,106 {text('Cache', '缓存率')} 84%</small></div>
 </div><Composer /></section>; }
 function ChoiceConversation() {
@@ -218,6 +231,6 @@ function Editor() { const host = React.useRef<HTMLDivElement>(null); React.useEf
     document.body.dataset.editorReady = 'true';
   }); return () => { cancelled = true; editor?.dispose(); }; }, []); return <div className="editor-area"><div className="editor-tabs"><span><I name="file-code" />ReleaseSummary.tsx ×</span><span>release.css</span></div><div ref={host} className="monaco-host" /><div className="terminal"><div>{text('Terminal', '终端')} <span>{text('Problems', '问题')} 0</span></div><pre>$ bun run build<br /><span className="green">✓</span> {text('Build completed', '构建完成')}<br />$ <span className="cursor">▌</span></pre></div></div>; }
 function IdeChat() { return <div className="ide-chat"><div className="panel-heading"><I name="chat-3" />{text('Conversation', '对话')}</div><User>{text('The order looks good. Keep the focus styles consistent with the rest of the site.', '顺序看着不错，焦点样式也和站点其他部分保持一致。')}</User><M>{text('I’ll reuse the existing focus treatment. The content order stays as we agreed.', '我会复用已有的焦点样式，内容顺序保持刚才商量的版本。')}</M><Activity kind="code" /><M>{text('The changes are in `ReleaseSummary.tsx` and `release.css`. You can edit the files here while we keep discussing the page.', '改动在 `ReleaseSummary.tsx` 和 `release.css`。你可以直接在这里编辑，我们继续讨论页面。')}</M><Files /><Composer bot={false} /></div>; }
-export function App() { return <I18nProvider><div className={`readme-app ${scene}`}><Header /><div className="frame-body">{!botScene && <Sidebar />}{scene === 'varin' ? <><VarinConversation /><aside className="bot-area"><BotWorkspaceNavigationContext.Provider value={navigation}><BotPanelBody model={model} /></BotWorkspaceNavigationContext.Provider></aside></> : scene === 'workbench' ? <><WorkbenchConversation /><Collaboration /><ContextPanelRail /></> : scene === 'ide' ? <><Editor /><IdeChat /></> : scene === 'conversation-choices' ? <ChoiceConversation /> : scene === 'conversation-reading' ? <ReadingConversation /> : <RichConversation />}</div></div></I18nProvider>; }
+export function App() { return <I18nProvider><div className={`readme-app ${scene}`}><Header /><div className="frame-body">{!botScene && <Sidebar />}{scene === 'varin' ? <><VarinConversation /><aside className="bot-area"><BotWorkspaceNavigationContext.Provider value={navigation}><BotPanelBody model={model} /></BotWorkspaceNavigationContext.Provider></aside></> : scene === 'workbench' ? <><WorkbenchConversation /><Collaboration /><ContextPanelRail /></> : scene === 'ide' ? <><Editor /><IdeChat /></> : scene === 'conversation-choices' ? <ChoiceConversation /> : scene === 'conversation-reading' ? <ReadingConversation /> : scene === 'conversation-chart' ? <ChartConversation /> : <RichConversation />}</div></div></I18nProvider>; }
 createRoot(document.getElementById('root')!).render(<ThemeSystemContext.Provider value={themeContext}><TooltipProvider><App /></TooltipProvider></ThemeSystemContext.Provider>);
 document.body.dataset.readmeReady = 'true';

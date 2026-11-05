@@ -85,6 +85,12 @@ Read, compare, choose and refine a result in the conversation itself.
   <img src=".github/readme/assets/conversation-en.png" alt="A weekly workload estimate with a live comparison chart and two adjustable assumptions, rendered inside the conversation" width="1100" />
 </p>
 
+**Compare findings alongside the explanation.** Charts bring patterns in the source material into view, with the discussion and references in the same conversation.
+
+<p align="center">
+  <img src=".github/readme/assets/conversation-chart-en.png" alt="A feedback comparison chart placed between explanatory paragraphs, with a source filter and references" width="1100" />
+</p>
+
 **Choose and refine without leaving the explanation.** Read alternative drafts in lightweight tabs, select the points to develop and add your own thoughts. Prepare the next message when you are ready to continue.
 
 <p align="center">

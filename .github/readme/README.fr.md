@@ -83,6 +83,12 @@ Général, Programmation, Recherche et Bureautique sont des **orientations de t�
   <img src="assets/conversation-en.png" alt="Estimation du travail hebdomadaire avec graphique comparatif et hypothèses ajustables dans la conversation" width="1100" />
 </p>
 
+**Comparer les résultats au fil de l'explication.** Les graphiques font ressortir les tendances des documents, avec la discussion et les références dans la même conversation.
+
+<p align="center">
+  <img src="assets/conversation-chart-en.png" alt="Graphique comparant les retours entre les paragraphes explicatifs, avec un filtre et des références" width="1100" />
+</p>
+
 **Choisir et préciser au fil de l'explication.** Lisez les propositions dans des onglets discrets, sélectionnez les points à développer et ajoutez vos remarques. Préparez le prochain message pour poursuivre la discussion.
 
 <p align="center">
