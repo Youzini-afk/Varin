@@ -2,12 +2,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const helperArtifact = require('../../computer-driver/windows/helper-artifact.cjs');
+const { normalizeKernelArchitecture } = require('../../../scripts/kernel-binary-identity.cjs');
 
 // electron-builder may sign nested executables during signApp. Record the
 // digest only now, after the final signing bytes, and explicitly include the
 // Computer helper in the same publisher configuration as the main executable.
 module.exports = async context => {
   if (context.electronPlatformName !== 'win32') return;
+  // electron-builder's Arch enum identifies this actual package, even when
+  // the hook was invoked without package.mjs exporting VARIN_TARGET_ARCH.
+  const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
+  if (!architecture) throw new Error(`Unsupported package architecture: ${context.arch}`);
+  if (process.env.VARIN_TARGET_ARCH && normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH) !== architecture) {
+    throw new Error(`Package architecture ${architecture} conflicts with VARIN_TARGET_ARCH=${process.env.VARIN_TARGET_ARCH}`);
+  }
   const directory = path.join(context.appOutDir, 'resources', 'app.asar.unpacked', 'node_modules', '@varin', 'web', 'server', 'computer-driver', 'windows');
   const executable = path.join(directory, helperArtifact.EXECUTABLE);
   const manifestPath = path.join(directory, 'manifest.json');
@@ -24,7 +32,6 @@ module.exports = async context => {
     await context.packager.signIf(executable);
   }
   const bytes = fs.readFileSync(executable);
-  const architecture = process.env.VARIN_TARGET_ARCH || process.arch;
   helperArtifact.inspectExecutable(bytes, architecture);
   manifest.sha256 = helperArtifact.digest(bytes);
   manifest.signature = helperArtifact.readSignature(executable);

@@ -11,6 +11,13 @@ const {
 } = require('../../../scripts/kernel-binary-identity.cjs');
 
 module.exports = (context) => {
+  // The builder context owns the target of this package, including cross-arch
+  // invocations that did not come through package.mjs's environment setup.
+  const targetArchitecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
+  if (!targetArchitecture) throw new Error(`Unsupported package architecture: ${context.arch}`);
+  if (process.env.VARIN_TARGET_ARCH && normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH) !== targetArchitecture) {
+    throw new Error(`Package architecture ${targetArchitecture} conflicts with VARIN_TARGET_ARCH=${process.env.VARIN_TARGET_ARCH}`);
+  }
   const resourcesPath = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
@@ -37,7 +44,6 @@ module.exports = (context) => {
   const kernelBytes = fs.readFileSync(packagedKernelPath);
   const kernelDigest = crypto.createHash('sha256').update(kernelBytes).digest('hex');
   const binaryIdentity = detectKernelBinaryIdentity(kernelBytes);
-  const targetArchitecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
   const expectedTargetTriple = process.env.VARIN_TARGET_TRIPLE || defaultKernelTargetTriple(context.electronPlatformName, targetArchitecture);
   if (kernelManifest.schema !== 3 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest
     || kernelManifest.protocolVersion !== protocolVersion || kernelManifest.platform !== context.electronPlatformName
