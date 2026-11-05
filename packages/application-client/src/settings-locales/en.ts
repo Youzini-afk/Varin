@@ -4,6 +4,7 @@ export const settingsDict = {
   "settings.page.harness.web.assistance.title": "Optional retrieval assistance",
   "settings.page.harness.web.assistance.description": "Smart search selection uses this model only when several connections are eligible. Reading assistance selects original passages for a question. Failures keep deterministic search and reading available.",
   "settings.page.harness.web.assistance.selection": "Search selection model",
+  "settings.page.harness.web.assistance.selectionEnabled": "Enable smart search connection selection",
   "settings.page.harness.web.assistance.reading": "Reading selection model",
   "settings.page.harness.web.assistance.model.description": "Choose a configured decision model or an ordinary language model. Provider usage remains attached to the original tool call.",
   "settings.page.harness.web.assistance.chat": "Ordinary language model",

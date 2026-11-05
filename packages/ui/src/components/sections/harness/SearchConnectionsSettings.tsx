@@ -139,15 +139,15 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
   };
   const edit = (id: string, patch: Partial<HarnessWebSearchConnection>) => {
     const value = current.current;
-    if (!value?.connections.some(connection => connection.id === id)) return;
+    if (!value?.connections?.some(connection => connection.id === id)) return;
     save({ ...value, connections: value.connections.map(connection => connection.id === id ? { ...connection, ...patch } : connection) });
   };
   return <SettingsSection title={t('settings.page.harness.section.web')} settingsItem="harness.web.search" contentClassName="space-y-5">
     <SettingsCheckboxRow checked={harness.tools.websearch !== false} onChange={enabled => update({ tools: { websearch: enabled } })}
       ariaLabel={t('settings.page.harness.web.search.enabled')} label={t('settings.page.harness.web.search.enabled')} />
-    {config === undefined ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.web.search.default.description')}</p> : null}
+    {config !== null && config?.connections === undefined ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.web.search.default.description')}</p> : null}
     {config === null ? <p role="alert" className="typography-meta text-destructive">{t('settings.webConnections.invalid')}</p> : null}
-    {config ? <>
+    {config?.connections ? <>
       <SettingsCheckboxRow checked={config.enabled !== false} onChange={enabled => save({ ...config, enabled })}
         ariaLabel={t('settings.webConnections.enabled')} label={t('settings.webConnections.enabled')} />
       <SettingsFieldRow label={t('settings.webConnections.default')}>
@@ -159,7 +159,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
       {config.connections.map(connection => <ConnectionDisclosure key={connection.id} connection={connection} initiallyOpen={connection.id === newConnectionId}
         onEnabledChange={enabled => edit(connection.id, { enabled })} onRemove={() => {
             const value = current.current;
-            if (!value) return;
+            if (!value?.connections) return;
             const { defaultConnectionId, ...rest } = value;
             save({ ...rest, connections: value.connections.filter(item => item.id !== connection.id), fallbackConnectionIds: value.fallbackConnectionIds.filter(id => id !== connection.id),
               ...(defaultConnectionId && defaultConnectionId !== connection.id ? { defaultConnectionId } : {}) });
@@ -170,7 +170,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
         <SettingsFieldRow label={t('settings.webConnections.endpoint')}>
           <AutoSaveInput value={connection.endpoint ?? ''} placeholder={connection.provider === 'searxng' ? 'https://search.example.com' : t('settings.webConnections.providerDefault')}
             validate={value => { if (!value.trim() && connection.provider !== 'searxng') return null; try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? null : t('settings.harness.validUrl'); } catch { return t('settings.harness.validUrl'); } }}
-            onCommit={endpoint => { const value = current.current; if (!value) return; save({ ...value, connections: value.connections.map(item => { if (item.id !== connection.id) return item; const { endpoint: _old, ...rest } = item; return { ...rest, ...(endpoint.trim() ? { endpoint: endpoint.trim() } : {}) }; }) }); }} />
+            onCommit={endpoint => { const value = current.current; if (!value?.connections) return; save({ ...value, connections: value.connections.map(item => { if (item.id !== connection.id) return item; const { endpoint: _old, ...rest } = item; return { ...rest, ...(endpoint.trim() ? { endpoint: endpoint.trim() } : {}) }; }) }); }} />
         </SettingsFieldRow>
         <SearchCredential connectionId={connection.id} onChanged={credentialChanged} />
         <SettingsCheckboxRow checked={config.fallbackConnectionIds.includes(connection.id)} onChange={enabled => {
@@ -199,7 +199,7 @@ export function SearchConnectionsSettings({ harness, update }: HarnessSettingsPa
         const id = `${newProvider}-${crypto.randomUUID()}`;
         setNewConnectionId(id);
         const value = current.current ?? { connections: [], fallbackConnectionIds: [] };
-        save({ ...value, connections: [...value.connections, { id, name: providerName(newProvider), provider: newProvider, enabled: true, credentialRef: `varin-web-search-connection-${id}` }],
+        save({ ...value, connections: [...(value.connections ?? []), { id, name: providerName(newProvider), provider: newProvider, enabled: true, credentialRef: `varin-web-search-connection-${id}` }],
           ...(value.defaultConnectionId ? {} : { defaultConnectionId: id }) });
       }}>{t('settings.webConnections.add')}</Button>
     </div>

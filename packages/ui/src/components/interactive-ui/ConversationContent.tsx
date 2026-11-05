@@ -3,6 +3,8 @@ import { createConversationContentParser } from '@varin/application-client';
 import { ChatTextSourceContext } from '@/components/conversation/chatTextSourceContext';
 import { ConversationPreviewContext } from '@/components/conversation/ConversationContext';
 import { DeclarativeUiContent } from './DeclarativeUiContent';
+import { useI18n } from '@/lib/i18n';
+import { InteractionDisclosure } from './InteractionDisclosure';
 
 /** React owns controls; the Markdown DOM owner only receives original prose slices. */
 export function ConversationContent({ content, messageId, variant = 'assistant', isStreaming, renderMarkdown }: {
@@ -11,6 +13,7 @@ export function ConversationContent({ content, messageId, variant = 'assistant',
 }) {
   const source = React.useContext(ChatTextSourceContext);
   const preview = React.useContext(ConversationPreviewContext);
+  const { t } = useI18n();
   // Provider part identity survives the transient-to-history handoff. Its parser
   // and complete definitions must survive too, especially while a field is focused.
   const parserIdentity = source?.contentIdentity ?? `${source?.entryId ?? messageId}:${source?.contentIndex ?? 0}`;
@@ -26,7 +29,7 @@ export function ConversationContent({ content, messageId, variant = 'assistant',
       return <DeclarativeUiContent key={sourceKey} node={part.node} sourceKey={sourceKey} isStreaming={isStreaming}
         fragment={source?.entryId ? { messageId: source.entryId, fragmentKey, contentIndex: source.contentIndex } : undefined} />;
     }
-    if (part.kind === 'invalid') return <pre key={part.start} className="whitespace-pre-wrap break-words text-sm my-3" data-invalid-interaction>{part.raw}</pre>;
+    if (part.kind === 'invalid') return <div key={part.start} className="my-3 text-sm" data-invalid-interaction><p role="status" className="text-destructive">{t('ui.content.parseFailed', { reason: part.error })}</p><InteractionDisclosure title={t('ui.content.source')}><pre className="whitespace-pre-wrap break-words">{part.raw}</pre></InteractionDisclosure></div>;
     return <React.Fragment key={part.start}>{renderMarkdown(part.text, part.start, Boolean(isStreaming && part === parts.at(-1)))}</React.Fragment>;
   })}</>;
 }

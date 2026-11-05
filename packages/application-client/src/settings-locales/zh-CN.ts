@@ -4,6 +4,7 @@ export const settingsDict = {
   "settings.page.harness.web.assistance.title": "可选检索辅助",
   "settings.page.harness.web.assistance.description": "智能搜索仅在多个连接适用时调用选择模型。阅读辅助按问题选择原文段落；辅助失败时仍可使用默认搜索和确定性阅读。",
   "settings.page.harness.web.assistance.selection": "搜索选择模型",
+  "settings.page.harness.web.assistance.selectionEnabled": "启用智能搜索连接选择",
   "settings.page.harness.web.assistance.reading": "阅读选段模型",
   "settings.page.harness.web.assistance.model.description": "选择已配置的决策模型或普通语言模型。实际用量保留在原工具调用中。",
   "settings.page.harness.web.assistance.chat": "普通语言模型",

@@ -449,11 +449,19 @@ const braveProvider = (settings: HarnessWebSearchSettings, runtime: SearchProvid
       headers: { Accept: "application/json", "X-Subscription-Token": requireCredential(settings, runtime.apiKey) },
       ...(options.signal ? { signal: options.signal } : {}),
     }), "Brave");
-    const web = isRecord(payload.web) ? payload.web : {};
+    // Brave may omit the web vertical when there are no web hits. A present,
+    // malformed vertical/result list is a protocol failure, not zero matches.
+    if (payload.error != null || (payload.web == null && payload.type !== "search" && !isRecord(payload.query))) {
+      throw new SearchProviderError({ kind: "protocol", message: "Brave returned an invalid search response" });
+    }
+    if (payload.web != null && !isRecord(payload.web)) {
+      throw new SearchProviderError({ kind: "protocol", message: "Brave returned an invalid web result object" });
+    }
+    const web = isRecord(payload.web) ? payload.web : undefined;
     const queryMeta = isRecord(payload.query) ? payload.query : {};
     const moreAvailable = queryMeta.more_results_available === true && offset < 9;
     return {
-      results: normalizeResults(Array.isArray(web.results) ? web.results : []),
+      results: normalizeResults(web === undefined ? [] : requireResults(web.results, "Brave"), "search-description"),
       ...(moreAvailable ? { nextPage: { kind: "offset" as const, value: offset + 1 } } : {}),
     };
   },
@@ -548,7 +556,7 @@ const searxngProvider = (settings: HarnessWebSearchSettings, runtime: SearchProv
       ...(options.signal ? { signal: options.signal } : {}),
     }), "SearXNG");
     const raw = requireResults(payload.results, "SearXNG");
-    const results = normalizeResults(raw, "search-description").slice(0, options.limit ?? 10);
+    const results = normalizeResults(raw, "search-description");
     // SearXNG does not report a result count; a non-empty page may have a successor.
     return {
       results,
@@ -632,7 +640,7 @@ export const resolveConfiguredSearchProvider = (input: {
   if (settings === null) return { unavailable: true, hint: "invalid search provider configuration", failure: { kind: "not-configured", message: "invalid search provider configuration" } };
   if (settings?.enabled === false) return { unavailable: true, hint: "web search connections are disabled", failure: { kind: "disabled", message: "web search connections are disabled" } };
   type Entry = { info: WebSearchConnectionInfo; provider: SearchProvider; failure?: WebSearchFailure };
-  const entries: Entry[] = settings ? settings.connections.map(connection => {
+  const entries: Entry[] = settings?.connections ? settings.connections.map(connection => {
     const apiKey = resolveSearchCredential(input.auth, connection.credentialRef);
     const provider = createConfiguredSearchProvider(connection, { apiKey, fetch: runtime.fetch, now: runtime.now });
     let failure: WebSearchFailure | undefined;
@@ -648,10 +656,10 @@ export const resolveConfiguredSearchProvider = (input: {
   }) : [exaMcpProvider(runtime), parallelMcpProvider(runtime)].map(provider => ({ provider,
     info: { id: provider.id, name: provider.id === "default-exa" ? "Exa · keyless" : "Parallel · keyless", providerId: provider.id,
       enabled: true, available: true, capabilities: provider.capabilities } }));
-  const defaultId = settings?.defaultConnectionId ?? (settings ? settings.connections.find(connection => connection.enabled)?.id : "default-exa");
-  const route = [...new Set([...(defaultId ? [defaultId] : []), ...(settings?.fallbackConnectionIds ?? (settings ? [] : ["default-parallel"]))])];
+  const defaultId = settings?.defaultConnectionId ?? (settings?.connections ? settings.connections.find(connection => connection.enabled)?.id : "default-exa");
+  const route = [...new Set([...(defaultId ? [defaultId] : []), ...(settings?.connections ? settings.fallbackConnectionIds : ["default-parallel"])])];
   const defaultEntry = entries.find(entry => entry.info.id === defaultId);
-  const cacheKey = createHash("sha256").update(JSON.stringify({ settings: settings ?? "default", credentials: settings?.connections.map(connection => resolveSearchCredential(input.auth, connection.credentialRef)) })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ settings: settings ?? "default", credentials: settings?.connections?.map(connection => resolveSearchCredential(input.auth, connection.credentialRef)) })).digest("hex");
   return {
     id: defaultId ?? "none", cacheKey, connections: entries.map(entry => entry.info), smartSelection: settings?.smartSelection === true,
     capabilities: defaultEntry?.provider.capabilities ?? { pagination: false },
@@ -777,8 +785,16 @@ export function createWebSearchService<C extends { signal: AbortSignal } = { sig
     signal.throwIfAborted();
     if (disposed) throw new DOMException("Search service is closed", "AbortError");
     if (!identities.has(provider)) identities.set(provider, ++nextIdentity);
-    const { signal: _signal, ...semanticOptions } = options;
-    const key = JSON.stringify([provider.cacheKey ?? identities.get(provider), query, semanticOptions]);
+    const keyFor = (value: SearchOptions) => {
+      const { signal: _signal, ...semanticOptions } = value;
+      // Initial upstream pages and defaults have one cache identity regardless
+      // of whether they came from a fresh call or a continuation cursor.
+      if (semanticOptions.page?.value === (semanticOptions.page?.kind === 'page' ? 1 : 0)) delete semanticOptions.page;
+      if (semanticOptions.limit === 10) delete semanticOptions.limit;
+      return JSON.stringify([provider.cacheKey ?? identities.get(provider), query,
+        Object.fromEntries(Object.entries(semanticOptions).sort(([a], [b]) => a.localeCompare(b)))]);
+    };
+    const key = keyFor(options);
     prune();
     const cached = !refresh ? cache.get(key) : undefined;
     if (cached) return { ...structuredClone(cached), fromCache: true };
@@ -796,7 +812,17 @@ export function createWebSearchService<C extends { signal: AbortSignal } = { sig
         controller.signal.throwIfAborted();
         const retrievedAt = now();
         const entry: Cached = { response, retrievedAt, expires: retrievedAt + ttl, bytes: new TextEncoder().encode(key + JSON.stringify(response)).byteLength };
-        if (!disposed && latest.get(key) === current && ttl > 0 && entry.bytes <= maxBytes) { drop(key); cache.set(key, structuredClone(entry)); cacheBytes += entry.bytes; prune(); }
+        if (!disposed && latest.get(key) === current && ttl > 0 && entry.bytes <= maxBytes) {
+          const { autoPreferredConnectionId: _preferred, ...exact } = options;
+          const exactKey = keyFor({ ...exact, connectionId: response.connectionId ?? options.connectionId ?? provider.id });
+          for (const cacheKey of new Set([key, exactKey])) {
+            // Do not let an older automatic lookup overwrite a newer explicit
+            // observation. Each cursor will also verify its page ordering.
+            if (cacheKey !== key && latest.has(cacheKey) && latest.get(cacheKey) !== current) continue;
+            drop(cacheKey); cache.set(cacheKey, structuredClone(entry)); cacheBytes += entry.bytes;
+          }
+          prune();
+        }
         return entry;
       }).finally(() => { if (pending.get(pendingKey) === current) pending.delete(pendingKey); producers.delete(current); if (latest.get(key) === current) latest.delete(key); });
     }
@@ -874,7 +900,8 @@ export function createWebSearchService<C extends { signal: AbortSignal } = { sig
           if (!isCancellation(error, ctx.signal)) notices.push("Search selection failed; using configured route.");
         }
       }
-      const runSearch = async (kind: "query" | "objective" | "page", query: string, input: SearchOptions, refresh = params.refresh === true): Promise<WebSearchItem> => {
+      const runSearch = async (kind: "query" | "objective" | "page", query: string, input: SearchOptions,
+        continuation?: { offset: number; hash: string }): Promise<WebSearchItem> => {
         const echo = { query, ...(input.objective ? { objective: input.objective } : {}), ...(input.connectionId ? { connectionId: input.connectionId } : {}) };
         if (!provider) return { kind, ...echo, status: "unavailable", detail: unavailable?.hint ?? "search provider is unavailable", ...(unavailable?.failure ? { failure: unavailable.failure } : {}) };
         const domains = mergeHarnessWebDomainPolicy(policy, { ...(input.allowedDomains === undefined ? {} : { allow: input.allowedDomains }), ...(input.blockedDomains === undefined ? {} : { block: input.blockedDomains }) });
@@ -885,17 +912,26 @@ export function createWebSearchService<C extends { signal: AbortSignal } = { sig
             ...(domains.block.length ? { blockedDomains: domains.block } : {}),
             ...(autoPreferredConnectionId && !input.connectionId ? { autoPreferredConnectionId } : {}),
           };
-          const { response, retrievedAt, fromCache } = await request(provider, query, requested, ctx.signal, refresh);
+          const { response, retrievedAt, fromCache } = await request(provider, query, requested, ctx.signal, params.refresh === true);
           const providerId = response.providerId ?? provider.id;
           const connectionId = response.connectionId ?? input.connectionId ?? provider.id;
           const ranked = filterByDomainPolicy(response.results, domains.allow, domains.block);
           if (input.preferredDomains?.length) ranked.sort((a, b) => Number(filterByDomainPolicy([b], input.preferredDomains, []).length > 0) - Number(filterByDomainPolicy([a], input.preferredDomains, []).length > 0));
-          const results = ranked.slice(0, input.limit ?? 10).map(result => ({ ...result,
+          const pageHash = createHash("sha256").update(JSON.stringify(ranked)).digest("hex");
+          if (continuation && (continuation.hash !== pageHash || continuation.offset >= ranked.length)) {
+            return { kind, ...echo, connectionId, providerId, status: "failed",
+              detail: "The search page or its filtering changed; refresh the original query to continue without skipping results." };
+          }
+          const offset = continuation?.offset ?? 0;
+          const results = ranked.slice(offset, offset + (input.limit ?? 10)).map(result => ({ ...result,
             provenance: [{ connectionId, providerId, query, ...(input.objective ? { objective: input.objective } : {}), retrievedAt }],
           }));
           const pagination = response.capabilities?.pagination ?? provider.capabilities.pagination;
-          const nextCursor = response.nextPage && response.nextPage.kind === pagination ? mintSearchCursor({ v: 1, p: providerId, c: connectionId,
-            ...(provider.cacheKey ? { config: provider.cacheKey } : {}), q: query, k: response.nextPage.kind, n: response.nextPage.value,
+          const remaining = offset + results.length < ranked.length && pagination !== false;
+          const nextPage = remaining ? { kind: pagination, value: input.page?.value ?? (pagination === "page" ? 1 : 0) } : response.nextPage;
+          const nextCursor = nextPage && nextPage.kind === pagination ? mintSearchCursor({ v: 1, p: providerId, c: connectionId,
+            ...(provider.cacheKey ? { config: provider.cacheKey } : {}), q: query, k: nextPage.kind, n: nextPage.value,
+            ...(remaining ? { resultOffset: offset + results.length, pageHash } : {}),
             ...(input.objective ? { objective: input.objective } : {}), ...(input.language ? { language: input.language } : {}), ...(input.region ? { region: input.region } : {}),
             ...(input.strictFilters !== undefined ? { strictFilters: input.strictFilters } : {}),
             ...(input.allowedDomains !== undefined ? { allow: input.allowedDomains } : {}), ...(input.blockedDomains ? { block: input.blockedDomains } : {}),
@@ -932,7 +968,7 @@ export function createWebSearchService<C extends { signal: AbortSignal } = { sig
           ...(payload.recency ? { recency: payload.recency } : {}), ...(payload.limit ? { limit: payload.limit } : {}),
           ...(payload.objective ? { objective: payload.objective } : {}), ...(payload.language ? { language: payload.language } : {}), ...(payload.region ? { region: payload.region } : {}),
           ...(payload.strictFilters !== undefined ? { strictFilters: payload.strictFilters } : {}),
-        });
+        }, payload.resultOffset !== undefined && payload.pageHash ? { offset: payload.resultOffset, hash: payload.pageHash } : undefined);
       };
       const items = await Promise.all([
         ...queryItems.flatMap(item => selectedConnections.map(connectionId => runSearch(item.kind, item.query, { ...common, ...(connectionId ? { connectionId } : {}) }))),

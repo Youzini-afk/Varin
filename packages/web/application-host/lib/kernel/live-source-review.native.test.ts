@@ -337,7 +337,7 @@ it('cancelling after actual live-root registration revokes the fresh grant befor
   registration.mockRestore();
 }, 30_000);
 
-it('live read and discovery do not authorize a returned path that escapes its registered root', async () => {
+it('confined live read and discovery do not authorize a returned path that escapes its registered root', async () => {
   const returned: Array<Record<string, unknown>> = []; let serial = 0;
   const f = await fixture((body, response) => {
     const output = lastOutput(body); if (output) returned.push(JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown>);
@@ -346,6 +346,8 @@ it('live read and discovery do not authorize a returned path that escapes its re
     else if (serial === 2) tool(response, 'file_search', { query: 'UNAUTHORIZED OUTSIDE CONTENT', fixedStrings: true }, serial);
     else done(response);
   });
+  // Deployment lockdown keeps the registered directory as the file boundary.
+  f.runtime.deviceFileAccess = false;
   const outside = path.join(f.root, 'not-selected'); await fs.mkdir(outside);
   await fs.writeFile(path.join(outside, 'private.txt'), 'UNAUTHORIZED OUTSIDE CONTENT');
   await fs.symlink(outside, path.join(f.workspace, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
@@ -357,6 +359,31 @@ it('live read and discovery do not authorize a returned path that escapes its re
   expect(returned[0]).not.toMatchObject({ outcome: 'succeeded' });
   expect(JSON.stringify(returned)).not.toContain('UNAUTHORIZED OUTSIDE CONTENT');
   expect(await fs.readFile(path.join(outside, 'private.txt'), 'utf8')).toBe('UNAUTHORIZED OUTSIDE CONTENT');
+}, 30_000);
+
+it('ordinary live sources allow device reads through links and explicitly selected outside search paths', async () => {
+  const returned: Array<Record<string, unknown>> = []; let serial = 0;
+  const f = await fixture((body, response) => {
+    const output = lastOutput(body); if (output) returned.push(JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown>);
+    serial++;
+    if (serial === 1) tool(response, 'file_read', { path: 'outside/device.txt' }, serial);
+    else if (serial === 2) tool(response, 'file_search', { paths: [outside], query: 'AUTHORIZED DEVICE CONTENT', fixedStrings: true }, serial);
+    else done(response);
+  });
+  const outside = path.join(f.root, 'other-device-directory'); await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'device.txt'), 'AUTHORIZED DEVICE CONTENT');
+  await fs.symlink(outside, path.join(f.workspace, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
+  const identity = await f.api.create('live-device-access');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const receipt = await f.api.submit({ ...identity, key: 'device-access', expectedHead: null, text: 'read the device file and search the selected directory', model, source: prepared.source });
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  expect(returned).toHaveLength(2);
+  for (const result of returned) {
+    expect(result).toMatchObject({ outcome: 'succeeded' });
+    expect(JSON.stringify(result)).toContain('AUTHORIZED DEVICE CONTENT');
+  }
+  expect(JSON.stringify(returned[1])).toContain('device.txt');
+  expect(await fs.readFile(path.join(outside, 'device.txt'), 'utf8')).toBe('AUTHORIZED DEVICE CONTENT');
 }, 30_000);
 
 it('fixed branch commands use an isolated execution view even when the binding includes a valid live root', async () => {

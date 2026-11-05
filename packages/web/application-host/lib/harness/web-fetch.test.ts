@@ -755,6 +755,28 @@ describe("question-directed original reading", () => {
     const fixture = createMaterialStoreFixture();
     return { ...fixture, service: createWebFetch({ ssrf: createMockSsrf(), materials: fixture.materials, ...options }) };
   };
+  it("returns a short original page directly without spending a helper call on cross-language selection", async () => {
+    const helper = vi.fn();
+    const body = "# Requirements\n\nThe minimum supported operating system is Windows 11.";
+    const { service } = open(body, { selectPassages: helper });
+    try {
+      const result = await service.fetch({ url: "https://example.com/requirements", question: "最低支持哪个操作系统？" }, fetchContext);
+      expect(result).toMatchObject({ status: "ok", markdown: body, selection: { method: "page" } });
+      expect(helper).not.toHaveBeenCalled();
+    } finally { await service.dispose(); }
+  });
+
+  it("passes a long source to assistance even without lexical matches, and accepts a deliberate empty selection", async () => {
+    const helper = vi.fn(async () => ({ ranges: [] as Array<{ startLine: number; endLine: number }> }));
+    const body = "# Requirements\n\nThe minimum supported operating system is Windows 11.\n\n# Installation\n\nDownload the installer.";
+    const { service } = open(body, { selectPassages: helper });
+    try {
+      const result = await service.fetch({ url: "https://example.com/requirements", question: "最低支持哪个操作系统？", maxLines: 3 }, fetchContext);
+      expect(helper).toHaveBeenCalledWith(expect.objectContaining({ markdown: body, candidates: [] }));
+      expect(result).toMatchObject({ status: "ok", ranges: [], selection: { method: "helper", matched: false } });
+    } finally { await service.dispose(); }
+  });
+
   it("selects Chinese and technical passages with exact unchanged original ranges", async () => {
     const body = ["# 产品手册", "", "## 账户", "注册账户可以使用电子邮件。", "", "## 代理故障", "出现 ERR_CONNECTION_RESET 时，检查代理的 TLS 配置。", "仅当代理启用时，才需设置 HTTPS_PROXY；直连不要设置。", "", "```bash", "export HTTPS_PROXY=http://proxy.example:8080", "```", "", "## 价格", "基础套餐每月十元。"].join("\n");
     const { service, materials } = open(body);
@@ -776,7 +798,7 @@ describe("question-directed original reading", () => {
   it("rejects invented helper ranges, uses deterministic fallback and never uses helper prose", async () => {
     const helper = vi.fn(async () => ({ ranges: [{ startLine: 300, endLine: 500 }], reason: "invalid source ranges" }));
     const { service } = open("# TLS\n\nTLS requires certificate verification.\n\n# Other\n\nUnrelated detail.", { selectPassages: helper });
-    const result = await service.fetch({ url: "https://example.com/tls", question: "TLS certificate verification" }, fetchContext);
+    const result = await service.fetch({ url: "https://example.com/tls", question: "TLS certificate verification", maxLines: 4 }, fetchContext);
     expect(result).toMatchObject({ status: "ok", selection: { method: "question", detail: "invalid source ranges" } });
     expect(result.status === "ok" && result.markdown).toContain("TLS requires certificate verification.");
     expect(helper).toHaveBeenCalledOnce();
@@ -786,7 +808,7 @@ describe("question-directed original reading", () => {
   it("accepts only grounded helper locations and preserves fenced code and table structure", async () => {
     const body = "# Setup\n\n```sh\nset MODE=1\n\necho done\n```\n\n| Option | Default |\n| --- | --- |\n| MODE | 1 |\n\nOther material.";
     const { service } = open(body, { selectPassages: async () => ({ ranges: [{ startLine: 5, endLine: 5 }, { startLine: 11, endLine: 11 }], assistance: { status: "selected", purpose: "reading" } }) });
-    const result = await service.fetch({ url: "https://example.com/setup", question: "How do I set the mode?" }, fetchContext);
+    const result = await service.fetch({ url: "https://example.com/setup", question: "How do I set the mode?", maxLines: 12 }, fetchContext);
     expect(result).toMatchObject({ status: "ok", selection: { method: "helper", assistance: { status: "selected" } } });
     if (result.status !== "ok") throw new Error(result.status);
     expect(result.markdown).toContain("```sh\nset MODE=1\n\necho done\n```");
@@ -797,7 +819,7 @@ describe("question-directed original reading", () => {
 
   it("reports a searched range when no passage matches instead of inventing an answer", async () => {
     const { service } = open("# Apples\n\nApples grow on trees.");
-    const result = await service.fetch({ url: "https://example.com/apple", question: "What is ERR_SSL_PROTOCOL_ERROR?" }, fetchContext);
+    const result = await service.fetch({ url: "https://example.com/apple", question: "What is ERR_SSL_PROTOCOL_ERROR?", maxLines: 2 }, fetchContext);
     expect(result).toMatchObject({ status: "ok", ranges: [], selection: { method: "question", matched: false, searchedRange: { startLine: 1, endLine: 3 } }, nextRead: { position: { kind: "lines", startLine: 1 } } });
     expect(result.status === "ok" && result.markdown).toContain("No relevant passages");
     await service.dispose();

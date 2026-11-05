@@ -8,9 +8,11 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { EmbeddedUiContent } from './EmbeddedUiContent';
 import { NativeObjectContent } from './NativeObjectContent';
 import { useNativeObjectActions } from '@/lib/interactive-ui/native-object-actions';
+import { InteractionDisclosure } from './InteractionDisclosure';
+import { UiRevisionLink } from './UiRevisionLink';
 
-const controlClass = 'min-w-0 max-w-full rounded-md border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary';
-const buttonClass = 'rounded-md border border-border px-3 py-2 text-sm hover:bg-interactive-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
+const controlClass = 'conversation-ui-control min-w-0 max-w-full rounded-md border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary';
+const buttonClass = 'conversation-ui-action rounded-md border border-border px-3 py-2 text-sm hover:bg-interactive-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
 export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(props: DeclarativeUiSource) {
   const [shown, setShown] = React.useState(props.node);
   const focused = React.useRef(false);
@@ -82,26 +84,26 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
   };
   const selectedTab = shown.type === 'tabs' ? shown.tabs.find(tab => tab.key === view.state.controls.tab) ?? shown.tabs[0] : undefined;
   const Surface = shown.type === 'embed' ? 'div' : 'form';
-  return <Surface ref={(element: HTMLDivElement | HTMLFormElement | null) => { surface.current = element; }} onSubmit={event => event.preventDefault()} data-conversation-ui-fragment={props.sourceKey} className="my-3 min-w-0 space-y-3 text-foreground" aria-label={shown.label}
+  return <Surface ref={(element: HTMLDivElement | HTMLFormElement | null) => { surface.current = element; }} onSubmit={event => event.preventDefault()} data-conversation-ui-fragment={props.sourceKey} className="conversation-ui-fragment my-3 min-w-0 space-y-3 text-foreground" aria-label={shown.label}
     onFocusCapture={() => { focused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; setShown(props.node); } }}>
     {shown !== props.node && <p role="status" className="text-sm text-muted-foreground">{t('ui.fragment.updated')} <button type="button" className={buttonClass} onClick={() => { focused.current = false; setShown(props.node); }}>{t('ui.fragment.applyUpdate')}</button></p>}
     {shown.type === 'form' && shown.label && <p className="font-medium">{shown.label}</p>}
     {fields.map(renderField)}
-    {shown.type === 'disclosure' && <details open={view.state.controls.open === true} onToggle={event => { if (event.currentTarget.open !== (view.state.controls.open === true)) view.setControl('open', event.currentTarget.open); }}>
-      <summary className="cursor-pointer font-medium">{shown.label ?? t('ui.fragment.details')}</summary><SimpleMarkdownRenderer content={shown.content} variant="tool" />
-    </details>}
-    {shown.type === 'tabs' && <div><div role="tablist" aria-label={shown.label} className="flex flex-wrap gap-2">{shown.tabs.map(tab => <button type="button" key={tab.key} role="tab" id={`${id}:tab:${tab.key}`} aria-controls={`${id}:panel`} aria-selected={selectedTab?.key === tab.key} tabIndex={selectedTab?.key === tab.key ? 0 : -1}
-      className={buttonClass} onClick={() => view.setControl('tab', tab.key)} onKeyDown={event => {
+    {shown.type === 'disclosure' && <InteractionDisclosure open={view.state.controls.open === true} onOpenChange={open => view.setControl('open', open)} title={shown.label ?? t('ui.fragment.details')}>
+      <SimpleMarkdownRenderer content={shown.content} variant="tool" />
+    </InteractionDisclosure>}
+    {shown.type === 'tabs' && <div><div role="tablist" aria-label={shown.label} className="flex flex-wrap gap-2">{shown.tabs.map(tab => <button type="button" key={tab.key} role="tab" id={`${id}:tab:${tab.key}`} aria-controls={`${id}:panel:${tab.key}`} aria-selected={selectedTab?.key === tab.key} tabIndex={selectedTab?.key === tab.key ? 0 : -1}
+      className={`conversation-ui-tab ${buttonClass}`} onClick={() => view.setControl('tab', tab.key)} onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault();
         const index = shown.tabs.findIndex(item => item.key === tab.key), next = event.key === 'Home' ? 0 : event.key === 'End' ? shown.tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + shown.tabs.length) % shown.tabs.length;
         view.setControl('tab', shown.tabs[next]!.key); document.getElementById(`${id}:tab:${shown.tabs[next]!.key}`)?.focus();
       }}>{tab.label}</button>)}</div>
-      {selectedTab && <div role="tabpanel" id={`${id}:panel`} aria-labelledby={`${id}:tab:${selectedTab.key}`}><SimpleMarkdownRenderer content={selectedTab.content} variant="tool" /></div>}
+      <div className="conversation-ui-tabs">{shown.tabs.map(tab => <div key={tab.key} className="conversation-ui-reveal" data-open={selectedTab?.key === tab.key} role="tabpanel" id={`${id}:panel:${tab.key}`} aria-labelledby={`${id}:tab:${tab.key}`} aria-hidden={selectedTab?.key !== tab.key} inert={selectedTab?.key !== tab.key}><div><SimpleMarkdownRenderer content={tab.content} variant="tool" /></div></div>)}</div>
     </div>}
     {shown.type === 'embed' && <EmbeddedUiContent refValue={shown.ref} sourceKey={props.sourceKey} />}
     {shown.type === 'object' && <NativeObjectContent refValue={shown.ref} />}
     {action && <div className="space-y-2">
-      {action.type === 'send' && <details><summary className="cursor-pointer text-sm">{t('ui.fragment.preview')}</summary><p className="whitespace-pre-wrap text-sm">{pendingText ?? text}</p></details>}
+      {action.type === 'send' && <InteractionDisclosure title={t('ui.fragment.preview')}><p className="whitespace-pre-wrap text-sm">{pendingText ?? text}</p></InteractionDisclosure>}
       <button type="button" className={buttonClass} disabled={busy || action.type === 'send' && sentText === text} onClick={() => void run()}>{action.type === 'send' ? `${t('ui.fragment.send')} · ${action.label}` : action.label}</button>
       {(action.type === 'compose' || action.type === 'reference') && <span className="ml-2 text-xs text-muted-foreground">{t('ui.fragment.draftHint')}</span>}
     </div>}
@@ -109,8 +111,9 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     {status && <p role="status" className="text-sm text-muted-foreground">{status}</p>}
     {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
     {view.error && <p role="alert" className="text-sm text-destructive">{t('ui.fragment.unsaved')}: {view.error} <button type="button" className={buttonClass} onClick={view.retry}>{t('ui.fragment.retry')}</button></p>}
+    {!props.session && shown.type !== 'embed' && shown.type !== 'object' && view.session && <UiRevisionLink session={view.session} />}
   </Surface>;
-}, (before, after) => before.node === after.node && before.sourceKey === after.sourceKey
+}, (before, after) => before.node === after.node && before.sourceKey === after.sourceKey && before.session === after.session
   && before.source === after.source && before.isStreaming === after.isStreaming
   && before.fragment?.messageId === after.fragment?.messageId && before.fragment?.fragmentKey === after.fragment?.fragmentKey
   && before.fragment?.contentIndex === after.fragment?.contentIndex && before.fragment?.contentVersion === after.fragment?.contentVersion);

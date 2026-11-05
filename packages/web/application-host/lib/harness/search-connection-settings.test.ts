@@ -36,12 +36,12 @@ it('edits one connection with the real settings revision, preserving other conne
   await f.settings.updateHarness((await f.settings.read()).revision, () => ({ web: { sourcePreferences: { preferredDomains: ['example.com'] } }, models: { webSelection: { enabled: false } } }));
   const first = await f.add('Research'); const second = await f.add('General');
   expect(second.configuration?.connections).toHaveLength(2);
-  const firstConnection = second.configuration!.connections[0]!;
-  const secondConnection = second.configuration!.connections[1]!;
+  const firstConnection = second.configuration!.connections![0]!;
+  const secondConnection = second.configuration!.connections![1]!;
   expect(firstConnection.credentialRef).not.toBe(secondConnection.credentialRef);
   const changed = await f.call('patch', { id: first.connectionId, expectedRevision: second.revision, set: { name: 'Papers', description: 'Academic sources' } });
   expect(changed).toMatchObject({ status: 'applied', mutation: 'applied' });
-  expect((await f.owner.list()).configuration?.connections[1]).toEqual(secondConnection);
+  expect((await f.owner.list()).configuration?.connections?.[1]).toEqual(secondConnection);
   expect(await f.call('patch', { id: first.connectionId, expectedRevision: second.revision, set: { name: 'Stale' } })).toMatchObject({ status: 'failed', mutation: 'none' });
   expect(await f.call('patch', { id: first.connectionId, expectedRevision: (await f.owner.list()).revision, set: { credentialRef: 'foreign' } })).toMatchObject({ status: 'failed', mutation: 'none' });
   const routed = await f.owner.route((await f.owner.list()).revision, { defaultConnectionId: second.connectionId, fallbackConnectionIds: [first.connectionId], smartSelection: true });
@@ -49,6 +49,16 @@ it('edits one connection with the real settings revision, preserving other conne
   expect(removed.configuration).toMatchObject({ defaultConnectionId: second.connectionId, fallbackConnectionIds: [], smartSelection: true });
   expect((await f.settings.read()).document.harness).toMatchObject({ web: { sourcePreferences: { preferredDomains: ['example.com'] } }, models: { webSelection: { enabled: false } } });
   expect((await f.owner.restoreDefault(removed.revision)).keylessDefault).toBe(true);
+});
+
+it('allows selection preferences on the anonymous route and preserves them when adding a connection', async () => {
+  const f = await fixture();
+  const routed = await f.owner.route((await f.owner.list()).revision, { smartSelection: true });
+  expect(routed).toMatchObject({ keylessDefault: true, configuration: { smartSelection: true } });
+  expect(routed.connections.map(connection => connection.id)).toEqual(['default-exa', 'default-parallel']);
+  const added = await f.add('Research');
+  expect(added).toMatchObject({ keylessDefault: false, configuration: { smartSelection: true } });
+  expect(added.connections).toHaveLength(1);
 });
 
 it('opens a private UI request and saves through the authenticated credential route without exposing the key to actions', async () => {
@@ -66,7 +76,7 @@ it('opens a private UI request and saves through the authenticated credential ro
   expect(saved.body.status).toBe('completed');
   const observed = await f.adapter.getOperation!(ctx, entry, operationId, {});
   expect(observed).toMatchObject({ status: 'applied', operation: { id: operationId, state: 'succeeded' } });
-  const reference = added.configuration!.connections[0]!.credentialRef!;
+  const reference = added.configuration!.connections![0]!.credentialRef!;
   expect(f.credentials.read()[reference]).toEqual({ type: 'api_key', key: 'private-key' });
   for (const value of [result, saved.body, observed, await f.owner.list(), f.changed.mock.calls, f.surfaces.request.mock.calls]) expect(JSON.stringify(value)).not.toContain('private-key');
   expect(await f.call('enter-credential', { id: added.connectionId, apiKey: 'do-not-accept' })).toMatchObject({ status: 'failed', mutation: 'none' });

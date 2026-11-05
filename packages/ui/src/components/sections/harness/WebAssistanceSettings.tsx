@@ -1,4 +1,4 @@
-import { resolveFastDecisionPurpose } from '@varin/protocol';
+import { parseHarnessWebSearchSettings, resolveFastDecisionPurpose } from '@varin/protocol';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '../shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
@@ -52,8 +52,12 @@ function AssistanceModel({ harness, update, purpose, slot }: HarnessSettingsPage
 /** The switch changes optional assistance only, never basic source retrieval or original text. */
 export function WebAssistanceSettings(props: HarnessSettingsPageProps) {
   const { t } = useI18n();
+  const search = parseHarnessWebSearchSettings(props.harness.web?.search);
   return <SettingsSection title={t('settings.page.harness.web.assistance.title')}
     description={t('settings.page.harness.web.assistance.description')} settingsItem="harness.web.assistance" contentClassName="space-y-5">
+    <SettingsCheckboxRow checked={search?.smartSelection === true}
+      onChange={smartSelection => props.update({ web: { search: { smartSelection } } })}
+      label={t('settings.page.harness.web.assistance.selectionEnabled')} ariaLabel={t('settings.page.harness.web.assistance.selectionEnabled')} />
     <AssistanceModel {...props} purpose="web-selection" slot="webSelection" />
     <SettingsCheckboxRow checked={props.harness.web?.readingAssistance === true}
       onChange={readingAssistance => props.update({ web: { readingAssistance } })}

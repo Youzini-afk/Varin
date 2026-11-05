@@ -4,9 +4,9 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { expect, it, vi } from 'vitest';
-import { InteractiveUiError } from '@varin/application-client';
+import { InteractiveUiError, getRuntimeEndpointGeneration } from '@varin/application-client';
 import { UiWorkView, InteractiveUiPanel } from './InteractiveUiCard';
-import { uiSession } from '@/lib/interactive-ui/sessions';
+import { uiSession, flushUiSessions } from '@/lib/interactive-ui/sessions';
 
 const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), state: vi.fn(), observe: vi.fn(), openPanel: vi.fn(), t: (key: string) => key }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createInteractiveUiHttpAPI: () => api }));
@@ -121,5 +121,38 @@ it('acknowledges explicit saves after persistence and drains writes before detac
     await act(async () => pending[1]!.reject(new Error('disk unavailable')));
     expect(posted).toHaveBeenCalledWith({ channel, type: 'state-save-error', id: 'save:2', error: 'disk unavailable' }, '*');
     expect(api.detach).toHaveBeenCalledWith(session.identity, 'ui-view:durable', 'lease', final);
+  } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
+});
+it('captures live HTML before a fork, drains pending saves and reports persistence failure', async () => {
+  vi.useFakeTimers();
+  const { document, window } = parseHTML('<html><body></body></html>');
+  for (const [key, value] of Object.entries({ document, window, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(key, value);
+  vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: vi.fn() });
+  vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '', fontFamily: 'system-ui' }));
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16)); vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  api.state.mockReset().mockResolvedValue({ saved: true });
+  api.attach.mockResolvedValue({ viewRef: 'ui-view:fork', token: 'lease' });
+  api.observe.mockImplementation((...args: unknown[]) => new Promise<void>(resolve => (args.at(-1) as AbortSignal).addEventListener('abort', () => resolve(), { once: true })));
+  const host = getRuntimeEndpointGeneration(), session = uiSession('html-fork', { runtime: 'agent', threadId: 'html-fork', branchId: 'main' }, host);
+  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
+  const live = { data: { amount: 42 }, controls: {}, scroll: { x: 0, y: 5 } };
+  try {
+    await act(async () => root.render(<UiWorkView session={session} source={{ ref: 'ui:fork@1' }} files={{ 'index.html': '<input>' }} entry="index.html" title="fork" committed />));
+    const frame = container.querySelector('iframe')!;
+    const channel = /data-channel="([^"]+)"/.exec(frame.getAttribute('srcDoc') ?? frame.getAttribute('srcdoc') ?? frame.srcdoc)![1];
+    const frameWindow = { postMessage: (message: { type: string; id?: string }) => {
+      if (message.type === 'capture') post({ type: 'capture', id: message.id, source: { ref: 'ui:fork@1' }, state: live, capturedAt: 'now', viewport: { width: 100, height: 100 } });
+    } };
+    const post = (data: object) => { const event = new window.Event('message'); Object.assign(event, { source: frameWindow, data: { channel, ...data } }); window.dispatchEvent(event); };
+    Object.defineProperty(frame, 'contentWindow', { value: frameWindow });
+    await act(async () => post({ type: 'ready' }));
+    await act(async () => post({ type: 'state', state: { ...live, data: { amount: 1 } } }));
+    expect(api.state).not.toHaveBeenCalled();
+    await act(async () => flushUiSessions(session.identity, host));
+    expect(api.state).toHaveBeenLastCalledWith(session.identity, 'ui-view:fork', 'lease', live);
+    expect(session.state).toEqual(live);
+    api.state.mockRejectedValueOnce(new Error('Storage unavailable'));
+    await act(async () => { await expect(flushUiSessions(session.identity, host)).rejects.toThrow('Storage unavailable'); });
   } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
 });

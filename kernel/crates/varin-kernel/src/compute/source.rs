@@ -425,7 +425,11 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     let matcher=ignore::WalkBuilder::new(&directory).hidden(false).build_matchers().remove(0);
                     Some(std::sync::Arc::new(std::sync::Mutex::new(vec![(prefix.clone(),matcher)])))
                 }else if respect{ignore_matchers.clone()}else{None};
-                let mut builder=ignore::WalkBuilder::new(&directory);
+                // Keep device selections and walker entries in the same logical
+                // namespace (Windows short names and ancestor symlinks included).
+                // Canonical identity and safe-open scope checks remain separate.
+                let walk_directory=if device { root.join(&prefix) } else { directory.clone() };
+                let mut builder=ignore::WalkBuilder::new(&walk_directory);
                 if immediate&&selections.len()==roots.len() { builder.max_depth(Some(1)); }
                 builder.sort_by_file_name(|a,b|a.cmp(b)).standard_filters(false).follow_links(false)
                     .filter_entry(move|entry|{

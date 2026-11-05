@@ -49,7 +49,7 @@
 ## 持续演进的设计
 
 - [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：方向已确认，待实施；Windows 改为随包原生 EXE，保留完整桌面操作、独立取消与释放输入，并接通平台构建、签名和 Host 生命周期。
-- [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：设计提案；正文轻量交互、HTML 与原生对象混排、可编辑草稿联动，以及 Varin 与普通 Agent 的呈现倾向，待实施。
+- [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：核心链路已实施；记录正文交互、作品修订、草稿联动、状态继承与回收的设计及验收边界。当前合同见[交互内容](interactive-content.md)。
 - [联网检索后续验证与扩展](design/web-retrieval.md)：核心合同已接入，见[检索](retrieval.md#web学术与文档材料)；保留真实任务比较、平台验收和新增渠道的选择空间。
 - [增量上下文管理](design/incremental-context-management.md)：待讨论；摘要块、原文回读等为候选思路，需重新判断理解连续性、总成本与实现必要性，尚未确定实施方向。
 - [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。

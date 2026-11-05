@@ -19,6 +19,7 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
     'view/reply': (root, body) => runtime.reply(root, String(body.viewRef), String(body.token), String(body.id), body.observation as UiObservation | undefined, body.error as string | undefined),
     select: (root, body) => { validateSourceScope(body, body.observation as UiObservation); return runtime.store.select(root, body.observation as UiObservation, body.selection as { text?: string; region?: UiSelection['region'] }, { threadId: String(body.threadId), branchId: String(body.branchId) }); },
     selection: (root, body) => runtime.store.selection(root, String(body.ref)),
+    'selection/release': (root, body) => runtime.releaseSelection(root, String(body.ref), { threadId: String(body.threadId), branchId: String(body.branchId) }),
   };
   app.get('/api/interactive-ui/view/observe', requireAuth, async (req, res) => {
     const abort = new AbortController(); res.once('close', () => abort.abort());

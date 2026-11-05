@@ -7,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { addContentReference } from '@/lib/agent-editor/attachments';
 import { useI18n } from '@/lib/i18n';
 import { useNativeObjectActions } from '@/lib/interactive-ui/native-object-actions';
+import { InteractionDisclosure } from './InteractionDisclosure';
 
 export function HtmlHostActions({ actions, session, capture }: { actions: readonly UiHostAction[]; session: UiSession; capture(): Promise<UiObservation> }) {
   React.useSyncExternalStore(subscribeUiSessions, uiSessionsRevision, uiSessionsRevision);
@@ -43,7 +44,7 @@ function HtmlHostAction({ action, session, capture }: { action: UiHostAction; se
     finally { running.current = false; setBusy(false); }
   };
   return <div className="min-w-0 max-w-full space-y-1">
-    {action.type === 'send' && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('ui.content.sendPreview')}</summary><p className="whitespace-pre-wrap break-words">{frozen?.input.text ?? action.text}</p></details>}
+    {action.type === 'send' && <InteractionDisclosure title={t('ui.content.sendPreview')}><p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{frozen?.input.text ?? action.text}</p></InteractionDisclosure>}
     <button type="button" disabled={busy || completed === signature} onClick={() => void execute()}
       className="max-w-full whitespace-normal rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">{action.type === 'send' ? `${t('ui.fragment.send')} · ${action.label}` : action.label}</button>
     {action.type === 'compose' && !status && <p className="text-xs text-muted-foreground">{t('ui.content.draftHint')}</p>}

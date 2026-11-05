@@ -7,7 +7,8 @@ const bindCalls: string[] = [];
 let bindGate: Promise<void> | null = null;
 let runtimeListener: (() => void) | null = null;
 
-vi.doMock('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', async original => ({
+  ...await original<typeof import('@varin/application-client')>(),
   RuntimeEventSource: MockEventSource,
   subscribeRuntimeEndpointChanged: (listener: () => void) => {
     runtimeListener = listener;

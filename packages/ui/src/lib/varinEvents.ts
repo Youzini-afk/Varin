@@ -5,6 +5,7 @@ import type { ComputerActivityEntry, ComputerAutomationInvalidation, ComputerAut
 import { bindClientSurfaceThread, selectedClientThread, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { searchCredentialChanged } from '@/stores/useSearchCredentialRequests';
+import { retryUiSelectionReleases } from '@/lib/interactive-ui/selection-lifetime';
 
 type StreamReadyEvent = {
   type: 'stream-ready';
@@ -141,6 +142,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
   if (envelope.type === 'varin:event-stream-ready') {
+    retryUiSelectionReleases();
     reconnectAttempt = 0;
     for (const listener of listeners) listener({ type: 'stream-ready' });
     return;

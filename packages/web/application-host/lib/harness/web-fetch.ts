@@ -354,6 +354,12 @@ export function createWebFetch(deps: WebFetchDeps) {
         selection: { method: "literal", matched: ranges.length > 0, searchedRange: range } };
     }
     if (request.question?.trim() && !request.position) {
+      // If the original page already fits the requested display, selecting it
+      // again adds latency and can hide the answer (especially across languages).
+      if (totalLines <= maxLines && markdown.length <= 24_000) {
+        return { body: markdown, range: wholeRange, ranges: [wholeRange],
+          selection: { method: "page", question: request.question, matched: true } };
+      }
       const candidates = rankWebPagePassages(markdown, request.question);
       const blocks = webPageBlocks(markdown);
       const chosen: WebPassageRange[] = [];
@@ -375,10 +381,11 @@ export function createWebFetch(deps: WebFetchDeps) {
         try {
           ctx.signal?.throwIfAborted();
           const proposed = await helper({ question: request.question, markdown, ...(structure ? { structure } : {}),
-            candidates: candidates.slice(0, 24), ...(source ? { source: { snapshotId: source.snapshotId, contentHash: source.contentHash, sourceUrl: source.sourceUrl, ...(source.title ? { title: source.title } : {}) } } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+            candidates, ...(source ? { source: { snapshotId: source.snapshotId, contentHash: source.contentHash, sourceUrl: source.sourceUrl, ...(source.title ? { title: source.title } : {}) } } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
           ctx.signal?.throwIfAborted();
           const response = proposed && !Array.isArray(proposed) ? proposed : undefined;
-          const validated = validateWebPassageRanges(response ? response.ranges : proposed, totalLines);
+          const proposedRanges = response ? response.ranges : proposed;
+          const validated = Array.isArray(proposedRanges) && proposedRanges.length === 0 ? [] : validateWebPassageRanges(proposedRanges, totalLines);
           assistance = response?.assistance;
           detail = response?.reason;
           if (validated) { ranges = validated; method = "helper"; }

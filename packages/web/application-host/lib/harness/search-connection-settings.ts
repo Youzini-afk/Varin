@@ -14,7 +14,7 @@ const configuration = (raw: unknown): HarnessWebSearchConfiguration | undefined 
   return parseHarnessWebSearchSettings(raw) ?? invalid('Search configuration is invalid. Restore the keyless default or repair the saved configuration.');
 };
 const missing = (): never => { throw new ModelConfigurationError('search_connection_missing', 'Search connection is unavailable. Read the connection list again.', 404); };
-const selected = (config: HarnessWebSearchConfiguration | undefined, id: string) => config?.connections.find(connection => connection.id === id) ?? missing();
+const selected = (config: HarnessWebSearchConfiguration | undefined, id: string) => config?.connections?.find(connection => connection.id === id) ?? missing();
 const routing = (connection: HarnessWebSearchConnection) => JSON.stringify([connection.provider, connection.endpoint ?? '', connection.credentialRef ?? '']);
 
 export interface SearchConnectionAccess {
@@ -93,9 +93,9 @@ export function createSearchConnectionSettings(options: {
     ...(options.credentialChanged ? { credentialChanged: options.credentialChanged } : {}) });
   const present = (config: HarnessWebSearchConfiguration | undefined, revision: string) => {
     const resolved = resolveConfiguredSearchProvider({ settings: config, auth: options.credentials.read() });
-    return { revision, keylessDefault: config === undefined, configuration: config ?? null,
+    return { revision, keylessDefault: config?.connections === undefined, configuration: config ?? null,
       connections: 'unavailable' in resolved ? [] : resolved.connections?.map(connection => ({ ...connection,
-        credentialConfigured: resolveSearchCredential(options.credentials.read(), config?.connections.find(item => item.id === connection.id)?.credentialRef) !== null })) ?? [] };
+        credentialConfigured: resolveSearchCredential(options.credentials.read(), config?.connections?.find(item => item.id === connection.id)?.credentialRef) !== null })) ?? [] };
   };
   const mutate = async (revision: string, change: (config: HarnessWebSearchConfiguration | undefined) => HarnessWebSearchConfiguration | undefined) => {
     const result = await options.settings.updateHarness(revision, harness => {
@@ -104,7 +104,7 @@ export function createSearchConnectionSettings(options: {
       if (next === undefined) delete web.search;
       else {
         const parsed = configuration(next)!;
-        for (const connection of parsed.connections) if (connection.endpoint) {
+        for (const connection of parsed.connections ?? []) if (connection.endpoint) {
           let url: URL; try { url = new URL(connection.endpoint); } catch { return invalid('Search endpoint must be an HTTP(S) URL.'); }
           if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return invalid('Search endpoint must be an HTTP(S) URL without embedded credentials.');
         }
@@ -125,7 +125,7 @@ export function createSearchConnectionSettings(options: {
       const id = `${input.provider}-${randomUUID()}`;
       const result = await mutate(revision, current => {
         const value = current ?? { connections: [], fallbackConnectionIds: [] };
-        return { ...value, connections: [...value.connections, { ...input, id, name: input.name?.trim() || input.provider, enabled: input.enabled ?? true, credentialRef: `varin-web-search-connection-${id}` }],
+        return { ...value, connections: [...(value.connections ?? []), { ...input, id, name: input.name?.trim() || input.provider, enabled: input.enabled ?? true, credentialRef: `varin-web-search-connection-${id}` }],
           ...(value.defaultConnectionId ? {} : { defaultConnectionId: id }) };
       });
       return { ...result, connectionId: id };
@@ -133,7 +133,7 @@ export function createSearchConnectionSettings(options: {
     patch(revision: string, id: string, patch: { name?: string; description?: string; enabled?: boolean; endpoint?: string | null }) {
       return mutate(revision, current => {
         selected(current, id);
-        return { ...current!, connections: current!.connections.map(connection => {
+        return { ...current!, connections: current!.connections!.map(connection => {
           if (connection.id !== id) return connection;
           const value = { ...connection, ...patch };
           if (value.endpoint === null) delete value.endpoint;
@@ -145,14 +145,13 @@ export function createSearchConnectionSettings(options: {
       return mutate(revision, current => {
         selected(current, id);
         const { defaultConnectionId, ...value } = current!;
-        return { ...value, connections: value.connections.filter(connection => connection.id !== id), fallbackConnectionIds: value.fallbackConnectionIds.filter(value => value !== id),
+        return { ...value, connections: value.connections!.filter(connection => connection.id !== id), fallbackConnectionIds: value.fallbackConnectionIds.filter(value => value !== id),
           ...(defaultConnectionId && defaultConnectionId !== id ? { defaultConnectionId } : {}) };
       });
     },
     route(revision: string, patch: { defaultConnectionId?: string | null; fallbackConnectionIds?: string[]; enabled?: boolean; smartSelection?: boolean }) {
       return mutate(revision, current => {
-        if (!current) return invalid('Add a connection before configuring a custom route.');
-        const value = { ...current, ...patch };
+        const value = { fallbackConnectionIds: [], ...current, ...patch };
         if (value.defaultConnectionId === null) delete value.defaultConnectionId;
         return value as HarnessWebSearchConfiguration;
       });

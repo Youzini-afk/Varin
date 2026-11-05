@@ -55,12 +55,30 @@ test('switches between ordinary and typed selection without changing the indepen
 
 test('reading assistance is explicitly opt-in and disabling it retains the selected model', async () => {
   await render();
-  const toggle = container.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="settings.page.harness.web.assistance.readingEnabled"]')!;
   expect(toggle.getAttribute('aria-checked')).toBe('false');
   await select(1, JSON.stringify(['account', 'selector']));
   await act(async () => toggle.click()); expect(latest.web?.readingAssistance).toBe(true);
   await act(async () => toggle.click()); expect(latest.web?.readingAssistance).toBe(false);
   expect(latest.fastDecision?.purposes?.['web-reading']).toEqual({ protocol: 'typed-classifier', providerId: 'account', modelId: 'selector' });
+});
+
+test('enables search selection independently while retaining anonymous defaults or configured connections', async () => {
+  await render();
+  const toggle = () => container.querySelector<HTMLButtonElement>('[aria-label="settings.page.harness.web.assistance.selectionEnabled"]')!;
+  await act(async () => toggle().click());
+  expect(latest.web?.search).toEqual({ smartSelection: true });
+  expect(latest.web?.readingAssistance).not.toBe(true);
+  expect(mergeHarnessSettings(latest, {}).web?.search).toMatchObject({ smartSelection: true });
+  expect(mergeHarnessSettings(latest, {}).web?.search).not.toHaveProperty('connections');
+  await act(async () => root.unmount()); root = createRoot(container);
+  const search = { connections: [{ id: 'one', provider: 'exa' as const, name: 'Research', credentialRef: 'key-one', enabled: true }],
+    defaultConnectionId: 'one', fallbackConnectionIds: ['one'] };
+  await render({ web: { search } });
+  await act(async () => toggle().click());
+  expect(latest.web?.search).toEqual({ ...search, smartSelection: true });
+  await act(async () => toggle().click());
+  expect(latest.web?.search).toEqual({ ...search, smartSelection: false });
 });
 
 test('retains and displays an unavailable saved decision model without silently replacing it', async () => {

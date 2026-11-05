@@ -41,7 +41,7 @@ export function InteractiveUiCard({ call, ownerCallId, execution, result, cwd, g
   if (!session) return null;
   if (conversation?.uiInlineViews) return <InlineUiSlot session={session} anchorKey={`tool:${ownerCallId ?? call.id}`} kind="tool" cwd={cwd} />;
   if (!session.display) return null;
-  if (session.display.content) return <DeclarativeUiContent node={session.display.content} sourceKey={session.key} source={session.display.source} isStreaming={!session.display.committed} />;
+  if (session.display.content) return <DeclarativeUiContent node={session.display.content} sourceKey={session.key} session={session} source={session.display.source} isStreaming={!session.display.committed} />;
   return <UiWorkView session={session} {...session.display} cwd={cwd} />;
 }
 
@@ -141,6 +141,22 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
     }
     return observation;
   }, [ready, send, t, anchored, session]);
+  React.useEffect(() => {
+    const flush = async () => {
+      if (!actual.current.committed) return;
+      clearTimeout(saveTimer.current);
+      if (!registration.current || !ready) {
+        if (state.current) throw new Error(t('ui.content.notReady'));
+        return;
+      }
+      // Capture the live DOM too: the iframe may still have a pending automatic save.
+      const observed = await capture();
+      state.current = session.state = observed.state;
+      await persistState(observed.state);
+    };
+    session.flushState = flush;
+    return () => { if (session.flushState === flush) delete session.flushState; };
+  }, [session, capture, persistState, ready, t]);
   const visible = panel || session.placement === 'inline';
   React.useEffect(() => { if (!visible) { setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID()); } }, [visible]);
   React.useEffect(() => {
@@ -253,7 +269,8 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
       if (abort.signal.aborted) return;
       registration.current = owner; session.viewRef = owner.viewRef;
       sessionStorage.setItem(`varin.ui-view:${session.key}`, owner.viewRef);
-      if (!state.current && 'state' in owner && owner.state) state.current = session.state = owner.state as UiViewState;
+      if (!state.current) state.current = session.state = ('state' in owner && owner.state ? owner.state as UiViewState : session.initialState);
+      delete session.initialState;
       setViewInitialized(true);
       setConnectionError('');
       const selected = owner;

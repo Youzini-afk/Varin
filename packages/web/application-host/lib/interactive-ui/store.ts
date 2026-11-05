@@ -220,7 +220,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     locks.set(key, task);
     try { return await task; } finally { if (locks.get(key) === task) locks.delete(key); }
   };
-  const snapshot = async (root: string, observation: UiObservation, branchScope?: UiBranchScope) => {
+  const snapshot = async (root: string, observation: UiObservation, branchScope?: UiBranchScope, selectionOwned = false) => {
     branchScope ??= (await view(root, observation.viewRef))?.branchScope;
     if (branchScope) await requireOwner?.(branchScope);
     if (observation.ref && observation.preview) throw new UiContentError('Observation must have exactly one source');
@@ -245,7 +245,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         const blob = await client.putBlob(Buffer.from(image.data, 'base64'), `${id}:image`);
         owners.push(blob.ownerId); object = { hash: blob.hash, slot: 'image' }; refs.push({ slot: 'image', objectHash: blob.hash });
       }
-      await put(root, id, 'ui.snapshot', { ...value, ...(branchScope ? { branchScope } : {}),
+      await put(root, id, 'ui.snapshot', { ...value, ...(selectionOwned ? { selectionOwned: true } : {}), ...(branchScope ? { branchScope } : {}),
         ...(preview ? { preview: { provenance: 'client-preview', callId: preview.callId, sequence: preview.sequence, baseRef: preview.baseRef, entry: preview.entry, title: preview.title, files, ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}) } } : {}),
         ...(image ? { image: { ...object, mimeType: image.mimeType, method: image.method, capturedAt: image.capturedAt, bounds: image.bounds } } : {}) }, id, refs, owners);
       return id;
@@ -258,7 +258,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
       image?: FileObject & { mimeType: 'image/png'; method: 'screen' | 'dom'; capturedAt?: string; bounds?: NonNullable<UiObservation['image']>['bounds'] };
       preview?: Omit<NonNullable<UiObservation['preview']>, 'contents'> & { files: Record<string, FileObject> };
     };
-    const { image, preview, ...rest } = value;
+    const { image, preview, selectionOwned: _selectionOwned, ...rest } = value as typeof value & { selectionOwned?: boolean };
     const contents = Object.fromEntries(await Promise.all(Object.entries(preview?.files ?? {}).map(async ([file, object]) => [file, (await bytes(root, ref, object)).toString('utf8')])));
     return { ...rest, ...(preview ? { preview: { callId: preview.callId, sequence: preview.sequence, entry: preview.entry, title: preview.title,
       ...(preview.baseRef ? { baseRef: preview.baseRef } : {}), ...(preview.content ? { content: preview.content } : {}), ...(preview.messageFragment ? { messageFragment: preview.messageFragment } : {}), contents } } : {}),
@@ -266,7 +266,7 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
   };
   const select = async (root: string, observation: UiObservation, selected: { text?: string; region?: UiSelection['region'] }, branchScope?: UiBranchScope): Promise<UiSelection> => {
     branchScope ??= (await view(root, observation.viewRef))?.branchScope;
-    const snapshotRef = await snapshot(root, observation, branchScope);
+    const snapshotRef = await snapshot(root, observation, branchScope, true);
     const ref = `ui-selection:${randomUUID()}`;
     await put(root, ref, 'ui.selection', { snapshotRef, ...selected, ...(branchScope ? { branchScope } : {}) }, ref);
     return selection(root, ref);
@@ -282,6 +282,31 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
         const a = node.bounds, b = saved.region!;
         return a.x < b.x + b.width && a.y < b.y + b.height && a.x + a.width > b.x && a.y + a.height > b.y;
       }) : observed.structure } : {}) };
+  };
+  const releaseSelection = async (root: string, ref: string, scope: UiBranchScope) => {
+    if (!/^ui-selection:[a-zA-Z0-9-]+$/.test(ref)) throw new UiContentError('Invalid selection reference');
+    const key = `${root}:${ref}`;
+    const task = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const record = await get(root, ref);
+      if (!record) return; // Replaying a retirement after physical collection is harmless.
+      const saved = JSON.parse(record.payloadJson) as { branchScope?: UiBranchScope; released?: boolean };
+      if (!saved.branchScope || canonical(saved.branchScope) !== canonical(scope)) throw new UiContentError('Selection belongs to another conversation branch', 403);
+      if (saved.released) return;
+      // This drops the draft root only. Catalog history/queue roots are traced before deletion.
+      await put(root, ref, 'ui.selection', { ...saved, released: true }, `ui-selection-release:${ref}`, record.references, [], record.recordRevision);
+    });
+    locks.set(key, task);
+    try { await task; } finally { if (locks.get(key) === task) locks.delete(key); }
+    return { released: true as const };
+  };
+  const hasReleasedSelections = async (root: string) => {
+    let cursor: number | undefined;
+    do {
+      const page = await (await connection(workspace(root))).listRecords({ workspaceId: workspace(root), recordType: 'ui.selection', ...(cursor === undefined ? {} : { cursor }) });
+      if (page.records.some(record => { const value = JSON.parse(record.payloadJson) as { released?: boolean; retirementChecked?: boolean }; return value.released && !value.retirementChecked; })) return true;
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined);
+    return false;
   };
   type BranchCapture = { kind: 'branch-state'; source: UiBranchScope; target: UiBranchScope; headId: string | null; capturedAt: string;
     views: { clientId: string; viewRef: string; sourceRef: string; confirmedAt: number; fragment?: UiMessageFragment; content?: ConversationUiNode; state: UiViewState }[] };
@@ -338,12 +363,25 @@ export function createUiContentStore(kernel: KernelClient, onCleanupError: () =>
     const migrated = migrateConversationUiState(seed.content, current.content, data && typeof data === 'object' && !Array.isArray(data) ? data : {});
     return { ...seed.state, data: migrated.values, controls: { ...seed.state.controls, __varinResetKeys: migrated.resetKeys } };
   };
+  const collectFamilies = (roots: readonly string[], plan: () => Promise<MaterialRetention>, signal?: AbortSignal) => {
+    const ordered = [...new Set(roots)].sort();
+    const enter = async (index: number): Promise<void> => {
+      signal?.throwIfAborted();
+      const root = ordered[index];
+      if (root !== undefined) return activity.exclusive(root, () => Promise.resolve().then(() => enter(index + 1)));
+      // Capture once after all candidate writes have settled, not once per family.
+      const retained = await plan();
+      for (const family of ordered) await releaseUiRecords(await connection(workspace(family)), workspace(family), retained, signal);
+    };
+    return enter(0);
+  };
   return { source: guarded(source), render: guarded(render), resolve: guarded(resolve), view: guarded(view), saveView: guarded(saveView),
-    snapshot: guarded(snapshot), operationReceipt: guarded(operationReceipt), captureBranch: guarded(captureBranch), branchSeed: guarded(branchSeed), readSnapshot: guarded(readSnapshot), select: guarded(select), selection: guarded(selection),
+    snapshot: guarded(snapshot), operationReceipt: guarded(operationReceipt), captureBranch: guarded(captureBranch), branchSeed: guarded(branchSeed), readSnapshot: guarded(readSnapshot), select: guarded(select), selection: guarded(selection), releaseSelection: guarded(releaseSelection), hasReleasedSelections: guarded(hasReleasedSelections),
     cleanup: (root: string, signal?: AbortSignal) => activity.exclusive(root, async () =>
       (await connection(workspace(root))).uiCleanup(workspace(root), signal)),
-    collect: (root: string, plan: MaterialRetention, signal?: AbortSignal) => activity.exclusive(root, async () =>
-      releaseUiRecords(await connection(workspace(root)), workspace(root), plan, signal)),
+    collect: (root: string, plan: MaterialRetention | (() => Promise<MaterialRetention>), signal?: AbortSignal) => activity.exclusive(root, async () =>
+      releaseUiRecords(await connection(workspace(root)), workspace(root), typeof plan === 'function' ? await plan() : plan, signal)),
+    collectFamilies,
     file: guarded(async (root: string, ref: string, file: string) => { const { record, version } = await resolve(root, ref); const object = version.files[file];
       if (!object) throw new UiContentError('Work file not found', 404); return (await bytes(root, record.recordId, object)).toString('utf8'); }),
   };

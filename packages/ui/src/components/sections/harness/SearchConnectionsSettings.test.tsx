@@ -36,7 +36,11 @@ const buttons = (text: string) => [...container.querySelectorAll<HTMLButtonEleme
 async function click(text: string, index = 0) { await act(async () => buttons(text)[index]!.click()); }
 const disclosures = () => [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')];
 async function toggle(index: number) { await act(async () => disclosures()[index]!.click()); }
-const configuration = () => parseHarnessWebSearchSettings(latest.web?.search)!;
+const configuration = () => {
+  const value = parseHarnessWebSearchSettings(latest.web?.search);
+  if (!value?.connections) throw new Error('Expected custom search connections');
+  return { ...value, connections: value.connections };
+};
 const initial = () => ({ web: { search: { connections: [
   { id: 'one', name: 'First', provider: 'exa' as const, enabled: true, credentialRef: 'first-account' },
   { id: 'two', name: 'Second', provider: 'exa' as const, enabled: true, credentialRef: 'second-account' },

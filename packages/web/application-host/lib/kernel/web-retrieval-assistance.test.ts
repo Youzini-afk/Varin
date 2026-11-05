@@ -116,10 +116,10 @@ it('bounds candidate text by real capacity, preserving all connection identities
 });
 
 it('rematerializes immutable original passage text and rejects ranges outside supplied candidates', async () => {
-  const f = fixture(); f.output('{"ranges":[{"startLine":2,"endLine":4}]}'); try {
+  const f = fixture(); f.output('{"ranges":[{"startLine":2,"endLine":40}]}'); try {
     expect(await f.read()).toMatchObject({ reason: 'assistance-invalid-ranges', assistance: { status: 'fallback' } });
     const sent = JSON.parse(String(calls(f, 'runtime.inference.generate')[0]![1].user));
-    expect(sent.candidates[0].text).toBe('# Runtime\nNode 24');
+    expect(sent.candidates.map((candidate: { text: string }) => candidate.text).join('\n')).toContain('# Runtime\nNode 24');
     expect(JSON.stringify(sent)).not.toContain('injected text');
   } finally { await f.service.close(); }
 });
@@ -128,6 +128,28 @@ it('returns only existing original line ranges, not model-written passages', asy
   const f = fixture(); f.output('{"ranges":[{"startLine":1,"endLine":2}]}'); try {
     expect(await f.read()).toMatchObject({ ranges: [{ startLine: 1, endLine: 2 }], assistance: { status: 'selected', purpose: 'web-reading' } });
   } finally { await f.service.close(); }
+});
+
+it('reads original passages without lexical candidates and uses actual capacity with page-wide coverage', async () => {
+  const f = fixture(); f.output('{"ranges":[{"startLine":3,"endLine":3}]}');
+  try {
+    const markdown = '# Requirements\n\nThe minimum supported operating system is Windows 11.';
+    const result = await f.service.selectPassages({ question: '最低支持哪个操作系统？', markdown, candidates: [] }, f.context);
+    expect(result).toMatchObject({ ranges: [{ startLine: 3, endLine: 3 }], assistance: { status: 'selected' } });
+    const sent = JSON.parse(String(calls(f, 'runtime.inference.generate')[0]![1].user));
+    expect(sent.partial).toBe(false);
+    expect(sent.candidates.some((candidate: { text: string }) => candidate.text.includes('Windows 11'))).toBe(true);
+  } finally { await f.service.close(); }
+  const bounded = fixture(); bounded.output('{"ranges":[]}');
+  try {
+    const markdown = Array.from({ length: 128 }, (_, index) => `Section ${index}: ${'source material '.repeat(60)}`).join('\n\n');
+    await bounded.service.selectPassages({ question: '相关条件是什么？', markdown, candidates: [] }, bounded.context);
+    const sent = JSON.parse(String(calls(bounded, 'runtime.inference.generate')[0]![1].user));
+    expect(sent.partial).toBe(true);
+    expect(sent.candidates.some((candidate: { startLine: number }) => candidate.startLine < 64)).toBe(true);
+    expect(sent.candidates.some((candidate: { startLine: number }) => candidate.startLine > 192)).toBe(true);
+    expect(calls(bounded, 'runtime.tokenizers.count').length).toBeLessThan(12);
+  } finally { await bounded.service.close(); }
 });
 
 it('uses a typed classifier connection choice with the frozen configuration and original receipts', async () => {
@@ -140,8 +162,8 @@ it('uses a typed classifier connection choice with the frozen configuration and 
 });
 
 it('maps a typed passage choice back to its original range', async () => {
-  const f = fixture('decision'); f.response({ answers: { passage: { type: 'choice', choice: 'lines:4:5' } } }); try {
-    expect(await f.read()).toMatchObject({ ranges: [{ startLine: 4, endLine: 5 }], assistance: { status: 'selected' } });
+  const f = fixture('decision'); f.response({ answers: { passage: { type: 'choice', choice: 'lines:5:5' } } }); try {
+    expect(await f.read()).toMatchObject({ ranges: [{ startLine: 5, endLine: 5 }], assistance: { status: 'selected' } });
   } finally { await f.service.close(); }
 });
 
