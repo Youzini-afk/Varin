@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ExternalConversationSnapshot, ExternalInteractionResponse } from '@varin/application-client';
+import type { ExternalAgentConfiguration, ExternalAgentSettings, ExternalConversationSnapshot, ExternalInteractionResponse } from '@varin/application-client';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { HarnessConnection } from './adapter.js';
 import type { ExternalAttachmentOwner } from './attachments.js';
@@ -10,25 +10,53 @@ import { ExternalAgentsService } from './service.js';
 
 vi.mock('./codex.js', () => ({ connectCodex: vi.fn() }));
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.clearAllMocks(); });
+afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
-async function fixture() {
-  const config = { id: 'fixture', name: 'Fixture', harness: 'codex', command: process.execPath, args: [], enabled: true };
+async function fixture(options: { connect?: boolean; probeUnconfirmed?: boolean } = {}) {
+  const config: ExternalAgentConfiguration = { id: 'fixture', name: 'Fixture', harness: 'codex', command: process.execPath, args: [], enabled: true };
   let snapshot = {
     conversation: { id: 'external:test', configurationId: config.id, harness: 'codex', cwd: '/tmp', title: 'Test', revision: 1, createdAt: 1, updatedAt: 1, archived: false, pinned: false, deleted: false, needsReview: true },
     turns: [], items: [],
   } as unknown as ExternalConversationSnapshot;
+  const settings: ExternalAgentSettings = { revision: 0, defaultAgent: null, agents: [config], capabilityCache: {} };
+  let cacheGeneration = 0;
   const commands: Array<Record<string, unknown>> = [];
-  const kernel = { agentRuntimeRequest: vi.fn(async (_method: string, params: { command: Record<string, unknown> }) => {
+  const kernel = { agentRuntimeRequest: vi.fn(async (_method: string, params: { command: Record<string, unknown> }): Promise<unknown> => {
     commands.push(params.command);
-    if (params.command.action === 'settings') return { revision: 0, defaultAgent: null, agents: [config] };
+    if (params.command.action === 'settings') return settings;
+    if (params.command.action === 'claim_capabilities') return ++cacheGeneration;
+    if (params.command.action === 'inspect_capabilities') return cacheGeneration ? {
+      generation: cacheGeneration, agentVersion: settings.capabilityCache!.fixture?.agentVersion,
+    } : null;
+    if (params.command.action === 'cache_capabilities') {
+      if (params.command.generation !== cacheGeneration) return null;
+      if (params.command.invalidate) cacheGeneration++;
+      if (params.command.capabilities) settings.capabilityCache![String(params.command.configurationId)] = {
+        capabilities: params.command.capabilities as never, agentVersion: String(params.command.agentVersion), cachedAt: Date.now(),
+      };
+      else delete settings.capabilityCache![String(params.command.configurationId)];
+    }
+    if (params.command.action === 'bind') snapshot.conversation.sessionId = String(params.command.sessionId);
+    if (params.command.action === 'child_list') return [];
     if (params.command.action === 'read') return snapshot;
     if (params.command.action === 'cleanup_list') return [];
     if (params.command.action === 'update') return { ...snapshot.conversation, deleted: params.command.deleted === true };
     return {};
   }) };
   const children: Array<{ end(): void; terminating: boolean }> = [];
-  const spawn = vi.fn(async () => {
+  let probe = async () => 'fixture 1';
+  const spawnConnection = vi.fn();
+  const spawn = vi.fn(async (_command: string, args: string[]) => {
+    if (args.includes('--version')) {
+      const stdout = new PassThrough();
+      const query = probe;
+      const completion = new Promise<void>((resolve, reject) => { setTimeout(() => {
+        if (options.probeUnconfirmed) reject(new Error('Version process still owned'));
+        else void query().then(version => { stdout.end(`${version}\n`); resolve(); }, reject);
+      }, 0); });
+      return { stdout, stderr: new PassThrough(), completion, exitCode: 0, exitConfirmed: !options.probeUnconfirmed, release: vi.fn() };
+    }
+    spawnConnection();
     let end!: () => void;
     const child = Object.assign(new EventEmitter(), {
       stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitConfirmed: false, terminating: false,
@@ -47,7 +75,7 @@ async function fixture() {
   vi.mocked(connectCodex).mockImplementation(async (peer) => {
     failure = undefined;
     return {
-      sessionId: 'native-test', capabilities: { models: [], resume: true, images: true, steering: false },
+      sessionId: 'native-test', capabilities: { models: [], resume: true, images: true, steering: false, protocol: { name: 'test', agentVersion: 'fixture 1' } },
       get failure() { return failure; },
       onFailure(listener) { fail = (error) => { failure = error; listener(error); }; return () => {}; },
       onCapabilities(listener) { change = listener; return () => {}; },
@@ -61,8 +89,9 @@ async function fixture() {
     for (const child of children) child.end();
     await close;
   });
-  await service.connect('external:test');
-  return { service, commands, spawn, children, stop, kernel, fail: (error: Error) => fail(error), change: () => change(),
+  if (options.connect !== false) await service.connect('external:test');
+  return { service, settings, config, sweep: () => (service as unknown as { sweepIdle(): Promise<void> }).sweepIdle(), commands, spawn: spawnConnection, children, stop, kernel, fail: (error: Error) => fail(error), change: () => change(),
+    setProbe(value: () => Promise<string>) { probe = value; },
     setSnapshot(value: Partial<ExternalConversationSnapshot>) { snapshot = { ...snapshot, ...value }; },
     get snapshot() { return snapshot; },
   };
@@ -302,4 +331,257 @@ it.each(['upload', 'send'] as const)('deletion seals and drains original file %s
   await deletion;
   expect(f.commands.some(command => command.action === 'admit')).toBe(false);
   expect(f.commands.filter(command => command.action === 'update')).toHaveLength(1);
+});
+
+it('reclaims an unobserved preparation only after five minutes and joins exit before resuming its binding', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  const first = f.service.subscribe('external:test', () => true);
+  const second = f.service.subscribe('external:test', () => true);
+  now += 10 * 60_000;
+  await f.sweep();
+  first();
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+  second();
+  now += 5 * 60_000 - 1;
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+  now++;
+  let reclaimed = false;
+  const sweep = f.sweep().then(() => { reclaimed = true; });
+  await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+  expect(reclaimed).toBe(false);
+  expect((await f.service.read('external:test')).connection?.status).not.toBe('reclaimed');
+  const resume = f.service.connect('external:test');
+  expect(f.spawn).toHaveBeenCalledTimes(1);
+  f.children[0]!.end();
+  await sweep;
+  await resume;
+  expect(f.spawn).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(connectCodex).mock.calls[1]?.[2]).toBe('native-test');
+  expect(f.commands.some(command => command.action === 'update' || command.action === 'cleaned' || command.action === 'admit')).toBe(false);
+});
+
+it('gives a started conversation fifteen unobserved idle minutes and exposes reclaimed cached hints', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  f.setSnapshot({ turns: [{ id: 'done', conversationId: 'external:test', key: 'first', status: 'completed', createdAt: 1, updatedAt: 2 }] });
+  now += 15 * 60_000 - 1;
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+  now++;
+  const sweep = f.sweep();
+  await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+  f.children[0]!.end();
+  await sweep;
+  const snapshot = await f.service.read('external:test');
+  expect(snapshot).toMatchObject({ connected: false, connection: { status: 'reclaimed' }, capabilitiesSource: 'cached' });
+  expect(snapshot.capabilities).toMatchObject({ protocol: { agentVersion: 'fixture 1' } });
+});
+
+it.each(['queued', 'preparing', 'running', 'waiting_user', 'stopping'] as const)('never reclaims a durable %s input', async status => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  f.setSnapshot({ turns: [{ id: 'active', conversationId: 'external:test', key: 'input', status, createdAt: 1, updatedAt: 2 }] });
+  now += 60 * 60_000;
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+});
+
+it('keeps native background tasks and pending admissions alive and restarts idle grace when work settles', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }>; inputAdmissions: Map<string, Set<unknown>> };
+  const connection = owner.connections.get('external:test')!.connection;
+  Object.defineProperty(connection, 'backgroundTasks', { value: 2, configurable: true });
+  now += 60 * 60_000;
+  await f.sweep();
+  Object.defineProperty(connection, 'backgroundTasks', { value: 0, configurable: true });
+  owner.inputAdmissions.set('external:test', new Set([{}]));
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+  owner.inputAdmissions.delete('external:test');
+  await f.sweep();
+  now += 5 * 60_000 - 1;
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+});
+
+it('abandons a reclaim candidate when an observer returns during the durable idle check', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  now += 5 * 60_000;
+  let unsubscribe = () => {};
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  f.kernel.agentRuntimeRequest.mockImplementationOnce(async (method, params) => {
+    unsubscribe = f.service.subscribe('external:test', () => true);
+    return original(method, params);
+  });
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+  unsubscribe();
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+});
+
+it('counts a failed initial observation as already detached without holding the process forever', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  f.service.subscribe('external:test', () => false);
+  now += 5 * 60_000;
+  const sweep = f.sweep();
+  await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+  f.children[0]!.end();
+  await sweep;
+});
+
+it('uses cached metadata before preparation, replaces it with real capabilities and never caches authentication', async () => {
+  const f = await fixture({ connect: false });
+  f.settings.capabilityCache!.fixture = {
+    capabilities: { models: [{ id: 'previous', name: 'Previous' }], images: true, resume: true, steering: false },
+    agentVersion: 'fixture 0', cachedAt: 1,
+  };
+  expect(await f.service.read('external:test')).toMatchObject({ connected: false, capabilitiesSource: 'cached', capabilities: { models: [{ id: 'previous' }] } });
+  expect(f.spawn).not.toHaveBeenCalled();
+  await f.service.connect('external:test');
+  expect(await f.service.read('external:test')).toMatchObject({ connected: true, capabilitiesSource: 'live', capabilities: { models: [] } });
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }> };
+  owner.connections.get('external:test')!.connection.capabilities.authentication = { methods: [{ id: 'login', name: 'Sign in', type: 'terminal', command: 'private login' }] };
+  f.change();
+  await Promise.resolve();
+  const write = f.commands.filter(command => command.action === 'cache_capabilities').at(-1)!;
+  expect(write.capabilities).not.toHaveProperty('authentication');
+  expect(write).toMatchObject({ configuration: { harness: 'codex', command: process.execPath, args: [] }, agentVersion: 'fixture 1' });
+});
+
+it('validates Host draft defaults without applying them to admitted input', async () => {
+  const f = await fixture();
+  await f.service.configure({ agents: [{ ...f.config, defaults: { model: 'fixed', thinking: 'high', mode: 'plan' } }], defaultAgent: null }, 0, 'defaults');
+  expect(f.commands.find(command => command.action === 'configure')).toMatchObject({ value: { agents: [{ defaults: { model: 'fixed' } }] } });
+  f.config.defaults = { model: 'fixed', mode: 'plan' };
+  await f.service.send('external:test', 'new-input', { text: 'Use CLI defaults' });
+  expect(f.commands.find(command => command.action === 'admit')).toMatchObject({ input: { text: 'Use CLI defaults' } });
+  expect(f.commands.find(command => command.action === 'admit')!.input).not.toHaveProperty('model');
+  await expect(f.service.configure({ agents: [{ ...f.config, defaults: { model: '' } }], defaultAgent: null }, 0, 'invalid')).rejects.toMatchObject({ code: 'invalid_settings' });
+});
+
+it('uses the same branded executable version for detection and cached handshake metadata', async () => {
+  const f = await fixture();
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }> };
+  owner.connections.get('external:test')!.connection.capabilities.protocol!.agentVersion = '1';
+  f.change();
+  await Promise.resolve();
+  expect(f.settings.capabilityCache!.fixture?.agentVersion).toBe('fixture 1');
+  expect(await f.service.detect('fixture')).toMatchObject({ status: 'available', version: 'fixture 1' });
+  expect(f.settings.capabilityCache!.fixture?.agentVersion).toBe('fixture 1');
+});
+
+it('keeps durable delegated work alive even before its transient Host task has started', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => params.command.action === 'child_list'
+    ? [{ conversation_id: 'external:test', report: null }] : original(method, params));
+  now += 60 * 60_000;
+  await f.sweep();
+  expect(f.children[0]!.terminating).toBe(false);
+});
+
+it('never reports a failed process termination as reclaimed and retries closure before reconnecting', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }> };
+  const connection = owner.connections.get('external:test')!.connection;
+  const close = connection.close;
+  connection.close = vi.fn().mockRejectedValueOnce(new Error('process exit unconfirmed')).mockImplementation(close);
+  now += 5 * 60_000;
+  await expect(f.sweep()).rejects.toThrow('process exit unconfirmed');
+  expect(await f.service.read('external:test')).toMatchObject({ connected: false, connection: { status: 'failed' } });
+  const reconnect = f.service.connect('external:test');
+  await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+  expect(f.spawn).toHaveBeenCalledTimes(1);
+  f.children[0]!.end();
+  await reconnect;
+  expect(f.spawn).toHaveBeenCalledTimes(2);
+});
+
+it('waits for an in-flight idle tree termination during Host shutdown', async () => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  now += 5 * 60_000;
+  const sweep = f.sweep();
+  await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+  let stopped = false;
+  const shutdown = f.service.close().then(() => { stopped = true; });
+  await Promise.resolve(); await Promise.resolve();
+  expect(stopped).toBe(false);
+  f.children[0]!.end();
+  await sweep;
+  await shutdown;
+  expect(stopped).toBe(true);
+});
+
+it('does not launch a session when its version probe failed with unconfirmed process exit', async () => {
+  const f = await fixture({ connect: false, probeUnconfirmed: true });
+  await expect(f.service.connect('external:test')).rejects.toThrow('process exit is unconfirmed');
+  expect(f.spawn).not.toHaveBeenCalled();
+  expect(await f.service.read('external:test')).toMatchObject({ connected: false, connection: { status: 'failed' } });
+});
+
+
+it.each([false, true])('preserves a non-resumable native session beyond idle expiry (started=%s)', async started => {
+  let now = 1_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const f = await fixture();
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }> };
+  owner.connections.get('external:test')!.connection.capabilities.resume = false;
+  if (started) f.setSnapshot({ turns: [{ id: 'done', conversationId: 'external:test', key: 'first', status: 'completed', createdAt: 1, updatedAt: 2 }] });
+  now += 60 * 60_000;
+  await f.sweep();
+  const snapshot = await f.service.read('external:test');
+  expect(f.children[0]!.terminating).toBe(false);
+  expect(snapshot).toMatchObject({ connected: true, connection: { status: 'connected' }, conversation: { sessionId: 'native-test' } });
+  expect(f.commands.some(command => command.action === 'update' || command.action === 'cleaned')).toBe(false);
+});
+
+it.each([false, true])('does not let an older detection invalidate a newer live program catalog (previous cache=%s)', async previousCache => {
+  const f = await fixture({ connect: previousCache });
+  let release!: (version: string) => void;
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const oldProbe = new Promise<string>(resolve => { release = resolve; });
+  f.setProbe(async () => { entered(); return oldProbe; });
+  const detection = f.service.detect('fixture');
+  await started;
+  if (previousCache) {
+    const disconnected = f.service.disconnect('external:test');
+    await vi.waitFor(() => expect(f.children[0]!.terminating).toBe(true));
+    f.children[0]!.end();
+    await disconnected;
+  }
+  f.setProbe(async () => 'fixture 2');
+  await f.service.connect('external:test');
+  const claims = f.commands.filter(command => command.action === 'claim_capabilities').length;
+  expect(f.settings.capabilityCache!.fixture?.agentVersion).toBe('fixture 2');
+  release('fixture 1.1');
+  expect(await detection).toMatchObject({ status: 'available', version: 'fixture 1.1' });
+  expect(f.commands.filter(command => command.action === 'claim_capabilities')).toHaveLength(claims);
+  expect(f.settings.capabilityCache!.fixture?.agentVersion).toBe('fixture 2');
+  // Normal same-version detection leaves this live writer able to refresh its real catalog.
+  await f.service.detect('fixture');
+  const owner = f.service as unknown as { connections: Map<string, { connection: HarnessConnection }> };
+  owner.connections.get('external:test')!.connection.capabilities.models = [{ id: 'new-model', name: 'New model' }];
+  f.change();
+  await Promise.resolve();
+  expect(f.settings.capabilityCache!.fixture?.capabilities.models).toEqual([{ id: 'new-model', name: 'New model' }]);
 });

@@ -22,7 +22,21 @@ vi.mock('@/components/thread/HarnessIcon', () => ({ HarnessIcon: () => null }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <main>{children}</main> }));
 vi.mock('@/components/sections/shared/SettingsSection', () => ({ SettingsFieldRow: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
-vi.mock('@/components/ui/select', () => ({ Select: () => null, SelectTrigger: () => null, SelectContent: () => null, SelectValue: () => null, SelectItem: () => null }));
+vi.mock('@/components/ui/select', async () => {
+  const { createContext, useContext } = await import('react');
+  const Selection = createContext<{ disabled?: boolean; onValueChange?(value: string): void }>({});
+  return {
+    Select: ({ children, disabled, onValueChange }: React.PropsWithChildren<{ disabled?: boolean; onValueChange(value: string): void }>) =>
+      <Selection.Provider value={{ disabled, onValueChange }}>{children}</Selection.Provider>,
+    SelectTrigger: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button type="button" {...props}>{children}</button>,
+    SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+    SelectValue: () => null,
+    SelectItem: ({ children, value, disabled }: React.PropsWithChildren<{ value: string; disabled?: boolean }>) => {
+      const select = useContext(Selection);
+      return <button type="button" data-option={value} disabled={disabled || select.disabled} onClick={() => select.onValueChange?.(value)}>{children}</button>;
+    },
+  };
+});
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} /> }));
 vi.mock('@/components/ui/switch', () => ({ Switch: ({ checked, disabled, onCheckedChange, ...props }: { checked: boolean; disabled: boolean; onCheckedChange(value: boolean): void; 'aria-label': string }) =>
@@ -75,4 +89,50 @@ it('discards old Host detection results and aborts the original observation when
   await act(async () => finish());
   expect(originalSignal?.aborted).toBe(true); expect(container.textContent).not.toContain('Old Host failure');
   expect(container.textContent).toContain('Installed (version detected)');
+});
+
+function addCatalogue() {
+  f.settings!.capabilityCache = { named: { cachedAt: 1000, agentVersion: '1.2.3', capabilities: {
+    resume: true, images: false, files: 'paths', steering: false,
+    models: [{ id: 'reasoner', name: 'Reasoner', thinkingLevels: ['low', 'high'] }, { id: 'fast', name: 'Fast' }],
+    current: { model: 'reasoner', thinking: 'low', mode: 'default' },
+    modes: [{ id: 'default', name: 'Default' }, { id: 'plan', name: 'Plan' }],
+  } } };
+}
+const namedRow = () => [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Host-provided description'))!;
+const selectOption = async (value: string) => act(async () => namedRow().querySelector<HTMLButtonElement>(`[data-option="value:${value}"]`)!.click());
+const saveNamed = async () => act(async () => namedRow().querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+
+it('offers only cached Host defaults and persists explicit choices on Save, without a connection or model request', async () => {
+  addCatalogue();
+  await render();
+  expect(namedRow().textContent).toContain('Options from the last negotiated catalogue · 1.2.3');
+  await selectOption('reasoner'); await selectOption('high'); await selectOption('plan');
+  expect(f.configure).not.toHaveBeenCalled();
+  await saveNamed();
+  expect(f.configure).toHaveBeenCalledWith({ agents: [
+    { ...f.settings!.agents[0], defaults: { model: 'reasoner', thinking: 'high', mode: 'plan' } }, f.settings!.agents[1],
+  ], defaultAgent: null }, 7, expect.any(String));
+  expect(f.detect).toHaveBeenCalledTimes(2);
+});
+
+it('clears model-specific thinking and preserves unsaved defaults through a metadata refresh', async () => {
+  addCatalogue();
+  f.settings!.agents[0]!.defaults = { model: 'reasoner', thinking: 'high', mode: 'plan' };
+  await render(); await selectOption('fast');
+  f.settings = { ...f.settings!, agents: f.settings!.agents.map(agent => ({ ...agent })),
+    capabilityCache: { named: { ...f.settings!.capabilityCache!.named!, cachedAt: 2000 } } };
+  await render(); await saveNamed();
+  expect(f.configure.mock.calls[0]![0].agents[0]!.defaults).toEqual({ model: 'fast', mode: 'plan' });
+});
+
+it('keeps an unavailable saved default visible and clearable without inventing candidates', async () => {
+  f.settings!.agents[0]!.defaults = { model: 'retired' };
+  await render();
+  expect(namedRow().textContent).toContain('Settings do not start a connection');
+  expect(namedRow().textContent).toContain('retired · Not reported by Agent');
+  expect(namedRow().querySelector<HTMLButtonElement>('[data-option="value:retired"]')!.disabled).toBe(true);
+  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="inherit"]')!.click());
+  await saveNamed();
+  expect(f.configure.mock.calls[0]![0].agents[0]).not.toHaveProperty('defaults');
 });

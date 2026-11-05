@@ -868,3 +868,163 @@ it('does not advertise live Claude model refresh when the pinned SDK only expose
   expect(connection.refreshCapabilities).toBeUndefined();
   expect(peer.frames.some((frame) => frame.method === 'prompt')).toBe(false);
 });
+
+describe('native context and background lifetime', () => {
+  it('keeps Codex window counters independent of billing and ignores stale turn frames', async () => {
+    const peer = new Peer(), fallback = peer.handler;
+    let number = 0;
+    peer.handler = (method, params) => method === 'turn/start'
+      ? { turn: { id: `turn-${++number}` } } : fallback(method, params);
+    const connection = await connectCodex(peer.transport, '/workspace', 'thread');
+    const s = sink(), first = connection.prompt({ text: 'first' }, s);
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalledWith('turn-1'));
+    peer.event('thread/tokenUsage/updated', codexEvent('turn-1', { tokenUsage: {
+      total: { inputTokens: 1000, outputTokens: 100, cachedInputTokens: 500 },
+      last: { totalTokens: 250 }, modelContextWindow: 1000,
+    } }));
+    expect(connection.contextUsage).toEqual({ used: 250, size: 1000 });
+    expect(s.usage).toHaveBeenLastCalledWith(expect.objectContaining({ input: 1000, scope: 'conversation' }));
+    peer.event('turn/completed', codexEvent('turn-1', { turn: { id: 'turn-1', status: 'completed' } }));
+    await first;
+    const second = connection.prompt({ text: 'second' }, s);
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalledWith('turn-2'));
+    peer.event('thread/tokenUsage/updated', codexEvent('turn-1', { tokenUsage: {
+      total: { inputTokens: 99999, outputTokens: 9999 }, last: { totalTokens: 999 }, modelContextWindow: 1000,
+    } }));
+    expect(connection.contextUsage).toEqual({ used: 250, size: 1000 });
+    peer.event('thread/tokenUsage/updated', codexEvent('turn-2', { tokenUsage: {
+      total: { inputTokens: 1300, outputTokens: 110, cachedInputTokens: 600 },
+      last: { totalTokens: 80 }, modelContextWindow: 1000,
+    } }));
+    expect(connection.contextUsage).toEqual({ used: 80, size: 1000 });
+    expect(s.usage).toHaveBeenLastCalledWith(expect.objectContaining({ input: 300, output: 10, scope: 'turn' }));
+    peer.event('thread/tokenUsage/updated', codexEvent('turn-2', { tokenUsage: {
+      total: { inputTokens: -1, outputTokens: 110 }, last: { totalTokens: '80' }, modelContextWindow: 1000,
+    } }));
+    expect(connection.contextUsage).toBeUndefined();
+    expect(s.usage).toHaveBeenCalledTimes(2);
+    peer.event('turn/completed', codexEvent('turn-2', { turn: { id: 'turn-2', status: 'completed' } }));
+    await second;
+  });
+
+  it('reads Pi native stats with exact session identity and clears unknown post-compaction occupancy', async () => {
+    const peer = new Peer('pi'), fallback = peer.handler;
+    let tokens: number | null = 60;
+    let nativeId = '/pi/session.jsonl';
+    peer.handler = (method, params) => method === 'get_session_stats'
+      ? { sessionFile: nativeId, tokens: { input: 999999 }, contextUsage: { tokens, contextWindow: 100 } }
+      : fallback(method, params);
+    const connection = await pi(peer, '/pi/session.jsonl');
+    expect(connection.contextUsage).toEqual({ used: 60, size: 100 });
+    const activity = vi.fn(); connection.onActivity!(activity);
+    peer.emit({ type: 'agent_start' });
+    expect(connection.backgroundTasks).toBe(1);
+    peer.emit({ type: 'agent_end', messages: [] });
+    expect(connection.backgroundTasks).toBe(1);
+    peer.emit({ type: 'agent_settled' });
+    expect(connection.backgroundTasks).toBe(0);
+    tokens = null;
+    await connection.refreshCapabilities!();
+    expect(connection.contextUsage).toBeUndefined();
+    tokens = 20; nativeId = '/pi/other.jsonl';
+    await connection.refreshCapabilities!();
+    expect(connection.contextUsage).toBeUndefined();
+    nativeId = '/pi/session.jsonl';
+    await connection.refreshCapabilities!();
+    expect(connection.contextUsage).toEqual({ used: 20, size: 100 });
+    peer.emit({ type: 'compaction_start' });
+    expect(connection.contextUsage).toBeUndefined();
+    expect(connection.backgroundTasks).toBe(1);
+    peer.emit({ type: 'compaction_end' });
+    expect(connection.backgroundTasks).toBe(0);
+  });
+
+  it('uses Claude context controls and authoritative task snapshots independently of turn receipts', async () => {
+    const peer = new Peer(), fallback = peer.handler;
+    peer.handler = (method, params) => method === 'context_usage'
+      ? { sessionId: 'claude-session', used: 70, size: 100 } : fallback(method, params);
+    const connection = await connectClaude(peer.transport, { command: 'claude', args: [] }, '/workspace');
+    expect(connection.contextUsage).toEqual({ used: 70, size: 100 });
+    const activity = (subtype: string, extra: RecordValue, sessionId = 'claude-session') =>
+      peer.event('activity', { sessionId, message: { session_id: sessionId, type: 'system', subtype, ...extra } });
+    activity('task_started', { task_id: 'old', run_id: '1' }, 'foreign');
+    expect(connection.backgroundTasks).toBe(0);
+    activity('task_started', { task_id: 'task', run_id: '2' });
+    activity('task_notification', { task_id: 'task', run_id: '1', status: 'completed' });
+    expect(connection.backgroundTasks).toBe(1);
+    activity('background_tasks_changed', { tasks: [{ task_id: 'one' }, { task_id: 'two' }] });
+    expect(connection.backgroundTasks).toBe(2);
+    activity('task_notification', { task_id: 'one', status: 'completed' });
+    expect(connection.backgroundTasks).toBe(2);
+    activity('background_tasks_changed', { tasks: [] });
+    activity('task_started', { task_id: 'late' });
+    expect(connection.backgroundTasks).toBe(0);
+  });
+});
+
+it('captures Codex restore occupancy before the response and never reuses it for a new connection', async () => {
+  const peer = new Peer(), fallback = peer.handler;
+  peer.handler = (method, params) => {
+    if (method === 'thread/resume') peer.event('thread/tokenUsage/updated', codexEvent('old', {
+      tokenUsage: { total: { inputTokens: 900, outputTokens: 40 }, last: { totalTokens: 90 }, modelContextWindow: 1000 },
+    }));
+    return fallback(method, params);
+  };
+  const connection = await connectCodex(peer.transport, '/workspace', 'thread');
+  expect(connection.contextUsage).toEqual({ used: 90, size: 1000 });
+  const other = await connectCodex(new Peer().transport, '/workspace', 'thread');
+  expect(other.contextUsage).toBeUndefined();
+});
+
+it('guards observed Codex commands and child activity after the parent turn stops', async () => {
+  const peer = new Peer(), connection = await connectCodex(peer.transport, '/workspace');
+  peer.event('item/started', codexEvent('turn', { item: { id: 'shell', type: 'commandExecution', status: 'inProgress' } }));
+  peer.event('item/completed', codexEvent('turn', { item: { id: 'spawn', type: 'collabAgentToolCall', senderThreadId: 'thread', agentsStates: { child: { status: 'running' } } } }));
+  expect(connection.backgroundTasks).toBe(2);
+  peer.event('thread/status/changed', { threadId: 'foreign', status: { type: 'idle' } });
+  expect(connection.backgroundTasks).toBe(2);
+  peer.event('item/completed', codexEvent('turn', { item: { id: 'shell', type: 'commandExecution', status: 'completed' } }));
+  expect(connection.backgroundTasks).toBe(1);
+  peer.event('thread/status/changed', { threadId: 'child', status: { type: 'idle' } });
+  expect(connection.backgroundTasks).toBe(0);
+});
+
+it('captures Claude startup background work and ignores malformed or stale lifecycle evidence', async () => {
+  const peer = new Peer(), fallback = peer.handler;
+  const event = (subtype: string, extra: RecordValue) => peer.event('activity', {
+    sessionId: 'claude-session', message: { session_id: 'claude-session', type: 'system', subtype, ...extra },
+  });
+  peer.handler = (method, params) => {
+    if (method === 'initialize') event('task_started', { task_id: 'one', run_id: '2' });
+    return fallback(method, params);
+  };
+  const connection = await connectClaude(peer.transport, { command: 'claude', args: [] }, '/workspace');
+  expect(connection.backgroundTasks).toBe(1);
+  event('task_notification', { task_id: 'one', status: 'completed' });
+  expect(connection.backgroundTasks).toBe(1);
+  event('task_notification', { task_id: 'one', run_id: '2', status: 'completed' });
+  event('task_started', { task_id: 'one', run_id: '2' });
+  expect(connection.backgroundTasks).toBe(0);
+  event('task_started', { task_id: 'one', run_id: '3' });
+  expect(connection.backgroundTasks).toBe(1);
+  event('background_tasks_changed', { tasks: [null] });
+  expect(connection.backgroundTasks).toBe(1);
+  event('background_tasks_changed', { tasks: [] });
+  expect(connection.backgroundTasks).toBe(0);
+});
+
+it('does not let a delayed Pi stats response overwrite a newer protocol snapshot', async () => {
+  const peer = new Peer('pi'), connection = await pi(peer), fallback = peer.handler;
+  const older = deferred<RecordValue>();
+  let requests = 0;
+  peer.handler = (method, params) => method === 'get_session_stats'
+    ? ++requests === 1 ? older.promise : { sessionFile: '/pi/session.jsonl', contextUsage: { tokens: 90, contextWindow: 100 } }
+    : fallback(method, params);
+  const first = connection.refreshCapabilities!();
+  await vi.waitFor(() => expect(requests).toBe(1));
+  await connection.refreshCapabilities!();
+  expect(connection.contextUsage).toEqual({ used: 90, size: 100 });
+  older.resolve({ sessionFile: '/pi/session.jsonl', contextUsage: { tokens: 10, contextWindow: 100 } });
+  await first;
+  expect(connection.contextUsage).toEqual({ used: 90, size: 100 });
+});

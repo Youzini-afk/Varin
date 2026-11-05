@@ -1,3 +1,4 @@
+import { externalAttachmentSupported } from './externalAttachments';
 import React from 'react';
 import { ComposerActionForm } from './ComposerActionForm';
 import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
@@ -11,7 +12,7 @@ import {
   type ExternalTurn,
   type ExternalObservation,
 } from '@varin/application-client';
-import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -37,11 +38,10 @@ import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
 import { toast } from '@/components/ui';
 import { ChatAgentMessageBubble } from '@/components/conversation/ChatAgentMessageBubble';
 import { ExternalInteractionForm } from './ExternalInteractionForm';
-import { ExternalSessionControls } from './ExternalSessionControls';
-import { externalSessionInput } from './externalSessionChoice';
+import { ExternalConnectionStatus } from './ExternalConnectionStatus';
+import { externalSessionInput, normalizeExternalSessionChoice } from './externalSessionChoice';
 import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadAttachments, ThreadFileDrafts } from './ThreadAttachments';
-import { ExternalAuthentication } from './ExternalAuthentication';
 
 const describe = (value: unknown): string =>
   typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);
@@ -380,11 +380,18 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
 }
 function ExternalConversationSession({ id, host, readOnly }: { id: string; host: number; readOnly: boolean }) {
   const { t } = useI18n();
+  const snapshotPublisher = React.useRef({}).current;
   const api = React.useMemo(() => createExternalAgentsHttpAPI(host), [host]);
+  const settings = useExternalAgents();
   const [snapshot, setSnapshot] = React.useState<ExternalConversationSnapshot>();
   const [error, setError] = React.useState('');
   const [pending, setPending] = React.useState(false);
   const [failure, setFailure] = React.useState<unknown>();
+  const [connecting, setConnecting] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
+  const cancellation = React.useRef<Promise<void> | undefined>(undefined);
+  const connectionVersion = React.useRef(0);
+  const connection = React.useRef<{ cancelled: boolean; promise: Promise<ExternalConversationSnapshot | undefined> } | undefined>(undefined);
   const [terminating, setTerminating] = React.useState(false);
   const acting = React.useRef(false);
   const terminatingRef = React.useRef(false);
@@ -392,11 +399,50 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
   const mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const isCurrent = () => mounted.current && host === getRuntimeEndpointGeneration();
+  React.useEffect(() => { if (snapshot) useExternalAgentStore.getState().setSnapshot(snapshot, host, snapshotPublisher); }, [snapshot, host, snapshotPublisher]);
+  React.useEffect(() => () => useExternalAgentStore.getState().clearSnapshot(id, host, snapshotPublisher), [id, host, snapshotPublisher]);
+  const ensureConnected = (force: boolean | 'models' = false): Promise<ExternalConversationSnapshot | undefined> => {
+    if (connection.current) return connection.current.promise;
+    if (force === true && snapshot?.connected && snapshot.capabilities?.resume === false) return Promise.reject(new ExternalAgentError('resume_unsupported', t('external.reconnectUnsupported')));
+    if (!force && snapshot?.connected && snapshot.capabilitiesSource !== 'cached') return Promise.resolve(snapshot);
+    if (!isCurrent() || readOnly || force === true && snapshot?.turns.some(turn => ['queued', 'preparing', 'running', 'waiting_user', 'stopping'].includes(turn.status))) return Promise.resolve(undefined);
+    const token = { cancelled: false, promise: Promise.resolve(undefined) as Promise<ExternalConversationSnapshot | undefined> };
+    connection.current = token; connectionVersion.current++; setConnecting(true); setFailure(undefined);
+    token.promise = (async () => {
+      if (force === true) await api.disconnect(id);
+      if (!isCurrent() || token.cancelled) return;
+      await api.connect(id);
+      if (!isCurrent() || token.cancelled) return;
+      const value = await api.read(id);
+      if (!isCurrent() || token.cancelled) return;
+      setSnapshot(value); return value;
+    })().catch(error => { if (isCurrent() && !token.cancelled) { setFailure(error); throw error; } return undefined; }).finally(() => {
+      if (connection.current === token) { connection.current = undefined; connectionVersion.current++; if (isCurrent()) setConnecting(false); }
+    });
+    return token.promise;
+  };
+  const cancelConnection = (): Promise<void> => {
+    if (cancellation.current) return cancellation.current;
+    if (!isCurrent()) return Promise.resolve();
+    setCancelling(true); const token = connection.current; if (token) token.cancelled = true;
+    connectionVersion.current++;
+    const work = (async () => {
+      try {
+        await api.disconnect(id);
+        if (!isCurrent()) return;
+        if (connection.current === token) connection.current = undefined;
+        setConnecting(false); setFailure(undefined); await refreshView.current();
+      } catch (error) { if (isCurrent()) setFailure(error); }
+      finally { cancellation.current = undefined; connectionVersion.current++; if (isCurrent()) setCancelling(false); }
+    })();
+    cancellation.current = work; return work;
+  };
   const [details, setDetails] = React.useState(false);
   const [earlier, setEarlier] = React.useState<ExternalItem[]>([]);
   const [previous, setPrevious] = React.useState<number | null>();
   const editor = React.useRef<ComposerEditorHandle | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
+  const imageInput = React.useRef<HTMLInputElement>(null);
   const viewport = React.useRef<HTMLDivElement>(null);
   const follow = React.useRef(true);
   const prepend = React.useRef<{ height: number; top: number } | null>(null);
@@ -456,7 +502,9 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
       try {
         while (dirty && !controller.signal.aborted) {
           dirty = false;
+          const version = connectionVersion.current;
           const value = await api.read(id, undefined, controller.signal);
+          if (version !== connectionVersion.current) { dirty = true; continue; }
           if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) {
             current = value;
             setSnapshot(value);
@@ -536,6 +584,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
   };
   const addFiles = (files: File[]) => {
     if (!isCurrent() || acting.current || draft.externalInput) return;
+    if (files.some(file => !externalAttachmentSupported(snapshot?.capabilities ?? (snapshot ? settings?.capabilityCache?.[snapshot.conversation.configurationId]?.capabilities : undefined), file))) { setFailure(new Error(t('external.filesUnsupported'))); return; }
     selectThreadFiles(key, files);
   };
   if (!snapshot)
@@ -549,6 +598,8 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
     active = snapshot.turns.find((v) => v.id === activeTurn);
   const last = snapshot.turns.at(-1),
     queued = snapshot.turns.filter((v) => v.status === 'queued');
+  const capabilities = snapshot.capabilities ?? settings?.capabilityCache?.[c.configurationId]?.capabilities;
+  const capabilitiesSource = snapshot.capabilities ? snapshot.capabilitiesSource ?? (snapshot.connected ? 'live' : 'cached') : capabilities ? 'cached' : undefined;
   const model = draft.externalModels?.[c.configurationId] ?? '';
   const unresolvedInput = Boolean(draft.externalInput && !pending);
   const options = draft.externalOptions?.[c.configurationId] ?? {};
@@ -557,7 +608,6 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
     externalModels: { ...draft.externalModels, [c.configurationId]: value.model ?? '' },
     externalOptions: { ...draft.externalOptions, [c.configurationId]: { thinking: value.thinking, mode: value.mode, config: value.config } },
   });
-  const authentication = failure instanceof ExternalAgentError ? failure.details?.authentication : undefined;
   const errorText = failure instanceof Error ? failure.message : failure ? String(failure) : error;
   const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()];
   const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} /></button>;
@@ -609,29 +659,17 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     respond={(answer) => void act(() => api.respond(id, request.id, answer), true)}
                   />
                 ))}
-                {errorText && (
-                  <p role="alert" className="mb-3 break-words typography-meta text-destructive">
-                    {errorText}
-                  </p>
-                )}
-                {authentication && <ExternalAuthentication authentication={authentication} pending={pending}
-                  authenticate={methodId => void act(() => api.authenticate(id, methodId), true)} />}
-                {!snapshot.connected && <div className="mb-3 space-y-2 typography-meta text-muted-foreground">
-                  <p>{t('external.prepareHint')}</p>
-                  <Button type="button" variant="outline" disabled={pending} onClick={() => void act(() => api.connect(id), true)}>{t('external.connect')}</Button>
-                </div>}
-                {snapshot.capabilities && <div className="mb-3"><ExternalSessionControls capabilities={snapshot.capabilities} choice={choice}
-                  onRetryModels={() => void act(() => api.connect(id), true)}
-                  disabled={pending || unresolvedInput} onChange={changeChoice} onCommand={text => { patch({ text: `${draft.text}${draft.text ? '\n' : ''}${text}` }); editor.current?.focus(); }} /></div>}
                 {unresolvedInput && (
                   <div className="mb-3 typography-meta text-muted-foreground">
                     <p>{t('external.sendUnconfirmed')}</p>
                     <p className="line-clamp-2 whitespace-pre-wrap">{draft.externalInput!.text}</p>
                     <Button
                       variant="ghost"
-                      disabled={pending || !snapshot.connected || c.needsReview}
+                      disabled={pending || c.needsReview}
                       onClick={() =>
                         void act(async () => {
+                          const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
+                          if (!ready.connected || ready.capabilitiesSource === 'cached') throw new Error(t('external.prepareHint'));
                           const request = draft.externalInput!;
                           await api.send(id, request.key, request);
                           if (!isCurrent()) return;
@@ -677,15 +715,19 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (acting.current || pending || unresolvedInput || !snapshot.connected || c.needsReview || snapshot.capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length && !draft.files?.length)) return;
+                  if (acting.current || pending || unresolvedInput || c.needsReview || capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length && !draft.files?.length)) return;
                   const originalText = draft.text, originalImages = draft.images, originalFiles = draft.files;
                   void act(async () => {
+                    const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
+                    if (!ready.connected || !ready.capabilities || ready.capabilitiesSource === 'cached' || ready.conversation.needsReview) throw new Error(t(ready.conversation.needsReview ? 'external.review' : 'external.prepareHint'));
+                    if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
+                    if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
                     const attachments = draft.externalInput ? [] : await prepareDraftFiles(key, draft.files ?? [], `external:${id}`,
                       (file, signal) => api.uploadAttachment(id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
                     if (!isCurrent()) return;
                     const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text,
                       images: draft.images.map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })),
-                      ...externalSessionInput(choice, snapshot.capabilities) };
+                      ...externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities) };
                     patch({ externalInput: request });
                     try {
                       await api.send(id, request.key, request);
@@ -713,6 +755,9 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   });
                 }}
               >
+                <input type="file" accept="image/*" multiple hidden ref={imageInput} onChange={event => {
+                  const files = [...(event.target.files ?? [])]; event.target.value = ''; addFiles(files);
+                }} />
                 <input
                   type="file"
                   multiple
@@ -736,8 +781,14 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   thinkingLevel="off"
                   onModelChange={() => {}}
                   backendControls={controls}
-                  backendCommands={snapshot.capabilities?.commands}
-                  commandActions={{ model: { content: controls }, thinking: { content: controls }, tree: { run: () => setDetails(true) },
+                  external={{ capabilities, source: capabilitiesSource, choice, disabled: pending || unresolvedInput, retryDisabled: Boolean(active) || queued.length > 0, retryDisabledReason: snapshot.connected && capabilities?.resume === false && !capabilities.modelsRefresh ? t('external.reconnectUnsupported') : undefined, onChange: changeChoice,
+                    onInteract: kind => { if (kind !== 'input' || !failure) void ensureConnected().catch(() => {}); }, onRetryModels: () => { void ensureConnected(capabilities?.modelsRefresh ? 'models' : true).catch(() => {}); } }}
+                  connectionStatus={<ExternalConnectionStatus snapshot={snapshot} name={settings?.agents.find(agent => agent.id === c.configurationId)?.name}
+                    busy={connecting} cancelling={cancelling} error={failure ?? (errorText || undefined)} reconnectDisabled={pending || Boolean(active) || queued.length > 0}
+                    onReconnect={() => { void ensureConnected(true).catch(() => {}); }} onCancel={() => { void cancelConnection(); }}
+                    onAuthenticate={methodId => { void act(() => api.authenticate(id, methodId), true); }} />}
+                  backendCommands={capabilities?.commands}
+                  commandActions={{ tree: { run: () => setDetails(true) },
                     new: { run: async () => { const next = await startThreadFromNavigation({ directory: c.cwd }); if (host === getRuntimeEndpointGeneration()) useThreadDraftStore.getState().patch(next, { harnessId: c.configurationId }); } },
                     rename: { content: complete => <ComposerActionForm initial={c.title} label={t('composer.name')} confirm={async title => { if (host !== getRuntimeEndpointGeneration()) throw new Error(t('composer.scope.changed')); await useExternalAgentStore.getState().update(id, { title }); }} onDone={complete} /> },
                     pin: { run: () => useExternalAgentStore.getState().update(id, { pinned: !c.pinned }), value: t(c.pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin') },
@@ -747,13 +798,13 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   }}
                   modelDisabled={pending}
                   attachmentDisabled={pending || unresolvedInput}
-                  imageDisabled={false}
-                  sendDisabled={pending || unresolvedInput || !snapshot.connected || Boolean(c.needsReview) || snapshot.capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length && !draft.files?.length)}
+                  imageDisabled={!capabilities?.images}
+                  sendDisabled={pending || unresolvedInput || Boolean(c.needsReview) || capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length && !draft.files?.length)}
                   pending={pending}
                   active={Boolean(active)}
                   retrying={false}
                   onFiles={(files) => void addFiles(files)}
-                  onAttachImages={() => fileInput.current?.click()}
+                  onAttachImages={() => imageInput.current?.click()}
                   onAttachPdfs={() => fileInput.current?.click()}
                   onStop={active ? () => void act(() => api.stop(id, active.id)) : undefined}
                   onGoal={() => {}}
@@ -804,11 +855,12 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
               {snapshot.capabilities.protocol.name} · {snapshot.capabilities.protocol.version} · {snapshot.capabilities.protocol.agentVersion}
             </dd></div>}
           </dl>
+          {snapshot.connected && capabilities?.resume === false && <p className="typography-meta text-muted-foreground">{t('external.reconnectUnsupported')}</p>}
           <Button
-            disabled={pending || readOnly}
-            onClick={() => void act(() => api.connect(id), true)}
+            disabled={pending || connecting || readOnly || Boolean(active) || queued.length > 0 || snapshot.connected && capabilities?.resume === false}
+            onClick={() => { void ensureConnected(true).catch(() => {}); }}
           >
-            {t('external.connect')}
+            {t('external.reconnect')}
           </Button>
         </DialogContent>
       </Dialog>

@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { ExternalAgentCapabilities } from '@varin/application-client';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
+import { ContextUsage } from './context-usage.js';
 import { ClaudeContent } from './claude-content.js';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
-import { HarnessTransport, record, text } from './transport.js';
+import { HarnessTransport, record, text, type RecordValue } from './transport.js';
 
 const claudeModels = (models: unknown): ExternalAgentCapabilities['models'] =>
   (Array.isArray(models) ? models : [])
@@ -41,6 +42,19 @@ export async function connectClaude(
     steering: false,
     models: [],
   };
+  const context = new ContextUsage();
+  const background = new Map<string, string>();
+  const runs = new Map<string, string>();
+  const terminal = new Map<string, string>();
+  let hasTaskSnapshot = false;
+  const activity = new Set<() => void>();
+  const refreshContext = async () => {
+    try {
+      const value = await peer.request('context_usage');
+      if (value.sessionId !== sessionId) { context.update(); return; }
+      context.update(value.used, value.size);
+    } catch { context.update(); }
+  };
   const changes = new Set<() => void>();
   const permissions = new Map<string, AbortController>();
   let callbacks = new AbortController();
@@ -52,9 +66,38 @@ export async function connectClaude(
     fail?.(error);
     for (const listener of failures) listener(error);
   };
-  peer.onMessage((frame) => {
+  let opening = true;
+  const earlyActivity: RecordValue[] = [];
+  const receive = (frame: RecordValue) => {
+    if (opening && frame.method === 'activity') { earlyActivity.push(frame); return; }
     const params = record(frame.params);
     const message = record(params.message);
+    if (frame.method === 'activity' && params.sessionId === sessionId &&
+        message.session_id === sessionId && message.type === 'system') {
+      if (message.subtype === 'background_tasks_changed') {
+        if (!Array.isArray(message.tasks) || message.tasks.some(task => !text(record(task).task_id))) return;
+        // Level snapshots are authoritative. Do not mix unordered edge bookends
+        // into this set once this CLI has provided the level protocol.
+        hasTaskSnapshot = true;
+        background.clear();
+        for (const value of message.tasks) {
+          const task = record(value), id = text(task.task_id);
+          if (id) background.set(id, text(task.run_id));
+        }
+      } else if (!hasTaskSnapshot) {
+        const id = text(message.task_id), run = text(message.run_id), prior = runs.get(id);
+        if (!id || prior && (!run || run < prior)) return;
+        if (run) runs.set(id, run);
+        if (message.subtype === 'task_notification' &&
+            ['completed', 'failed', 'stopped'].includes(text(message.status))) {
+          background.delete(id);
+          terminal.set(id, run);
+        } else if ((message.subtype === 'task_started' || message.subtype === 'task_progress') && terminal.get(id) !== run)
+          background.set(id, run);
+      }
+      for (const listener of activity) listener();
+      return;
+    }
     if (frame.method === 'failure') {
       markFailed(new Error(text(params.message) || 'Claude SDK session ended'));
       return;
@@ -112,6 +155,10 @@ export async function connectClaude(
       started = true;
       sink.started?.(turnId!);
     }
+    if (message.context_usage && !message.parent_tool_use_id) {
+      const usage = record(message.context_usage);
+      context.update(usage.total_tokens, usage.raw_max_tokens);
+    }
     content?.receive(message);
     if (message.type === 'result') {
       const usage = record(message.usage);
@@ -148,7 +195,8 @@ export async function connectClaude(
           : undefined,
       });
     }
-  });
+  };
+  peer.onMessage(receive);
   peer.onExit(markFailed);
   peer.onRequest(async (message) => {
     const p = record(message.params);
@@ -275,8 +323,15 @@ export async function connectClaude(
       ? undefined
       : 'Claude did not supply a model catalog; reconnect to obtain native session metadata',
   });
+  opening = false;
+  for (const frame of earlyActivity) receive(frame);
+  await refreshContext();
   return {
     sessionId,
+    get contextUsage() { return context.value; },
+    onContextUsage: context.subscribe,
+    get backgroundTasks() { return background.size; },
+    onActivity(listener) { activity.add(listener); return () => { activity.delete(listener); }; },
     get failure() {
       return failure;
     },
@@ -343,7 +398,9 @@ export async function connectClaude(
           markFailed(error);
           throw error;
         }
-        return await completion;
+        const result = await completion;
+        await refreshContext();
+        return result;
       } finally {
         active = false;
         callbacks.abort(new Error('The Claude turn ended'));

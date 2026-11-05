@@ -1,5 +1,6 @@
 import type {
   ExternalAgentCapabilities,
+  ExternalContextUsage,
   ExternalInput,
   ExternalInteraction,
   ExternalInteractionResponse,
@@ -26,6 +27,12 @@ export interface HarnessSink {
 export interface HarnessConnection {
   sessionId: string;
   capabilities: ExternalAgentCapabilities;
+  /** Native protocol occupancy, never billing counters or guessed model limits. */
+  readonly contextUsage?: ExternalContextUsage | undefined;
+  onContextUsage?(listener: (usage: ExternalContextUsage | undefined) => void): () => void;
+  /** Native work may outlive the admitted turn. Unknown tasks are never inferred. */
+  readonly backgroundTasks?: number;
+  onActivity?(listener: () => void): () => void;
   readonly failure?: Error | undefined;
   onFailure?(listener: (error: Error) => void): () => void;
   onCapabilities?(listener: () => void): () => void;

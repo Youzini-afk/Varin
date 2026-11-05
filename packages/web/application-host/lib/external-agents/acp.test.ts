@@ -978,3 +978,48 @@ it('delivers original generic files as baseline resource links without requiring
   f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
   await expect(pending).resolves.toMatchObject({ status: 'completed' });
 });
+
+it('projects native context during restore and idle, never books it as turn usage', async () => {
+  const f = fixture({ handle(request, reply) {
+    if (request.method !== 'session/load') return false;
+    f.update({ sessionUpdate: 'usage_update', used: 420, size: 1000 });
+    f.update({ sessionUpdate: 'usage_update', used: 999, size: 1000 }, 'other-session');
+    reply(request, { sessionId: 'native-session' });
+    return true;
+  } });
+  const connection = await connectAcp(f.peer, '/workspace', 'native-session');
+  expect(connection.contextUsage).toEqual({ used: 420, size: 1000 });
+  const update = vi.fn();
+  const unsubscribe = connection.onContextUsage!(update);
+  f.update({ sessionUpdate: 'usage_update', used: 0, size: 1000 });
+  expect(connection.contextUsage).toEqual({ used: 0, size: 1000 });
+  f.update({ sessionUpdate: 'usage_update', used: -1, size: 1000 });
+  expect(connection.contextUsage).toBeUndefined();
+  for (const [used, size] of [['5', 100], [10, 0], [10.5, 100], [null, 100]]) {
+    f.update({ sessionUpdate: 'usage_update', used, size });
+    expect(connection.contextUsage).toBeUndefined();
+  }
+  const s = sink(), result = connection.prompt({ text: 'Hello' }, s);
+  await vi.waitFor(() => expect(f.latest('session/prompt')).toBeDefined());
+  f.update({ sessionUpdate: 'usage_update', used: 1100, size: 1000 });
+  expect(connection.contextUsage).toEqual({ used: 1100, size: 1000 });
+  expect(s.usage).not.toHaveBeenCalled();
+  f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
+  await result;
+  unsubscribe();
+  const count = update.mock.calls.length;
+  f.update({ sessionUpdate: 'usage_update', used: 5, size: 10 });
+  expect(update).toHaveBeenCalledTimes(count);
+});
+
+it('keeps protocol-observed ACP tools busy beyond prompt settlement', async () => {
+  const f = fixture(), connection = await connectAcp(f.peer, '/workspace');
+  const activity = vi.fn(); connection.onActivity!(activity);
+  f.update({ sessionUpdate: 'tool_call', toolCallId: 'background', status: 'in_progress' });
+  expect(connection.backgroundTasks).toBe(1);
+  f.update({ sessionUpdate: 'tool_call_update', toolCallId: 'background', status: 'completed' }, 'wrong');
+  expect(connection.backgroundTasks).toBe(1);
+  f.update({ sessionUpdate: 'tool_call_update', toolCallId: 'background', status: 'completed' });
+  expect(connection.backgroundTasks).toBe(0);
+  expect(activity).toHaveBeenCalledTimes(2);
+});

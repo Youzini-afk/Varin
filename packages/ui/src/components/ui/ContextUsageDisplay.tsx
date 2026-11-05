@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { clampPercent, resolveUsageTone } from '@/lib/usagePresentation';
 
 interface ContextUsageDisplayProps {
+  tooltipTitle?: string;
   totalTokens?: number;
   percentage?: number;
   colorPercentage?: number;
@@ -24,6 +25,7 @@ interface ContextUsageDisplayProps {
 }
 
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
+  tooltipTitle,
   totalTokens,
   percentage,
   colorPercentage,
@@ -76,7 +78,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 
   const percentLabel = percentage === undefined ? '—' : `${percentage.toFixed(1)}%`;
   const tooltipLines = percentage === undefined ? [t('contextUsage.tooltip.unavailable')] : [
-    t('contextUsage.tooltip.lastRequest'),
+    tooltipTitle ?? t('contextUsage.tooltip.lastRequest'),
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     ...(outputLimit === undefined ? [] : [t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(outputLimit) })]),

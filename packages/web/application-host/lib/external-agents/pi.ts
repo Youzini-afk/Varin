@@ -3,6 +3,7 @@ import type { ExternalAgentCapabilities } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
+import { ContextUsage } from './context-usage.js';
 import { PiContent } from './pi-content.js';
 import { requirePiRpcVersion } from './pi-version.js';
 import {
@@ -58,10 +59,13 @@ export async function connectPi(
       })
       .filter((command) => command.name),
   };
+  const context = new ContextUsage();
+  const activity = new Set<() => void>();
+  const notifyActivity = () => { for (const listener of activity) listener(); };
+  let compacting = state.isCompacting === true;
   let lifecycleRevision = 0;
   let sessionBusy =
     state.isStreaming === true ||
-    state.isCompacting === true ||
     Number(state.pendingMessageCount) > 0;
   const changed = new Set<() => void>(),
     failures = new Set<(error: Error) => void>();
@@ -79,7 +83,9 @@ export async function connectPi(
     notify();
   };
   applyState(state);
+  let metadataRevision = 0;
   const refresh = async () => {
+    const request = ++metadataRevision;
     const before = lifecycleRevision,
       current = await peer.request('get_state');
     if ((text(current.sessionFile) || text(current.sessionId)) !== sessionId) {
@@ -89,13 +95,24 @@ export async function connectPi(
       markFailed(error);
       throw error;
     }
-    if (before === lifecycleRevision)
-      sessionBusy =
-        current.isStreaming === true ||
-        current.isCompacting === true ||
-        Number(current.pendingMessageCount) > 0;
-    applyState(current);
+    if (before === lifecycleRevision && request === metadataRevision) {
+      sessionBusy = current.isStreaming === true || Number(current.pendingMessageCount) > 0;
+      compacting = current.isCompacting === true;
+      notifyActivity();
+    }
+    if (request === metadataRevision) applyState(current);
+    // Pi >=1.5 get_session_stats reports native occupancy separately from
+    // lifetime billing tokens. Null tokens after compaction mean unknown.
+    try {
+      const stats = await peer.request('get_session_stats');
+      if (request !== metadataRevision) return;
+      if ((text(stats.sessionFile) || text(stats.sessionId)) === sessionId && before === lifecycleRevision) {
+        const usage = record(stats.contextUsage);
+        context.update(usage.tokens, usage.contextWindow);
+      } else context.update();
+    } catch { if (request === metadataRevision) context.update(); }
     const response = await peer.request('get_available_thinking_levels');
+    if (request !== metadataRevision) return;
     const levels = (Array.isArray(response.levels) ? response.levels : []).filter(
       (value): value is string => typeof value === 'string',
     );
@@ -191,13 +208,27 @@ export async function connectPi(
     }
   };
   peer.onMessage((event) => {
+    if (event.type === 'compaction_start') {
+      compacting = true;
+      lifecycleRevision++;
+      context.update();
+      notifyActivity();
+    }
+    if (event.type === 'compaction_end') {
+      compacting = false;
+      lifecycleRevision++;
+      context.update();
+      notifyActivity();
+    }
     if (event.type === 'agent_start') {
       sessionBusy = true;
       lifecycleRevision++;
+      notifyActivity();
     }
     if (event.type === 'agent_settled') {
       sessionBusy = false;
       lifecycleRevision++;
+      notifyActivity();
     }
     if (event.type === 'thinking_level_changed') {
       capabilities.current = { ...capabilities.current, thinking: text(event.level) };
@@ -264,6 +295,10 @@ export async function connectPi(
   return {
     sessionId,
     capabilities,
+    get contextUsage() { return context.value; },
+    onContextUsage: context.subscribe,
+    get backgroundTasks() { return Number(sessionBusy || compacting); },
+    onActivity(listener) { activity.add(listener); return () => { activity.delete(listener); }; },
     get failure() {
       return failure;
     },
@@ -296,7 +331,7 @@ export async function connectPi(
     async prompt(input, next) {
       if (failure) throw failure;
       if (sink) throw new Error('Pi is already running');
-      if (sessionBusy)
+      if (sessionBusy || compacting)
         throw new Error(
           'Pi session still has independent native work; wait for session settlement before sending another prompt',
         );
@@ -327,7 +362,7 @@ export async function connectPi(
           await peer.request('set_thinking_level', { level: selected.thinking });
         await refresh();
         if (failure) throw failure;
-        if (sessionBusy)
+        if (sessionBusy || compacting)
           throw new Error(
             'Pi session started independent native work while configuring; no input was sent',
           );
