@@ -22,6 +22,10 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin が読み、チームメイトと協力し、仕事の進行に反応する" width="600" />
+</p>
+
 ## Varin と話すところから
 
 Varin は、継続する仕事を一緒に進めるパーソナル AI アシスタントです。アイデアを相談したり、短い質問をしたり、時間のかかる仕事を任せたりできます。小さな仕事は自分で処理し、大きな仕事には Agent を呼び、以前のタスクをその文脈とともに再開できます。
@@ -107,15 +111,6 @@ Monaco で編集し、プロジェクトや差分を調べ、会話の横でタ�
 **仕事に合った場所で動かす。** ローカル、自分のサーバー、ブラウザーやスマートフォンから利用できます。画面、Agent サービス、ファイルのワークスペース、PC 操作の対象は別々の機器に配置できます。[デプロイ](../../docs/ops/cloud-deployment.md) · [リソース](../../docs/resources.md)
 
 **デスクトップにも仲間を。** 任意のデスクトップコンパニオンが、選択した Bot の活動に反応します。設定から外観をダウンロードし、起こしたり眠らせたりできます。
-
-<details>
-<summary>仕事中のキャラクターを見る</summary>
-
-<p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin が読み、チームメイトと協力し、仕事の進行に反応する" width="600" />
-</p>
-
-</details>
 
 <a id="how-the-harness-works"></a>
 

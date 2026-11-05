@@ -22,6 +22,10 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
+<p align="center">
+  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin reads, works with her team and responds as the work progresses" width="600" />
+</p>
+
 ## Meet Varin
 
 Varin is a personal AI assistant for ongoing work. Talk through an idea, ask a quick question, or hand over something that will take time. It can do small jobs itself, bring in Agents for larger ones, and return to an existing task with its context intact.
@@ -109,15 +113,6 @@ Common tools are available directly; other capabilities are discovered as needed
 **Place the work where it belongs.** Run locally, self-host on a server, or connect from a browser or phone. The interface, Agent service, file workspace and computer-use device can be on different machines. [Deployment](docs/ops/cloud-deployment.md) · [Resources](docs/resources.md)
 
 **Keep an optional companion nearby.** The desktop companion follows the selected Bot's activity. Download its artwork and wake or put it to sleep from Settings.
-
-<details>
-<summary>See Varin at work</summary>
-
-<p align="center">
-  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin reads, works with her team and responds as the work progresses" width="600" />
-</p>
-
-</details>
 
 <a id="how-the-harness-works"></a>
 

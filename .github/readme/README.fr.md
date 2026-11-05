@@ -22,6 +22,10 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin lit, travaille avec ses coéquipiers et réagit à leur progression" width="600" />
+</p>
+
 ## Faites connaissance avec Varin
 
 Varin est un assistant personnel pour le travail au long cours. Discutez d'une idée, posez une question rapide ou confiez-lui un travail qui prendra du temps. Il peut traiter les petites demandes lui-même, faire appel à des Agents pour les tâches plus importantes et reprendre un travail existant avec son contexte.
@@ -107,15 +111,6 @@ Les outils courants sont disponibles directement ; les autres se découvrent au 
 **Placez le travail au bon endroit.** Exécutez Varin localement, sur votre serveur, ou connectez-vous depuis un navigateur ou un téléphone. L'interface, le service Agent, les fichiers et l'appareil de contrôle peuvent résider sur des machines différentes. [Déploiement](../../docs/ops/cloud-deployment.md) · [Ressources](../../docs/resources.md)
 
 **Un compagnon de bureau facultatif.** Il suit l'activité du Bot sélectionné. Téléchargez son apparence dans les Paramètres et choisissez de le réveiller ou de le mettre en veille.
-
-<details>
-<summary>Voir le personnage au travail</summary>
-
-<p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin lit, travaille avec ses coéquipiers et réagit à leur progression" width="600" />
-</p>
-
-</details>
 
 <a id="how-the-harness-works"></a>
 

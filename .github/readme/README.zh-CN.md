@@ -22,6 +22,10 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin 阅读、和队友合作，并随着工作进展作出回应" width="600" />
+</p>
+
 ## 从和 Varin 交流开始
 
 Varin 是陪你持续工作的个人 AI 助手。可以一起讨论想法、快速查一件事，也可以交给它需要长期推进的工作。小事它能直接处理，大一些的工作可以安排 Agent 协作，后续还可以带着已有上下文继续交办。
@@ -107,15 +111,6 @@ Varin 是陪你持续工作的个人 AI 助手。可以一起讨论想法、快�
 **工作放在合适的设备上。** 本地运行、服务器自托管，或者用浏览器和手机连接。前端、Agent 服务、文件工作区和 Computer Use 设备可以分开部署。[部署](../../docs/ops/cloud-deployment.md) · [资源](../../docs/resources.md)
 
 **也可以有桌面上的陪伴。** 可选桌宠跟随所选 Bot 的活动，在设置中按需下载形象，并控制唤醒和沉睡。
-
-<details>
-<summary>看看她工作时的样子</summary>
-
-<p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin 阅读、和队友合作，并随着工作进展作出回应" width="600" />
-</p>
-
-</details>
 
 <a id="how-the-harness-works"></a>
 
