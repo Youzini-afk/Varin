@@ -1,5 +1,9 @@
 # Varin Computer Use drivers
 
+The [native helper delivery design](../../docs/design/native-computer-helper.md) proposes replacing
+the Windows PowerShell runtime with a build-time Rust executable. It is not yet implemented;
+the platform entries and behavior below describe the current drivers.
+
 Resident platform helpers for Computer Use (BC4). A driver runs inside the
 target desktop session and speaks a line-delimited JSON protocol on
 stdin/stdout:
