@@ -4,7 +4,6 @@ import {
   defaultVarinWorkbenchProfileDocument,
   inspectVarinWorkbenchShell,
   migrateVarinWorkbenchProfileDocument,
-  parseVarinWorkbenchLayoutLayer,
   parseVarinWorkbenchProfileApplyRequest,
   parseVarinWorkbenchProfileDocument,
   parseVarinWorkbenchShellContributionData,
@@ -20,8 +19,6 @@ import {
   VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL,
   VARIN_WORKBENCH_IDE_PROFILE_ID,
   VARIN_WORKBENCH_IDE_PROFILE_LABEL,
-  VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
-  VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL,
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
   resolveVarinWorkbenchLayout,
@@ -88,8 +85,8 @@ test("workbench profile selection is user-scoped while workspace layers remain p
     surface: "web",
     userId: "default",
     workspaceId: "/workspace",
-  }, VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
-  assert.equal(candidate.profileId, VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
+  }, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(candidate.profileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
   assert.equal(document.profileSelections.users.default, VARIN_WORKBENCH_IDE_PROFILE_ID);
 });
 
@@ -308,19 +305,6 @@ test("distribution includes an optional IDE profile without making it active", (
     VARIN_WORKBENCH_IDE_PROFILE_ID,
   );
   assert.equal(mobileIde.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
-});
-
-test("distribution includes the Research profile and shell on every supported surface", () => {
-  const document = defaultVarinWorkbenchProfileDocument();
-  assert.ok(document.profiles.some((profile) => (
-    profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID
-    && profile.label === VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL
-  )));
-  const researchLayouts = document.layouts.filter((layer) => layer.profileId === VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
-  assert.deepEqual(
-    researchLayouts.map((layer) => layer.surface).sort(),
-    ["desktop", "mobile", "web"],
-  );
 });
 
 test("migrates missing IDE profiles without changing the active Agent selection", () => {

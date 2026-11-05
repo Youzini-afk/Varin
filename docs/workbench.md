@@ -35,13 +35,14 @@ Electron 在进程内承载同一套 Web Application Host；移动端连接 Vari
 <a id="profiles-and-shell-switching"></a>
 ## Profile 与 Shell 切换
 
-官方 Profile 的稳定 ID 是 Agent Workspace 的 `default`、IDE 的 `varin.ide`、科研的
-`varin.research` 和 Bot 的 `varin.bot`。它们由普通内置扩展提供，可以停用或替换。
+官方 Profile 的稳定 ID 是工作台的 `default`、IDE 的 `varin.ide` 和 Varin 的 `varin.bot`。
+它们由普通内置扩展提供，可以停用或替换。工作台使用统一聊天界面，不再内置“通用／科研”布局切换。
+旧科研布局的已保存选择由 Profile owner 自动转回工作台；实验记录和材料查看复用公共会话面板。
 固定 Recovery Shell 在选中 Shell 无法运行时提供修复入口，不承担另一套日常工作区。
 
 工作台选择属于 user/application，按用户选择、active profile 依次解析。工作区可以保存布局，
 项目或会话导航不会自动选择另一 Shell。工作侧重、模型、权限和已受理 Run 的配置是独立执行事实：
-打开科研工作台不派发研究任务，切回 IDE 也不重配 Agent。
+切换工作台、IDE 或 Varin 不重配 Agent，也不改变当前任务的工作侧重。
 
 模式选择器在进入 IDE 或 Bot 前按 Host 记住普通工作台，作为返回偏好，不另建当前 Profile 权威。
 Bot 会话归属继续独立于普通会话导航。

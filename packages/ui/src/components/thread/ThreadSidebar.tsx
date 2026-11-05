@@ -70,7 +70,7 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
       {!archived && <Button variant="ghost" size="sm" onClick={() => useUIStore.getState().setArchivePageOpen(true)} aria-label={t('sessions.archivePage.title')}><Icon name="inbox-archive" className="size-4" /></Button>}
     </div>}
     <Input aria-label={t(archived ? 'sessions.archivePage.searchPlaceholder' : 'sessions.sidebar.header.search.placeholder')} placeholder={t(archived ? 'sessions.archivePage.searchPlaceholder' : 'sessions.sidebar.header.search.placeholder')} value={query} onChange={event => setQuery(event.target.value)} />
-    {error && <div role="alert" className="text-xs text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => void act(() => useThreadStore.getState().loadCatalog())}>{t('research-workbench.retry')}</Button></div>}
+    {error && <div role="alert" className="text-xs text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => void act(() => useThreadStore.getState().loadCatalog())}>{t('common.retry')}</Button></div>}
     {loading && !threads.length && <span role="status">{t('common.loading')}</span>}
     <div className="min-h-0 flex-1 overflow-y-auto">
       {externalVisible.map(c => <div key={c.id} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 hover:bg-interactive-hover"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left typography-meta" onClick={() => void act(async () => { await openConversationFromNavigation({threadId:c.id}); onNavigate?.(); })}><HarnessIcon harness={c.harness} /><span className="truncate">{c.title}</span></button>

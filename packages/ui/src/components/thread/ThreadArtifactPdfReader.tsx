@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, ThreadRequestError } from '@varin/application-client';
 import { PdfMaterialReader, type PdfMaterialDraft, type PdfMaterialReaderPort } from '@/components/materials/PdfMaterialReader';
-import type { ResearchFactsOwner } from '@/workbenches/research/researchFacts';
+import type { ResearchFactsOwner } from './research/researchFacts';
 import { ThreadMaterialDraftContext } from './ThreadMaterialDraftContext';
 
 /** The selected original research Run ingests the artifact; retained pages belong to its Thread. */

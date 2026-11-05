@@ -538,12 +538,12 @@ renderers.extensions = () => {
  return head('Varin 扩展','为工作台添加能力，管理服务和工作台配置。',btn('安装扩展','extension-install','','plus'))+
  tabs([['installed','已安装'],['routing','服务路由'],['profiles','工作台配置']],tab,'extension')+
  (tab==='installed'?[
- ['Agent Workspace','内置 · 当前工作台','已启用'],['IDE Workspace','内置 · 编辑与开发','已启用'],['Research Workspace','内置 · 科研工作台','已启用'],['Example integration','本地目录 · 有新候选','待审阅']
+ ['Agent Workspace','内置 · 当前工作台','已启用'],['IDE Workspace','内置 · 编辑与开发','已启用'],['Varin','内置 · 长期总助手','已启用'],['Example integration','本地目录 · 有新候选','待审阅']
  ].map(([n,d,s])=>`<div class="object-row">${icon('box')}<button class="object-main" data-action="extension-detail:${n}"><strong>${n}</strong><small>${d}</small></button><span class="status ${s==='待审阅'?'warn':''}">${s}</span>${s==='待审阅'?btn('审阅','extension-review'):toggle('启用-'+n,true,n)}</div>`).join('')+
  '<p class="hint">更改启用选项后可在扩展详情中查看运行结果。</p>':
  tab==='routing'?section('服务路由',`<div class="actions" style="margin-bottom:20px">${select('路由范围',['用户','工作区 · opencr'])}</div>`+
  row('文件编辑器',select('文件编辑器服务',['当前默认','已注册的替代服务']))+row('文档阅读',select('文档阅读服务',['当前默认','已注册的替代服务']))+row('其他已声明服务',btn('查看服务目录','service-directory','ghost'))):
- section('当前工作台',row('配置',select('工作台配置',['Agent Workspace','IDE Workspace','Research Workspace']))+objectRow('Shell 与替代服务','选择界面与注册服务的实现。','profile-detail','layers')+fold('扩展集','按配置显式应用',`<p class="hint">编辑配置不会自动应用整套启停状态。</p>${btn('应用扩展集','profile-apply')}`)+
+ section('当前工作台',row('配置',select('工作台配置',['Agent Workspace','IDE Workspace','Varin']))+objectRow('Shell 与替代服务','选择界面与注册服务的实现。','profile-detail','layers')+fold('扩展集','按配置显式应用',`<p class="hint">编辑配置不会自动应用整套启停状态。</p>${btn('应用扩展集','profile-apply')}`)+
  '<div class="actions" style="margin-top:20px">'+btn('新建配置','profile-new','ghost','plus')+btn('移除配置','profile-delete','danger ghost')+'</div>'));
 };
 
@@ -954,7 +954,7 @@ const actions = {
  'extension-review'(){dialog('审阅扩展候选','<p>Example integration · 新候选</p><div class="resource-line">'+icon('globe')+'<div><p>网络能力</p><small>按候选声明与完整性身份展示。</small></div></div><div class="resource-line">'+icon('folder')+'<div><p>资源访问能力</p><small>允许 / 拒绝针对本次候选。</small></div></div><details class="disclosure"><summary>'+icon('arrow')+'来源与完整性</summary><div><code>本地扩展目录 · 示例</code></div></details>',[{text:'拒绝',action:'modal-close'},{text:'允许并应用候选',action:'extension-approved',primary:true}]);},
  'extension-approved'(){closeModal();toast('示例：候选受理后继续显示实际应用状态');},
  'service-directory'(){dialog('已声明服务','<p>保留真实服务名称、当前提供方、选择来源与不可用原因。</p>');},
- 'profile-detail'(){simpleEditor('工作台配置',row('Shell',select('ProfileShell',['Agent Workspace','IDE Workspace','Research Workspace']))+modalInput('配置名称','Agent Workspace'));},
+ 'profile-detail'(){simpleEditor('工作台配置',row('Shell',select('ProfileShell',['Agent Workspace','IDE Workspace','Varin']))+modalInput('配置名称','Agent Workspace'));},
  'profile-apply'(){dialog('应用扩展集？','<p>正式流程将列出实际启用与停用变化，再交给原工作台 owner 应用。</p>',[{text:'取消',action:'modal-close'},{text:'应用示例配置',action:'modal-close',primary:true}]);},
  'profile-new'(){simpleEditor('新建工作台配置',modalInput('名称','My workspace'));},
  'profile-delete'(){dialog('移除工作台配置？','<p>移除配置与卸载扩展分别处理。</p>',[{text:'取消',action:'modal-close'},{text:'移除',action:'modal-close',danger:true}]);},

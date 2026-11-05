@@ -629,7 +629,7 @@ export const ResearchFactsView: React.FC<{ owner: ResearchFactsOwner | null; wor
           </span>
           <button type="button" className="shrink-0 text-primary hover:underline"
             onClick={() => { void reload(); }}>
-            {t('research-workbench.retry')}
+            {t('common.retry')}
           </button>
         </div>
       ) : null}

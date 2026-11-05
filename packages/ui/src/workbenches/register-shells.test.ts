@@ -3,7 +3,6 @@ import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
 } from '@varin/extension-contract';
 import { resolveWorkbenchShellComponent } from '@/lib/extensions/shell-component-registry';
 import { ensureBuiltinSettingsContributions } from '@/lib/settings/surface-registry';
@@ -14,7 +13,7 @@ describe('production workbench registration', () => {
     await registerWorkbenchShells('web');
     expect(resolveWorkbenchShellComponent(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID)).toBeTruthy();
     expect(resolveWorkbenchShellComponent(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID)).toBeTruthy();
-    expect(resolveWorkbenchShellComponent(VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID)).toBeTruthy();
+    expect(resolveWorkbenchShellComponent('varin.builtin.research-workbench')).toBeUndefined();
     expect(resolveWorkbenchShellComponent(VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID)).toBeTruthy();
     await expect(ensureBuiltinSettingsContributions()).resolves.toBeUndefined();
   });

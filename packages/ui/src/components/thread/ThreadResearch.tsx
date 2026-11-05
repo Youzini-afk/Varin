@@ -2,7 +2,7 @@ import React from 'react';
 import type { ThreadIdentity, ThreadMaterialsAPI, ThreadResearchAPI, ThreadResearchScope } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
-import { ResearchFactsView } from '@/workbenches/research/ResearchFactsPanel';
+import { ResearchFactsView } from './research/ResearchFactsPanel';
 
 /** Source choices are Catalog projections. A later Run changing source never hides the older choice. */
 export function ThreadResearch({ api, materials, identity, sourceRunId, onContentChange }: {

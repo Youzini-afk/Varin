@@ -15,7 +15,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
-import { workbenchWorkspaceLabel } from '@/lib/extensions/workbench-profile-label';
+import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import { WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { useUIStore } from '@/stores/useUIStore';
@@ -24,7 +24,6 @@ import {
   VARIN_WORKBENCH_BOT_PROFILE_ID,
   VARIN_WORKBENCH_BOT_PROFILE_LABEL,
   VARIN_WORKBENCH_IDE_PROFILE_ID,
-  VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
   resolveVarinWorkbenchLayout,
 } from '@varin/extension-contract';
 import {
@@ -135,11 +134,11 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
               size="sm"
               disabled={busy}
               aria-busy={busy}
-              aria-label={`${t('workbench.switcher.workspace')}: ${workbenchWorkspaceLabel(agentProfile, t)}`}
+              aria-label={`${t('workbench.switcher.workspace')}: ${workbenchProfileLabel(agentProfile, t)}`}
               className="h-7 min-w-0 max-w-40 gap-1 px-1.5"
             >
-              <Icon name={agentProfile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'workspace-research' : 'workspace-general'} className="size-4 shrink-0" />
-              <span className="truncate">{workbenchWorkspaceLabel(agentProfile, t)}</span>
+              <Icon name="workbench-agent" className="size-4 shrink-0" />
+              <span className="truncate">{workbenchProfileLabel(agentProfile, t)}</span>
               <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
@@ -153,8 +152,8 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             >
               {agentProfiles.map((profile) => (
                 <DropdownMenuRadioItem key={profile.id} value={profile.id} disabled={busy} className="gap-2.5">
-                  <Icon name={profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'workspace-research' : 'workspace-general'} className="size-4 shrink-0 text-muted-foreground" />
-                  {workbenchWorkspaceLabel(profile, t)}
+                  <Icon name="workbench-agent" className="size-4 shrink-0 text-muted-foreground" />
+                  {workbenchProfileLabel(profile, t)}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

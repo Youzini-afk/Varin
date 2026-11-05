@@ -15,7 +15,6 @@ import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
   type VarinApplicationSurface,
 } from '@varin/extension-contract';
 import { registerWorkbenchShellComponent } from '@/lib/extensions/shell-component-registry';
@@ -51,8 +50,6 @@ export const registerWorkbenchShells = (surface: VarinApplicationSurface): void 
       () => import('./agent/AgentWorkspaceShell').then(m => ({ default: m.AgentWorkspaceShell })));
     registerLazyWorkbenchShell(VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
       () => import('./bot/BotWorkspaceShell').then(m => ({ default: m.BotWorkspaceShell })));
-    registerLazyWorkbenchShell(VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
-      () => import('./research/ResearchWorkbenchShell').then(m => ({ default: m.ResearchWorkbenchShell })));
   }
   if (surface === 'web' || surface === 'desktop') {
     registerLazyWorkbenchShell(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,

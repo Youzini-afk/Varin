@@ -560,7 +560,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     {selected ? <BotActivityBanner bot={selected} busy={actionBusy !== null} onAction={(action) => { void mutateBot(selected, action); }} /> : null}
     {error ? <div role="alert" className="flex items-center gap-3 border-b border-border px-4 py-3 typography-meta">
       <span className="flex-1 text-destructive">{error}</span>
-      <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('research-workbench.retry')}</Button>
+      <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('common.retry')}</Button>
     </div> : null}
     {sessionsError ? <p role="alert" className="border-b border-border px-4 py-2 typography-meta text-destructive">{sessionsError}</p> : null}
     {ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads

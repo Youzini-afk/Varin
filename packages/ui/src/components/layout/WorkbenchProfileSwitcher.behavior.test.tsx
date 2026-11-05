@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 
 const state = vi.hoisted(() => ({
   activeProfileId: 'default',
+  customProfile: false,
   hostId: 'host-a',
   selectProfile: vi.fn(),
   error: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/lib/extensions/catalog-store', async () => {
         hostId: state.hostId,
         document: {
           ...defaultVarinWorkbenchProfileDocument(),
+          profiles: [...defaultVarinWorkbenchProfileDocument().profiles, ...(state.customProfile ? [{ id: 'example.team', label: 'Team workspace' }] : [])],
           profileSelections: { users: { default: state.activeProfileId } },
         },
       },
@@ -69,7 +71,7 @@ describe('independent workbench presentation controls', () => {
   const agentButton = '[data-profile="workbench"]';
   const ideButton = '[data-profile="ide"]';
   const botButton = '[data-profile="bot"]';
-  const researchItem = '[data-profile="varin.research"]';
+  const customItem = '[data-profile="example.team"]';
 
   beforeEach(() => {
     const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -80,6 +82,7 @@ describe('independent workbench presentation controls', () => {
     document.body.append(container);
     root = createRoot(container);
     state.activeProfileId = 'default';
+    state.customProfile = false;
     state.hostId = 'host-a';
     state.error.mockReset();
     state.selectProfile.mockReset().mockImplementation(async (profileId: string) => { state.activeProfileId = profileId; });
@@ -92,48 +95,50 @@ describe('independent workbench presentation controls', () => {
     vi.unstubAllGlobals();
   });
 
-  it('selects Research within Workbench while offering three top-level modes', async () => {
+  it('offers the three built-in modes without a second General/Research menu', async () => {
     await render();
-    expect(container.querySelector('[data-profile="varin.ide"]')).toBeNull();
+    expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(3);
     expect(container.querySelector(ideButton)).not.toBeNull();
     expect(container.querySelector(botButton)).not.toBeNull();
-    await click(researchItem);
-    expect(state.selectProfile).toHaveBeenLastCalledWith('varin.research', undefined, { enableShell: true });
     expect(container.querySelector(agentButton)?.getAttribute('aria-checked')).toBe('true');
-    expect(container.querySelector(researchItem)?.getAttribute('aria-checked')).toBe('true');
+    expect(container.querySelector('[aria-label^="workbench.switcher.workspace:"]')).toBeNull();
   });
 
-  it('returns from IDE to Research after the shell controls remount', async () => {
-    state.activeProfileId = 'varin.research';
+  it('selects an installed custom workspace and returns from IDE after remounting', async () => {
+    state.customProfile = true;
     await render();
+    await click(customItem);
+    expect(state.selectProfile).toHaveBeenLastCalledWith('example.team', undefined, { enableShell: true });
     await click(ideButton);
     expect(state.activeProfileId).toBe('varin.ide');
     act(() => root.unmount());
     root = createRoot(container);
     await render();
-    expect(container.querySelector(researchItem)).toBeNull();
+    expect(container.querySelector(customItem)).toBeNull();
     await click(agentButton);
-    expect(state.activeProfileId).toBe('varin.research');
+    expect(state.activeProfileId).toBe('example.team');
     const persisted = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as { agentWorkbenchProfileByHost: Record<string, string> };
-    expect(persisted.agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
+    expect(persisted.agentWorkbenchProfileByHost['host-a']).toBe('example.team');
   });
 
   it('returns from Bot to the remembered workspace without treating Bot as a workspace', async () => {
-    state.activeProfileId = 'varin.research';
+    state.customProfile = true;
+    state.activeProfileId = 'example.team';
     await render();
     await click(botButton);
     expect(state.activeProfileId).toBe('varin.bot');
     expect(container.querySelector(botButton)?.getAttribute('aria-checked')).toBe('true');
-    expect(container.querySelector(researchItem)).toBeNull();
-    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
+    expect(container.querySelector(customItem)).toBeNull();
+    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('example.team');
     await click(agentButton);
-    expect(state.activeProfileId).toBe('varin.research');
+    expect(state.activeProfileId).toBe('example.team');
   });
 
   it('retains the current workspace and return choice when a transition fails', async () => {
+    state.customProfile = true;
     await render();
     state.selectProfile.mockRejectedValueOnce(new Error('candidate failed'));
-    await click(researchItem);
+    await click(customItem);
     expect(state.activeProfileId).toBe('default');
     expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('default');
     expect(state.error).toHaveBeenCalledWith('candidate failed');
@@ -147,6 +152,15 @@ describe('independent workbench presentation controls', () => {
     await click(agentButton);
     expect(state.activeProfileId).toBe('default');
     expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
+  });
+
+  it('returns to Workbench when this Host remembered the retired Research layout', async () => {
+    useUIStore.setState({ agentWorkbenchProfileByHost: { 'host-a': 'varin.research' } });
+    state.activeProfileId = 'varin.ide';
+    await render();
+    await click(agentButton);
+    expect(state.activeProfileId).toBe('default');
+    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('default');
   });
 
   it('does not show a superseded choice as a failed switch and remains usable', async () => {

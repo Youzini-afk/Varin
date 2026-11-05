@@ -18,8 +18,6 @@ export const VARIN_WORKBENCH_DEFAULT_PROFILE_ID = "default";
 export const VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
 export const VARIN_WORKBENCH_IDE_PROFILE_ID = "varin.ide";
 export const VARIN_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
-export const VARIN_WORKBENCH_RESEARCH_PROFILE_ID = "varin.research";
-export const VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
 export const VARIN_WORKBENCH_BOT_PROFILE_ID = "varin.bot";
 export const VARIN_WORKBENCH_BOT_PROFILE_LABEL = "Varin";
 export const VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID = "varin.builtin.bot-workspace";
@@ -31,9 +29,6 @@ export const VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES: VarinApplicationSurface[] =
 export const VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID = "varin.builtin.ide-workbench";
 export const VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID = "varin.builtin.ide-workbench.shell";
 export const VARIN_BUILTIN_IDE_WORKBENCH_SURFACES: VarinApplicationSurface[] = ["web", "desktop"];
-export const VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID = "varin.builtin.research-workbench";
-export const VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID = "varin.builtin.research-workbench.shell";
-export const VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
 
 export const VARIN_WORKBENCH_REPLACEMENT_TARGETS = {
   agents: "agents.workbench",
@@ -648,13 +643,6 @@ export const defaultVarinWorkbenchProfileDocument = (): VarinWorkbenchProfileDoc
         VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
       )
     )),
-    ...VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => (
-      distributionShellLayer(
-        VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
-        surface,
-        VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
-      )
-    )),
     ...VARIN_BUILTIN_BOT_WORKSPACE_SURFACES.map((surface) => (
       distributionShellLayer(VARIN_WORKBENCH_BOT_PROFILE_ID, surface, VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID)
     )),
@@ -663,7 +651,6 @@ export const defaultVarinWorkbenchProfileDocument = (): VarinWorkbenchProfileDoc
   profiles: [
     { id: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, label: VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL },
     { id: VARIN_WORKBENCH_IDE_PROFILE_ID, label: VARIN_WORKBENCH_IDE_PROFILE_LABEL },
-    { id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL },
     { id: VARIN_WORKBENCH_BOT_PROFILE_ID, label: VARIN_WORKBENCH_BOT_PROFILE_LABEL },
   ],
   revision: 0,
@@ -675,6 +662,47 @@ export const migrateVarinWorkbenchProfileDocument = (
   document: VarinWorkbenchProfileDocument,
 ): boolean => {
   let changed = false;
+  // Retire the separate research presentation at the original profile owner.
+  // Existing conversations and execution modes are independent of this document.
+  const retiredProfile = "varin.research";
+  const retiredExtension = "varin.builtin.research-workbench";
+  const retiredShell = "varin.builtin.research-workbench.shell";
+  if (document.profiles.some(candidate => candidate.id === retiredProfile)
+    || document.layouts.some(layer => layer.profileId === retiredProfile)) {
+    document.profiles = document.profiles.filter(candidate => candidate.id !== retiredProfile);
+    document.layouts = document.layouts.filter(layer => layer.profileId !== retiredProfile);
+    changed = true;
+  }
+  if (document.activeProfileId === retiredProfile) {
+    document.activeProfileId = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
+    changed = true;
+  }
+  for (const [user, selected] of Object.entries(document.profileSelections.users)) {
+    if (selected === retiredProfile) {
+      document.profileSelections.users[user] = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
+      changed = true;
+    }
+  }
+  for (const layer of document.layouts) {
+    if (layer.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell] === retiredShell) {
+      layer.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell] = VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID;
+      changed = true;
+    }
+    if (layer.references.some(reference => reference.contributionId === retiredShell)) {
+      layer.references = layer.references.filter(reference => reference.contributionId !== retiredShell);
+      changed = true;
+    }
+  }
+  for (const candidate of document.profiles) {
+    if (candidate.extensionIds?.includes(retiredExtension)) {
+      candidate.extensionIds = [...new Set(candidate.extensionIds.map(id => id === retiredExtension ? VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID : id))];
+      changed = true;
+    }
+  }
+  if (!document.profiles.some(candidate => candidate.id === VARIN_WORKBENCH_DEFAULT_PROFILE_ID)) {
+    document.profiles.push({ id: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, label: VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL });
+    changed = true;
+  }
   const profile = document.profiles.find((candidate) => candidate.id === VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
   if (profile && profile.label === "Default") {
     profile.label = VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL;
@@ -682,10 +710,6 @@ export const migrateVarinWorkbenchProfileDocument = (
   }
   if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_IDE_PROFILE_ID)) {
     document.profiles.push({ id: VARIN_WORKBENCH_IDE_PROFILE_ID, label: VARIN_WORKBENCH_IDE_PROFILE_LABEL });
-    changed = true;
-  }
-  if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID)) {
-    document.profiles.push({ id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL });
     changed = true;
   }
   if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_BOT_PROFILE_ID)) {
@@ -708,12 +732,6 @@ export const migrateVarinWorkbenchProfileDocument = (
     VARIN_WORKBENCH_IDE_PROFILE_ID,
     VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
     VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-  ) || changed;
-  changed = ensureDistributionShellLayouts(
-    document,
-    VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
-    VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
-    VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
   ) || changed;
   changed = ensureDistributionShellLayouts(
     document,
