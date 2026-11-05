@@ -48,13 +48,14 @@ it('uses the target operation for nested gateway controls and retains the media 
   expect(invocationStatus(offline.result, offline.execution)).toBe('background');
 });
 
-it('presents a saved render_ui gateway receipt as an interactive card with its original history identity', () => {
+it.each([false, true])('presents a saved render_ui gateway receipt (legacy=%s) with its original history identity', legacy => {
+  const target = legacy ? { reference: { name: 'render_ui', version: 'version' } } : { name: 'render_ui' };
   const input = { title: 'Report', changes: [{ op: 'write', file: 'index.html', text: '<h1>Report</h1>' }] };
   const receipt = { kind: 'ui', workRef: 'ui:report', ref: 'ui:report@1', title: 'Report', revision: 1, entry: 'index.html', files: ['index.html'] };
   const base = { parent: null, thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null };
   const history = [
-    { ...base, id: 'call-history', content: { id: 'model-item:7:request:call', content: { kind: 'tool_call', call: { call_id: 'call', name: 'tool_invoke', arguments: { reference: { name: 'render_ui', version: 'version' }, arguments: input } } } } },
-    { ...base, id: 'result-history', source: 'tool', content: { content: { kind: 'tool_result', result: { request_id: 'request', call_id: 'call', completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { reference: { name: 'render_ui', version: 'version' }, completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' }, result: receipt }, parts: [] } } } } } },
+    { ...base, id: 'call-history', content: { id: 'model-item:7:request:call', content: { kind: 'tool_call', call: { call_id: 'call', name: 'tool_invoke', arguments: { ...target, arguments: input } } } } },
+    { ...base, id: 'result-history', source: 'tool', content: { content: { kind: 'tool_result', result: { request_id: 'request', call_id: 'call', completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { ...target, completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' }, result: receipt }, parts: [] } } } } } },
   ] as ThreadHistoryItem[];
   const view = new HistoryPresentation('thread').project(history, undefined);
   expect(view.entries[0]).toMatchObject({ id: 'call-history', message: { content: [{ name: 'render_ui', arguments: input }] } });

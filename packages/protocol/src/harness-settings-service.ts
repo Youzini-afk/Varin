@@ -26,6 +26,8 @@ export type SettingsEntryState =
   | "action";
 
 export interface SettingsSearchParams {
+  /** Summary discovery by default; an exact id defaults to its full contract. */
+  detail?: "summary" | "full";
   query?: string;
   category?: string;
   owner?: "app" | "agent-settings" | "client" | "action";
@@ -51,6 +53,7 @@ export interface SettingsActionContract {
 }
 export type SettingsEffectTiming = "immediate" | "next-request" | "next-run" | "restart" | "manual" | "unsupported";
 export interface SettingsSearchItem {
+  read?: { tool: "settings_read"; arguments: { id: string } };
   id: string;
   category: string;
   owner: "app" | "agent-settings" | "client" | "action";
@@ -93,6 +96,7 @@ export interface SettingsSearchItem {
 }
 
 export interface SettingsSearchResult {
+  next?: SettingsSearchParams;
   items: SettingsSearchItem[];
   total: number;
   categories: { category: string; count: number }[];

@@ -11,9 +11,9 @@ vi.mock('@/stores/useUIStore', () => ({ useUIStore: { getState: () => ({ openCon
 const session = (): UiSession => ({ key: 'card', identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, host: 1, placement: 'inline' });
 const receipt: UiReceipt = { kind: 'ui', ref: 'ui:work@1', workRef: 'ui:work', title: '报告', entry: 'index.html', files: ['index.html'], revision: 1 };
 
-it('streams nested gateway HTML and its selected entry before the tool finishes', () => {
+it.each([false, true])('streams nested gateway HTML (legacy=%s) before the tool finishes', legacy => {
   const current = session();
-  const raw = '{"reference":{"name":"render_ui","version":"1"},"arguments":{"entry":"report.html","changes":[{"file":"report.html","op":"write","text":"<h1>生成中';
+  const raw = (legacy ? '{"reference":{"name":"render_ui","version":"1"}' : '{"name":"render_ui"') + ',"arguments":{"entry":"report.html","changes":[{"file":"report.html","op":"write","text":"<h1>生成中';
   try {
     projectUiWork(current, { type: 'toolCall', id: 'call', name: 'render_ui', arguments: {}, rawArguments: raw }, undefined, true, false);
     expect(current.display).toMatchObject({ entry: 'report.html', files: { 'report.html': '<h1>生成中' }, committed: false });

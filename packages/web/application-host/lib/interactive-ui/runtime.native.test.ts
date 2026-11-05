@@ -25,6 +25,7 @@ it('reads a connected view live and reports a missing or disconnected view with 
     const missing = await ui.read(family, { kind: 'ui', ref: saved.ref, view: 'state' }, signal);
     expect(missing).toMatchObject({ status: 'unavailable', code: 'ui_view_required', views: [] });
     expect(await ui.read(family, { kind: 'ui', ref: saved.ref, view: 'source', file: 'index.html' }, signal)).toMatchObject({ status: 'ready' });
+    expect(await ui.read(family, { kind: 'ui', ref: saved.ref, view: 'source' }, signal)).toMatchObject({ status: 'ready', file: 'index.html', content: '<p id="n">1</p>' });
 
     // A connected client answers the live state read through its own observation queue.
     const { viewRef, token } = await ui.attach(family, { ref: saved.ref }, undefined, 'client-a');

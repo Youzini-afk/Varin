@@ -27,7 +27,8 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
     ?? (typeof data.status === 'string' ? data : finalData));
   const observedOutput = toolRecord(data.observation);
   const chunks = (Array.isArray(data.chunks) ? data.chunks : Array.isArray(observedOutput.chunks) ? observedOutput.chunks : []).map(toolRecord);
-  const text = chunks.length ? chunks.map(chunk => toolText(chunk.text)).join('')
+  const screen = toolRecord(data.screen ?? observedOutput.screen);
+  const text = typeof screen.text === 'string' ? screen.text : chunks.length ? chunks.map(chunk => toolText(chunk.text)).join('')
     : operation?.external_receipt?.result.parts.flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n') ?? '';
   const processId = toolText(args.processId) || toolText(data.processId) || toolText(snapshot.processId);
   const command = processCommand(args) || targets?.processes.get(processId) || '';

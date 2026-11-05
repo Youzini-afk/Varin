@@ -4,6 +4,7 @@ import { ThreadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { HistoryPresentation } from '../conversation/historyPresentation';
 import { fileChangePhase, fileChangeTargets, type FileChangePhase } from '../conversation/fileChangePreview';
 import type { ChatToolCall, ChatToolResultMessage } from '../conversation/types';
+import { presentInvocation, invocationData } from '../conversation/toolInvocation';
 
 export type ThreadProduct =
   | { kind: 'file'; key: string; itemId: string; runId: string; call: ChatToolCall; path: string; deleted: boolean; phase: FileChangePhase }
@@ -19,13 +20,9 @@ export function threadProducts(history: ThreadSnapshot['history'], snapshot: Thr
     if (entry.type !== 'message' || entry.message.role !== 'assistant') continue;
     for (const original of entry.message.content) {
       if (original.type !== 'toolCall') continue;
-      const args = original.arguments as { reference?: { name?: string }; arguments?: ChatToolCall['arguments'] } | null;
-      const call = original.name === 'tool_invoke' && args?.reference?.name && args.arguments
-        ? { ...original, name: args.reference.name, arguments: args.arguments } : original;
+      const call = presentInvocation(original);
       const originalResult = results.get(call.id);
-      const details = originalResult?.details as { reference?: unknown; result?: ChatToolResultMessage['details'] } | undefined;
-      const result = original.name === 'tool_invoke' && details?.reference && details.result
-        ? { ...originalResult!, details: details.result } : originalResult;
+      const result = originalResult ? { ...originalResult, details: invocationData(originalResult.details, call) as ChatToolResultMessage['details'] } : undefined;
       for (const file of fileChangeTargets(call)) {
         const phase = fileChangePhase(view.toolExecutions[call.id], result, false, file.path);
         if (!['applied', 'draft', 'branch'].includes(phase)) continue;

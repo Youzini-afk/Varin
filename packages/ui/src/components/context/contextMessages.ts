@@ -1,4 +1,5 @@
 import type { ThreadHistoryItem } from '@varin/application-client';
+import { invokedToolName } from '../conversation/toolInvocation';
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 /** Tool source comes from the call's frozen request, never a name prefix or current server list. */
@@ -7,7 +8,7 @@ export function contextMessageKinds(items: readonly ThreadHistoryItem[]): Map<st
   const mcpCalls = new Set<string>();
   for (const item of items) {
     const call = record(record(record(item.content).content).call);
-    const name = call.name === 'tool_invoke' ? record(record(call.arguments).reference).name : call.name;
+    const name = call.name === 'tool_invoke' ? invokedToolName(call.arguments) : call.name;
     if (typeof name === 'string' && item.modelRequest?.mcpTools?.includes(name)) {
       kinds.set(item.id, 'mcp'); mcpCalls.add(JSON.stringify([item.run_id, item.modelRequest.requestId, call.call_id]));
     }

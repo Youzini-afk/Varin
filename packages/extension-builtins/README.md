@@ -4,7 +4,7 @@ This package contains the browser-safe manifests for Varin's built-in extensions
 
 These declarations form the executable capability directory. Ordinary Agent requests expose a
 stable native interface: `tool_describe` reads available namespaces or exact tool documentation,
-and `tool_invoke` calls the returned version reference through the original nested invocation
+and `tool_invoke` calls a tool by name and arguments through the original nested invocation
 lifecycle. Detailed schemas are tool-result data, not additional model functions. Explicit tool
 toggles compose with each owner's configuration readiness before a declaration is published.
 `runtime_contract` covers service/UI contracts and package source; callable-tool documentation

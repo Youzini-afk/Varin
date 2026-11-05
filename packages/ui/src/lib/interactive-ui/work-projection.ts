@@ -33,8 +33,8 @@ class WorkProjection {
     this.call = call; this.output = output; this.running = running; this.failed = failed;
     if (call.rawArguments !== undefined) {
       const input = this.reader.feed(call.rawArguments.slice(this.raw.length)) as
-        (Partial<RenderUiInput> & { reference?: { name?: string }; arguments?: Partial<RenderUiInput> }) | undefined;
-      this.input = (input?.reference?.name === 'render_ui' ? input.arguments : input) ?? {};
+        (Partial<RenderUiInput> & { name?: string; reference?: { name?: string }; arguments?: Partial<RenderUiInput> }) | undefined;
+      this.input = ((input?.name ?? input?.reference?.name) === 'render_ui' ? input?.arguments : input) ?? {};
       this.raw = call.rawArguments;
     }
     else this.input = call.arguments as Partial<RenderUiInput> ?? {};

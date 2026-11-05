@@ -252,7 +252,7 @@ pub(super) fn bounded_output(
 
 pub(super) fn retrieval_preview_limit(call: &ToolCall) -> Option<usize> {
     let (name, args) = if call.name == crate::tool_disclosure::INVOKE {
-        (call.arguments["reference"]["name"].as_str().unwrap_or(""), &call.arguments["arguments"])
+        (crate::tool_disclosure::invoked_name(&call.arguments).unwrap_or(""), &call.arguments["arguments"])
     } else { (call.name.as_str(), &call.arguments) };
     (name == "code_retrieval").then(|| args["limit"].as_u64()
         .and_then(|value| usize::try_from(value).ok())).flatten()
@@ -264,7 +264,7 @@ pub(super) fn retrieval_preview_limit(call: &ToolCall) -> Option<usize> {
 pub(super) fn is_explicit_read(call: &ToolCall) -> bool {
     let (name, args) = if call.name == crate::tool_disclosure::INVOKE {
         (
-            call.arguments["reference"]["name"].as_str().unwrap_or(""),
+            crate::tool_disclosure::invoked_name(&call.arguments).unwrap_or(""),
             &call.arguments["arguments"],
         )
     } else {

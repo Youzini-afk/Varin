@@ -204,12 +204,14 @@ export class ThreadProjection {
                   if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
                   const input = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as
                     { ref?: string; reference?: { name?: string }; arguments?: Record<string, unknown>; [key: string]: unknown } | undefined;
-                  const wrapped = call.rawName === 'tool_invoke' && typeof input?.reference?.name === 'string' && reader.fieldComplete(input.reference, 'name');
+                  const targetName = typeof input?.name === 'string' && reader.fieldComplete(input, 'name') ? input.name
+                    : typeof input?.reference?.name === 'string' && reader.fieldComplete(input.reference, 'name') ? input.reference.name : undefined;
+                  const wrapped = call.rawName === 'tool_invoke' && targetName !== undefined;
                   if (wrapped) {
-                    call.name = input!.reference!.name!;
+                    call.name = targetName!;
                     call.gateway = { name: 'tool_invoke', arguments: input as import('@varin/protocol').JsonValue };
                   }
-                  const args = wrapped ? input.arguments : input;
+                  const args = wrapped ? input?.arguments : input;
                   if (args && typeof args === 'object' && !Array.isArray(args)) {
                     const visible = { ...args };
                     // Half-written paths are useful text, but are not navigable resources.

@@ -4117,7 +4117,7 @@ export interface KernelProcessSpawnParams {
   rows?: number;
 }
 
-export type ProcessOutputMode = 'text' | 'raw';
+export type ProcessOutputMode = 'text' | 'raw' | 'screen';
 
 export interface KernelProcessReadParams {
   workspaceId: string;
@@ -4205,7 +4205,21 @@ export interface KernelProcessOutputChunk {
   text?: string;
 }
 
+export interface KernelProcessScreenCursor {
+  row: number;
+  column: number;
+}
+
+export interface KernelProcessScreen {
+  text: string;
+  rows: number;
+  cols: number;
+  cursor: KernelProcessScreenCursor;
+  alternateScreen: boolean;
+}
+
 export interface KernelProcessReadResult {
+  screen?: KernelProcessScreen;
   process: KernelProcessSnapshot;
   chunks: KernelProcessOutputChunk[];
   nextCursor: number;

@@ -39,6 +39,36 @@ pub fn summary(tool: &ToolSchema) -> &str {
         |d| &d.summary,
     )
 }
+
+/// Only fixed property values in the selected schema become call hints.
+/// Branch intersections avoid inventing an action for an ambiguous contract.
+pub fn invocation_arguments(schema: &Value) -> Value {
+    fn literals(schema: &Value) -> serde_json::Map<String, Value> {
+        let mut values = serde_json::Map::new();
+        if let Some(properties) = schema["properties"].as_object() {
+            for (name, field) in properties {
+                if let Some(value) = field.get("const").or_else(|| field["enum"].as_array().filter(|v| v.len() == 1).map(|v| &v[0])) {
+                    values.insert(name.clone(), value.clone());
+                }
+            }
+        }
+        if let Some(branches) = schema["allOf"].as_array() {
+            for branch in branches { values.extend(literals(branch)); }
+        }
+        for key in ["oneOf", "anyOf"] {
+            if let Some(branches) = schema[key].as_array().filter(|v| !v.is_empty()) {
+                let mut common = literals(&branches[0]);
+                for branch in &branches[1..] {
+                    let next = literals(branch);
+                    common.retain(|name, value| next.get(name) == Some(value));
+                }
+                values.extend(common);
+            }
+        }
+        values
+    }
+    Value::Object(literals(schema))
+}
 fn builtin_summary(name: &str) -> Option<&'static str> {
     Some(match name {
         "file_read" => "Read files, complete code units, lines or bytes from the selected source.",

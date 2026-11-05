@@ -108,10 +108,7 @@ fn activity(
 ) -> Value {
     let (tool, arguments) = if call.name == "tool_invoke" {
         (
-            call.arguments
-                .pointer("/reference/name")
-                .and_then(Value::as_str)
-                .unwrap_or(&call.name),
+            crate::tool_disclosure::invoked_name(&call.arguments).unwrap_or(&call.name),
             call.arguments.get("arguments").unwrap_or(&call.arguments),
         )
     } else {

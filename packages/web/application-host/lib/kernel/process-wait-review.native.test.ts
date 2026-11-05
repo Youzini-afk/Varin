@@ -314,7 +314,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       else tool(response, 'tool_describe', { name: 'process_resize' }, 4);
     } else if (serial === 5 && revoked === 'none') {
       const described = JSON.parse(responsesMetadataText(output?.output));
-      tool(response, 'tool_invoke', { reference: described.content.reference, arguments: { processId, cols: 100, rows: 30 } }, 5);
+      tool(response, 'tool_invoke', { name: described.content.name, arguments: { processId, cols: 100, rows: 30 } }, 5);
     } else {
       if (revoked === 'none') expect(JSON.parse(responsesMetadataText(output?.output))).toMatchObject({ kind: 'result', outcome: 'failed',
         error: { code: 'process_exited', message: expect.stringContaining('The process has exited') },

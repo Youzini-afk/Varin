@@ -185,6 +185,7 @@ fn user_handoff_is_atomic_truthful_and_preserves_exact_receipt_after_reopen() {
     assert_eq!(f.counts(), original_count);
     let duplicate = f.prepare(f.command.clone()).unwrap();
     let child = f.accept();
+    assert_eq!(child.name, format!("Agent {}", child.agent_id));
     assert_eq!(child.origin, None);
     assert_eq!(child.call_id, None);
     assert_eq!(child.parent_thread_id, "parent");

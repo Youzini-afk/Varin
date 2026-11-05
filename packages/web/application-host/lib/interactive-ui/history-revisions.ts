@@ -26,7 +26,7 @@ export async function historicalUiRevision(reference: HistoryReference, runtime:
     return saved?.ref === direct ? direct : undefined;
   }
   const gateway = object(data), nestedRef = fixedReceipt(gateway.result), summary = object(gateway.completion);
-  if (!nestedRef || object(gateway.reference).name !== 'render_ui' || typeof gateway.operationId !== 'string'
+  if (!nestedRef || (gateway.name ?? object(gateway.reference).name) !== 'render_ui' || typeof gateway.operationId !== 'string'
     || summary.kind !== 'result' || summary.outcome !== 'succeeded') return undefined;
   // Only the native owner can establish gateway parentage. Do not dereference an
   // arbitrary operation ID supplied by another tool's receipt-shaped output.
@@ -34,7 +34,8 @@ export async function historicalUiRevision(reference: HistoryReference, runtime:
   const parent = await runtime.findOperation(operationId, signal);
   if (!parent || parent.id !== operationId || parent.run_id !== reference.run_id) return undefined;
   const parentCall = object(object(parent.intent).call);
-  if (parentCall.name !== 'tool_invoke' || object(object(parentCall.arguments).reference).name !== 'render_ui') return undefined;
+  const parentArguments = object(parentCall.arguments);
+  if (parentCall.name !== 'tool_invoke' || (parentArguments.name ?? object(parentArguments.reference).name) !== 'render_ui') return undefined;
   const nested = await runtime.findOperation(gateway.operationId, signal);
   if (!nested) return undefined;
   const childIntent = object(nested.intent), childCall = object(childIntent.call), origin = object(childIntent.origin);

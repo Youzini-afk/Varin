@@ -732,6 +732,11 @@ impl Storage {
                     .into(),
             ));
         }
+        if params_value["mode"] == "screen" {
+            let mut result = self.processes.read_screen(id)?;
+            result["process"] = record;
+            return Ok(result);
+        }
         let cursor = unsigned(params_value, "cursor", 0)?;
         let limit = unsigned(params_value, "maxBytes", CHUNK_BYTES as u64)?;
         if limit == 0 || limit > CHUNK_BYTES as u64 {

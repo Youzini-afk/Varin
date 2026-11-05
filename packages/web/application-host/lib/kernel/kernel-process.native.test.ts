@@ -238,11 +238,20 @@ it("native PTY is a real terminal with its requested dimensions and resize input
     await pause();
   }
   assert.match(stripVTControlCharacters(initial), /TTY true true 90 30/);
+  const viewport = await f.client.processRead({ workspaceId: 'ws', processId: params.processId, cursor: 0, mode: 'screen' });
+  assert.match(viewport.screen!.text, /TTY true true 90 30/);
+  assert.equal(viewport.screen!.cols, 90);
+  assert.equal(viewport.screen!.rows, 30);
   await f.client.processResize({ workspaceId: "ws", processId: params.processId, operationId: `resize:${params.processId}`, cols: 111, rows: 41 });
   await pause(100);
   await f.client.processWrite({ workspaceId: "ws", processId: params.processId, operationId: `input:${params.processId}`, bytesBase64: Buffer.from("go\r").toString("base64") });
   const result = await drain(f.client, params.processId, cursor);
   assert.match(stripVTControlCharacters(result.stdout.toString()), /SIZE 111 41/);
+  const finalViewport = await f.client.processRead({ workspaceId: 'ws', processId: params.processId, cursor: 0, mode: 'screen' });
+  assert.match(finalViewport.screen!.text, /SIZE 111 41/);
+  assert.equal(finalViewport.screen!.cols, 111);
+  assert.equal(finalViewport.screen!.rows, 41);
+  assert.equal(finalViewport.outputComplete, true);
   assert.equal(result.process.exitCode, 0, JSON.stringify(result.process));
   }
 }, 30_000);

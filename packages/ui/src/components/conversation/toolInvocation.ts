@@ -4,26 +4,30 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 export const toolRecord = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 export const toolText = (value: unknown): string => typeof value === 'string' ? value : '';
+export const invokedToolName = (value: unknown): string => {
+  const args = toolRecord(value);
+  return toolText(args.name) || toolText(toolRecord(args.reference).name);
+};
 
 /** The gateway is a transport for the named call. Preserve its original input for inspection. */
 export function presentInvocation<T extends { name?: unknown; arguments?: unknown }>(call: T): T {
-  const args = toolRecord(call.arguments), reference = toolRecord(args.reference);
-  if (call.name !== 'tool_invoke' || typeof reference.name !== 'string' || !reference.name
-    || reference.name === 'tool_invoke' || !Object.hasOwn(args, 'arguments')) return call;
-  return { ...call, name: reference.name, arguments: args.arguments,
+  const args = toolRecord(call.arguments), name = invokedToolName(args);
+  if (call.name !== 'tool_invoke' || !name
+    || name === 'tool_invoke' || !Object.hasOwn(args, 'arguments')) return call;
+  return { ...call, name, arguments: args.arguments,
     gateway: { name: call.name, arguments: call.arguments } };
 }
 
 /** Only unwrap an actual gateway receipt matching this call; arbitrary output data stays opaque. */
 export function invocationData(data: unknown, call?: { name?: unknown; gateway?: unknown }): unknown {
   const value = toolRecord(data);
-  return call?.gateway && toolRecord(value.reference).name === call.name && Object.hasOwn(value, 'result')
+  return call?.gateway && invokedToolName(value) === call.name && Object.hasOwn(value, 'result')
     ? value.result : data;
 }
 
 export function invocationGateway(data: unknown, call?: { name?: unknown; gateway?: unknown }) {
   const value = toolRecord(data);
-  return call?.gateway && toolRecord(value.reference).name === call.name && typeof value.operationId === 'string'
+  return call?.gateway && invokedToolName(value) === call.name && typeof value.operationId === 'string'
     ? { operationId: value.operationId, completion: toolRecord(value.completion) } : undefined;
 }
 

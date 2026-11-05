@@ -227,8 +227,10 @@ Office、浏览器、材料等复合工具列出原接口的操作，`operation`
 未声明的目标必须通过已注册的 `tool_invoke`。协议解析与执行前校验共用这一边界，包含扩展模型适配器。
 `tool_describe` 返回名称、参数、是否已声明和调用模板；读取说明不注册新函数。实现入口为 [tool_disclosure.rs](../kernel/crates/varin-runtime/src/tool_disclosure.rs)，
 [execution.rs](../kernel/crates/varin-runtime/src/execution.rs) 在模型调用受理时仍按原快照核验直接调用集合。
-通用入口按本次请求冻结的完整目录校验目标版本，不能查找后来加入的工具或越过 Agent 的工具选择。
-未声明、目录不可用、版本不匹配、调用格式错误和参数无效使用独立错误码。界面显示工具名和修正方式，
+选定操作后，调用模板从该操作的原参数契约提取固定参数值，使用工具真实的 `action`、`view` 等字段；查询用的 `operation` 不会冒充调用参数。
+`settings_search` 默认返回简短目录与 `settings_read` 入口，精确 id 或显式 `detail: full` 才附带完整字段契约；分页返回可直接继续的 `next` 参数。
+通用入口使用 `tool_invoke({name, arguments})`，按名称解析本次请求冻结目录中的工具；不要求模型提供版本，也不要求先读说明。
+执行绑定和参数校验来自原目录，不能越过 Agent 的工具选择。未声明、目录不可用、调用格式错误和参数无效使用独立错误码。界面显示工具名和修正方式，
 不复制调用参数或服务端任意错误正文；新错误在会话、工作概览和协作聊天中使用同一组本地化说明。
 已关闭、未配置的扩展能力在配置 owner 准备阶段过滤；源依赖沿原 Source 准入，Goal 报告只在绑定 Goal 时可用。
 首个模型请求等待当前选中扩展完成准备，后续配置变化仍在请求边界发布。通用模式将已启用的 `research_search`
@@ -236,7 +238,7 @@ Office、浏览器、材料等复合工具列出原接口的操作，`operation`
 `research_decide` 已移除活动声明与专属实现，历史工具回执仍可展示。
 Host 将科研模式的展示选择固定在工具元数据中，原绑定恢复时保留该选择；新 Run 按其实际工作模式重新准备。
 工作模式决定展示方式，各工具的配置与后端就绪状态决定可用性；披露说明不会动态改变模型工具列表。
-已声明函数的直接调用进入原 ModelStep 工具执行流程；`tool_invoke` 核对版本引用后进入原嵌套调用流程，
+已声明函数的直接调用进入原 ModelStep 工具执行流程；`tool_invoke` 按名称解析目标后进入原嵌套调用流程，
 实际目标继续执行自己的参数校验、权限检查和资源准入。包装入口保留持久父记录，目标 Operation 独立保存
 效果、停止证据和 Job 句柄；返回的文字与媒体保留原输出类型。隐藏能力更新不改变模型工具前缀或本地编码复用键。
 子任务委派说明也通过 `tool_describe` 返回，不随目录变化重写系统前缀。
@@ -244,7 +246,7 @@ Host 将科研模式的展示选择固定在工具元数据中，原绑定恢复
 媒体历史可用于普通派发及快速检索，`inheritContext` 只决定是否把对话背景交给子任务。
 
 失败的工具结果共享 `error:{code,message,details?}` 投影。直调结果、`tool_invoke` 返回数据与脚本 `tools.invoke`
-receipt 都能从 `error` 读取；原 `kind/outcome/effect`、目标 reference、operation、completion、正文和媒体继续保留。
+receipt 都能从 `error` 读取；原 `kind/outcome/effect`、目标名称、operation、completion、正文和媒体继续保留。
 `NotDispatched` 保存结构化错误及原 reason，持久化和对象回收后续读仍保留详细原因。取消沿原取消状态表达。
 成功正文中名为 error 的普通属性不改变原执行状态；扩展与 MCP 的自定义正文也由其实际协议状态判断。
 错误码缺失时使用通用失败码并保留消息，不通过解析任意消息前缀猜原因。

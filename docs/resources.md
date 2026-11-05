@@ -252,6 +252,8 @@ Linux 的临时启动线程结束不触发停止，避免把线程退出误当�
 `process_read` 继续读取保留的输出。
 底层输出块保留精确的 `bytesBase64` 和字节游标，终端及 LSP/DAP 等协议消费者继续读原始字节。
 Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 控制序列；`mode: raw` 返回原始字节。
+交互式程序可用 `mode: screen` 读取当前 PTY 屏幕，包含文字、行列大小、光标位置和备用屏幕状态；回车覆盖、清屏、光标移动按终端语义应用，不再把重绘叠成日志。
+屏幕在输出到达时增量维护，不重放整份日志；退出时保留最后一屏，输出回收时一起释放。screen 不按字节分页；text/raw 与原始输出仍可独立读取。
 字节数和游标始终计入原始控制序列；可见文字较少时不代表输出丢失，不能用显示字符数计算续读位置。
 输出读取不消费保留的历史；各读者可以独立续读或回读任意保留字节。帧位置索引只缓存磁盘偏移，不复制正文，输出释放时一并释放。
 文本页按完整字符对齐，`nextCursor` 仍是原输出的字节位置；从字符中间请求时，`actualCursor` 给出该字符起点，
@@ -265,7 +267,8 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
 显式 `waitMs` 在同一等待预算内覆盖进程退出和输出收尾，通过原生通知唤醒并响应取消，不增加固定收尾延迟。
 等待预算耗尽时返回实际进展；默认 0 仍立即返回。最终页的完成标志同时用于顶层回执，避免较早进程快照覆盖新读到的 EOF。
-`process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
+`process_write.text` 按 JSON 解码一次；未指定 submit 时原样写入。`submit:true` 将多行文字的换行统一为原进程的 `input.lineEnding`，并在末尾缺少行结束符时补一次 Enter；空文本提交也是 Enter。
+Windows 上 Agent 启动进程并继承环境时，缺省补入 `PYTHONIOENCODING=utf-8` 与 `PYTHONUTF8=1`，避免 Python 输出中文或 emoji 因本地代码页失败。已有同名环境变量和显式传入的完整 env 保持不变；用户交互终端沿其原环境启动。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
 应用的响应继续读原进程输出。退出与输出收尾分别观察：`outputComplete:false` 保留游标，输出错误显示原错误，
 `outputComplete:true` 也仍可能有当前页尚未读到的后续内容。读取到 `nextCursor == endCursor` 只说明已读到当前保留的末尾。

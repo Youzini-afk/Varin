@@ -168,7 +168,7 @@ impl ChildAdmissionPreparation {
             source_agent:self.input.source_agent.clone(),
             origin: ChildAdmissionOrigin::Tool(self.context),
             input_ref,
-            title: self.input.name.as_deref().map(str::trim).map(str::to_owned).or_else(|| self.input.task.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned)),
+            title: self.input.name.as_deref().map(str::trim).map(str::to_owned),
             operation_revision: operation.revision,
             call_id: Some(admitted.call.call_id),
             configuration_ref: self.content.save(&self.launch.configuration)?,

@@ -102,7 +102,7 @@ function tool(name: string, args: unknown, id: string) {
   const versions: Record<string, string> = { wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '5', memory: '1' };
   const exchange = CODE_EXCHANGE_TOOL_DECLARATIONS.find(d => d.tool?.name === name);
   if (exchange) versions[name] = extensionToolSchema(exchange).version;
-  if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
+  if (versions[name]) { args = { name, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
 function answer(text: string, id: string) {
@@ -111,7 +111,7 @@ function answer(text: string, id: string) {
 function result(body: Record<string, unknown>, name?: string) {
   const items = body.input as Array<Record<string, unknown>>;
   const call = name ? items.findLast(item => item.type === 'function_call' && (item.name === name
-    || item.name === 'tool_invoke' && JSON.parse(String(item.arguments)).reference?.name === name)) : undefined;
+    || item.name === 'tool_invoke' && JSON.parse(String(item.arguments)).name === name)) : undefined;
   const output = items.findLast(item => item.type === 'function_call_output' && (!call || item.call_id === call.call_id));
   const value = output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
   const content = value?.content as { reference?: unknown; completion: Record<string, unknown>; result: unknown } | undefined;
@@ -739,7 +739,7 @@ it.each(['quick','formal','isolated'] as const)('%s retrieval uses native search
   let parentSteps=0,childSteps=0;
   let retrievalId='';
   const entered=gate(), release=gate();
-  const invoke=(name:string,args:unknown,id:string)=>tool('tool_invoke',{reference:{name,version:'1'},arguments:args},id);
+  const invoke=(name:string,args:unknown,id:string)=>tool('tool_invoke',{name,arguments:args},id);
   const f=await fixture(async ({body,response})=>{
     assertPairing(body);
     if(isParent(body)) {
@@ -992,7 +992,7 @@ it.each([
       }
       switch (step) {
         case 1: complete(response, [invocation === 'direct' ? tool('code_retrieval', question, 'quick')
-          : tool('tool_invoke', { reference: { name: 'code_retrieval', version: '1' }, arguments: question }, 'quick')]); break;
+          : tool('tool_invoke', { name: 'code_retrieval', arguments: question }, 'quick')]); break;
         case 2: {
           const accepted = result(body, 'code_retrieval');
           expect(accepted?.kind, JSON.stringify(accepted)).toBe('job_accepted');
@@ -1837,7 +1837,7 @@ function combinedResult(body: Record<string, unknown>, family: CombinedFamily, n
   if (family === 'openai-responses') return result(body, name);
   const items = combinedItems(body, family);
   const call = items.findLast(item => item.type === 'tool_use' && (item.name === name
-    || item.name === 'tool_invoke' && (item.input as { reference?: { name: string } })?.reference?.name === name));
+    || item.name === 'tool_invoke' && (item.input as { name?: string })?.name === name));
   const output = items.findLast(item => item.type === 'tool_result' && item.tool_use_id === call?.id);
   if (!output) return undefined;
   const blocks = output.content as Array<{ type: string; text?: string }>;

@@ -27,16 +27,10 @@ struct Describe {
     #[serde(skip_serializing_if = "Option::is_none")]
     cursor: Option<String>,
 }
-#[derive(Clone, Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct Reference {
-    name: String,
-    version: String,
-}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Invoke {
-    reference: Reference,
+    name: String,
     arguments: Value,
 }
 enum Request {
@@ -185,18 +179,12 @@ fn parse(call: &ToolCall, frozen: &FrozenToolContext) -> Result<Request, Executi
                     "tool_invoke.arguments must be an object matching the target parameters returned by tool_describe",
                 ));
             }
-            let target = frozen.tools.iter().find(|tool| tool.name == args.reference.name)
-                .ok_or_else(|| error(format!("Tool {:?} is not available to this request. Use tool_describe to check the selected capabilities; tool_invoke does not enable unavailable tools.", args.reference.name)))?;
+            let target = frozen.tools.iter().find(|tool| tool.name == args.name)
+                .ok_or_else(|| error(format!("Tool {:?} is not available to this request. Use tool_describe to check the available tools.", args.name)))?;
             if disclosure::is_gateway(target) {
                 return Err(error(
                     "Call the registered tool_describe or tool_invoke function directly; a gateway cannot invoke another gateway.",
                 ));
-            }
-            if target.version != args.reference.version {
-                return Err(error(format!(
-                    "The reference for tool {:?} does not match this request's version. Call tool_describe with this name and use the returned reference unchanged.",
-                    target.name
-                )));
             }
             Ok(Request::Invoke(args))
         }
@@ -347,7 +335,7 @@ impl Call {
                     return Ok(read(
                         "operations",
                         operations,
-                        json!({"name":name,"view":"operations","description":docs::summary(tool),"reference":entry["reference"],"full":entry["full"]}),
+                        json!({"name":name,"view":"operations","description":docs::summary(tool),"full":entry["full"]}),
                     ));
                 }
             }
@@ -478,7 +466,7 @@ impl Call {
     fn summary(&self, tool: &ToolSchema) -> Value {
         use varin_runtime::tool_documentation as docs;
         json!({"name":tool.name,"description":docs::summary(tool),"namespace":docs::namespace(tool),
-            "reference":{"name":tool.name,"version":tool.version},"requirements":tool.requirements,
+            "requirements":tool.requirements,
             "directlyCallable":disclosure::is_declared_for(tool,self.frozen.direct_tools.as_deref()),
             "describe":{"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name}}})
     }
@@ -496,7 +484,7 @@ impl Call {
         ) {
             json!({"tool":tool.name})
         } else {
-            json!({"tool":disclosure::INVOKE,"arguments":{"reference":{"name":tool.name,"version":tool.version},"arguments":{}}})
+            json!({"tool":disclosure::INVOKE,"arguments":{"name":tool.name,"arguments":{}}})
         };
         value["related"] = json!(
             disclosure::related(&tool.name)
@@ -551,6 +539,12 @@ impl Call {
             value["view"] = "complete".into();
         }
         if value.get("parameters").is_some() {
+            let arguments = docs::invocation_arguments(&value["parameters"]);
+            if disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()) {
+                value["invocation"]["arguments"] = arguments;
+            } else {
+                value["invocation"]["arguments"]["arguments"] = arguments;
+            }
             if let Some(output) = &tool.output_schema {
                 value["outputSchema"] = output.clone();
             }
@@ -648,7 +642,7 @@ impl Call {
                     &varin_runtime::ExecutorOwner::Kernel,
                     NestedToolInput {
                         call_id: "target".into(),
-                        name: args.reference.name.clone(),
+                        name: args.name.clone(),
                         arguments: args.arguments.clone(),
                     },
                 )?;
@@ -684,7 +678,7 @@ impl Call {
                         Value::Null.into(),
                     ),
                 };
-                let mut data = json!({"reference":args.reference,"operationId":receipt.operation_id,"completion":completion,"result":output.data});
+                let mut data = json!({"name":args.name,"operationId":receipt.operation_id,"completion":completion,"result":output.data});
                 if let Some(error) = failure {
                     data["error"] = json!(error);
                 }

@@ -103,6 +103,10 @@ impl Launch {
         let data_epoch = kernel_epoch.clone();
         let marker_path = spool_path.with_extension("output.complete");
         let shared = Arc::new(Shared::new());
+        if config["mode"] == "pty" {
+            *shared.screen.lock().unwrap_or_else(|error| error.into_inner()) = screen::Screen::new(
+                config["rows"].as_u64().unwrap_or(24) as u16, config["cols"].as_u64().unwrap_or(80) as u16);
+        }
         let (input, input_rx) = mpsc::sync_channel::<Value>(4);
         let guardian = Arc::new(Mutex::new(guardian));
         let containment = Arc::new(containment);
@@ -242,6 +246,14 @@ impl Launch {
                                     .max(receipt.identity().sequence as i64);
                                 buffer.input_error = receipt.identity().reason.clone();
                             }
+                            drop(buffer);
+                            if let interaction::Receipt::Resize { identity, rows, cols } = &receipt {
+                                if identity.state == interaction::State::Applied {
+                                    if let Some(screen) = reader_shared.screen.lock().unwrap_or_else(|error| error.into_inner()).as_mut() {
+                                        screen.resize(*rows, *cols);
+                                    }
+                                }
+                            }
                         }
                         Some("output-error") => {
                             reader_shared.lock().output_error =
@@ -318,6 +330,8 @@ impl Launch {
                         offset,position:position-5-bytes.len() as u64,length:bytes.len(),channel:if channel==1 {"stdout"} else {"stderr"},
                     });
                     offset=end;
+                    let mut screen = data_shared.screen.lock().unwrap_or_else(|error| error.into_inner());
+                    if let Some(screen) = screen.as_mut() { screen.process(&bytes); }
                     let mut buffer = data_shared.lock();
                     buffer.end=end;
                     buffer.file_end = position;
@@ -334,12 +348,13 @@ impl Launch {
                     .map_err(|_| io::Error::other("output publication poisoned"))?;
                 let released = data_shared.lock().discard;
                 if !discarded && !released {
+                    let screen = data_shared.screen.lock().unwrap_or_else(|error| error.into_inner()).as_ref().map(screen::Screen::snapshot);
                     let temporary = marker_path.with_extension("complete.tmp");
                     let mut marker = File::create(&temporary)?;
                     marker.write_all(
                         serde_json::to_string(
                             &json!({"processId":data_process_id,"kernelEpoch":data_epoch,
-                        "endCursor":end,"fileBytes":file_end,"complete":true}),
+                        "endCursor":end,"fileBytes":file_end,"complete":true,"screen":screen}),
                         )?
                         .as_bytes(),
                     )?;

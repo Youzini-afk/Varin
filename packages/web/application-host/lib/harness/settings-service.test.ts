@@ -187,6 +187,25 @@ describe("settings service catalog search", () => {
     const page = await service.search(caller, { category: "chat", limit: 3, offset: 0 });
     assert.equal(page.items.length, 3);
     assert.ok(page.total > 3);
+    assert.equal(page.next?.offset, 3);
+    const next = await service.search(caller, page.next!);
+    assert.deepEqual(next.items.map(item => item.id), all.items.slice(3, 6).map(item => item.id));
+  });
+
+  it("browses compact entries and reads the selected editing contract on demand", async () => {
+    const { service } = fixture();
+    const overview = await service.search(caller, { query: 'providers.models' });
+    const item = overview.items.find(item => item.id === 'providers.models')!;
+    assert.ok(item);
+    assert.equal(item.fields, undefined);
+    assert.equal(item.keywords, undefined);
+    assert.deepEqual(item.read, { tool: 'settings_read', arguments: { id: item.id } });
+    const exact = await service.search(caller, { id: item.id });
+    const full = await service.search(caller, { query: 'providers.models', detail: 'full' });
+    assert.ok(exact.items[0]?.fields?.length);
+    assert.deepEqual(full.items.find(entry => entry.id === item.id)?.fields, exact.items[0]?.fields);
+    const read = await service.read(caller, item.read!.arguments);
+    assert.ok(read.fields?.length);
   });
 
   it("locates a stable id exactly", async () => {

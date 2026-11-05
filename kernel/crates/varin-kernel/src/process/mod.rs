@@ -8,6 +8,7 @@ pub(crate) mod subscriptions;
 pub(crate) mod worker;
 pub(crate) mod text;
 mod paging;
+mod screen;
 mod program;
 pub(crate) mod launch;
 use crate::{
@@ -62,6 +63,7 @@ struct Shared {
     // Seek metadata only; reading never consumes or deletes retained output.
     spool_index: Mutex<SpoolIndex>,
     text_pages: Mutex<paging::Boundaries>,
+    screen: Mutex<Option<screen::Screen>>,
 }
 impl Shared {
     fn new() -> Self {
@@ -75,6 +77,7 @@ impl Shared {
             interaction_wakes: Mutex::new(HashMap::new()),
             spool_index: Mutex::new(SpoolIndex::default()),
             text_pages: Mutex::new(paging::Boundaries::default()),
+            screen: Mutex::new(None),
         }
     }
     fn notify(&self) {
@@ -468,7 +471,7 @@ impl ProcessManager {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => None,
                 Err(error) => return Err(error.into()),
             };
-            let complete = if let Some(marker) = marker {
+            let complete = if let Some(marker) = &marker {
                 if truncated
                     || marker["processId"].as_str() != Some(id)
                     || marker["kernelEpoch"].as_str() != Some(epoch)
@@ -485,6 +488,9 @@ impl ProcessManager {
                 false
             };
             let shared = Arc::new(Shared::new());
+            if let Some(view) = marker.as_ref().and_then(|marker| marker.get("screen")).filter(|view| view.is_object()) {
+                *shared.screen.lock().unwrap_or_else(|error| error.into_inner()) = Some(screen::Screen::Retained(view.clone()));
+            }
             *shared.spool_index.lock().unwrap_or_else(|error|error.into_inner())=index;
             {
                 let mut buffer = shared.lock();
@@ -607,6 +613,15 @@ impl ProcessManager {
     pub(crate) fn read_text(&self, id: &str, cursor: u64, limit: usize, encoding: Option<&str>, record: &Value) -> Result<Value, KernelError> {
         let output = self.outputs.get(id).ok_or_else(|| failure("process output storage unavailable"))?;
         paging::read(output, cursor, limit, encoding, record)
+    }
+    pub(crate) fn read_screen(&self, id: &str) -> Result<Value, KernelError> {
+        let output = self.outputs.get(id).ok_or_else(|| failure("process output storage unavailable"))?;
+        let held = output.shared.screen.lock().unwrap_or_else(|error| error.into_inner());
+        let screen = held.as_ref().ok_or_else(|| failure("No PTY screen was retained for this process; read mode text or raw for its output stream."))?.snapshot();
+        let buffer = output.shared.lock();
+        Ok(json!({"screen":screen,"chunks":[],"nextCursor":buffer.end,"endCursor":buffer.end,"startCursor":0,
+            "inputSequence":buffer.input_sequence,"inputError":buffer.input_error,
+            "outputComplete":buffer.output_closed && buffer.output_error.is_none(),"outputError":buffer.output_error}))
     }
     pub(crate) fn kill(&mut self, id: &str, force: bool) -> Result<Value, KernelError> {
         if let Some(starting)=self.starting.get(id){

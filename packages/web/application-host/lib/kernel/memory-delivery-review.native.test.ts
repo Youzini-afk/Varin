@@ -398,7 +398,7 @@ function toolCall(response: ServerResponse, callId: string, args: Record<string,
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [
     { id: `item-${callId}`, type: 'function_call', call_id: callId, name: 'tool_invoke',
-      arguments: JSON.stringify({ reference: { name: 'memory', version: '1' }, arguments: args }) },
+      arguments: JSON.stringify({ name: 'memory', arguments: args }) },
   ] } })}\n\n`);
 }
 it('actual model tools share UI notes, keep reads cheap, enforce revision CAS and deliver each committed mutation once', async () => {

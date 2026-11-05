@@ -516,7 +516,9 @@ impl Catalog {
         let child_thread_id = format!("thread:child:{}", op.id);
         let child_branch_id = format!("branch:child:{}", op.id);
         super::threads::insert(&tx, &child_thread_id)?;
-        super::threads::initialize_title(&tx, &child_thread_id, prepared.title.as_deref())?;
+        let agent_id: String = tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?;
+        let name = prepared.title.clone().unwrap_or_else(|| format!("Agent {agent_id}"));
+        super::threads::initialize_title(&tx, &child_thread_id, Some(&name))?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![child_branch_id, child_thread_id],
@@ -531,8 +533,8 @@ impl Catalog {
                     let index = (Uuid::new_v4().as_u128() % crate::AGENT_AVATAR_IDS.len() as u128) as usize;
                     crate::AGENT_AVATAR_IDS[index].to_owned()
                 })),
-                agent_id: tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?,
-                name: prepared.title.clone().unwrap_or_else(|| "Agent".into()),
+                agent_id,
+                name,
                 execution_id: op.id.clone(),
                 operation_id: op.id.clone(),
                 parent_run_id: run.id.clone(),

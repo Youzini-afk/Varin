@@ -5,12 +5,16 @@ use serde_json::json;
 
 pub const DESCRIBE: &str = "tool_describe";
 pub const INVOKE: &str = "tool_invoke";
+/// Read both current calls and retained historical gateway calls for presentation.
+pub fn invoked_name(arguments: &serde_json::Value) -> Option<&str> {
+    arguments["name"].as_str().or_else(|| arguments["reference"]["name"].as_str())
+}
 pub const GROUPS: &[(&str, &str)] = &[
     ("files", "File reading, editing and recovery"),
     ("execution", "Processes, terminal interaction and managed scripts"),
     ("collaboration", "Agents, conversation history, code exchange and follow-ups"),
     ("documents", "Web search, page/document reading and retained material collections"),
-    ("media", "Image generation, editing and generated visual interfaces"),
+    ("media", "Images and interactive content"),
     (
         "research",
         "Scholarly search and publication relationships",
@@ -50,14 +54,14 @@ fn build_schemas() -> Vec<ToolSchema> {
         .collect::<Vec<_>>()
         .join("; ");
     [
-        (DESCRIBE, format!("查询当前目录中的真实工具。省略参数浏览分组；query 搜索简短候选，namespace 浏览分组。已知名称用 name 或 names；复合工具展示真实操作，operation 可直接读取该操作的完整契约，detail: full 读取原契约。结果中的 next 可继续读取完整条目，path 读取原说明的 JSON 结构。已有有效引用可复用。查询不会新增模型函数；未直接声明的目标用 tool_invoke({{reference,arguments:目标参数}})，不要再次嵌套 arguments。脚本中使用 tools.invoke({{name,arguments:目标参数}})，读取 result.completion.kind、result.completion.content.data 和 parts。分组是导航，模型可自由组合文件、程序、脚本、应用和服务；MCP 沿 mcp_discover/mcp_call。分组索引：{index}。"),
+        (DESCRIBE, format!("查询当前目录中的真实工具。省略参数浏览分组；query 搜索简短候选，namespace 浏览分组。已知名称用 name 或 names；复合工具展示真实操作，operation 选择要阅读的操作文档，实际调用使用返回的 parameters 和 invocation（操作字段可能是 action 等名称）。detail: full 读取原契约。结果中的 next 可续读，path 读取原说明的 JSON 结构。已知工具可以直接调用，无需重复发现。未直接声明的目标用 tool_invoke({{name,arguments:目标参数}})，不要再次嵌套 arguments。脚本中使用 tools.invoke({{name,arguments:目标参数}})，读取 result.completion.kind、result.completion.content.data 和 parts。分组是导航，模型可自由组合文件、程序、脚本、应用和服务；MCP 沿 mcp_discover/mcp_call。分组索引：{index}。"),
          json!({"type":"object","additionalProperties":false,"properties":{"namespace":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},
              "names":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1}},
              "query":{"type":"string","minLength":1},"detail":{"type":"string","enum":["summary","full"]},
              "operation":{"type":"string","minLength":1},"path":{"type":"string"},"cursor":{"type":"string","minLength":1,"description":"Use alone; continues the same frozen directory and query."}}})),
-        (INVOKE, "使用工具的 reference（名称和版本）及符合其参数定义的 arguments 调用当前目录中的能力。reference 可从 tool_describe 取得并在有效时复用。未在本次 tools 中单独声明的工具通过本入口调用；可用范围与原工具权限保持一致。".into(),
-         json!({"type":"object","additionalProperties":false,"required":["reference","arguments"],"properties":{
-             "reference":{"type":"object","additionalProperties":false,"required":["name","version"],"properties":{"name":{"type":"string","minLength":1},"version":{"type":"string","minLength":1}}},
+        (INVOKE, "按名称 name 和目标参数 arguments 调用当前可用工具。已知名称与参数即可调用；需要了解能力或修正参数时可用 tool_describe。执行使用本次请求的工具定义与权限。".into(),
+         json!({"type":"object","additionalProperties":false,"required":["name","arguments"],"properties":{
+             "name":{"type":"string","minLength":1},
              "arguments":{"type":"object"}}})),
     ].into_iter().map(|(name, description, schema)| ToolSchema {
         name: name.into(), version: "1".into(), description, schema,

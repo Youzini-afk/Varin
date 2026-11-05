@@ -34,6 +34,7 @@ globset.workspace = true
 tree-sitter.workspace = true
 streaming-iterator.workspace = true
 wasmparser.workspace = true
+vt100 = "=0.18.1"
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

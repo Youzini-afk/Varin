@@ -397,7 +397,7 @@ impl ModelProvider for ProductMemoryModel {
                         if result.call_id == format!("memory-{index}") =>
                     {
                         match &result.completion {
-                            ToolCompletion::Result { content, .. } => Some(if content.data.get("reference").is_some() {
+                            ToolCompletion::Result { content, .. } => Some(if content.data["name"] == "memory" {
                                 content.data["result"].clone()
                             } else { content.data.clone() }),
                             _ => None,
@@ -434,7 +434,7 @@ impl ModelProvider for ProductMemoryModel {
                     call_id: format!("memory-{step}"),
                     name: "tool_invoke".into(),
                     schema_version: "1".into(),
-                    arguments: json!({"reference":{"name":"memory","version":"bot-2"},"arguments":arguments}),
+                    arguments: json!({"name":"memory","arguments":arguments}),
                 },
             })
             .unwrap_or(Content::Text {

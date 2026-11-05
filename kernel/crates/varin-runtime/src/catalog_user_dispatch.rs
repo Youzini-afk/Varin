@@ -239,16 +239,7 @@ impl UserChildDispatchSelection {
             .name
             .as_deref()
             .map(str::trim)
-            .map(str::to_owned)
-            .or_else(|| {
-                p.command
-                    .input
-                    .task
-                    .lines()
-                    .map(str::trim)
-                    .find(|line| !line.is_empty())
-                    .map(str::to_owned)
-            });
+            .map(str::to_owned);
         let command_ref = p.content.save(&serde_json::to_value(&p.command)?)?;
         let operation_id = operation_id(&p.command);
         let project = self.selection.project(&p.command.input)?;

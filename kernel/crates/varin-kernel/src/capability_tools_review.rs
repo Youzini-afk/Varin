@@ -30,7 +30,9 @@ fn discovery_pages_whole_entries_and_reads_exact_operations_without_changing_exe
     let search=call.describe(&serde_json::from_value(json!({"query":"截图 屏幕"})).unwrap()).unwrap();assert_eq!(search["tools"][0]["name"],"viewer");assert!(search["tools"][0].get("parameters").is_none());
     let exact=call.describe(&serde_json::from_value(json!({"name":"viewer","operation":"capture"})).unwrap()).unwrap();
     assert_eq!(exact["parameters"]["required"],json!(["application"]));assert!(exact.get("metadata").is_none());assert!(exact.get("scriptInvocation").is_none());
-    assert_eq!(exact["reference"]["version"],"original");assert_eq!(frozen.tools.last().unwrap().schema["oneOf"].as_array().unwrap().len(),2);
+    assert!(exact.get("reference").is_none());
+    assert_eq!(exact["invocation"]["arguments"]["arguments"], json!({"view":"capture"}));
+    assert_eq!(frozen.tools.last().unwrap().schema["oneOf"].as_array().unwrap().len(),2);
     let mut large=frozen.clone();Arc::make_mut(&mut large.tools)[0].description="文本😀".repeat(600);
     let large_call=Call {owner:owner.clone(),frozen:large.clone(),name:disclosure::DESCRIBE.into(),request:Request::Describe(Describe::default())};
     let mut args:Describe=serde_json::from_value(json!({"name":"external_000","path":"/description"})).unwrap();let mut text=String::new();
@@ -41,6 +43,19 @@ fn discovery_pages_whole_entries_and_reads_exact_operations_without_changing_exe
     let changed_call=Call {owner:owner.clone(),frozen:changed,name:disclosure::DESCRIBE.into(),request:Request::Describe(Describe::default())};
     assert_eq!(changed_call.describe(&serde_json::from_value(json!({"cursor":first_cursor.unwrap()})).unwrap()).unwrap()["status"],"directory_changed");
     drop(large_call);drop(changed_call);drop(call);drop(owner);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn known_name_calls_need_no_discovery_or_target_version() {
+    let mut tools = disclosure::schemas();
+    tools.push(ToolSchema { name: "known_target".into(), version: "new-implementation".into(), description: "Target".into(),
+        schema: json!({"type":"object"}), requirements: None, metadata: None, output_schema: None });
+    let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
+        child_dispatch: None, resource_activations: vec![], resource_checkpoint_id: None, run_id: "run".into(),
+        origin: ToolOrigin::ModelStep { request_id: "request".into() }, tool_schema_generation: 1, tools: Arc::new(tools), source: None };
+    let call = ToolCall { call_id: "call".into(), name: disclosure::INVOKE.into(), schema_version: "1".into(),
+        arguments: json!({"name":"known_target","arguments":{}}) };
+    assert!(matches!(parse(&call, &frozen).unwrap(), Request::Invoke(Invoke { name, .. }) if name == "known_target"));
 }
 
 struct Provider {
@@ -168,14 +183,8 @@ impl ModelProvider for Provider {
                 assert_eq!(result["name"], if self.mode == "question" { "ask_user" } else { "fixture_effect" });
                 assert_eq!(result["directlyCallable"], self.mode == "question");
                 assert_eq!(result["invocation"]["tool"], if self.mode == "question" { "ask_user" } else { disclosure::INVOKE });
-                if self.mode != "question" { assert_eq!(result["invocation"]["arguments"]["reference"], result["reference"]); }
-                let mut reference = result["reference"].clone();
-                if self.mode == "stale" {
-                    reference["version"] = json!("obsolete");
-                }
-                if self.mode == "missing" {
-                    reference["name"] = json!("not_selected");
-                }
+                if self.mode != "question" { assert_eq!(result["invocation"]["arguments"]["name"], result["name"]); }
+                let name = if self.mode == "missing" { "not_selected" } else { result["name"].as_str().unwrap() };
                 let arguments = if self.mode.ends_with("invalid") {
                     json!({})
                 } else if self.mode == "question" {
@@ -186,8 +195,8 @@ impl ModelProvider for Provider {
                 let call = if self.mode.starts_with("direct_") {
                     ToolCall {
                         call_id: "invoke".into(),
-                        name: reference["name"].as_str().unwrap().into(),
-                        schema_version: reference["version"].as_str().unwrap().into(),
+                        name: name.into(),
+                        schema_version: "original".into(),
                         arguments,
                     }
                 } else {
@@ -195,7 +204,7 @@ impl ModelProvider for Provider {
                         call_id: "invoke".into(),
                         name: disclosure::INVOKE.into(),
                         schema_version: "1".into(),
-                        arguments: json!({"reference":reference,"arguments":arguments}),
+                        arguments: json!({"name":name,"arguments":arguments}),
                     }
                 };
                 Content::ToolCall { call }
@@ -245,6 +254,7 @@ impl ToolExecutor for Target {
         _: &FrozenToolContext,
         _: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
+        assert_eq!(call.schema_version, "original", "the executor receives its bound version without model-supplied versions");
         if !call.arguments["mode"].is_string() {
             return Err(error("mode required"));
         }
@@ -317,7 +327,7 @@ impl ToolExecutor for Target {
 #[test]
 fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output() {
     for mode in [
-        "success", "denied", "stale", "missing", "unknown", "question", "invalid", "not_dispatched",
+        "success", "denied", "missing", "unknown", "question", "invalid", "not_dispatched",
         "direct_success", "direct_denied", "direct_invalid",
     ] {
         let root = std::env::temp_dir().join(format!("varin-disclosure-{}", uuid::Uuid::new_v4()));

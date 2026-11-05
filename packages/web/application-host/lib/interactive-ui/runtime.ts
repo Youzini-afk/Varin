@@ -214,9 +214,9 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
         const page = textPage(JSON.stringify(definition), input, { kind: 'ui', ref: version.ref, view: 'source' });
         return { status: 'ready', ...summary, ...(page.next || page.offset ? { contentText: page.content, offset: page.offset, totalBytes: page.totalBytes, ...(page.next ? { next: page.next } : {}) } : definition) };
       }
-      if (!input.file) return { status: 'ready', ...summary };
-      const text = await store.file(root, version.ref, input.file);
-      return sourcePage(text, input, version.ref);
+      const file = input.file ?? version.entry;
+      const text = await store.file(root, version.ref, file);
+      return sourcePage(text, { ...input, file }, version.ref);
     }
     let observed: UiObservation, snapshotRef: string, text: string | undefined;
     if (input.ref.startsWith('ui-selection:')) {

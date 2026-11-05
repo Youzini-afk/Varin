@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Mode { #[default] Text, Raw }
+pub(crate) enum Mode { #[default] Text, Raw, Screen }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all="camelCase", deny_unknown_fields)]
@@ -130,6 +130,7 @@ pub(crate) fn output_state(value: &Value) -> Option<Value> {
 
 pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     if let Some(state) = output_state(value) { value["outputState"] = state; }
+    if matches!(mode, Mode::Screen) { return; }
     if let (Some(next), Some(end), Some(chunks)) = (value["nextCursor"].as_u64(), value["endCursor"].as_u64(), value["chunks"].as_array()) {
         let returned: u64 = chunks.iter().filter_map(|chunk| chunk["byteLength"].as_u64()).sum();
         let unread = end.saturating_sub(next);

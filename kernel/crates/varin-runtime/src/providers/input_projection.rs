@@ -68,7 +68,7 @@ fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bo
 }
 
 fn process_call(call: &ToolCall) -> bool {
-    let name = if call.name == crate::tool_disclosure::INVOKE { call.arguments["reference"]["name"].as_str().unwrap_or("") } else { &call.name };
+    let name = if call.name == crate::tool_disclosure::INVOKE { crate::tool_disclosure::invoked_name(&call.arguments).unwrap_or("") } else { &call.name };
     matches!(name,"process_spawn"|"process_read")
 }
 fn process_text(content: &Content) -> Option<Content> {

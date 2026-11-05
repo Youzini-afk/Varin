@@ -32,7 +32,7 @@ import type { LaunchTool } from './protocol.generated.js';
 
 function invokeTool(tool: Pick<LaunchTool, 'name' | 'version'>, args: unknown, callId: string) {
   return { id: `item-${callId}`, type: 'function_call', call_id: callId, name: 'tool_invoke',
-    arguments: JSON.stringify({ reference: { name: tool.name, version: tool.version }, arguments: args }) };
+    arguments: JSON.stringify({ name: tool.name, arguments: args }) };
 }
 const discover = (id: string) => invokeTool({ name: 'mcp_discover', version: '1' }, { server: 'fixture' }, id);
 

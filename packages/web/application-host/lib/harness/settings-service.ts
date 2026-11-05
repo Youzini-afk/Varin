@@ -348,8 +348,12 @@ export interface SettingsService {
 }
 
 export function createSettingsService(deps: SettingsServiceDeps): SettingsService {
-  const toSearchItem = (entry: SettingsCatalogEntry): SettingsSearchItem => {
+  const toSearchItem = (entry: SettingsCatalogEntry, detail: 'summary' | 'full' = 'full'): SettingsSearchItem => {
     const item = catalogSearchItem(entry);
+    if (detail === 'summary') {
+      const { fields: _fields, keywords: _keywords, ...summary } = item;
+      return { ...summary, read: { tool: 'settings_read', arguments: { id: entry.id } } };
+    }
     const adapter = deps.actions?.adapterFor(entry.actionRef?.domain);
     return adapter ? { ...item, actions: Object.fromEntries(Object.entries(getSettingsActionContracts(entry)).filter(([verb]) => adapter.verbs.includes(verb))) } : item;
   };
@@ -357,6 +361,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsSearchParams,
   ): Promise<SettingsSearchResult> => {
+    const detail = params.detail ?? (params.id ? 'full' : 'summary');
     const translations = params.query?.trim() && !params.id ? await settingsSearchTranslations() : undefined;
     const matches = querySettingsCatalog({
       ...(params.query !== undefined ? { query: params.query } : {}),
@@ -376,7 +381,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       }
     }
     const related = [...relatedScores].sort((a, b) => b[1] - a[1] || a[0].id.localeCompare(b[0].id))
-      .slice(0, limit).map(([entry]) => toSearchItem(entry));
+      .slice(0, limit).map(([entry]) => toSearchItem(entry, detail));
     const categories = new Map<string, number>();
     for (const entry of matches) {
       categories.set(entry.category, (categories.get(entry.category) ?? 0) + 1);
@@ -385,11 +390,12 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const summaries = await summarizeSearchItems(caller, page);
     return {
       items: page.map((entry, index) => {
-        const item = toSearchItem(entry);
+        const item = toSearchItem(entry, detail);
         const summary = summaries[index];
         return summary ? { ...item, summary } : item;
       }),
       total: matches.length,
+      ...(offset + page.length < matches.length ? { next: { ...params, offset: offset + page.length } } : {}),
       ...(related.length ? { related } : {}),
       categories: [...categories.entries()]
         .map(([category, count]) => ({ category, count }))

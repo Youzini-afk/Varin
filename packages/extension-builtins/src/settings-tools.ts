@@ -8,10 +8,11 @@ const patch = { type: 'object', additionalProperties: false, required: ['id'], p
 } };
 export const SETTINGS_TOOL_DECLARATIONS: readonly VarinExtensionServiceProvision[] = [
   { id: 'varin.settings.search', version: 2, tool: { name: 'settings_search', operation: 'read', completion: 'result',
-    description: 'Find native application settings by keyword, category or stable id. Discover executable field and per-verb schemas, saved/configured values and target scopes; unavailable owners never imply empty configuration.',
+    description: 'Find native settings by keyword, category or stable id. Default searches return concise candidates and read links; next continues the list. An exact id or detail:full returns field and per-verb schemas. settings_read reads one setting with its current values and edit contract.',
     inputSchema: { type: 'object', additionalProperties: false, properties: {
       query: { type: 'string' }, category: { type: 'string' }, owner: { type: 'string', enum: ['app', 'agent-settings', 'client', 'action'] },
       id: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 }, offset: { type: 'integer', minimum: 0 },
+      detail: { enum: ['summary', 'full'] },
     } }, outputSchema: { type: 'object' } } },
   { id: 'varin.settings.read', version: 2, tool: { name: 'settings_read', operation: 'read', completion: 'result',
     description: 'Read saved layers, merged configured next-use values, owner revision and actual apply timing (not an active Run snapshot). Global native settings work without a project. Project settings require the original admitted trusted source. Client settings target one authenticated Surface bound to this exact Thread/branch.',

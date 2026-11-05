@@ -108,13 +108,13 @@ impl ToolKind {
                 "Inspect a retained process owned by the admitted execution environment."
             }
             Self::ProcessRead => {
-                "Read retained process output. Reading is non-destructive: any retained byte cursor can be revisited. Text pages align to complete characters and omit terminal controls; byteLength and cursors still count original bytes, not visible characters. Continue with nextCursor. Raw mode returns exact bytes."
+                "Read retained process output. mode:screen shows the current PTY viewport for interactive programs, with redraws applied; it does not consume the log. Text mode reads log pages, aligns complete characters and omits terminal controls. Raw mode returns exact bytes. Byte cursors refer to the original log and can be revisited; nextCursor continues it."
             }
             Self::ProcessSpawn => {
                 "Start a process in the admitted execution environment and return its durable operation handle."
             }
             Self::ProcessWrite => {
-                "Send exact UTF-8 text to the original process input channel. submit appends its advertised input.lineEnding (Enter); text may be empty. confirmedBytes/state:applied confirms channel writes, not application execution. Read process output for its response. Pipe EOF is explicit; PTY control characters remain exact."
+                "Send UTF-8 text to the original process input channel. With submit:true, line breaks are normalized to input.lineEnding and a final Enter is added if needed; empty text sends Enter. Without submit, bytes and PTY control characters remain exact. confirmedBytes/state:applied confirms channel writes, not application execution. Read output for the response. Pipe EOF is explicit."
             }
             Self::ProcessResize => {
                 "Resize the original PTY and wait for its actual size-change receipt."
@@ -332,9 +332,46 @@ impl ProcessWriteArgs {
             let process=resources.interactions.as_ref().ok_or_else(||ExecutionError::new("process_unavailable","The original process input owner is unavailable"))?
                 .access(binding.clone(),self.process_id.clone()).map_err(|error|ExecutionError::new("process_input",error.to_string()))?;
             let ending=process["input"]["lineEnding"].as_str().ok_or_else(||ExecutionError::new("process_input","The original process did not publish an input line ending"))?;
-            bytes.extend_from_slice(ending.as_bytes());
+            bytes = submitted_text(&self.text, ending).into_bytes();
         }
         Ok(crate::process::interaction::Input::Write {bytes:bytes.into(),eof:self.eof})
+    }
+}
+fn submitted_text(text: &str, ending: &str) -> String {
+    let mut result = text.replace("\r\n", "\n").replace('\r', "\n").replace('\n', ending);
+    if result.is_empty() || !result.ends_with(ending) { result.push_str(ending); }
+    result
+}
+
+fn agent_environment_defaults(environment: &mut Vec<Value>, windows: bool) {
+    if windows {
+        for (name, value) in [("PYTHONIOENCODING", "utf-8"), ("PYTHONUTF8", "1")] {
+            if !environment.iter().any(|entry| entry["name"].as_str().is_some_and(|key| key.eq_ignore_ascii_case(name))) {
+                environment.push(json!({"name":name,"value":value}));
+            }
+        }
+    }
+}
+#[cfg(test)]
+mod process_input_defaults_tests {
+    use super::*;
+    #[test]
+    fn submit_normalizes_each_line_without_duplicating_enter() {
+        assert_eq!(submitted_text("one\ntwo\r\nthree\r", "\r"), "one\rtwo\rthree\r");
+        assert_eq!(submitted_text("one\r\ntwo", "\n"), "one\ntwo\n");
+        assert_eq!(submitted_text("", "\r"), "\r");
+        assert_eq!(submitted_text("line\n", "\n"), "line\n");
+    }
+    #[test]
+    fn windows_defaults_preserve_user_environment() {
+        let mut env = vec![json!({"name":"PythonIoEncoding","value":"gbk"})];
+        agent_environment_defaults(&mut env, true);
+        assert_eq!(env, vec![json!({"name":"PythonIoEncoding","value":"gbk"}),json!({"name":"PYTHONUTF8","value":"1"})]);
+        let mut empty = vec![];
+        agent_environment_defaults(&mut empty, false);
+        assert!(empty.is_empty());
+        agent_environment_defaults(&mut empty, true);
+        assert!(empty.iter().any(|item| item["name"] == "PYTHONIOENCODING" && item["value"] == "utf-8"));
     }
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -353,6 +390,7 @@ struct ProcessInspectArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProcessReadArgs {
     process_id: String,
+    #[serde(default)]
     cursor: u64,
     max_bytes: Option<u64>,
     #[serde(default)]
@@ -1963,6 +2001,7 @@ impl KernelToolExecutor {
                 let path=std::env::join_paths(std::env::split_paths(current).chain(extra.iter().map(std::path::PathBuf::from)))
                     .map_err(|error|ExecutionError::new("environment_encoding",error.to_string()))?;
                 env.push(json!({"name":"PATH","value":path.to_string_lossy()}));
+                agent_environment_defaults(&mut env, cfg!(windows));
                 arguments["env"]=json!(env);
             }
         }
@@ -2834,12 +2873,12 @@ fn tool_schema(kind: ToolKind) -> Value {
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
             json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte offset. Text may include the character crossing this position and reports actualCursor."},"maxBytes":{"type":"integer","minimum":1,"description":"Byte page target. Text pages end at a complete character; a tiny target returns at least one complete character."},
-                "mode":{"type":"string","enum":["text","raw"],"default":"text","description":"text decodes readable output and removes ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
+                "mode":{"type":"string","enum":["text","raw","screen"],"default":"text","description":"screen reads the current PTY viewport (cursor and maxBytes do not paginate it); text reads log pages without ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
                 "encoding":{"type":"string","description":"Text encoding override, such as utf-8, gbk, shift_jis or utf-16le. Auto uses BOM/UTF-8, then the actual Windows source Host's codepage hint."}}),
-            vec!["processId", "cursor"],
+            vec!["processId"],
         ),
         ToolKind::ProcessWrite => (
-            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"Exact JSON-decoded UTF-8 input; escapes are decoded once. Writing confirms delivery to the input channel, not application execution."},"submit":{"type":"boolean","default":false,"description":"Append this process input.lineEnding once after text. Empty text with submit sends Enter. Existing newlines are kept."},"eof":{"type":"boolean"}}),
+            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"JSON-decoded UTF-8 input; escapes are decoded once. Without submit, all bytes are kept exactly."},"submit":{"type":"boolean","default":false,"description":"Normalize text line breaks to this process input.lineEnding, then append a final Enter if absent. Empty text sends Enter."},"eof":{"type":"boolean"}}),
             vec!["processId", "text"],
         ),
         ToolKind::ProcessResize => (

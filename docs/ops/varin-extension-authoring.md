@@ -973,7 +973,7 @@ Additional tool documentation uses native `tool_describe`: `{}` lists available 
 reads one exact tool. Search returns concise candidates by default. Simple tool details include complete
 parameters and a version reference; compound tools expose their original operations, selectable directly
 with `operation`. A model calls an already declared function directly, and otherwise uses
-`tool_invoke({ reference, arguments })`.
+`tool_invoke({ name, arguments })`. The current request resolves the tool binding; models do not supply a version.
 Both use the original frozen capability directory, validation and permissions.
 Documentation is appended as tool-result data; the
 provider's function list stays fixed. Unavailable tools are absent, and discovery grants no
