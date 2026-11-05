@@ -38,7 +38,7 @@ function ResolvedEmbeddedUiContent({ refValue, sourceKey, ancestors }: { refValu
   if (conversation?.uiInlineViews) return <InlineUiSlot session={session} anchorKey={sourceKey} kind="embed" cwd={conversation.fileDirectory} />;
   if (!session.display) return <p role="status" className="text-sm text-muted-foreground">{t('common.loading')}</p>;
   return <UiEmbedAncestryContext.Provider value={[...ancestors, refValue]}>
-    {session.display.content ? <DeclarativeUiContent node={session.display.content} sourceKey={session.key} source={session.display.source} />
+    {session.display.content ? <DeclarativeUiContent node={session.display.content} sourceKey={session.key} session={session} source={session.display.source} />
       : <UiWorkView session={session} {...session.display} cwd={conversation?.fileDirectory} />}
     <UiRevisionLink session={session} />
   </UiEmbedAncestryContext.Provider>;

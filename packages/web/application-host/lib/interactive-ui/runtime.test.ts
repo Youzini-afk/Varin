@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createInteractiveUiRuntime } from './runtime.js';
 
-const store = vi.hoisted(() => ({ render: vi.fn(), source: vi.fn(), resolve: vi.fn(), view: vi.fn(), saveView: vi.fn(), captureBranch: vi.fn(), branchSeed: vi.fn(), operationReceipt: vi.fn(), collect: vi.fn(), cleanup: vi.fn() }));
+const store = vi.hoisted(() => ({ render: vi.fn(), source: vi.fn(), resolve: vi.fn(), view: vi.fn(), saveView: vi.fn(), captureBranch: vi.fn(), branchSeed: vi.fn(), operationReceipt: vi.fn(), collectFamilies: vi.fn(), cleanup: vi.fn(), hasReleasedSelections: vi.fn() }));
 vi.mock('./store.js', async importOriginal => ({ ...await importOriginal<typeof import('./store.js')>(), createUiContentStore: () => store }));
 const definition = { type: 'choice', label: '发型', options: ['短发', '长发'] };
 const text = '正文\n```varin-ui\n' + JSON.stringify(definition) + '\n```\n';
@@ -17,11 +17,11 @@ function fixture() {
   };
   return { runtime, ui: createInteractiveUiRuntime({ kernel: {} as never, runtime: runtime as never, media: {} as never }) };
 }
-beforeEach(() => { vi.clearAllMocks(); store.cleanup.mockResolvedValue({ pending: false, failures: [] }); store.branchSeed.mockResolvedValue(null); store.view.mockResolvedValue(null); store.render.mockResolvedValue({ ref: 'ui:registered@1' }); store.source.mockResolvedValue({ ref: 'ui:registered@1' }); });
+beforeEach(() => { vi.clearAllMocks(); store.hasReleasedSelections.mockResolvedValue(false); store.collectFamilies.mockImplementation(async (_roots, plan) => await plan()); store.cleanup.mockResolvedValue({ pending: false, failures: [] }); store.branchSeed.mockResolvedValue(null); store.view.mockResolvedValue(null); store.render.mockResolvedValue({ ref: 'ui:registered@1' }); store.source.mockResolvedValue({ ref: 'ui:registered@1' }); });
 it('derives registration only from the original assistant text and canonicalizes equivalent source coordinates', async () => {
   const { runtime, ui } = fixture();
   await ui.registerFragment(identity, { messageId: 'message', fragmentKey: 'offset:3' });
-  expect(runtime.historyItem).toHaveBeenCalledWith(reference, undefined);
+  expect(runtime.historyItem).toHaveBeenCalledWith(reference);
   expect(store.render).toHaveBeenCalledWith('family', { content: definition, title: '发型' }, expect.stringContaining('fragment:'), undefined,
     expect.objectContaining({ threadId: identity.threadId, branchId: identity.branchId, messageId: 'message', fragmentKey: 'offset:3' }));
 });
@@ -40,7 +40,7 @@ it('pins ancestry pagination and separates branch origins without rewriting hist
   runtime.historyPage.mockResolvedValueOnce({ head: 'latest', items: [], previous: 'older', boundary_reset: false })
     .mockResolvedValueOnce({ head: 'latest', items: [reference], previous: null, boundary_reset: false });
   await ui.registerFragment(identity, { messageId: 'message', fragmentKey: 'offset:3' });
-  expect(runtime.historyPage.mock.calls[1]).toEqual([{ branchId: 'branch', headId: 'latest', beforeId: 'older', limit: 100 }, undefined]);
+  expect(runtime.historyPage.mock.calls[1]).toEqual([{ branchId: 'branch', headId: 'latest', beforeId: 'older', limit: 100 }]);
   const mainOrigin = store.render.mock.calls[0]![2];
   await ui.registerFragment({ ...identity, branchId: 'fork' }, { messageId: 'message', fragmentKey: 'offset:3', contentIndex: 0 });
   expect(store.render.mock.calls[1]![2]).not.toEqual(mainOrigin);
@@ -204,13 +204,16 @@ it('discovers persisted UI namespaces before requesting full native retention tr
   expect(await ui.releaseDeleted()).toEqual({ pending: false });
   expect(store.cleanup).toHaveBeenCalledWith('family', undefined);
   expect(runtime.materialRetention.mock.calls).toEqual([[undefined, undefined], [undefined, undefined, true]]);
-  expect(store.collect).toHaveBeenCalledWith('family', { ...base, uiReferences: ['ui:kept@1'] }, undefined);
+  expect(store.collectFamilies).toHaveBeenCalledWith(['family'], expect.any(Function), undefined);
   expect(kernel.revokeGrant).toHaveBeenCalledWith('discovery');
-  runtime.materialRetention.mockClear(); store.collect.mockClear();
+  runtime.materialRetention.mockClear(); store.collectFamilies.mockClear();
   threads.push({ threadId: 'child', rootThreadId: 'family', release: false });
   await ui.releaseDeleted();
   expect(runtime.materialRetention.mock.calls).toEqual([[undefined, undefined]]);
-  expect(store.collect).not.toHaveBeenCalled();
+  expect(store.collectFamilies).not.toHaveBeenCalled();
+  store.hasReleasedSelections.mockResolvedValueOnce(true);
+  await ui.releaseDeleted();
+  expect(store.collectFamilies).toHaveBeenCalledWith(['family'], expect.any(Function), undefined);
   kernel.recordWorkspaces.mockResolvedValue({ workspaceIds: [] }); runtime.materialRetention.mockClear();
   await ui.releaseDeleted(); expect(runtime.materialRetention).not.toHaveBeenCalled();
 });
@@ -232,7 +235,7 @@ it('reports pending physical cleanup even when its record was already released',
   const ui = createInteractiveUiRuntime({ kernel: kernel as never, runtime: runtime as never, media: {} as never });
   store.cleanup.mockResolvedValueOnce({ pending: true, failures: ['temporarily busy'] });
   expect(await ui.releaseDeleted()).toEqual({ pending: true });
-  expect(store.collect).not.toHaveBeenCalled();
+  expect(store.collectFamilies).not.toHaveBeenCalled();
   expect(await ui.releaseDeleted()).toEqual({ pending: false });
   expect(store.cleanup).toHaveBeenCalledTimes(2);
   expect(kernel.revokeGrant).toHaveBeenCalledTimes(2);

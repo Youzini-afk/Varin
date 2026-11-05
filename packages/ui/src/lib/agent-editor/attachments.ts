@@ -3,6 +3,7 @@ import type { EditorContextAttachment } from './types';
 import type { ThreadIdentity, ContentReference } from '@varin/application-client';
 import { threadComposerKey } from '@/stores/useThreadStore';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
+import { releaseUiSelection } from '@/lib/interactive-ui/selection-lifetime';
 
 const listeners = new Set<() => void>();
 let attachments: EditorContextAttachment[] = [];
@@ -19,6 +20,10 @@ export function addContentReference(identity: ThreadIdentity, reference: Content
 const emit = (): void => {
   revision += 1;
   for (const listener of listeners) listener();
+};
+const releaseRemoved = (removed: readonly EditorContextAttachment[]) => {
+  for (const item of removed) if (item.runtimeKey === getRuntimeKey() && item.reference
+    && !attachments.some(other => other.runtimeKey === item.runtimeKey && other.reference?.ref === item.reference?.ref)) releaseUiSelection(item.reference);
 };
 
 export const getEditorContextAttachmentsRevision = (): number => revision;
@@ -80,11 +85,13 @@ export const addEditorContextAttachment = (
 };
 
 export const removeEditorContextAttachment = (id: string, runtimeKey: string, threadKey: string): void => {
+  const previous = attachments;
   const next = attachments.filter((item) => (
     item.id !== id || item.runtimeKey !== runtimeKey || item.threadKey !== threadKey
   ));
   if (next.length === attachments.length) return;
   attachments = next;
+  releaseRemoved(previous.filter(item => !next.includes(item)));
   emit();
 };
 
@@ -115,7 +122,8 @@ export const restoreEditorContextAttachments = (items: readonly EditorContextAtt
 export const resetEditorContextAttachments = (): void => {
   ordinals.clear();
   if (attachments.length === 0) return;
-  attachments = [];
+  const previous = attachments; attachments = [];
+  releaseRemoved(previous);
   emit();
 };
 
@@ -126,6 +134,7 @@ export const acknowledgeEditorContextAttachments = (captured: readonly EditorCon
   const keys = new Set(captured.filter(item => item.reference).map(item => item.threadKey));
   if (draftKey) keys.add(draftKey);
   for (const key of keys) if (!remaining.some(next => next.threadKey === key && next.reference)) ordinals.delete(key);
-  if (remaining.length === attachments.length) return;
-  attachments = remaining; emit();
+  const changed = remaining.length !== attachments.length;
+  attachments = remaining; releaseRemoved(captured);
+  if (changed) emit();
 };

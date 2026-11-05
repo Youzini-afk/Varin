@@ -27,7 +27,8 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 const render = async (action: UiHostAction) => { await act(async () => root.render(<HtmlHostActions actions={[action]} session={session} capture={capture} />)); };
-const click = async () => { await act(async () => container.querySelector('button')!.click()); };
+const actionButton = () => container.querySelector<HTMLButtonElement>('button:not([aria-expanded])');
+const click = async () => { await act(async () => actionButton()!.click()); };
 it('does not act before a trusted button click, then composes readable text with a fixed source', async () => {
   await render({ key: 'fill', type: 'compose', label: 'Use result', text: 'Budget: 21' });
   expect(mocks.compose).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled();
@@ -38,10 +39,10 @@ it('does not act before a trusted button click, then composes readable text with
 it('labels sending explicitly and retries the frozen failed submission even after the HTML changes its proposed result', async () => {
   mocks.send.mockRejectedValueOnce(new Error('Unknown outcome'));
   await render({ key: 'continue', type: 'send', label: 'Continue', text: 'Original result' });
-  expect(container.querySelector('button')?.textContent).toContain('ui.fragment.send');
+  expect(actionButton()?.textContent).toContain('ui.fragment.send');
   await click(); const frozen = mocks.send.mock.calls[0]![0];
   await render({ key: 'continue', type: 'send', label: 'Continue', text: 'New result' });
-  expect(container.querySelector('details')?.textContent).toContain('Original result');
+  expect(container.querySelector('.conversation-ui-disclosure')?.textContent).toContain('Original result');
   await click(); expect(mocks.send.mock.calls[1]![0]).toBe(frozen); expect(capture).toHaveBeenCalledTimes(1);
   await click(); expect(mocks.send.mock.calls[2]![0].text).toBe('New result');
   await click(); expect(mocks.send).toHaveBeenCalledTimes(3);
@@ -64,11 +65,11 @@ it('retains an unresolved send when the page removes or changes the action, acro
   await render({ key: 'same', type: 'send', label: 'Original send', text: 'Frozen result' }); await click();
   const frozen = mocks.send.mock.calls[0]![0];
   await render({ key: 'same', type: 'open', label: 'New navigation', ref: 'thread:other' });
-  expect(container.querySelector('button')?.textContent).toContain('Original send');
+  expect(actionButton()?.textContent).toContain('Original send');
   expect(mocks.open).not.toHaveBeenCalled();
   await act(async () => root.render(null));
   await act(async () => root.render(<HtmlHostActions actions={[]} session={session} capture={capture} />));
-  expect(container.querySelector('button')?.textContent).toContain('Original send');
+  expect(actionButton()?.textContent).toContain('Original send');
   await click(); expect(mocks.send.mock.calls[1]![0]).toBe(frozen); expect(mocks.open).not.toHaveBeenCalled();
   expect(container.querySelector('button')).toBeNull();
 });

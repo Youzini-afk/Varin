@@ -47,7 +47,9 @@ export async function releaseUiRecords(client: KernelScopedClient, workspaceId: 
     // Family access is the existing authority boundary. While any member is live,
     // even a not-yet-submitted draft may name a source in this workspace.
     const original = owners(record, value);
-    if (!familyReleased || original.some(thread => !deleted.has(thread))) retained.add(record.recordId);
+    const disposable = record.recordType === 'ui.selection' && value.released === true
+      || record.recordType === 'ui.snapshot' && value.selectionOwned === true;
+    if (!disposable && (!familyReleased || original.some(thread => !deleted.has(thread)))) retained.add(record.recordId);
     // A snapshot contains viewRef as capture provenance, not ownership of a mutable
     // view. Its source/state are already frozen; retaining the view would retain its
     // latest (possibly unrelated) revision forever.
@@ -60,7 +62,19 @@ export async function releaseUiRecords(client: KernelScopedClient, workspaceId: 
   }
   let released = 0;
   for (const record of rows) {
-    if (retained.has(record.recordId)) continue;
+    if (retained.has(record.recordId)) {
+      if (record.recordType === 'ui.selection') {
+        const value = JSON.parse(record.payloadJson) as { released?: boolean; retirementChecked?: boolean };
+        if (value.released && !value.retirementChecked) {
+          const operationId = `ui-retention:${record.recordId}:${record.recordRevision}`;
+          await client.putRecord({ workspaceId, recordId: record.recordId, recordType: record.recordType, state: record.state,
+            payloadJson: JSON.stringify({ ...value, retirementChecked: true }), references: record.references, ownerIds: [],
+            operationId, expectedRecordRevision: record.recordRevision }, signal);
+          await client.releaseOperation(operationId, signal);
+        }
+      }
+      continue;
+    }
     signal?.throwIfAborted();
     await client.releaseRecord(`ui-retire:${workspaceId}:${record.recordId}`, workspaceId, record.recordId, signal);
     released++;

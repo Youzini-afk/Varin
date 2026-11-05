@@ -96,6 +96,7 @@ export function createInteractiveUiHttpAPI(generation = getRuntimeEndpointGenera
     reply: (identity: ThreadIdentity, viewRef: string, token: string, id: string, observation?: UiObservation, error?: string) => post<{ received: true }>('view/reply', identity, { viewRef, token, id, observation, error }),
     select: (identity: ThreadIdentity, observation: UiObservation, selection: { text?: string; region?: UiSelection['region'] }) => post<UiSelection>('select', identity, { observation, selection }),
     selection: (identity: ThreadIdentity, ref: string) => post<UiSelection>('selection', identity, { ref }),
+    releaseSelection: (identity: ThreadIdentity, ref: string) => post<{ released: true }>('selection/release', identity, { ref }),
   };
 }
 export type InteractiveUiAPI = ReturnType<typeof createInteractiveUiHttpAPI>;
