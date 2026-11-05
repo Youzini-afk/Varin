@@ -66,6 +66,7 @@ export interface BotWorkView {
   /** The session handed this work over directly, so it leads that task; its own helpers do not. */
   lead: boolean;
   status: BotWorkStatus | null;
+  lastState?: RunState;
   updatedAtMs: number;
 }
 
@@ -104,6 +105,7 @@ export function workViews(items: readonly BotWorkItem[], threads: readonly Threa
       sessionThreadId: item.sessionThreadId ?? null,
       lead: !!item.sessionThreadId && thread.parent_thread_id === item.sessionThreadId,
       status: runStatus(liveRun(thread, item.identity.branchId, item.activeRun)),
+      lastState: thread.branches.find(branch => branch.branch_id === item.identity.branchId)?.latest_run?.state,
       updatedAtMs: thread.updated_at_ms,
     };
   });
@@ -202,6 +204,7 @@ export function figureState(facts: BotFigureFacts): BotFigureState {
 
 /** What the stage knows about her own round: its phase and, for a tool, which prop and what it works on. */
 export interface BotOwnPose {
+  waitingFor?: string;
   phase: 'preparing' | 'thinking' | 'replying' | 'tool' | 'team';
   tool: BotToolProp | null;
   /** A file's base name or a tool's name when exactly one thing is being worked on. */
@@ -249,6 +252,7 @@ const TOOL_LINE: Record<BotToolProp, { key: I18nKey; one?: I18nKey; many?: I18nK
 
 /** A neutral statement of the real state. It never speaks as the model. */
 export function stateLine(bot: BotSummary, state: BotFigurePose, details: { needs: readonly BotNeed[]; working: readonly { name: string }[]; own?: BotOwnPose | null }): BotStateLine {
+  if (details.own?.waitingFor && !['offline', 'sleeping', 'waking', 'waiting'].includes(state)) return { key: 'bot.workspace.waiting', params: { name: details.own.waitingFor }, tone: 'none' };
   if (state.startsWith('tool-')) {
     const tool = TOOL_LINE[state.slice(5) as BotToolProp], own = details.own;
     if (own && own.count > 1 && tool.many) return { key: tool.many, params: { count: own.count }, tone: 'none' };

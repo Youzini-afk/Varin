@@ -1,0 +1,77 @@
+/* Varin · 总助手设计稿 · 手机端：底部面板、文件浏览、会话列表与连接入口 */
+
+/* 手机与窄窗口不受桌面文件视图宽度影响 */
+.frame[data-size="mobile"][data-region="view"] .region:has(.vbody[data-kind="files"]),
+.frame[data-size="narrow"][data-region="view"] .region:has(.vbody[data-kind="files"]) { width: auto; }
+
+/* ===================== 底部面板 ===================== */
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes fade-in { from { opacity: 0; } }
+.sheet-scrim { position: absolute; inset: 0; z-index: 58; background: #00000038; animation: fade-in var(--t-glide) var(--ease); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 59; max-height: 84%; overflow-y: auto; padding: 6px 14px 22px; border-radius: 22px 22px 30px 30px; background: var(--elevated); box-shadow: 0 -1px 0 var(--border-strong), 0 -18px 40px -20px #0006; animation: sheet-up 380ms cubic-bezier(.32, .72, 0, 1); scrollbar-width: none; }
+.sheet .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--border-hover); margin: 4px auto 12px; }
+.sheet h4 { margin: 0 4px 2px; font-size: 16px; font-weight: 650; }
+.sheet .sub { margin: 0 4px 12px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.sheet h5 { margin: 14px 4px 4px; font-size: 12px; font-weight: 500; color: var(--faint); }
+.s-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 6px; border-radius: 12px; text-align: left; font-size: 14px; }
+.s-row:hover, .s-row:active { background: var(--hover); }
+.s-row .env-ic { width: 34px; height: 34px; border-radius: 10px; }
+.s-row small { display: block; font-size: 12px; color: var(--faint); line-height: 1.45; }
+.s-row .end { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.s-row .end .ic { color: var(--faint); }
+.s-row.cur { background: var(--selection); }
+.s-row.danger { color: var(--error); }
+.s-row.danger .env-ic { color: var(--error); }
+.s-sep { height: 1px; background: var(--border); margin: 8px 6px; }
+.s-path { padding: 4px 6px 2px; }
+.s-path .hop .env-ic { width: 32px; height: 32px; }
+.s-path .hops-res { margin-left: 42px; }
+.s-path .hop + .hop::before { left: 15px; }
+.s-note { display: flex; gap: 8px; margin: 10px 6px 0; padding: 10px 12px; border-radius: 12px; background: var(--soft); font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+
+/* ===================== 手机文件浏览 ===================== */
+.mfv { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.msrc { display: flex; align-items: center; gap: 11px; margin: 10px 12px 4px; padding: 9px 12px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); text-align: left; }
+.msrc .env-ic { width: 34px; height: 34px; border-radius: 10px; }
+.msrc b { display: block; font-size: 14px; font-weight: 600; }
+.msrc small { display: block; font-size: 12px; color: var(--faint); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msrc > .ic { color: var(--faint); }
+.mtools { display: flex; align-items: center; gap: 2px; padding: 4px 8px 6px 10px; border-bottom: 1px solid var(--border); }
+.mtools .crumbs { flex: 1; overflow-x: auto; scrollbar-width: none; }
+.mfl { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 80px; }
+.mfl-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+.mfl-row:active { background: var(--hover); }
+.mfl-row .env-ic { width: 36px; height: 36px; border-radius: 10px; }
+.mfl-row .env-ic.dir { color: var(--link); }
+.mfl-row b { display: block; font-size: 14px; font-weight: 500; }
+.mfl-row small { display: block; font-size: 12px; color: var(--faint); }
+.mfl-row > .ic { margin-left: auto; color: var(--faint); }
+.mfl-row .chg { color: var(--add); }
+.mxfer { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 10px 12px 12px; border-radius: 16px; background: var(--elevated); box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-float); text-align: left; font-size: 13px; overflow: hidden; animation: rise var(--t-glide) var(--ease); }
+.mxfer .grow small { display: block; font-size: 12px; color: var(--warning); }
+.mxfer .pbar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--fg); transition: width .6s var(--ease); }
+.mprev-t { padding: 12px 16px 8px; }
+.mprev-t b { display: block; font-size: 17px; font-weight: 650; }
+.mprev-t small { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); line-height: 1.5; }
+.code.m { margin: 4px 12px 0; flex: 1; font-size: 12px; }
+.mbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px 14px; border-top: 1px solid var(--border); background: var(--bg); }
+.mbar .btn { flex: 1; height: 38px; border-radius: 11px; font-size: 13.5px; }
+.mbar .icon-btn { width: 38px; height: 38px; border-radius: 11px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+
+/* ===================== 手机会话列表：整页，底部是连接入口 ===================== */
+.frame[data-size="mobile"] .sidebar { position: absolute; inset: 0; z-index: 26; width: 100%; background: var(--frame); transform: translateX(-100%); transition: transform var(--t-glide) var(--ease); }
+.frame[data-size="mobile"][data-sidebar="open"] .sidebar { width: 100%; transform: none; }
+.frame[data-size="mobile"] .sb-in { width: 100%; padding: 58px 14px 26px; }
+.sb-mhead { display: none; }
+.frame[data-size="mobile"] .sb-mhead { display: flex; align-items: center; gap: 8px; position: absolute; top: 12px; left: 12px; right: 12px; }
+.frame[data-size="mobile"] .sb-mhead b { font-size: 16px; }
+.sb-conn { display: none; }
+.frame[data-size="mobile"] .sb-conn { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 10px; padding: 11px 12px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-strong); text-align: left; font-size: 13.5px; }
+.sb-conn small { display: block; font-size: 12px; color: var(--faint); }
+.sb-conn > .ic { margin-left: auto; color: var(--faint); }
+.frame[data-size="mobile"] .sb-new kbd { display: none; }
+
+/* 顶部胶囊展开卡片里的连接行 */
+.is-conn { flex-basis: 100%; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 4px 0; border-top: 1px solid #ffffff14; font-size: 12px; color: #a3a3a0; }
+.is-conn .dot { width: 6px; height: 6px; }
+.is-conn span:last-child { margin-left: auto; color: #d7d7d4; }

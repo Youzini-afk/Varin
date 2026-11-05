@@ -14,6 +14,7 @@ export function liveRound(activity: ThreadLiveActivity | null): BotLiveRound | n
   if (!activity) return null;
   return {
     threadId: activity.identity.threadId, branchId: activity.identity.branchId, runId: activity.runId, text: activity.text,
+    ...(activity.waitingFor ? { waitingFor: activity.waitingFor } : {}),
     tools: activity.tools.map(tool => ({ name: tool.name, subject: botToolSubject(tool.name, tool.arguments), units: botToolUnits(tool.name, tool.arguments) })),
   };
 }

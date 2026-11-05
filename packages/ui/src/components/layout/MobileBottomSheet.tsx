@@ -8,11 +8,13 @@ import { FULL_GAP_PX, OVERSHOOT, settleSheet, sheetOffsets, type SheetSnap } fro
  * height, follows the finger 1:1 and settles on glide; above full height it resists. Tapping
  * the dimmed conversation closes it.
  */
-export function MobileBottomSheet({ open, onOpenChange, label, children }: {
+export function MobileBottomSheet({ open, onOpenChange, label, children, full = false, keepMounted = false }: {
   open: boolean;
   onOpenChange(open: boolean): void;
   label: string;
   children: React.ReactNode;
+  full?: boolean;
+  keepMounted?: boolean;
 }) {
   const host = React.useRef<HTMLDivElement>(null);
   const [height, setHeight] = React.useState(0);
@@ -33,7 +35,7 @@ export function MobileBottomSheet({ open, onOpenChange, label, children }: {
   }, [mounted]);
   React.useEffect(() => {
     if (open) {
-      setMounted(true); setSnap('half');
+      setMounted(true); setSnap(full ? 'full' : 'half');
       let second = 0;
       const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setRaised(true)); });
       return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
@@ -41,7 +43,7 @@ export function MobileBottomSheet({ open, onOpenChange, label, children }: {
     setRaised(false);
     const timer = setTimeout(() => setMounted(false), springTiming('glide').duration);
     return () => clearTimeout(timer);
-  }, [open]);
+  }, [open, full]);
   const stops = sheetOffsets(height);
   const resting = open && raised ? stops[snap] : stops.closed;
   const offset = drag ?? resting;
@@ -75,9 +77,10 @@ export function MobileBottomSheet({ open, onOpenChange, label, children }: {
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
   };
-  if (!mounted) return <div ref={host} hidden />;
+  React.useEffect(() => { if (full && open) setSnap('full'); }, [full, open]);
+  if (!mounted && !keepMounted) return <div ref={host} hidden />;
   const shown = Math.max(0, Math.min(1, 1 - offset / Math.max(1, stops.closed)));
-  return <div ref={host} className="absolute inset-0 z-30" data-page-scroll-lock="true">
+  return <div ref={host} hidden={!mounted} inert={!open} className="absolute inset-0 z-30" data-page-scroll-lock="true">
     <div aria-hidden="true" className="absolute inset-0 bg-black/30" style={{ opacity: open && raised ? shown : 0, transition: drag === null ? 'opacity var(--motion-dur-glide) var(--motion-ease-glide)' : 'none' }}
       onClick={() => onOpenChange(false)} />
     <section role="dialog" aria-label={label} aria-modal="false"

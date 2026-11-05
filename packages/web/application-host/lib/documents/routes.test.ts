@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createDocumentAuthorityHarness } from './contract-fixtures.js';
 import { registerDocumentRoutes } from './routes.js';
 
 describe('document routes', () => {
+  it('keeps workspace edits under the selected Documents route mount', async () => {
+    const app = express(); app.use(express.json());
+    const discardWorkspaceEdit = vi.fn(async () => ({ status: 'missing' }));
+    registerDocumentRoutes(app, { base: '/managed/documents', documents: { discardWorkspaceEdit } as unknown as Parameters<typeof registerDocumentRoutes>[1]['documents'] });
+    const input = { workspaceId: 'original', operationId: 'edit' };
+    await request(app).post('/managed/documents/workspace-edit/discard').send(input).expect(200, { status: 'missing' });
+    expect(discardWorkspaceEdit).toHaveBeenCalledExactlyOnceWith(input);
+    await request(app).post('/api/documents/workspace-edit/discard').send(input).expect(404);
+  });
   it('serves revisioned reads without mapping failures to missing', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {

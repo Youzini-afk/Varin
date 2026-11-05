@@ -4,6 +4,12 @@ Application-host authority for revisioned workspace documents, file watches, and
 
 Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains browse/binary/CRUD, and `WorkspaceAPI` remains project/tree/git/upload. Neither exposes a duplicate text read/write shape.
 
+Independent resource views reuse this entire protocol. The framework-neutral HTTP client lives in
+`application-client/src/documents-http.ts`; `/api/resource-documents` forwards to the selected managed
+Host's original Documents routes, including watch, dirty-buffer coordination and recovery journals.
+Desktop/Web still use Monaco and mobile uses the document-bound CodeMirror adapter. Resource-scoped
+editors do not advertise local IDE language/debug ownership for a remote document.
+
 Native workspace registrations retain the logical owning/execution workspace, branch and optional scope;
 the original trusted directory remains the configuration namespace. Admission resolves the current mount
 generation and actual directory through the original workspace owner. Saved Office readers, tool hints

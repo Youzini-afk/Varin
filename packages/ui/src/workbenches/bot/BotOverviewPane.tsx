@@ -1,72 +1,74 @@
 import React from 'react';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
-import { SwapText } from '@/components/motion/SwapText';
-import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { useBotPanel } from './botPanelModel';
-import { clockTime, latestReport, isWaitingStatus, memorySourceLabel, scheduleWhen, type BotNeed } from './botPresentation';
-import { Named } from './botParts';
-import { useFlash } from './botFocus';
+import { useBotLayout } from './botLayout';
+import { BotSegment } from './botParts';
+import { BotWorkStatusLabel } from './BotActivityPane';
+import { runStatus, workKey, type BotWorkView, type BotNeed } from './botPresentation';
+import { useFlash, useScrollIntoFocus } from './botFocus';
+import { useBotWorkspaceNavigation } from './botWorkspaceViews';
+import { threadHostKey } from '@/stores/useThreadStore';
 
-const MAX_NEEDS = 3;
-
-function NeedCard({ need }: { need: BotNeed }) {
-  const { t } = useI18n();
-  const model = useBotPanel();
-  const flash = useFlash(model.focus?.tab === 'overview' && model.focus.id === need.key, model.focus?.token);
-  return <button type="button" className={`bot-need ${flash ?? ''}`} onClick={() => model.openNeed(need)}>
-    <AgentAvatar identity={need.identity.threadId} avatar={need.avatar} size={26} {...(need.lead ? { role: 'lead' as const } : {})} />
-    <span className="flex min-w-0 flex-col leading-snug">
-      <b className="truncate text-[13.5px] font-semibold">{need.name}</b>
-      <span className="bot-need-detail truncate text-[12.5px]">{t(need.kind === 'permission' ? 'bot.overview.needPermission' : 'bot.overview.needQuestion')}</span>
-    </span>
-    <span className="bot-need-detail ml-auto flex shrink-0 items-center gap-1 text-[12.5px]">{t('bot.overview.handle')}<Icon name={need.session ? 'arrow-right-s' : 'external-link'} className="size-3.5" /></span>
-  </button>;
+const NO_PINS: string[] = [];
+function NeedRow({ need }: { need: BotNeed }) {
+  const { t } = useI18n(), model = useBotPanel();
+  const focused = model.focus?.tab === 'overview' && model.focus.id === need.key;
+  const flash = useFlash(focused, model.focus?.token), ref = React.useRef<HTMLButtonElement>(null);
+  useScrollIntoFocus(ref, focused, model.focus?.token);
+  return <button ref={ref} type="button" className={`bot-need ${flash ?? ''}`} onClick={() => model.openNeed(need)}><Icon name="question" className="size-4 shrink-0" /><span className="min-w-0 flex-1"><b>{need.name}</b><span className="block typography-meta">{t(need.kind === 'permission' ? 'bot.overview.needPermission' : 'bot.overview.needQuestion')}</span></span><Icon name="arrow-right-s" className="size-4" /></button>;
 }
 
-/** One sentence per block; any block opens its tab and lights the matching row (§5.3). */
-export function BotOverviewPane() {
-  const { t } = useI18n();
-  const model = useBotPanel();
-  const locale = getCurrentIntlLocale();
-  const running = model.work.filter(item => item.status !== null && !isWaitingStatus(item.status));
-  const report = latestReport(model.timeline);
-  const memory = model.facts.memory.value?.filter(item => !item.inactive).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
-  const next = model.facts.tasks.value?.filter(task => task.enabled && task.calendar?.definition.next_at_ms)
-    .sort((a, b) => (a.calendar!.definition.next_at_ms ?? 0) - (b.calendar!.definition.next_at_ms ?? 0))[0] ?? null;
-  const loading = model.facts.activity.status === 'loading' && model.facts.memory.status === 'loading' && model.facts.tasks.status === 'loading';
-  const failures = [model.facts.activity, model.facts.memory, model.facts.tasks].filter(read => read.status === 'failed');
-  const empty = !model.needs.length && !running.length && !report && !memory && !next;
+function FollowingRow({ item, showSession }: { item: BotWorkView; showSession: boolean }) {
+  const { t } = useI18n(), model = useBotPanel(), navigation = useBotWorkspaceNavigation();
+  return <div className="bot-following-row">
+    <button type="button" className="bot-following-main" onClick={() => navigation ? navigation.open({ kind: 'work', key: item.key, identity: item.identity, title: item.name }) : model.openWork(item.identity)}>
+      <span className="bot-following-title"><b>{item.name}</b><AgentAvatar identity={item.identity.threadId} avatar={item.avatar} size={20} {...(item.lead ? { role: 'lead' as const } : {})} /></span>
+      <span className="bot-following-state">{item.status ? <BotWorkStatusLabel status={item.status} /> : t(item.lastState === 'completed' ? 'bot.workspace.roundEnded' : item.lastState === 'failed' ? 'bot.workspace.failed' : item.lastState === 'cancelled' ? 'bot.workspace.cancelled' : 'bot.workspace.idle')}</span>
+      {showSession && item.sessionThreadId && <small>{t('bot.workspace.fromSession', { name: model.sessionTitle(item.sessionThreadId) })}</small>}
+    </button>
+    {model.workItems?.find(raw => workKey(raw.identity) === item.key)?.desktops?.map(desktop => <button type="button" key={desktop.id} className="bot-work-link" onClick={() => navigation?.computer(desktop)}><Icon name="computer" className="size-3" />{desktop.label}</button>)}
+  </div>;
+}
 
+/** Stable, source-owned work identities; updates never reorder the user's current reading. */
+export function BotOverviewPane() {
+  const { t } = useI18n(), model = useBotPanel(), navigation = useBotWorkspaceNavigation();
+  const scope = useBotLayout(state => state.overviewScope), setScope = useBotLayout(state => state.setOverviewScope);
+  const sessionId = model.session?.identity.threadId;
+  const pinScope = JSON.stringify([threadHostKey(), model.bot.id]);
+  const pinned = useBotLayout(state => state.pinnedComputers[pinScope] ?? NO_PINS);
+  const togglePin = useBotLayout(state => state.toggleComputerPin);
+  const inScope = (id: string | null | undefined) => scope === 'all' || Boolean(sessionId && sessionId === id);
+  const matters = (model.matters ?? []).filter(matter => !matter.archived && (scope === 'all' || matter.threads.some(link => model.work.some(item => item.identity.threadId === link.threadId && item.identity.branchId === link.branchId && inScope(item.sessionThreadId)))));
+  const grouped = new Set(matters.flatMap(matter => matter.threads.map(link => workKey({ runtime: 'agent', threadId: link.threadId, branchId: link.branchId }))));
+  const pending = model.work.filter(item => item.lead && inScope(item.sessionThreadId) && item.status !== null && !grouped.has(item.key));
+  const followed = (model.workItems ?? []).filter(item => item.purpose === 'followed' && (scope === 'all' || grouped.has(workKey(item.identity))));
+  const recent = model.work.filter(item => item.lead && inScope(item.sessionThreadId) && item.status === null && !grouped.has(item.key));
+  const elsewhere = model.work.filter(item => item.lead && item.status && item.sessionThreadId && item.sessionThreadId !== sessionId).length;
+  const needs = model.needs.filter(need => scope === 'all' || need.session && need.identity.threadId === sessionId || model.work.some(item => item.key === need.key && inScope(item.sessionThreadId)));
   return <>
-    {failures.length ? <div role="alert" className="mx-2 my-2 flex items-start gap-2 rounded-lg px-2 py-2 typography-meta text-destructive">
-      <span className="min-w-0 flex-1 break-words">{failures.map(read => read.status === 'failed' ? read.error : '').join(' · ')}</span>
-      <button type="button" className="shrink-0 text-foreground hover:underline" onClick={() => { model.facts.retryActivity(); model.facts.retryMemory(); model.facts.retryTasks(); }}>{t('settings.harness.retry')}</button>
-    </div> : null}
-    {model.needs.slice(0, MAX_NEEDS).map(need => <NeedCard key={need.key} need={need} />)}
-    {running.length ? <button type="button" className="bot-block" onClick={() => model.focusTab('activity', running[0]!.key)}>
-      <span className="bot-block-head">{t('bot.overview.running')}<Icon name="arrow-right-s" className="size-3.5" /></span>
-      <span className="flex min-w-0 items-center gap-2 text-[14px]">
-        <span className="bot-faces">{running.slice(0, 4).map(item => <AgentAvatar key={item.key} identity={item.identity.threadId} avatar={item.avatar} size={20} {...(item.lead ? { role: 'lead' as const } : {})} />)}</span>
-        <SwapText text={t('bot.overview.runningCount', { count: running.length })} hold={0} className="min-w-0" />
-      </span>
-      <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground"><span className="bot-ring" aria-hidden="true" />
-        <span className="truncate">{running[0]!.name}{running[0]!.task ? ` · ${running[0]!.task}` : ''}</span></span>
-    </button> : null}
-    {report ? <button type="button" className="bot-block" onClick={() => model.openSession(report.session)}>
-      <span className="bot-block-head">{t('bot.overview.latest')}{report.atMs === null ? null : ` · ${clockTime(report.atMs, locale)}`}<Icon name="arrow-right-s" className="size-3.5" /></span>
-      <span className="text-[14px] leading-relaxed"><Named id="bot.overview.latestReport" name={report.name} params={{ session: model.sessionTitle(report.session.threadId) }} /></span>
-    </button> : null}
-    {memory ? <button type="button" className="bot-block" onClick={() => model.focusTab('memory', String(memory.id))}>
-      <span className="bot-block-head">{t('bot.overview.memory')}<Icon name="arrow-right-s" className="size-3.5" /></span>
-      <span className="bot-quote line-clamp-3">{memory.content}</span>
-      <span className="text-[12.5px] text-muted-foreground">{new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(memory.createdAt)} · {memorySourceLabel(memory.sourceKind, t)}</span>
-    </button> : null}
-    {next ? <button type="button" className="bot-block" onClick={() => model.focusTab('schedule', next.id)}>
-      <span className="bot-block-head">{t('bot.overview.schedule')}<Icon name="arrow-right-s" className="size-3.5" /></span>
-      <span className="truncate text-[14px]">{t('bot.overview.scheduleNext', { time: scheduleWhen(next.calendar!.definition.next_at_ms!, locale), name: next.name })}</span>
-    </button> : null}
-    {empty && !loading && !failures.length ? <p className="px-4 py-7 text-center text-[13px] leading-loose text-muted-foreground">{t('bot.overview.empty', { name: model.bot.name })}</p> : null}
-    {empty && loading ? <p role="status" className="px-4 py-7 text-center typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
+    {needs.map(need => <NeedRow key={need.key} need={need} />)}
+    <section className="bot-following"><header className="bot-section-heading"><h3>{t('bot.workspace.following')}</h3><BotSegment label={t('bot.workspace.following')} value={scope} onChange={setScope} options={[{ value: 'session', label: t('bot.workspace.currentSession') }, { value: 'all', label: t('bot.workspace.allWork') }]} /></header>
+      {model.session?.running && <button type="button" className="bot-following-main" onClick={() => model.openSession(model.session!.identity)}><span className="bot-following-title"><b>{model.bot.name}</b></span><span className="bot-following-state">{t(model.line.key, model.line.params)}</span></button>}
+      {matters.map(matter => <details key={matter.id} className="bot-matter-row"><summary>{matter.title}<span>{matter.threads.length}</span></summary><p>{matter.description}</p>{matter.threads.map(link => {
+        const item = model.work.find(item => item.identity.threadId === link.threadId && item.identity.branchId === link.branchId);
+        return item ? <FollowingRow key={item.key} item={item} showSession={scope === 'all' && item.sessionThreadId !== sessionId} /> : null;
+      })}</details>)}
+      {pending.map(item => <FollowingRow key={item.key} item={item} showSession={scope === 'all' && item.sessionThreadId !== sessionId} />)}
+      {followed.map(item => <button type="button" key={workKey(item.identity)} className="bot-following-main" onClick={() => navigation?.open({ kind: 'work', key: workKey(item.identity), identity: item.identity, title: item.thread.title })}><b>{item.thread.title}</b><small>{t('bot.workspace.followed')} · {runStatus(item.activeRun) ? t('bot.work.running') : t('bot.workspace.idle')}</small></button>)}
+      {!pending.length && !matters.length && !followed.length && !model.session?.running && <p className="bot-overview-empty">{t('bot.workspace.emptyWork')}</p>}
+      {scope === 'session' && elsewhere > 0 && <button className="bot-section-more" type="button" onClick={() => setScope('all')}>{t('bot.workspace.otherSessions', { count: elsewhere })}<Icon name="arrow-right-s" className="size-3" /></button>}
+    </section>
+    {recent.length > 0 && <details className="bot-matter-row"><summary>{t('bot.workspace.recent')}<span>{recent.length}</span></summary>{recent.map(item => <FollowingRow key={item.key} item={item} showSession={scope === 'all' && item.sessionThreadId !== sessionId} />)}</details>}
+    {navigation && <section className="bot-environments"><h3 className="bot-section-label">{t('bot.workspace.environment')}</h3>
+      {navigation.computers?.desktops.slice().sort((a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id))).map(desktop => <div key={desktop.id} className="bot-env-computer"><button type="button" className="bot-env-row" onClick={() => navigation.computer(desktop)}><Icon name="computer" className="size-4" /><span>{desktop.label}<small>{t(desktop.status === 'available' ? 'settings.computers.status.available' : desktop.status === 'stopped' ? 'settings.computers.status.stopped' : 'settings.computers.status.unavailable')}</small></span><Icon name="arrow-right-s" className="size-3.5" /></button><button className="bot-env-pin" aria-label={t('bot.workspace.pinComputer', { name: desktop.label })} aria-pressed={pinned.includes(desktop.id)} onClick={() => togglePin(pinScope, desktop.id)}><Icon name={pinned.includes(desktop.id) ? 'pushpin-2-fill' : 'pushpin-2'} className="size-3.5" /></button></div>)}
+      {navigation.sources?.targets.map(target => <button key={JSON.stringify(target.resourceOwner)} type="button" className="bot-env-row" onClick={() => navigation.files(target.resourceOwner, target.resourceOwner.kind === 'local' ? t('bot.workspace.local') : target.label)}><Icon name="folder" className="size-4" /><span>{target.resourceOwner.kind === 'local' ? t('bot.workspace.local') : target.label}<small>{t('bot.workspace.files')}</small></span><Icon name="arrow-right-s" className="size-3.5" /></button>)}
+      {navigation.sources?.unavailable.map(target => <p key={target.connectionId} className="bot-files-feedback">{target.label} · {target.message}</p>)}
+      {navigation.error && <p role="alert" className="bot-files-feedback">{navigation.error}<button type="button" onClick={navigation.refresh}>{t('settings.harness.retry')}</button></p>}
+      <button type="button" className="bot-env-row text-muted-foreground" onClick={navigation.connections}><Icon name="add" className="size-4" /><span>{t('bot.workspace.addDevice')}</span></button>
+    </section>}
+    {model.facts.activity.status === 'failed' && <p role="alert" className="bot-files-feedback text-destructive">{model.facts.activity.error}<button type="button" onClick={model.facts.retryActivity}>{t('settings.harness.retry')}</button></p>}
   </>;
 }

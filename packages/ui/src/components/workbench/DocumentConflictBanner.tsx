@@ -9,11 +9,13 @@ import type { MergeRegionDecision } from '@/lib/agent-editor/types';
 
 type DocumentConflictBannerProps = {
   identity: DocumentIdentity;
+  registry?: ReturnType<typeof getDocumentRegistry>;
 };
 
-export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ identity }) => {
+export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ identity, registry: owner }) => {
   const { t } = useI18n();
-  const record = useDocumentRecord(identity);
+  const registry = owner ?? getDocumentRegistry();
+  const record = useDocumentRecord(identity, registry);
   const [mergeOpen, setMergeOpen] = React.useState(false);
   const [edited, setEdited] = React.useState<Record<number, string>>({});
   const [decisions, setDecisions] = React.useState<MergeRegionDecision[]>([]);
@@ -37,7 +39,7 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
   };
 
   const save = (): void => {
-    void getDocumentRegistry().save(identity, record.status === 'deleted'
+    void registry.save(identity, record.status === 'deleted'
       ? { recreateDeleted: true }
       : { overwriteConflict: true });
   };
@@ -59,7 +61,7 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
         </div>
         {record.status === 'conflict' ? (
           <>
-            <Button variant="outline" size="sm" onClick={() => getDocumentRegistry().discard(identity)}>
+            <Button variant="outline" size="sm" onClick={() => registry.discard(identity)}>
               {t('filesView.document.conflict.reloadDisk')}
             </Button>
             <Button variant="outline" size="sm" onClick={save}>
@@ -132,7 +134,7 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
               size="sm"
               disabled={!allConflictsDecided}
               onClick={() => {
-                void getDocumentRegistry().applyMerged(identity, applyMergeDecisions(regions, decisions));
+                void registry.applyMerged(identity, applyMergeDecisions(regions, decisions));
               }}
             >
               {t('filesView.document.conflict.merge')}

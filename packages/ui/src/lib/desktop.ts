@@ -133,6 +133,7 @@ export type DesktopSettings = {
   openInAppId?: string;
   autoCreateWorktree?: boolean;
   followUpBehavior?: 'steer' | 'queue';
+  botFollowUpBehavior?: 'steer' | 'queue';
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
   zenModel?: string;

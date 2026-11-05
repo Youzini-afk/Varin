@@ -1,4 +1,6 @@
+import { botWorkspaceZh } from './bot-workspaces.js';
 export const settingsDict = {
+  ...botWorkspaceZh,
   "settings.harness.role.webSelection": "搜索连接选择",
   "settings.harness.role.webSelection.description": "使用独立的模型和思考设置，从适用的搜索连接中选择。",
   "settings.page.harness.web.assistance.title": "可选检索辅助",
@@ -2616,6 +2618,8 @@ export const settingsDict = {
   'settings.smartSearch.unavailable.body': 'Smart Search 设置仅在 Web 运行时可用。',
   'settings.smartSearch.unavailable.description': '当前运行环境没有暴露 Smart Search 配置 API。',
   "settings.varin.visual.section.followUpBehavior": "任务执行时发送消息",
+  "settings.varin.visual.section.botFollowUpBehavior": "与 Varin 交谈时",
+  "settings.varin.visual.field.botFollowUpBehaviorDescription": "默认立即补充，Varin 在下一个可接收的间隙读到消息。正在执行的操作继续；派发的 Agent 使用普通任务的发送设置。",
   "settings.varin.visual.section.followUpBehaviorAria": "任务执行时发送消息",
   "settings.varin.visual.field.followUpBehaviorAria": "发送方式：{option}",
   "settings.varin.visual.field.followUpBehaviorDescription": "选择任务执行期间发送消息的默认方式：排队等待任务结束，或在下一个可接收时机补充到当前任务。正在执行的工具会继续。",

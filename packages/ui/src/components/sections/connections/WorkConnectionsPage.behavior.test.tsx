@@ -19,6 +19,7 @@ vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, isDesktopLocalOri
 vi.mock('@/lib/platform', () => ({ getClientPlatform: () => 'web' }));
 vi.mock('@/lib/desktopHosts', () => ({ redactSensitiveUrl: (url: string) => url }));
 vi.mock('./DesktopLocalHostSettings', () => ({ DesktopLocalHostSettings: () => null }));
+vi.mock('./AddDeviceDialog', () => ({ AddDeviceDialog: () => null }));
 vi.mock('@/lib/settings/drafts', () => ({ requestSettingsNavigation: (proceed: () => void) => proceed() }));
 vi.mock('@/components/sections/remote-instances/RemoteInstancesPage', () => ({ RemoteInstancesPage: () => null }));
 vi.mock('@/components/desktop/DesktopHostSwitcher', () => ({ DesktopHostSwitcherInline: () => null }));

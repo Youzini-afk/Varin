@@ -55,7 +55,8 @@ interface MainLayoutProps {
      * A workbench's own secondary panel. On desktop it replaces the context panel and its rail
      * and must render an `aside` beside the main canvas; on mobile it fills a bottom sheet.
      */
-    renderSecondaryPanel?: (placement: 'docked' | 'drawer') => React.ReactNode;
+    renderSecondaryPanel?: (placement: 'docked' | 'drawer', visible: boolean) => React.ReactNode;
+    secondaryPanelFocus?: string | null;
     /** Accessible names for that panel and its mobile header toggle. */
     secondaryPanelLabel?: string;
     secondaryPanelToggleLabels?: { open: string; close: string };
@@ -69,7 +70,7 @@ interface MainLayoutProps {
     renderMobileTitle?: (panel: { open: boolean; toggle(): void }) => React.ReactNode;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, secondaryPanelFocus, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle }) => {
     const shellActive = useWorkbenchShellActive();
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
@@ -118,6 +119,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
     const [mobileRightSidebarOpen, setMobileRightSidebarOpen] = React.useState(false);
+    React.useEffect(() => { if (isMobile && secondaryPanelFocus) setMobileRightSidebarOpen(true); }, [isMobile, secondaryPanelFocus]);
     const [mobileLeftDrawerVisible, setMobileLeftDrawerVisible] = React.useState(false);
     const [mobileRightDrawerVisible, setMobileRightDrawerVisible] = React.useState(false);
     const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
@@ -399,8 +401,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                 </ErrorBoundary>
                             </motion.div>
                             {renderSecondaryPanel ? (
-                                <MobileBottomSheet open={mobileRightSidebarOpen} onOpenChange={setMobileRightSidebarOpen} label={secondaryPanelLabel ?? ''}>
-                                    <ErrorBoundary>{renderSecondaryPanel('drawer')}</ErrorBoundary>
+                                <MobileBottomSheet open={mobileRightSidebarOpen} onOpenChange={setMobileRightSidebarOpen} label={secondaryPanelLabel ?? ''} full={Boolean(secondaryPanelFocus)} keepMounted={secondaryPanelFocus !== undefined}>
+                                    <ErrorBoundary>{renderSecondaryPanel('drawer', mobileRightSidebarOpen)}</ErrorBoundary>
                                 </MobileBottomSheet>
                             ) : mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
@@ -483,7 +485,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                                 <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
                                             <WorkbenchContributionSlot kind="panel" slot="workbench.secondary.before" />
-                                            {renderSecondaryPanel ? <ErrorBoundary>{renderSecondaryPanel('docked')}</ErrorBoundary> : <WorkbenchReplacement
+                                            {renderSecondaryPanel ? <ErrorBoundary>{renderSecondaryPanel('docked', true)}</ErrorBoundary> : <WorkbenchReplacement
                                                 target={WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer}
                                                 fallback={<ContextPanel />}
                                             />}

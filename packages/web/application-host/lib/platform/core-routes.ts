@@ -1137,6 +1137,8 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
       req.path.startsWith('/api/workspace') ||
+      req.path.startsWith('/api/resource-files') ||
+      req.path.startsWith('/api/resource-documents') ||
       req.path.startsWith('/api/documents') ||
       req.path.startsWith('/api/language') ||
       req.path.startsWith('/api/language-support') ||

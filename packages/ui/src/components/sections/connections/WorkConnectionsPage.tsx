@@ -18,6 +18,7 @@ import { listComputers, type ComputerCatalog } from '@/lib/computers';
 import { DesktopLocalHostSettings } from './DesktopLocalHostSettings';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
+import { AddDeviceDialog } from './AddDeviceDialog';
 
 /** A projection of existing connection/source/desktop owners; never another placement profile. */
 export function WorkConnectionsPage() {
@@ -29,16 +30,18 @@ function WorkConnectionsContent() {
   const { threads } = useRuntimeAPIs();
   const { identity, snapshot, error: threadError } = useSelectedThreadSnapshot();
   const [manageResources, setManageResources] = React.useState(false);
-  const [tab, setTab] = React.useState<'agent' | 'resources'>('agent');
+  const [addingDevice, setAddingDevice] = React.useState(false);
+  const [tab, setTab] = React.useState<'agent' | 'resources' | 'access'>('resources');
   const [sources, setSources] = React.useState<ThreadSourceTargets | null>(null);
   const [computers, setComputers] = React.useState<ComputerCatalog | null>(null);
   const [sourceError, setSourceError] = React.useState<string | null>(null);
   const [computerError, setComputerError] = React.useState<string | null>(null);
   const [epoch, setEpoch] = React.useState(0);
+  const refresh = React.useCallback(() => setEpoch(value => value + 1), []);
   React.useEffect(() => {
     const abort = new AbortController();
     setSources(null); setComputers(null); setSourceError(null); setComputerError(null);
-    if (threads) void threads.sources.list(identity, abort.signal).then(value => { if (!abort.signal.aborted) setSources(value); }, error => { if (!abort.signal.aborted) setSourceError(String(error)); });
+    if (threads) void threads.sources.list(null, abort.signal).then(value => { if (!abort.signal.aborted) setSources(value); }, error => { if (!abort.signal.aborted) setSourceError(String(error)); });
     else setSourceError(t('settings.connections.resourceUnavailable'));
     void listComputers().then(value => { if (!abort.signal.aborted) setComputers(value); }, error => { if (!abort.signal.aborted) setComputerError(String(error)); });
     return () => abort.abort();
@@ -70,20 +73,21 @@ function WorkConnectionsContent() {
       <div className="settings-connection-node min-w-0"><Icon name="computer" className="mb-3 size-5 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.connections.computerDefault')}</h2><p className="mt-2 typography-meta">{desktopSummary}</p><p className="mt-2 typography-meta text-muted-foreground">{t('settings.connections.computerHint')}</p></div>
     </div>
     <SettingsTabs value={tab} label={t('settings.page.connections.title')} onChange={value => { if (value !== tab) requestSettingsNavigation(() => setTab(value)); }}
-      items={[{ value: 'agent', label: t('settings.connections.tab.agent') }, { value: 'resources', label: t('settings.connections.tab.resources') }]} />
+      items={[{ value: 'resources', label: t('bot.workspace.devices') }, { value: 'agent', label: t('bot.workspace.switchService') }, { value: 'access', label: t('bot.workspace.pair') }]} />
     {tab === 'agent' ? <><SettingsSection title={t('settings.connections.tab.agent')} description={t('settings.connections.switchHint')} divider={false}>
       <DesktopHostSwitcherInline />
       <SettingsPageLink page="remote-instances" description={t('settings.connections.manageHint')}>{t('settings.page.remoteInstances.title')}</SettingsPageLink>
+    </SettingsSection>{isDesktopShell() ? <DesktopLocalHostSettings key={epoch} /> : null}</> : tab === 'access' ? <SettingsSection title={t('bot.workspace.pair')} description={t('bot.workspace.pairHint')} divider={false}>
       <SettingsPageLink page="access">{t('settings.page.access.title')}</SettingsPageLink>
       <SettingsPageLink page="tunnel">{t('settings.page.tunnel.title')}</SettingsPageLink>
-    </SettingsSection>{isDesktopShell() ? <DesktopLocalHostSettings key={epoch} /> : null}</> : <>
+    </SettingsSection> : <>
       <SettingsSection title={t('settings.connections.files')} description={t('settings.connections.resourceOrigin')} divider={false}>
-        <Button className="mb-4" size="sm" variant="outline" onClick={() => setManageResources(true)}>{t('settings.connections.resourceManage')}</Button>
+        <div className="mb-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => setAddingDevice(true)}><Icon name="add" className="size-4" />{t('bot.workspace.addDevice')}</Button><Button size="sm" variant="ghost" onClick={() => setManageResources(true)}>{t('settings.connections.resourceManage')}</Button></div>
         {sourceError ? <p role="alert" className="typography-meta text-destructive">{sourceError}</p> : !sources ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : <div className="divide-y divide-border/60">
           {sources.targets.map(target => <div key={target.resourceOwner.kind === 'local' ? 'local' : target.resourceOwner.connectionId} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="typography-ui-label">{target.resourceOwner.kind === 'local' ? t('settings.connections.agentLocal') : target.label}</p><p className="mt-1 typography-meta text-muted-foreground">{target.capabilities.join(' · ')}</p></div><span className="typography-meta">{t('settings.connections.available')}</span></div>)}
           {sources.unavailable.map(target => <div key={target.connectionId} className="py-3"><p className="typography-ui-label">{target.label}</p><p role="status" className="mt-1 typography-meta text-muted-foreground">{target.message}</p></div>)}
         </div>}
-        <p className="mt-3 typography-meta text-muted-foreground">{t('settings.connections.chooseInConversation')}</p>
+        <p className="mt-3 typography-meta text-muted-foreground">{t('bot.workspace.deviceHint')}</p>
         <p className="mt-2 typography-meta text-muted-foreground">{t('settings.connections.relayBoundary')}</p>
       </SettingsSection>
       <SettingsSection title={t('settings.connections.desktops')} description={t('settings.connections.desktopHint')}>
@@ -100,5 +104,6 @@ function WorkConnectionsContent() {
         <div className="min-h-0 flex-1"><RemoteInstancesPage view="resources" /></div>
       </DialogContent>
     </Dialog>
+    {addingDevice && <AddDeviceDialog onClose={() => setAddingDevice(false)} onChanged={refresh} />}
   </SettingsPageLayout>;
 }

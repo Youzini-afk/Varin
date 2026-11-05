@@ -1,6 +1,7 @@
 # Varin 总助手：持续交流、工作概览与设备空间
 
-状态：2026-11-05 讨论形成的设计方案，待实施。本文以 main `fe8a3ab97` 的现有能力为起点；第 2 节区分已有实现与本轮变化，后续章节描述目标行为，不作为已经交付的功能说明。
+状态：2026-11-06 已落地本轮交流、工作详情、独立文件空间、电脑入口、连接流程与窄屏交互。当前合同见 [Bot](../bot.md)、[资源](../resources.md)和[工作台](../workbench.md)。第 2 节保留实施起点，交互稿中的示例事件不作为运行状态来源；外部 Harness 和尚无可浏览路径的固定来源继续遵守原 owner 的能力边界。
+交互稿：[varin-conversation-preview/index.html](varin-conversation-preview/index.html)（浏览器直接打开，示例数据，不连接 Host；左下角原型实验室切换场景、主题与窗口尺寸）。
 
 本文接续[长期总助手](bot-assistant.md)、[Bot 界面](bot-ui.md)和[聊天正文与交互内容](conversation-content-and-interaction.md)。本轮调整聊天的组织方式、持续工作入口、消息发送默认、电脑与文件空间，以及连接流程。既有身份、记忆、任务复用、交互内容和形象设计继续沿用。当前运行合同见 [Bot](../bot.md)、[协作](../collaboration.md)、[资源](../resources.md)、[工作台](../workbench.md)及[交互内容](../interactive-content.md)。
 

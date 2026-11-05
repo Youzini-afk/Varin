@@ -13,13 +13,26 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { Icon } from '@/components/icon/Icon';
 
 /** The edit draft retains its original revision even if the Catalog changes or delivers it. */
-export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCancel, onSendNow }: {
+export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCancel, onSendNow, reportDelivery = false }: {
   api: Pick<ThreadsAPI, 'mediaRead'> & Partial<Pick<ThreadsAPI, 'attachments'>>; identity: ThreadIdentity; inputs: QueuedInput[]; pending: boolean;
   onSave(input: QueuedInput, text: string, images?: ImageAttachment[]): Promise<boolean>;
   onCancel(input: QueuedInput): Promise<void>;
   onSendNow?(input: QueuedInput): Promise<void>;
+  reportDelivery?: boolean;
 }) {
   const { t } = useI18n();
+  const previousInputs = React.useRef(new Map(inputs.map(input => [input.id, input.state])));
+  const [received, setReceived] = React.useState<{ id: string; text: string }>();
+  React.useEffect(() => {
+    const delivered = inputs.find(input => input.state === 'delivered' && previousInputs.current.get(input.id) === 'queued');
+    previousInputs.current = new Map(inputs.map(input => [input.id, input.state]));
+    if (reportDelivery && delivered) setReceived({ id: delivered.id, text: inputText(delivered.content) });
+  }, [inputs, reportDelivery]);
+  React.useEffect(() => {
+    if (!received) return;
+    const timer = setTimeout(() => setReceived(undefined), 4000);
+    return () => clearTimeout(timer);
+  }, [received]);
   const [editing, setEditing] = React.useState<{ input: QueuedInput; text: string } | null>(null);
   const [images, setImages] = React.useState<ImageAttachment[]>();
   const [reading, setReading] = React.useState(false);
@@ -91,12 +104,14 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
       <Button type="submit" variant="ghost" size="sm" disabled={pending || reading || !editIsCurrent}>{t('settings.common.actions.saveChanges')}</Button>
     </div>
   </form>;
-  if (!queued.length && !editing) return null;
+  if (!queued.length && !editing && !received) return null;
   return <section aria-label={t('chat.queuedMessage.title')} className="max-h-[40vh] space-y-2 overflow-y-auto overscroll-contain">
+    {received && <p role="status" className="bot-input-received"><Icon name="check" className="size-3" /><span>{t('bot.workspace.received')} · {received.text}</span></p>}
     {queued.map(input => <div key={input.id} data-queued-input={input.id} className="mx-auto max-w-3xl rounded-xl border border-border/60 px-3 py-2 text-sm">
       <div className="flex items-center gap-2 text-muted-foreground">
         <Icon name={input.mode === 'next_run' ? 'time' : 'arrow-up'} className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate" title={inputText(input.content)}>{inputText(input.content) || t('chat.queuedMessage.empty')}</span>
+        <span className="shrink-0 typography-micro text-muted-foreground max-sm:hidden">{t(input.mode === 'next_run' ? 'bot.workspace.queued' : 'bot.workspace.accepted')}</span>
         {input.mode === 'next_run' && onSendNow && <button type="button" disabled={pending || Boolean(editing)}
           title={t('chat.queuedMessage.sendHint')} className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 typography-micro text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
           onClick={() => void onSendNow(input)}><Icon name="arrow-up" className="size-3.5" />{t('chat.queuedMessage.sendNow')}</button>}

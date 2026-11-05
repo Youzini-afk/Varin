@@ -41,6 +41,7 @@ export interface BotStageView { own: (BotOwnPose & { threadId: string }) | null;
 
 /** The open conversation's current Run as its projection sees it (ThreadConversation `onActivity`). */
 export interface BotLiveRound {
+  waitingFor?: string;
   threadId: string;
   branchId: string;
   runId: string | null;
@@ -212,9 +213,9 @@ export class BotStageDirector {
     const run = activeRun(root)!;
     const team = leads.some(lead => lead.sessionThreadId === root.threadId);
     let phase = runPhase(run, cursor)!;
-    const base = { threadId: root.threadId, tool: null, subject: null, count: 0 };
-    if (phase === 'waiting') return { ...base, phase: team ? 'team' : 'thinking' };
     const seen = live && live.threadId === root.threadId && live.branchId === root.branchId && live.runId === run.id ? live : null;
+    const base = { threadId: root.threadId, tool: null, subject: null, count: 0, ...(seen?.waitingFor ? { waitingFor: seen.waitingFor } : {}) };
+    if (phase === 'waiting') return { ...base, phase: team || seen?.waitingFor ? 'team' : 'thinking' };
     if (seen) {
       const tools = seen.tools.flatMap(tool => { const kind = botToolKind(tool.name); return kind ? [{ ...tool, kind }] : []; });
       const last = tools.at(-1);

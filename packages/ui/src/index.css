@@ -10,6 +10,7 @@
 @import "./styles/thinking.css";
 @import "./styles/collaboration.css";
 @import "./styles/bot.css";
+@import "./styles/bot-workspaces.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */

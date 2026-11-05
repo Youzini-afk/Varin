@@ -88,6 +88,7 @@ type SourceClientMethod<Method> = Method extends (principal: infer _Principal, .
   ? (...args: Args) => Result : never;
 /** An authenticated connection to one frozen Host. No credential is included in source metadata. */
 export type ManagedSourceClient = Omit<{ [Method in keyof ManagedSourceService]: SourceClientMethod<ManagedSourceService[Method]> }, 'service'> & {
+  documents(path: string, method: 'GET' | 'POST', body?: unknown, signal?: AbortSignal): Promise<Response>;
   service<Operation extends SourceServiceOperation>(input: Omit<ManagedSourceServiceRequest, 'operation'> & { operation: Operation }, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>>;
 };
 
@@ -143,10 +144,10 @@ class ManagedTargetClient {
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
     }
     if (!response.ok) {
-      const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown; details?: unknown } | null;
+      const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown; reason?: unknown; details?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
-      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined, response.status, responseBody?.details);
+      throw new ManagedResponseError(message, responseBody?.code ?? responseBody?.reason, response.status, responseBody?.details);
     }
     return response;
   }
@@ -484,6 +485,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       codeExchange: (input, signal) => request('codeExchange', input, signal),
       resolve: (input, signal) => request('resolve', input, signal),
       files: (input, signal) => request('files', input, signal),
+      workspace: (input, signal) => request('workspace', input, signal),
+      documents: (path, method, body, signal) => client.response(`/documents/${path}`, { method, headers: { 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}) }),
+      workspaceUpload: async (input, body, signal) => {
+        if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('File upload belongs to another coordinator');
+        return client.request('/sources/workspaceUpload', { method: 'POST', body,
+          headers: { 'Content-Type': 'application/octet-stream', 'x-varin-file-upload': encodeURIComponent(JSON.stringify(input)) }, ...(signal ? { signal } : {}) });
+      },
       skills: (input, signal) => request('skills', input, signal),
       prepare: (input, signal) => request('prepare', input, signal),
       bind: (input, signal) => request('bind', input, signal),

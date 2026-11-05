@@ -380,6 +380,18 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     });
   }
 
+  /** Browser uploads and cross-device copies stream into the existing native blob owner. */
+  async writeStream(identity: RecoveryIdentity, relativePath: string, chunks: AsyncIterable<Uint8Array>,
+    options: { byteLength: number; operationId: string; expected?: RecoveryState; mode?: number; signal?: AbortSignal }) {
+    const context = await this.bind(identity);
+    const stored = await context.client.putBlobStream(chunks, { operationId: `${options.operationId}:content`, byteLength: options.byteLength }, options.signal);
+    try {
+      options.signal?.throwIfAborted();
+      return await this.applyStateDetailed(identity, relativePath, { kind: 'regular-file', objectHash: stored.hash, byteLength: stored.byteLength, ...(options.mode === undefined ? {} : { mode: options.mode }) },
+        { ownerId: stored.ownerId, operationId: options.operationId, ...(options.expected ? { expected: options.expected } : {}) });
+    } finally { await context.client.releaseBlob(stored.ownerId); }
+  }
+
   async mkdir(identity: RecoveryIdentity, relativePath: string, recursive = true): Promise<void> {
     const context = await this.bind(identity);
     const pathId = this.translated(context, relativePath);

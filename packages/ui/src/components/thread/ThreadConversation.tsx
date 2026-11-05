@@ -116,6 +116,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const setMaterials = React.useCallback((value: React.SetStateAction<ThreadMaterialAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ materials: typeof value === 'function' ? value(current.materials) : value })), [draftKey]);
   const setPreparedSource = React.useCallback((preparedSource: ThreadPreparedSource | null) => useThreadDraftStore.getState().patch(draftKey, { preparedSource }), [draftKey]);
   const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
+  const botFollowUpBehavior = useMessageQueueStore(state => state.botFollowUpBehavior);
+  const submitMode = React.useRef<'boundary' | 'next_run' | undefined>(undefined);
   const { text, images, materials } = draft;
   // Bot's execution source is owned by its Host profile, not the workspace picker.
   const workspacePath = botSurface ? undefined : draft.workspacePath;
@@ -253,7 +255,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
   const preparingExecution = snapshot?.delegatedExecutions?.find(execution => execution.state === 'preparing' && !execution.cancel_requested);
   const preparingDelegation = Boolean(preparingExecution);
-  const inputMode = !delegated && followUpBehavior === 'queue' ? 'next_run' as const : 'boundary' as const;
+  const botSession = Boolean(snapshot?.thread.bot_id && !snapshot.thread.parent_thread_id);
+  const inputMode = !delegated && (botSession ? botFollowUpBehavior : followUpBehavior) === 'queue' ? 'next_run' as const : 'boundary' as const;
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
   const workFocus = useThreadWorkFocus(draftKey, botSurface ? undefined : workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot) && !botSurface);
   const agent = { profileId: null, workFocus };
@@ -569,7 +572,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <Departure present={empty} animated={sendDeparts} exit="rise" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">{emptyHero?.visual ?? <VarinLogo width={24} height={24} decorative className="text-muted-foreground" />}<h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyHero?.title ?? (emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle'))}</h1></Departure>
     {!botSurface && snapshot && <ThreadWorkStrips key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
     <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}
-      api={api} identity={identity} inputs={snapshot.inputs} pending={pending}
+      api={api} identity={identity} inputs={snapshot.inputs} pending={pending} reportDelivery={botSession}
       onSave={async (input, text, images) => {
         let saved = false;
         await act(async () => {
@@ -581,6 +584,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onSendNow={active && run ? input => act(() => api.sendInputNow(input.id, input.revision, run.id)) : undefined} />}</div>
     {workflows.directed ?? <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
+      const requestedMode = submitMode.current ?? inputMode;
+      submitMode.current = undefined;
       if (draft.firstSend || !botSurface && draft.identity && !run && (draft.sourceSelection || draft.files?.length)) {
         if (pending || !draft.firstSend && sendDisabled) return;
         try {
@@ -623,7 +628,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           const attachments = { ...(materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {}),
             ...(retained.length || selections.length ? { attachments: [...retained.map(({ ref }) => ({ ref })), ...selections] } : {}) };
           const submit = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
-          const queued = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, mode: inputMode };
+          const queued = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, mode: requestedMode };
           const continuation = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
           const goalSettings = useUIStore.getState();
@@ -680,6 +685,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
       <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => openConversationTree(surface)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
         permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
+          // Resource scope is independent of the conversation's presentation.
           ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
           : workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}
         agentControls={!botSurface && !snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
@@ -698,6 +704,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
         attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
+        prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}
         onWorkspace={botSurface ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
         workspacePath={localWorkspacePath}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>

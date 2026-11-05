@@ -246,6 +246,8 @@ import { createMaterialCollections as createMaterialCollectionsService } from '.
 
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { createThreadFileTargetResolver } from './lib/kernel/thread-file-target.js';
+import { createResourceFilesOwner } from './lib/workspace/resource-files.js';
+import { registerResourceFileRoutes } from './lib/workspace/resource-file-routes.js';
 
 import { THINKING_LEVELS, resolveMessageTimeSettings } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
@@ -2265,8 +2267,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindSourceFiles(threadSourceFiles);
   threads.bindContentMaintenance(contentMaintenance.request);
   externalAgents.bindContentMaintenance(contentMaintenance.request);
-  threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
-    documents: documentsAuthority, validateLiveSource: liveSources.validate,nativeWorkspaces }));
+  const userFileTarget = createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
+    documents: documentsAuthority, validateLiveSource: liveSources.validate, nativeWorkspaces });
+  threads.bindFileResolver(userFileTarget);
+  // User mutations share Documents' native gate and its lease context.
+  const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget);
+  registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
   threads.bindMessageTime(async () => {
@@ -2325,6 +2331,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    workspaceFiles: resourceFiles,
     deviceFileAccess: !workspaceConfig.lockdown,
     executionEnvironment: () => executionEnvironment.snapshot(),
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
@@ -2519,6 +2526,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   void connections.restore().catch((error) => console.error('[HostConnections]', errorMessage(error)));
   registerManagedRemoteRoutes(app, {
+    documents: documentsAuthority,
     service: managedRemoteExecution,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
     ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),

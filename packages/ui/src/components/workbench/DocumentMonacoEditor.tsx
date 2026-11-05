@@ -51,6 +51,8 @@ import {
 } from '@/lib/language-services/provider-status-registry';
 
 type DocumentMonacoEditorProps = {
+  scope?: { documents: import('@/lib/documents/registry').DocumentRegistry; models: import('@/lib/monaco/model-registry').FileEditorModelRegistry };
+  readOnly?: boolean;
   className?: string;
   identity: DocumentIdentity;
   onViewStateChange?(viewState: EditorViewState): void;
@@ -75,6 +77,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   providerId,
   viewId,
   viewState,
+  scope,
+  readOnly = false,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -84,7 +88,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
   const sessionId = useThreadStore(state => selectedComposerKey(state));
   const sessionDirectory = useEffectiveDirectory();
-  const inlineDraftKey = sessionId && sessionDirectory
+  const inlineDraftKey = !scope && sessionId && sessionDirectory
     ? getInlineCommentDraftKey(getRuntimeKey(), sessionDirectory, sessionId)
     : null;
   const inlineDrafts = useInlineCommentDraftStore((state) => (
@@ -105,7 +109,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     () => peekLanguageProviderStatus(identity.workspaceId, hostLanguageId),
     () => undefined,
   );
-  const record = useDocumentRecord(identity);
+  const record = useDocumentRecord(identity, scope?.documents);
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const vimStatusRef = React.useRef<HTMLDivElement | null>(null);
   const editorRef = React.useRef<import('monaco-editor/editor').editor.IStandaloneCodeEditor | null>(null);
@@ -116,7 +120,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const captureContextRef = React.useRef<(() => void) | null>(null);
   const closeInlineCommentRef = React.useRef<(() => void) | null>(null);
   const inlineCommentDecorationIdsRef = React.useRef<string[]>([]);
-  const models = getFileEditorModelRegistry();
+  const models = scope?.models ?? getFileEditorModelRegistry();
   const instanceOwner = React.useId();
   const ownerId = `view:${viewId}:${instanceOwner}`;
 
@@ -163,7 +167,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       profileId,
       settings: fileEditorSettings,
     }));
-  }, [editorFontSize, fileEditorSettings, path, profileId]);
+    editorInstance.updateOptions({ readOnly });
+  }, [editorFontSize, fileEditorSettings, path, profileId, readOnly]);
 
   React.useEffect(() => {
     const host = hostRef.current;
@@ -179,17 +184,18 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       }),
       model: modelSnapshot.model,
       theme: themeName,
+      readOnly,
     });
     editorRef.current = editorInstance;
     setEditorInstance(editorInstance);
     applyMonacoEditorViewState(editorInstance, viewStateRef.current);
     editorInstance.layout();
 
-    const bridge = getMonacoLanguageBridge(monaco, models);
+    const bridge = scope ? null : getMonacoLanguageBridge(monaco, models);
     const languageOwnerId = `language:${viewId}:${instanceOwner}`;
-    bridge.acquire(modelSnapshot.model, identity, languageOwnerId);
-    const runDebugAdapter = createRunDebugEditorAdapter({ editor: editorInstance, identity, monaco });
-    const disposeExtensionView = registerMonacoExtensionView({
+    bridge?.acquire(modelSnapshot.model, identity, languageOwnerId);
+    const runDebugAdapter = scope ? null : createRunDebugEditorAdapter({ editor: editorInstance, identity, monaco });
+    const disposeExtensionView = scope ? () => {} : registerMonacoExtensionView({
       editor: editorInstance,
       getDocumentVersion: () => recordRef.current?.localEditRevision ?? 0,
       identity,
@@ -208,6 +214,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       const selection = editorInstance.getSelection();
       const open = recordRef.current;
       const hasSelection = Boolean(selection && !selection.isEmpty());
+      if (scope) return;
       if (!open?.documentInstanceId) return;
       publishEditorContext(ownerId, {
         documentInstanceId: open.documentInstanceId,
@@ -282,13 +289,13 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
         activateEditorContextOwner(ownerId);
         scheduleCapture();
       }),
-      editorInstance.addAction({
+      ...(scope ? [] : [editorInstance.addAction({
         id: 'varin.editor.addInlineComment',
         label: tRef.current('inlineComment.actions.comment'),
         contextMenuGroupId: 'navigation',
         contextMenuOrder: 20,
         run: openInlineComment,
-      }),
+      })]),
     ];
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => editorInstance.layout())
@@ -305,8 +312,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       captureContextRef.current = null;
       releaseEditorContextOwner(ownerId);
       closeInlineCommentRef.current?.();
-      bridge.release(languageOwnerId);
-      runDebugAdapter.dispose();
+      bridge?.release(languageOwnerId);
+      runDebugAdapter?.dispose();
       disposeExtensionView();
       for (const disposable of disposables) disposable.dispose();
       resizeObserver?.disconnect();
@@ -360,6 +367,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   React.useEffect(() => {
     if (!monaco || !editorInstance) return undefined;
     return registerFileEditorCommandTarget({
+      documents: scope?.documents,
       editor: editorInstance,
       identity,
       ownerId,
@@ -384,6 +392,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     t,
     updateFileEditorSettings,
     viewId,
+    scope?.documents,
   ]);
 
   React.useEffect(() => {
