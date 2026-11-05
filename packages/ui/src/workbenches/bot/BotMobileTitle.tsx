@@ -44,7 +44,7 @@ export function BotMobileTitle({ bot, figure, line, open, onToggle, model }: {
         {work.slice(0, 3).map(item => <button key={item.key} type="button" onClick={() => { setPreviewOpen(false); navigation?.open({ kind: 'work', key: item.key, identity: item.identity, title: item.name }); }}><AgentAvatar identity={item.identity.threadId} avatar={item.avatar} role="lead" size={24} /><span>{item.name}<small>{item.status && <BotWorkStatusLabel status={item.status} />}</small></span><Icon name="arrow-right-s" className="size-4" /></button>)}
         {!work.length && !model?.needs.length && <p className="typography-meta text-muted-foreground">{t('bot.workspace.emptyWork')}</p>}
       </div>
-      <footer className="flex items-center justify-between gap-2"><Button variant="ghost" size="sm" onClick={() => { setPreviewOpen(false); navigation?.connections(); }}><Icon name="computer" className="size-4" />{t('bot.workspace.connections')}</Button><Button variant="outline" size="sm" onClick={() => { setPreviewOpen(false); onToggle(); }}>{t(open ? 'bot.mobile.closePanel' : 'bot.mobile.openPanel', { name: bot.name })}</Button></footer>
+      <footer className="flex justify-end"><Button variant="outline" size="sm" onClick={() => { setPreviewOpen(false); onToggle(); }}>{t(open ? 'bot.mobile.closePanel' : 'bot.mobile.openPanel', { name: bot.name })}</Button></footer>
     </Popover.Popup></Popover.Positioner></Popover.Portal>
   </Popover.Root>;
 }

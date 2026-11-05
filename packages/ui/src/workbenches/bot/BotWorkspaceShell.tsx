@@ -534,7 +534,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const togglePanel = () => { if (floating) setNarrowPanelOpen(open => !open); else setPanelOpen(!panelOpen); };
   const panelLabel = t(panelVisible ? 'bot.panel.close' : 'bot.panel.open');
   const panelControl = isMobile ? undefined : <>
-    <Tooltip><TooltipTrigger asChild><button type="button" className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover" aria-label={t('bot.workspace.connections')} onClick={spaces.connections}><Icon name="computer" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('bot.workspace.connections')}</TooltipContent></Tooltip>
     {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
       className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
       onClick={() => treeTab ? closeTree() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
