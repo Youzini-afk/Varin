@@ -177,7 +177,7 @@
   "devDependencies": {
     "@clack/prompts": "^1.8.1",
     "@eslint/js": "^10.0.1",
-    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.4",
     "@types/dom-speech-recognition": "^0.0.12",
     "@types/node": "^24.13.3",
     "@types/react": "^19.3.0",
