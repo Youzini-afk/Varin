@@ -8,6 +8,7 @@ import { afterEach, it as vitestIt } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore } from "./kernel-recovery-store.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
+import { createResourceFilesOwner } from '../workspace/resource-files.js';
 import { createKernelClient, type KernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
 
@@ -416,6 +417,26 @@ it("audit: real Documents write, stale save, move and delete use the kernel Reco
       await assert.rejects(h.authority.runResourceOperation(h.identity.workspaceId, [{ resourceId: "nested", scope: "subtree" }], async () => { invoked = true; }), /scope|lease/i);
     });
     assert.equal(invoked, false, "Documents must not shortcut kernel coverage validation");
+    const explorer = createResourceFilesOwner(h.authority, backend);
+    const opened = await explorer.request({ command: { kind: 'open', path: h.workspaceRoot } });
+    assert.equal(opened.kind, 'opened');
+    if (opened.kind !== 'opened') throw new Error('Expected explicit file location');
+    const location = { root: opened.root, workspaceId: opened.workspaceId };
+    await explorer.request({ ...location, command: { kind: 'mkdir', path: 'upload' } });
+    const bytes = Buffer.from('remote 文件\n'.repeat(30_000));
+    await explorer.upload({ ...location, path: 'upload/data.txt', byteLength: bytes.length, key: 'explorer-upload' }, (async function* () { yield bytes.subarray(0, 111); yield bytes.subarray(111); })());
+    assert.deepEqual(await fs.readFile(path.join(h.workspaceRoot, 'upload/data.txt')), bytes);
+    await assert.rejects(explorer.upload({ ...location, path: 'upload/data.txt', byteLength: 1, key: 'collision' }, (async function* () { yield Buffer.from('x'); })()), /destination already exists/i);
+    const page = await explorer.request({ ...location, command: { kind: 'bytes', path: 'upload/data.txt', offset: 0 } });
+    assert.equal(page.kind, 'bytes');
+    assert.ok(page.kind === 'bytes' && !page.eof && page.nextOffset > 0);
+    await explorer.request({ ...location, command: { kind: 'copy', path: 'upload/data.txt', destination: 'copied.txt', key: 'copy-file' } });
+    await explorer.request({ ...location, command: { kind: 'rename', path: 'copied.txt', destination: 'renamed.txt', key: 'rename-file' } });
+    assert.deepEqual(await fs.readFile(path.join(h.workspaceRoot, 'renamed.txt')), bytes);
+    await assert.rejects(explorer.request({ ...location, command: { kind: 'remove', path: 'renamed.txt', expectedHash: createHash('sha256').update('other').digest('hex'), key: 'changed-source' } }), /source changed/i);
+    assert.deepEqual(await fs.readFile(path.join(h.workspaceRoot, 'renamed.txt')), bytes);
+    await explorer.request({ ...location, command: { kind: 'remove', path: 'renamed.txt', expectedHash: `sha256-${createHash('sha256').update(bytes).digest('hex')}`, key: 'remove-copied-source' } });
+    await assert.rejects(fs.stat(path.join(h.workspaceRoot, 'renamed.txt')), { code: 'ENOENT' });
   } finally { await adapter.dispose(); await h.cleanup(); }
 }, 30_000);
 

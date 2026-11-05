@@ -43,6 +43,7 @@ export const FILE_EDITOR_COMMAND_IDS = {
 export type FileEditorCommandId = typeof FILE_EDITOR_COMMAND_IDS[keyof typeof FILE_EDITOR_COMMAND_IDS];
 
 type FileEditorCommandTarget = {
+  documents?: ReturnType<typeof getDocumentRegistry>;
   editor: editor.IStandaloneCodeEditor;
   identity: DocumentIdentity;
   ownerId: string;
@@ -175,7 +176,7 @@ export const saveFileEditorDocument = async (identity: DocumentIdentity): Promis
   if (target?.getSettings().formatOnSave) {
     await runAction(target, 'editor.action.formatDocument').catch(() => undefined);
   }
-  await getDocumentRegistry().save(identity);
+  await (target?.documents ?? getDocumentRegistry()).save(identity);
 };
 
 const saveTarget = async (target: FileEditorCommandTarget): Promise<void> => {

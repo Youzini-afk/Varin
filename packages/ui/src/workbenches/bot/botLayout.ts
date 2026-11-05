@@ -29,14 +29,18 @@ interface BotLayoutState {
   panelWidth: number;
   tab: BotPanelTab;
   activityScope: 'all' | 'session';
+  overviewScope: 'all' | 'session';
   memoryScope: 'current' | 'all';
   seen: Record<string, BotSeenMarks>;
+  pinnedComputers: Record<string, string[]>;
+  toggleComputerPin(scope: string, id: string): void;
   setSidebarOpen(open: boolean): void;
   setOrdinarySidebar(open: boolean | null): void;
   setPanelOpen(open: boolean): void;
   setPanelWidth(width: number): void;
   setTab(tab: BotPanelTab): void;
   setActivityScope(scope: 'all' | 'session'): void;
+  setOverviewScope(scope: 'all' | 'session'): void;
   setMemoryScope(scope: 'current' | 'all'): void;
   markSeen(botId: string, marks: BotSeenMarks): void;
 }
@@ -49,14 +53,18 @@ export const useBotLayout = create<BotLayoutState>()(persist((set) => ({
   panelWidth: BOT_PANEL_WIDTH.initial,
   tab: 'overview',
   activityScope: 'all',
+  overviewScope: 'session',
   memoryScope: 'current',
   seen: {},
+  pinnedComputers: {},
+  toggleComputerPin: (scope, id) => set(state => { const current = state.pinnedComputers[scope] ?? []; return { pinnedComputers: { ...state.pinnedComputers, [scope]: current.includes(id) ? current.filter(value => value !== id) : [...current, id] } }; }),
   setSidebarOpen: sidebarOpen => set({ sidebarOpen }),
   setOrdinarySidebar: ordinarySidebar => set({ ordinarySidebar }),
   setPanelOpen: panelOpen => set({ panelOpen }),
   setPanelWidth: width => set({ panelWidth: clampBotPanelWidth(width) }),
   setTab: tab => set({ tab }),
   setActivityScope: activityScope => set({ activityScope }),
+  setOverviewScope: overviewScope => set({ overviewScope }),
   setMemoryScope: memoryScope => set({ memoryScope }),
   markSeen: (botId, marks) => set(state => {
     const current = state.seen[botId] ?? {};
@@ -67,5 +75,5 @@ export const useBotLayout = create<BotLayoutState>()(persist((set) => ({
 }), {
   name: 'varin.botLayout.v1',
   storage: createDeferredSafeJSONStorage(),
-  partialize: ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, memoryScope, seen }) => ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, memoryScope, seen }),
+  partialize: ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers }) => ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers }),
 }));

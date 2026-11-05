@@ -1,4 +1,6 @@
+import { botWorkspaceEn } from './bot-workspaces.js';
 export const settingsDict = {
+  ...botWorkspaceEn,
   "settings.harness.role.webSelection": "Web connection selection",
   "settings.harness.role.webSelection.description": "Choose among eligible search connections using a separate model and thinking setting.",
   "settings.page.harness.web.assistance.title": "Optional retrieval assistance",
@@ -2611,6 +2613,8 @@ export const settingsDict = {
   'settings.smartSearch.unavailable.body': 'Smart Search settings are available in the Web runtime.',
   'settings.smartSearch.unavailable.description': 'This runtime does not expose Smart Search configuration APIs.',
   "settings.varin.visual.section.followUpBehavior": "Messages during a task",
+  "settings.varin.visual.section.botFollowUpBehavior": "When talking with Varin",
+  "settings.varin.visual.field.botFollowUpBehaviorDescription": "Add to the current conversation by default. Varin receives it at the next input boundary while running operations continue. Delegated agents use the ordinary task preference.",
   "settings.varin.visual.section.followUpBehaviorAria": "Messages during a task",
   "settings.varin.visual.field.followUpBehaviorAria": "Send behavior: {option}",
   "settings.varin.visual.field.followUpBehaviorDescription": "Choose the default when sending during an active task: queue for after it finishes, or add input at its next input boundary. Running tools continue.",

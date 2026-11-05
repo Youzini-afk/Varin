@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BotSummary, ThreadIdentity, ThreadsAPI } from '@varin/application-client';
+import type { BotSummary, BotWorkItem, ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import type { BotMatter } from '@varin/protocol';
 import type { BotPanelTab } from './botLayout';
 import type { BotFigurePose, BotNeed, BotSessionView, BotStateLine, BotTimelineEvent, BotWorkView } from './botPresentation';
@@ -21,6 +21,7 @@ export interface BotPanelModel {
   /** The conversation open in the centre; null while none of the Bot's own conversations is open. */
   session: BotSessionView | null;
   work: BotWorkView[];
+  workItems?: BotWorkItem[];
   needs: BotNeed[];
   timeline: BotTimelineEvent[];
   facts: ReturnType<typeof useBotFacts>;

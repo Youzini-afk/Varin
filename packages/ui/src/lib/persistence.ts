@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
+  DEFAULT_BOT_FOLLOW_UP_BEHAVIOR,
   isFollowUpBehavior,
   useMessageQueueStore,
 } from '@/stores/messageQueueStore';
@@ -474,6 +475,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     sessionRetentionAction: defaults.sessionRetentionAction,
     recoveryPreference: defaults.recoveryPreference,
     followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
+    botFollowUpBehavior: DEFAULT_BOT_FOLLOW_UP_BEHAVIOR,
     showDeletionDialog: defaults.showDeletionDialog,
     nativeNotificationsEnabled: defaults.nativeNotificationsEnabled,
     notificationMode: defaults.notificationMode,
@@ -581,6 +583,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritat
 
   if (isFollowUpBehavior(settings.followUpBehavior) && settings.followUpBehavior !== queueStore.followUpBehavior) {
     queueStore.setFollowUpBehavior(settings.followUpBehavior);
+  }
+  if (isFollowUpBehavior(settings.botFollowUpBehavior) && settings.botFollowUpBehavior !== queueStore.botFollowUpBehavior) {
+    queueStore.setBotFollowUpBehavior(settings.botFollowUpBehavior);
   }
 
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
@@ -1070,6 +1075,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (isFollowUpBehavior(candidate.followUpBehavior)) {
     result.followUpBehavior = candidate.followUpBehavior;
+  }
+  if (isFollowUpBehavior(candidate.botFollowUpBehavior)) {
+    result.botFollowUpBehavior = candidate.botFollowUpBehavior;
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;

@@ -1,0 +1,71 @@
+/* Varin · 总助手设计稿 · 手机顶部状态胶囊（类似灵动岛）
+ * 平时显示会话名；Varin 在做事时换成当前动作；有事等你亮暖色点；
+ * 结果送达、提问、接收补充等事件短暂展开成横幅后收回；点一下展开成小概览。
+ *
+ * 位置：胶囊在应用自己的标题栏里，标题栏从安全区下方开始（产品里是 --varin-safe-area-top，
+ * 即 env(safe-area-inset-top)）。系统按机型报告状态栏与摄像头开孔占用的高度，所以任何手机上
+ * 胶囊都不会压到摄像头；横屏时左右安全区同样留给开孔。
+ * 配色：跟随主题，不做纯黑。纯黑胶囊在有硬件灵动岛的 iPhone 上会像第二个岛。
+ */
+.island-slot { display: flex; justify-content: center; min-width: 0; }
+.island { --is-bg: var(--elevated); --is-fg: var(--fg); --is-sub: var(--muted); --is-line: var(--border); --is-glyph: var(--faint);
+  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; max-width: 100%; padding: 0 12px 0 4px; border-radius: 16px; background: var(--is-bg); color: var(--is-fg);
+  box-shadow: 0 0 0 1px var(--border-strong), 0 6px 18px -10px #0005; overflow: hidden; text-align: left; white-space: nowrap;
+  transition: width 520ms cubic-bezier(.34, 1.26, .64, 1), height 520ms cubic-bezier(.34, 1.26, .64, 1), border-radius 520ms cubic-bezier(.34, 1.26, .64, 1), padding 420ms var(--ease), box-shadow 320ms var(--ease); will-change: width, height; }
+:root[data-theme="dark"] .island { --is-bg: #202020; }
+.island:active { transform: scale(.97); }
+.island .is-head { position: relative; width: 24px; height: 24px; border-radius: 50%; flex: none; background: var(--soft); box-shadow: inset 0 0 0 1px var(--is-line); overflow: hidden; transition: width 420ms var(--ease), height 420ms var(--ease); }
+.island .is-head svg { margin: -1px 0 0 -1px; }
+.island[data-busy="true"] .is-head::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--success); animation: breathe 2.2s var(--ease) infinite; }
+.island .is-body { display: flex; flex-direction: column; min-width: 0; flex: 1; animation: is-in 360ms var(--ease) both; }
+@keyframes is-in { from { opacity: 0; filter: blur(4px); transform: scale(.96); } }
+.island .is-t1 { font-size: 13px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; }
+.island .is-t2 { font-size: 12px; color: var(--is-sub); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }
+.island .is-end { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--is-glyph); }
+.island .is-act { height: 26px; padding: 0 11px; border-radius: 13px; background: var(--primary); color: var(--primary-fg); font-size: 12.5px; font-weight: 600; }
+.island .is-act.warn { background: var(--warning); color: #fff; }
+
+/* 有事等你、事件到达时，边缘带一点状态色，平时保持中性 */
+.island[data-tone="warn"] { box-shadow: 0 0 0 1px var(--warning-line), 0 6px 18px -10px #0005; }
+
+/* 事件横幅：头像变大、两行文字、一个动作 */
+.island[data-mode="event"] { height: 64px; border-radius: 26px; padding: 0 12px 0 10px; gap: 11px; box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-float); }
+.island[data-mode="event"] .is-head { width: 40px; height: 40px; background: none; box-shadow: none; }
+.island[data-mode="event"] .is-t1 { font-size: 13.5px; }
+
+/* 点开：小概览 */
+.island[data-mode="open"] { height: auto; min-height: 32px; border-radius: 24px; padding: 12px; flex-wrap: wrap; align-items: flex-start; white-space: normal; box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-float); }
+.island[data-mode="open"] .is-head { width: 40px; height: 40px; }
+.island[data-mode="open"] .is-body { flex: 1 1 calc(100% - 52px); }
+.is-list { flex-basis: 100%; min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--is-line); }
+.is-row { min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; border-radius: 10px; font-size: 12.5px; color: var(--is-sub); }
+.is-row:active { background: var(--hover); }
+.is-row b { color: var(--is-fg); font-weight: 600; }
+.is-row .trunc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-row .go { color: var(--warning); font-size: 12px; white-space: nowrap; }
+.is-row > .ic { color: var(--warning); }
+.is-foot { flex-basis: 100%; min-width: 0; width: 100%; display: flex; gap: 8px; margin-top: 8px; }
+.is-foot .is-act { flex: 1; height: 32px; border-radius: 16px; }
+.is-foot .is-act.ghost { background: var(--soft); color: var(--is-fg); box-shadow: inset 0 0 0 1px var(--is-line); }
+.island-scrim { position: absolute; inset: 0; z-index: 19; }
+
+/* ===================== 手机：系统状态栏（评审示意）与应用标题栏 ===================== */
+.statusbar { display: none; }
+.frame[data-size="mobile"] .statusbar { display: flex; align-items: center; justify-content: space-between; flex: none; position: relative; height: 54px; padding: 0 30px 0 34px; font-size: 15px; font-weight: 600; color: var(--fg); }
+.statusbar .sb-sys { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .sb-sys svg { height: 11px; width: auto; fill: currentColor; }
+.statusbar .cutout { position: absolute; left: 50%; transform: translateX(-50%); background: #000; }
+/* 每种机型的安全区高度与开孔：这些只在原型里画出来；产品里由系统报告，应用不需要知道开孔形状 */
+.statusbar[data-device="island"] { height: 54px; }
+.statusbar[data-device="island"] .cutout { top: 11px; width: 122px; height: 35px; border-radius: 18px; }
+.statusbar[data-device="notch"] { height: 47px; }
+.statusbar[data-device="notch"] .cutout { top: 0; width: 158px; height: 30px; border-radius: 0 0 20px 20px; }
+.statusbar[data-device="punch"] { height: 36px; padding: 0 24px; font-size: 13px; }
+.statusbar[data-device="punch"] .cutout { top: 11px; width: 14px; height: 14px; border-radius: 50%; }
+.statusbar[data-device="punch-left"] { height: 36px; padding: 0 24px 0 56px; font-size: 13px; }
+.statusbar[data-device="punch-left"] .cutout { left: 30px; transform: none; top: 11px; width: 14px; height: 14px; border-radius: 50%; }
+
+/* 手机标题栏：左侧会话列表，中间胶囊，右侧 Varin 面板；高度不再自己预留状态栏 */
+.frame[data-size="mobile"] .titlebar { grid-template-columns: 40px 1fr 40px; height: 46px; padding: 4px 10px 0; align-items: start; }
+.frame[data-size="mobile"] .titlebar .tb-btn { margin-top: 1px; }
+.frame[data-size="mobile"] .titlebar:has(.island[data-mode="open"]) { z-index: 30; }

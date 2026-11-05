@@ -54,3 +54,6 @@ export * from './external-agents.js';
 export * from './usage.js';
 
 export * from "./conversation-content.js";
+export * from './resource-files.js';
+export * from './documents-http.js';
+export * from './transport/document-watch-events.js';

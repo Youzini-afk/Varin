@@ -35,7 +35,14 @@ vi.mock('@/lib/bots', async original => ({
   openBotWorkInWorkbench: state.openWork,
   deleteBot: vi.fn(),
 }));
-vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: {} }) }));
+vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { sources: { list: async () => ({ targets: [], unavailable: [] }) } }; return { useRuntimeAPIs: () => ({ threads }) }; });
+vi.mock('@/lib/computers', () => ({ listComputers: async () => ({ desktops: [], machines: [], defaultDesktopId: null }) }));
+vi.mock('./BotWorkDetail', async () => {
+  const { useBotPanel } = await import('./botPanelModel');
+  return { BotWorkDetail: ({ identity }: { identity: import('@varin/application-client').ThreadIdentity }) => {
+    const model = useBotPanel(); return <div data-work-detail={identity.threadId}><button onClick={() => model.openWork(identity, { tab: 'overview', id: `${identity.threadId}\0${identity.branchId}` })}>bot.workspace.openProcess</button></div>;
+  } };
+});
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
 vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope }: { layoutScope?: string }) => <aside data-conversation-tree={layoutScope} /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
@@ -79,11 +86,11 @@ vi.mock('@/components/layout/MainLayout', () => ({
   MainLayout: ({ renderNavigator, renderConversation, renderSecondaryPanel, navigationTitle, navigationSubtitle, headerPanelControl }: {
     renderNavigator(visible: boolean): React.ReactNode;
     renderConversation(active: boolean): React.ReactNode;
-    renderSecondaryPanel?(placement: 'docked' | 'drawer'): React.ReactNode;
+    renderSecondaryPanel?(placement: 'docked' | 'drawer', visible: boolean): React.ReactNode;
     navigationTitle?: string; navigationSubtitle?: string; headerPanelControl?: React.ReactNode;
   }) => <>
     <header data-title={navigationTitle} data-subtitle={navigationSubtitle ?? ''}>{headerPanelControl}</header>
-    {renderNavigator(true)}{renderConversation(true)}<div data-secondary="">{renderSecondaryPanel?.('docked')}</div>
+    {renderNavigator(true)}{renderConversation(true)}<div data-secondary="">{renderSecondaryPanel?.('docked', true)}</div>
   </>,
 }));
 
@@ -248,7 +255,7 @@ describe('Bot workbench', () => {
     expect(state.createSession).not.toHaveBeenCalled();
   });
 
-  it('opens delegated work in the ordinary workbench and never mounts it in the centre', async () => {
+  it('opens work details beside the conversation before entering the original workbench', async () => {
     const child = { runtime: 'agent' as const, threadId: 'child-work', branchId: 'child-branch' };
     const waiting = run(child.threadId, child.branchId, { state: 'waiting', waiting_on: 'permission:write' });
     const item: BotWorkItem = { runtime: 'agent', identity: child, purpose: 'work', activeRun: waiting, sessionThreadId: 'entry-a',
@@ -259,11 +266,16 @@ describe('Bot workbench', () => {
     expect(container.querySelector('.bot-stage .bot-figure')?.getAttribute('data-state')).toBe('waiting');
     expect(container.querySelector('.bot-stage [aria-live]')?.textContent).toBe('bot.state.waitingPermission');
     await act(async () => { container.querySelector<HTMLButtonElement>('.bot-need')!.click(); });
+    expect(state.openWork).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-work-detail="child-work"]')).not.toBeNull();
+    expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
+    await click('bot.workspace.openProcess');
     expect(state.openWork).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ botId: 'a', session: bot('a').entry, workThreadId: 'child-work', focus: { tab: 'overview', id: expect.any(String) } }), child);
     // Coming back through the workbench's back control lights the card the user left from.
     await act(async () => useBotReturn.setState({ returned: state.openWork.mock.calls[0]![0] }));
     expect(container.querySelector('.bot-need')?.classList.contains('bot-flash')).toBe(true);
     expect(useBotReturn.getState().returned).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('.bot-space-back')!.click());
     await click('bot.tab.activity');
     expect(container.querySelector('[role="tabpanel"]')?.id).toBe('bot-pane-activity');
     expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain('Writer');

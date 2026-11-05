@@ -48,7 +48,7 @@
 
 ## 持续演进的设计
 
-- [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：2026-11-05 本轮方案，待实施；覆盖总助手聊天、独立插队默认、工作与成果入口、电脑查看、独立文件管理及分开部署的连接体验。
+- [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：独立发送默认、工作详情、电脑与文件空间、设备连接和手机状态胶囊已接入；当前合同见 [Bot](bot.md)、[资源](resources.md)和[工作台](workbench.md)。[交互稿](design/varin-conversation-preview/index.html)保留视觉与布局参考。
 - [外部 Agent 输入框：连接、控件与状态](design/external-agent-composer.md)：2026-11-05 方向已确认，待实施；参考 codeg，外部后端使用原生工具栏位置，自动准备与空闲回收，项目选择移到输入框下，外部会话接入顶栏的上下文指示。
 - [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：Windows 已改为随包原生 `VarinComputer.exe` 并接通构建、签名配置和 Host 生命周期；正式证书签名与平台实机验收仍待完成。
 - [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：核心链路已实施；记录正文交互、作品修订、草稿联动、状态继承与回收的设计及验收边界。当前合同见[交互内容](interactive-content.md)。

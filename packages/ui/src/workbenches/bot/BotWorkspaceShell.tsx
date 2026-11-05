@@ -43,7 +43,11 @@ import { useBotStage } from './useBotStage';
 import { BotFigure } from './BotFigure';
 import { BotMobileTitle } from './BotMobileTitle';
 import { BotNavigator } from './BotNavigator';
-import { BotPanel, BotPanelBody } from './BotPanel';
+import { BotPanel } from './BotPanel';
+import { useBotWorkspaces } from './useBotWorkspaces';
+import { BotWorkspaceNavigationContext } from './botWorkspaceViews';
+import { BotWorkspaceArea } from './BotWorkspaceArea';
+import { workKey } from './botPresentation';
 
 const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
 const ContextPanel = React.lazy(() => import('@/components/layout/ContextPanel').then(module => ({ default: module.ContextPanel })));
@@ -152,6 +156,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [focus, setFocus] = React.useState<BotPanelFocus | null>(null);
   const [narrowPanelOpen, setNarrowPanelOpen] = React.useState(false);
+  const [spaceExpanded, setSpaceExpanded] = React.useState(false);
   const [moment, setMoment] = React.useState<{ line: BotStateLine; until: number } | null>(null);
   const [listening, setListening] = React.useState(false);
   const opening = React.useRef<AbortController | null>(null);
@@ -491,7 +496,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     : stateLine(selected, pose, { needs, working, own }), [selected, pose, moment, needs, working, own]);
   const panelModel = React.useMemo<BotPanelModel | null>(() => selected && sessionsWithWork && line ? {
     bot: selected, figure: pose, stage: stageFeed, line,
-    sessions: sessionsWithWork, session: currentSession, work, needs, timeline, facts, matters: mattersForBot, threads,
+    sessions: sessionsWithWork, session: currentSession, work, workItems: workItems ?? [], needs, timeline, facts, matters: mattersForBot, threads,
     readOnly: readOnly || offline, busy: actionBusy !== null, focus, profileOpen,
     sessionTitle, focusTab,
     openWork,
@@ -506,9 +511,16 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     requestDelete: () => setDeleting(selected),
     archive: () => { void mutateBot(selected, 'archive'); },
   } : null, [selected, pose, stageFeed, line, needs, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
-    sessionTitle, focusTab, openWork, openSession, mutateBot, archiveMatter, newSession]);
+    sessionTitle, focusTab, openWork, openSession, mutateBot, archiveMatter, newSession, workItems]);
 
-  const childNavigation = React.useMemo<ChildNavigation>(() => ({ label: t('bot.work.openInWorkbench'), open: identity => openWork(identity) }), [t, openWork]);
+  const spaces = useBotWorkspaces(panelModel, committed && !settingsOpen, () => { closeTree(); if (floating) setNarrowPanelOpen(true); else setPanelOpen(true); });
+  const openSpace = spaces.open;
+  const shownPanel = React.useMemo<BotPanelModel | null>(() => panelModel && ({ ...panelModel,
+    openNeed: need => openSpace({ kind: 'work', key: workKey(need.identity), identity: need.identity, title: need.name }),
+  }), [panelModel, openSpace]);
+  React.useEffect(() => { if (!spaces.activeKey) setSpaceExpanded(false); }, [spaces.activeKey]);
+
+  const childNavigation = React.useMemo<ChildNavigation>(() => ({ label: t('bot.workspace.details'), open: identity => openSpace({ kind: 'work', key: workKey(identity), identity, title: work.find(item => item.key === workKey(identity))?.name ?? t('bot.workspace.details') }) }), [t, openSpace, work]);
   const memoryNavigation = React.useMemo<MemoryNavigation>(() => ({ label: t('bot.memory.viewInPanel'), open: memoryId => focusTab('memory', memoryId ?? undefined) }), [t, focusTab]);
   const otherSessions = sessionsWithWork?.filter(session => session.identity.threadId !== selectedEntry?.threadId) ?? [];
   const isSidebarOpen = useUIStore(state => state.isSidebarOpen);
@@ -522,6 +534,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const togglePanel = () => { if (floating) setNarrowPanelOpen(open => !open); else setPanelOpen(!panelOpen); };
   const panelLabel = t(panelVisible ? 'bot.panel.close' : 'bot.panel.open');
   const panelControl = isMobile ? undefined : <>
+    <Tooltip><TooltipTrigger asChild><button type="button" className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover" aria-label={t('bot.workspace.connections')} onClick={spaces.connections}><Icon name="computer" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('bot.workspace.connections')}</TooltipContent></Tooltip>
     {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
       className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
       onClick={() => treeTab ? closeTree() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
@@ -591,15 +604,18 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     </Dialog>}
   </div>;
 
-  const secondaryPanel = (placement: 'docked' | 'drawer') => placement === 'drawer'
-    ? <div className="flex h-full min-h-0 flex-col bg-background">{panelModel ? <BotPanelBody model={panelModel} /> : null}</div>
+  const workspaceArea = (visible: boolean) => shownPanel && <BotWorkspaceArea model={shownPanel} active={committed && !settingsOpen && visible} expanded={spaceExpanded} onExpand={() => setSpaceExpanded(value => !value)} />;
+  const secondaryPanel = (placement: 'docked' | 'drawer', visible: boolean) => placement === 'drawer'
+    ? <div className="flex h-full min-h-0 flex-col bg-background">{workspaceArea(visible)}</div>
     : <><BotPanel model={panelModel} open={!treeTab && panelVisible && panelModel !== null} floating={floating}
-      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }} />
+      workspace={Boolean(spaces.activeKey)} expanded={Boolean(spaces.activeKey) && spaceExpanded}
+      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!treeTab && panelVisible)}</BotPanel>
       {treeMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_TREE_PANEL_SCOPE} surfaceModes={TREE_SURFACES} /></React.Suspense>}</>;
 
-  return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+  return <BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+    secondaryPanelFocus={spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention}
     floatingSidebar={floatingSidebar}
-    renderMobileTitle={isMobile && selected && line ? panel => <BotMobileTitle bot={selected} figure={figure} line={line} open={panel.open} onToggle={panel.toggle} /> : undefined} />;
+    renderMobileTitle={isMobile && selected && line ? panel => <BotMobileTitle bot={selected} model={shownPanel} figure={figure} line={line} open={panel.open} onToggle={panel.toggle} /> : undefined} /></BotWorkspaceNavigationContext.Provider>;
 };

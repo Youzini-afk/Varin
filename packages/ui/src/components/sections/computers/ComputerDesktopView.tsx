@@ -195,7 +195,7 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
   };
 
   const controlLabel = !control ? t('settings.computers.view.control.unknown')
-    : control.owner === 'agent' ? t('settings.computers.view.control.agent')
+    : control.owner === 'agent' ? control.operator?.label || t('settings.computers.view.control.agent')
       : weHoldControl ? t('settings.computers.view.control.you')
         : control.reachable ? t('settings.computers.view.control.otherHuman')
           : t('settings.computers.view.control.pendingHuman');

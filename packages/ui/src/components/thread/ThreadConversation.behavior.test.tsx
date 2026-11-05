@@ -13,6 +13,8 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, Attachment } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { BotWorkDetail } from '@/workbenches/bot/BotWorkDetail';
+import { BotPanelContext, type BotPanelModel } from '@/workbenches/bot/botPanelModel';
 import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
 import { dict as en } from '@/lib/i18n/messages/en';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
@@ -224,7 +226,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
-  useMessageQueueStore.setState({ followUpBehavior: 'queue' });
+  useMessageQueueStore.setState({ followUpBehavior: 'queue', botFollowUpBehavior: 'steer' });
   useTimelineViewStore.setState({ views: {} });
   useWorkOverviewStore.setState({ bySession: {} });
   timelineList.scrollToIndex.mockClear();
@@ -582,6 +584,34 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(button('Stop run')).toBeUndefined();
+});
+
+it.each([
+  { bot: 'varin', parent: null, surface: 'workbench' as const, expected: 'boundary' },
+  { bot: null, parent: null, surface: 'bot' as const, expected: 'next_run' },
+  { bot: 'varin', parent: 'parent', surface: 'bot' as const, expected: 'next_run' },
+])('uses the actual Bot conversation identity for the independent input default: $bot/$parent/$surface', async ({ bot, parent, surface, expected }) => {
+  const f = fixture(true);
+  f.view.thread.bot_id = bot; f.view.thread.parent_thread_id = parent;
+  await act(async () => root.render(<ThreadConversation surface={surface} api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Please also check the result');
+  await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
+  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, mode: expected, text: 'Please also check the result' }));
+  expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('sends a retained file from Bot work details to that original task and keeps newer draft state', async () => {
+  const f = fixture(true);
+  const draftKey = threadComposerKey(threadHostKey(), identity);
+  const file: Attachment = { ref: 'attachment:work-document', filename: 'brief.pdf', mimeType: 'application/pdf', byteLength: 10 };
+  useThreadDraftStore.getState().patch(draftKey, { text: 'Please use this file', selectedAttachments: [{ id: file.ref, host: endpoint.generation, filename: file.filename, selection: { ref: file.ref }, attachment: file }] });
+  const model = { threads: f.api, work: [], workItems: [], sessions: [], openWork: vi.fn() } as unknown as BotPanelModel;
+  await act(async () => root.render(<BotPanelContext.Provider value={model}><BotWorkDetail identity={identity} active /></BotPanelContext.Provider>));
+  expect(container.textContent).toContain('brief.pdf');
+  await submitForm(container.querySelector<HTMLFormElement>('form')!);
+  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, mode: 'boundary', text: 'Please use this file', attachments: [{ ref: file.ref }] }));
+  expect(useThreadDraftStore.getState().drafts[draftKey]?.selectedAttachments).toEqual([]);
+  expect(f.cancelRun).not.toHaveBeenCalled();
 });
 
 it('sends an original queued message now without resubmitting attachments, changing the draft, or cancelling tools', async () => {

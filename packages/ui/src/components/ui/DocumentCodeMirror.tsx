@@ -17,6 +17,7 @@ import { documentKey, type DocumentEditResult, type DocumentIdentity, type Docum
  */
 type DocumentCodeMirrorProps = Omit<React.ComponentProps<typeof CodeMirrorEditor>, 'value' | 'onChange'> & {
   identity: DocumentIdentity | undefined;
+  registry?: import('@/lib/documents/registry').DocumentRegistry;
 };
 
 type DocumentCodeMirrorRegistry = Pick<ReturnType<typeof getDocumentRegistry>, 'get' | 'applyEdits'>;
@@ -53,11 +54,13 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
   extensions,
   onViewDestroy,
   onViewReady,
+  registry: scopedRegistry,
   ...editorProps
 }) => {
   const origin = React.useId();
   const viewRef = React.useRef<import('@codemirror/view').EditorView | null>(null);
-  const record = useDocumentRecord(identity);
+  const registry = scopedRegistry ?? getDocumentRegistry();
+  const record = useDocumentRecord(identity, registry);
   const previousBaseRevisionRef = React.useRef<string | null | undefined>(record?.baseRevision);
   const previousSavingRef = React.useRef(record?.saving ?? false);
   const rejectedChangeRef = React.useRef<{ identityKey: string; attemptedValue: string } | null>(null);
@@ -66,13 +69,13 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
   const projectedRevisionRef = React.useRef(record?.localEditRevision ?? 0);
   activeIdentityKeyRef.current = identity ? documentKey(identity) : '';
   const buffer = record?.buffer ?? '';
-  const languageExtensions = useDocumentLanguageExtensions(identity);
+  const languageExtensions = useDocumentLanguageExtensions(scopedRegistry ? undefined : identity);
 
   React.useEffect(() => {
-    if (!identity) return undefined;
+    if (!identity || scopedRegistry) return undefined;
     acquireLanguageDocument(identity);
     return () => releaseLanguageDocument(identity);
-  }, [identity]);
+  }, [identity, scopedRegistry]);
 
   React.useEffect(() => {
     const identityKey = identity ? `${identity.workspaceId}\0${identity.resourceId}` : '';
@@ -89,8 +92,8 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     previousBaseRevisionRef.current = record?.baseRevision;
     previousSavingRef.current = record?.saving ?? false;
     if (!identity || !wasSaving || record?.saving || previous === undefined || previous === record?.baseRevision) return;
-    notifyLanguageDocumentSave(identity);
-  }, [identity, record?.baseRevision, record?.localEditRevision, record?.saving]);
+    if (!scopedRegistry) notifyLanguageDocumentSave(identity);
+  }, [identity, record?.baseRevision, record?.localEditRevision, record?.saving, scopedRegistry]);
 
   React.useEffect(() => {
     projectedRevisionRef.current = record?.localEditRevision ?? 0;
@@ -98,7 +101,6 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
 
   const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[]) => {
     if (!identity) return;
-    const registry = getDocumentRegistry();
     const current = registry.get(identity);
     const identityKey = documentKey(identity);
     const rejected = rejectedChangeRef.current;
@@ -121,7 +123,7 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
       case 'applied':
         projectedRevisionRef.current = result.record.localEditRevision;
         rejectedChangeRef.current = null;
-        notifyLanguageDocumentChange(identity);
+        if (!scopedRegistry) notifyLanguageDocumentChange(identity);
         return;
       case 'stale':
       case 'invalid':
@@ -150,7 +152,7 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
         }
         return;
     }
-  }, [identity, origin]);
+  }, [identity, origin, registry, scopedRegistry]);
 
   if (!identity) return null;
 

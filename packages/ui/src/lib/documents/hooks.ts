@@ -13,10 +13,10 @@ const readRecord = (identity: DocumentIdentity | undefined): DocumentRecord | un
   identity ? getDocumentRegistry().get(identity) : undefined
 );
 
-export const useDocumentRecord = (identity: DocumentIdentity | undefined): DocumentRecord | undefined => (
+export const useDocumentRecord = (identity: DocumentIdentity | undefined, registry?: ReturnType<typeof getDocumentRegistry>): DocumentRecord | undefined => (
   React.useSyncExternalStore(
-    (onStoreChange) => subscribeRecord(identity, onStoreChange),
-    () => readRecord(identity),
+    (onStoreChange) => registry && identity ? registry.subscribe(identity, onStoreChange) : subscribeRecord(identity, onStoreChange),
+    () => registry && identity ? registry.get(identity) : readRecord(identity),
     () => undefined,
   )
 );

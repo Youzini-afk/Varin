@@ -39,6 +39,7 @@ interface UiAuthController {
 interface DocumentRoutesOptions {
   documents: DocumentAuthority;
   uiAuthController?: UiAuthController;
+  base?: string;
 }
 
 const sendError = (res: Response, error: unknown): Response => {
@@ -64,22 +65,23 @@ const flushResponse = (res: Response): void => {
 export const registerDocumentRoutes = (app: Express, {
   documents,
   uiAuthController,
+  base = '/api/documents',
 }: DocumentRoutesOptions) => {
   const requireAuth: RequestHandler = uiAuthController?.requireAuth
     ?? ((_req, _res, next) => next());
 
-  app.post('/api/documents/workspace/resolve', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/workspace/resolve`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.resolveWorkspace(readBody(req)));
     } catch (error) {
       return sendError(res, error);
     }
   });
-  app.post('/api/documents/workspace/retention',requireAuth,async(req:Request,res:Response)=>{
+  app.post(`${base}/workspace/retention`,requireAuth,async(req:Request,res:Response)=>{
     try{return res.json(await documents.setWorkspaceRetention?.(readBody(req)));}catch(error){return sendError(res,error);}
   });
 
-  app.post('/api/documents/read', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/read`, requireAuth, async (req: Request, res: Response) => {
     try {
       const resource = readBody(req).resource;
       if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
@@ -92,14 +94,14 @@ export const registerDocumentRoutes = (app: Express, {
   for (const [route, method] of [
     ['prepare', 'prepareWorkspaceEdit'], ['apply', 'applyWorkspaceEdit'], ['discard', 'discardWorkspaceEdit'],
     ['read', 'readWorkspaceEdit'], ['undo', 'undoWorkspaceEdit'], ['recovery', 'readWorkspaceEditRecovery'],
-  ] as const) app.post(`/api/documents/workspace-edit/${route}`, requireAuth, async (req: Request, res: Response) => {
+  ] as const) app.post(`${base}/workspace-edit/${route}`, requireAuth, async (req: Request, res: Response) => {
     try { return res.json(await documents[method](readBody(req))); } catch (error) { return sendError(res, error); }
   });
-  app.post('/api/documents/workspace-edit/list', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/workspace-edit/list`, requireAuth, async (req: Request, res: Response) => {
     try { return res.json(await documents.listWorkspaceEdits(String(readBody(req).workspaceId ?? ''))); } catch (error) { return sendError(res, error); }
   });
 
-  app.post('/api/documents/write', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/write`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.write(readBody(req)));
     } catch (error) {
@@ -107,7 +109,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/move', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/move`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.move(readBody(req)));
     } catch (error) {
@@ -115,7 +117,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/delete', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/delete`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.delete(readBody(req)));
     } catch (error) {
@@ -123,7 +125,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/dirty/publish', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/dirty/publish`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.publishDirtyBuffers(readBody(req)));
     } catch (error) {
@@ -131,7 +133,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/dirty/clear', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/dirty/clear`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.clearDirtyBuffers(readBody(req)));
     } catch (error) {
@@ -139,7 +141,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/dirty/barrier/ack`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.acknowledgeDirtyStateBarrier(readBody(req)));
     } catch (error) {
@@ -147,7 +149,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/resource/identity', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/resource/identity`, requireAuth, async (req: Request, res: Response) => {
     try {
       const { resource, options } = readBody(req);
       if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
@@ -157,7 +159,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/agent-input/capture', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/agent-input/capture`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.captureAgentInputSnapshot(readBody(req)));
     } catch (error) {
@@ -165,7 +167,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/agent-input/release', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/agent-input/release`, requireAuth, async (req: Request, res: Response) => {
     try {
       const body = readBody(req);
       return res.json(await documents.releaseAgentInputSnapshot(body.consumer, body.context));
@@ -174,7 +176,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/surface-operation/read', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/surface-operation/read`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.readSurfaceOperation(readBody(req)));
     } catch (error) {
@@ -182,7 +184,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/surface-operation/complete', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/surface-operation/complete`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.completeSurfaceOperation(readBody(req)));
     } catch (error) {
@@ -190,7 +192,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.get('/api/documents/watch', requireAuth, async (req: Request, res: Response) => {
+  app.get(`${base}/watch`, requireAuth, async (req: Request, res: Response) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!workspaceId) {
       return res.status(400).json({ error: 'workspaceId is required', reason: 'failed' });
@@ -262,7 +264,7 @@ export const registerDocumentRoutes = (app: Express, {
     return undefined;
   });
 
-  app.post('/api/documents/recovery/list', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/recovery/list`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json({ journals: await documents.listRecoveryJournals(readBody(req)) });
     } catch (error) {
@@ -270,7 +272,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/recovery/read', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/recovery/read`, requireAuth, async (req: Request, res: Response) => {
     try {
       const journalId = readBody(req).journalId;
       if (typeof journalId !== 'string' || !journalId) {
@@ -282,7 +284,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/recovery/write', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/recovery/write`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.writeRecoveryJournal(readBody(req)));
     } catch (error) {
@@ -290,7 +292,7 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
-  app.post('/api/documents/recovery/delete', requireAuth, async (req: Request, res: Response) => {
+  app.post(`${base}/recovery/delete`, requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.deleteRecoveryJournal(readBody(req)));
     } catch (error) {

@@ -215,33 +215,41 @@ function BotPanelContent() {
  * the pointer 1:1 with resistance past the range, releasing below 240px closes it, a double click
  * restores 360px, and the handle takes arrow keys and Enter.
  */
-export function BotPanel({ model, open, floating, onOpenChange }: {
+export function BotPanel({ model, open, floating, onOpenChange, children, workspace = false, expanded = false }: {
   model: BotPanelModel | null;
   open: boolean;
   /** Narrow windows: a card over the conversation instead of a docked column (§8). */
   floating: boolean;
   onOpenChange(open: boolean): void;
+  children?: React.ReactNode;
+  workspace?: boolean;
+  expanded?: boolean;
 }) {
   const { t } = useI18n();
   const width = useBotLayout(state => state.panelWidth);
   const setWidth = useBotLayout(state => state.setPanelWidth);
   const panel = React.useRef<HTMLElement | null>(null);
   const [drag, setDrag] = React.useState<number | null>(null);
-  const shown = drag ?? width;
-  useMainColumnGlide(panel, open, !floating && drag === null, width);
+  const [workspaceWidth, setWorkspaceWidth] = React.useState(580);
+  const baseWidth = workspace ? workspaceWidth : width;
+  const maximum = workspace ? Math.max(360, window.innerWidth - 360) : BOT_PANEL_WIDTH.max;
+  const clamp = (value: number) => workspace ? Math.max(360, Math.min(maximum, value)) : clampBotPanelWidth(value);
+  const changeWidth = (value: number) => workspace ? setWorkspaceWidth(clamp(value)) : setWidth(value);
+  const shown = drag ?? clamp(baseWidth);
+  useMainColumnGlide(panel, open, !floating && drag === null, shown);
   const begin = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!open || event.button !== 0) return;
     event.preventDefault();
     const handle = event.currentTarget;
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
-    const startWidth = width;
+    const startWidth = shown;
     let raw = startWidth;
     let frame = 0;
     document.documentElement.style.cursor = 'col-resize';
     const move = (next: PointerEvent) => {
       raw = startWidth + (startX - next.clientX);
-      if (!frame) frame = requestAnimationFrame(() => { frame = 0; setDrag(dampBotPanelWidth(raw)); });
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; setDrag(workspace ? clamp(raw) + (raw - clamp(raw)) * BOT_PANEL_WIDTH.overshoot : dampBotPanelWidth(raw)); });
     };
     const end = () => {
       handle.removeEventListener('pointermove', move);
@@ -251,7 +259,7 @@ export function BotPanel({ model, open, floating, onOpenChange }: {
       document.documentElement.style.cursor = '';
       // The release glides back to the range, or closes from where it was let go.
       if (raw < BOT_PANEL_WIDTH.collapse) { setDrag(null); onOpenChange(false); return; }
-      setWidth(clampBotPanelWidth(raw));
+      changeWidth(raw);
       setDrag(null);
     };
     handle.addEventListener('pointermove', move);
@@ -262,7 +270,7 @@ export function BotPanel({ model, open, floating, onOpenChange }: {
   const onKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
-      setWidth(width + (event.key === 'ArrowLeft' ? BOT_PANEL_WIDTH.step : -BOT_PANEL_WIDTH.step));
+      changeWidth(shown + (event.key === 'ArrowLeft' ? BOT_PANEL_WIDTH.step : -BOT_PANEL_WIDTH.step));
     } else if (event.key === 'Enter') {
       event.preventDefault();
       onOpenChange(!open);
@@ -272,14 +280,15 @@ export function BotPanel({ model, open, floating, onOpenChange }: {
     ? { ['--varin-context-panel-width' as string]: `${shown}px`, width: 'min(var(--varin-context-panel-width), 100%)', maxWidth: '100%', overflowX: 'clip' }
     : { ['--varin-context-panel-width' as string]: `${shown}px`, width: 0, maxWidth: '100%', overflowX: 'clip' };
   return <aside ref={panel} className={cn('workbench-resource-canvas bot-panel relative flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden bg-background', !open && 'pointer-events-none')}
+    data-workspace={workspace || undefined} data-expanded={expanded || undefined}
     data-open={open} data-resizing={drag !== null || undefined} data-floating={floating || undefined} inert={!open || undefined} style={style}
     onKeyDown={event => { if (event.key === 'Escape' && floating && open) onOpenChange(false); }}>
     {open ? <div aria-hidden="true" className="bot-panel-seam" /> : null}
-    {open && !floating ? <div className="bot-panel-handle" role="separator" aria-orientation="vertical" aria-label={t('bot.panel.resize')} tabIndex={0}
-      aria-valuenow={Math.round(shown)} aria-valuemin={BOT_PANEL_WIDTH.min} aria-valuemax={BOT_PANEL_WIDTH.max}
-      onPointerDown={begin} onDoubleClick={() => setWidth(BOT_PANEL_WIDTH.initial)} onKeyDown={onKey} /> : null}
+    {open && !floating && !expanded ? <div className="bot-panel-handle" role="separator" aria-orientation="vertical" aria-label={t('bot.panel.resize')} tabIndex={0}
+      aria-valuenow={Math.round(shown)} aria-valuemin={workspace ? 360 : BOT_PANEL_WIDTH.min} aria-valuemax={maximum}
+      onPointerDown={begin} onDoubleClick={() => changeWidth(workspace ? 580 : BOT_PANEL_WIDTH.initial)} onKeyDown={onKey} /> : null}
     <div className="relative z-10 flex h-full min-h-0 shrink-0 flex-col" style={{ width: 'var(--varin-context-panel-width)' }} aria-hidden={!open}>
-      {model ? <BotPanelBody model={model} /> : null}
+      {children ?? (model ? <BotPanelBody model={model} /> : null)}
     </div>
   </aside>;
 }

@@ -5,8 +5,11 @@ import { requestBodyChunks } from "./managed-remote-service.js";
 import type { ManagedSourcePrincipal, ManagedSourceService } from './managed-remote-types.js';
 import { sourceFailureCode } from '../kernel/source-admission-error.js';
 import { KernelClientError } from '../kernel/kernel-error.js';
+import { registerDocumentRoutes } from '../documents/routes.js';
+import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 
 export interface ManagedRemoteRoutesOptions {
+  documents?: import('../documents/authority.js').DocumentAuthority;
   service: ManagedRemoteExecutionService;
   requireAuth?: RequestHandler;
   resolveAuthContext?: (
@@ -70,7 +73,7 @@ const route = (handler: (request: Request, response: Response) => Promise<void>)
 
 export function registerManagedRemoteRoutes(
   app: Express,
-  { service, requireAuth = noAuth, resolveAuthContext }: ManagedRemoteRoutesOptions,
+  { service, requireAuth = noAuth, resolveAuthContext, documents }: ManagedRemoteRoutesOptions,
 ): void {
   const base = "/api/harness/managed-execution/v1";
   const principals = new WeakMap<Request, ManagedSourcePrincipal>();
@@ -113,8 +116,37 @@ export function registerManagedRemoteRoutes(
     response.setHeader("Cache-Control", "no-store");
     response.json(await service.identity());
   }));
+  if (documents) {
+    app.use(`${base}/documents`, requireAuth, requireSourceAuth, async (request, response, next) => {
+      try {
+      const read = request.method === 'GET' || ['/read', '/workspace/resolve', '/resource/identity', '/recovery/list', '/recovery/read', '/workspace-edit/read', '/workspace-edit/list', '/workspace-edit/recovery'].includes(request.path);
+      if (!read && !principals.get(request)?.capabilities.includes('filesystem:write')) { response.status(403).json({ error: 'File write access is unavailable' }); return; }
+      const allowed = principals.get(request)?.allowedDirectories;
+      if (allowed?.length) {
+        const check = async (input: unknown): Promise<void> => {
+          if (!input || typeof input !== 'object') return;
+          const object = input as Record<string, unknown>;
+          if (typeof object.workspaceId === 'string') {
+            const workspace = await documents.resolveWorkspace({ workspaceId: object.workspaceId });
+            const registration = await documents.admitWorkspaceRegistration(workspace.workspaceId);
+            await assertResourcePathAllowed(registration.canonicalPath, allowed);
+          }
+          for (const nested of Object.values(object)) if (nested && typeof nested === 'object') await check(nested);
+        };
+        await check(request.body); await check(request.query);
+        if (request.path === '/workspace/resolve' && typeof request.body?.path === 'string') await assertResourcePathAllowed(request.body.path, allowed);
+        if (request.path === '/recovery/read') {
+          const journal = await documents.readRecoveryJournal(request.body?.journalId);
+          if (journal.status === 'ready') await check(journal.journal);
+        }
+      }
+      next();
+      } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : String(error) }); }
+    });
+    registerDocumentRoutes(app, { documents, base: `${base}/documents` });
+  }
 
-  const sourceMethods = ['attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const sourceMethods = ['workspace', 'attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
   const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
@@ -136,7 +168,7 @@ export function registerManagedRemoteRoutes(
       // Cancellation and retirement have their own original-owner receipts.
       const sourceOperation = value(body.operation);
       const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
-      const result = !mcpObserver && (method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
+      const result = !mcpObserver && (method === 'workspace' && !['open', 'locations', 'list', 'bytes', 'readlink'].includes(String(value(body.command).kind)) || method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');
@@ -144,6 +176,13 @@ export function registerManagedRemoteRoutes(
       }
     }));
   }
+
+  app.post(`${base}/sources/workspaceUpload`, requireAuth, requireSourceAuth, route(async (request, response) => {
+    const input = JSON.parse(decodeURIComponent(asString(request.header('x-varin-file-upload'), 'Upload metadata'))) as Parameters<ManagedSourceService['workspaceUpload']>[1];
+    authorize(request, input.coordinatorHostId);
+    const result = await service.sources().workspaceUpload(principals.get(request)!, input, request);
+    if (!response.destroyed) response.json(result);
+  }));
 
   app.post(`${base}/sources/processSubscribe`, requireAuth, requireSourceAuth, route(async (request, response) => {
     const body = value(request.body);

@@ -10,6 +10,7 @@ import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 export type FollowUpBehavior = 'steer' | 'queue';
 
 export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
+export const DEFAULT_BOT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'steer';
 
 export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
     value === 'steer' || value === 'queue'
@@ -56,6 +57,7 @@ export const parseMessageQueueKey = (key: string): MessageQueueTarget | null => 
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // runtime + directory + session → queue
     followUpBehavior: FollowUpBehavior;
+    botFollowUpBehavior: FollowUpBehavior;
 }
 
 interface MessageQueueActions {
@@ -66,6 +68,7 @@ interface MessageQueueActions {
     clearQueue: (target: MessageQueueTarget) => void;
     clearAllQueues: () => void;
     setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
+    setBotFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForTarget: (target: MessageQueueTarget) => QueuedMessage[];
 }
 
@@ -77,6 +80,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             (set, get) => ({
                 queuedMessages: {},
                 followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
+                botFollowUpBehavior: DEFAULT_BOT_FOLLOW_UP_BEHAVIOR,
 
                 addToQueue: (target, message) => {
                     const key = getMessageQueueKey(target);
@@ -195,6 +199,12 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         void updateDesktopSettings({ followUpBehavior: behavior });
                     }
                 },
+                setBotFollowUpBehavior: (behavior) => {
+                    set({ botFollowUpBehavior: behavior });
+                    if (!isApplyingAuthoritativeSettings()) {
+                        void updateDesktopSettings({ botFollowUpBehavior: behavior });
+                    }
+                },
 
                 getQueueForTarget: (target) => {
                     return get().queuedMessages[getMessageQueueKey(target)] ?? [];
@@ -206,6 +216,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
                     followUpBehavior: state.followUpBehavior,
+                    botFollowUpBehavior: state.botFollowUpBehavior,
                 }),
             }
         ),

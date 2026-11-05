@@ -486,6 +486,9 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.followUpBehavior === 'steer' || candidate.followUpBehavior === 'queue') {
       result.followUpBehavior = candidate.followUpBehavior;
     }
+    if (candidate.botFollowUpBehavior === 'steer' || candidate.botFollowUpBehavior === 'queue') {
+      result.botFollowUpBehavior = candidate.botFollowUpBehavior;
+    }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;
     }

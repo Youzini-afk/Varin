@@ -33,7 +33,7 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
-  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss,
+  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
   onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
@@ -43,6 +43,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   commandActions?: Record<string, ComposerCommandAction | undefined>;
   onReferenceSelect?(reference: ComposerReference): void;
   suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
+  prepareSendMode?(mode: 'boundary' | 'next_run' | undefined): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void | Promise<void>; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void | Promise<void>;
@@ -128,13 +129,14 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     setInsertedSuggestion({ text: availableSuggestion, identity: identityKey });
     setAutocomplete(null);
   };
-  const submit = () => {
+  const submit = (mode?: 'boundary' | 'next_run') => {
     if (references?.some(reference => reference.target.kind === 'backend-command' && value.slice(reference.from, reference.to) === reference.text && (reference.target.backend !== backendIdentity || reference.host !== getRuntimeEndpointGeneration()))) { setCommandError(t('composer.scope.changed')); return; }
     const backend = references?.some(reference => reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity && reference.host === getRuntimeEndpointGeneration() && value.slice(reference.from, reference.to) === reference.text && value.trim() === `/${reference.target.name}`);
     const exact = !backend && knownCommands.find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
     if (exact) { void runCommand(exact, { kind: 'command', query: exact.name, from: value.indexOf('/'), to: value.trimEnd().length }); return; }
     if (sendDisabled) return;
     if (ghostSuggestion) flushSync(acceptSuggestion);
+    prepareSendMode?.(mode);
     messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit();
   };
   const insertTranscript = (text: string) => { onChange([value.trimEnd(), text.trim()].filter(Boolean).join('\n')); requestAnimationFrame(() => inputRef.current?.focus()); };
@@ -291,6 +293,10 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     if (availableSuggestion && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
       if (event.key === 'Tab') { acceptSuggestion(); return true; }
       if (event.key === 'Escape') { onSuggestionDismiss?.(); return true; }
+    }
+    if (prepareSendMode && active && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === 'Enter' && !isIMECompositionEvent(event)) {
+      if (canSend && !sending) submit('next_run');
+      return true;
     }
     if (eventMatchesShortcut(event, getEffectiveShortcutCombo('submit_message', shortcuts)) && !isIMECompositionEvent(event)) { submit(); return true; }
     if (
@@ -487,6 +493,13 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   <TooltipContent side="top">{t('chat.chatInput.actions.stopGeneratingAria')}</TooltipContent>
                 </Tooltip>
               )}
+              {prepareSendMode && active && hasInput && !retrying ? <DropdownMenu>
+                <DropdownMenuTrigger asChild><button type="button" className={footerIconButtonClass} disabled={pending} aria-label={t('bot.workspace.sendOptions')}><Icon name="arrow-down-s" className="size-3.5" /></button></DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => submit('boundary')}><Icon name="arrow-up" className="size-4" />{t('bot.workspace.sendNow')}</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => submit('next_run')}><Icon name="time" className="size-4" />{t('bot.workspace.sendLater')}<span className="ml-auto typography-micro text-muted-foreground">Alt ↵</span></DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu> : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

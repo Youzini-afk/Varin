@@ -12,7 +12,7 @@ vi.mock('@varin/application-client', async (importOriginal) => ({
 describe('createWebDocumentsAPI', () => {
   it('resolves workspaces through the documents host route', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
       workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       hostId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -30,7 +30,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('rejects stale completions after an application-host endpoint switch', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     let resolveResponse: ((value: Response) => void) | undefined;
     runtimeFetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
       resolveResponse = resolve;
@@ -50,7 +50,7 @@ describe('createWebDocumentsAPI', () => {
     { reason: 'future-host-reason', status: 503, expected: 'failed' },
   ])('preserves $reason failures through the actual documents client', async ({ reason, status, expected }) => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
       error: 'Workspace is unavailable', reason,
     }, { status }));
@@ -65,7 +65,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('publishes live dirty buffers through the document authority', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     const request = {
       generation: 2,
       ownerId: 'surface-1',
@@ -89,7 +89,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('opens document watches without putting credentials in the URL', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream(), {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -113,7 +113,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('delivers dirty-state barrier controls outside file-event sequencing', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const control = {
       action: 'acquire',
@@ -166,7 +166,7 @@ describe('createWebDocumentsAPI', () => {
       },
     }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
     const events: unknown[] = [];
-    const subscription = createWebDocumentsAPI().watch(workspaceId, (event) => events.push(event), {
+    const subscription = createWebDocumentsAPI(runtimeFetchMock).watch(workspaceId, (event) => events.push(event), {
       dirtyOwner: { generation: 1, ownerId: 'surface-1' },
     });
     try {
@@ -178,7 +178,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('reconnects an ended watch and tells consumers to resynchronize', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     runtimeFetchMock
       .mockResolvedValueOnce(new Response('', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
       .mockResolvedValueOnce(new Response(new ReadableStream(), {
@@ -199,7 +199,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('turns a same-generation sequence gap into a workspace reset', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     const encoder = new TextEncoder();
     const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
@@ -229,7 +229,7 @@ describe('createWebDocumentsAPI', () => {
 
   it('does not turn a malformed recovery response into an empty list', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
-    const api = createWebDocumentsAPI();
+    const api = createWebDocumentsAPI(runtimeFetchMock);
     runtimeFetchMock.mockResolvedValueOnce(Response.json({}));
     await expect(api.listRecoveryJournals({
       workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -244,7 +244,7 @@ describe('document observation response cleanup', () => {
       runtimeFetchMock.mockReset();
       const cancelled = vi.fn();
       runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), { status }));
-      const subscription = createWebDocumentsAPI().watch('workspace', () => undefined);
+      const subscription = createWebDocumentsAPI(runtimeFetchMock).watch('workspace', () => undefined);
       await vi.waitFor(() => expect(cancelled).toHaveBeenCalledTimes(1));
       expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
       subscription.close();
@@ -261,7 +261,7 @@ describe('document observation response cleanup', () => {
         cancel: cancelled,
       }), { headers: { 'Content-Type': 'text/event-stream' } });
       runtimeFetchMock.mockResolvedValueOnce(response);
-      const subscription = createWebDocumentsAPI().watch('workspace', () => undefined);
+      const subscription = createWebDocumentsAPI(runtimeFetchMock).watch('workspace', () => undefined);
       if (!malformed) {
         await vi.waitFor(() => expect(response.body!.locked).toBe(true));
         expect(cancelled).not.toHaveBeenCalled();

@@ -724,6 +724,7 @@ export interface SettingsPayload {
   sessionRetentionAction?: 'archive' | 'delete';
   recoveryPreference?: 'conversation' | 'both' | 'ask';
   followUpBehavior?: 'steer' | 'queue';
+  botFollowUpBehavior?: 'steer' | 'queue';
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;

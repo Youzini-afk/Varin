@@ -43,6 +43,8 @@ export const ChatSettings: React.FC = () => {
   })));
   const actions = useUIStore.getState();
   const followUpBehavior = useMessageQueueStore(s => s.followUpBehavior);
+  const botFollowUpBehavior = useMessageQueueStore(s => s.botFollowUpBehavior);
+  const setBotFollowUpBehavior = useMessageQueueStore(s => s.setBotFollowUpBehavior);
   const setFollowUpBehavior = useMessageQueueStore(s => s.setFollowUpBehavior);
   const directoryShowHidden = useDirectoryShowHidden();
   const previewFiles = usePreferencesStore(s => s.settingsDefaultFileViewerPreview);
@@ -115,6 +117,11 @@ export const ChatSettings: React.FC = () => {
     </div>
     <div data-preview-scene="input">
     <SettingsDisclosure title={t('settings.chat.input')} settingsItem="chat.composer">
+      <SettingsFieldRow settingsItem="chat.bot-follow-up-behavior" label={t('settings.varin.visual.section.botFollowUpBehavior')}
+        info={t('settings.varin.visual.field.botFollowUpBehaviorDescription')}>
+        <SettingsChipGroup aria-label={t('settings.varin.visual.section.botFollowUpBehavior')} value={botFollowUpBehavior} onChange={setBotFollowUpBehavior}
+          options={[{ value: 'steer', label: t('settings.varin.visual.option.followUpBehavior.steer.label') }, { value: 'queue', label: t('settings.varin.visual.option.followUpBehavior.queue.label') }]} />
+      </SettingsFieldRow>
       <SettingsFieldRow settingsItem="chat.follow-up-behavior" label={t('settings.chat.busySend')}
         info={t(followUpBehavior === 'queue' ? 'settings.chat.queueHint' : 'settings.chat.steerHint')}>
         <SettingsChipGroup aria-label={t('settings.chat.busySend')} value={followUpBehavior} onChange={setFollowUpBehavior}

@@ -912,6 +912,14 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
       keywords: ['follow up', 'queue', 'steer', 'send immediately'] },
   },
   {
+    id: 'chat.bot-follow-up-behavior', category: 'chat', owner: 'app',
+    field: { path: 'botFollowUpBehavior', kind: 'enum', options: [{ value: 'steer' }, { value: 'queue' }] },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.varin.visual.section.botFollowUpBehavior',
+      descriptionKey: 'settings.varin.visual.field.botFollowUpBehaviorDescription',
+      keywords: ['bot', 'Varin', 'follow up', 'queue', 'steer'] },
+  },
+  {
     id: 'chat.persist-drafts', category: 'chat', owner: 'client',
     field: { path: 'enabled', kind: 'boolean' },
     apply: 'immediate',

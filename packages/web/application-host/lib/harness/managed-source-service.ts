@@ -24,6 +24,7 @@ import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
 export interface ManagedSourceServiceOptions {
+  workspaceFiles?: import('../workspace/resource-files.js').ResourceFilesOwner;
   deviceFileAccess?: boolean;
   executionEnvironment?: () => Promise<import('../kernel/protocol.generated.js').ExecutionEnvironment>;
   kernel: KernelClient;
@@ -343,6 +344,38 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const registration = await documents.admitWorkspaceRegistration(resolved.workspaceId, signal);
       if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
       return { workspaceId: resolved.workspaceId, canonicalRoot: registration.canonicalPath, hostId: options.hostId };
+    },
+    async workspace(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (!['open', 'locations', 'list', 'bytes', 'readlink'].includes(input.command?.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
+      if (!options.workspaceFiles) throw new SourceAdmissionError('source_unavailable');
+      const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+      if (input.root && principal.allowedDirectories?.length) {
+        const workspace = await documents.resolveWorkspace({ path: input.root });
+        const registration = await documents.admitWorkspaceRegistration(workspace.workspaceId, signal);
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
+      if (input.command.kind === 'open' && input.command.path) await assertResourcePathAllowed(input.command.path, principal.allowedDirectories);
+      const selected = input.command.kind === 'open' && !input.command.path && !input.taskSource && principal.allowedDirectories?.length
+        ? { ...input, command: { ...input.command, path: principal.allowedDirectories[0]! } } : input;
+      const result = await options.workspaceFiles.request(selected, signal);
+      if (result.kind === 'opened') {
+        const registration = await documents.admitWorkspaceRegistration(result.workspaceId, signal);
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
+      if ((result.kind === 'opened' || result.kind === 'locations') && principal.allowedDirectories?.length) result.locations = [...principal.allowedDirectories];
+      return result;
+    },
+    async workspaceUpload(principal, input, body, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (!principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
+      if (!options.workspaceFiles) throw new SourceAdmissionError('source_unavailable');
+      const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+      if (principal.allowedDirectories?.length) {
+        const registration = await documents.admitWorkspaceRegistration(input.workspaceId, signal);
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
+      return options.workspaceFiles.upload(input, body, signal);
     },
     async files(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
