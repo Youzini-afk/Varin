@@ -12,6 +12,8 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'ui.fragment.draftHint': '可在输入框中继续编辑',
+  'ui.content.draftHint': '可在输入框中继续编辑',
   'ui.content.latest': '查看最新版本',
   'ui.content.alreadyLatest': '当前已是最新版本。',
   'ui.content.cyclicEmbed': '内容循环引用',

@@ -4,9 +4,9 @@
   <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>Confiez la tâche, puis regardez l'équipe la mener à bien.</strong></p>
+<p align="center"><strong>Un assistant IA pour le travail au long cours, avec un espace où intervenir.</strong></p>
 
-<p align="center">Varin planifie le travail, fait appel à des coéquipiers, vérifie les résultats et vous rend compte.<br />Open source, exécuté sur votre propre ordinateur ou serveur, avec vos propres clés d'API.</p>
+<p align="center">Discutez avec Varin, faites avancer le travail et ouvrez les détails à votre rythme.<br />Open source. Vos modèles, vos clés, votre ordinateur ou serveur.</p>
 
 <p align="center">
   <a href="https://varin.dev/fr/">Site web</a> ·
@@ -22,44 +22,114 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
-<p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin sur le rebord de la fenêtre de l'espace Bot : elle cherche sur le web, lit trois fichiers, envoie deux coéquipiers avec chacun une partie de la tâche, recueille leurs comptes rendus, répond, puis fête la fin du travail" width="600" />
-  <br />
-  <sub>La scène de l'espace Bot, qui rejoue une exécution scénarisée.</sub>
-</p>
+## Faites connaissance avec Varin
 
-## À quoi ressemble le travail avec Varin
+Varin est un assistant personnel pour le travail au long cours. Discutez d'une idée, posez une question rapide ou confiez-lui un travail qui prendra du temps. Il peut traiter les petites demandes lui-même, faire appel à des Agents pour les tâches plus importantes et reprendre un travail existant avec son contexte.
 
-**Le même modèle va plus loin.** Varin prépare tout ce qui entoure le modèle : un contexte rangé à l'avance, chaque étape notée pour que l'exécution survive à un redémarrage, le reste qui avance pendant que l'agent vous attend, des outils chargés au besoin. Le même modèle peut mener à bien des tâches plus longues et plus complexes. [Comment fonctionne le harness](#how-the-harness-works)
-
-**Une équipe que vous voyez travailler.**
-
-- L'agent principal découpe la tâche et en confie les parties à ses coéquipiers : un Worker écrit l'implémentation, l'agent de recherche rassemble le contexte, le vérificateur lance les tests. Les coéquipiers avancent en parallèle, s'écrivent directement, se transmettent du code avec son diff fichier par fichier, et rendent compte dans le panneau de collaboration. Intervenez quand vous voulez.
-- Un bot est un super agent qui tourne dans la durée, avec son propre nom, ses instructions, son modèle, son dossier de travail et sa mémoire ; il mène plusieurs tâches de front. Sa scène dans l'espace Bot montre ce qu'il est en train de faire et quels coéquipiers sont partis en mission. Mettez-le en veille et son travail est suspendu ; réveillez-le et il reprend là où il s'était arrêté.
-- Codex, Claude Code, Pi et les programmes compatibles avec ACP peuvent tourner sur votre Host comme sessions dans Varin, ou prendre en charge le travail confié par l'agent principal. Ils gardent leurs propres modèles, comptes et outils.
-- Dans l'application de bureau, un compagnon de bureau facultatif s'installe sur votre bureau et mime ce que fait le bot. Ses illustrations se téléchargent à part, dans les Paramètres.
-
-**À vous de le faire tourner et de le façonner.** Les clés restent sur votre propre Host et les requêtes partent directement vers les fournisseurs que vous configurez. N'importe quel agent prédéfini peut recevoir un nouveau modèle, de nouvelles instructions ou de nouveaux outils, et les espaces de travail eux-mêmes sont des extensions que vous pouvez désactiver ou remplacer. Varin est distribué sous licence AGPL-3.0.
+- **Continuez à parler pendant le travail.** Un message peut orienter le travail en cours ; mettez-le en file d'attente si vous préférez qu'il soit traité ensuite.
+- **Voyez ce qui avance.** Le panneau latéral rassemble travaux, réponses, demandes à traiter, mémoire et calendrier. Ouvrez les détails à côté de la conversation ou entrez dans le workbench de la tâche.
+- **Retrouvez le fil.** Varin peut retrouver et organiser les souvenirs pertinents de ses conversations. Vous pouvez les consulter, les modifier et les oublier.
+- **Gardez les ressources à portée de main.** Ouvrez fichiers et ordinateurs connectés à côté du chat. Transmettez une pièce jointe originale à un Agent, discutez du résultat et poursuivez le travail.
 
 <p align="center">
-  <img src="assets/team.png" alt="L'agent principal confie une vérification à un coéquipier, qui lance les tests et rend compte dans le panneau de collaboration" width="960" />
+  <img src="assets/varin-en.png" alt="Une conversation avec Varin associe tâches en cours, document et choix du public de la prochaine publication" width="1100" />
 </p>
 
-## Quatre façons de travailler
+[L'assistant](../../docs/bot.md) · [Collaboration et reprise des tâches](../../docs/collaboration.md)
 
-Le mode détermine les outils dont l'agent dispose d'emblée et les coéquipiers qui l'aident.
+## Choisissez votre niveau de participation
 
-| Mode | Ce qu'il fait | Par exemple |
+Restez dans la discussion d'ensemble, travaillez directement avec un Agent ou ouvrez les fichiers vous-même. Chaque vue met une autre information au premier plan.
+
+| Vue | Au premier plan | À ouvrir selon vos besoins |
 | --- | --- | --- |
-| Programmation | Lire et modifier le code, lancer des commandes, ouvrir des terminaux. Chaque fichier modifié est sauvegardé à chaque tour. | « Refactorise le module de connexion et préviens-moi quand tous les tests passent. » |
-| Recherche | Interroger OpenAlex et Semantic Scholar, lire articles et PDF, et faire avancer une expérience pas à pas. | « Trouve les articles des deux dernières années sur ce sujet et fais-en un tableau comparatif filtrable. » |
-| Bureautique | Travailler directement avec Word, Excel et PowerPoint, ainsi qu'avec le navigateur et les applications de votre ordinateur. | « Exporte les commandes du mois dernier dans un fichier Excel avec des graphiques. » |
-| Général | Chercher une information, rédiger, créer un petit outil interactif. | « Compare ces trois appareils photo et fais-moi un graphique réglable. » |
+| **Varin** | La conversation, les travaux en cours et les résultats | Tâches, questions, mémoire, fichiers et ordinateurs |
+| **Workbench** | Une tâche précise et l'Agent qui l'exécute | Outils, coéquipiers, plans, contexte et restauration |
+| **IDE** | Les fichiers et le code que vous souhaitez manipuler | Éditeurs, différences, terminaux, Git et conversation |
+
+### Workbench : travaillez directement avec les Agents
+
+Confiez une tâche et suivez son exécution au niveau de détail souhaité. L'activité des outils se replie en résumés entre les messages ; les tâches déléguées restent accessibles. Ouvrez la conversation d'un coéquipier, envoyez un message ou un fichier, vérifiez une modification ou créez une branche de conversation.
+
+La délégation peut choisir librement une tâche, un modèle et un niveau de réflexion, ou utiliser vos Agents prédéfinis. Un assistant facultatif peut sélectionner le modèle parmi vos modèles de conversation activés, à partir de leurs descriptions.
 
 <p align="center">
-  <img src="assets/code-mode.png" alt="Varin en mode Programmation : l'agent explore le projet, modifie profile.js, confie un test de non-régression au vérificateur de l'équipe, puis annonce que tous les tests passent" width="480" />
-  <img src="assets/research-mode.png" alt="Varin en mode Recherche : une comparaison d'articles récents présentée sous forme de tableau dans la conversation" width="480" />
+  <img src="assets/workbench-en.png" alt="Le workbench réunit conversation, modifications de fichiers et échanges entre Agents" width="1100" />
 </p>
+
+### IDE : gardez la main sur les fichiers
+
+Éditez avec Monaco, parcourez le projet, inspectez les différences et utilisez terminaux et Git à côté de la conversation. Passez de la discussion à l'édition du fichier : éditeurs et Agents partagent les mêmes services de documents et d'espace de travail.
+
+<p align="center">
+  <img src="assets/ide-en.png" alt="Un fichier source et le terminal dans l'IDE, avec la conversation sur la modification à côté" width="1100" />
+</p>
+
+Général, Programmation, Recherche et Bureautique sont des **orientations de tâche** distinctes : elles déterminent les outils et coéquipiers disponibles, indépendamment de ces vues. [Architecture du workbench](../../docs/workbench.md)
+
+## Une conversation dans laquelle travailler
+
+- **Une progression lisible.** Le texte reste au premier plan ; développez activités, réflexion, résultats d'outils et réponses des Agents selon vos besoins.
+- **Des contrôles près de l'explication.** Choix simples ou multiples, champs et formulaires peuvent apparaître entre les paragraphes. Une sélection peut préparer un message modifiable.
+- **Des résultats expressifs.** Images, tableaux, formules et diagrammes s'intègrent au texte. Le HTML permet des graphiques interactifs, comparaisons et petits outils, avec consultation du code et export.
+- **Des liens avec le travail.** Les références aux tâches, fichiers, plans et sources ouvrent la vue correspondante. Les pièces jointes conservent leurs originaux entre Agents.
+- **La possibilité de changer de direction.** Branches de conversation et restauration de fichiers gardent le travail précédent accessible. Le composeur propose références, commandes et suggestions de message modifiables.
+
+<p align="center">
+  <img src="assets/conversation-en.png" alt="Texte, graphique interactif, références et composeur dans la même conversation" width="1100" />
+</p>
+
+[Conversation et contenu interactif](../../docs/interactive-content.md)
+
+## Des outils pour toute la tâche
+
+Varin relie le modèle aux informations, fichiers, programmes et interfaces nécessaires au travail.
+
+| Capacité | Outils accessibles aux Agents |
+| --- | --- |
+| **Fichiers et code** | Parcourir, rechercher, lire et modifier ; extraire la structure du code ; enquêter en arrière-plan ; consulter différences et points de restauration. |
+| **Commandes et calcul** | Shells, terminaux interactifs, processus en arrière-plan et environnement JavaScript persistant, avec état, sorties et arrêt. |
+| **Web et recherche** | Recherche web configurable, lecture de pages, citations, recherche académique et lecture des documents originaux. |
+| **Documents et données** | Lire des PDF et fichiers Office ; créer et modifier Word, Excel et PowerPoint ; rendre et exporter les formats pris en charge. |
+| **Navigateur et ordinateur** | Interagir avec les pages, gérer les téléchargements, observer les applications et utiliser un bureau connecté. |
+| **Images et résultats interactifs** | Consulter des images, appeler les modèles de génération et d'édition configurés et produire du HTML/JavaScript dans le chat. |
+| **Coordination et continuité** | Déléguer, envoyer des messages et reprendre les tâches ; gérer plans, mémoire, calendrier et suivis. |
+| **Vos propres capacités** | Connecter des serveurs MCP, utiliser des Skills et installer des extensions. |
+
+Les outils courants sont disponibles directement ; les autres se découvrent au besoin. Les fonctions liées à un fournisseur utilisent vos services configurés, et les opérations distantes utilisent les capacités de l'appareil connecté.
+
+## Vos modèles, vos machines et votre espace
+
+**Choisissez les modèles.** Connectez des fournisseurs ou services locaux compatibles, réglez la réflexion et attribuez différents modèles aux tâches et travaux auxiliaires. L'usage et les coûts estimés sont suivis par canal et modèle.
+
+**Intégrez d'autres Agents.** Codex, Claude Code, Pi et les programmes compatibles ACP peuvent fonctionner en sessions ou recevoir des tâches en conservant leurs comptes, modèles et outils. [Agents externes](../../docs/external-agents.md)
+
+**Placez le travail au bon endroit.** Exécutez Varin localement, sur votre serveur, ou connectez-vous depuis un navigateur ou un téléphone. L'interface, le service Agent, les fichiers et l'appareil de contrôle peuvent résider sur des machines différentes. [Déploiement](../../docs/ops/cloud-deployment.md) · [Ressources](../../docs/resources.md)
+
+**Un compagnon de bureau facultatif.** Il suit l'activité du Bot sélectionné. Téléchargez son apparence dans les Paramètres et choisissez de le réveiller ou de le mettre en veille.
+
+<details>
+<summary>Voir le personnage au travail</summary>
+
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin lit, travaille avec ses coéquipiers et réagit à leur progression" width="600" />
+</p>
+
+</details>
+
+<a id="how-the-harness-works"></a>
+
+## Pour le travail qui se poursuit
+
+Le harness gère le contexte et l'exécution autour du modèle :
+
+- Préparation du contexte en arrière-plan avant son remplacement, avec résumés et extraits originaux conservés.
+- Historique durable des exécutions et résultats pour reprendre les travaux récupérables après un redémarrage.
+- État propre aux questions, permissions, messages en attente et rapports pendant que d'autres travaux continuent.
+- Historique de restauration des fichiers et vérification des conflits lorsque leur contenu a changé.
+- Recherche, révision et entretien de la mémoire du Bot en arrière-plan, avec gestion directe par l'utilisateur.
+
+Le runtime central est écrit en Rust. Les interfaces bureau, web et mobile partagent les mêmes services applicatifs. [Runtime](../../docs/runtime.md) · [Architecture](../../docs/architecture.md)
 
 ## Commencer
 
@@ -73,27 +143,9 @@ Le mode détermine les outils dont l'agent dispose d'emblée et les coéquipiers
    | Depuis les sources | Voir [Exécuter depuis les sources](#exécuter-depuis-les-sources). |
 
 2. Ouvrez les Paramètres et ajoutez une clé d'API pour un fournisseur de modèles, ou connectez un service local. [Canaux de modèles](../../packages/docs/content/docs/fr/providers.mdx)
-3. Choisissez un mode de travail, sélectionnez un dossier de projet si la tâche en a besoin, puis lancez votre première tâche.
+3. Commencez une conversation avec Varin. Ouvrez le Workbench pour collaborer directement avec un Agent, ou l'IDE pour travailler dans les fichiers.
 
 Varin est en développement actif avant la version 1.0. Cette page décrit les sources actuelles ; les [notes de version](https://github.com/Youzini-afk/Varin/releases) décrivent chaque build publié. Sauvegardez les données importantes de l'application avant une mise à niveau.
-
-<a id="how-the-harness-works"></a>
-
-## Comment fonctionne le harness
-
-Le modèle réfléchit. Le harness, c'est tout ce qui l'entoure : outils, contexte, exécution, permissions, collaboration et reprise.
-
-- Contexte autogéré : rangé à l'avance en arrière-plan, résumé en gardant les extraits clés, et compté avec des tokenizers locaux calés sur l'usage réel.
-- Exécution durable : chaque étape est notée et l'exécution reprend après un redémarrage. Une action au résultat incertain s'arrête pour vérification au lieu d'être rejouée.
-- Questions sans blocage : le reste avance pendant que l'agent attend votre réponse, et les objectifs budgétés reprennent quand leurs conditions sont remplies.
-- Outils à la demande : les outils courants restent sous la main, les autres se chargent au besoin. Les serveurs MCP peuvent être exposés directement ou découverts à la demande.
-- Historique des fichiers : chaque fichier modifié s'aligne sur une frise, tour par tour. Revenez en arrière en un geste, et annulez ce retour si besoin. Les fichiers que vous avez modifiés vous-même ne sont jamais écrasés.
-
-**Prêt à l'emploi.** Environ 90 outils natifs, 4 modes de travail, 4 espaces de travail officiels, 7 serveurs de langage intégrés et 9 protocoles de modèle natifs, avec une interface en 10 langues.
-
-**Personnalisation en profondeur, sans écrire de code.** Changez le modèle, les instructions ou les outils de n'importe quel agent prédéfini, ou créez le vôtre. Choisissez des modèles distincts pour les titres, le contexte, la planification, les images et les embeddings. Modifiez les instructions système et la mémoire, utilisez les Skills des dossiers `.claude` et `.agents` ou installez-les depuis un dépôt Git, et choisissez, outil par outil, d'autoriser, de demander ou de refuser.
-
-**Vos clés, vos données.** Les clés restent sur votre propre Host, et les requêtes partent directement vers les fournisseurs que vous configurez : OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Bedrock, Mistral, Alibaba Model Studio, Zhipu et StepFun, ou Ollama, LM Studio et tout endpoint compatible. L'usage est enregistré par canal et par modèle, tour après tour. Vous voyez tout ce dont un bot se souvient, et vous pouvez le corriger ou le lui faire oublier.
 
 ## Exécuter depuis les sources
 
@@ -112,7 +164,7 @@ Pour l'application de bureau, exécutez `bun run electron:dev` dans le même dé
 
 ## Étendre Varin
 
-Les espaces Agent, IDE, Recherche et Bot, ainsi que le navigateur, Office, le contrôle de l'ordinateur et les serveurs de langage, sont eux-mêmes des extensions et utilisent les mêmes contrats que les extensions tierces. Chacun peut être désactivé, et un espace de travail peut être remplacé entièrement. Les extensions peuvent ajouter des outils, des protocoles de modèle, des algorithmes de contexte, des panneaux et des espaces de travail complets. Commencez par le [guide de création](../../docs/ops/varin-extension-authoring.md), le [SDK](../../packages/extension-sdk/README.md) ou les [exemples fonctionnels](../../examples/extensions/README.md).
+Les vues Varin, Workbench et IDE, ainsi que le navigateur, Office, le contrôle de l'ordinateur et les serveurs de langage, sont eux-mêmes des extensions et utilisent les mêmes contrats que les extensions tierces. Chacun peut être désactivé, et un espace de travail peut être remplacé entièrement. Les extensions peuvent ajouter des outils, des protocoles de modèle, des algorithmes de contexte, des panneaux et des espaces de travail complets. Commencez par le [guide de création](../../docs/ops/varin-extension-authoring.md), le [SDK](../../packages/extension-sdk/README.md) ou les [exemples fonctionnels](../../examples/extensions/README.md).
 
 Pour comprendre comment les éléments s'articulent, consultez l'[architecture](../../docs/architecture.md), le [runtime](../../docs/runtime.md) et l'[index de la documentation](../../docs/README.md).
 

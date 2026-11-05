@@ -14,7 +14,7 @@ Use these for architecture, then the local owner below for implementation change
 
 | Area | Owner and local reference |
 | --- | --- |
-| Official shells | `src/workbenches`: Agent, IDE, Research, Bot, and Settings composition |
+| Official shells | `src/workbenches`: Varin, Agent workbench, IDE, and Settings composition |
 | Extension integration | `src/lib/extensions`: catalog, loader, mounts, replacement/slot consumers, and owner-bound services |
 | Profile handoff | `src/lib/workbench/profile-transition.ts` and `src/lib/extensions/workbench-shell-transition.ts` |
 | Text state | [Document Registry](src/lib/documents/DOCUMENTATION.md) |

@@ -3,7 +3,7 @@
 Varin 由共享工作台、可信 Application Host 和私有 Rust 内核组成。Web、Electron 和移动端使用同一套产品服务。
 Varin 原生对话通过 Agent runtime 执行；Thread、HistoryBranch、Run、请求和 Operation 由 Rust Catalog 持久化。
 外部 Harness 继续执行自己的会话循环，产品绑定、投递与观察记录也由 Catalog 保存，见[外部 Agent](external-agents.md)。
-Workbench Profile 选择 Agent、IDE、Research 或 Bot 外壳，不改变执行身份、来源和权限。
+Workbench Profile 选择 Varin、工作台或 IDE 外壳，不改变执行身份、来源和权限。
 
 运行机制见[运行时](runtime.md)，文件、进程与恢复见[资源](resources.md)，材料与知识见[检索](retrieval.md)，
 界面见[工作台](workbench.md)，能力组合见[扩展](extensions.md)，开发入口见[开发指南](development.md)。

@@ -4,9 +4,9 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <img src=".github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>Hand over the task, then watch the team get it done.</strong></p>
+<p align="center"><strong>An AI assistant for ongoing work, with a workspace you can step into.</strong></p>
 
-<p align="center">Varin plans the work, brings in teammates, checks the results and reports back.<br />Open source, running on your own computer or server, with your own API keys.</p>
+<p align="center">Talk with Varin, keep work moving, and open the details whenever you want.<br />Open source. Your models, your keys, your computer or server.</p>
 
 <p align="center">
   <a href="https://varin.dev">Website</a> ·
@@ -22,44 +22,116 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
-<p align="center">
-  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin at the window ledge of the Bot workbench: she searches the web, reads three files, sends two teammates off with parts of the task, collects their reports, replies and celebrates when the work is done" width="600" />
-  <br />
-  <sub>The Bot workbench stage, replaying a scripted run.</sub>
-</p>
+## Meet Varin
 
-## What working with Varin looks like
+Varin is a personal AI assistant for ongoing work. Talk through an idea, ask a quick question, or hand over something that will take time. It can do small jobs itself, bring in Agents for larger ones, and return to an existing task with its context intact.
 
-**The same model goes further.** Varin prepares everything around the model: context tidied ahead of time, every step recorded so a run survives a restart, other work moving while it waits for you, tools loaded when they are needed. The same model can finish longer, more complex tasks. [How the harness works](#how-the-harness-works)
-
-**A team you can watch.**
-
-- The lead agent splits a task and assigns the parts: a Worker writes the implementation, a research agent gathers context, a verifier runs the tests. Teammates work in parallel, message each other, hand over code with file-by-file diffs, and report back in the collaboration panel. Step in whenever you like.
-- A bot is a long-running super agent with its own name, instructions, model, working directory and memory, and keeps several pieces of work moving. Its stage in the Bot workbench shows what it is doing and which teammates are out on the job. Put it to sleep and its work is suspended; wake it and it picks up where it left off.
-- Codex, Claude Code, Pi and programs that speak ACP can run on your Host as sessions in Varin, or take work dispatched by the lead agent. They keep their own models, accounts and tools.
-- In the desktop app, an optional desktop companion sits on your desktop and acts out what the bot is doing. Its artwork is a separate download in Settings.
-
-**Yours to run and shape.** Keys stay on your own Host and requests go straight to the providers you configure. Any preset agent can get a new model, instructions or tools, and the workbenches themselves are extensions you can turn off or replace. Varin is licensed under AGPL-3.0.
+- **Keep talking while work continues.** Follow-up messages can guide the current work; queue a message when you want it handled afterward.
+- **See what is happening.** The side panel brings together current work, replies, things that need your input, memory and schedules. Open a task beside the conversation, or enter its full workbench.
+- **Build on previous conversations.** Varin can recall and organize relevant memories across its conversations. You can inspect, edit and forget what it keeps.
+- **Keep the work within reach.** Open files and connected computers alongside your chat. Send an original attachment to an Agent, discuss its result, and continue the task.
 
 <p align="center">
-  <img src=".github/readme/assets/team.png" alt="A lead agent hands a check to a teammate, which runs the tests and reports back in the collaboration panel" width="960" />
+  <img src=".github/readme/assets/varin-en.png" alt="A conversation with Varin about a product release, with an inline audience choice, a document and the current work alongside it" width="1100" />
 </p>
 
-## Four ways to work
+[About the assistant](docs/bot.md) · [Collaboration and task reuse](docs/collaboration.md)
 
-The mode decides which tools the agent starts with and which teammates help out.
+## Choose how closely you want to work
 
-| Mode | What it does | For example |
+You can stay with the overall conversation, work directly with an Agent, or open the files yourself. Each view puts a different kind of information in front of you.
+
+| View | What stays in focus | What you can open when needed |
 | --- | --- | --- |
-| Code | Reads and changes code, runs commands and terminals. Every edited file is checkpointed by turn. | "Refactor the login module and ping me when all the tests pass." |
-| Research | Searches OpenAlex and Semantic Scholar, reads papers and PDFs, and moves an experiment forward step by step. | "Find the last two years of papers on this and build a filterable comparison table." |
-| Office | Works with Word, Excel and PowerPoint, plus the browser and the apps on your computer. | "Export last month's orders into an Excel sheet with charts." |
-| General | Looks things up, writes, or builds a small interactive tool. | "Compare these three cameras and make a chart I can tweak." |
+| **Varin** | Your conversation, ongoing work and results | Task details, questions, memory, files and computers |
+| **Workbench** | A specific task and the Agent doing it | Tool activity, teammates, plans, context and recovery |
+| **IDE** | Files and code you want to work on directly | Editor groups, diffs, terminals, Git and the Agent conversation |
+
+### Workbench — work directly with the Agents
+
+Give an Agent a task and follow its progress at the level you need. Ordinary tool activity folds into a short summary between messages; delegated tasks remain easy to open. Inspect a teammate's conversation, send a message or file, check a change, or branch the conversation to explore another approach.
+
+Tasks can be delegated freely, with a model and thinking level, or use your configured Agent presets. An optional model-selection assistant can choose among your enabled chat models using their descriptions.
 
 <p align="center">
-  <img src=".github/readme/assets/code-mode.png" alt="Varin in code mode: the agent searches the project, edits profile.js, hands a regression test to a Verifier teammate and reports that all tests pass" width="480" />
-  <img src=".github/readme/assets/research-mode.png" alt="Varin in research mode: a comparison of recent papers laid out as a table in the conversation" width="480" />
+  <img src=".github/readme/assets/workbench-en.png" alt="The workbench pairs a readable conversation and file changes with messages between the task lead and another Agent" width="1100" />
 </p>
+
+### IDE — keep the files in your hands
+
+Edit with Monaco, navigate the project, inspect diffs and use terminals and Git alongside the conversation. Move between discussing a change and working on the file itself; editors and Agents use the same document and workspace services.
+
+<p align="center">
+  <img src=".github/readme/assets/ide-en.png" alt="The IDE shows a source file and terminal next to the Agent conversation about that change" width="1100" />
+</p>
+
+General, Coding, Research and Office are separate **task focuses**: they shape the tools and teammates available to an Agent. They sit underneath these views. [Workbench architecture](docs/workbench.md)
+
+## A conversation you can work in
+
+Read, compare, choose and refine a result in the conversation itself.
+
+- **Readable progress.** Text stays in the foreground. Expand activity summaries, thinking, tool results and Agent replies when you want the detail.
+- **Controls beside the explanation.** Choices, multiple selections, inputs and forms can sit between paragraphs. A selection can prepare an editable message in the composer.
+- **Rich results.** Images, tables, math and diagrams fit into the conversation. Custom HTML can provide interactive charts, comparisons and small tools, with source viewing and export.
+- **Connected to the work.** Task, file, plan and source references open the relevant view. Attachments keep their originals when passed between Agents.
+- **Room to change direction.** Conversation branches and file recovery keep earlier work accessible. The composer supports references, commands and editable next-message suggestions.
+
+<p align="center">
+  <img src=".github/readme/assets/conversation-en.png" alt="Prose, an interactive feedback chart, file and web references, and the composer share one conversation" width="1100" />
+</p>
+
+[Conversation and interactive content](docs/interactive-content.md)
+
+## Tools for the whole task
+
+Varin connects the model to information, files, programs and the interface where work happens.
+
+| Capability | What Agents can use |
+| --- | --- |
+| **Files and code** | List, search, read and edit files; extract code structure; investigate in the background; inspect changes and recovery points. |
+| **Commands and computation** | Shells, interactive terminals, background processes and a persistent JavaScript runtime, with status, output and cancellation. |
+| **Web and research** | Configurable web search, page reading, source citations, academic search and document reading. Follow results back to their source. |
+| **Documents and data** | Read PDFs and Office files; create and edit Word, Excel and PowerPoint documents; render and export supported formats. |
+| **Browser and computer use** | Browse and interact with pages, handle downloads, observe applications and operate a connected desktop. |
+| **Images and interactive results** | View images, use configured image-generation and editing models, and build HTML/JavaScript content inside chat. |
+| **Coordination and continuity** | Delegate, message and resume tasks; maintain plans and memory; schedule work and follow-ups. |
+| **Your own capabilities** | Connect MCP servers, use Skills and install extensions for additional tools and services. |
+
+Common tools are available directly; other capabilities are discovered as needed. Provider-backed features use your configured services; desktop and remote operations use the capabilities available on the connected device.
+
+## Your models, machines and workspace
+
+**Choose the models.** Connect providers or compatible local services, configure thinking levels, and assign different models to tasks and supporting jobs. Usage and estimated costs are recorded by channel and model.
+
+**Bring other Agents.** Codex, Claude Code, Pi and ACP-compatible programs can run as sessions or take delegated tasks while retaining their own accounts, models and tools. [External Agents](docs/external-agents.md)
+
+**Place the work where it belongs.** Run locally, self-host on a server, or connect from a browser or phone. The interface, Agent service, file workspace and computer-use device can be on different machines. [Deployment](docs/ops/cloud-deployment.md) · [Resources](docs/resources.md)
+
+**Keep an optional companion nearby.** The desktop companion follows the selected Bot's activity. Download its artwork and wake or put it to sleep from Settings.
+
+<details>
+<summary>See Varin at work</summary>
+
+<p align="center">
+  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin reads, works with her team and responds as the work progresses" width="600" />
+</p>
+
+</details>
+
+<a id="how-the-harness-works"></a>
+
+## Built for work that continues
+
+The harness handles the context and execution around the model:
+
+- Context is prepared in the background before it needs replacing, with summaries and selected original material.
+- Durable history records execution and results so recoverable work can continue after a restart.
+- Questions, permissions, queued messages and task reports keep their own state while other work proceeds.
+- File changes have recovery records, with conflict checks when files have changed since.
+- Bot memory can be recalled, revised and maintained in the background, and managed directly by you.
+
+The core runtime is written in Rust. The desktop, web and mobile interfaces share the same application services. [Runtime](docs/runtime.md) · [Architecture](docs/architecture.md)
 
 ## Get started
 
@@ -73,25 +145,9 @@ The mode decides which tools the agent starts with and which teammates help out.
    | From source | See [Run from source](#run-from-source). |
 
 2. Open Settings and add an API key for a model provider, or connect a local service. [Model channels](packages/docs/content/docs/providers.mdx)
-3. Pick a work mode, choose a project folder if the task needs one, and start your first task.
+3. Start a conversation with Varin. Open the Workbench for direct Agent collaboration, or the IDE when you want to work in the files.
 
 Varin is in active development before 1.0. This README describes the current source; [release notes](https://github.com/Youzini-afk/Varin/releases) describe each published build. Back up important application data before upgrading.
-
-## How the harness works
-
-The model does the thinking. The harness is everything around it: tools, context, execution, permissions, collaboration and recovery.
-
-- Self-curated context: tidied in the background ahead of time, summarized with the key originals kept, and counted with local tokenizers calibrated against real usage.
-- Durable runs: every step is recorded and resumes after a restart. An action with an unclear outcome stops for a check instead of running again.
-- Questions don't block: other work goes on while the agent waits for you, and budgeted goals resume when their conditions are met.
-- Tools on demand: common tools are always at hand and the rest load when needed. MCP servers can be exposed directly or discovered on demand.
-- File timeline: every edited file lines up by turn. Roll back in one step, and undo the rollback too. Files you changed by hand are never overwritten.
-
-**Ready out of the box.** About 90 native tools, 4 work modes, 4 official workbenches, 7 bundled language servers and 9 native model protocols, with the interface in 10 languages.
-
-**Deep customization, no code required.** Give any preset agent a new model, instructions or tools, or create your own. Choose separate models for titles, context curation, planning, images and embeddings. Edit system instructions and memory, use Skills from `.claude` and `.agents` folders or install them from a Git repository, and allow, ask or deny each tool.
-
-**Your keys, your data.** Keys stay on your own Host, and requests go straight to the providers you configure: OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Bedrock, Mistral, Alibaba Model Studio, Zhipu and StepFun, or Ollama, LM Studio and any compatible endpoint. Usage is recorded per channel and model, turn by turn. You can see, correct or erase what a bot remembers.
 
 ## Run from source
 
@@ -110,7 +166,7 @@ For the desktop app, run `bun run electron:dev` from the same checkout. It prepa
 
 ## Extend Varin
 
-The Agent, IDE, Research and Bot workbenches, along with the browser, Office, computer use and language servers, are extensions themselves. They use the same contracts as third-party extensions, any of them can be turned off, and a workbench can be replaced entirely. Extensions can add tools, model protocols, context algorithms, panels and whole workbenches. Start with the [authoring guide](docs/ops/varin-extension-authoring.md), the [SDK](packages/extension-sdk/README.md) or the [working examples](examples/extensions/README.md).
+The Varin, Workbench and IDE views, along with the browser, Office, computer use and language servers, are extensions themselves. They use the same contracts as third-party extensions, any of them can be turned off, and a workbench can be replaced entirely. Extensions can add tools, model protocols, context algorithms, panels and whole workbenches. Start with the [authoring guide](docs/ops/varin-extension-authoring.md), the [SDK](packages/extension-sdk/README.md) or the [working examples](examples/extensions/README.md).
 
 For how the pieces fit together, read the [architecture](docs/architecture.md), [runtime](docs/runtime.md) and [documentation index](docs/README.md).
 
