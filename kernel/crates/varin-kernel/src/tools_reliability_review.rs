@@ -199,6 +199,47 @@ fn device_files_read_write_search_and_process_admission_share_the_selected_host_
     assert!(content.get("observation").is_some(),"{content}");
 }
 
+#[cfg(unix)]
+#[test]
+fn device_discovery_keeps_ancestor_aliases_for_selection_filters_and_paging() {
+    let mut f = Fixture::with_device_access(true);
+    let physical = f.root.join("other/nested");
+    fs::create_dir_all(&physical).unwrap();
+    for name in ["alpha.txt", "beta.txt", "excluded.txt"] {
+        fs::write(physical.join(name), "selected device marker").unwrap();
+    }
+    let alias = f.root.join("other-alias");
+    std::os::unix::fs::symlink(f.root.join("other"), &alias).unwrap();
+    // An ancestor alias reproduces the Windows short-name/long-name mismatch
+    // without changing the separate contract for a selected symlink leaf.
+    let selected = alias.join("nested");
+    for tool in ["file_list", "file_search"] {
+        let mut args = json!({"paths":[selected],"globs":["!**/excluded.txt"],
+            "recursive":true,"respectGitignore":false,"maxResults":1});
+        if tool == "file_search" { args["query"] = json!("selected device marker"); }
+        let mut paths = Vec::new();
+        let mut pages = 0;
+        loop {
+            pages += 1;
+            assert!(pages <= 3, "two matches must finish after at most one empty final page");
+            let result = f.call(tool, args.clone());
+            let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = result else { panic!("{result:?}") };
+            for record in content.data["records"].as_array().unwrap() {
+                paths.push(record["path"].as_str().unwrap().to_owned());
+            }
+            assert!(paths.len() <= 2, "unexpected or repeated page: {paths:?}");
+            let Some(cursor) = content.data["nextCursor"].as_str() else { break; };
+            args["cursor"] = json!(cursor);
+        }
+        assert_eq!(paths, [selected.join("alpha.txt"), selected.join("beta.txt")]
+            .map(|path| path.to_string_lossy().into_owned()));
+    }
+    let explicit = selected.join("alpha.txt");
+    let result = f.call("file_search", json!({"paths":[explicit],"query":"selected device marker"}));
+    let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = result else { panic!("{result:?}") };
+    assert_eq!(content.data["records"][0]["path"], explicit.to_string_lossy().as_ref());
+}
+
 pub(crate) fn source_reader(run:&str,thread:&str)->(KernelToolExecutor,TestRoot) {
     let mut f=Fixture::new();
     fs::write(f.root.join("work/body.txt"),"native retrieval evidence\r\n").unwrap();
