@@ -54,6 +54,7 @@ function fixture() {
 
 test('Windows PE identity and imports reject wrong architecture and missing VC runtime', () => {
   assert.deepEqual(artifact.inspectExecutable(pe(), 'x64').imports, ['kernel32.dll']);
+  assert.deepEqual(artifact.inspectExecutable(pe('x64', 'bcryptprimitives.dll'), 'x64').imports, ['bcryptprimitives.dll']);
   assert.equal(artifact.inspectExecutable(pe('arm64'), 'arm64').architecture, 'arm64');
   assert.throws(() => artifact.inspectExecutable(pe(), 'arm64'), /architecture/);
   assert.throws(() => artifact.inspectExecutable(pe('x64', 'VCRUNTIME140.dll'), 'x64'), /unbundled/);

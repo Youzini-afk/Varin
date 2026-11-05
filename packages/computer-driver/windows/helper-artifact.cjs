@@ -47,7 +47,7 @@ function inspectExecutable(bytes, architecture) {
     throw new Error('Computer helper PE imports are truncated');
   };
   readImports(1, 20, 12); readImports(13, 32, 4);
-  const system = new Set(['advapi32.dll', 'bcrypt.dll', 'comctl32.dll', 'comdlg32.dll', 'crypt32.dll', 'dwmapi.dll', 'gdi32.dll', 'imm32.dll', 'kernel32.dll', 'kernelbase.dll', 'msvcrt.dll', 'ntdll.dll', 'ole32.dll', 'oleaut32.dll', 'propsys.dll', 'rpcrt4.dll', 'secur32.dll', 'shell32.dll', 'shlwapi.dll', 'uiautomationcore.dll', 'user32.dll', 'userenv.dll', 'version.dll', 'windowscodecs.dll', 'winmm.dll', 'ws2_32.dll', 'dbghelp.dll', 'ucrtbase.dll']);
+  const system = new Set(['advapi32.dll', 'bcrypt.dll', 'bcryptprimitives.dll', 'comctl32.dll', 'comdlg32.dll', 'crypt32.dll', 'dwmapi.dll', 'gdi32.dll', 'imm32.dll', 'kernel32.dll', 'kernelbase.dll', 'msvcrt.dll', 'ntdll.dll', 'ole32.dll', 'oleaut32.dll', 'propsys.dll', 'rpcrt4.dll', 'secur32.dll', 'shell32.dll', 'shlwapi.dll', 'uiautomationcore.dll', 'user32.dll', 'userenv.dll', 'version.dll', 'windowscodecs.dll', 'winmm.dll', 'ws2_32.dll', 'dbghelp.dll', 'ucrtbase.dll']);
   for (const name of imports) if (!system.has(name) && !/^(?:api|ext)-ms-win-[a-z0-9-]+\.dll$/.test(name)) {
     throw new Error(`Computer helper imports an unbundled non-system DLL: ${name}`);
   }
