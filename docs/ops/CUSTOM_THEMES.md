@@ -12,7 +12,7 @@ be removed from the same panel. This device-local library is separate from the H
 `themes` directory described below. The color controls save per-theme overrides locally;
 copying the active theme includes the currently applied colors.
 
-The importer accepts complete Varin theme JSON or this compact palette format:
+The importer accepts Codex exported theme JSON, complete Varin theme JSON, or this compact palette format:
 
 ```json
 {
@@ -23,7 +23,14 @@ The importer accepts complete Varin theme JSON or this compact palette format:
 ```
 
 A compact palette builds the remaining component and syntax colors from the corresponding
-light or dark default. It is not a general importer for other applications' theme formats.
+light or dark default. Codex imports translate `chromeTheme` accent/surface/ink, editor colors,
+common TextMate scopes and diff colors into Varin's theme model. Available UI and code font
+stacks are used when the corresponding Varin font setting is System; an explicit Varin font
+setting takes precedence. Fonts must be installed or otherwise available on the device. Codex's
+content font, contrast derivation, `skill` color and native `opaqueWindows` behavior have no
+exact equivalent here; unrecognized fields are not applied. Other applications' formats are not
+generally supported.
+
 
 ## Quick start
 

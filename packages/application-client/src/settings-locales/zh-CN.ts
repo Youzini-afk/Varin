@@ -7,7 +7,7 @@ export const settingsDict = {
   'settings.varin.visual.field.importThemeFile': '从 JSON 文件导入',
   'settings.varin.visual.field.removeImportedTheme': '删除当前导入主题',
   'settings.varin.visual.field.themeImported': '主题已导入并应用。',
-  'settings.varin.visual.field.themeInvalid': '主题 JSON 无效。请使用 Varin 主题，或提供名称、亮暗类型、强调色、背景色和文字色的配色。',
+  'settings.varin.visual.field.themeInvalid': '主题 JSON 无效。请使用 Codex 或 Varin 主题，或提供名称、亮暗类型、强调色、背景色和文字色的配色。',
   'settings.varin.visual.field.themeCopied': '主题 JSON 已复制。',
   'settings.varin.visual.field.themeCopyFallback': '无法自动复制，主题 JSON 已显示在下方。',
   'settings.varin.visual.field.themeRemoved': '已删除导入的主题。',

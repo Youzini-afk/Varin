@@ -2,6 +2,7 @@ import type { Theme } from '@/types/theme';
 import { isValidTheme } from '@/contexts/theme-validation';
 import { getDefaultTheme } from './themes';
 import { applyCustomColors, normalizeCustomColor } from './customColors';
+import { parseCodexTheme } from './codexTheme';
 
 export const IMPORTED_THEMES_STORAGE_KEY = 'varin.imported-themes.v1';
 const MAX_THEME_BYTES = 1024 * 1024;
@@ -14,6 +15,8 @@ function safeCssValues(value: unknown): boolean {
   return value === undefined || typeof value === 'boolean' || typeof value === 'number';
 }
 
+const recordCodexTheme = (object: Record<string, unknown>): Theme | undefined => parseCodexTheme(object);
+
 export function parseImportedTheme(raw: string): Theme {
   if (new TextEncoder().encode(raw).length > MAX_THEME_BYTES) throw new Error('size');
   let input: unknown;
@@ -23,6 +26,10 @@ export function parseImportedTheme(raw: string): Theme {
   let theme: Theme;
   if (isValidTheme(input)) {
     theme = input;
+  } else if (object.chromeTheme !== undefined || (object.surface !== undefined && object.ink !== undefined)) {
+    const codexTheme = recordCodexTheme(object);
+    if (!codexTheme) throw new Error('format');
+    theme = codexTheme;
   } else {
     // A small palette is convenient to copy from another editor or message.
     const palette = object.colors && typeof object.colors === 'object' && !Array.isArray(object.colors)
@@ -37,7 +44,11 @@ export function parseImportedTheme(raw: string): Theme {
     theme = { ...theme, metadata: { ...theme.metadata, id: name, name, variant } };
   }
   if (!safeCssValues(theme.colors) || (theme.config && !safeCssValues(theme.config))) throw new Error('unsafe');
-  const originalId = theme.metadata.id.replace(/^imported-/, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+  const rawId = theme.metadata.id.replace(/^imported-/, '');
+  const slug = rawId.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 65);
+  // Retain stable, distinct IDs for non-Latin theme names.
+  const hash = [...rawId].reduce((state, char) => Math.imul(state ^ char.codePointAt(0)!, 16777619) >>> 0, 2166136261).toString(16);
+  const originalId = /[^a-zA-Z0-9_-]/.test(rawId) ? `${slug || 'theme'}-${hash}` : slug;
   if (!originalId || theme.metadata.name.length > 120) throw new Error('format');
   return { ...theme, metadata: { ...theme.metadata, id: `imported-${originalId}`,
     name: theme.metadata.name.trim(), description: typeof theme.metadata.description === 'string' ? theme.metadata.description : '',

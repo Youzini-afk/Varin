@@ -7,7 +7,7 @@ export const settingsDict = {
   'settings.varin.visual.field.importThemeFile': 'Import JSON file',
   'settings.varin.visual.field.removeImportedTheme': 'Remove imported theme',
   'settings.varin.visual.field.themeImported': 'Theme imported and applied.',
-  'settings.varin.visual.field.themeInvalid': 'Invalid theme JSON. Use a Varin theme or a palette with name, variant, accent, background and foreground.',
+  'settings.varin.visual.field.themeInvalid': 'Invalid theme JSON. Use a Codex or Varin theme, or a palette with name, variant, accent, background and foreground.',
   'settings.varin.visual.field.themeCopied': 'Theme JSON copied.',
   'settings.varin.visual.field.themeCopyFallback': 'Could not copy automatically; the theme JSON is shown below.',
   'settings.varin.visual.field.themeRemoved': 'Imported theme removed.',
