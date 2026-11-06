@@ -494,6 +494,7 @@ jobs:
         with:
           name: ${{ steps.record.outputs.artifact_name }}
           path: tooling/artifacts/commit-images/candidate.json
+          archive: true
           if-no-files-found: error
           overwrite: false
 

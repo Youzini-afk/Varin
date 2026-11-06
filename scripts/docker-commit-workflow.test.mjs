@@ -121,6 +121,7 @@ test('normal and recovered candidates retain both real smokes before the saved p
   const artifact = commit.jobs.record.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
   assert.equal(artifact.with.name, '${{ steps.record.outputs.artifact_name }}');
   assert.equal(artifact.with.path, 'tooling/artifacts/commit-images/candidate.json');
+  assert.equal(artifact.with.archive, true);
   assert.equal(artifact.with['if-no-files-found'], 'error');
   assert.equal(artifact.with.overwrite, false);
   assert.ok(ancestors('promote').includes('record'));

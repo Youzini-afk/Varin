@@ -7,7 +7,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { acceptImageRelease, createImageRegistry } from './docker-release.mjs';
 import { acceptCommitPublication, assertAncestor, assertCurrentMain, commitImagePlan, loadVerifiedCandidate,
-  incompletePublication, promoteCommitImages, readCandidateArchive, sourceVersion, validateCandidateReceipt, verifyCommitImages } from './docker-commit.mjs';
+  createCommitRegistry, incompletePublication, publicationFailure, promoteCommitImages, readCandidateArchive,
+  sourceVersion, validateCandidateReceipt, verifyCommitImages } from './docker-commit.mjs';
 import { imageRegistryFixture } from './test-fixtures/image-registry.mjs';
 
 const source = 'a'.repeat(40), tooling = 'b'.repeat(40), prefix = 'ghcr.io/youzini-afk/';
@@ -171,6 +172,23 @@ test('the real Docker adapter passes anonymous credentials isolation to layer pu
   const calls = [], registry = createImageRegistry((args, options) => calls.push({ args, options }));
   registry.pull(images.standardApp, { anonymous: true });
   assert.deepEqual(calls, [{ args: ['pull', '--platform', 'linux/amd64', images.standardApp], options: { anonymous: true } }]);
+});
+
+test('public failure details retain safe registry targets and HTTP/transport distinction without signed URLs', () => {
+  for (const [detail, httpStatus, transportFailure] of [
+    ['request https://download.invalid/?sig=do-not-print returned 403 Forbidden', 403, false],
+    ['request https://download.invalid/?sig=do-not-print: context deadline exceeded', null, true],
+  ]) {
+    const registry = createCommitRegistry(() => { throw Object.assign(new Error(detail), { stderr: detail, status: 1 }); });
+    try { registry.pull(images.standardApp, { anonymous: true }); assert.fail('pull should fail'); }
+    catch (error) {
+      const failure = publicationFailure(error);
+      assert.deepEqual(failure, { operation: 'registry pull', target: [images.standardApp], exitStatus: 1, httpStatus, transportFailure, anonymous: true });
+      const report = incompletePublication(acceptCommitPublication(input), { receipt: receipt(), artifact: { id: 80 } }, receipt().producer, 'promote-and-readback', error);
+      assert.ok(!JSON.stringify(report).includes('do-not-print'));
+      assert.deepEqual(report.failure, failure);
+    }
+  }
 });
 
 const archiveAvailable = spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status === 0 && spawnSync('zip', ['-v'], { stdio: 'ignore' }).status === 0;

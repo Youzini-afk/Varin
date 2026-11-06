@@ -28,7 +28,39 @@ const id = value => {
   return result;
 };
 const sameRepository = value => typeof value === 'string' && value.toLowerCase() === repository.toLowerCase();
-const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+function operation(name, target, execute, anonymous) {
+  try { return execute(); }
+  catch (error) {
+    // Only extract a status class. Raw buffers may contain signed download URLs
+    // or registry authorization details and never belong in public receipts.
+    const detail = String(error.stderr ?? '');
+    const status = /\bHTTP\s+(\d{3})\b/i.exec(detail)?.[1]
+      ?? /\b(401|403|404|408|409|422|429|500|502|503|504)\s+(?:Unauthorized|Forbidden|Not Found|Request Timeout|Conflict|Unprocessable|Too Many|Internal Server|Bad Gateway|Service Unavailable|Gateway Timeout)\b/i.exec(detail)?.[1];
+    error.publicationOperation = { operation: name, target, exitStatus: Number.isInteger(error.status) ? error.status : null,
+      httpStatus: status ? Number(status) : null,
+      transportFailure: /timed? ?out|deadline exceeded|connection reset|TLS handshake|ECONNRESET|ENOTFOUND|unexpected EOF/i.test(detail),
+      ...(anonymous === undefined ? {} : { anonymous }) };
+    throw error;
+  }
+}
+export function publicationFailure(error) {
+  const visited = new Set();
+  for (let current = error; current && !visited.has(current); current = current.cause) {
+    visited.add(current);
+    if (current.publicationOperation) return current.publicationOperation;
+  }
+  return { operation: 'validation', message: error?.message ?? 'Publication could not be verified' };
+}
+const git = (args, cwd) => operation(`git ${args[0]}`, args.slice(1).join(' '),
+  () => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
+
+export function createCommitRegistry(runDocker) {
+  return createImageRegistry((args, options) => {
+    const action = args[0] === 'pull' ? 'pull' : args[2];
+    const references = action === 'create' ? [args.at(-1), args[args.indexOf('--tag') + 1]] : [action === 'pull' ? args.at(-1) : args[3]];
+    return operation(`registry ${action}`, references, () => runDocker(args, options), options?.anonymous === true);
+  });
+}
 
 export function acceptCommitPublication({ eventName, ref, repository: repo, toolingSha, sourceSha, version }) {
   if (eventName !== 'workflow_dispatch' || ref !== 'refs/heads/main' || !sameRepository(repo)) {
@@ -222,18 +254,21 @@ export function promoteCommitImages(receipt, stageTag, registry) {
     platforms: ['linux/amd64', 'linux/arm64'], runtimeSmokePlatform: 'linux/amd64', anonymousPullPlatform: 'linux/amd64', images };
 }
 
-export function incompletePublication(candidate, saved, publication, phase) {
+export function incompletePublication(candidate, saved, publication, phase, error) {
   return { schema: 1, status: 'incomplete', source: { sha: candidate.sourceSha, version: candidate.version },
     phase, publication, artifact: saved?.artifact ?? null,
     expectedImages: saved ? commitImagePlan(saved.receipt).flatMap(image => image.targets.map(target => ({ ref: target.ref, digest: image.digest }))) : null,
     promotionAttemptedInThisJob: phase === 'promote-and-readback',
     registryState: 'unknown-until-reconciled',
+    failure: error ? publicationFailure(error) : null,
     recovery: 'Earlier writes may exist. Resume the original verified candidate digests; never rebuild or overwrite frozen commit tags.' };
 }
 
 const api = {
-  json(endpoint) { return JSON.parse(execFileSync('gh', ['api', endpoint], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })); },
-  zip(endpoint) { return execFileSync('gh', ['api', endpoint], { maxBuffer: 1024 * 1024 }); },
+  json(endpoint) { return operation('GitHub GET metadata', endpoint,
+    () => JSON.parse(execFileSync('gh', ['api', endpoint], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }))); },
+  zip(endpoint) { return operation('GitHub GET candidate archive', endpoint,
+    () => execFileSync('gh', ['api', endpoint], { maxBuffer: 1024 * 1024 })); },
 };
 const output = values => {
   for (const [key, value] of Object.entries(values)) {
@@ -278,7 +313,7 @@ function runCli() {
     if (!key) throw new Error('Choose slim or toolbelt');
     const reference = process.env.BASE_IMAGE;
     if (!reference?.startsWith(`${prefix}${imageNames[key]}@`) || !digestPattern.test(reference.split('@')[1] ?? '')) throw new Error('Build must consume its fixed commit runtime base');
-    verifyCommitArtifact(reference, key, { source: { sha: candidate.sourceSha, version: candidate.version }, build: selectedBuild(), images: {} }, createImageRegistry(dockerCommand()));
+    verifyCommitArtifact(reference, key, { source: { sha: candidate.sourceSha, version: candidate.version }, build: selectedBuild(), images: {} }, createCommitRegistry(dockerCommand()));
     output({ image: reference });
   } else if (command === 'record') {
     const candidate = githubContext(process.env.SOURCE_SHA, process.env.SOURCE_VERSION);
@@ -289,7 +324,7 @@ function runCli() {
     const receipt = verifyCommitImages({ schema: 1, repository, workflow: workflowPath, tag: candidate.tag,
       source: { sha: candidate.sourceSha, version: candidate.version }, producer, build,
       images: { standardApp: process.env.STANDARD_APP_IMAGE, toolbeltApp: process.env.TOOLBELT_APP_IMAGE,
-        slimBase: process.env.SLIM_BASE_IMAGE, toolbeltBase: process.env.TOOLBELT_BASE_IMAGE } }, createImageRegistry(dockerCommand()));
+        slimBase: process.env.SLIM_BASE_IMAGE, toolbeltBase: process.env.TOOLBELT_BASE_IMAGE } }, createCommitRegistry(dockerCommand()));
     const directory = 'artifacts/commit-images'; fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(`${directory}/candidate.json`, `${JSON.stringify(receipt, null, 2)}\n`);
     output({ artifact_name: `${artifactPrefix}${producer.runAttempt}`, artifact_attempt: producer.runAttempt });
@@ -311,7 +346,7 @@ function runCli() {
       writeAnonymousDockerConfig(temporary);
       phase = 'promote-and-readback';
       const result = promoteCommitImages(saved.receipt, `candidate-${publication.runId}-${publication.runAttempt}`,
-        createImageRegistry(dockerCommand(temporary)));
+        createCommitRegistry(dockerCommand(temporary)));
       const report = { schema: 1, status: 'complete', ...result, artifact: saved.artifact, publication };
       save(report);
       console.log(JSON.stringify(report, null, 2));
@@ -319,7 +354,7 @@ function runCli() {
         `## Published commit images\n\nSource: ${candidate.sourceSha}\n\nAll six immutable tags verified. Both architectures inspected; actual app smoke and anonymous pulls: linux/amd64.\n\n`
         + result.images.map(item => `- \`${item.ref}\` → \`${item.digest}\``).join('\n') + '\n');
     } catch (error) {
-      save(incompletePublication(candidate, saved, publication, phase));
+      save(incompletePublication(candidate, saved, publication, phase, error));
       if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
         `## Commit image publication incomplete\n\nSource: ${candidate.sourceSha}\n\nStopped during ${phase}. Earlier writes may exist. Reconcile and resume the original verified digest set; do not rebuild or overwrite frozen tags. See the publication outcome artifact.\n`);
       throw error;
@@ -332,9 +367,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   catch (error) {
     // Child-process failures can include signed artifact download URLs. Keep
     // those buffers/causes out of public Actions logs and outcome artifacts.
-    console.error(error.cmd || error.stdout || error.stderr
-      ? `Publication command failed (exit ${error.status ?? 'unknown'}); no complete publication is claimed.`
-      : error.message);
+    console.error(JSON.stringify(publicationFailure(error)));
     process.exitCode = 1;
   }
 }
