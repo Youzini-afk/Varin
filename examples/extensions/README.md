@@ -37,6 +37,7 @@ same declaration.
   `tasks.schedules` Host capability.
 - [Memory then read](nested-tools/README.md): calls the native `memory` tool, then optionally
   `file_read`, from inside one tool.
+- [Gmail](gmail/README.md): connect a Google account locally and search, read, or send plain-text mail.
 - [Agent-authored text counter](agent-authored-panel/README.md): fixed input for the
   `extension_package` tool, with a Host entry and a self-contained panel.
 
