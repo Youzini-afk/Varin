@@ -28,9 +28,9 @@ readline.createInterface({input:process.stdin}).on('line',line=>{const request=J
 if(request.method==='initialize')result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{},resources:{}},serverInfo:{name:'fixture',version:'1'}};
 else if(request.method==='resources/list')result={resources:[]};
 else if(request.method==='resources/templates/list')result={resourceTemplates:[]};
-else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
+else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:fs.realpathSync.native(process.cwd()),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
 else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false},execution:{taskSupport:'required'}}]};
-else if(request.method==='tools/call'){const value={cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
+else if(request.method==='tools/call'){const value={cwd:fs.realpathSync.native(process.cwd()),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
 else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Unsupported fixture method'}})+'\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
   );
   const config = {
@@ -139,7 +139,7 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
       completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' },
       executor_stopped: true,
     });
-    // The child reports its physical cwd, which may differ from a symlinked temp path.
+    // Native realpath on both sides expands symlinks and Windows 8.3 aliases; the JS sync walker does not.
     expect(
       (await fs.readFile(calls, 'utf8'))
         .trim()
