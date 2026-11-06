@@ -1,10 +1,10 @@
 # 插件中心、公开收录目录与作者发行来源
 
-状态：目录、发行交付、插件中心、通用 Host 凭据接线及 Gmail 普通插件已实现；普通包安装与模拟 OAuth/发信链路已验证，真实跨平台 OAuth 和 Google 生产审核另行验证。生产站点部署不在本轮范围。原设计日期：2026-11-06。源码基线：`d0d5f579d`。
+状态：设计方案，待实施。日期：2026-11-06。源码基线：`d0d5f579d`。
 
 本文整合插件界面、内置与外部插件管理、公开市场和发行包安装更新。连接类插件通过现有 Host 的授权与凭据机制接入。当前已实现的扩展机制见[扩展](../extensions.md)和[作者指南](../ops/varin-extension-authoring.md)。
 
-需求背景见 [#288](https://github.com/Youzini-afk/Varin/issues/288)。[Gmail PR #285](https://github.com/Youzini-afk/Varin/pull/285)提供插件业务实现参考。
+连接类插件的需求背景见 [#288](https://github.com/Youzini-afk/Varin/issues/288)。该议题中的 Gmail 业务由独立插件项目交付。
 
 ## 1. 核心决定
 
@@ -309,7 +309,7 @@ Host 系统和架构决定执行包，当前 Surface 决定配置页和视觉 co
 
 插件自己组织邮箱、工作区、服务端点及配置界面。它可以把连接配置放在现有插件存储中，将秘密保存为 Host 凭据引用。插件 Host 端适配器处理服务商特有的授权参数、令牌交换、请求签名或撤销行为。Host 端按真实调用身份解析引用并用于目标请求，前端、工具参数与模型上下文只使用配置所需的非秘密信息。
 
-普通扩展调用通过 Host capability `varin.credentials` 接通凭据归属。Surface service lease 的认证主体与 Rust Catalog 保存的 Thread/Run 主体分别进入 Host-only 调用 scope，插件参数不能替代它们。配置页授权和 Agent 工具执行都要由 Host 从各自的可信调用链解析同一用户身份，并将凭据范围绑定到插件与连接。一个用户可拥有同一插件的多条连接，同一 Host 上的不同可信主体各自管理自己的连接。当前登录入口仍为原单一 Host owner 的密码、passkey 与设备配对；多用户注册和邀请不在本次实现中。模型渠道、MCP 或其他插件的凭据仍按各自的归属解析。
+实际缺口是普通扩展调用与凭据归属的接线。现有 Surface service lease 会校验认证主体，通用扩展服务调用还没有将该主体交给凭据能力。配置页授权和 Agent 工具执行都要由 Host 从各自的可信调用链解析同一用户身份，并将凭据范围绑定到插件与连接。一个用户可拥有同一插件的多条连接，同一 Host 上的不同用户各自管理自己的连接。模型渠道、MCP 或其他插件的凭据仍按各自的归属解析。
 
 上述归属约束作用于 Host 凭据 API。原生插件仍以其进程账户权限运行，代码信任沿用现有安装与执行边界。
 
@@ -317,19 +317,11 @@ Host 系统和架构决定执行包，当前 Surface 决定配置页和视觉 co
 
 授权尝试复用现有 Host 交互，绑定发起用户、插件与目标连接。具体回调由服务商和部署方式决定，例如本机桌面可用系统浏览器与本机回调，远程 Host 则使用该部署能接收且已登记的回调方式。发布者负责所需的 OAuth 应用配置与审核。配置页负责呈现授权结果、重连以及服务商支持的撤销操作。
 
-## 10. Gmail 插件的接入职责
+## 10. 平台与插件的交付边界
 
-目标路径：用户在市场安装 Gmail，点击“配置”进入 Gmail 自己的页面，完成账号授权，然后在对话中搜索、读取、发送和回复邮件。账号可见范围与实际执行绑定一致。
+Varin 主仓交付插件中心、发行包安装更新和可供插件调用的 Host 授权与凭据能力。平台交付不包含 Gmail 示例、业务页面或发行工作流。插件的业务实现、发行包和服务商授权配置由作者在插件项目维护。作者发布后可按同一收录流程提交到市场。
 
-按 #288 的明确需求，发送前展示实际收件人、抄送、主题和正文，单次确认只授权这次内容。取消不发送；已派发但结果不确定时，不自动重复发送。将这种操作预览和确认接进既有权限及回执机制，而不是让插件另建对话、审批和执行数据库。
-
-收发邮件、在原邮件线程回复、附件处理属于 Gmail 插件自己的能力声明。新邮件通知或持续监听需由用户在插件中启用；它们不是安装插件的隐含效果，也不是市场的全局业务状态。
-
-#285 已有实验实现可复用，但公共交付还需要验证普通安装包、Windows/macOS/Linux、本机和远程授权、可信账号归属及生产 OAuth 应用。文档中的实验说明不能替代这些真实交付。
-
-当前交付位于 [Gmail 插件](../../examples/extensions/gmail/README.md)：使用普通 CLI 发行包、插件自己的配置页与 Google PKCE 适配器，接入通用 `varin.credentials` 和 `varin.tools.confirmation`。发送与回复声明 `confirmation: "always"`，复用原 Catalog 权限请求及结果回执，展示完整原始输入并消费单次、同调用、同 owner 的确认。插件没有独立账号或审批数据库，不进行自动收件监听。普通归档安装、真实 broker 启用、模拟授权和单次发送测试不代表已通过真实 Google 生产审核或 Windows/macOS/Linux 浏览器联调。
-
-Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；不要把“必须有一个保密的桌面 client secret 分发服务”当作所有桌面接入的固定前提。Gmail 读取及发送涉及的 scope 审核要求依据发布时的官方规则落实。
+需要用户确认的外部操作沿用 Varin 的权限与回执机制。插件提供这次操作实际使用的内容，平台负责将用户的确认绑定到该次操作。Gmail 发信预览及其发布要求由 [#288](https://github.com/Youzini-afk/Varin/issues/288) 单独跟踪。
 
 ## 11. 实现落点
 
@@ -357,10 +349,8 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 1. **公开目录与站点**：独立仓库、提交模板、静态列表和图标、资料校验、Cloudflare 部署。来源数据职责与第 3 节一致。
 2. **发行交付与安装更新**：CLI 发行包、GitHub/npm 直接来源解析、跨平台选择、明确版本安装、本地包导入、已安装检查更新和候选应用。
 3. **插件中心**：发现/已安装、内置分组、配置入口、安装进度、升级和卸载、保留高级功能，接通网站安装链接。
-4. **连接类插件接入**：扩展复用 Host 授权与凭据能力，补齐调用身份绑定。Gmail 自己提供配置、服务商授权和发信预览，完成 #288 的目标路径。
+4. **扩展授权与凭据接线**：让扩展复用 Host 授权与凭据能力，补齐配置页和 Agent 工具调用的身份绑定。
 5. **开发者与用户文档**：从空项目到发行、一次收录后的后续发版、各部署下账号连接和失败处理；把落地机制合入当前扩展文档。
-
-市场及普通插件安装可以先投入使用。Gmail 的生产 OAuth 审核按该插件的发布安排推进。
 
 ## 13. 验收依据
 
@@ -379,7 +369,7 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 | 最新发行不兼容、资产缺失或摘要不符 | 明确说明，旧安装保持可用，不发布错误 candidate |
 | 更新发生在原工具调用进行期间 | 原调用继续持有原实现，新版本只在实际发布后供新绑定使用 |
 | 用户切换 Host 时安装/更新仍在进行 | 操作保持原 Host 归属，迟到结果不污染另一个 Host |
-| Gmail 安装后未授权 | 插件中心显示平台状态和“配置”，账号状态只出现在插件页面 |
+| 外部插件安装后需要授权 | 插件中心提供“配置”，服务商授权与账号状态由插件自己的页面呈现 |
 | 不同用户共享 Host；同用户多端 | 前者连接及凭据隔离，后者按真实身份使用自己的连接 |
 | 单次发信确认、取消和未知结果 | 原始内容展示正确，取消无发送，未知结果不自动重发 |
 | 内置与外部插件管理 | 保留原有组合、权限、数据保留和生命周期能力，入口清楚可达 |
@@ -391,6 +381,5 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 - 当前扩展机制：[扩展](../extensions.md)、[作者指南](../ops/varin-extension-authoring.md)、[extension-host](../../packages/extension-host/README.md)、[extension-cli](../../packages/extension-cli/README.md)。
 - 当前官网发布：[部署说明](../../packages/docs/DEPLOYMENT.md)、[文档站 workflow](../../.github/workflows/docs-site.yml)。
 - Cloudflare：[GitHub 集成](https://developers.cloudflare.com/pages/configuration/git-integration/github-integration/)、[预览部署](https://developers.cloudflare.com/pages/configuration/preview-deployments/)。
-- Google：[桌面 OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)。
 
-收录仓库的目录、静态站点和校验流程已在 Astrmira/Varin-plugins 初始化。生产发布仍需确认站点域名、Cloudflare 项目与部署权限；具体连接插件另行确认生产 OAuth 应用归属。
+站点部署需确认域名、Cloudflare 项目和部署权限。服务商 OAuth 应用由对应插件发布者负责。
