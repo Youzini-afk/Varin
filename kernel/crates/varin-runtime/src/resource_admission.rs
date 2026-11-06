@@ -10,6 +10,7 @@ use crate::execution_capacity::{
 use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::{mpsc, Arc, Mutex};
+use std::task::Poll;
 
 #[derive(Default)]
 pub struct ResourceAdmission {
@@ -47,6 +48,7 @@ struct Pending {
     intents: Vec<ResourceIntent>,
     claims: Option<Vec<ResourceClaim>>,
     wake: mpsc::SyncSender<()>,
+    observer: Option<mpsc::SyncSender<()>>,
     family: String,
     class: ExecutionClass,
     cancel: CancellationToken,
@@ -182,6 +184,7 @@ impl ResourceAdmission {
                 intents,
                 claims: None,
                 wake,
+                observer: None,
                 family: family.into(),
                 class,
                 cancel: cancel.clone(),
@@ -208,6 +211,7 @@ impl ResourceAdmission {
             owner: Some(owner.into()),
             events,
             _cancellation: cancellation,
+            observer_cancellation: None,
         })
     }
     fn compute_active(state: &State) -> usize {
@@ -331,6 +335,9 @@ impl ResourceAdmission {
     fn wake_waiters(state: &State) {
         for pending in &state.pending {
             let _ = pending.wake.try_send(());
+            if let Some(observer) = &pending.observer {
+                let _ = observer.try_send(());
+            }
         }
     }
     /// Only executor stop/terminal evidence releases a background owner's claims; cancel is not proof.
@@ -349,6 +356,7 @@ pub struct ResourceReservation {
     owner: Option<String>,
     events: mpsc::Receiver<()>,
     _cancellation: CancellationRegistration,
+    observer_cancellation: Option<CancellationRegistration>,
 }
 impl ResourceReservation {
     /// Validate the trusted preplanning promise before publishing the complete plan. Narrowing
@@ -384,61 +392,87 @@ impl ResourceReservation {
         ResourceAdmission::wake_waiters(&state);
         Ok(())
     }
+    /// Subscribe a coordinator to queue changes and cancellation. Registration precedes its
+    /// first poll, so release/cancellation between polling and waiting cannot be lost. Events
+    /// coalesce; the coordinator must inspect its reservations, not treat a wake as a grant.
+    pub(crate) fn notify_on_change(&mut self, wake: mpsc::SyncSender<()>) {
+        let mut state = self
+            .admission
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let pending = state
+            .pending
+            .iter_mut()
+            .find(|entry| entry.ticket == self.ticket)
+            .expect("reservation owns its queue entry");
+        self.observer_cancellation = Some(pending.cancel.wake_on_cancel(wake.clone()));
+        pending.observer = Some(wake);
+    }
+
+    /// The same atomic/fair admission decision as `acquire`, without retaining a waiting
+    /// thread. Pending holds only its ordering intent; a returned lease owns the entire plan.
+    pub fn try_acquire(&mut self) -> Poll<Result<Option<ResourceLease>, ExecutionError>> {
+        let mut state = self
+            .admission
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let position = state
+            .pending
+            .iter()
+            .position(|entry| entry.ticket == self.ticket)
+            .expect("reservation owns its queue entry");
+        let pending = &state.pending[position];
+        if pending.cancel.is_cancelled() {
+            return Poll::Ready(Ok(None));
+        }
+        if pending.claims.is_none() {
+            return Poll::Ready(Err(ExecutionError::new(
+                "resource_plan_unresolved",
+                "complete resource plan required before admission",
+            )));
+        }
+        let class = pending.class;
+        let blocked = ResourceAdmission::resource_blocked(&state, position)
+            || (class == ExecutionClass::LocalCompute
+                && (ResourceAdmission::compute_active(&state) >= state.compute_capacity.get()
+                    || ResourceAdmission::next_compute(&state) != Some(self.ticket)));
+        if !blocked {
+            let pending = state.pending.remove(position).expect("checked reservation");
+            let owner = self.owner.take().expect("unconsumed reservation");
+            state.active.insert(
+                owner.clone(),
+                Active {
+                    claims: pending.claims.expect("resolved plan"),
+                    family: pending.family.clone(),
+                    class,
+                    identity: pending.identity,
+                },
+            );
+            if class == ExecutionClass::LocalCompute {
+                state.families.retain(|id| id != &pending.family);
+                state.families.push_back(pending.family.clone());
+                state.last_compute_family = Some(pending.family);
+            }
+            ResourceAdmission::wake_waiters(&state);
+            return Poll::Ready(Ok(Some(ResourceLease {
+                admission: self.admission.clone(),
+                owner: Some(owner),
+                dispatched: false,
+            })));
+        }
+        Poll::Pending
+    }
+
     pub fn acquire(mut self) -> Result<Option<ResourceLease>, ExecutionError> {
         loop {
-            let mut state = self
-                .admission
-                .state
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
-            let position = state
-                .pending
-                .iter()
-                .position(|entry| entry.ticket == self.ticket)
-                .expect("reservation owns its queue entry");
-            let pending = &state.pending[position];
-            if pending.cancel.is_cancelled() {
-                return Ok(None);
+            match self.try_acquire() {
+                Poll::Ready(result) => return result,
+                Poll::Pending => self.events.recv().map_err(|_| {
+                    ExecutionError::new("resource_wait_closed", "resource control channel closed")
+                })?,
             }
-            if pending.claims.is_none() {
-                return Err(ExecutionError::new(
-                    "resource_plan_unresolved",
-                    "complete resource plan required before admission",
-                ));
-            }
-            let class = pending.class;
-            let blocked = ResourceAdmission::resource_blocked(&state, position)
-                || (class == ExecutionClass::LocalCompute
-                    && (ResourceAdmission::compute_active(&state) >= state.compute_capacity.get()
-                        || ResourceAdmission::next_compute(&state) != Some(self.ticket)));
-            if !blocked {
-                let pending = state.pending.remove(position).expect("checked reservation");
-                let owner = self.owner.take().expect("unconsumed reservation");
-                state.active.insert(
-                    owner.clone(),
-                    Active {
-                        claims: pending.claims.expect("resolved plan"),
-                        family: pending.family.clone(),
-                        class,
-                        identity: pending.identity,
-                    },
-                );
-                if class == ExecutionClass::LocalCompute {
-                    state.families.retain(|id| id != &pending.family);
-                    state.families.push_back(pending.family.clone());
-                    state.last_compute_family = Some(pending.family);
-                }
-                ResourceAdmission::wake_waiters(&state);
-                return Ok(Some(ResourceLease {
-                    admission: self.admission.clone(),
-                    owner: Some(owner),
-                    dispatched: false,
-                }));
-            }
-            drop(state);
-            self.events.recv().map_err(|_| {
-                ExecutionError::new("resource_wait_closed", "resource control channel closed")
-            })?;
         }
     }
 }

@@ -723,3 +723,41 @@ fn persistence_failure_cancels_queued_successor_without_releasing_uncertain_occu
         Some("active")
     );
 }
+
+#[test]
+fn stalled_resolve_flood_is_bounded_without_blocking_ready_calls_or_starting_cancelled_lookups() {
+    let store = Arc::new(Store::default());
+    let gate = Arc::new(Gate::default());
+    let cancel = CancellationToken::default();
+    let budget = varin_runtime::execution_capacity::default_compute_capacity().get();
+    let names: Vec<_> = (0..64).map(|index| format!("resolve-{index}")).collect();
+    let mut specs: Vec<_> = names.iter().map(|id|
+        (id.as_str(), Spec::dynamic("file:shared", Access::Read, gate.clone()))).collect();
+    specs.push(("ready", Spec::ready("process:status", Access::Read)));
+    let (tx, rx) = mpsc::channel();
+    let (provider, worker) = start(store.clone(), "bounded-resolve", specs, tx, cancel.clone());
+    let mut seen = until(&rx, "execute:ready");
+    while seen.iter().filter(|event| event.starts_with("prepare:")).count() < budget {
+        seen.push(rx.recv_timeout(WAIT).unwrap());
+    }
+    assert_eq!(provider.generations.load(Ordering::SeqCst), 1);
+    assert_eq!(store.admission.summary().queued, 64);
+    let request = store.records.lock().unwrap().iter().find_map(|record| match record {
+        ExecutionRecord::RequestPrepared { snapshot } => Some(snapshot.view.request_id.clone()),
+        _ => None,
+    }).unwrap();
+    assert!(cancel.cancel_child(&format!("{request}:tool:resolve-63")));
+    let deadline = std::time::Instant::now() + WAIT;
+    while store.admission.summary().queued != 63 {
+        assert!(std::time::Instant::now() < deadline,
+            "exact cancellation must wake the coordinator without releasing slow preparation");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    cancel.cancel();
+    assert_eq!(worker.join().unwrap().unwrap().state, RunState::Cancelled);
+    seen.extend(rx.try_iter());
+    assert_eq!(seen.iter().filter(|event| event.starts_with("prepare:")).count(), budget,
+        "queued cancelled lookups must never start owner preparation");
+    assert!(!seen.iter().any(|event| event.starts_with("execute:resolve-")));
+    assert_eq!(store.admission.summary().queued, 0);
+}

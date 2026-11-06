@@ -266,6 +266,35 @@ nested call 来源，贯穿准备、资源准入、授权和执行；模型批�
 任务家族调度。等待容量时不能先占文件资源，慢准备不能占公共控制通道。
 这是共享硬件上的逻辑隔离，不是独立 CPU、磁盘或物理故障域的保证。
 
+Linux Host 的科研资源探针读取本进程 cgroup v1/v2、可见祖先 quota/cpuset、内存与 PID 限额，
+`capacity` 表示有效上限，不再把宿主机总量当容器容量。`system` 保留物理容量、探测来源、范围与
+降级原因；内存/PID headroom、CPU throttle 和 OOM 累计事实进入带时间的 sample，缺失值不造零。
+不可见祖先、外部进程和采样竞态仍由实际 OS 约束，逻辑准入不能承诺硬隔离。
+
+`VARIN_RESEARCH_RESERVE_CPU_CORES`、`VARIN_RESEARCH_RESERVE_MEMORY_MB` 是明确的 Host/后台
+保留预算，未设置为 0，不根据某个 worker 猜内存成本。科研预算先从有效容量减保留，再减耐久
+commitment；当前可读内存 headroom 另外约束新请求，不把真实 usage 和 commitment 重复相减。
+容量下降不重写已确认回执。PID 目前只观测 Linux task 数（包括线程），不虚构每任务固定 PID 成本。
+这些预算不是 shell、模型、LSP、扩展等所有子进程共用的全局 semaphore。
+
+Rust 继续用同一 `configured_compute_capacity` 连接原子准入和 ComputeManager，默认取
+`min(available_parallelism, 2)`，显式覆盖用 `VARIN_COMPUTE_CONCURRENCY`；另保留后台索引 worker。
+
+默认模型工具批次先建立全部原资源排序意图，再分别通过 Ready/Resolve 准备通路完成同步 owner
+准备和首次授权。每条准备通路采用硬件派生的 worker 预算（单核 1，否则 2），未派发结算另有
+同规模预算；慢 Resolve 不占 Ready 通路，取消未开始项不调用其 owner。完成准备但等待资源或
+计算容量的调用由原 Run 线程通过合并通知驱动，不为每个等待项保留 OS 线程。准备线程完成并
+join 后才复用名额；实际执行与 nested callback 不持有准备名额，不引入嵌套调用的全局 semaphore。
+首次 watch/authorize 仍是同步 owner 回调；同一批次的 Ready 授权都挂起时，后续 Ready 会等待准备
+名额，不能声称任意权限交互都能被无界越过。其他 Run 使用各自准备预算。
+
+全计划原子准入、冲突顺序、family 轮转、撤权 watch、派发前授权、持久 dispatch/settlement 和
+unknown handoff 仍经过同一 owner。该边界不是工具数量上限：队列数据仍为 O(N)，每个 Run 仍有
+原同步执行线程，policy graph、driver、nested 的同步入口仍可能占用调用线程。逻辑容量不等于
+整个 Host 的线程/RSS 总量上限。`family_capacity_review` 中显式忽略的
+`measure_real_engine_queue_cost` 探针测量真实 Catalog/Engine 配受控 executor 的队列、RSS、独立
+工具完成和取消 join 成本，不能代替完整容器/模型/索引混合负载基准。
+
 Operation 分开记录阶段、业务结果、效果和取消。效果可以是 none、dispatched、partial、
 confirmed 或 unknown。外部回执另带原执行者 identity/epoch 和真实 `executor_stopped`。
 成功文案、空占用表、HTTP abort、丢失的进程响应和取消意图都不能替代停止证据。
@@ -276,6 +305,11 @@ confirmed 或 unknown。外部回执另带原执行者 identity/epoch 和真实 
 取消先留下事实，再推进依赖清理；控制唤醒不依赖正文读取完成。绑定准备保留原 Cancel 或
 Bot Sleep 路径，不能把已知取消改写成无关失败。已发出的副作用仍由原执行者结算。
 迟到回执不能清算新 Run 或替换后的资源；不明结果保持可查询，不自动重放。
+
+期限按实际 owner 区分：排队/开始期限只有在尚未派发时才能产生 `not_dispatched`；执行期限必须
+由原执行 owner 接受并冻结；观察 timeout 仅结束当前等待；stop grace 只限定等待真实停止回执的
+时间。Host 实现全链 stop deadline，不给所有 Run 增设统一 queue/execution TTL，
+也不对长模型流套一个硬总时长。已有 durable wait、进程等待和观察取消保留原语义。
 重启前已取消的未配对交换，在原停止回执到齐后只恢复原工具批次和历史结算，
 不重新准备模型、工具或 Source 执行权限。正文暂不可读时保留取消与回执；正文修复后可再次取消重试，
 原回执变化也会重新检查，未变化的失败边界不会自行循环读取。
@@ -607,6 +641,23 @@ Agent 的 `image_generate`、`image_edit` 分别选择生成和编辑模型，�
 提供方原始用量与缺失值分别保留，不把图片计量强行转为 token。派发后结果不明保持 unknown，读取原回执不会再生成一次。
 
 ## 恢复与验证边界
+
+Application Host 停止入口同步进入 draining，readiness 立即撤销，受理层拒绝新执行和写入，保留
+已识别的查询、观察、取消和回执清理。新执行即使还在 Kernel IPC credit 队列，也在派发前再次检查
+draining；已派发工作继续由原 owner 结算。HTTP 已进入 handler 的工作不因拒绝后续请求自动消失。
+新 Surface service lease 可能激活 provider，不视作只读观察。实时观察协议保留原 pull/cancel；
+任意字节的终端、连接、转发和预览桥由原传输 owner 关闭，不能把桥断开当作远端 executor 停止。
+
+`VARIN_SHUTDOWN_TIMEOUT_MS`（默认沿用 10 秒）建立一次单调绝对 deadline，覆盖 producer、进程、
+Kernel、Knowledge 和 HTTP close。正常退出记录结构化 `outcome: graceful`。owner 失败或到期记录
+`incomplete`、owner、reason、elapsedMs 和 deadlineMs，停止后续依赖拆除，不提前关闭仍有 writer
+的数据库，不把超时解释为 executor stopped。迟到的 Kernel drain 回执也不会重启已到期的清理链。
+前台 CLI 对正常 SIGTERM 保留退出码 143，不完整关闭为 1；监督者或容器最后负责整个进程故障域。
+event loop 被同步代码阻塞时，JS timer 不是硬实时保证，仍需要外部 stop grace，见[部署](ops/cloud-deployment.md)。
+
+冷备份完整保留 WAL、正文对象、原身份与未知效果。恢复副本默认封锁 Host 启动；灾备激活必须核对
+原实例 fencing、备份后的外部效果及 workspace/连接绑定。独立可运行的新 Host clone 尚未实现，
+不能靠复制或替换 hostId 获得。完整范围和操作入口见[冷备份与隔离恢复](ops/cold-backup.md)。
 
 恢复读取原事实与回执。Prepared 但未 dispatched 的请求可沿原受保护路径继续；
 已派发却结果不明的模型请求不自动重发。已保留的摘要/工具结果可以继续投递，不重新生成或执行。
