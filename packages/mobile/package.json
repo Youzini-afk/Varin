@@ -49,7 +49,7 @@
     "@capacitor/cli": "^8.6.0",
     "@capacitor/ios": "^8.6.0",
     "@types/node": "^24.3.1",
-    "serve-sim": "^0.1.48",
+    "serve-sim": "^0.1.49",
     "sharp": "^0.35.5",
     "typescript": "~5.9.0"
   }
