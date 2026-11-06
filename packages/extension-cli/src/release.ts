@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { access, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -51,11 +52,13 @@ export async function releaseProject(directory = '.', options: { output?: string
     for (const file of selected) await copy(file);
     // Build metadata/development scripts and dependencies are not runtime requirements of bundled entrypoints.
     await writeFile(join(packageRoot, 'package.json'), JSON.stringify({ name: project.packageJson.name, version: project.manifest.version, type: project.packageJson.type, engines: project.manifest.engines }, null, 2));
-    const file = `${project.manifest.id}-${project.manifest.version}-${platform}-${arch}.tgz`;
+    const file = `${project.manifest.id}-${project.manifest.version.replaceAll('+', '_')}-${platform}-${arch}.tgz`;
     await mkdir(output, { recursive: true });
     const archive = join(output, file);
     await createTar({ cwd: root, file: archive, gzip: true, portable: true, noMtime: true }, ['package']);
-    const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex');
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(archive)) hash.update(chunk);
+    const sha256 = hash.digest('hex');
     const manifest: VarinExtensionReleaseManifest = parseVarinExtensionReleaseManifest({ schemaVersion: 1, extensionId: project.manifest.id,
       version: project.manifest.version, engines: project.manifest.engines, assets: [{ file, sha256, platform, arch }] });
     const manifestPath = join(output, 'varin.release.json');

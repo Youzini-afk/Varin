@@ -15,9 +15,11 @@ test('release builds executable bundles and packages explicit runtime assets wit
   await writeFile(join(directory, 'src/main.ts'), 'export default { activate() {} };');
   await writeFile(join(directory, 'runtime/helper.txt'), 'runtime resource');
   await writeFile(join(directory, '.env'), 'PRIVATE=never-package');
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dev.release.cli', version: '1.0.0', type: 'module', files: ['runtime'], scripts: { prepack: 'exit 1' }, varin: { build: { entrypoints: { host: 'src/main.ts' } } } }));
-  await writeFile(join(directory, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'dev.release.cli', version: '1.0.0', engines: { varin: '^1.0.0' }, entrypoints: { host: { mode: 'brokered', file: 'dist/host.cjs' } } }));
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dev.release.cli', version: '1.0.0+build.7', type: 'module', files: ['runtime'], scripts: { prepack: 'exit 1' }, varin: { build: { entrypoints: { host: 'src/main.ts' } } } }));
+  await writeFile(join(directory, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'dev.release.cli', version: '1.0.0+build.7', engines: { varin: '^1.0.0' }, entrypoints: { host: { mode: 'brokered', file: 'dist/host.cjs' } } }));
   const result = await releaseProject(directory);
+  assert.equal(result.manifest.version, '1.0.0+build.7');
+  assert.equal(result.manifest.assets[0]?.file, 'dev.release.cli-1.0.0_build.7-any-any.tgz');
   const paths: string[] = [];
   await listTar({ file: result.archive, onReadEntry: entry => { paths.push(entry.path); } });
   assert.ok(paths.includes('package/dist/host.cjs'));
