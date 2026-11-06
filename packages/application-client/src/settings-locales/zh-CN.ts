@@ -3079,6 +3079,7 @@ export const settingsDict = {
   'bot.session.new': '新建会话',
   'bot.session.newNeedsAwake': '叫醒 {name} 后才能开始新会话',
   'bot.session.search': '搜索会话',
+  'bot.session.archivedList': '已归档会话',
   'bot.session.noMatch': '没有匹配的会话。',
   'bot.session.running': '运行中',
   'bot.session.unread': '有新回报',

@@ -2,6 +2,7 @@ import React from 'react';
 import type { BotSummary, ThreadIdentity } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { BotMenu, type BotMenuAction } from '@/components/sections/bots/BotMenu';
@@ -61,12 +62,44 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   const needle = query.trim().toLocaleLowerCase();
   const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle))
     .sort((a, b) => Number(b.thread.pinned) - Number(a.thread.pinned)) ?? null;
+  const archivedSessions = shownSessions?.filter(session => session.thread.archived) ?? [];
   const titleCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
     const title = sessionTitle(session);
     titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   }
   const rowClass = 'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-ui-label text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50';
+
+  const renderSession = (session: BotSessionView) => {
+    const main = session.identity;
+    const mainCurrent = current?.threadId === main.threadId && current.branchId === main.branchId;
+    const title = sessionTitle(session);
+    const updated = session.thread.updated_at_ms;
+    return <React.Fragment key={main.threadId}>
+      <BotSessionMenu session={session} identity={main} label={title} disabled={busy} onAction={action => onSessionAction(session, main, action)}>
+      <button type="button" data-sidebar-row={rowId(main)} data-current={mainCurrent || undefined} aria-current={mainCurrent ? 'page' : undefined}
+        className="bot-nav-row bot-nav-session" disabled={busy && !mainCurrent} onClick={() => onSelectSession(main)}>
+        <Icon name="chat-3" className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {session.thread.pinned ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" /> : null}
+        {(titleCounts.get(title) ?? 0) > 1 && Number.isFinite(updated) ? <time dateTime={new Date(updated).toISOString()} title={new Date(updated).toLocaleString(getCurrentIntlLocale())}
+          className="shrink-0 typography-micro font-normal text-muted-foreground">{formatSessionCompactDateLabel(updated)}</time> : null}
+        <SessionMark waiting={session.waiting} running={session.running} unread={session.unread && !mainCurrent} />
+      </button>
+      </BotSessionMenu>
+      {session.branches.map((branch, index) => {
+        const branchCurrent = current?.threadId === branch.threadId && current.branchId === branch.branchId;
+        const status = runStatus(liveRun(session.thread, branch.branchId, null));
+        return <BotSessionMenu key={branch.branchId} session={session} identity={branch} label={`${title} · ${t('bot.session.branch', { index: index + 1 })}`} disabled={busy} onAction={action => onSessionAction(session, branch, action)}>
+        <button type="button" data-sidebar-row={rowId(branch)} data-current={branchCurrent || undefined} data-branch=""
+          aria-current={branchCurrent ? 'page' : undefined} className="bot-nav-row bot-nav-session" disabled={busy && !branchCurrent} onClick={() => onSelectSession(branch)}>
+          <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 truncate">{t('bot.session.branch', { index: index + 1 })}</span>
+          <SessionMark waiting={isWaitingStatus(status)} running={status !== null && !isWaitingStatus(status)} unread={false} />
+        </button></BotSessionMenu>;
+      })}
+    </React.Fragment>;
+  };
 
   return <nav className="flex h-full min-h-0 flex-col" aria-label={t('bot.sidebar.aria')}>
     <div className="flex items-center gap-1 px-2.5 pb-2 pt-3">
@@ -119,36 +152,16 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
           {isSelected ? <div className="bot-nav-sessions"><div>
             {shownSessions === null ? <p role="status" className="py-2 pl-9 typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
             {shownSessions?.length === 0 && needle ? <p className="py-2 pl-9 typography-meta text-muted-foreground">{t('bot.session.noMatch')}</p> : null}
-            {shownSessions?.map(session => {
-              const main = session.identity;
-              const mainCurrent = current?.threadId === main.threadId && current.branchId === main.branchId;
-              const title = sessionTitle(session);
-              const updated = session.thread.updated_at_ms;
-              return <React.Fragment key={main.threadId}>
-                <BotSessionMenu session={session} identity={main} label={title} disabled={busy} onAction={action => onSessionAction(session, main, action)}>
-                <button type="button" data-sidebar-row={rowId(main)} data-current={mainCurrent || undefined} aria-current={mainCurrent ? 'page' : undefined}
-                  className="bot-nav-row bot-nav-session" disabled={busy && !mainCurrent} onClick={() => onSelectSession(main)}>
-                  <Icon name="chat-3" className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{title}</span>
-                  {session.thread.pinned ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" /> : null}
-                  {(titleCounts.get(title) ?? 0) > 1 && Number.isFinite(updated) ? <time dateTime={new Date(updated).toISOString()} title={new Date(updated).toLocaleString(getCurrentIntlLocale())}
-                    className="shrink-0 typography-micro font-normal text-muted-foreground">{formatSessionCompactDateLabel(updated)}</time> : null}
-                  <SessionMark waiting={session.waiting} running={session.running} unread={session.unread && !mainCurrent} />
-                </button>
-                </BotSessionMenu>
-                {session.branches.map((branch, index) => {
-                  const branchCurrent = current?.threadId === branch.threadId && current.branchId === branch.branchId;
-                  const status = runStatus(liveRun(session.thread, branch.branchId, null));
-                  return <BotSessionMenu key={branch.branchId} session={session} identity={branch} label={`${title} · ${t('bot.session.branch', { index: index + 1 })}`} disabled={busy} onAction={action => onSessionAction(session, branch, action)}>
-                  <button type="button" data-sidebar-row={rowId(branch)} data-current={branchCurrent || undefined} data-branch=""
-                    aria-current={branchCurrent ? 'page' : undefined} className="bot-nav-row bot-nav-session" disabled={busy && !branchCurrent} onClick={() => onSelectSession(branch)}>
-                    <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">{t('bot.session.branch', { index: index + 1 })}</span>
-                    <SessionMark waiting={isWaitingStatus(status)} running={status !== null && !isWaitingStatus(status)} unread={false} />
-                  </button></BotSessionMenu>;
-                })}
-              </React.Fragment>;
-            })}
+            {shownSessions?.filter(session => !session.thread.archived).map(renderSession)}
+            {archivedSessions.length > 0 ? <Collapsible key={needle ? 'search-archive' : 'archive'} defaultOpen={Boolean(needle)}>
+              <CollapsibleTrigger className="bot-nav-archive typography-meta justify-start gap-2 text-muted-foreground [&[data-panel-open]>svg:last-child]:rotate-90">
+                <Icon name="archive" className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{t('bot.session.archivedList')}</span>
+                <span className="tabular-nums">{archivedSessions.length}</span>
+                <Icon name="arrow-right-s" className="size-3 shrink-0 transition-transform" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>{archivedSessions.map(renderSession)}</CollapsibleContent>
+            </Collapsible> : null}
           </div></div> : null}
         </div>;
       })}

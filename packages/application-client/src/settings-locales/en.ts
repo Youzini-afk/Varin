@@ -3072,6 +3072,7 @@ export const settingsDict = {
   'bot.session.new': 'New conversation',
   'bot.session.newNeedsAwake': 'Wake {name} before starting a new conversation',
   'bot.session.search': 'Search conversations',
+  'bot.session.archivedList': 'Archived conversations',
   'bot.session.noMatch': 'No matching conversations.',
   'bot.session.running': 'Working',
   'bot.session.unread': 'New report',

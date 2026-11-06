@@ -107,6 +107,14 @@ vi.mock('@/components/sections/bots/BotNameDialog', () => ({
     <button type="submit">settings.bots.save</button>
   </form> : null,
 }));
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ open, children }: React.PropsWithChildren<{ open: boolean }>) => open ? <div role="dialog">{children}</div> : null,
+  DialogContent: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  DialogHeader: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  DialogFooter: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  DialogTitle: ({ children }: React.PropsWithChildren) => <h2>{children}</h2>,
+  DialogDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
+}));
 vi.mock('@/components/layout/MainLayout', () => ({
   MainLayout: ({ renderNavigator, renderConversation, renderSecondaryPanel, navigationTitle, navigationSubtitle, headerPanelControl }: {
     renderNavigator(visible: boolean): React.ReactNode;
@@ -154,6 +162,9 @@ describe('Bot workbench', () => {
     Object.defineProperty(window, 'location', { value: new URL('http://ui.test/'), configurable: true });
     vi.stubGlobal('window', window);
     vi.stubGlobal('document', document);
+    vi.stubGlobal('HTMLElement', window.HTMLElement);
+    vi.stubGlobal('Element', window.Element);
+    vi.stubGlobal('Node', window.Node);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     container = document.createElement('div');
     document.body.append(container);
@@ -314,6 +325,7 @@ describe('Bot workbench', () => {
     };
     let items = await menu();
     expect(items.some(item => item.textContent === 'sessions.sidebar.session.menu.rename')).toBe(false);
+    expect(items.some(item => item.textContent === 'sessions.sidebar.dialogs.deleteSession.titleAction')).toBe(false);
     await act(async () => items.find(item => item.textContent === 'bot.session.menu.copyBranchId')!.click());
     expect(state.copy).toHaveBeenCalledExactlyOnceWith('trip-alternative');
     expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
@@ -321,6 +333,53 @@ describe('Bot workbench', () => {
     await act(async () => items.find(item => item.textContent === 'bot.session.menu.fork')!.click());
     expect(state.fork).toHaveBeenCalledWith({ runtime: 'agent', threadId: 'trip', branchId: 'trip-alternative', key: expect.any(String), headId: 'alternative-head' });
     expect(useBotNavigation.getState().entry?.branchId).toBe('new-branch');
+  });
+
+  it('archives and restores a conversation, then deletes it only after confirmation', async () => {
+    const entry = sessionOf('a', 'entry-a', 'branch-a', { title: 'Planning' }, true);
+    const other = sessionOf('a', 'other', 'other-main', { title: 'Follow-up' });
+    let sessions = [entry, other];
+    state.sessions.mockImplementation(async () => sessions);
+    state.ensure.mockImplementation(async () => ({
+      bot: bot('a'), model: null, entry: sessions.find(session => !session.thread.archived)?.identity,
+    }));
+    const syncCatalog = () => useThreadStore.setState({ threads: sessions.map(session => session.thread) });
+    const update = vi.spyOn(useThreadStore.getState(), 'updateThread').mockImplementation(async (id, patch) => {
+      sessions = sessions.map(session => session.identity.threadId === id ? { ...session, thread: { ...session.thread, ...patch } } : session);
+      syncCatalog();
+    });
+    const remove = vi.spyOn(useThreadStore.getState(), 'deleteThread').mockImplementation(async id => {
+      sessions = sessions.filter(session => session.identity.threadId !== id);
+      syncCatalog();
+    });
+    syncCatalog();
+    await render();
+    const row = () => container.querySelector<HTMLButtonElement>('[data-sidebar-row="session:entry-a:branch-a"]');
+    const action = async (label: string) => {
+      await act(async () => row()!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+      const item = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === label)!;
+      await act(async () => item.click());
+      await settle();
+    };
+    await action('sessions.sidebar.bulkActions.archive');
+    expect(update).toHaveBeenCalledWith('entry-a', { archived: true });
+    expect(centre()?.getAttribute('data-agent')).toBe('other');
+    expect(find('bot.session.archivedList1')?.getAttribute('aria-expanded')).toBe('false');
+    await click('bot.session.archivedList1');
+    await act(async () => row()!.click());
+    expect(centre()?.getAttribute('data-readonly')).toBe('true');
+    await action('sessions.sidebar.session.menu.restore');
+    expect(update).toHaveBeenLastCalledWith('entry-a', { archived: false });
+    expect(centre()?.getAttribute('data-readonly')).toBe('false');
+    await action('sessions.sidebar.dialogs.deleteSession.titleAction');
+    expect(remove).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const confirm = [...dialog.querySelectorAll('button')].find(item => item.textContent === 'sessions.sidebar.dialogs.deleteSession.titleAction')!;
+    await act(async () => confirm.click());
+    await settle();
+    expect(remove).toHaveBeenCalledExactlyOnceWith('entry-a');
+    expect(row()).toBeNull();
+    expect(centre()?.getAttribute('data-agent')).toBe('other');
   });
 
   it('activates the Bot profile context menu through click, like its dropdown menu', async () => {

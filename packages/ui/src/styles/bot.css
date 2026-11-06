@@ -73,6 +73,7 @@
 .bot-nav-bot { min-height: 38px; padding: 5px 8px; gap: 6px; font-weight: 600; }
 .bot-nav-session { min-height: 34px; padding: 6px 10px 6px 38px; font-weight: 400; }
 .bot-nav-session[data-branch] { padding-left: 58px; color: var(--muted-foreground); }
+.bot-nav-archive { min-height: 32px; padding: 5px 10px 5px 38px; }
 .bot-session-menu .bot-nav-session { padding-right: 30px; }
 .bot-session-menu-button { opacity: 0; }
 .bot-session-menu[data-menu-open] > .bot-nav-session:not([data-current]) { background: var(--interactive-hover); }

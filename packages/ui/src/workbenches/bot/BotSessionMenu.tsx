@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { useI18n } from '@/lib/i18n';
 import type { BotSessionView } from './botPresentation';
 
-export type BotSessionAction = 'open' | 'tree' | 'fork' | 'rename' | 'automatic-title' | 'pin' | 'copy';
+export type BotSessionAction = 'open' | 'tree' | 'fork' | 'rename' | 'automatic-title' | 'pin' | 'copy' | 'archive' | 'restore' | 'delete';
 
 /** Session metadata belongs to the conversation; branch actions retain the exact clicked branch. */
 export function BotSessionMenu({ session, identity, label, disabled, onAction, children }: React.PropsWithChildren<{
@@ -31,11 +31,14 @@ export function BotSessionMenu({ session, identity, label, disabled, onAction, c
   const items = (dropdown: boolean) => {
     const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
     const Separator = dropdown ? DropdownMenuSeparator : ContextMenuSeparator;
-    const select = (action: BotSessionAction) => () => { pending.current = action; returnFocus.current = action !== 'rename'; };
+    const select = (action: BotSessionAction) => () => {
+      pending.current = action;
+      returnFocus.current = action !== 'rename' && action !== 'delete';
+    };
     return <>
       <Item disabled={disabled} onClick={select('open')}><Icon name="chat-3" className="size-4" />{t(main ? 'bot.session.menu.open' : 'bot.session.menu.openBranch')}</Item>
       <Item disabled={disabled} onClick={select('tree')}><Icon name="git-branch" className="size-4" />{t('chat.tree.title')}</Item>
-      <Item disabled={disabled || !branch?.head} onClick={select('fork')}><Icon name="git-branch" className="size-4" />{t('bot.session.menu.fork')}</Item>
+      <Item disabled={disabled || session.thread.archived || !branch?.head} onClick={select('fork')}><Icon name="git-branch" className="size-4" />{t('bot.session.menu.fork')}</Item>
       {main ? <>
         <Separator />
         <Item disabled={disabled} onClick={select('rename')}><Icon name="edit" className="size-4" />{t('sessions.sidebar.session.menu.rename')}</Item>
@@ -44,6 +47,16 @@ export function BotSessionMenu({ session, identity, label, disabled, onAction, c
       </> : null}
       <Separator />
       <Item onClick={select('copy')}><Icon name="file-copy" className="size-4" />{t(main ? 'sessions.sidebar.session.menu.copyId' : 'bot.session.menu.copyBranchId')}</Item>
+      {main ? <>
+        <Separator />
+        <Item disabled={disabled} onClick={select(session.thread.archived ? 'restore' : 'archive')}>
+          <Icon name={session.thread.archived ? 'inbox-unarchive' : 'inbox-archive'} className="size-4" />
+          {t(session.thread.archived ? 'sessions.sidebar.session.menu.restore' : 'sessions.sidebar.bulkActions.archive')}
+        </Item>
+        <Item className="text-destructive" disabled={disabled} onClick={select('delete')}>
+          <Icon name="delete-bin" className="size-4" />{t('sessions.sidebar.dialogs.deleteSession.titleAction')}
+        </Item>
+      </> : null}
     </>;
   };
   return <ContextMenu onOpenChange={change} onOpenChangeComplete={complete}>

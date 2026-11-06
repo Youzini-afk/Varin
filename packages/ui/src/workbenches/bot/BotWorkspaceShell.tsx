@@ -4,7 +4,7 @@ import type { BotMatter } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, type BotSession, type ThreadIdentity } from '@varin/application-client';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { BOT_TREE_PANEL_SCOPE, openConversationTree } from '@/lib/openConversationTree';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -156,6 +156,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [nameDraft, setNameDraft] = React.useState('');
   const sessionForkKeys = React.useRef(new Map<string, string>());
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
+  const [deletingSession, setDeletingSession] = React.useState<{ botId: string; threadId: string; title: string } | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [focus, setFocus] = React.useState<BotPanelFocus | null>(null);
@@ -174,6 +175,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const workItems = workResult?.botId === selectedId ? workResult.items : null;
   const sessionItems = sessionResult?.botId === selectedId && 'items' in sessionResult ? sessionResult.items : null;
   const sessionsError = sessionResult?.botId === selectedId && 'error' in sessionResult ? sessionResult.error : null;
+  const catalogSessionIds = React.useMemo(() => JSON.stringify(catalog
+    .filter(thread => thread.bot_id === selectedId && !thread.parent_thread_id)
+    .map(thread => thread.thread_id).sort()), [catalog, selectedId]);
   const panelOpen = useBotLayout(state => state.panelOpen);
   const setPanelOpen = useBotLayout(state => state.setPanelOpen);
   const setTab = useBotLayout(state => state.setTab);
@@ -221,7 +225,16 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       const known = botsRef.current?.find((bot) => bot.id === botId);
       if (known?.deletion) return;
       const inactive = known && (known.archived || (known.activity && known.activity.state !== 'awake'));
-      const { bot, entry, model } = inactive ? { bot: known, model: known.model, entry: known.entry } : await ensureBotEntry(botId, controller.signal);
+      if (inactive) {
+        const sessions = await listBotSessions(botId, controller.signal);
+        if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
+        const entry = sessions.find(session => session.primary && !session.thread.archived)
+          ?? sessions.find(session => !session.thread.archived);
+        if (entry) await openBotConversation(botId, entry.identity, known.model, known.archived);
+        else useBotNavigation.setState({ botId, entry: null, model: known.model, archived: known.archived });
+        return;
+      }
+      const { bot, entry, model } = await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       await openBotConversation(bot.id, entry, model);
@@ -247,6 +260,13 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     }).catch((cause: unknown) => {
       if (!signal.aborted) setError(message(cause));
     });
+    return () => controller.abort();
+  }, [committed, selectedId, settingsOpen, revision, workRevision, botsAPI]);
+
+  React.useEffect(() => {
+    if (!committed || !selectedId || settingsOpen) return;
+    const controller = new AbortController();
+    const signal = controller.signal;
     // Sessions fail on their own: the conversation stays usable through the profile entry.
     void listBotSessions(selectedId, signal).then(items => {
       if (!signal.aborted) setSessionResult({ botId: selectedId, items });
@@ -254,7 +274,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       if (!signal.aborted) setSessionResult(current => current?.botId === selectedId && 'items' in current ? current : { botId: selectedId, error: message(cause) });
     });
     return () => controller.abort();
-  }, [committed, selectedId, settingsOpen, revision, workRevision, botsAPI]);
+  }, [committed, selectedId, settingsOpen, revision, workRevision, catalogSessionIds]);
 
   React.useEffect(() => {
     if (!navigation.botId || !navigation.entry) return;
@@ -273,9 +293,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     const known = sessionItems ?? (sessionsError ? [] : null);
     // Until the list answers (or if it failed), the profile entry is still the Bot's conversation.
     const entryThread = catalog.find(thread => thread.thread_id === selected.entry.threadId);
-    const items = known?.some(session => session.identity.threadId === selected.entry.threadId) || !entryThread
-      ? known
-      : [{ identity: selected.entry, thread: entryThread, primary: true }, ...(known ?? [])];
+    const items = sessionItems ?? (entryThread && entryThread.deleted_at_ms === null
+      ? [{ identity: selected.entry, thread: entryThread, primary: true }]
+      : known);
     return items ? sessionViews(items, catalog, []) : null;
   }, [selected, sessionItems, sessionsError, catalog]);
   const facts = useBotFacts({ botId: selected?.id ?? null, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
@@ -288,13 +308,14 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const selectedPresence = selectedId ? presence.get(selectedId)?.value ?? null : null;
   const sessionsWithWork = React.useMemo(() => sessions && selected ? sessionViews(sessions.map(view => ({ identity: view.identity, thread: view.thread, primary: view.primary })), catalog, work) : sessions, [sessions, selected, catalog, work]);
   const currentSession = sessionsWithWork?.find(session => session.identity.threadId === selectedEntry?.threadId) ?? null;
+  const conversationArchived = currentSession?.thread.archived ?? catalog.find(thread => thread.thread_id === selectedEntry?.threadId)?.archived ?? false;
   const ownsConversation = Boolean(selectedEntry && selected && (currentSession
-    || selectedEntry.threadId === selected.entry.threadId
+    || (!sessionItems && selectedEntry.threadId === selected.entry.threadId)
     || catalog.some(thread => thread.thread_id === selectedEntry.threadId && thread.bot_id === selected.id && !thread.parent_thread_id && thread.branches.some(branch => branch.branch_id === selectedEntry.branchId))));
   const sessionEntry = Boolean(ownsConversation);
 
   React.useEffect(() => {
-    if (!committed || !selected || readOnly || !sessionEntry) return;
+    if (!committed || !selected || readOnly || conversationArchived || !sessionEntry) return;
     if (entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey) return;
     const controller = new AbortController();
     const botId = selected.id;
@@ -304,7 +325,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       if (!controller.signal.aborted) setError(message(cause));
     });
     return () => controller.abort();
-  }, [committed, selected, profileModelKey, readOnly, sessionEntry, entryModel]);
+  }, [committed, selected, profileModelKey, readOnly, conversationArchived, sessionEntry, entryModel]);
 
   // "Listening" is the user typing into this conversation's composer.
   const draftKey = selectedEntry ? threadComposerKey(threadHostKey(), selectedEntry) : null;
@@ -437,8 +458,49 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     }
   };
 
+  const mutateSession = async (botId: string, threadId: string, action: 'archive' | 'restore' | 'delete') => {
+    const host = getRuntimeEndpointGeneration();
+    const current = () => alive.current && host === getRuntimeEndpointGeneration();
+    setActionBusy(`session:${threadId}`);
+    setError(null);
+    try {
+      const store = useThreadStore.getState();
+      if (!store.threads.some(thread => thread.thread_id === threadId)) await store.loadCatalog();
+      if (!current()) return;
+      if (action === 'delete') await store.deleteThread(threadId);
+      else await store.updateThread(threadId, { archived: action === 'archive' });
+      if (!current()) return;
+      if (action === 'delete') {
+        setDeletingSession(null);
+        setSessionResult(result => result?.botId === botId && 'items' in result
+          ? { ...result, items: result.items.filter(session => session.identity.threadId !== threadId) }
+          : result);
+      }
+      toast.success(t(action === 'restore' ? 'sessions.sidebar.session.unarchive.success' : action === 'archive' ? 'sessions.sidebar.session.archive.success' : 'sessions.sidebar.session.delete.success'));
+      const navigation = useBotNavigation.getState();
+      if (navigation.botId === botId && navigation.entry?.threadId === threadId && action !== 'restore') {
+        useBotNavigation.setState({ entry: null });
+        await openEntry(botId);
+      }
+      if (current()) refreshWork();
+    } catch (cause) {
+      if (current()) setError(message(cause));
+    } finally {
+      if (current()) setActionBusy(null);
+    }
+  };
+
   const sessionAction = async (session: BotSessionView, identity: ThreadIdentity, action: BotSessionAction) => {
     if (!selected || !threads) return;
+    if (action === 'delete') {
+      setError(null);
+      setDeletingSession({ botId: selected.id, threadId: identity.threadId, title: sessionTitleOf(session) });
+      return;
+    }
+    if (action === 'archive' || action === 'restore') {
+      await mutateSession(selected.id, identity.threadId, action);
+      return;
+    }
     if (action === 'rename') {
       setError(null); setNameDraft(sessionTitleOf(session)); setNameDialog({ mode: 'session', session }); return;
     }
@@ -613,7 +675,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       ? <ChildNavigationContext.Provider value={childNavigation}><MemoryNavigationContext.Provider value={memoryNavigation}>
         <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork} onActivity={stage.onActivity}
           inheritWorkbenchModel={!selected?.model}
-          preferredModel={selected && entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey ? entryModel.model : null} readOnly={readOnly}
+          preferredModel={selected && entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey ? entryModel.model : null} readOnly={readOnly || conversationArchived}
           emptyHero={selected ? { visual: <BotFigure state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refreshWork(); }} />
       </MemoryNavigationContext.Provider></ChildNavigationContext.Provider>
@@ -625,7 +687,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         {bots && !bots.some(bot => bot.archived === showArchived) ? <>
           <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>
           {!showArchived ? <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button> : null}
-        </> : selected && !selected.deletion && !busy ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
+        </> : selected && !readOnly && !busy ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
     <BotNameDialog
@@ -639,6 +701,21 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       onOpenChange={(open) => { if (!open && actionBusy === null) setNameDialog(null); }}
       onSubmit={(event) => { void saveName(event); }}
     />
+    <Dialog open={deletingSession !== null} onOpenChange={open => { if (!open && actionBusy === null) setDeletingSession(null); }}>
+      <DialogContent showCloseButton={false} className="max-w-sm gap-5">
+        <DialogHeader>
+          <DialogTitle>{t('sessions.sidebar.dialogs.deleteSession.title')}</DialogTitle>
+          <DialogDescription>{t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: deletingSession?.title ?? '' })}</DialogDescription>
+        </DialogHeader>
+        {error && deletingSession ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
+        <DialogFooter>
+          <Button variant="outline" size="sm" disabled={actionBusy !== null} onClick={() => setDeletingSession(null)}>{t('sessions.sidebar.dialogs.cancel')}</Button>
+          <Button variant="destructive" size="sm" disabled={actionBusy !== null} onClick={() => {
+            if (deletingSession) void mutateSession(deletingSession.botId, deletingSession.threadId, 'delete');
+          }}>{t('sessions.sidebar.dialogs.deleteSession.titleAction')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     {deleting ? <BotDeleteDialog key={deleting.id} bot={deleting} onClose={() => setDeleting(null)} onAccepted={(bot) => {
       setBots((list) => list?.flatMap((item) => item.id === deleting.id ? bot ? [bot] : [] : [item]) ?? null);
       if (deleting.id === selectedId) setProfileOpen(false);

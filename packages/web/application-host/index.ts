@@ -219,6 +219,7 @@ import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personali
 import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 
 import { createBotService } from './lib/bots/bot-service.js';
+import { createBotSessions } from './lib/bots/bot-sessions.js';
 import { botModelMatches, resolveBotModelSelection } from './lib/bots/bot-model.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
@@ -1431,11 +1432,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     dataDir: VARIN_DATA_DIR,
     agent: {
-      ensureEntry: async bot => {
-        if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot identity is required');
-        await agentRuntime.createBotThread(bot.id, bot.entry.threadId, bot.entry.branchId);
-        return bot.entry;
-      },
+      ...createBotSessions(() => agentRuntime),
       model: bot => botAgentModel(bot),
       listWork: async (bot, includeEntry) => {
         const scope = await agentRuntime.botScope(bot.id);
@@ -1456,7 +1453,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           if (error instanceof KernelClientError && error.code === 'not-found') return null;
           throw error;
         })));
-        return [...scope.threads, ...followed.filter((thread): thread is NonNullable<typeof thread> => thread !== null && thread.deleted_at_ms === null)].flatMap(thread => thread.branches.flatMap(branch => {
+        return [...scope.threads, ...followed.filter(thread => thread !== null)].filter(thread => thread.deleted_at_ms === null).flatMap(thread => thread.branches.flatMap(branch => {
           const entry = bot.entry.runtime === 'agent' && bot.entry.threadId === thread.thread_id && bot.entry.branchId === branch.branch_id;
           if (entry && !includeEntry) return [];
           const matterIds = matters.filter(matter => matter.threads.some(link => link.threadId === thread.thread_id && link.branchId === branch.branch_id)).map(matter => matter.id);
@@ -1465,19 +1462,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           return [{ runtime: 'agent' as const, identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }, thread,
             activeRun: branch.latest_run, matterIds, purpose, sessionThreadId: owned.has(thread.thread_id) ? sessionOf(thread.thread_id) : null }];
         }));
-      },
-      listSessions: async bot => {
-        const scope = await agentRuntime.botScope(bot.id, undefined, true);
-        const threads = new Map(scope.threads.map(thread => [thread.thread_id, thread] as const));
-        return scope.sessions.flatMap(threadId => {
-          const thread = threads.get(threadId);
-          return thread && thread.deleted_at_ms === null ? [{ identity: { runtime: 'agent' as const, threadId, branchId: thread.main_branch_id }, thread, primary: threadId === bot.entry.threadId }] : [];
-        });
-      },
-      createSession: async (bot, identity) => {
-        await agentRuntime.createBotThread(bot.id, identity.threadId, identity.branchId);
-        const thread = await agentRuntime.thread(identity.threadId);
-        return { identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: thread.main_branch_id }, thread, primary: false };
       },
       applyProfile: async bot => {
         if (bot.entry.runtime !== 'agent') return;
