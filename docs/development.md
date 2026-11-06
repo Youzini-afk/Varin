@@ -118,6 +118,11 @@ Windows native 或双镜像。Host/共享协议/扩展改动保留 Linux 真 nat
 Host `lib` 顶层公共 helper 同样属于平台接线，包括配置 watcher 的路径规范化、更新命令和退出协调。
 根依赖/构建入口、未知路径或取不到 diff 都扩大到完整适用范围；重命名同时考虑旧、新 owner。
 
+仅修改 Host/CLI portable `*.test.ts` 时保留类型、lint、portable 与所属平台验证，不重复构建生产产物或跑
+kernel 验收；`*.native.test.ts`、`*.smoke.test.ts`、Node `kernel-client.test.ts` 及共享测试 helper/fixture
+仍按原 owner 验证。`varin-runtime/tests` 顶层 `.rs` integration 测试保留 Linux native/Rust，不重复运行
+未改变的生产装配、容器和平台 owner；嵌套 fixtures、其他 Rust 路径仍保守处理。混合改动累加各自要求。
+
 Windows 用 `test:packages:platform`、Host `test:platform` 与 `test:kernel -- --platform`
 验证文件/锁/CAS/路径/PTY/进程树/真实退出等 owner。Linux 的完整 native suite 保留所有业务接线；
 Windows 的平台选择保留 live-shell destroy 等真实资源寿命回归，不按当前红绿挑测试。

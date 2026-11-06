@@ -86,10 +86,18 @@ test('owner/dependency/build input decisions include the actual downstream bound
     ...['configuration-watch.ts', 'package-manager.ts', 'cloudflare-tunnel.ts'].map(helper =>
       [`packages/web/application-host/lib/${helper}`, ['native', 'production', 'windows', 'macos'], ['rust', 'android']]),
     ['packages/web/application-host/lib/mcp/sources.ts', ['native', 'production', 'windows', 'macos'], []],
-    ...['thread-remember.ts', 'thread-remember.test.ts'].map(owner =>
-      [`packages/web/application-host/lib/memory/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container', 'full']]),
-    ...['invocation-principal.ts', 'invocation-principal.test.ts'].map(owner =>
-      [`packages/web/application-host/lib/extensions/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container', 'full']]),
+    ...['memory/thread-remember.ts', 'extensions/invocation-principal.ts'].map(owner =>
+      [`packages/web/application-host/lib/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container', 'full']]),
+    ...['application-host/lib/memory/thread-remember.test.ts', 'application-host/lib/extensions/invocation-principal.test.ts',
+      'application-host/lib/deadline.test.ts', 'cli/cli.test.ts'].map(owner =>
+      [`packages/web/${owner}`, ['code', 'windows', 'macos'], ['native', 'rust', 'production', 'container', 'full']]),
+    ['packages/web/application-host/lib/harness/experiments.test.ts', ['code'], ['native', 'production', 'windows', 'macos']],
+    ...['kernel/kernel-process.native.test.ts', 'knowledge/store.smoke.test.ts', 'kernel/kernel-client.test.ts',
+      'kernel/process.test-helper.ts', 'kernel/process.fixture.ts'].map(owner =>
+      [`packages/web/application-host/lib/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container']]),
+    ['kernel/crates/varin-runtime/tests/host_job_review.rs', ['code', 'native', 'rust'], ['production', 'container', 'windows', 'macos', 'full']],
+    ...['varin-runtime/tests/fixtures/input_admission.rs', 'varin-computer-windows/tests/transport.rs'].map(owner =>
+      [`kernel/crates/${owner}`, ['native', 'rust', 'windows', 'macos', 'production', 'container'], []]),
     ['kernel/crates/varin-runtime/src/catalog.rs', ['native', 'rust', 'windows', 'macos', 'production', 'container'], []],
     ['packages/workspace-driver/macos/Volume.swift', ['rust', 'native', 'macos', 'container'], []],
     ['packages/mobile/android/app/build.gradle', ['frontend', 'android'], ['native', 'container']],
@@ -137,11 +145,39 @@ test('missing/unavailable bases and mixed unknown diffs require full qualificati
   assert.deepEqual(classifyChanges(['docs/guide.md', 'new-package/README.runtime-template.md']), all);
 });
 
+test('test leaves accumulate mixed changes and preserve deleted or renamed owners', t => {
+  const portable = 'packages/web/application-host/lib/memory/thread-remember.test.ts';
+  const runtime = 'kernel/crates/varin-runtime/tests/host_job_review.rs';
+  const source = 'kernel/crates/varin-runtime/src/catalog.rs';
+  for (const leaf of [portable, runtime]) for (const other of [source, 'new-owner/test.test.ts']) {
+    for (const files of [[leaf, other], [other, leaf]]) {
+      assert.deepEqual(classifyChanges(files), classifyChanges([other]));
+    }
+  }
+  for (const [from, to, expected] of [
+    [portable, null, portable],
+    ['packages/web/application-host/lib/kernel/kernel-process.native.test.ts', portable,
+      'packages/web/application-host/lib/kernel/kernel-process.native.test.ts'],
+    [portable, source, source],
+    ['kernel/crates/varin-runtime/tests/fixtures/input_admission.rs', runtime,
+      'kernel/crates/varin-runtime/tests/fixtures/input_admission.rs'],
+  ]) {
+    const f = fixture(t);
+    const before = f.commit(from);
+    if (to) { fs.mkdirSync(path.dirname(path.join(f.cwd, to)), { recursive: true }); f.git('mv', from, to); }
+    else f.git('rm', from);
+    f.commit();
+    assert.deepEqual(f.detect('push', { before }), classifyChanges([expected]));
+  }
+});
+
 test('the always-present gate rejects every missing/failed/cancelled/unexpectedly skipped requirement', () => {
   assert.equal(workflow.jobs['source-quality'].if, '${{ always() }}');
   const expectedJobs = Object.keys(requiredJobs(all));
   assert.deepEqual(new Set(workflow.jobs['source-quality'].needs), new Set(['changes', ...expectedJobs]));
-  for (const scope of [all, classifyChanges(['docs/guide.md']), classifyChanges(['packages/ui/src/file.ts'])]) {
+  for (const scope of [all, ...['docs/guide.md', 'packages/ui/src/file.ts',
+    'packages/web/application-host/lib/memory/thread-remember.test.ts',
+    'kernel/crates/varin-runtime/tests/host_job_review.rs'].map(file => classifyChanges([file]))]) {
     const needs = { changes: { result: 'success' }, ...Object.fromEntries(Object.entries(requiredJobs(scope))
       .map(([job, required]) => [job, { result: required ? 'success' : 'skipped' }])) };
     assert.doesNotThrow(() => assertRequiredResults(scope, needs));

@@ -46,13 +46,22 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
       else if (!file.startsWith('packages/computer-driver/linux/')) enable('windows', 'macos');
       continue;
     }
+    // Cargo discovers these integration leaves only for tests. Nested fixtures
+    // can be compiled into other owners and retain the ordinary kernel scope.
+    if (/^kernel\/crates\/varin-runtime\/tests\/[^/]+\.rs$/u.test(file)) {
+      enable('native', 'rust'); continue;
+    }
     if (file.startsWith('kernel/') || file.startsWith('packages/workspace-driver/')) {
       enable('native', 'rust', 'windows', 'macos', 'production', 'container');
       if (/(?:Cargo\.(?:toml|lock)|rust-toolchain\.toml)$/u.test(file)) enable('security');
       continue;
     }
     if (file.startsWith('packages/web/application-host/') || file.startsWith('packages/web/cli/')) {
-      enable('native', 'production');
+      // Portable test leaves are excluded from production output. Keep the
+      // dedicated native/Node entries and shared helpers on their owner scope.
+      const portableTest = file.endsWith('.test.ts') && !/\.(?:native|smoke)\.test\.ts$/u.test(file)
+        && !file.endsWith('/lib/kernel/kernel-client.test.ts');
+      if (!portableTest) enable('native', 'production');
       if (file === 'packages/web/application-host/lib/harness/resources-system.ts') enable('container');
       if (hostPlatform.test(file) || file.startsWith('packages/web/cli/')) enable('windows', 'macos');
       continue;
