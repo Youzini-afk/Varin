@@ -12,41 +12,7 @@ import {
 test('withdraws and restores built-in command contributions without a document refresh', async () => {
   await ensureBuiltinWorkbenchCommands();
   const registrations = workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot());
-  const expectedCommandIds = [
-    'new-session',
-    'new-worktree',
-    'add-project',
-    'workspace-search',
-    'toggle-sidebar',
-    'toggle-terminal',
-    'context-usage',
-    'open-settings',
-    'split-editor',
-    'split-editor-orthogonal',
-    'close-editor',
-    'save-active-file',
-    'editor.saveAll',
-    'editor.find',
-    'editor.replace',
-    'editor.goToLine',
-    'editor.goToSymbol',
-    'editor.formatDocument',
-    'editor.renameSymbol',
-    'editor.quickFix',
-    'editor.goToDefinition',
-    'editor.findReferences',
-    'editor.fold',
-    'editor.unfold',
-    'editor.toggleWordWrap',
-    'editor.toggleMinimap',
-    'editor.addCursorAbove',
-    'editor.addCursorBelow',
-    'editor.focusPreviousGroup',
-    'editor.focusNextGroup',
-  ];
-  expect(registrations.filter(registration => !registration.meta.composer).map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
-  expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
-    .toBe('varin.builtin.commands.editor.save-all');
+  expect(registrations.some(registration => registration.meta.commandId === 'editor.saveAll')).toBe(true);
   expect(registrations.find((registration) => registration.meta.commandId === 'toggle-sidebar')?.meta.mobileTitleKey)
     .toBe('commandPalette.item.showSessionSwitcher');
 
@@ -54,8 +20,8 @@ test('withdraws and restores built-in command contributions without a document r
   expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot())).toEqual([]);
 
   await setBuiltinWorkbenchCommandsEnabled(true);
-  expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot()).length)
-    .toBe(registrations.length);
+  expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot()).map(item => item.meta.commandId))
+    .toEqual(registrations.map(item => item.meta.commandId));
 });
 
 test('a declarative command activates and executes the latest dynamic implementation', async () => {

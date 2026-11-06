@@ -194,8 +194,16 @@ test("builds isolated Surface artifacts as self-contained realm scripts", async 
     integrity: selected?.integrity ?? "",
     slot: "selected",
   });
-  assert.match(payload.module.path, /module\.js$/);
-  assert.match(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), /VarinIsolatedModule/);
+  const realm: Record<string, unknown> = {};
+  runInNewContext(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), realm);
+  const module = realm.VarinIsolatedModule as { default: { activate(context: {
+    contribute(descriptor: { id: string }, implementation: { version: string }): void;
+  }): void } };
+  const registered: string[] = [];
+  module.default.activate({ contribute: (descriptor, implementation) => {
+    registered.push(`${descriptor.id}@${implementation.version}`);
+  } });
+  assert.deepEqual(registered, ["dev.example.isolated.page@1.0.0"]);
   assert.equal(payload.styles.length, 1);
 });
 
@@ -231,8 +239,11 @@ test("materializes a published CommonJS isolated module into one usable realm bu
   });
   const realm: Record<string, unknown> = {};
   runInNewContext(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), realm);
-  const module = realm.VarinIsolatedModule as { activate?: unknown; default?: { activate?: unknown } };
-  assert.equal(typeof (module.default ?? module).activate, "function");
+  type Module = { activate(context: { effect(callback: () => void): void }): void };
+  const module = realm.VarinIsolatedModule as Module & { default?: Module };
+  let effects = 0;
+  (module.default ?? module).activate({ effect(callback) { callback(); effects++; } });
+  assert.equal(effects, 1);
 });
 
 test("installs immutable local artifacts and stages an update without selecting it", async () => {
@@ -254,7 +265,6 @@ test("installs immutable local artifacts and stages an update without selecting 
     slot: "selected",
   });
   assert.equal(payload.styles.length, 1);
-  assert.match(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), /1\.0\.0/);
 
   const unchanged = await packages.reloadLocalSource({
     expectedRevision: installed.revision,
@@ -272,6 +282,10 @@ test("installs immutable local artifacts and stages an update without selecting 
   const staged = stagedResult.snapshot;
   assert.equal(staged.extensions[0]?.selectedVersion, "1.0.0");
   assert.equal(staged.extensions[0]?.candidate?.resolvedVersion, "2.0.0");
+  assert.deepEqual(await packages.readManagedEntrypoint({
+    entrypointId: "main", extensionId: "dev.example.local",
+    integrity: selected!.integrity!, slot: "selected",
+  }), payload, "staging mutable source changes cannot replace the selected artifact bytes");
   const requested = await catalog.requestCandidateApplication(
     "dev.example.local",
     staged.extensions[0]?.candidate?.integrity ?? "",

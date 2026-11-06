@@ -1,75 +1,10 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { MaterialsCollectionParams } from "@varin/protocol";
-import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import type { MaterialCollectionContext } from "./material-collections.js";
 import type { ThreadMaterialAuthority } from "./web-materials.js";
 import { createMaterialCollections, MATERIAL_COLLECTION_RECORD_TYPE } from "./material-collections.js";
-import { createWebMaterialStore } from "./web-materials.js";
-import { createMaterialLifecycle } from "./material-lifecycle.js";
 
-type TestRecord = {
-  recordId: string;
-  workspaceId: string;
-  recordType: string;
-  state: string;
-  threadId?: string;
-  recordRevision: number;
-  payloadJson: string;
-  references: Array<{ slot: string; objectHash: string }>;
-};
-
-const openStore = () => {
-  const objects = new Map<string, Buffer>();
-  const records = new Map<string, TestRecord>();
-  const store = {
-    async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
-      const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
-      objects.set(hash, Buffer.from(bytes));
-      return { hash, byteLength: bytes.byteLength };
-    },
-    async getObject(hash: string): Promise<Buffer | null> {
-      const bytes = objects.get(hash);
-      return bytes ? Buffer.from(bytes) : null;
-    },
-  };
-  const context = {
-    records: {
-      async get(recordId: string): Promise<TestRecord | null> {
-        return records.get(recordId) ?? null;
-      },
-      async list(input: { recordType?: string }): Promise<TestRecord[]> {
-        return [...records.values()].filter((record) => !input.recordType || record.recordType === input.recordType);
-      },
-      async put(input: Omit<TestRecord, "recordRevision" | "workspaceId"> & { workspaceId?: string; operationId: string; expectedRecordRevision?: number }): Promise<TestRecord> {
-        const existing = records.get(input.recordId);
-        if (existing && input.expectedRecordRevision !== undefined && input.expectedRecordRevision !== existing.recordRevision) {
-          throw new Error("record revision conflict");
-        }
-        const record = { ...input, workspaceId: input.workspaceId ?? "ws", recordRevision: (existing?.recordRevision ?? 0) + 1, references: [...(input.references ?? [])] };
-        records.set(record.recordId, record);
-        return record;
-      },
-      async release(_operationId: string, recordId: string): Promise<Record<string, unknown>> {
-        const released = records.delete(recordId);
-        return { recordId, released };
-      },
-    },
-  };
-  const workingStates: WorkspaceWorkingStateRootAccess = {
-    withBranchStore: async (_workspaceId, _purpose, operation) => operation(
-      store as unknown as WorkingStateRootStore,
-      context as unknown as WorkingStateRootContext,
-    ),
-  };
-  return {
-    records,
-    objects,
-    materials: createWebMaterialStore(workingStates),
-    lifecycle: createMaterialLifecycle(workingStates),
-    workingStates,
-  };
-};
+import { createMaterialStoreFixture as openStore } from "./web-materials.test-helper.js";
 
 const ctx = (threadId: string, extra: Partial<MaterialCollectionContext> = {}): MaterialCollectionContext => ({
   authority: { kind: "thread", owningWorkspaceId: "ws", threadId },

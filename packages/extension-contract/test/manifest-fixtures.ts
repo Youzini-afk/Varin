@@ -298,10 +298,28 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     { label: 'shell recursively replaces itself', seams: {
       web: { replacementTargets: ['workbench.shell'], slots: [] },
     } },
+    { label: 'shell recursively replaces the transition', seams: {
+      web: { replacementTargets: ['workbench.transition'], slots: [] },
+    } },
     { label: 'shell duplicates a replacement target', seams: {
       web: { replacementTargets: ['workbench.editor', 'workbench.editor'], slots: [] },
     } },
   ].map(({ label, seams }) => ({ label, manifest: shellManifest(seams), schemaValid: false, runtimeValid: false })),
+  {
+    label: "shell uses an unsupported data contract",
+    manifest: { ...baseManifest(), contributions: [{
+      ...shellManifest({ web: { replacementTargets: [], slots: [] } }).contributions[0],
+      data: { contract: "wrong", seams: { web: { replacementTargets: [], slots: [] } } },
+    }] },
+    schemaValid: false,
+    runtimeValid: false,
+  },
+  {
+    label: "shell target and slot identities overlap",
+    manifest: shellManifest({ web: { replacementTargets: ["workbench.panel"], slots: ["workbench.panel"] } }),
+    schemaValid: true, // cross-field identity collision is checked by runtime admission
+    runtimeValid: false,
+  },
   {
     label: "versioned shell data with extra field",
     manifest: {

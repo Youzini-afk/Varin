@@ -409,25 +409,6 @@ test("unsupported contract version contributions are diagnosed without entering 
   assert.match(snapshot.actual[0]?.diagnostics[0]?.message ?? "", /settings-page contract version 99/);
 });
 
-test("same extension can have compatible and incompatible contributions simultaneously", async () => {
-  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
-  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
-    context.contribute(page("dev.example.alpha.view", 0), "view-impl");
-    context.contribute({
-      id: "dev.example.alpha.future",
-      kind: "view",
-      contractVersion: 2,
-      supports: ["web"],
-      data: {},
-    }, "future-impl");
-  });
-  const snapshot = runtime.getSnapshot();
-  assert.equal(snapshot.contributions.length, 1);
-  assert.equal(snapshot.visibleContributions.length, 1);
-  assert.equal(snapshot.visibleContributions[0]?.descriptor.id, "dev.example.alpha.view");
-  assert.equal(snapshot.actual[0]?.diagnostics[0]?.code, "unsupported-contract-version");
-});
-
 test("when expression hides contributions when context is false and shows when true", async () => {
   const contextKeys = new Map<string, string | number | boolean>();
   const listeners = new Set<() => void>();

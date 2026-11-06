@@ -294,7 +294,7 @@ fn finish(
     }
 }
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; real MCP stdio, no product socket"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; real MCP stdio, no product socket"]
 fn original_resource_observers_preserve_shared_owners_passive_facts_cancel_and_reopen() {
     let root = std::env::temp_dir().join(format!("varin-mcp-resources-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
@@ -732,7 +732,7 @@ impl AgentPolicy for Policy {
 }
 
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; real MCP stdio, no product socket"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; real MCP stdio, no product socket"]
 fn policy_resource_subscription_delivers_environment_without_model_tool_pairs() {
     let root = std::env::temp_dir().join(format!("varin-resource-policy-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
@@ -1023,7 +1023,7 @@ fn source_less_child_installed_nested_resource_observers_keep_their_real_origins
 }
 
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; real MCP stdio, no product socket"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; real MCP stdio, no product socket"]
 fn acknowledged_resource_rpc_releases_dispatch_while_original_local_acceptance_recovers() {
     let root = std::env::temp_dir().join(format!(
         "varin-resource-acceptance-{}",

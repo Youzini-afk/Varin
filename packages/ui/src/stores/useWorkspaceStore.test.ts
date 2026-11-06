@@ -32,7 +32,7 @@ const rootInfo: WorkspaceRootInfo = {
 
 const lists = new Map<string, WorkspaceListResult>();
 
-const workspaceApi: WorkspaceAPI = {
+const workspaceApi = {
   async getRoot() {
     calls.push({ name: "getRoot" });
     return rootInfo;
@@ -42,19 +42,9 @@ const workspaceApi: WorkspaceAPI = {
     calls.push({ name: "list", path: normalized });
     return lists.get(normalized) ?? { path: `/workspace/${normalized}`, relativePath: normalized, entries: [] };
   },
-  async tree(path = "") {
-    return this.list(path);
-  },
-  async entry(path) {
-    return makeEntry(path.split("/").pop() || path, path);
-  },
   async createFolder(path) {
     calls.push({ name: "createFolder", path });
     return { success: true, entry: makeEntry(path.split("/").pop() || path, path) };
-  },
-  async createFile(path) {
-    calls.push({ name: "createFile", path });
-    return { success: true, entry: makeEntry(path.split("/").pop() || path, path, "file") };
   },
   async move(from, to) {
     calls.push({ name: "move", payload: { from, to } });
@@ -64,11 +54,6 @@ const workspaceApi: WorkspaceAPI = {
     calls.push({ name: "deleteEntry", path, payload: options });
     return { success: true, trashed: options?.permanent ? false : true };
   },
-  async upload(path) {
-    calls.push({ name: "upload", path });
-    return { success: true, entries: [] };
-  },
-  async download() {},
   async previewArchive(path) {
     calls.push({ name: "previewArchive", path });
     return {
@@ -95,49 +80,11 @@ const workspaceApi: WorkspaceAPI = {
       deletedArchive: request.deleteArchive === true,
     };
   },
-  async openProject(path) {
-    calls.push({ name: "openProject", path });
-    return {
-      success: true,
-      project: { id: "project-demo", path: `/workspace/${path}`, label: path || "workspace" },
-      settings: { projects: [{ id: "project-demo", path: `/workspace/${path}`, label: path || "workspace" }], activeProjectId: "project-demo" },
-    };
-  },
-  async gitStatus(path) {
-    calls.push({ name: "gitStatus", path });
-    return { isGitRepository: false, files: [], current: "", tracking: null, ahead: 0, behind: 0, isClean: true };
-  },
-  async gitFetch(path) {
-    calls.push({ name: "gitFetch", path });
-    return { success: true };
-  },
   async gitClone(path, options) {
     calls.push({ name: "gitClone", path, payload: options });
     return { success: true, directoryName: options.directoryName ?? null };
   },
-  async gitPull(path) {
-    calls.push({ name: "gitPull", path });
-    return { success: true, summary: { changes: 0, insertions: 0, deletions: 0 }, files: [], insertions: 0, deletions: 0 };
-  },
-  async gitPush(path) {
-    calls.push({ name: "gitPush", path });
-    return { success: true, pushed: [], repo: path, ref: null };
-  },
-  async gitCheckout(path, branch) {
-    calls.push({ name: "gitCheckout", path, payload: branch });
-    return { success: true, branch };
-  },
-  async gitCommit(path, message, options) {
-    calls.push({ name: "gitCommit", path, payload: { message, options } });
-    return { success: true, commit: "abc123", branch: "main", summary: { changes: 0, insertions: 0, deletions: 0 } };
-  },
-  async gitLog() {
-    return { all: [], latest: null, total: 0 };
-  },
-  async gitRemotes() {
-    return [];
-  },
-};
+} satisfies Pick<WorkspaceAPI, 'getRoot' | 'list' | 'createFolder' | 'move' | 'deleteEntry' | 'previewArchive' | 'extractArchive' | 'gitClone'>;
 
 vi.doMock("@/lib/workspaceApi", () => ({
   getWorkspaceAPI: () => workspaceApi,

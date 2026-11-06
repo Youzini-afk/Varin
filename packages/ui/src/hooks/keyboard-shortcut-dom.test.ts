@@ -1,30 +1,18 @@
+import { parseHTML } from 'linkedom';
 import { expect, test } from 'vitest';
-
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
 
-test('does not treat an unrelated visible listbox as an open dropdown', () => {
-  const promptNavigator = {} as Element;
-  const root = {
-    querySelector: (selector: string) => selector.includes('[role="listbox"]') ? promptNavigator : null,
-  } as unknown as ParentNode;
-
-  expect(hasOpenDropdown(root)).toBe(false);
-});
-
-test('detects an open dropdown popup', () => {
-  const dropdown = {} as Element;
-  const root = {
-    querySelector: (selector: string) => selector.includes('[data-slot="dropdown-menu-content"][data-open]') ? dropdown : null,
-  } as unknown as ParentNode;
-
-  expect(hasOpenDropdown(root)).toBe(true);
-});
-
-test('detects an open select popup', () => {
-  const select = {} as Element;
-  const root = {
-    querySelector: (selector: string) => selector.includes('[data-slot="select-content"][data-open]') ? select : null,
-  } as unknown as ParentNode;
-
-  expect(hasOpenDropdown(root)).toBe(true);
+test('blocks shortcuts only while a dropdown or select popup is open', () => {
+  const { document } = parseHTML('<html><body><div role="listbox">Prompt navigator</div></body></html>');
+  expect(hasOpenDropdown(document)).toBe(false);
+  for (const slot of ['dropdown-menu-content', 'select-content']) {
+    const popup = document.createElement('div');
+    popup.dataset.slot = slot;
+    document.body.append(popup);
+    expect(hasOpenDropdown(document)).toBe(false);
+    popup.setAttribute('data-open', '');
+    expect(hasOpenDropdown(document)).toBe(true);
+    popup.remove();
+    expect(hasOpenDropdown(document)).toBe(false);
+  }
 });

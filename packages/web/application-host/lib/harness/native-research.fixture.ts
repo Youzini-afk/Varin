@@ -1,7 +1,5 @@
 /** Explicit native provenance and source-owner seam for domain tests. */
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
 import type { ExperimentCaller, ResearchOwner } from './research-identity.js';
 import { prepareExperimentInput } from './experiment-workspace.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
@@ -36,21 +34,17 @@ export function nativeResearchReader(options: CallerOptions = {}): ExperimentCal
   const { operationId: _operationId, executionOwner: _executionOwner, ...owner } = caller.owner as ResearchOwner;
   return { ...caller, owner: { ...owner, actor: { kind: 'reader' } } };
 }
-/** Domain tests inject the source owner, while capture still exercises the production Storage path. */
+/** An admitted physical source for domain tests, not an authorization implementation.
+ * Research-source tests exercise the real admission policy; native experiment tests
+ * use this seam to exercise actual input capture, processes and storage. */
 export function createResearchSourceFixture(client: KernelClient, resolveRoot: () => string | Promise<string>): ResearchSourceAuthority {
   return {
     async admit(caller, cwd, signal) {
       signal?.throwIfAborted();
-      const canonicalRoot = await resolveRoot();
-      if (caller.owner.source.mode !== 'live_root' || caller.owner.source.live_root?.canonicalRoot !== canonicalRoot) throw new Error('Original native source root changed');
-      const relative = cwd ? path.relative(canonicalRoot, path.resolve(canonicalRoot, cwd)).replaceAll('\\', '/') : '';
-      if (relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) throw new Error('Experiment cwd is outside its original source');
-      if (caller.workspaceScope?.length && relative && !caller.workspaceScope.some(root => root === '' || relative === root || relative.startsWith(`${root}/`)))
-        throw new Error('Experiment cwd is outside its original source scope');
-      return { kind: 'physical', canonicalRoot, selection: structuredClone(caller.owner.source), cwd: relative };
+      return { kind: 'physical', canonicalRoot: await resolveRoot(), selection: caller.owner.source, cwd: cwd ?? '' };
     },
     async capture(caller, admitted, options) {
-      if (admitted.kind !== 'physical' || !isDeepStrictEqual(admitted.selection, caller.owner.source)) throw new Error('Original source admission changed');
+      if (admitted.kind !== 'physical') throw new Error('Fixture provides only physical input');
       return prepareExperimentInput(client, caller, admitted.canonicalRoot, { ...options, cwd: admitted.cwd });
     },
     async release() {},

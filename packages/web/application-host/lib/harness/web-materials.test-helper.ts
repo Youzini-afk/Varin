@@ -88,8 +88,8 @@ export const createMaterialStoreFixture = (options: {
     operations,
     objects,
     workingStates,
-    // A fresh store over the same maps simulates a Host restart: durable
-    // records remain resolvable while nothing about the process survived.
+    // Recreate only the Host adapter over controlled records. Persistence and
+    // process restart are verified against real Storage in the native suite.
     reopen: () => createWebMaterialStore(workingStates),
     materials: createWebMaterialStore(workingStates),
     lifecycle: createMaterialLifecycle(workingStates),

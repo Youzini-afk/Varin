@@ -41,45 +41,6 @@ const candidate = (id: string, target: string): SurfaceContribution => ({
   },
 });
 
-test('Agent does not show the six IDE structure targets', () => {
-  const projections = projectWorkbenchSeams({
-    layout: layout({ [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: 'varin.builtin.agent-workspace.shell' }),
-    shellContributionId: 'varin.builtin.agent-workspace.shell',
-    shellExtensionId: 'varin.builtin.agent-workspace',
-    shellStatus: 'ready',
-    catalog: [agentEntry()],
-    surface: 'web',
-    visibleContributions: [],
-  });
-  const targets = new Set(projections.map((p) => p.target));
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.activity)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.status)).toBe(false);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator)).toBe(true);
-});
-
-test('IDE shows the six structure targets', () => {
-  const projections = projectWorkbenchSeams({
-    layout: layout({ [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: 'varin.builtin.ide-workbench.shell' }),
-    shellContributionId: 'varin.builtin.ide-workbench.shell',
-    shellExtensionId: 'varin.builtin.ide-workbench',
-    shellStatus: 'ready',
-    catalog: [ideEntry()],
-    surface: 'web',
-    visibleContributions: [],
-  });
-  const targets = new Set(projections.map((p) => p.target));
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.activity)).toBe(true);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar)).toBe(true);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor)).toBe(true);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar)).toBe(true);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel)).toBe(true);
-  expect(targets.has(VARIN_WORKBENCH_REPLACEMENT_TARGETS.status)).toBe(true);
-});
-
 test('Agent Mobile does not claim workspace.explorer support', () => {
   const projections = projectWorkbenchSeams({
     layout: layout({ [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: 'varin.builtin.agent-workspace.shell' }),

@@ -399,7 +399,7 @@ fn media(catalog: &Arc<Mutex<Catalog>>, params: &MediaReadParams) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; original MCP stdio only, no product sockets or model request"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; original MCP stdio only, no product sockets or model request"]
 fn original_mcp_content_resources_prompts_reach_model_permissions_and_persisted_readers() {
     let root = std::env::temp_dir().join(format!("varin-mcp-content-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();

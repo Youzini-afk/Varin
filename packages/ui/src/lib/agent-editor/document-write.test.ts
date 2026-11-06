@@ -1,5 +1,5 @@
 import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
@@ -14,7 +14,7 @@ const resource = (resourceId = 'note.txt'): VarinResourceReference => ({
 const createMemoryDocuments = () => {
   const files = new Map<string, { content: string; revision: string }>();
   const keyOf = (ref: VarinResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
-  let revisionSeq = 1;
+  const unexpectedWrite = vi.fn(async (): Promise<never> => { throw new Error('Patch review must not mutate files'); });
   const api: DocumentsAPI = {
     ...unconfiguredWorkspaceEdits,
     clearDirtyBuffers: async () => ({ cleared: true }),
@@ -35,30 +35,9 @@ const createMemoryDocuments = () => {
         byteLength: file.content.length,
       } satisfies VarinDocumentReadResult;
     },
-    write: async (request) => {
-      const key = keyOf(request.resource);
-      const current = files.get(key);
-      if (request.expectedRevision === null) {
-        if (current) {
-          return { status: 'conflict', current: { status: 'ready', epoch: 1, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length } };
-        }
-      } else if (!current || current.revision !== request.expectedRevision) {
-        return {
-          status: 'conflict',
-          current: current
-            ? { status: 'ready', epoch: 1, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length }
-            : { status: 'missing', epoch: 1, resource: request.resource },
-        };
-      }
-      const revision = `d1_${revisionSeq++}`;
-      files.set(key, { content: request.content, revision });
-      return { status: 'written', revision, byteLength: request.content.length };
-    },
-    move: async () => ({ status: 'missing', resource: resource() }),
-    delete: async (request) => {
-      files.delete(keyOf(request.resource));
-      return { status: 'deleted', resource: request.resource };
-    },
+    write: unexpectedWrite,
+    move: unexpectedWrite,
+    delete: unexpectedWrite,
     watch: () => ({ close: () => undefined }),
     listRecoveryJournals: async () => [],
     readRecoveryJournal: async (journalId) => ({ status: 'missing', journalId }),
@@ -112,6 +91,9 @@ describe('document patch writes', () => {
     expect(blocked).toEqual({ status: 'conflict', currentRevision: 'd1_1', dirty: true });
     expect(registry.get(identity)?.buffer).toBe('dirty');
     expect(files.get(keyOf(identity))?.content).toBe('agent');
+    expect(api.write).not.toHaveBeenCalled();
+    expect(api.move).not.toHaveBeenCalled();
+    expect(api.delete).not.toHaveBeenCalled();
   });
 });
 
@@ -140,8 +122,7 @@ describe('hinted agent reloads', () => {
       resource: identity,
       revision: 'd1_2',
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(registry.get(identity)?.buffer).toBe('two');
+    await vi.waitFor(() => expect(registry.get(identity)?.buffer).toBe('two'));
     expect(registry.get(identity)?.externalSource).toBe('agent');
   });
 });

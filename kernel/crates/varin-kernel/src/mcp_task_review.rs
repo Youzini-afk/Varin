@@ -169,7 +169,7 @@ impl AgentPolicy for Policy {
     }
 }
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; original MCP stdio, no product socket"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; original MCP stdio, no product socket"]
 fn original_mcp_tasks_survive_run_completion_cancel_without_false_stop_and_reopen() {
     let root = std::env::temp_dir().join(format!("varin-mcp-tasks-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
@@ -847,7 +847,7 @@ impl ModelProvider for LostAcceptance {
     }
 }
 #[test]
-#[ignore = "requires workspace Node/tsx and built pi-host; original MCP stdio, no product socket"]
+#[ignore = "requires workspace Node/tsx and built Host dependencies; original MCP stdio, no product socket"]
 fn original_mcp_acceptance_reply_loss_preserves_original_completion_and_eventual_result() {
     acceptance_reply_case(true);
     acceptance_reply_case(false);

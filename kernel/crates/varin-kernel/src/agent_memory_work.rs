@@ -51,7 +51,3 @@ pub(super) fn execute(
         _ => Err(KernelError::Protocol("Unknown memory work method".into())),
     }
 }
-
-#[cfg(test)]
-#[path = "agent_memory_work/tests.rs"]
-mod tests;

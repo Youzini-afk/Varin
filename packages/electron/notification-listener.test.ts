@@ -102,13 +102,15 @@ describe('NotificationListener', () => {
     expect(warnings.join('\n')).toMatch(/self-signed certificate/i);
   });
 
-  test('authenticates and receives notifications over ordinary HTTP loopback', async () => {
+  test('authenticates with sanitized headers and delivers the original Thread and Host', async () => {
     let passwordBody = '';
-    let streamCookie: string | undefined;
-    let finish: (detail: unknown) => void = () => {};
-    const received = new Promise<unknown>((resolve) => { finish = resolve; });
+    let authHeaders: IncomingHttpHeaders | null = null;
+    let streamHeaders: IncomingHttpHeaders | null = null;
+    let receive!: (value: unknown) => void;
+    const received = new Promise<unknown>(resolve => { receive = resolve; });
     const server = http.createServer((req, res) => {
       if (req.url === '/auth/session') {
+        authHeaders = req.headers;
         req.setEncoding('utf8');
         req.on('data', (chunk: string) => { passwordBody += chunk; });
         req.on('end', () => {
@@ -118,9 +120,11 @@ describe('NotificationListener', () => {
         return;
       }
       if (req.url === '/api/notifications/stream') {
-        streamCookie = req.headers.cookie;
+        streamHeaders = req.headers;
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.end(`data: ${JSON.stringify({ type: 'varin:notification', properties: { threadId: 'thread:local', title: 'Ready' } })}\n\n`);
+        res.end(`data: ${JSON.stringify({ type: 'varin:notification', properties: {
+          threadId: 'thread:local', branchId: 'branch:local', title: 'Ready', sourceUrl: 'https://forged.invalid',
+        } })}\n\n`);
         return;
       }
       res.writeHead(404);
@@ -130,46 +134,9 @@ describe('NotificationListener', () => {
     const listener = new NotificationListener({
       serverUrl,
       password: 'local-test-password',
-      logger: noopLogger,
-      onNotification: finish,
-    });
-    listeners.push(listener);
-
-    await listener.start();
-    expect(await received).toMatchObject({ threadId: 'thread:local', sourceUrl: serverUrl });
-    listener.stop();
-
-    expect(JSON.parse(passwordBody)).toEqual({ password: 'local-test-password' });
-    expect(streamCookie).toBe('session=local-test-session');
-  });
-
-  test('forwards sanitized custom requestHeaders to /auth/session', async () => {
-    let observedAuthHeaders: IncomingHttpHeaders | null = null;
-    const server = http.createServer((req, res) => {
-      if (req.url === '/auth/session') {
-        observedAuthHeaders = req.headers;
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-      if (req.url === '/api/notifications/stream') {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write('data: \n\n');
-        res.end();
-        return;
-      }
-      res.writeHead(404);
-      res.end();
-    });
-    const baseUrl = await listen(server);
-
-    const listener = new NotificationListener({
-      serverUrl: baseUrl,
-      password: 'shh',
       requestHeaders: {
-        'CF-Access-Client-Id': 'client-id',
+        ' CF-Access-Client-Id ': ' client-id ',
         'X-Custom-Header': 'value',
-        // Reserved — must not be forwarded / must not override listener's own value.
         Authorization: 'Bearer evil',
         Cookie: 'stolen=1',
         'Content-Length': '999',
@@ -178,128 +145,64 @@ describe('NotificationListener', () => {
         'Bad\nName': 'value',
         'Bad-Value': 'line\nbreak',
       },
-      onNotification: () => {},
       logger: noopLogger,
+      onNotification: receive,
     });
     listeners.push(listener);
 
     await listener.start();
-    // Give the SSE stream a tick to open.
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(await received).toMatchObject({ threadId: 'thread:local', branchId: 'branch:local', sourceUrl: serverUrl });
     listener.stop();
 
-    expect(observedAuthHeaders).not.toBeNull();
-    const authHeaders = requireHeaders(observedAuthHeaders);
-    expect(authHeaders['cf-access-client-id']).toBe('client-id');
-    expect(authHeaders['x-custom-header']).toBe('value');
-    // Reserved headers dropped from custom set; listener's own values win.
-    expect(authHeaders['content-type']).toBe('application/json');
-    expect(authHeaders['authorization']).toBeUndefined();
-    expect(authHeaders['cookie']).toBeUndefined();
+    expect(JSON.parse(passwordBody)).toEqual({ password: 'local-test-password' });
+    const auth = requireHeaders(authHeaders);
+    expect(auth['content-type']).toBe('application/json');
+    expect(Number(auth['content-length'])).toBe(Buffer.byteLength(passwordBody));
+    expect(auth.authorization).toBeUndefined();
+    expect(auth.cookie).toBeUndefined();
+    const stream = requireHeaders(streamHeaders);
+    expect(stream.cookie).toBe('session=local-test-session');
+    for (const headers of [auth, stream]) {
+      expect(headers['cf-access-client-id']).toBe('client-id');
+      expect(headers['x-custom-header']).toBe('value');
+      expect(headers['bad-value']).toBeUndefined();
+    }
   });
 
-  test('forwards sanitized custom requestHeaders to /api/notifications/stream and preserves auth', async () => {
-    let observedStreamHeaders: IncomingHttpHeaders | null = null;
+  test('replaces custom headers on auth update without overriding bearer or stream headers', async () => {
+    let request!: (value: IncomingHttpHeaders) => void;
+    const requested = new Promise<IncomingHttpHeaders>(resolve => { request = resolve; });
     const server = http.createServer((req, res) => {
-      if (req.url === '/auth/session') {
-        res.writeHead(401);
-        res.end();
-        return;
-      }
-      if (req.url === '/api/notifications/stream') {
-        observedStreamHeaders = req.headers;
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write('data: \n\n');
-        res.end();
-        return;
-      }
-      res.writeHead(404);
-      res.end();
+      if (req.url !== '/api/notifications/stream') { res.writeHead(404); res.end(); return; }
+      request(req.headers);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('data: \n\n');
     });
-    const baseUrl = await listen(server);
-
+    const serverUrl = await listen(server);
     const listener = new NotificationListener({
-      serverUrl: baseUrl,
-      password: '',
-      clientToken: 'token-abc',
-      requestHeaders: {
-        'X-Forwarded-Host': 'example.com',
-        // Reserved — must not override listener's own Authorization/Accept/Cache-Control.
-        Authorization: 'Bearer evil',
-        Accept: 'text/evil',
-        'Cache-Control': 'must-revalidate',
-      },
-      onNotification: () => {},
-      logger: noopLogger,
-    });
-    listeners.push(listener);
-
-    await listener.start();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    listener.stop();
-
-    expect(observedStreamHeaders).not.toBeNull();
-    const streamHeaders = requireHeaders(observedStreamHeaders);
-    expect(streamHeaders['x-forwarded-host']).toBe('example.com');
-    expect(streamHeaders['authorization']).toBe('Bearer token-abc');
-    expect(streamHeaders['accept']).toBe('text/event-stream');
-    expect(streamHeaders['cache-control']).toBe('no-cache');
-  });
-
-  test('updateAuth replaces requestHeaders and re-sanitizes reserved names', async () => {
-    let observedStreamHeaders: IncomingHttpHeaders | null = null;
-    const server = http.createServer((req, res) => {
-      if (req.url === '/api/notifications/stream') {
-        observedStreamHeaders = req.headers;
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write('data: \n\n');
-        res.end();
-        return;
-      }
-      res.writeHead(404);
-      res.end();
-    });
-    const baseUrl = await listen(server);
-
-    const listener = new NotificationListener({
-      serverUrl: baseUrl,
-      clientToken: 'tok',
+      serverUrl,
+      clientToken: 'old-token',
       requestHeaders: { 'X-Old': 'old' },
       onNotification: () => {},
       logger: noopLogger,
     });
     listeners.push(listener);
-
     listener.updateAuth({
-      clientToken: 'tok',
-      requestHeaders: { 'X-New': 'new', Authorization: 'Bearer evil', Cookie: 'c=1' },
+      clientToken: 'new-token',
+      requestHeaders: {
+        'X-New': 'new', Authorization: 'Bearer evil', Cookie: 'stolen=1',
+        Accept: 'text/evil', 'Cache-Control': 'must-revalidate',
+      },
     });
 
     await listener.start();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    const headers = await requested;
     listener.stop();
-
-    expect(observedStreamHeaders).not.toBeNull();
-    const updateHeaders = requireHeaders(observedStreamHeaders);
-    expect(updateHeaders['x-new']).toBe('new');
-    expect(updateHeaders['x-old']).toBeUndefined();
-    expect(updateHeaders['authorization']).toBe('Bearer tok');
-    expect(updateHeaders['cookie']).toBeUndefined();
+    expect(headers['x-new']).toBe('new');
+    expect(headers['x-old']).toBeUndefined();
+    expect(headers.authorization).toBe('Bearer new-token');
+    expect(headers.cookie).toBeUndefined();
+    expect(headers.accept).toBe('text/event-stream');
+    expect(headers['cache-control']).toBe('no-cache');
   });
-  test('receives native Thread and branch with the configured source Host', async () => {
-    const received: unknown[] = [];
-    const server = http.createServer((req, res) => {
-      if (req.url !== '/api/notifications/stream') { res.writeHead(404); res.end(); return; }
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.end(`data: ${JSON.stringify({ type: 'varin:notification', properties: { threadId: 'thread:a', branchId: 'branch:b', title: 'Ready', sourceUrl: 'https://forged.invalid' } })}\n\n`);
-    });
-    const baseUrl = await listen(server);
-    const listener = new NotificationListener({ serverUrl: baseUrl, clientToken: 'token', logger: noopLogger, onNotification: detail => received.push(detail) });
-    listeners.push(listener); await listener.start();
-    await new Promise(resolve => setTimeout(resolve, 30)); listener.stop();
-    expect(received).toHaveLength(1);
-    expect(received[0]).toMatchObject({ threadId: 'thread:a', branchId: 'branch:b', sourceUrl: baseUrl });
-    expect(received[0]).not.toHaveProperty('sessionId');
-  });
-
 });

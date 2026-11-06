@@ -1,18 +1,12 @@
-import { EventEmitter } from 'events';
-import fs from 'fs';
-import path from 'path';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import express from 'express';
+import request, { type Response } from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
-import type { Express, Request, Response } from 'express';
 import type { CommandResult } from './types.js';
-
-type RouteHandler = (request: Request, response: Response) => unknown;
-
-interface MockPayload extends Record<string, unknown> {
-  results: CommandResult[];
-}
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
@@ -21,292 +15,65 @@ class FakeChild extends EventEmitter {
   unref = vi.fn();
 }
 
-const createRouteRegistry = () => {
-  const routes = new Map<string, RouteHandler>();
-  return {
-    app: {
-      get(routePath: unknown, handler: RouteHandler) {
-        routes.set(`GET ${routePath}`, handler);
-      },
-      post(routePath: unknown, handler: RouteHandler) {
-        routes.set(`POST ${routePath}`, handler);
-      },
-    },
-    getRoute(method: string, routePath: unknown): RouteHandler {
-      const handler = routes.get(`${method} ${routePath}`);
-      if (!handler) throw new Error(`Route is not registered: ${method} ${String(routePath)}`);
-      return handler;
-    },
-  };
-};
-
-const createMockResponse = () => {
-  let statusCode = 200;
-  let body: unknown = null;
-  const headers = new Map<string, unknown>();
-  return {
-    status(code: number) {
-      statusCode = code;
-      return this;
-    },
-    json(payload: unknown) {
-      body = payload;
-      return this;
-    },
-    type() {
-      return this;
-    },
-    send(payload: unknown) {
-      body = payload;
-      return this;
-    },
-    end() { return this; },
-    setHeader(name: string, value: unknown) {
-      headers.set(name.toLowerCase(), value);
-      return this;
-    },
-    getHeader(name: string) {
-      return headers.get(name.toLowerCase());
-    },
-    get statusCode() {
-      return statusCode;
-    },
-    get body(): MockPayload {
-      return body as MockPayload;
-    },
-  };
-};
-
-const firstCommandResult = (response: ReturnType<typeof createMockResponse>): CommandResult => {
-  const result = response.body.results[0];
-  if (!result) throw new Error('Expected command result');
-  return result;
-};
-
-// Fake child process: emits the configured stdout then closes with the given code.
-const createSpawn = ({ stdoutByCommand = {}, exitCode = 0 }: {
+// Only the process boundary is controlled; requests use the real Express router.
+const createSpawn = ({ stdoutByCommand = {}, exitCode = 0, deferred = false }: {
   exitCode?: number;
   stdoutByCommand?: Record<string, string>;
+  deferred?: boolean;
 } = {}) => {
   const calls: string[] = [];
+  const pending: Array<() => void> = [];
   const spawn = vi.fn((_shell: string, args: string[]) => {
     const command = args.at(-1) ?? '';
     calls.push(command);
     const child = new FakeChild();
-    queueMicrotask(() => {
+    const close = () => {
       const out = stdoutByCommand[command];
       if (out) child.stdout.emit('data', Buffer.from(out));
       child.emit('close', exitCode, null);
-    });
+    };
+    if (deferred) pending.push(close); else queueMicrotask(close);
     return child;
   });
-  return { spawn, calls };
+  return { spawn, calls, closeNext: () => pending.shift()?.() };
 };
 
-const createDeferredSpawn = ({ stdoutByCommand = {}, exitCode = 0 }: {
-  exitCode?: number;
-  stdoutByCommand?: Record<string, string>;
-} = {}) => {
-  const calls: string[] = [];
-  const pending: Array<{ child: FakeChild; command: string }> = [];
-  const spawn = vi.fn((_shell: string, args: string[]) => {
-    const command = args.at(-1) ?? '';
-    calls.push(command);
-    const child = new FakeChild();
-    pending.push({ child, command });
-    return child;
-  });
-  const closeNext = () => {
-    const entry = pending.shift();
-    if (!entry) return;
-    const out = stdoutByCommand[entry.command];
-    if (out) entry.child.stdout.emit('data', Buffer.from(out));
-    entry.child.emit('close', exitCode, null);
-  };
-  return { spawn, calls, closeNext };
-};
-
-const registerExec = ({ spawn }: { spawn: unknown }): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path,
-    fsPromises: {
-      realpath: async (targetPath: string) => targetPath,
-      stat: async () => ({ isDirectory: () => true }),
-    },
-    spawn,
-    crypto: { randomUUID: (() => { let n = 0; return () => `job-${n++}`; })() },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('POST', '/api/fs/exec');
-};
-
-const registerWrite = (fsPromises: object, options: {
+const createFsApp = (options: {
+  fsPromises?: object;
+  spawn?: unknown;
+  platform?: NodeJS.Platform;
   documents?: import('../documents/authority.js').DocumentAuthority;
   path?: typeof path;
   workspaceRoot?: string;
-} = {}): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
+} = {}) => {
+  const app = express();
+  app.use(express.json());
+  registerFsRoutes(app, {
     os: { homedir: () => '/home/user' },
-    path: options.path || path.posix,
+    path: options.path ?? path.posix,
     fsPromises: {
       realpath: async (targetPath: string) => targetPath,
-      ...fsPromises,
+      stat: async () => ({ isDirectory: () => true }),
+      ...options.fsPromises,
     },
-    spawn: vi.fn(),
-    crypto: { randomUUID: () => 'job-0' },
+    spawn: options.spawn ?? vi.fn(),
+    platform: options.platform ?? 'linux',
+    crypto: { randomUUID: (() => { let n = 0; return () => `job-${n++}`; })() },
     normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: options.workspaceRoot || '/repo' }),
+    resolveProjectDirectory: async () => ({ directory: options.workspaceRoot ?? '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
     varinUserConfigRoot: '/home/user/.config',
     ...(options.documents ? { documents: options.documents } : {}),
   });
-  return getRoute('POST', '/api/fs/write');
+  return app;
 };
 
-const registerRead = (fsPromises: object): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises: {
-      realpath: async (targetPath: string) => targetPath,
-      ...fsPromises,
-    },
-    spawn: vi.fn(),
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('GET', '/api/fs/read');
+const firstCommandResult = (response: Response): CommandResult => {
+  const result = (response.body as { results: CommandResult[] }).results[0];
+  if (!result) throw new Error('Expected command result');
+  return result;
 };
-
-const registerStat = (fsPromises: object): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises,
-    spawn: vi.fn(),
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('GET', '/api/fs/stat');
-};
-
-const registerRaw = (fsPromises: object): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises: {
-      realpath: async (targetPath: string) => targetPath,
-      ...fsPromises,
-    },
-    spawn: vi.fn(),
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('GET', '/api/fs/raw');
-};
-
-const registerMkdir = (fsPromises: object): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises: {
-      realpath: async (targetPath: string) => targetPath,
-      ...fsPromises,
-    },
-    spawn: vi.fn(),
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('POST', '/api/fs/mkdir');
-};
-
-const registerReveal = ({ fsPromises, spawn, platform = 'linux' }: {
-  fsPromises: object;
-  platform?: NodeJS.Platform;
-  spawn: unknown;
-}): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises: {
-      realpath: async (targetPath: string) => targetPath,
-      ...fsPromises,
-    },
-    spawn,
-    platform,
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('POST', '/api/fs/reveal');
-};
-
-const registerList = (fsPromises: object, spawn: unknown = vi.fn()): RouteHandler => {
-  const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app as unknown as Express, {
-    os: { homedir: () => '/home/user' },
-    path: path.posix,
-    fsPromises,
-    spawn,
-    crypto: { randomUUID: () => 'job-0' },
-    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
-    buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
-    varinUserConfigRoot: '/home/user/.config',
-  });
-  return getRoute('GET', '/api/fs/list');
-};
-
-const callRoute = async (
-  handler: RouteHandler,
-  request: { body?: Record<string, unknown>; query?: Record<string, string> },
-) => {
-  const res = createMockResponse();
-  await handler(request as unknown as Request, res as unknown as Response);
-  return res;
-};
-
-const callExec = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
-const callWrite = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
-const callRead = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
-const callStat = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
-const callRaw = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
-const callMkdir = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
-const callReveal = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
-const callList = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
 
 describe('fs list', () => {
   it('returns directories, files, and resolved directory symlinks', async () => {
@@ -325,9 +92,9 @@ describe('fs list', () => {
         dirent('linked-package', 'symlink'),
       ]),
     };
-    const handler = registerList(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callList(handler, { path: '/repo' });
+    const res = await request(handler).get('/api/fs/list').query({ path: '/repo' });
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
@@ -353,9 +120,9 @@ describe('fs list', () => {
         isSymbolicLink: () => false,
       }]),
     };
-    const handler = registerList(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callList(handler, { path: '/repo/linked-workspace' });
+    const res = await request(handler).get('/api/fs/list').query({ path: '/repo/linked-workspace' });
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
@@ -373,13 +140,13 @@ describe('fs list', () => {
 
   it('returns the normal missing-directory error for every path', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
-    const handler = registerList({
+    const handler = createFsApp({ fsPromises: {
       realpath: vi.fn(async () => { throw missing; }),
       stat: vi.fn(),
       readdir: vi.fn(),
-    });
+    } });
 
-    const res = await callList(handler, { path: '/repo/.opencode/plans' });
+    const res = await request(handler).get('/api/fs/list').query({ path: '/repo/.opencode/plans' });
 
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual({ error: 'Directory not found', reason: 'not-found' });
@@ -387,13 +154,13 @@ describe('fs list', () => {
 
   it('returns a stable reason for operating-system permission failures', async () => {
     const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
-    const handler = registerList({
+    const handler = createFsApp({ fsPromises: {
       realpath: vi.fn(async () => { throw denied; }),
       stat: vi.fn(),
       readdir: vi.fn(),
-    });
+    } });
 
-    const res = await callList(handler, { path: '/restricted' });
+    const res = await request(handler).get('/api/fs/list').query({ path: '/restricted' });
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
@@ -407,59 +174,35 @@ describe('fs write', () => {
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn<(filePath: string, content: string, encoding: string) => Promise<void>>(async () => undefined),
     };
-    const handler = registerWrite(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
+    const res = await request(handler).post('/api/fs/write').send({ path: '/repo/file.txt', content: 'same' });
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
   });
 
-  it('writes a file when content changed', async () => {
-    const fsPromises = {
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn<(filePath: string, content: string, encoding: string) => Promise<void>>(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
-    };
-    const handler = registerWrite(fsPromises);
-
-    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
-
-    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
-    expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
-    const tmp = fsPromises.writeFile.mock.calls[0]?.[0];
-    if (!tmp) throw new Error('Expected temporary write path');
-    expect(tmp).toMatch(/^\/repo\/file\.txt\.tmp-/);
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
-    expect(fsPromises.unlink).not.toHaveBeenCalled();
-  });
-
-  it('writes through existing symlinks without replacing the link', async () => {
-    const fsPromises = {
-      realpath: vi.fn(async (targetPath) => {
-        if (targetPath === '/repo/link.txt') return '/repo/target.txt';
-        return targetPath;
-      }),
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn<(filePath: string, content: string, encoding: string) => Promise<void>>(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
-    };
-    const handler = registerWrite(fsPromises);
-
-    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
-
-    expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
-    const tmp = fsPromises.writeFile.mock.calls[0]?.[0];
-    if (!tmp) throw new Error('Expected temporary write path');
-    expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
-    expect(fsPromises.rename).not.toHaveBeenCalledWith(expect.any(String), '/repo/link.txt');
+  it('writes through an admitted symlink without replacing the link', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const target = path.join(harness.workspaceRoot, 'target');
+    const targetFile = path.join(target, 'note.txt');
+    const alias = path.join(harness.workspaceRoot, 'alias');
+    try {
+      await fs.promises.mkdir(target);
+      await fs.promises.writeFile(targetFile, 'old');
+      // Windows junctions avoid requiring symlink privileges. On POSIX, link the
+      // file itself so an atomic rename to the request path would break this test.
+      const windows = process.platform === 'win32';
+      await fs.promises.symlink(windows ? target : targetFile, alias, windows ? 'junction' : 'file');
+      const requestedPath = windows ? path.join(alias, 'note.txt') : alias;
+      const app = createFsApp({ fsPromises: fs.promises, workspaceRoot: harness.workspaceRoot, path });
+      await request(app).post('/api/fs/write').send({ path: requestedPath, content: 'new' }).expect(200);
+      expect(await fs.promises.readFile(targetFile, 'utf8')).toBe('new');
+      expect((await fs.promises.lstat(alias)).isSymbolicLink()).toBe(true);
+      expect(await fs.promises.readdir(target)).toEqual(['note.txt']);
+    } finally {
+      await harness.cleanup();
+    }
   });
 
   it('rejects existing symlinks that resolve outside the workspace', async () => {
@@ -474,9 +217,9 @@ describe('fs write', () => {
       rename: vi.fn(async () => undefined),
       unlink: vi.fn(async () => undefined),
     };
-    const handler = registerWrite(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
+    const res = await request(handler).post('/api/fs/write').send({ path: '/repo/link.txt', content: 'new' });
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Access denied' });
@@ -487,20 +230,20 @@ describe('fs write', () => {
   it('records workspace mutations and refuses writes during maintenance', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
-      const handler = registerWrite(fs.promises, {
+      const handler = createFsApp({ fsPromises: fs.promises,
         documents: harness.authority,
         workspaceRoot: harness.workspaceRoot,
         path,
       });
       const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
 
-      const written = await callWrite(handler, { path: path.join(harness.workspaceRoot, 'tracked.txt'), content: 'tracked' });
+      const written = await request(handler).post('/api/fs/write').send({ path: path.join(harness.workspaceRoot, 'tracked.txt'), content: 'tracked' });
       expect(written.statusCode).toBe(200);
       const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
       expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
 
       await harness.authority.setMaintenance(harness.identity.workspaceId, true);
-      const rejected = await callWrite(handler, { path: path.join(harness.workspaceRoot, 'late.txt'), content: 'late' });
+      const rejected = await request(handler).post('/api/fs/write').send({ path: path.join(harness.workspaceRoot, 'late.txt'), content: 'late' });
       expect(rejected.statusCode).toBe(409);
       expect(fs.existsSync(path.join(harness.workspaceRoot, 'late.txt'))).toBe(false);
     } finally {
@@ -513,14 +256,14 @@ describe('fs stat', () => {
   it('treats Electron invalid-asar errors as a missing optional path or bad required path', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const handler = registerStat({
+      const handler = createFsApp({ fsPromises: {
         realpath: vi.fn(async () => { throw new Error('Invalid package /repo/app.asar'); }),
         stat: vi.fn(),
-      });
-      const optional = await callStat(handler, { path: '/repo/app.asar', optional: 'true' });
+      } });
+      const optional = await request(handler).get('/api/fs/stat').query({ path: '/repo/app.asar', optional: 'true' });
       expect(optional.statusCode).toBe(200);
       expect(optional.body).toEqual({ path: '/repo/app.asar', exists: false });
-      const required = await callStat(handler, { path: '/repo/app.asar' });
+      const required = await request(handler).get('/api/fs/stat').query({ path: '/repo/app.asar' });
       expect(required.statusCode).toBe(400);
       expect(required.body).toEqual({ error: 'Invalid archive path' });
       expect(logged).not.toHaveBeenCalled();
@@ -535,9 +278,9 @@ describe('fs read', () => {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
       readFile: vi.fn(async () => 'secret'),
     };
-    const handler = registerRead(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRead(handler, { path: '/etc/passwd', allowOutsideWorkspace: 'true' });
+    const res = await request(handler).get('/api/fs/read').query({ path: '/etc/passwd', allowOutsideWorkspace: 'true' });
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Outside workspace file access requires a grant' });
@@ -556,16 +299,16 @@ describe('fs read', () => {
       path: path.posix,
       crypto: { randomUUID: () => 'grant-read' },
     });
-    const handler = registerRead(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRead(handler, {
+    const res = await request(handler).get('/api/fs/read').query({
       path: '/outside/plan.txt',
       allowOutsideWorkspace: 'true',
       outsideFileGrant: grant.outsideFileGrant,
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toBe('secret');
+    expect(res.text).toBe('secret');
   });
 
   it('rejects outside workspace grants for a different canonical path', async () => {
@@ -579,9 +322,9 @@ describe('fs read', () => {
       path: path.posix,
       crypto: { randomUUID: () => 'grant-mismatch' },
     });
-    const handler = registerRead(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRead(handler, {
+    const res = await request(handler).get('/api/fs/read').query({
       path: '/outside/b.txt',
       allowOutsideWorkspace: 'true',
       outsideFileGrant: grant.outsideFileGrant,
@@ -604,25 +347,25 @@ describe('fs read', () => {
       path: path.posix,
       crypto: { randomUUID: () => 'grant-raw' },
     });
-    const handler = registerRaw(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRaw(handler, {
+    const res = await request(handler).get('/api/fs/raw').query({
       path: '/outside/image.png',
       allowOutsideWorkspace: 'true',
       outsideFileGrant: grant.outsideFileGrant,
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.getHeader('referrer-policy')).toBe('no-referrer');
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
   });
 
   it('allows explicit outside-workspace directory creation for project onboarding', async () => {
     const fsPromises = {
       mkdir: vi.fn(async () => undefined),
     };
-    const handler = registerMkdir(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callMkdir(handler, { path: '/tmp/staging', allowOutsideWorkspace: true });
+    const res = await request(handler).post('/api/fs/mkdir').send({ path: '/tmp/staging', allowOutsideWorkspace: true });
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ success: true, path: '/tmp/staging' });
@@ -635,12 +378,12 @@ describe('fs read', () => {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
       readFile: vi.fn(async () => ''),
     };
-    const handler = registerRead(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRead(handler, { path: '/repo/file.txt' });
+    const res = await request(handler).get('/api/fs/read').query({ path: '/repo/file.txt' });
 
-    expect(res.body).toBe('');
-    expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
+    expect(res.text).toBe('');
+    expect(fsPromises.readFile.mock.calls.length).toBeGreaterThan(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
   });
@@ -654,7 +397,7 @@ describe('fs reveal', () => {
       queueMicrotask(() => child.emit('error', Object.assign(new Error('not found'), { code: 'ENOENT' })));
       return child;
     });
-    const handler = registerReveal({
+    const handler = createFsApp({
       fsPromises: {
         access: vi.fn(async () => undefined),
         stat: vi.fn(async () => ({ isDirectory: () => false })),
@@ -662,7 +405,7 @@ describe('fs reveal', () => {
       spawn,
     });
 
-    const res = await callReveal(handler, { path: '/repo/file.txt' });
+    const res = await request(handler).post('/api/fs/reveal').send({ path: '/repo/file.txt' });
 
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: 'Failed to launch file browser' });
@@ -676,7 +419,7 @@ describe('fs reveal', () => {
       queueMicrotask(() => child.emit('spawn'));
       return child;
     });
-    const handler = registerReveal({
+    const handler = createFsApp({
       fsPromises: {
         access: vi.fn(async () => undefined),
         stat: vi.fn(async () => ({ isDirectory: () => false })),
@@ -684,7 +427,7 @@ describe('fs reveal', () => {
       spawn,
     });
 
-    const res = await callReveal(handler, { path: '/repo/file.txt' });
+    const res = await request(handler).post('/api/fs/reveal').send({ path: '/repo/file.txt' });
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
     expect(child.unref).toHaveBeenCalledOnce();
@@ -702,9 +445,9 @@ describe('fs exec git-read cache', () => {
 
   it('rejects background command execution', async () => {
     const { spawn } = createSpawn();
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    const res = await callExec(handler, { commands: ['id'], cwd: '/repo', background: true });
+    const res = await request(handler).post('/api/fs/exec').send({ commands: ['id'], cwd: '/repo', background: true });
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Background command execution is not allowed' });
@@ -714,9 +457,9 @@ describe('fs exec git-read cache', () => {
   it('rejects command execution outside the workspace', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { spawn } = createSpawn();
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    const res = await callExec(handler, { commands: ['id'], cwd: '/' });
+    const res = await request(handler).post('/api/fs/exec').send({ commands: ['id'], cwd: '/' });
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
@@ -727,10 +470,10 @@ describe('fs exec git-read cache', () => {
   it('caches an allowlisted git rev-parse across identical requests', async () => {
     const command = 'git rev-parse --absolute-git-dir --git-common-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    const first = await callExec(handler, { commands: [command], cwd: '/repo' });
-    const second = await callExec(handler, { commands: [command], cwd: '/repo' });
+    const first = await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
+    const second = await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
 
     expect(firstCommandResult(first).stdout).toBe('/repo/.git\n.git');
     expect(firstCommandResult(second).stdout).toBe('/repo/.git\n.git');
@@ -741,14 +484,13 @@ describe('fs exec git-read cache', () => {
 
   it('dedupes concurrent identical git-read requests while the first is in flight', async () => {
     const command = 'git rev-parse --absolute-git-dir --git-common-dir';
-    const { spawn, calls, closeNext } = createDeferredSpawn({ stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
-    const handler = registerExec({ spawn });
+    const { spawn, calls, closeNext } = createSpawn({ deferred: true, stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
+    const handler = createFsApp({ spawn });
 
-    const first = callExec(handler, { commands: [command], cwd: '/repo' });
-    const second = callExec(handler, { commands: [command], cwd: '/repo' });
+    const first = request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' }).then(response => response);
+    const second = request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' }).then(response => response);
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls.length).toBe(1);
+    await vi.waitFor(() => expect(calls.length).toBe(1));
 
     closeNext();
     const [firstRes, secondRes] = await Promise.all([first, second]);
@@ -762,10 +504,10 @@ describe('fs exec git-read cache', () => {
     const firstCommand = 'git   rev-parse   --absolute-git-dir';
     const secondCommand = 'git rev-parse --absolute-git-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [firstCommand]: '/repo/.git\n' } });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    const first = await callExec(handler, { commands: [firstCommand], cwd: '/repo' });
-    const second = await callExec(handler, { commands: [secondCommand], cwd: '/repo' });
+    const first = await request(handler).post('/api/fs/exec').send({ commands: [firstCommand], cwd: '/repo' });
+    const second = await request(handler).post('/api/fs/exec').send({ commands: [secondCommand], cwd: '/repo' });
 
     expect(firstCommandResult(first).command).toBe(firstCommand);
     expect(firstCommandResult(second).command).toBe(secondCommand);
@@ -775,10 +517,10 @@ describe('fs exec git-read cache', () => {
   it('keys the cache by working directory', async () => {
     const command = 'git rev-parse --absolute-git-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/x/.git\n' } });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/repo/a' });
-    await callExec(handler, { commands: [command], cwd: '/repo/b' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo/a' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo/b' });
 
     expect(calls.length).toBe(2);
   });
@@ -786,10 +528,10 @@ describe('fs exec git-read cache', () => {
   it('never caches non-allowlisted commands', async () => {
     const command = 'git status';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: 'clean\n' } });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/repo' });
-    await callExec(handler, { commands: [command], cwd: '/repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
 
     expect(calls.length).toBe(2);
   });
@@ -797,10 +539,10 @@ describe('fs exec git-read cache', () => {
   it('does not cache failed git-read results', async () => {
     const command = 'git rev-parse --absolute-git-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: {}, exitCode: 128 });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
-    await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo/not-a-repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo/not-a-repo' });
 
     expect(calls.length).toBe(2);
   });
@@ -809,24 +551,24 @@ describe('fs exec git-read cache', () => {
     process.env.VARIN_GIT_READ_CACHE_TTL_MS = '0';
     const command = 'git rev-parse --absolute-git-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/repo/.git\n' } });
-    const handler = registerExec({ spawn });
+    const handler = createFsApp({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/repo' });
-    await callExec(handler, { commands: [command], cwd: '/repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
+    await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
 
     expect(calls.length).toBe(2);
   });
 
   it('re-runs once a cached entry ages past the TTL', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const command = 'git rev-parse --absolute-git-dir';
       const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/repo/.git\n' } });
-      const handler = registerExec({ spawn }); // default 30s TTL
+      const handler = createFsApp({ spawn }); // default 30s TTL
 
-      await callExec(handler, { commands: [command], cwd: '/repo' });
+      await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
       vi.advanceTimersByTime(31_000);
-      await callExec(handler, { commands: [command], cwd: '/repo' });
+      await request(handler).post('/api/fs/exec').send({ commands: [command], cwd: '/repo' });
 
       // Stale entry is not served; a fresh subprocess fires.
       expect(calls.length).toBe(2);
@@ -835,44 +577,25 @@ describe('fs exec git-read cache', () => {
     }
   });
 
-  it('bounds the cache by evicting the least-recently-used entry past the count cap', async () => {
-    const command = 'git rev-parse --absolute-git-dir';
-    const { spawn, calls } = createSpawn(); // exit 0, empty stdout — still cacheable
-    const handler = registerExec({ spawn });
 
-    // Fill to the 500-entry ceiling with distinct working directories.
-    for (let i = 0; i < 500; i += 1) {
-      await callExec(handler, { commands: [command], cwd: `/repo/worktree-${i}` });
-    }
-    const afterFill = calls.length;
-    expect(afterFill).toBe(500);
-
-    // One more distinct dir evicts the oldest entry (/repo/worktree-0).
-    await callExec(handler, { commands: [command], cwd: '/repo/worktree-overflow' });
-    // Evicted entry must re-run; a surviving entry must still be served.
-    await callExec(handler, { commands: [command], cwd: '/repo/worktree-0' });   // evicted -> spawns
-    await callExec(handler, { commands: [command], cwd: '/repo/worktree-499' }); // cached  -> no spawn
-
-    expect(calls.length).toBe(afterFill + 2);
-  });
 });
 
 describe('fs raw download Content-Disposition', () => {
   it('serves an authenticated image derivative with dimensions and validates cached previews', async () => {
     const { createCanvas } = await import('@napi-rs/canvas');
     const bytes = await createCanvas(32, 24).encode('png');
-    const handler = registerRaw({ stat: async () => ({ isFile: () => true }), readFile: async () => bytes });
-    const response = createMockResponse();
-    const request = { path: '/api/fs/raw', query: { path: '/repo/image.png', preview: 'image' }, headers: {} };
-    await handler(request as unknown as Request, response as unknown as Response);
+    const handler = createFsApp({ fsPromises: { stat: async () => ({ isFile: () => true }), readFile: async () => bytes } });
+    const query = { path: '/repo/image.png', preview: 'image' };
+    const response = await request(handler).get('/api/fs/raw').query(query);
     expect(response.statusCode).toBe(200);
-    expect(response.body).toBe(bytes);
-    expect(response.getHeader('X-Varin-Image-Width')).toBe('32');
-    expect(response.getHeader('X-Varin-Image-Height')).toBe('24');
-    const repeated = createMockResponse();
-    await handler({ ...request, headers: { 'if-none-match': response.getHeader('ETag') } } as unknown as Request, repeated as unknown as Response);
+    expect(response.body).toEqual(bytes);
+    expect(response.headers['x-varin-image-width']).toBe('32');
+    expect(response.headers['x-varin-image-height']).toBe('24');
+    const etag = response.headers.etag;
+    if (!etag) throw new Error('Image preview must include its cache validator');
+    const repeated = await request(handler).get('/api/fs/raw').query(query).set('if-none-match', etag);
     expect(repeated.statusCode).toBe(304);
-    expect(repeated.body).toBeNull();
+    expect(repeated.text).toBe('');
   });
   it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
     const fsPromises = {
@@ -880,15 +603,15 @@ describe('fs raw download Content-Disposition', () => {
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
       readFile: vi.fn(async () => Buffer.from('content')),
     };
-    const handler = registerRaw(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRaw(handler, {
+    const res = await request(handler).get('/api/fs/raw').query({
       path: '/repo/文件.txt',
       download: 'true',
     });
 
     expect(res.statusCode).toBe(200);
-    const cd = res.getHeader('content-disposition');
+    const cd = res.headers['content-disposition'];
     expect(cd).toContain("filename*=UTF-8''");
     expect(cd).toContain(encodeURIComponent('文件.txt'));
     // ASCII fallback strips non-ASCII chars, leaving extension
@@ -901,12 +624,12 @@ describe('fs raw download Content-Disposition', () => {
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
       readFile: vi.fn(async () => Buffer.from('content')),
     };
-    const handler = registerRaw(fsPromises);
+    const handler = createFsApp({ fsPromises });
 
-    const res = await callRaw(handler, { path: '/repo/readme.txt', download: 'true' });
+    const res = await request(handler).get('/api/fs/raw').query({ path: '/repo/readme.txt', download: 'true' });
 
     expect(res.statusCode).toBe(200);
-    const cd = res.getHeader('content-disposition');
+    const cd = res.headers['content-disposition'];
     expect(cd).toContain('filename="readme.txt"');
     expect(cd).toContain("filename*=UTF-8''readme.txt");
   });

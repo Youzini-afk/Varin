@@ -2,10 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Express, Request, Response } from 'express';
-
-type RouteHandler = (request: Request, response: Response) => unknown;
-type RouteInvoker = (request: Record<string, unknown>, response: object) => unknown;
+import express from 'express';
+import request from 'supertest';
 interface WriterRecord {
   close: ReturnType<typeof vi.fn>;
   markMutated: ReturnType<typeof vi.fn>;
@@ -41,52 +39,11 @@ vi.mock('./index.js', () => ({
 
 const { registerGitRoutes } = await import('./routes.js');
 
-const createRouteRegistry = () => {
-  const routes = new Map<string, RouteHandler>();
-
-  return {
-    app: {
-      get(routePath: unknown, handler: RouteHandler) {
-        routes.set(`GET ${routePath}`, handler);
-      },
-      post(routePath: unknown, handler: RouteHandler) {
-        routes.set(`POST ${routePath}`, handler);
-      },
-      put(routePath: unknown, handler: RouteHandler) {
-        routes.set(`PUT ${routePath}`, handler);
-      },
-      delete(routePath: unknown, handler: RouteHandler) {
-        routes.set(`DELETE ${routePath}`, handler);
-      },
-    },
-    getRoute(method: string, routePath: unknown): RouteInvoker {
-      const handler = routes.get(`${method} ${routePath}`);
-      if (!handler) throw new Error(`Route is not registered: ${method} ${String(routePath)}`);
-      return (request, response) => handler(request as unknown as Request, response as Response);
-    },
-  };
-};
-
-const createMockResponse = () => {
-  let statusCode = 200;
-  let body: unknown = null;
-
-  return {
-    status(code: number) {
-      statusCode = code;
-      return this;
-    },
-    json(payload: unknown) {
-      body = payload;
-      return this;
-    },
-    get statusCode() {
-      return statusCode;
-    },
-    get body() {
-      return body;
-    },
-  };
+const createGitApp = (options: Parameters<typeof registerGitRoutes>[1] = {}) => {
+  const app = express();
+  app.use(express.json());
+  registerGitRoutes(app, options);
+  return app;
 };
 
 describe('git routes index mutations', () => {
@@ -123,17 +80,13 @@ describe('git routes index mutations', () => {
     });
 
     try {
-      const { app, getRoute } = createRouteRegistry();
-      registerGitRoutes(app as unknown as Express);
-      const response = createMockResponse();
+      const app = createGitApp();
 
-      await getRoute('POST', '/api/git/clone')({
-        body: {
+      const response = await request(app).post('/api/git/clone').send({
           remoteUrl: 'git@example.com:team/demo.git',
           destinationPath: destination,
           gitIdentityId: 'work',
-        },
-      }, response);
+      });
 
       expect(response.statusCode).toBe(200);
       expect(response.body).toEqual({ success: true, path: normalizedDestination, output: 'cloned' });
@@ -148,87 +101,33 @@ describe('git routes index mutations', () => {
   });
 
   it('rejects remote-ext clone URLs before reaching Git', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
+    const app = createGitApp();
 
-    await getRoute('POST', '/api/git/clone')({
-      body: {
+    const response = await request(app).post('/api/git/clone').send({
         remoteUrl: 'ext::sh -c calc',
         destinationPath: '/projects/demo',
-      },
-    }, response);
+    });
 
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ error: 'ext:: git remotes are not supported' });
     expect(gitLibraries.cloneRepository).not.toHaveBeenCalled();
   });
 
-  it('accepts legacy stage path payloads', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
-
-    await getRoute('POST', '/api/git/stage')(
-      { query: { directory: '/repo' }, body: { path: 'a.ts' } },
-      response,
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(gitLibraries.stageFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
-  });
-
-  it('accepts bulk stage paths payloads', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
-
-    await getRoute('POST', '/api/git/stage')(
-      { query: { directory: '/repo' }, body: { paths: ['a.ts', 'b.ts'] } },
-      response,
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(gitLibraries.stageFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
-  });
-
-  it('accepts legacy unstage path payloads', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
-
-    await getRoute('POST', '/api/git/unstage')(
-      { query: { directory: '/repo' }, body: { path: 'a.ts' } },
-      response,
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(gitLibraries.unstageFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
-  });
-
-  it('accepts bulk unstage paths payloads', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
-
-    await getRoute('POST', '/api/git/unstage')(
-      { query: { directory: '/repo' }, body: { paths: ['a.ts', 'b.ts'] } },
-      response,
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(gitLibraries.unstageFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
+  it.each([
+    ['stage', 'stageFiles'],
+    ['unstage', 'unstageFiles'],
+  ] as const)('accepts legacy and bulk %s paths', async (route, method) => {
+    const app = createGitApp();
+    for (const body of [{ path: 'a.ts' }, { paths: ['a.ts', 'b.ts'] }]) {
+      await request(app).post(`/api/git/${route}`).query({ directory: '/repo' }).send(body).expect(200);
+      expect(gitLibraries[method]).toHaveBeenLastCalledWith('/repo', body.paths ?? [body.path]);
+    }
   });
 
   it('rejects invalid path payloads before calling git', async () => {
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express);
-    const response = createMockResponse();
+    const app = createGitApp();
 
-    await getRoute('POST', '/api/git/stage')(
-      { query: { directory: '/repo' }, body: { paths: [' ', null] } },
-      response,
-    );
+    const response = await request(app).post('/api/git/stage').query({ directory: '/repo' }).send({ paths: [' ', null] });
 
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ error: 'path parameter is required' });
@@ -243,13 +142,9 @@ describe('git routes index mutations', () => {
     const documents = {
       registerWriterForScope: vi.fn().mockResolvedValue(writer),
     };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
+    const app = createGitApp({ documents });
 
-    await getRoute('POST', '/api/git/stage')(
-      { query: { directory: '/repo' }, body: { path: 'a.ts' } },
-      createMockResponse(),
-    );
+    await request(app).post('/api/git/stage').query({ directory: '/repo' }).send({ path: 'a.ts' }).expect(200);
 
     expect(documents.registerWriterForScope).toHaveBeenCalledWith(
       '/repo',
@@ -268,14 +163,9 @@ describe('git routes index mutations', () => {
     const documents = {
       registerWriterForScope: vi.fn().mockRejectedValue(error),
     };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
-    const response = createMockResponse();
+    const app = createGitApp({ documents });
 
-    await getRoute('POST', '/api/git/stage')(
-      { query: { directory: '/repo' }, body: { path: 'a.ts' } },
-      response,
-    );
+    const response = await request(app).post('/api/git/stage').query({ directory: '/repo' }).send({ path: 'a.ts' });
 
     expect(gitLibraries.stageFiles).not.toHaveBeenCalled();
     expect(response.statusCode).toBe(409);
@@ -291,17 +181,13 @@ describe('git routes index mutations', () => {
     const documents = {
       registerWriterForScope: vi.fn().mockRejectedValue(error),
     };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
-    const response = createMockResponse();
+    const app = createGitApp({ documents });
 
     try {
-      await getRoute('POST', '/api/git/clone')({
-        body: {
+      const response = await request(app).post('/api/git/clone').send({
           remoteUrl: 'https://example.com/demo.git',
           destinationPath: path.join(parent, 'demo'),
-        },
-      }, response);
+      });
 
       expect(response.statusCode).toBe(409);
       expect(gitLibraries.cloneRepository).not.toHaveBeenCalled();
@@ -315,13 +201,9 @@ describe('git routes index mutations', () => {
     gitLibraries.isGitRepository.mockResolvedValue(true);
     gitLibraries.getStatus.mockResolvedValue({ files: [] });
     const documents = { registerWriterForScope: vi.fn() };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
+    const app = createGitApp({ documents });
 
-    await getRoute('GET', '/api/git/status')(
-      { query: { directory: '/repo' } },
-      createMockResponse(),
-    );
+    await request(app).get('/api/git/status').query({ directory: '/repo' }).expect(200);
 
     expect(documents.registerWriterForScope).not.toHaveBeenCalled();
   });
@@ -332,11 +214,9 @@ describe('git routes index mutations', () => {
     gitLibraries.getStatus.mockResolvedValue(status);
     const onStatus = vi.fn(() => { throw new Error('observer failed'); });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { onStatus });
-    const response = createMockResponse();
+    const app = createGitApp({ onStatus });
     try {
-      await getRoute('GET', '/api/git/status')({ query: { directory: '/repo' } }, response);
+      const response = await request(app).get('/api/git/status').query({ directory: '/repo' });
       await Promise.resolve();
       await Promise.resolve();
       expect(response.statusCode).toBe(200);
@@ -363,14 +243,9 @@ describe('git routes index mutations', () => {
     };
     gitLibraries.createWorktree.mockResolvedValue(created);
     const documents = { registerWriterForScope: vi.fn() };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
-    const response = createMockResponse();
+    const app = createGitApp({ documents });
 
-    await getRoute('POST', '/api/git/worktrees')(
-      { query: { directory: '/repo' }, body: input },
-      response,
-    );
+    const response = await request(app).post('/api/git/worktrees').query({ directory: '/repo' }).send(input);
 
     expect(response.body).toEqual(created);
     expect(gitLibraries.createWorktree).toHaveBeenCalledWith('/repo', input, {
@@ -393,17 +268,9 @@ describe('git routes index mutations', () => {
         return record;
       }),
     };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
-    const response = createMockResponse();
+    const app = createGitApp({ documents });
 
-    await getRoute('DELETE', '/api/git/worktrees')(
-      {
-        query: { directory: '/repo' },
-        body: { directory: '/worktrees/feature', deleteLocalBranch: true },
-      },
-      response,
-    );
+    const response = await request(app).delete('/api/git/worktrees').query({ directory: '/repo' }).send({ directory: '/worktrees/feature', deleteLocalBranch: true });
 
     expect(response.body).toEqual({ success: true });
     expect(gitLibraries.removeWorktree).toHaveBeenCalledWith('/repo', {
@@ -437,14 +304,9 @@ describe('git routes index mutations', () => {
         return record;
       }),
     };
-    const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app as unknown as Express, { documents });
-    const response = createMockResponse();
+    const app = createGitApp({ documents });
 
-    await getRoute('POST', '/api/git/integrate/run')(
-      { body: { plan } },
-      response,
-    );
+    const response = await request(app).post('/api/git/integrate/run').send({ plan });
 
     expect(response.body).toEqual({ kind: 'success', moved: 1 });
     expect(gitLibraries.integrateWorktreeCommits).toHaveBeenCalledWith(plan);

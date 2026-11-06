@@ -71,7 +71,7 @@ jobs:
           node-version: 24
       # No install/build: block consumers of an invalid production graph while
       # unrelated source and native-owner checks still report their results.
-      - run: node --test scripts/cloud-runtime-layout.test.js
+      - run: node scripts/build-cloud-runtime.mjs --check-lock
 
   portable-source:
     name: Portable source checks
