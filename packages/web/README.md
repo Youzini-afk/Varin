@@ -93,3 +93,35 @@ configuration and must not be placed in package archives or build arguments.
 
 [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Incorporated permissive
 material retains the notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Stop and admission contract
+
+`stop()` synchronously withdraws readiness and fences new HTTP writes, native execution admissions
+(including requests still waiting for a transport credit) and terminal input. `/health` returns 503
+with `ready: false` while draining. `/live` remains a lightweight HTTP liveness check,
+without waiting for identity storage or kernel readiness. Known read/observation and cancellation/release routes stay
+available while their original owners drain. New effectful WebSocket upgrades are fenced at each
+owner and rechecked after authentication waits. Effect-capable generic peer, preview and service-forward
+bridges close on drain rather than forwarding new bytes. The realtime observation bridge retains
+original pull/cancel and approved reads, but refuses new provider-acquiring Surface leases. Closing
+a bridge is not an executor-stop receipt and does not release the remote execution owner. Unknown commands and side-effecting GET login/key
+routes are refused. This fence does not roll back requests already inside their original owners.
+Direct HTTP observation streams remain open during owner drain and end at the final transport
+teardown, so an idle SSE observer cannot prevent an otherwise completed stop.
+
+`VARIN_SHUTDOWN_TIMEOUT_MS` is one process-wide stop budget (default 10000 milliseconds, positive
+integer up to 2147483647). Every Host stop phase, native kernel drain and final HTTP close consumes
+that same monotonic deadline. Configure the container/service supervisor's grace period above this
+budget. A failed or unresponsive owner ends the graceful sequence with `shutdown-incomplete`; it
+does not license closing dependent databases, dropping native workspace writers, replaying an
+unknown effect, or reporting that cancellation completed. An embedding caller receives the failure
+and retains responsibility for terminating the process. The foreground CLI exits 1 on incomplete
+stop; a successful SIGTERM stop keeps its existing exit code 143.
+
+`[Shutdown]` JSON records report `outcome`, fixed `owner`/`reason`, `elapsedMs` and configured
+`deadlineMs`, without request content or owner identities. This budget is a stop deadline, not a
+queue TTL, model execution limit or observation timeout. Caller cancellation of a queued request
+remains distinct from an admitted effect's original completion. No universal model-stream deadline
+or comprehensive queue/execution/observation budget has been introduced. Individual owners retain
+their existing cancellation and actual-exit contracts; deadline expiry is a crash-recovery path,
+not proof of a clean checkpoint. The supervisor must also bound a stalled JavaScript event loop.

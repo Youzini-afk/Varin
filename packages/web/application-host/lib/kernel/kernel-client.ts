@@ -1,3 +1,4 @@
+import { ShutdownDeadline } from '../shutdown-runtime.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { ModelProtocolBridge, type ModelProtocolOwner, type PrivateModelProtocolResponse } from './model-protocol-bridge.js';
 import { ManagedSourceBridge, type ManagedSourceOwner, type PrivateManagedSourceFrame } from './managed-source-bridge.js';
@@ -615,6 +616,15 @@ const canonicalStoragePath = (value: string): string => {
   }
 };
 
+// Explicit execution entry points, not a blanket mutation ban: original effect
+// completions, cancellation, storage writes and grant cleanup must still drain.
+const NEW_EXECUTION_METHODS = new Set<KernelMethod>([
+  'runtime.input.submit', 'runtime.input.enqueue', 'runtime.input.sendNow', 'runtime.run.start', 'runtime.run.resume',
+  'runtime.child.user.accept', 'runtime.child.continuation.accept', 'runtime.bot.work.admit',
+  'runtime.calendar.admit', 'runtime.calendar.run', 'runtime.context_job.create', 'runtime.context_job.resume',
+  'runtime.goal.start', 'runtime.messages.send',
+]);
+
 export class KernelClient {
   nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
   private nativeWorkspaceLifetime = false;
@@ -678,6 +688,15 @@ export class KernelClient {
     return () => { this.readyListeners.delete(listener); };
   }
   private closed = false;
+  private draining = false;
+  private readonly newExecutionAdmission = new AbortController();
+  /** Reject new execution admissions, while retaining control/receipts for original owners. */
+  beginDraining(): void { this.draining = true; this.newExecutionAdmission.abort(); }
+  private assertAdmissionOpen(method: KernelMethod): void {
+    if (this.draining && NEW_EXECUTION_METHODS.has(method)) throw new KernelRequestError(
+      new KernelClientError({ code: 'host-draining', message: 'Host is draining; new execution is not accepted', retryable: true }),
+      method, 'not_dispatched');
+  }
   private epoch: string | null = null;
   private readonly clientToken = Symbol("varin-kernel-client");
   private managementGrant: InternalGrantHandle | null = null;
@@ -1240,11 +1259,21 @@ export class KernelClient {
   }
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
+    this.assertAdmissionOpen(method);
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled)
+    const newExecution = NEW_EXECUTION_METHODS.has(method);
+    const queueSignal = newExecution
+      ? options.signal ? AbortSignal.any([options.signal, this.newExecutionAdmission.signal]) : this.newExecutionAdmission.signal
+      : options.signal;
+    // The drain signal only expires queue admission. Never attach it to an
+    // already-dispatched operation or mistake rejection for an executor stop.
+    const queueCancelled = () => newExecution && this.draining
+      ? new KernelClientError({ code: 'host-draining', message: 'Host stopped execution admission', retryable: true }) : cancelled();
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(queueSignal, queueCancelled)
       .catch(error => { throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched'); });
     let admitted = false;
     try {
+      this.assertAdmissionOpen(method);
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
       if (options.signal?.aborted) throw cancelled();
       const id = randomUUID();
@@ -1296,6 +1325,7 @@ export class KernelClient {
 
   /** Native authority management. Never expose this Host-owned channel to tool grants. */
   async agentRuntimeRequest<T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal, options: { settleCancellation?: boolean } = {}): Promise<T> {
+    this.assertAdmissionOpen(method);
     if (!this.handshakeResult) await this.start();
     return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true, ...options });
   }
@@ -1992,12 +2022,23 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("storage.record.release", params, { signal, grant });
   }
 
-  close(): Promise<void> {
-    this.closePromise ??= this.closeInternal().catch(error => { this.closePromise = undefined; throw error; });
+  close(deadline?: ShutdownDeadline): Promise<void> {
+    this.closePromise ??= this.closeInternal(deadline).catch(error => {
+      // A Host deadline is final: do not restart destructive cleanup after it.
+      if (!deadline) this.closePromise = undefined;
+      throw error;
+    });
     return this.closePromise;
   }
 
-  private async closeInternal(): Promise<void> {
+  private async closeInternal(deadline?: ShutdownDeadline): Promise<void> {
+    // Standalone native-workspace owners retain their historical actual-drain
+    // lifetime. Host shutdown supplies its one deadline, without killing or
+    // detaching an undrained native writer when that observation expires.
+    const budget = deadline ?? (this.nativeWorkspaceLifetime ? undefined : new ShutdownDeadline(20_000));
+    const step = <T>(name: string, work: () => Promise<T>): Promise<T> => budget ? budget.run(name, work) : work();
+    budget?.assertRemaining('kernel.close');
+    this.beginDraining();
     this.closed = true;
     this.credentialBridge.close();
     this.modelProtocolBridge.close();
@@ -2017,36 +2058,29 @@ export class KernelClient {
     this.controlWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();
     const child = this.child;
-    if (!child) { await this.transport?.close(); this.transport = undefined; return; }
-    const bounded = async (work: Promise<unknown>): Promise<boolean> => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
-      } finally { if (timer) clearTimeout(timer); }
-    };
-    if (this.nativeWorkspaceLifetime && this.handshakeResult && !child.killed) {
-      // Send cancellation/drain through the control lane immediately. Waiting
-      // for every data request first can strand a filesystem callback. A failed
-      // cleanup keeps this original kernel and its transport for explicit retry.
-      await this.requestRaw('kernel.shutdown', {}, { grant: this.managementGrant ?? undefined });
-    } else if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()])) && this.handshakeResult && !child.killed) {
-      await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
+    if (!child) {
+      await step('kernel.transport.close', async () => { await this.transport?.close(); });
+      this.transport = undefined;
+      return;
     }
-    await this.transport?.close();
-    this.transport = undefined;
-    const waitForExit = (): Promise<boolean> => new Promise(resolve => {
-      if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
-      const onExit = () => { clearTimeout(timer); resolve(true); };
-      const timer = setTimeout(() => { child.removeListener("exit", onExit); resolve(false); }, 5_000);
-      child.once("exit", onExit);
-    });
-    if (child.exitCode === null && child.signalCode === null) {
-      if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
-      if (!await waitForExit()) {
-        child.kill();
-        if (!await waitForExit()) throw new KernelClientError({ code: "kernel-stop-failed", message: "Rust kernel did not exit after termination", retryable: true });
+    if (this.nativeWorkspaceLifetime && this.handshakeResult && !child.killed) {
+      // Send drain on the control lane before waiting for data requests; a native
+      // filesystem callback may require that control request to finish.
+      await step('kernel.native-drain', () => this.requestRaw('kernel.shutdown', {}, { grant: this.managementGrant ?? undefined }));
+    } else {
+      await step('kernel.requests.drain', () => Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()]));
+      if (this.handshakeResult && !child.killed) {
+        await step('kernel.shutdown', () => this.requestRaw('kernel.shutdown', {}, { grant: this.managementGrant ?? undefined }));
       }
     }
+    // Never reach this teardown after a timeout or a rejected native drain.
+    await step('kernel.transport.close', async () => { await this.transport?.close(); });
+    this.transport = undefined;
+    await step('kernel.exit', () => new Promise<void>(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+      child.once('exit', () => resolve());
+      if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
+    }));
     if (this.child === child) this.child = null;
   }
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import http from 'node:http';
+import { once } from 'node:events';
 import type { IncomingHttpHeaders, IncomingMessage, Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 
@@ -22,6 +23,7 @@ const closeServer = async (server: Server): Promise<void> => {
 };
 
 interface ProxyServerOptions {
+  isDraining?: () => boolean;
   apiBaseUrl: string;
   authToken?: string | null;
   originAllowed?: boolean;
@@ -33,12 +35,13 @@ interface ProxyServerWithAuthOptions {
   uiAuthController: NonNullable<ReturnType<NonNullable<Parameters<typeof attachRealtimeProxy>[0]['getUiAuthController']>>>;
 }
 
-const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true }: ProxyServerOptions) => {
+const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true, isDraining = () => false }: ProxyServerOptions) => {
   const app = express();
   const server = http.createServer(app);
   const runtime = attachRealtimeProxy({
     app,
     server,
+    isDraining,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl,
       requestHeaders: { 'X-Proxy-Auth': 'secret' },
@@ -49,7 +52,7 @@ const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllo
     isRequestOriginAllowed: async () => originAllowed,
   });
   const origin = await listen(server);
-  return { origin, runtime };
+  return { origin, runtime, server };
 };
 
 const startProxyServerWithAuthController = async ({ apiBaseUrl, uiAuthController, originAllowed = true }: ProxyServerWithAuthOptions) => {
@@ -121,6 +124,119 @@ describe('realtime proxy URL builders', () => {
 });
 
 describe('realtime proxy', () => {
+  it('refuses an authentication-in-progress upgrade after the proxy has stopped', async () => {
+    let entered!: () => void, release!: () => void;
+    const authenticating = new Promise<void>(resolve => { entered = resolve; });
+    const app = express(), server = http.createServer(app);
+    const runtime = attachRealtimeProxy({ app, server,
+      getDesktopRuntimeConfig: () => ({ apiBaseUrl: 'http://127.0.0.1:1', requestHeaders: { 'X-Proxy-Auth': 'test' } }),
+      getUiAuthController: () => ({ ensureSessionToken: async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); return true; } }),
+      isRequestOriginAllowed: () => true });
+    const origin = await listen(server);
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, 'ws://127.0.0.1:1/api/terminal/ws')); client.on('error', () => {});
+    try {
+      const refused = new Promise<number>((resolve, reject) => {
+        client.once('open', () => reject(new Error('Stopped proxy accepted upgrade')));
+        client.once('unexpected-response', (_req, response) => { response.resume(); resolve(response.statusCode!); });
+      });
+      await authenticating; runtime.stop(); release(); expect(await refused).toBe(503);
+    } finally { release?.(); client.terminate(); runtime.stop(); }
+  });
+
+  it('fences new commands on an established effectful bridge after draining begins', async () => {
+    let draining = false;
+    const received: string[] = [];
+    const upstreamServer = http.createServer(), upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', socket => socket.on('message', data => { received.push(String(data)); socket.send(String(data)); }));
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime, server } = await startProxyServer({ apiBaseUrl: upstreamOrigin, isDraining: () => draining });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin.replace('http:', 'ws:')}/api/terminal/ws`));
+    try {
+      await once(client, 'open');
+      const receipt = once(client, 'message'); client.send('original'); await receipt;
+      draining = true;
+      const closed = once(client, 'close'); client.send('NEW_COMMAND_WHILE_DRAINING'); await closed;
+      expect(received).toEqual(['original']);
+      runtime.stop();
+      await closeServer(server);
+    } finally { client.terminate(); runtime.stop(); for (const socket of upstreamWs.clients) socket.terminate(); upstreamWs.close(); }
+  });
+
+  it('keeps original observation controls while denying new Surface lease opens, then closes both bridge ends on stop', async () => {
+    let draining = false;
+    const received: unknown[] = [];
+    const upstreamServer = http.createServer(), upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', socket => socket.on('message', data => { received.push(JSON.parse(String(data))); socket.send(data); }));
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime, server } = await startProxyServer({ apiBaseUrl: upstreamOrigin, isDraining: () => draining });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin.replace('http:', 'ws:')}/api/varin/observations/ws`));
+    const exchange = async (frame: unknown) => { const response = once(client, 'message'); client.send(JSON.stringify(frame)); return JSON.parse(String((await response)[0])); };
+    try {
+      await once(client, 'open');
+      const lease = { type: 'open', id: 1, method: 'POST', path: '/api/varin/extensions/v1/services/lease', headers: {}, body: '{}' };
+      expect(await exchange(lease)).toEqual(lease);
+      draining = true; runtime.beginDraining();
+      expect(await exchange({ ...lease, id: 2 })).toMatchObject({ type: 'error', id: 2 });
+      const read = { type: 'open', id: 3, method: 'POST', path: '/api/varin/extensions/v1/host-state/wait', headers: {}, body: '{}' };
+      expect(await exchange(read)).toEqual(read);
+      expect(await exchange({ type: 'pull', id: 1 })).toEqual({ type: 'pull', id: 1 });
+      expect(await exchange({ type: 'cancel', id: 1 })).toEqual({ type: 'cancel', id: 1 });
+      expect(received).toHaveLength(4);
+      const clientClosed = once(client, 'close');
+      const upstreamClosed = Promise.all([...upstreamWs.clients].map(socket => once(socket, 'close')));
+      runtime.stop(); await clientClosed; await upstreamClosed;
+      expect(client.readyState).toBe(WebSocket.CLOSED);
+      await closeServer(server);
+    } finally { client.terminate(); runtime.stop(); for (const socket of upstreamWs.clients) socket.terminate(); upstreamWs.close(); }
+  });
+
+  it('does not flush a command queued behind an unfinished upstream handshake after draining', async () => {
+    let draining = false, accept!: () => void;
+    let upgraded!: () => void;
+    const waiting = new Promise<void>(resolve => { upgraded = resolve; });
+    const received: string[] = [];
+    const upstreamServer = http.createServer(), upstreamWs = new WebSocketServer({ noServer: true });
+    upstreamServer.on('upgrade', (request, socket, head) => { accept = () => upstreamWs.handleUpgrade(request, socket, head, ws => upstreamWs.emit('connection', ws)); upgraded(); });
+    upstreamWs.on('connection', socket => socket.on('message', data => { received.push(String(data)); }));
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin, isDraining: () => draining });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin.replace('http:', 'ws:')}/api/terminal/ws`));
+    try {
+      await once(client, 'open'); await waiting;
+      await new Promise<void>((resolve, reject) => client.send('queued command', error => error ? reject(error) : resolve()));
+      // A client ping/pong round trip establishes that the proxy consumed the
+      // earlier frame while its upstream handshake was still held.
+      const pong = once(client, 'pong'); client.ping(); await pong;
+      draining = true;
+      const closed = once(client, 'close'); accept(); await closed;
+      expect(received).toEqual([]);
+    } finally { client.terminate(); runtime.stop(); for (const socket of upstreamWs.clients) socket.terminate(); upstreamWs.close(); }
+  });
+
+  it('ends existing SSE and its upstream observer on stop without reopening an upstream', async () => {
+    let upstreamClosed!: () => void;
+    const closed = new Promise<void>(resolve => { upstreamClosed = resolve; });
+    let requests = 0;
+    const upstreamServer = http.createServer((_req, res) => {
+      requests += 1;
+      res.once('close', upstreamClosed);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: ready\n\n');
+    });
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const url = buildRealtimeProxySseUrl(origin, `${upstreamOrigin}/api/varin/events`);
+      const response = await fetch(url), reader = response.body!.getReader();
+      expect((await reader.read()).done).toBe(false);
+      runtime.stop();
+      expect((await reader.read()).done).toBe(true);
+      await closed;
+      expect(await (await fetch(url)).text()).toBe('');
+      expect(requests).toBe(1);
+    } finally { runtime.stop(); upstreamServer.closeAllConnections(); }
+  });
+
   it('forwards mounted SSE only within the configured Host path', async () => {
     const upstream = await startSseUpstream({ path: '/base/api/varin/events' });
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstream.origin}/base` });

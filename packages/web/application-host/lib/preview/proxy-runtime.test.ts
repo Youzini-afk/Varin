@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { once } from 'node:events';
+import { WebSocket, WebSocketServer } from 'ws';
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -732,4 +734,60 @@ describe('preview CSP rewrite', () => {
     expect(rewritePreviewCspHeader('', 'abc123')).toBe('');
     expect(rewritePreviewCspHeader(undefined, 'abc123')).toBe(undefined);
   });
+});
+
+
+it('refuses a new preview upgrade during draining before resolving or connecting an upstream', async () => {
+  const app = express();
+  const server = createServer(app);
+  const runtime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
+  runtime.attach(app, {
+    server, express, uiAuthController: null, isDraining: () => true,
+    isRequestOriginAllowed: async () => true,
+    rejectWebSocketUpgrade: (socket, status) => { socket.end(`HTTP/1.1 ${status} Unavailable\r\nConnection: close\r\n\r\n`); },
+  });
+  const port = await listen(server);
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/api/preview/proxy/0000000000000000/hmr`);
+  socket.on('error', () => {});
+  try {
+    const status = await new Promise<number>((resolve, reject) => {
+      socket.once('open', () => reject(new Error('Unexpected preview upgrade')));
+      socket.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode!); });
+    });
+    expect(status).toBe(503);
+  } finally {
+    socket.terminate(); server.close(); await once(server, 'close');
+  }
+});
+
+it('closes an established preview bridge on drain and cannot bypass admission after a prior HTTP request', async () => {
+  const upstream = createServer((_req, res) => { res.setHeader('content-type', 'text/plain'); res.end('ready'); });
+  const ws = new WebSocketServer({ server: upstream });
+  ws.on('connection', socket => socket.on('message', data => socket.send(data)));
+  const app = express(), server = createServer(app);
+  const runtime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
+  runtime.attach(app, { server, express, uiAuthController: null,
+    isRequestOriginAllowed: async () => true,
+    rejectWebSocketUpgrade: (socket, status) => { socket.end(`HTTP/1.1 ${status} Unavailable\r\nConnection: close\r\n\r\n`); },
+  });
+  const upstreamPort = await listen(upstream), port = await listen(server);
+  let client: WebSocket | undefined;
+  try {
+    const registration = await fetch(`http://127.0.0.1:${port}/api/preview/targets`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `http://127.0.0.1:${upstreamPort}/` }) });
+    const { proxyBasePath, previewToken } = requirePreviewTargetRegistration(await registration.json());
+    const route = `${proxyBasePath}/hmr?varin_preview_token=${previewToken}`;
+    expect(await (await fetch(`http://127.0.0.1:${port}${route}`)).text()).toBe('ready');
+    client = new WebSocket(`ws://127.0.0.1:${port}${route}`); await once(client, 'open');
+    const reply = once(client, 'message'); client.send('original'); expect(String((await reply)[0])).toBe('original');
+    const closed = once(client, 'close'), upstreamClosed = Promise.all([...ws.clients].map(peer => once(peer, 'close')));
+    runtime.beginDraining(); await closed; await upstreamClosed;
+    const refused = new WebSocket(`ws://127.0.0.1:${port}${route}`); refused.on('error', () => {});
+    const status = await new Promise<number>((resolve, reject) => {
+      refused.once('open', () => { refused.terminate(); reject(new Error('Preview admission bypassed')); });
+      refused.once('unexpected-response', (_req, response) => { response.resume(); refused.terminate(); resolve(response.statusCode!); });
+    });
+    expect(status).toBe(503);
+    runtime.stop(); await close(server);
+  } finally { client?.terminate(); runtime.stop(); for (const peer of ws.clients) peer.terminate(); ws.close(); server.closeAllConnections(); server.close(); await close(upstream); }
 });

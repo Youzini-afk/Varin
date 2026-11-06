@@ -1,5 +1,6 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
 
 import type { NextFunction, RequestHandler } from 'express';
 import type { Options as ProxyOptions, RequestHandler as ProxyRequestHandler } from 'http-proxy-middleware';
@@ -145,6 +146,7 @@ interface PreviewProxyRuntimeDependencies {
 }
 
 interface PreviewAttachDependencies {
+  isDraining?: () => boolean;
   server: PreviewUpgradeServer;
   express: PreviewExpressRuntime;
   uiAuthController: PreviewUiAuthController | null;
@@ -1445,6 +1447,13 @@ export const createPreviewProxyRuntime = ({
 }: PreviewProxyRuntimeDependencies) => {
   const targets = new Map<string, PreviewTargetEntry>();
   let sweepTimer: ReturnType<typeof setInterval> | null = null;
+  let draining = false;
+  const sockets = new Set<Duplex>();
+  const rememberSocket = (socket: Duplex) => {
+    if (draining) { socket.destroy(); return; }
+    sockets.add(socket); socket.once('close', () => sockets.delete(socket));
+  };
+  const beginDraining = () => { draining = true; for (const socket of sockets) socket.destroy(); sockets.clear(); };
 
   const now = (): number => Date.now();
 
@@ -1564,6 +1573,7 @@ export const createPreviewProxyRuntime = ({
   };
 
   const attach = (app: PreviewApplication, {
+    isDraining = () => false,
     server,
     express,
     uiAuthController,
@@ -1668,15 +1678,11 @@ export const createPreviewProxyRuntime = ({
     const proxy = createProxyMiddleware({
       target: 'http://127.0.0.1',
       changeOrigin: true,
-      ws: true,
+      // Only our explicit authenticated/admission-checked upgrade handler may
+      // proxy WS. An automatic listener after the first HTTP request bypasses it.
+      ws: false,
       selfHandleResponse: true,
-      // Restrict the proxy (especially its auto-attached `upgrade` listener,
-      // which is registered globally on the underlying HTTP server when
-      // `ws: true`) to preview paths. Without this, every WebSocket upgrade
-      // on the server (e.g. `/api/terminal/ws`) gets proxied to
-      // `http://127.0.0.1` and tears the socket down with ECONNREFUSED.
-      //
-      // We use a function so the same filter handles both cases:
+      // Keep the same preview-only filter for both transports:
       //   - HTTP requests through Express, where `req.url` has been stripped
       //     of the `/api/preview/proxy` mount-point, so we check `originalUrl`.
       //   - Raw upgrade events from the HTTP server, where `req.url` still
@@ -1708,6 +1714,7 @@ export const createPreviewProxyRuntime = ({
         return `${strippedPath}${withoutUrlAuthToken}`;
       },
       on: {
+        open: rememberSocket,
         proxyReq: (proxyReq, req) => {
           applyPreviewPassthroughRequestHeaders(req, proxyReq);
           // Keep local dev servers from receiving Varin credentials.
@@ -1841,6 +1848,9 @@ export const createPreviewProxyRuntime = ({
     app.use('/api/preview/proxy', requirePreviewTarget, proxy);
 
     server.on('upgrade', (req, socket, head) => {
+      if ((draining || isDraining()) && req.url?.startsWith('/api/preview/proxy/')) {
+        rejectWebSocketUpgrade(socket, 503, 'Host draining'); return;
+      }
       const resolved = resolveTargetFromRequest(req);
       if (!resolved.ok) {
         return;
@@ -1856,6 +1866,8 @@ export const createPreviewProxyRuntime = ({
             }
           }
 
+          if (draining || isDraining()) { rejectWebSocketUpgrade(socket, 503, 'Host draining'); return; }
+          rememberSocket(socket);
           // Rewrite req.url to what the dev server expects.
           const rawUrl = req.url || '';
           req.originalUrl = rawUrl;
@@ -1879,5 +1891,7 @@ export const createPreviewProxyRuntime = ({
 
   return {
     attach,
+    beginDraining,
+    stop: () => { beginDraining(); if (sweepTimer) clearInterval(sweepTimer); sweepTimer = null; targets.clear(); },
   };
 };

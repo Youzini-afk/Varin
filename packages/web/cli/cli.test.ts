@@ -14,7 +14,7 @@ import { formatGoal } from './lib/commands-schedule.js';
 import { formatModelsOutput } from './lib/commands-models.js';
 import { formatProjectLine } from './lib/commands-projects.js';
 import { resolveTargetPort } from './lib/cli-api-target.js';
-import { createServeCommand } from './lib/commands-serve.js';
+import { createServeCommand, createForegroundShutdown } from './lib/commands-serve.js';
 import { createUpdateCommand } from './lib/commands-update.js';
 import { terminateProcessTree } from './lib/cli-process.js';
 import type { FetchLike, FetchResponseLike } from './lib/cli-http.js';
@@ -1270,5 +1270,22 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+});
+
+
+describe('foreground stop outcome', () => {
+  it.each([{ fails: false, code: 143 }, { fails: true, code: 1 }])('uses exit $code for SIGTERM when incomplete=$fails', async ({ fails, code }) => {
+    const stop = vi.fn(async () => { if (fails) throw new Error('original writer is still alive'); });
+    const cleanup = vi.fn(), exit = vi.fn();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const shutdown = createForegroundShutdown({ stop, cleanup, exit });
+      const first = shutdown('SIGTERM');
+      expect(shutdown('SIGTERM')).toBe(first);
+      await first;
+      expect(stop).toHaveBeenCalledOnce(); expect(cleanup).toHaveBeenCalledOnce();
+      expect(exit).toHaveBeenCalledWith(code);
+    } finally { error.mockRestore(); }
   });
 });

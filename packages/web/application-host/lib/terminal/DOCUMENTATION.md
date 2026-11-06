@@ -72,6 +72,6 @@ bun run test:kernel
 Rejected native completion projects `status: error` / `PROCESS_UNAVAILABLE`, not `exit`.
 Programmatic `onError` / `waitForExit` report the same failure. Harness work fails explicitly while
 its command writer stays retained. Reconnect sees the error in the snapshot. Unknown exit codes
-never become zero; an uncertain launch never falls back to another interpreter. Shutdown stops new
-admissions, drains pending creates, retains failed owners and closes transports without clearing the
+never become zero; an uncertain launch never falls back to another interpreter. Host `beginDraining()` synchronously fences new admissions and terminal writes while allowing
+existing snapshots/output and close/kill controls. Shutdown drains pending creates, retains failed owners and closes transports without clearing the
 session map before native receipts. See [process ownership](../process/DOCUMENTATION.md).

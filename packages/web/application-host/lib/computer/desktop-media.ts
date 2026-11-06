@@ -8,6 +8,7 @@ import type { ComputerService } from './computer-service.js';
  * ComputerService ownership lane even while noVNC is the viewing client. */
 export function attachDesktopMedia(options: {
   server: Server;
+  isDraining?: () => boolean;
   hostId: string;
   computers: Pick<ComputerService, 'mediaTarget'>;
   authenticate(request: IncomingMessage): Promise<boolean>;
@@ -15,17 +16,25 @@ export function attachDesktopMedia(options: {
 }) {
   const server = new WebSocketServer({ noServer: true, maxPayload: 0, perMessageDeflate: false });
   const streams = new Set<Duplex>();
+  let stopped = false;
+  const refuseDraining = (socket: Duplex): boolean => {
+    if (!stopped && !options.isDraining?.()) return false;
+    socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    return true;
+  };
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const pathname = new URL(request.url ?? '/', 'http://local').pathname;
     const match = /^\/api\/computers\/desktops\/([^/]+)\/vnc$/u.exec(pathname);
     if (!match) return;
+    if (refuseDraining(socket)) return;
     void (async () => {
       const expected = request.headers['x-varin-computer-host'];
       if ((expected && expected !== options.hostId) || !await options.authenticate(request) || !await options.originAllowed(request)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return;
       }
+      if (refuseDraining(socket)) return;
       const target = await options.computers.mediaTarget(decodeURIComponent(match[1]!));
-      if (socket.destroyed) return;
+      if (socket.destroyed || refuseDraining(socket)) return;
       server.handleUpgrade(request, socket, head, (viewer) => {
         const downstream = createWebSocketStream(viewer);
         const upstream = 'socketPath' in target ? connect(target.socketPath)
@@ -41,5 +50,5 @@ export function attachDesktopMedia(options: {
     });
   };
   options.server.on('upgrade', upgrade);
-  return { stop() { options.server.off('upgrade', upgrade); for (const stream of streams) stream.destroy(); streams.clear(); server.close(); } };
+  return { stop() { stopped = true; options.server.off('upgrade', upgrade); for (const stream of streams) stream.destroy(); streams.clear(); server.close(); } };
 }

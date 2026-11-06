@@ -9,6 +9,7 @@ import { registerDocumentRoutes } from '../documents/routes.js';
 import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 
 export interface ManagedRemoteRoutesOptions {
+  isDraining?: () => boolean;
   documents?: import('../documents/authority.js').DocumentAuthority;
   service: ManagedRemoteExecutionService;
   requireAuth?: RequestHandler;
@@ -25,6 +26,8 @@ export interface ManagedRemoteRoutesOptions {
 
 const noAuth: RequestHandler = (_request, _response, next) => next();
 const value = (input: unknown): Record<string, unknown> => input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
+const isManagedMcpCleanup = (operation: Record<string, unknown>): boolean => operation.kind === 'mcp'
+  && ['release', 'derivation_inspect', 'derivation_release', 'child_inspect', 'child_release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(String(value(operation.action).kind));
 const asString = (input: unknown, label: string): string => {
   if (typeof input !== "string" || !input.trim()) throw new Error(`${label} is required`);
   return input.trim();
@@ -73,7 +76,7 @@ const route = (handler: (request: Request, response: Response) => Promise<void>)
 
 export function registerManagedRemoteRoutes(
   app: Express,
-  { service, requireAuth = noAuth, resolveAuthContext, documents }: ManagedRemoteRoutesOptions,
+  { service, requireAuth = noAuth, resolveAuthContext, documents, isDraining = () => false }: ManagedRemoteRoutesOptions,
 ): void {
   const base = "/api/harness/managed-execution/v1";
   const principals = new WeakMap<Request, ManagedSourcePrincipal>();
@@ -151,11 +154,19 @@ export function registerManagedRemoteRoutes(
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
       const operation = value(value(request.body).operation);
-      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'derivation_inspect', 'derivation_release', 'child_inspect', 'child_release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(String(value(operation.action).kind));
+      const cleanup = method === 'service' && isManagedMcpCleanup(operation);
+      if (method === 'service' && isDraining() && !cleanup) {
+        response.status(503).json({ code: 'host-draining', error: 'Host is draining; new source work is not accepted', admission: 'not_started' });
+        return;
+      }
       return (receiptMethods.has(method) || cleanup ? requireReceiptAuth : requireSourceAuth)(request, response, next);
     };
     app.post(`${base}/sources/${method}`, requireAuth, methodAuth, route(async (request, response) => {
       const body = value(request.body);
+      if (method === 'service' && isDraining()) {
+        const operation = value(body.operation);
+        if (!isManagedMcpCleanup(operation)) { response.status(503).json({ code: 'host-draining', admission: 'not_started' }); return; }
+      }
       authorize(request, body.coordinatorHostId);
       const principal = principals.get(request)!;
       const sources = service.sources();

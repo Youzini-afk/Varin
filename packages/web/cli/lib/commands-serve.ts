@@ -31,6 +31,25 @@ import { recordOf } from './cli-types.js';
 
 const DAEMON_READY_TIMEOUT_MS = 30000;
 
+/** The foreground process is the supervisor when graceful owner drain is incomplete. */
+export function createForegroundShutdown(options: {
+  stop(): Promise<void>;
+  cleanup(): void;
+  exit(code: number): void;
+}): ForegroundShutdown {
+  let pending: Promise<void> | undefined;
+  return (signal = 'SIGTERM') => pending ??= (async () => {
+    let incomplete = false;
+    try { await options.stop(); }
+    catch {
+      incomplete = true;
+      console.error('[Shutdown] Incomplete; forcing foreground process exit for crash recovery');
+    }
+    options.cleanup();
+    options.exit(incomplete ? 1 : signal === 'SIGINT' ? 130 : signal === 'SIGQUIT' ? 131 : 143);
+  })();
+}
+
 function createServeCommand({
   serverPath,
   setForegroundServerActive,
@@ -250,22 +269,15 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
 
       process.on('exit', cleanupFiles);
 
-      // Idempotent graceful shutdown with deterministic exit codes.
-      let shutdownInProgress = false;
-      const shutdownForegroundServer: ForegroundShutdown = async (signal = 'SIGTERM') => {
-        if (shutdownInProgress) return;
-        shutdownInProgress = true;
-        try {
-          await controller.stop({ exitProcess: false });
-        } catch {
-    // Best-effort operation; continue when it is unavailable.
-  }
-        cleanupFiles();
-        setForegroundServerActive(false);
-        setForegroundShutdown(null);
-        const exitCode = signal === 'SIGINT' ? 130 : signal === 'SIGQUIT' ? 131 : 143;
-        process.exit(exitCode);
-      };
+      const shutdownForegroundServer = createForegroundShutdown({
+        stop: () => controller.stop({ exitProcess: false }),
+        cleanup: () => {
+          cleanupFiles();
+          setForegroundServerActive(false);
+          setForegroundShutdown(null);
+        },
+        exit: code => { process.exit(code); },
+      });
 
       // Expose shutdown to the global SIGINT handler.
       setForegroundShutdown(shutdownForegroundServer);
