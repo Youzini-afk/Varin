@@ -105,6 +105,7 @@ await phase('typical',120,4,500);
 if(profile==='mixed') await phase('high',600,64,0);
 else {
   const cpuOperation={name:'cpu-full-checksum',async run(){const {data,bytes}=await request('/api/fs/exec',{commands:[cpuCommand],cwd:root,background:false});assert.equal(data.status,'done');assert.equal(data.success,true);assert.equal(data.results.length,1);const r=data.results[0];assert.equal(r.success,true);assert.equal(r.exitCode,0);assert.equal(r.stdout.trim(),`${cpuAggregate}  -`);assert.equal(r.stderr,'');return bytes;}};
+  setPhase('prepare-cpu');
   await cpuOperation.run();
   await phase('cpu-full',180,4,0,[cpuOperation]);
 }
