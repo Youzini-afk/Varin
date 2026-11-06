@@ -56,7 +56,7 @@ export const memorySourceClaims = (spans: readonly MemorySourceSpan[]): MemoryWo
 export function createMemoryInference(options: {
   kernel: KernelClient;
   runtime: AgentRuntimeClient;
-  models: ReturnType<typeof createModelAuthority>;
+  models: Pick<ReturnType<typeof createModelAuthority>, 'resolveModel' | 'rebindModel'>;
   authority: { readGlobalInferenceSettings(): Promise<unknown>; selectedModel(providerId: string, modelId: string): Promise<SelectedModel> };
   decision: Pick<SemanticInference, 'captureDecision'>;
   /** Registry lookup, not a scope-string test. Sleep/enable authority stays with BotService. */

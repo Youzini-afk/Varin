@@ -294,6 +294,27 @@ describe("memory organizer (BC2)", () => {
     org.start(); await wait(() => calls.some(call => call.method === 'generate')); await settled(store);
     expect(new Set(opened)).toEqual(new Set(['bot:ws-1']));
   });
+  it('suspending automatic organization drains its generation and never writes a late proposal', async () => {
+    const store = await setup();
+    let release!: (text: string) => void;
+    organizeText = () => new Promise<string>(resolve => { release = resolve; });
+    const org = organizer(memory());
+    org.noteScope('bot:ws-1');
+    await wait(() => calls.some(call => call.method === 'generate'));
+    let drained = false;
+    const suspension = org.suspendScope('bot:ws-1').then(() => { drained = true; });
+    try {
+      await setImmediate();
+      expect(drained).toBe(false);
+      expect(await store.listKnowledge({})).toEqual([]);
+    } finally { release(proposal(materials[0]!.text)); }
+    await suspension;
+    expect(drained).toBe(true);
+    expect(org.pending).toBe(0);
+    expect(await store.listKnowledge({})).toEqual([]);
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(1);
+  });
+
   it('commits source-bound proposals and does not reprocess coverage after reopening', async () => {
     const store = await setup(); organizeText = proposal(materials[0]!.text);
     let org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store); await org.dispose();
