@@ -372,6 +372,7 @@ jobs:
 
           docker exec varin-smoke node verify-kernel.mjs packages/web
           docker exec varin-smoke node verify-services.mjs
+          node scripts/smoke-container-stop.mjs varin-smoke toolbelt
 
   smoke-amd64-slim:
     name: Smoke immutable amd64 slim candidate
@@ -429,6 +430,7 @@ jobs:
 
           docker exec varin-slim-smoke node verify-kernel.mjs packages/web
           docker exec varin-slim-smoke node verify-services.mjs
+          node scripts/smoke-container-stop.mjs varin-slim-smoke slim
 
   promote:
     name: Promote verified release image tags

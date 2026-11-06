@@ -113,6 +113,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
           docker exec varin-check-smoke node verify-services.mjs
+          node scripts/smoke-container-stop.mjs varin-check-smoke slim
 
       # Both final variants use this same BuildKit instance and source, so its
       # common Rust/Web/browser builder stages are reused, not built on a second
@@ -183,6 +184,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
           docker exec varin-check-smoke node verify-services.mjs
+          node scripts/smoke-container-stop.mjs varin-check-smoke toolbelt
 
       - name: Remove the local registry
         if: always()

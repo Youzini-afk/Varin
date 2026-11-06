@@ -36,8 +36,13 @@ test('promotion uses exactly tested digests and validates every required artifac
   assert.equal(plan[0].at(-1), `ghcr.io/youzini-afk/varin@${app}`);
   assert.equal(plan[1].at(-1), `ghcr.io/youzini-afk/varin-slim@${slimApp}`);
   assert.ok(plan.flat().includes('ghcr.io/youzini-afk/varin:latest'));
+  assert.ok(plan[0].includes('ghcr.io/youzini-afk/varin-toolbelt:latest'));
+  assert.ok(!plan[1].includes('ghcr.io/youzini-afk/varin:latest'));
   assert.ok(!plan.flat().some(argument => argument.endsWith(':main')));
-  assert.equal(imagePromotionPlan(candidate, { app, slimApp, base: app, slimBase: slimApp }).length, 4);
+  const complete = imagePromotionPlan(candidate, { app, slimApp, base: app, slimBase: slimApp });
+  assert.equal(complete.length, 4);
+  assert.ok(complete[2].includes('ghcr.io/youzini-afk/varin-runtime-toolbelt:latest'));
+  assert.equal(complete[2].at(-1), `ghcr.io/youzini-afk/varin-runtime-base@${app}`);
   assert.throws(() => imagePromotionPlan(candidate, { app }));
   assert.throws(() => imagePromotionPlan(candidate, { app, slimApp, base: 'mutable:main' }));
 });

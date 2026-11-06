@@ -2,9 +2,9 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 services:
   varin:
-    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin:latest}
+    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin-toolbelt:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-base:latest}
+        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-toolbelt:latest}

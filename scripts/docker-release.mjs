@@ -33,13 +33,17 @@ export function assertImageReleaseTag(candidate, cwd = process.cwd()) {
 }
 
 export function imagePromotionPlan(candidate, { app, slimApp, base, slimBase }) {
-  const images = [['varin', app, true], ['varin-slim', slimApp, true],
-    ['varin-runtime-base', base, false], ['varin-runtime-slim', slimBase, false]];
-  return images.flatMap(([name, digest, required]) => {
+  // Add explicit names for the same tested manifests. Existing repositories and
+  // every historical/latest alias keep their toolbelt meaning until an announced
+  // future version boundary; publishing must never silently turn varin into slim.
+  const images = [['varin', ['varin', 'varin-toolbelt'], app, true], ['varin-slim', ['varin-slim'], slimApp, true],
+    ['varin-runtime-base', ['varin-runtime-base', 'varin-runtime-toolbelt'], base, false],
+    ['varin-runtime-slim', ['varin-runtime-slim'], slimBase, false]];
+  return images.flatMap(([name, names, digest, required]) => {
     if (!digest && !required) return [];
     if (!/^sha256:[a-f0-9]{64}$/.test(digest ?? '')) throw new Error(`Missing or invalid verified digest for ${name}`);
     const repository = `ghcr.io/youzini-afk/${name}`;
-    return [['buildx', 'imagetools', 'create', ...candidate.aliases.flatMap(alias => ['--tag', `${repository}:${alias}`]), `${repository}@${digest}`]];
+    return [['buildx', 'imagetools', 'create', ...names.flatMap(target => candidate.aliases.flatMap(alias => ['--tag', `ghcr.io/youzini-afk/${target}:${alias}`])), `${repository}@${digest}`]];
   });
 }
 

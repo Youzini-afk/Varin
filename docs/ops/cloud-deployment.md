@@ -13,21 +13,32 @@ agent worker, SDK dependency closure, Node Storage or PTY authority is installed
 
 ## Container images
 
-The Docker workflow publishes four images to GHCR:
+The Docker workflow builds four manifests and publishes explicit variant names plus compatible aliases to GHCR:
 
 | Image | Role |
 | --- | --- |
 | `ghcr.io/youzini-afk/varin-slim` | Application on the slim runtime. Compose default. |
-| `ghcr.io/youzini-afk/varin` | Application on the language-toolbelt runtime. |
+| `ghcr.io/youzini-afk/varin-toolbelt` | Application on the language-toolbelt runtime. `varin` remains a compatibility name for the same tested digest. |
 | `ghcr.io/youzini-afk/varin-runtime-slim` | Slim base: Bun, Node, Git, SSH, cloudflared, and the compilers needed to install native production modules. |
-| `ghcr.io/youzini-afk/varin-runtime-base` | Toolbelt base: the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
+| `ghcr.io/youzini-afk/varin-runtime-toolbelt` | Toolbelt base (`varin-runtime-base` remains a compatibility name): the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
 
-All four images are built for `linux/amd64` and `linux/arm64` **at release time**, not on every
+Both application and both runtime variants are built for `linux/amd64` and `linux/arm64` **at release time**, not on every
 main push. `Docker Images` accepts `v<package version>` tag pushes, or a manual run whose selected
 workflow ref is that release tag; branch/manual-main runs cannot publish. Stable releases receive
 exact version, major/minor, major, `latest`, and full `sha-*` tags. Prereleases receive only their
 exact version and SHA tags. No workflow updates a `main` image alias. Local Dockerfile/Compose builds default to the released
 `varin-runtime-*:latest` base; set `VARIN_RUNTIME_BASE_IMAGE` to a version/digest for reproducible local builds.
+
+The explicit `*-toolbelt` names are added by the next qualified release; no historical tag is rewritten.
+`varin:latest` and versioned `varin` tags remain toolbelt. Compose continues to select `varin-slim`;
+changing the unqualified image default requires a separately announced future version boundary.
+Until a release containing these aliases is published, use `VARIN_IMAGE=ghcr.io/youzini-afk/varin:<version>`
+and `VARIN_RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-base:<version>` with the toolbelt overlay.
+
+Images carry `io.varin.image.variant`, `io.varin.image.role`, `VARIN_IMAGE_VARIANT`, and
+`/etc/varin/image-capabilities.json`. This metadata describes installed software, not permissions or
+a guarantee of a working Varin Browser/Computer owner. Slim still includes Python and native-module
+build prerequisites; it is not a tool-free sandbox. Toolbelt reports Chrome only on amd64.
 
 Before any GHCR candidate write, the workflow accepts the exact tag/SHA/version and runs full source,
 Rust/native and platform qualification for that SHA. Each application consumes the matching base
@@ -35,7 +46,9 @@ manifest digest from this release (or an explicitly supplied immutable-resolved 
 cannot silently pick up a newer floating base. Images retain provenance and SBOM attestations.
 
 Uniquely named candidates are pulled by digest; both amd64 applications must start, pass `/health`
-and native Host closure checks before those same digests are promoted. Promotion rechecks the tag
+and native Host closure checks before those same digests are promoted. The exact running candidate
+also validates installed-variant metadata and receives a real SIGTERM: a graceful receipt and foreground
+exit 143 are required within the 15-second smoke supervision window; incomplete/forced exits fail qualification. Promotion rechecks the tag
 and serializes public alias changes across releases without canceling in-progress publication.
 The alias set is not a cross-image atomic transaction; a manual interruption or registry failure
 requires completing/retrying that accepted release. Arm64 native dependencies/kernel are checked
@@ -105,14 +118,38 @@ probe cannot mistake a previous process with the same semantic version for the c
 | `VARIN_HOST` | Bind address; Compose defaults to `0.0.0.0` |
 | `VARIN_DATA_DIR` | Persistent Varin data root |
 | `VARIN_WORKSPACE_ROOT` | Root for mounted projects |
+| `VARIN_SHUTDOWN_TIMEOUT_MS` | One complete Host stop budget, integer 1–2147483647 ms; default 10000 |
+| `VARIN_STOP_GRACE_PERIOD` | Compose supervision grace; default `15s`, must exceed the Host stop budget |
+| `VARIN_RESEARCH_RESERVE_CPU_CORES` | Explicit CPU capacity reserved from research admission; default 0 |
+| `VARIN_RESEARCH_RESERVE_MEMORY_MB` | Explicit memory reserved from research admission; default 0 |
 | `VARIN_TUNNEL_PROVIDER` | Tunnel provider, currently `cloudflare` when configured |
 | `VARIN_TUNNEL_MODE` | `quick`, `managed-remote`, or `managed-local` |
 | `VARIN_TUNNEL_HOSTNAME` | Hostname for managed-remote mode |
 | `VARIN_TUNNEL_TOKEN` | Runtime-only Cloudflare token for managed-remote mode |
 | `VARIN_TUNNEL_CONFIG` | Container path to managed-local cloudflared configuration |
 
+`/health` is readiness: it returns HTTP 503 as soon as the Host drains or its kernel is unavailable.
+`/live` is a lightweight HTTP-process liveness check and does not assert that new work can be admitted.
+A normal foreground SIGTERM exits 143; an incomplete stop exits 1 and logs its owner/reason, elapsed
+time and deadline. The default 10-second application budget preserves the previous setting, with
+5 seconds of Compose supervision margin. These are initial defaults, not a measured drain SLA.
+Set both budgets from representative workloads, and keep the external grace larger. A blocked Node
+event loop cannot guarantee its own timer; the container supervisor remains the final boundary.
+
+Set Docker/Compose CPU, memory and PID limits for the deployment explicitly. Host research diagnostics
+report cgroup/affinity effective capacity, visible-ancestor scope, current headroom and pressure counters.
+A logical research reservation or Rust compute slot is not a hard limit on all model, shell, LSP, extension
+and background processes. The current container shares one failure domain; this change does not add
+per-tool cgroups, a global semaphore, a hard queued-task count or an unmeasured memory-per-job estimate.
+
 Passwords and tunnel tokens are runtime values. They are never accepted as Docker build arguments or
 embedded in an image.
+
+## Cold backup and isolated recovery
+
+Use the [cold-backup procedure](cold-backup.md) for complete declared data/workspace roots, a verified
+manifest and fenced inspection/recovery copies. Stop every writer first. Do not delete WAL files or
+start a copied hostId on the production network; a separately runnable clone is not yet supported.
 
 ## SSH deployment
 

@@ -57,7 +57,7 @@ test('default local builds follow a published release base, not a retired main a
   const dockerfile = fs.readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
   const direct = /^ARG RUNTIME_BASE_IMAGE=(.+)$/mu.exec(dockerfile)?.[1];
   assert.equal(direct, 'ghcr.io/youzini-afk/varin-runtime-slim:latest');
-  for (const [file, image] of [['docker-compose.yml', 'varin-runtime-slim'], ['docker-compose.toolbelt.yml', 'varin-runtime-base']]) {
+  for (const [file, image] of [['docker-compose.yml', 'varin-runtime-slim'], ['docker-compose.toolbelt.yml', 'varin-runtime-toolbelt']]) {
     const compose = parse(fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'));
     const argument = compose.services.varin.build.args.RUNTIME_BASE_IMAGE;
     assert.equal(argument, '${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/' + image + ':latest}');

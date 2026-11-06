@@ -80,6 +80,7 @@ RUN VARIN_SOURCE_REVISION="${VARIN_SOURCE_REVISION}" \
 # of the builder architecture.
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 WORKDIR /home/varin/app
+LABEL io.varin.image.role="application"
 
 ENV HOME=/home/varin \
   NODE_ENV=production \
