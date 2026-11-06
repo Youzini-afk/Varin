@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import {
   CLOUD_RUNTIME_PACKAGE_DIRS,
   CLOUD_RUNTIME_SCHEMA_VERSION,
@@ -82,6 +83,9 @@ const createFixture = () => {
         path.join(packageRoot, 'server', 'index.js'),
         "import '@varin/extension-host';\n",
       );
+    }
+    if (directory === 'extension-host') {
+      fs.cpSync(path.join(repoRoot, 'packages', directory, 'broker'), path.join(packageRoot, 'broker'), { recursive: true });
     }
     if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
   }
@@ -164,6 +168,31 @@ describe('Varin cloud runtime layout', () => {
   it('accepts the canonical application-host runtime tree', () => {
     const fixture = createFixture();
     assert.equal(verifyCloudRuntimeLayout(fixture).schemaVersion, CLOUD_RUNTIME_SCHEMA_VERSION);
+  });
+
+  it('stages the broker directory with the compiled Host package', () => {
+    const source = createFixture();
+    writeJson(path.join(source, 'package.json'), readJson(path.join(repoRoot, 'package.json')));
+    for (const relative of [
+      'scripts/build-cloud-runtime.mjs', 'scripts/sync-workspace-lock-versions.mjs',
+      'scripts/smoke-kernel-release.mjs', 'scripts/smoke-cloud-services.mjs',
+      'bun-patches/braces@3.0.3.patch', 'kernel/THIRD_PARTY_NOTICES.md',
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(source, relative)), { recursive: true });
+      fs.copyFileSync(path.join(repoRoot, relative), path.join(source, relative));
+    }
+    // Broker-owned sibling assets must travel with its entrypoint too.
+    const broker = 'packages/extension-host/broker';
+    fs.writeFileSync(path.join(source, broker, 'fixture-asset.json'), '{}\n');
+    const staged = path.join(source, 'staged');
+    execFileSync(process.execPath, ['scripts/build-cloud-runtime.mjs', '--skip-build', '--no-lock',
+      '--no-archive', '--output', staged], { cwd: source, stdio: 'pipe' });
+    for (const entry of ['broker-child.mjs', 'fixture-asset.json']) {
+      assert.deepEqual(fs.readFileSync(path.join(staged, broker, entry)), fs.readFileSync(path.join(source, broker, entry)));
+    }
+    fs.rmSync(path.join(staged, broker), { recursive: true });
+    assert.throws(() => verifyCloudRuntimeLayout(staged, { requireLock: false }),
+      /Missing runtime package entry: packages\/extension-host\/broker/);
   });
 
   it('requires the runtime security patch referenced by the deployable manifest', () => {

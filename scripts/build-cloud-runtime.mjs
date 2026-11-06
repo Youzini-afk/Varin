@@ -85,7 +85,7 @@ const packageFiles = Object.freeze({
     optional: [],
   },
   'extension-host': {
-    required: ['package.json', 'dist'],
+    required: ['package.json', 'dist', 'broker'],
     optional: [],
   },
   protocol: {
@@ -420,6 +420,7 @@ const stageRuntimeTree = (outputDir, productWeb = false) => {
     copyEntry(path.join(repoRoot, relative), path.join(outputDir, relative), true);
   }
   copyEntry(path.join(repoRoot, 'scripts/smoke-kernel-release.mjs'), path.join(outputDir, 'verify-kernel.mjs'), true);
+  copyEntry(path.join(repoRoot, 'scripts/smoke-cloud-services.mjs'), path.join(outputDir, 'verify-services.mjs'), true);
   copyEntry(path.join(repoRoot, 'kernel/THIRD_PARTY_NOTICES.md'), path.join(outputDir, 'KERNEL_THIRD_PARTY_NOTICES.md'), true);
   copyEntry(path.join(repoRoot, 'LICENSE'), path.join(outputDir, 'LICENSE'), true);
   copyEntry(

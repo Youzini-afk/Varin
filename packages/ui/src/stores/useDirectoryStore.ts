@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getDesktopHomeDirectory } from '@/lib/desktop';
+import { getDesktopHomeDirectory, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -180,14 +180,9 @@ const persistResolvedHome = (resolved: string) => {
 };
 
 const initializeHomeDirectory = async () => {
-  const acceptCandidate = (candidate?: string | null) => {
-    const normalized = normalizeHomeCandidate(candidate);
-    return normalized ? persistResolvedHome(normalized) : null;
-  };
-
   try {
     const desktopHome = await getDesktopHomeDirectory();
-    const resolved = acceptCandidate(desktopHome);
+    const resolved = normalizeHomeCandidate(desktopHome);
     if (resolved) {
       return resolved;
     }
@@ -196,7 +191,7 @@ const initializeHomeDirectory = async () => {
   }
 
   const fallback = getHomeDirectory();
-  const resolvedFallback = acceptCandidate(fallback);
+  const resolvedFallback = normalizeHomeCandidate(fallback);
   if (resolvedFallback) {
     return resolvedFallback;
   }
@@ -331,8 +326,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
       synchronizeHomeDirectory: (homePath: string) => {
         const state = get();
-        const resolvedHome = homePath;
-        cachedHomeDirectory = resolvedHome;
+        const resolvedHome = persistResolvedHome(homePath);
         const needsUpdate = state.homeDirectory !== resolvedHome;
         const savedLastDirectory = safeStorage.getItem('lastDirectory');
         const hasSavedLastDirectory = typeof savedLastDirectory === 'string' && savedLastDirectory.length > 0;
@@ -397,19 +391,21 @@ export const useDirectoryStore = create<DirectoryStore>()(
 );
 
 if (typeof window !== 'undefined') {
-  initializeHomeDirectory().then((home) => {
-    useDirectoryStore.getState().synchronizeHomeDirectory(home);
-  });
-
-  // Host switches happen in place (no page reload), so the home directory
-  // must be re-resolved from the new runtime's authoritative source instead
-  // of keeping the previous host's value cached.
-  subscribeRuntimeEndpointChanged(() => {
-    cachedHomeDirectory = null;
+  const initializeLocalHome = () => {
     const generation = ++homeResolveGeneration;
-    initializeHomeDirectory().then((home) => {
+    // Remote home is resolved after authentication by directoryPersistence.
+    // Preload and browser caches describe the local/previous Host, not this one.
+    if (!isDesktopLocalOriginActive()) return;
+    void initializeHomeDirectory().then((home) => {
       if (generation !== homeResolveGeneration) return;
       useDirectoryStore.getState().synchronizeHomeDirectory(home);
     });
+  };
+  initializeLocalHome();
+
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    cachedHomeDirectory = null;
+    initializeLocalHome();
   });
 }
