@@ -1177,6 +1177,8 @@ pub(crate) struct BranchForkParams {
     pub(crate) plan_capture: Option<PlanForkCaptureParams>,
 }
 
+pub(crate) type BranchDeleteParams = varin_runtime::catalog::threads::BranchDelete;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PlanViewParams {
@@ -4664,6 +4666,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.branch.fork" => serde_json::from_value::<BranchForkParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.branch.delete" => serde_json::from_value::<BranchDeleteParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.plan.view" => serde_json::from_value::<PlanViewParams>(params.clone())

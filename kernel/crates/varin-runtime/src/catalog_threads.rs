@@ -38,6 +38,13 @@ pub struct ThreadDelete {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BranchDelete {
+    pub thread_id: String,
+    pub branch_id: String,
+    pub key: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ThreadRead {
     pub thread_id: String,
     pub key: String,
@@ -107,6 +114,20 @@ pub(super) fn require_available(db: &Connection, thread_id: &str) -> Result<()> 
         Some(Some(_)) => Err(RuntimeError::Conflict("Thread is deleted".into())),
         Some(None) => Ok(()),
     }
+}
+
+pub(super) fn branch_deleted(db: &Connection, branch: &str) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='branch.deleted')",
+        [branch], |row| row.get(0),
+    )?)
+}
+
+pub(super) fn require_branch_available(db: &Connection, branch: &str) -> Result<()> {
+    if branch_deleted(db, branch)? {
+        return Err(RuntimeError::NotFound(branch.into()));
+    }
+    Ok(())
 }
 
 /// Internal investigations are controlled through their parent Operation.
@@ -326,6 +347,40 @@ impl Catalog {
         tx.commit()?;
         Ok(receipt)
     }
+    pub fn delete_branch(&mut self, command: &BranchDelete) -> Result<Value> {
+        let intent = json!({"kind":"branch.delete","command":command});
+        let tx = self.db.transaction()?;
+        if let Some(receipt) = existing_command(&tx, &command.key, &intent)? {
+            return Ok(receipt);
+        }
+        require_available(&tx, &command.thread_id)?;
+        require_public(&tx, &command.thread_id)?;
+        let target = &command.branch_id;
+        require_branch_available(&tx, target)?;
+        let active: Option<String> = tx.query_row(
+            "SELECT active_run FROM branches WHERE id=?1 AND thread_id=?2",
+            params![target, command.thread_id], |row| row.get(0),
+        ).optional()?.ok_or_else(|| RuntimeError::NotFound(target.clone()))?;
+        if branch(&tx, &command.thread_id)? == *target {
+            return Err(RuntimeError::Conflict("The main conversation cannot be deleted as a branch".into()));
+        }
+        let unfinished: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runs WHERE branch_id=?1 AND json_extract(body,'$.state') NOT IN ('completed','failed','cancelled'))",
+            [target], |row| row.get(0),
+        )?;
+        if active.is_some() || unfinished {
+            return Err(RuntimeError::Conflict("Stop the work on this branch before deleting it".into()));
+        }
+        followups::cancel_branch(&tx, &command.thread_id, target)?;
+        let revision = tx.query_row(
+            "UPDATE threads SET revision=revision+1 WHERE id=?1 RETURNING revision",
+            [&command.thread_id], |row| read_number(row, 0),
+        )?;
+        event(&tx, target, revision, "branch.deleted", json!({"threadId":command.thread_id}))?;
+        let receipt = save_command(&tx, &command.key, &intent, &command.thread_id)?;
+        tx.commit()?;
+        Ok(receipt)
+    }
     pub fn mark_thread_read(&mut self, command: &ThreadRead) -> Result<Value> {
         let intent = json!({"kind":"thread.read","command":command});
         let tx = self.db.transaction()?;
@@ -378,7 +433,8 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
         return Err(RuntimeError::NotFound(thread_id.into()));
     }
     let mut statement =
-        db.prepare("SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid")?;
+        db.prepare("SELECT b.id,b.head,b.active_run FROM branches b WHERE b.thread_id=?1
+            AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid")?;
     let rows = statement.query_map([thread_id], |row| {
         Ok((
             row.get::<_, String>(0)?,

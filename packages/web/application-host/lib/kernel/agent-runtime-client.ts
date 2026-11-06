@@ -1027,6 +1027,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  deleteBranch(input: import('./protocol.generated.js').BranchDeleteParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.delete', input, signal);
+  }
   planContains(
     branchId: string,
     headId: string | null,

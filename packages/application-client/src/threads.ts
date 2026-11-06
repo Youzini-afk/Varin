@@ -531,6 +531,7 @@ export interface ThreadCatalogIdentity { runtime: 'agent'; threadId: string; }
 export type ThreadListOptions = import('@varin/protocol').ThreadCatalogQuery;
 export type ThreadUpdate = ThreadCatalogIdentity & import('@varin/protocol').ThreadMetadataUpdateParams;
 export type ThreadDelete = ThreadCatalogIdentity & import('@varin/protocol').ThreadDeleteParams;
+export type ThreadBranchDelete = ThreadIdentity & import('@varin/protocol').BranchDeleteParams;
 export type ThreadRead = ThreadCatalogIdentity & import('@varin/protocol').ThreadReadPositionParams;
 
 export interface ThreadAttachmentUpload {
@@ -569,6 +570,7 @@ export interface ThreadsAPI {
   update(input: ThreadUpdate): Promise<ThreadSummary>;
   /** Hide this Thread and close fresh user admission. Existing work and its resources continue. */
   delete(input: ThreadDelete): Promise<ThreadSummary>;
+  deleteBranch(input: ThreadBranchDelete): Promise<ThreadSummary>;
   /** Acknowledge only the event cursor actually presented; concurrent activity remains unread. */
   markRead(input: ThreadRead): Promise<ThreadSummary>;
   create(key: string): Promise<ThreadIdentity>;

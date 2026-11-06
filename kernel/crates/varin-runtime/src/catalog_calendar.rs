@@ -445,6 +445,9 @@ fn target_hold(
         branch_id,
     } = &o.target
     {
+        if threads::branch_deleted(db, branch_id)? {
+            return Ok(Some("source_unavailable".into()));
+        }
         let run = target
             .cloned()
             .map(Some)

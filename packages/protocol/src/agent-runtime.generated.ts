@@ -1749,6 +1749,8 @@ export interface ThreadMetadataUpdateParams { threadId: string; key: string; exp
 
 export interface ThreadDeleteParams { threadId: string; key: string; expectedRevision: number; }
 
+export interface BranchDeleteParams { threadId: string; branchId: string; key: string; }
+
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {

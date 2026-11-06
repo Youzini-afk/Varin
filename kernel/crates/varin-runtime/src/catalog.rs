@@ -208,6 +208,7 @@ fn initialize_metadata(
     context::initialize(&tx)?;
     // Derived lookup over the original descriptive events; no second matter/task state.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_matter_revisions ON events(subject,json_extract(data,'$.id'),cursor DESC) WHERE kind='bot.matter.updated'")?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS deleted_conversation_branches ON events(subject) WHERE kind='branch.deleted'")?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_work_changes ON events(json_extract(data,'$.changeId'),json_extract(data,'$.targetThreadId')) WHERE kind='bot.work_pending'")?;
     // Derived lookups for the attention read: only unsettled Runs and operations are indexed, so
     // the read does not scan retained history. Their predicates match attention::OPEN_*.

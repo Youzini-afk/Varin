@@ -156,7 +156,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [nameDraft, setNameDraft] = React.useState('');
   const sessionForkKeys = React.useRef(new Map<string, string>());
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
-  const [deletingSession, setDeletingSession] = React.useState<{ botId: string; threadId: string; title: string } | null>(null);
+  const [deletingSession, setDeletingSession] = React.useState<{ botId: string; identity: ThreadIdentity; branch: boolean; title: string } | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [focus, setFocus] = React.useState<BotPanelFocus | null>(null);
@@ -490,11 +490,44 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     }
   };
 
+  const confirmSessionDelete = async () => {
+    if (!deletingSession) return;
+    const { identity, botId, branch } = deletingSession;
+    if (!branch) {
+      await mutateSession(botId, identity.threadId, 'delete');
+      return;
+    }
+    const host = getRuntimeEndpointGeneration();
+    const current = () => alive.current && host === getRuntimeEndpointGeneration();
+    setActionBusy(`session:${identity.threadId}`);
+    setError(null);
+    try {
+      const store = useThreadStore.getState();
+      if (!store.threads.some(thread => thread.thread_id === identity.threadId)) await store.loadCatalog();
+      if (!current()) return;
+      const fallback = await store.deleteBranch(identity);
+      if (!current()) return;
+      const navigation = useBotNavigation.getState();
+      if (navigation.botId === botId && navigation.entry?.threadId === identity.threadId && navigation.entry.branchId === identity.branchId) {
+        await openBotConversation(botId, fallback);
+      }
+      setDeletingSession(null);
+      toast.success(t('bot.session.branchDeleted'));
+      refreshWork();
+    } catch (cause) {
+      if (current()) setError(message(cause));
+    } finally {
+      if (current()) setActionBusy(null);
+    }
+  };
+
   const sessionAction = async (session: BotSessionView, identity: ThreadIdentity, action: BotSessionAction) => {
     if (!selected || !threads) return;
     if (action === 'delete') {
       setError(null);
-      setDeletingSession({ botId: selected.id, threadId: identity.threadId, title: sessionTitleOf(session) });
+      const branch = identity.branchId !== session.thread.main_branch_id;
+      const title = branch ? t('bot.session.branch', { index: session.branches.findIndex(item => item.branchId === identity.branchId) + 1 }) : sessionTitleOf(session);
+      setDeletingSession({ botId: selected.id, identity, branch, title });
       return;
     }
     if (action === 'archive' || action === 'restore') {
@@ -704,15 +737,17 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     <Dialog open={deletingSession !== null} onOpenChange={open => { if (!open && actionBusy === null) setDeletingSession(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">
         <DialogHeader>
-          <DialogTitle>{t('sessions.sidebar.dialogs.deleteSession.title')}</DialogTitle>
-          <DialogDescription>{t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: deletingSession?.title ?? '' })}</DialogDescription>
+          <DialogTitle>{t(deletingSession?.branch ? 'bot.session.deleteBranch.title' : 'sessions.sidebar.dialogs.deleteSession.title')}</DialogTitle>
+          <DialogDescription>{deletingSession?.branch
+            ? t('bot.session.deleteBranch.description', { name: deletingSession.title })
+            : t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: deletingSession?.title ?? '' })}</DialogDescription>
         </DialogHeader>
         {error && deletingSession ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button variant="outline" size="sm" disabled={actionBusy !== null} onClick={() => setDeletingSession(null)}>{t('sessions.sidebar.dialogs.cancel')}</Button>
-          <Button variant="destructive" size="sm" disabled={actionBusy !== null} onClick={() => {
-            if (deletingSession) void mutateSession(deletingSession.botId, deletingSession.threadId, 'delete');
-          }}>{t('sessions.sidebar.dialogs.deleteSession.titleAction')}</Button>
+          <Button variant="destructive" size="sm" disabled={actionBusy !== null} onClick={() => { void confirmSessionDelete(); }}>
+            {t(deletingSession?.branch ? 'bot.session.menu.deleteBranch' : 'sessions.sidebar.dialogs.deleteSession.titleAction')}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

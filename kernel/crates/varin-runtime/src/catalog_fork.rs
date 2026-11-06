@@ -153,6 +153,7 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         threads::require_available(&tx, &thread)?;
+        threads::require_branch_available(&tx, &source)?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,?3)",
             params![target, thread, head],

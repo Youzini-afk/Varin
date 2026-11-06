@@ -315,6 +315,7 @@ impl AttentionRead {
           (SELECT json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=t.id)
           FROM threads t JOIN branches b ON b.thread_id=t.id
           WHERE ((t.archived=0 AND t.deleted_at_ms IS NULL) OR b.id IN (SELECT value FROM json_each(?1)))
+          AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted')
           AND NOT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval')
           AND NOT EXISTS(SELECT 1 FROM branches x JOIN runs r ON r.branch_id=x.id JOIN context_jobs c ON c.run_id=r.id WHERE x.thread_id=t.id)
           AND NOT EXISTS(SELECT 1 FROM branches x JOIN runs r ON r.branch_id=x.id JOIN operations o ON o.run_id=r.id WHERE x.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.id,b.id")?;

@@ -187,6 +187,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     navigate: ['runtime', 'threadId', 'branchId', 'key', 'expectedHeadId', 'targetHeadId', 'undoOf'],
     'navigation/receipt': ['runtime', 'threadId', 'branchId', 'key'],
     fork: ['runtime', 'threadId', 'branchId', 'key', 'headId'],
+    'branch/delete': ['runtime', 'threadId', 'branchId', 'key'],
     'tools/inspect':['runtime','threadId','branchId','runId'],
     'policy/inspect': ['runtime','threadId','branchId','runId'],
     'policy/restart': ['runtime','threadId','branchId','runId','selectionId'],
@@ -523,6 +524,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('navigation/receipt', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
   post('navigate', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
   post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('branch/delete', (body, signal) => adapter.deleteBranch({ ...identity(body), key: text(body.key) }, signal));
   post('source/list', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
   post('source/resolve', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
   post('source/prepare', (body, signal) => {

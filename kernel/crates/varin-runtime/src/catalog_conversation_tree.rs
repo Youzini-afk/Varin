@@ -76,12 +76,14 @@ impl ConversationTreeRead {
         let mut db = history_views::current_history_owner(&self.database, self.epoch)?;
         let tx = db.transaction()?;
         threads::require_available(&tx, &self.thread)?;
+        threads::require_branch_available(&tx, &self.branch)?;
         let main_branch_id = threads::branch(&tx, &self.thread)?;
         let mut routes = Vec::new();
         {
             let mut statement = tx.prepare("SELECT b.id,b.head,b.active_run,
                 (SELECT data FROM events WHERE subject=b.id AND kind='branch.created' ORDER BY cursor LIMIT 1)
-                FROM branches b WHERE b.thread_id=?1 ORDER BY b.rowid")?;
+                FROM branches b WHERE b.thread_id=?1
+                AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid")?;
             let rows = statement.query_map([&self.thread], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -123,7 +125,8 @@ impl ConversationTreeRead {
         // UNION visits a shared ancestor once. No content objects or tool output
         // are opened, and this scan runs outside the Catalog command mutex.
         let mut statement = tx.prepare("WITH RECURSIVE reachable(id) AS (
-            SELECT head FROM branches WHERE thread_id=?1 AND head IS NOT NULL
+            SELECT b.head FROM branches b WHERE b.thread_id=?1 AND b.head IS NOT NULL
+            AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted')
             UNION SELECT h.parent FROM history h JOIN reachable r ON h.id=r.id WHERE h.parent IS NOT NULL
         ) SELECT h.id,h.parent,h.run_id,json_extract(h.body,'$.source') FROM history h
           JOIN reachable r ON r.id=h.id WHERE h.thread_id=?1 ORDER BY h.rowid")?;

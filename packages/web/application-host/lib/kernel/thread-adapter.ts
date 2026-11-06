@@ -788,6 +788,14 @@ export class ThreadAdapter {
     return { runtime: 'agent', ...result };
   }
 
+  async deleteBranch(input: import('@varin/application-client').ThreadBranchDelete, signal?: AbortSignal) {
+    this.assertIdentity(input);
+    const { runtime: _, ...command } = input;
+    const receipt = await this.runtime.deleteBranch(command, signal);
+    this.requestContentMaintenance?.();
+    return receipt;
+  }
+
   async compact(input: ThreadCompact, signal: AbortSignal = new AbortController().signal) {
     await this.requireIdentity(input, signal);
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');

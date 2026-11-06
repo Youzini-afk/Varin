@@ -1,8 +1,10 @@
-//! Retire deleted conversations through their original Catalog, before ContentStore tracing.
+//! Retire deleted conversations and branches through their original Catalog before content tracing.
 //! Live executors and surviving relational references remain roots. Thread tombstones keep
 //! deletion replay and agent identity stable without retaining every historical request body.
 use super::*;
 use std::collections::BTreeMap;
+
+type RetirementCandidates = (Vec<(String, Vec<String>)>, usize);
 
 fn quoted(value: &str) -> String { format!("\"{}\"", value.replace('"', "\"\"")) }
 
@@ -14,7 +16,7 @@ fn seed(tx: &Transaction<'_>, table: &str, condition: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::threads::ThreadDelete;
+    use crate::catalog::threads::{BranchDelete, ThreadDelete};
     use crate::test_submission::InputAdmission;
 
     struct Fixture(std::path::PathBuf);
@@ -37,8 +39,46 @@ mod tests {
         db.delete_thread(&command).unwrap(); command
     }
     fn retire(db: &mut Catalog) -> Result<(usize, usize)> {
-        let runs = db.deleted_thread_retirement_candidates()?.0.into_iter().flat_map(|(_, runs)| runs).collect::<Vec<_>>();
+        let runs = db.deleted_thread_retirement_candidates()?.0.into_iter()
+            .chain(db.deleted_branch_retirement_candidates()?.0).flat_map(|(_, runs)| runs).collect::<Vec<_>>();
         db.retire_deleted_threads(&runs)
+    }
+
+    #[test]
+    fn branch_deletion_preserves_descendants_and_retires_unshared_history() {
+        let root = Fixture::new();
+        let mut db = root.open();
+        let main = submit(&mut db, "chat", "Main conversation");
+        finish(&mut db, &main.run_id);
+        let fork = db.prepare_branch_fork("chat-main", "fork", Some(&main.input_id), None).unwrap().load().unwrap();
+        db.admit_branch_fork(fork).unwrap();
+        let leaf = db.submit(&SubmitInput {
+            key: "fork-input".into(), thread_id: "chat".into(), branch_id: "fork".into(),
+            expected_head: Some(main.input_id.clone()), input: json!({"text":"Branch work"}), configuration: json!({}),
+        }).unwrap();
+        let command = BranchDelete { thread_id: "chat".into(), branch_id: "fork".into(), key: "delete-fork".into() };
+        assert!(db.delete_branch(&command).is_err());
+        finish(&mut db, &leaf.run_id);
+        let descendant = db.prepare_branch_fork("fork", "descendant", Some(&leaf.input_id), None).unwrap().load().unwrap();
+        db.admit_branch_fork(descendant).unwrap();
+        let receipt = db.delete_branch(&command).unwrap();
+        assert_eq!(receipt["branches"].as_array().unwrap().len(), 2);
+        assert_eq!(db.delete_branch(&command).unwrap(), receipt);
+        assert!(db.prepare_branch_fork("fork", "new", Some(&leaf.input_id), None).is_err());
+        let tree = db.capture_conversation_tree("chat", "chat-main").unwrap().load(&|| false).unwrap();
+        assert!(tree.routes.iter().all(|route| route.branch_id != "fork"));
+        assert_eq!(retire(&mut db).unwrap().1, 0);
+        assert!(db.history("fork").unwrap().is_empty());
+        assert_eq!(db.history("descendant").unwrap().len(), 2);
+
+        db.delete_branch(&BranchDelete { branch_id: "descendant".into(), key: "delete-descendant".into(), ..command.clone() }).unwrap();
+        assert!(retire(&mut db).unwrap().0 > 0);
+        assert!(matches!(db.run(&leaf.run_id), Err(RuntimeError::NotFound(_))));
+        assert_eq!(db.history("chat-main").unwrap().len(), 1);
+        drop(db);
+        let mut db = root.open();
+        assert_eq!(db.delete_branch(&command).unwrap(), receipt);
+        assert_eq!(db.inspect_thread("chat").unwrap()["branches"].as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -189,17 +229,30 @@ fn owned(tx: &Transaction<'_>, table: &str, query: &str) -> Result<()> {
 }
 
 impl Catalog {
-    pub(crate) fn deleted_thread_retirement_candidates(&self) -> Result<(Vec<(String, Vec<String>)>, usize)> {
+    pub(crate) fn deleted_thread_retirement_candidates(&self) -> Result<RetirementCandidates> {
         // Summary Threads are private jobs owned by the branch being deleted.
         self.db.execute("UPDATE threads SET deleted_at_ms=(SELECT parent.deleted_at_ms FROM child_tasks c JOIN operations o ON o.id=c.id JOIN threads parent ON parent.id=json_extract(c.body,'$.parent_thread_id') WHERE c.child_thread_id=threads.id AND json_extract(o.body,'$.executor')='code_retrieval' AND parent.deleted_at_ms IS NOT NULL),revision=revision+1 WHERE deleted_at_ms IS NULL AND id IN (SELECT c.child_thread_id FROM child_tasks c JOIN operations o ON o.id=c.id JOIN threads parent ON parent.id=json_extract(c.body,'$.parent_thread_id') WHERE json_extract(o.body,'$.executor')='code_retrieval' AND parent.deleted_at_ms IS NOT NULL)", [])?;
         self.db.execute("UPDATE threads SET deleted_at_ms=(SELECT min(parent.deleted_at_ms) FROM context_jobs j JOIN branches source ON source.id=j.branch_id JOIN threads parent ON parent.id=source.thread_id JOIN runs r ON r.id=j.run_id JOIN branches child ON child.id=r.branch_id WHERE child.thread_id=threads.id AND parent.deleted_at_ms IS NOT NULL),revision=revision+1 WHERE deleted_at_ms IS NULL AND id IN (SELECT child.thread_id FROM context_jobs j JOIN branches source ON source.id=j.branch_id JOIN threads parent ON parent.id=source.thread_id JOIN runs r ON r.id=j.run_id JOIN branches child ON child.id=r.branch_id WHERE parent.deleted_at_ms IS NOT NULL)", [])?;
-        let threads: Vec<String> = self.db.prepare("SELECT id FROM threads WHERE deleted_at_ms IS NOT NULL")?
-            .query_map([], |row| row.get(0))?.collect::<std::result::Result<_, _>>()?;
+        self.retirement_candidates("SELECT id FROM threads WHERE deleted_at_ms IS NOT NULL",
+            "SELECT r.body FROM runs r JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1")
+    }
+
+    pub(crate) fn deleted_branch_retirement_candidates(&self) -> Result<RetirementCandidates> {
+        self.retirement_candidates(
+            "SELECT b.id FROM events e JOIN branches b ON b.id=e.subject JOIN threads t ON t.id=b.thread_id
+             WHERE e.kind='branch.deleted' AND t.deleted_at_ms IS NULL",
+            "SELECT body FROM runs WHERE branch_id=?1",
+        )
+    }
+
+    fn retirement_candidates(&self, targets: &str, runs: &str) -> Result<RetirementCandidates> {
+        let targets: Vec<String> = self.db.prepare(targets)?.query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        let mut query = self.db.prepare(runs)?;
         let mut ready = Vec::new();
         let mut pending = 0;
-        for thread in threads {
-            let runs: Vec<Run> = self.db.prepare("SELECT r.body FROM runs r JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1")?
-                .query_map([&thread], |row| row.get::<_, String>(0))?
+        for id in targets {
+            let runs: Vec<Run> = query.query_map([&id], |row| row.get::<_, String>(0))?
                 .map(|row| Ok(serde_json::from_str(&row?)?)).collect::<Result<_>>()?;
             let mut drained = true;
             for run in &runs {
@@ -208,33 +261,42 @@ impl Catalog {
                 let child_resources:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions d JOIN operations o ON o.id=d.child_operation_id WHERE o.run_id=?1 AND json_extract(d.body,'$.resources_released')=0)",[&run.id],|row|row.get(0))?;
                 if !run.state.terminal() || pending || child_resources || !stops.is_empty() || !models.is_empty() { drained = false; break; }
             }
-            if drained { ready.push((thread, runs.into_iter().map(|run| run.id).collect())); } else { pending += 1; }
+            if drained { ready.push((id, runs.into_iter().map(|run| run.id).collect())); } else { pending += 1; }
         }
         Ok((ready, pending))
     }
 
     pub(crate) fn retire_deleted_threads(&mut self, drained_runs: &[String]) -> Result<(usize, usize)> {
         let (candidates, mut pending) = self.deleted_thread_retirement_candidates()?;
+        let (branches, branch_pending) = self.deleted_branch_retirement_candidates()?;
+        pending += branch_pending;
         let mut ready = Vec::new();
-        for (thread, runs) in candidates {
-            if runs.iter().all(|run| drained_runs.contains(run)) { ready.push(thread); }
+        for ((id, runs), table) in candidates.into_iter().map(|target| (target, "thread_gc_threads"))
+            .chain(branches.into_iter().map(|target| (target, "thread_gc_branches"))) {
+            if runs.iter().all(|run| drained_runs.contains(run)) { ready.push((id, table)); }
             else { pending += 1; }
         }
         if ready.is_empty() { return Ok((0, pending)); }
         let tx = self.db.transaction()?;
         tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS thread_gc_threads(id TEXT PRIMARY KEY);
+            CREATE TEMP TABLE IF NOT EXISTS thread_gc_branches(id TEXT PRIMARY KEY);
             CREATE TEMP TABLE IF NOT EXISTS thread_gc_runs(id TEXT PRIMARY KEY);
             CREATE TEMP TABLE IF NOT EXISTS thread_gc_rows(table_name TEXT NOT NULL,row_id INTEGER NOT NULL,PRIMARY KEY(table_name,row_id));
             CREATE TEMP TABLE IF NOT EXISTS thread_gc_owners(table_name TEXT NOT NULL,row_id INTEGER NOT NULL,run_id TEXT NOT NULL,PRIMARY KEY(table_name,row_id));
-            DELETE FROM thread_gc_threads; DELETE FROM thread_gc_runs; DELETE FROM thread_gc_rows; DELETE FROM thread_gc_owners;")?;
-        for thread in ready { tx.execute("INSERT INTO thread_gc_threads VALUES(?1)", [thread])?; }
-        tx.execute("INSERT INTO thread_gc_runs SELECT r.id FROM runs r JOIN branches b ON b.id=r.branch_id JOIN thread_gc_threads t ON t.id=b.thread_id", [])?;
+            DELETE FROM thread_gc_threads; DELETE FROM thread_gc_branches; DELETE FROM thread_gc_runs; DELETE FROM thread_gc_rows; DELETE FROM thread_gc_owners;")?;
+        for (id, table) in ready {
+            tx.execute(&format!("INSERT INTO {table} VALUES(?1)"), [id])?;
+        }
+        tx.execute("INSERT INTO thread_gc_branches SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads)", [])?;
+        tx.execute("INSERT INTO thread_gc_runs SELECT r.id FROM runs r JOIN thread_gc_branches b ON b.id=r.branch_id", [])?;
         for table in ["history", "goals", "followups", "calendar_occurrences", "bot_thread_bindings"] {
             seed(&tx, table, "thread_id IN (SELECT id FROM thread_gc_threads)")?;
         }
-        for table in ["input_queue", "context_checkpoints", "memory_states", "active_contexts"] {
-            seed(&tx, table, "branch_id IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))")?;
+        for table in ["input_queue", "context_checkpoints", "memory_states", "active_contexts", "goals", "thread_title_progress"] {
+            seed(&tx, table, "branch_id IN (SELECT id FROM thread_gc_branches)")?;
         }
+        seed(&tx, "followups", "json_extract(body,'$.branch_id') IN (SELECT id FROM thread_gc_branches)")?;
+        seed(&tx, "calendar_occurrences", "input_id IN (SELECT id FROM input_queue WHERE branch_id IN (SELECT id FROM thread_gc_branches))")?;
         seed(&tx, "runs", "id IN (SELECT id FROM thread_gc_runs)")?;
         for table in ["run_drivers", "driver_checkpoints", "driver_calls", "operations", "model_steps", "model_selections", "policy_checkpoints", "policy_selections", "waits", "bot_run_holds", "context_jobs", "context_job_nodes", "context_job_steps", "resumptions"] {
             owned(&tx, table, &format!("SELECT rowid AS row_id,run_id FROM {table}"))?;
@@ -256,22 +318,22 @@ impl Catalog {
         // the parent conversation is hidden. Relational protection retains that Run too.
         tx.execute("DELETE FROM thread_gc_rows WHERE table_name='child_tasks' AND row_id IN (SELECT rowid FROM child_tasks WHERE child_thread_id NOT IN (SELECT id FROM thread_gc_threads))", [])?;
         seed(&tx, "input_history_content", "input_id IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue'))")?;
-        seed(&tx, "followup_occurrences", "followup_id IN (SELECT id FROM followups WHERE thread_id IN (SELECT id FROM thread_gc_threads))")?;
-        for table in ["goal_children", "goal_runs"] { seed(&tx, table, "goal_id IN (SELECT id FROM goals WHERE thread_id IN (SELECT id FROM thread_gc_threads))")?; }
-        seed(&tx, "goal_usage", "id IN (SELECT id FROM goals WHERE thread_id IN (SELECT id FROM thread_gc_threads))")?;
+        seed(&tx, "followup_occurrences", "followup_id IN (SELECT id FROM followups WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='followups'))")?;
+        for table in ["goal_children", "goal_runs"] { seed(&tx, table, "goal_id IN (SELECT id FROM goals WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='goals'))")?; }
+        seed(&tx, "goal_usage", "id IN (SELECT id FROM goals WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='goals'))")?;
 
         // These are typed receipt identity fields, never a scan of arbitrary user text for IDs.
-        seed(&tx, "commands", "coalesce(json_extract(intent,'$.kind'),'')!='thread.delete' AND (
+        seed(&tx, "commands", "coalesce(json_extract(intent,'$.kind'),'') NOT IN ('thread.delete','branch.delete') AND (
             json_extract(receipt,'$.thread_id') IN (SELECT id FROM thread_gc_threads)
             OR json_extract(receipt,'$.threadId') IN (SELECT id FROM thread_gc_threads)
             OR json_extract(receipt,'$.run_id') IN (SELECT id FROM thread_gc_runs)
             OR json_extract(receipt,'$.runId') IN (SELECT id FROM thread_gc_runs)
-            OR json_extract(receipt,'$.branch_id') IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))
-            OR json_extract(receipt,'$.branchId') IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))
+            OR json_extract(receipt,'$.branch_id') IN (SELECT id FROM thread_gc_branches)
+            OR json_extract(receipt,'$.branchId') IN (SELECT id FROM thread_gc_branches)
             OR json_extract(receipt,'$.input_id') IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue'))
             OR json_extract(receipt,'$.id') IN (SELECT id FROM operations WHERE run_id IN (SELECT id FROM thread_gc_runs)))")?;
-        seed(&tx, "events", "kind!='thread.deleted' AND (subject IN (SELECT id FROM thread_gc_threads)
-            OR subject IN (SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads))
+        seed(&tx, "events", "kind NOT IN ('thread.deleted','branch.deleted') AND (subject IN (SELECT id FROM thread_gc_threads)
+            OR subject IN (SELECT id FROM thread_gc_branches)
             OR subject IN (SELECT id FROM thread_gc_runs)
             OR subject IN (SELECT id FROM operations WHERE run_id IN (SELECT id FROM thread_gc_runs))
             OR subject IN (SELECT id FROM driver_calls WHERE run_id IN (SELECT id FROM thread_gc_runs))
@@ -284,7 +346,7 @@ impl Catalog {
 
         // A branch can share an older Thread's head before it has appended any history of its own.
         tx.execute_batch("WITH RECURSIVE retained(id) AS (
-            SELECT head FROM branches WHERE thread_id NOT IN (SELECT id FROM thread_gc_threads) AND head IS NOT NULL
+            SELECT head FROM branches WHERE id NOT IN (SELECT id FROM thread_gc_branches) AND head IS NOT NULL
             UNION SELECT h.parent FROM history h JOIN retained r ON r.id=h.id WHERE h.parent IS NOT NULL)
             DELETE FROM thread_gc_rows WHERE table_name='history' AND row_id IN (SELECT rowid FROM history WHERE id IN retained);")?;
 
@@ -321,7 +383,8 @@ impl Catalog {
         attachments::retire(&tx)?;
         // Heads are not SQL foreign keys. Only retired branches can have lost their final head.
         tx.execute("UPDATE branches SET head=NULL,active_run=NULL WHERE thread_id IN (SELECT id FROM thread_gc_threads) AND head IS NOT NULL AND NOT EXISTS(SELECT 1 FROM history WHERE id=branches.head)", [])?;
-        tx.execute_batch("DELETE FROM thread_gc_threads; DELETE FROM thread_gc_runs; DELETE FROM thread_gc_rows; DELETE FROM thread_gc_owners;")?;
+        tx.execute("UPDATE branches SET head=NULL WHERE id IN (SELECT id FROM thread_gc_branches) AND head IS NOT NULL AND EXISTS(SELECT 1 FROM events WHERE subject=branches.id AND kind='branch.deleted')", [])?;
+        tx.execute_batch("DELETE FROM thread_gc_threads; DELETE FROM thread_gc_branches; DELETE FROM thread_gc_runs; DELETE FROM thread_gc_rows; DELETE FROM thread_gc_owners;")?;
         tx.commit()?;
         Ok((removed, pending))
     }

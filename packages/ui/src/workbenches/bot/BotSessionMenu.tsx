@@ -47,16 +47,16 @@ export function BotSessionMenu({ session, identity, label, disabled, onAction, c
       </> : null}
       <Separator />
       <Item onClick={select('copy')}><Icon name="file-copy" className="size-4" />{t(main ? 'sessions.sidebar.session.menu.copyId' : 'bot.session.menu.copyBranchId')}</Item>
-      {main ? <>
-        <Separator />
+      <Separator />
+      {main ? (
         <Item disabled={disabled} onClick={select(session.thread.archived ? 'restore' : 'archive')}>
           <Icon name={session.thread.archived ? 'inbox-unarchive' : 'inbox-archive'} className="size-4" />
           {t(session.thread.archived ? 'sessions.sidebar.session.menu.restore' : 'sessions.sidebar.bulkActions.archive')}
         </Item>
-        <Item className="text-destructive" disabled={disabled} onClick={select('delete')}>
-          <Icon name="delete-bin" className="size-4" />{t('sessions.sidebar.dialogs.deleteSession.titleAction')}
-        </Item>
-      </> : null}
+      ) : null}
+      <Item className="text-destructive" disabled={disabled} onClick={select('delete')}>
+        <Icon name="delete-bin" className="size-4" />{t(main ? 'sessions.sidebar.dialogs.deleteSession.titleAction' : 'bot.session.menu.deleteBranch')}
+      </Item>
     </>;
   };
   return <ContextMenu onOpenChange={change} onOpenChangeComplete={complete}>

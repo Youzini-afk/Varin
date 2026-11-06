@@ -829,6 +829,15 @@ fn cancel_definition(tx: &Transaction<'_>, d: &mut Definition) -> Result<()> {
 pub(super) fn cancel_source_run(tx: &Transaction<'_>, run: &str) -> Result<()> {
     cancel_source_registrations(tx, run, false)
 }
+pub(super) fn cancel_branch(tx: &Transaction<'_>, thread: &str, branch: &str) -> Result<()> {
+    let mut query = tx.prepare("SELECT body FROM followups WHERE thread_id=?1 AND json_extract(body,'$.branch_id')=?2")?;
+    let rows = query.query_map(params![thread, branch], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    for raw in rows {
+        cancel_definition(tx, &mut serde_json::from_str(&raw)?)?;
+    }
+    Ok(())
+}
 pub(super) fn cancel_tree_source_run(tx: &Transaction<'_>, run: &str) -> Result<()> {
     cancel_source_registrations(tx, run, true)
 }

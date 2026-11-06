@@ -266,6 +266,9 @@ impl Catalog {
             ));
         }
         let tx = self.db.transaction()?;
+        if let Some(undo) = &command.undo_of {
+            threads::require_branch_available(&tx, &format!("preserved:{}", command_key(&command.branch_id, undo)))?;
+        }
         if idle(&tx, &command.thread_id, &command.branch_id)? != command.expected_head_id {
             return Err(RuntimeError::Conflict(
                 "navigation expected head changed".into(),

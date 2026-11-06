@@ -326,6 +326,7 @@ describe('Bot workbench', () => {
     let items = await menu();
     expect(items.some(item => item.textContent === 'sessions.sidebar.session.menu.rename')).toBe(false);
     expect(items.some(item => item.textContent === 'sessions.sidebar.dialogs.deleteSession.titleAction')).toBe(false);
+    expect(items.some(item => item.textContent === 'bot.session.menu.deleteBranch')).toBe(true);
     await act(async () => items.find(item => item.textContent === 'bot.session.menu.copyBranchId')!.click());
     expect(state.copy).toHaveBeenCalledExactlyOnceWith('trip-alternative');
     expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
@@ -333,6 +334,34 @@ describe('Bot workbench', () => {
     await act(async () => items.find(item => item.textContent === 'bot.session.menu.fork')!.click());
     expect(state.fork).toHaveBeenCalledWith({ runtime: 'agent', threadId: 'trip', branchId: 'trip-alternative', key: expect.any(String), headId: 'alternative-head' });
     expect(useBotNavigation.getState().entry?.branchId).toBe('new-branch');
+  });
+
+  it('deletes just the selected alternate route and returns to the main conversation', async () => {
+    const entry = sessionOf('a', 'entry-a', 'branch-a', { branches: [
+      { branch_id: 'branch-a', head: null, active_run_id: null, latest_run: null },
+      { branch_id: 'alternative', head: null, active_run_id: null, latest_run: null },
+      { branch_id: 'sibling', head: null, active_run_id: null, latest_run: null },
+    ] }, true);
+    state.sessions.mockResolvedValue([entry]);
+    useThreadStore.setState({ threads: [entry.thread] });
+    const remove = vi.spyOn(useThreadStore.getState(), 'deleteBranch').mockImplementation(async () => {
+      useThreadStore.setState({ threads: [{ ...entry.thread, branches: entry.thread.branches.filter(branch => branch.branch_id !== 'alternative') }] });
+      return entry.identity;
+    });
+    await render();
+    const alternative = container.querySelector<HTMLButtonElement>('[data-sidebar-row="session:entry-a:alternative"]')!;
+    await act(async () => alternative.click());
+    await act(async () => alternative.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+    const item = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'bot.session.menu.deleteBranch')!;
+    await act(async () => item.click());
+    expect(remove).not.toHaveBeenCalled();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === 'bot.session.menu.deleteBranch')!;
+    await act(async () => confirm.click());
+    await settle();
+    expect(remove).toHaveBeenCalledExactlyOnceWith({ ...entry.identity, branchId: 'alternative' });
+    expect(centre()?.getAttribute('data-branch')).toBe('branch-a');
+    expect(container.querySelector('[data-sidebar-row="session:entry-a:alternative"]')).toBeNull();
+    expect(container.querySelector('[data-sidebar-row="session:entry-a:sibling"]')).not.toBeNull();
   });
 
   it('archives and restores a conversation, then deletes it only after confirmation', async () => {

@@ -925,8 +925,12 @@ impl RunSupervisor {
     /// Rechecking against this exact drained set prevents a newly terminal Run losing its rows
     /// before its worker has finished teardown.
     pub fn retire_deleted_threads(&self) -> Result<(usize, usize)> {
-        let runs = self.catalog.lock().map_err(error)?.deleted_thread_retirement_candidates().map_err(error)?
-            .0.into_iter().flat_map(|(_, runs)| runs).collect::<Vec<_>>();
+        let runs = {
+            let catalog = self.catalog.lock().map_err(error)?;
+            catalog.deleted_thread_retirement_candidates().map_err(error)?.0.into_iter()
+                .chain(catalog.deleted_branch_retirement_candidates().map_err(error)?.0)
+                .flat_map(|(_, runs)| runs).collect::<Vec<_>>()
+        };
         for run in &runs { self.quiesce_run_workers(run, |run| run.state.terminal(), true)?; }
         self.catalog.lock().map_err(error)?.retire_deleted_threads(&runs).map_err(error)
     }

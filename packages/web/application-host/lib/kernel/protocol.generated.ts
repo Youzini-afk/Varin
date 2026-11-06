@@ -150,6 +150,7 @@ export type KernelMethod =
   | "runtime.branch.recovery.sources"
   | "runtime.operation.recovery.anchor"
   | "runtime.branch.fork"
+  | "runtime.branch.delete"
   | "runtime.plan.view"
   | "runtime.plan.contains"
   | "runtime.context_job.preview"
@@ -2954,6 +2955,8 @@ export interface ThreadTitleFinishParams { job: ThreadTitleJob; title: string | 
 export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; titleMode?: 'automatic' | 'manual'; }
 
 export interface ThreadDeleteParams { threadId: string; key: string; expectedRevision: number; }
+
+export interface BranchDeleteParams { threadId: string; branchId: string; key: string; }
 
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
@@ -7026,6 +7029,7 @@ export type KernelMethodParams = {
   "runtime.branch.recovery.sources": NavigationReceiptParams;
   "runtime.operation.recovery.anchor": OperationInspectParams;
   "runtime.branch.fork": BranchForkParams;
+  "runtime.branch.delete": BranchDeleteParams;
   "runtime.plan.view": PlanViewParams;
   "runtime.plan.contains": PlanContainsParams;
   "runtime.context_job.preview": ContextJobPreviewParams;
@@ -8592,6 +8596,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.branch.fork";
       params: BranchForkParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.delete";
+      params: BranchDeleteParams;
       epoch?: string;
       grantId?: string;
     }

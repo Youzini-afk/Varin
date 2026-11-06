@@ -32,6 +32,7 @@ interface ThreadNavigationState {
   materializeDraft(draftKey: string): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
+  deleteBranch(identity: ThreadIdentity): Promise<ThreadIdentity>;
   markRead(threadId: string, throughCursor: number): Promise<void>;
 }
 
@@ -40,6 +41,7 @@ let binding = 0;
 let catalogRequest = 0;
 let navigation = 0;
 const deleted = new Set<string>();
+const deletedBranches = new Set<string>();
 let catalogPending: Promise<void> | undefined;
 let catalogAgain = false;
 const selections = new Map<string, ThreadIdentity>();
@@ -66,7 +68,12 @@ function mergeSummary(previous: ThreadSummary | undefined, incoming: ThreadSumma
   return { ...incoming,
     title_mode: newerMetadata ? previous.title_mode : incoming.title_mode ?? previous.title_mode,
     ...(newerMetadata ? { title: previous.title, pinned: previous.pinned, archived: previous.archived, revision: previous.revision } : {}),
-    ...(previous.activity_cursor > incoming.activity_cursor ? { branches: previous.branches, observer_project_ids: previous.observer_project_ids } : {}),
+    ...(previous.activity_cursor > incoming.activity_cursor ? {
+      branches: incoming.revision <= previous.revision
+        ? previous.branches
+        : incoming.branches.map(branch => previous.branches.find(current => current.branch_id === branch.branch_id) ?? branch),
+      observer_project_ids: previous.observer_project_ids,
+    } : {}),
     deleted_at_ms: previous.deleted_at_ms ?? incoming.deleted_at_ms,
     updated_at_ms: Math.max(previous.updated_at_ms, incoming.updated_at_ms),
     activity_cursor, read_cursor, unread: activity_cursor > read_cursor,
@@ -87,11 +94,17 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
           const threads = await api.list({ archived: 'include' });
           if (owner !== binding || request !== catalogRequest) return;
           const current = get();
-          const merged = threads.filter(thread => !deleted.has(thread.thread_id)).map(thread => mergeSummary(current.threads.find(value => value.thread_id === thread.thread_id), thread));
+          const merged = threads.filter(thread => !deleted.has(thread.thread_id)).map(thread => {
+            const summary = mergeSummary(current.threads.find(value => value.thread_id === thread.thread_id), thread);
+            return deletedBranches.size ? { ...summary, branches: summary.branches.filter(branch => !deletedBranches.has(branch.branch_id)) } : summary;
+          });
           const selected = current.selectedIdentity;
-          const retained = selected && merged.find(thread => thread.thread_id === selected.threadId && thread.branches.some(branch => branch.branch_id === selected.branchId));
+          const selectedThread = selected && merged.find(thread => thread.thread_id === selected.threadId);
+          const retained = selectedThread && selectedThread.branches.some(branch => branch.branch_id === selected?.branchId);
+          const fallback = selectedThread ? { runtime: 'agent' as const, threadId: selectedThread.thread_id, branchId: selectedThread.main_branch_id } : null;
+          if (selected && !retained && fallback) selections.set(current.hostKey, fallback);
           set({ threads: merged, catalogLoaded: true, catalogError: null,
-            ...(selected && !retained ? { selectedIdentity: null } : {}) });
+            ...(selected && !retained ? { selectedIdentity: fallback } : {}) });
         } while (catalogAgain && owner === binding);
       } catch (error) {
         if (owner === binding && request === catalogRequest) set({ catalogError: errorMessage(error) });
@@ -184,6 +197,32 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     if (get().selectedIdentity?.threadId === threadId) selections.delete(get().hostKey);
     set(state => ({ threads: state.threads.filter(value => value.thread_id !== threadId), selectedIdentity: state.selectedIdentity?.threadId === threadId ? null : state.selectedIdentity }));
   },
+  async deleteBranch(identity) {
+    const api = requireAPI();
+    const owner = binding;
+    const host = get().hostKey;
+    const fingerprint = JSON.stringify([host, identity.threadId, identity.branchId, 'delete-branch']);
+    const key = mutationKeys.get(fingerprint) ?? crypto.randomUUID();
+    mutationKeys.set(fingerprint, key);
+    const summary = await api.deleteBranch({ ...identity, key });
+    if (owner !== binding) throw new Error('Application Host changed during branch deletion');
+    mutationKeys.delete(fingerprint);
+    deletedBranches.add(identity.branchId);
+    const fallback = { ...identity, branchId: summary.main_branch_id };
+    const current = get();
+    const selected = current.selectedIdentity;
+    const switchBranch = selected?.threadId === identity.threadId && selected.branchId === identity.branchId;
+    if (switchBranch) selections.set(host, fallback);
+    set({
+      threads: current.threads.map(thread => {
+        if (thread.thread_id !== identity.threadId) return thread;
+        const updated = mergeSummary(thread, summary);
+        return { ...updated, branches: updated.branches.filter(branch => !deletedBranches.has(branch.branch_id)) };
+      }),
+      ...(switchBranch ? { selectedIdentity: fallback } : {}),
+    });
+    return fallback;
+  },
   async markRead(threadId, throughCursor) {
     const api = requireAPI(); const owner = binding;
     const thread = get().threads.find(thread => thread.thread_id === threadId);
@@ -199,7 +238,7 @@ export function bindThreadStore(api: ThreadsAPI): () => void {
   let abort = new AbortController();
   let retry: ReturnType<typeof setTimeout> | undefined;
   const reset = () => {
-    deleted.clear(); binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false;
+    deleted.clear(); deletedBranches.clear(); binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false;
     abort.abort(); if (retry) clearTimeout(retry); abort = new AbortController();
     boundAPI = api;
     const hostKey = threadHostKey();

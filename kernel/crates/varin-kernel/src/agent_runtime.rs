@@ -2885,6 +2885,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let command: ThreadDeleteParams = serde_json::from_value(params)?;
         return catalog.delete_thread(&command).map_err(domain);
     }
+    if method == "runtime.branch.delete" {
+        let command: BranchDeleteParams = serde_json::from_value(params)?;
+        return catalog.delete_branch(&command).map_err(domain);
+    }
     if method == "runtime.thread.read" {
         let command: ThreadReadPositionParams = serde_json::from_value(params)?;
         return catalog.mark_thread_read(&command).map_err(domain);

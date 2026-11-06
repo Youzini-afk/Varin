@@ -81,7 +81,7 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
     void api.observe(null, event => {
       if ('stream' in event) return;
       const routes = treeRef.current?.routes;
-      if (event.kind === 'branch.created' || event.kind === 'branch.navigated'
+      if (event.kind === 'branch.created' || event.kind === 'branch.navigated' || event.kind === 'branch.deleted'
           || event.kind === 'history.appended' && routes?.some(route => route.branchId === event.subject)
           || event.kind === 'run.accepted'
           || event.kind.startsWith('run.') && (routes?.some(route => route.activeRunId === event.subject)
