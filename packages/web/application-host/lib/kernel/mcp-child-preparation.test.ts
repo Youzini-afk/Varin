@@ -139,12 +139,13 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
       completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' },
       executor_stopped: true,
     });
+    // The child reports its physical cwd, which may differ from a symlinked temp path.
     expect(
       (await fs.readFile(calls, 'utf8'))
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line)),
-    ).toEqual([{ cwd: childCwd, marker: 'child' }]);
+    ).toEqual([{ cwd: await fs.realpath(childCwd), marker: 'child' }]);
     const saved = structuredClone(child.binding);
     child.release();
     const restored = await prepare(
@@ -167,7 +168,7 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
     const nextCall = { ...call, runId: nextInput.runId, operationId: 'continued-effect', callId: 'continued-call' };
     await next.authorize(nextCall, signal);
     await next.execute(nextCall, signal, { kind: 'external', identity: 'continued-effect', epoch: 'continued-epoch' });
-    expect(JSON.parse((await fs.readFile(calls, 'utf8')).trim().split('\n').at(-1)!)).toEqual({ cwd: nextCwd, marker: 'continued' });
+    expect(JSON.parse((await fs.readFile(calls, 'utf8')).trim().split('\n').at(-1)!)).toEqual({ cwd: await fs.realpath(nextCwd), marker: 'continued' });
     const nextSaved = structuredClone(next.binding); next.release();
     const nextRestored = await prepare({ ...nextInput, requiredBinding: nextSaved }, signal);
     leases.push(nextRestored); expect(nextRestored.binding).toEqual(nextSaved);
@@ -235,9 +236,9 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
         .split('\n')
         .map((line) => JSON.parse(line)),
     ).toEqual([
-      { cwd: childCwd, marker: 'child' },
-      { cwd: nextCwd, marker: 'continued' },
-      { cwd: root, marker: 'neutral' },
+      { cwd: await fs.realpath(childCwd), marker: 'child' },
+      { cwd: await fs.realpath(nextCwd), marker: 'continued' },
+      { cwd: await fs.realpath(root), marker: 'neutral' },
     ]);
     // The child preparation owner also derives a service-only selection, including a
     // source-less neutral dependency. This is real stdio/Host admission, not a script engine test.
@@ -270,7 +271,7 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
       const service = (discovered.completion.content.data as {services:{kind:string;schemaVersion:string}[]}).services.find(value => value.kind === 'resources')!;
       const received = await invoke('read_resource', {server:'fixture',schemaVersion:service.schemaVersion,uri:'fixture:///not-listed'});
       expect(received.completion).toMatchObject({kind:'result',outcome:'succeeded',effect:'confirmed',content:{parts:[
-        {kind:'text',text:JSON.stringify({cwd:expectedCwd,marker:expectedMarker})},
+        {kind:'text',text:JSON.stringify({cwd:await fs.realpath(expectedCwd),marker:expectedMarker})},
         {kind:'media',media:{media_type:'application/octet-stream',data_base64:Buffer.from('resource-bytes').toString('base64')}},
       ]}});
       const savedServices = structuredClone(servicesChild.binding);
@@ -305,10 +306,10 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
         .split('\n')
         .map((line) => JSON.parse(line)),
     ).toEqual([
-      { cwd: childCwd, marker: 'child' },
-      { cwd: nextCwd, marker: 'continued' },
-      { cwd: root, marker: 'neutral' },
-      { cwd: childCwd, marker: 'child' },
+      { cwd: await fs.realpath(childCwd), marker: 'child' },
+      { cwd: await fs.realpath(nextCwd), marker: 'continued' },
+      { cwd: await fs.realpath(root), marker: 'neutral' },
+      { cwd: await fs.realpath(childCwd), marker: 'child' },
     ]);
     // Host restart or final original-owner release cannot synthesize the old definition.
     for (const lease of leases) lease.release();

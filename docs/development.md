@@ -180,7 +180,7 @@ CLI 按所选 Host 产物的声明编译，清洁构建不依赖开发目录中�
 入口、产物布局和重试方式见 [Desktop 打包说明](../packages/electron/README.md#packaging)。
 
 Host 类型由独立 Node 工程检查，Web/CLI/跨层测试通过 `#application-host` 读取新生成声明；Vitest 使用真实 Host 源码。
-生产类型/构建不把 `*.test-helper.ts` 与 `*.fixture.ts` 当成入口；测试工程仍包含它们，避免先生成测试声明和产物再清理。
+生产运行构建不把 `*.test-helper.ts` 与 `*.fixture.ts` 当成入口；独立声明缓存仍为跨层测试提供这些辅助模块的类型，测试工程检查其源码。声明生成前原地清理旧文件并保留目录，避免残留声明掩盖缺失模块，同时不重引 Windows watcher 的目录替换问题。
 不要用旧 server/ 或旧声明验证新源码。Electron 的类型准备不需要覆盖正在运行的 server generation。
 
 私有 wire 改动后运行 `bun run kernel:protocol`，生成检查使用同一脚本的 `--check`。正常 kernel build 生成与当前

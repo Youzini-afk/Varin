@@ -35,7 +35,9 @@ Rust executable, and creates the production dependency layout and lockfile.
 `bun run --cwd packages/web type-check` prepares shared runtime dependencies and emits/checks the
 Application Host declarations, then runs `type-check:prepared`: private protocol generation check,
 Host test types, browser types and CLI source/test types. Named test helpers (`*.test-helper.ts`) and
-fixtures (`*.fixture.ts`) are checked by the test config rather than compiled into production Host output.
+fixtures (`*.fixture.ts`) stay out of production Host output. The declaration-cache config includes
+their signatures for cross-layer tests; the test config checks their source. Old cache files are removed
+in place before emission so excluded or deleted modules cannot survive through stale declarations.
 Host bodies use
 their Node compiler settings; browser code retains its DOM settings. The existing `#application-host`
 imports let cross-layer tests use those generated signatures without recompiling the Host as browser
