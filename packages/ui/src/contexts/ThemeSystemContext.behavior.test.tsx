@@ -106,3 +106,30 @@ it('keeps the newer same-Host theme generation and accepts validated same-ID liv
   expect(current.currentTheme.colors.primary.base).toBe('#886655');
   expect(storage.setItem).not.toHaveBeenCalled(); expect(mocks.ink).not.toHaveBeenCalled();
 });
+
+it('applies, saves and resets custom colors for the selected theme', async () => {
+  await mount(false);
+  const themeId = current.currentTheme.metadata.id;
+  const initial = current.currentTheme.colors.surface.background;
+  await act(async () => current.setCustomColor(themeId, 'background', '#f5f3ee'));
+  expect(current.currentTheme.colors.surface.background).toBe('#f5f3ee');
+  expect(document.getElementById('opencode-theme-variables')?.textContent).toContain('--surface-background: #f5f3ee');
+  expect(storage.setItem).toHaveBeenCalledWith('varin.custom-colors.v1', JSON.stringify({ [themeId]: { background: '#f5f3ee' } }));
+  await act(async () => current.resetCustomColors(themeId));
+  expect(current.currentTheme.colors.surface.background).toBe(initial);
+  expect(storage.setItem).toHaveBeenCalledWith('varin.custom-colors.v1', '{}');
+});
+
+it('imports a copied palette, applies it and can remove it', async () => {
+  await mount(false);
+  const palette = JSON.stringify({ name: 'Paper', variant: 'light', colors: {
+    accent: '#da7756', background: '#f5f3ee', foreground: '#1d1b16',
+  } });
+  await act(async () => current.importTheme(palette));
+  expect(current.currentTheme.metadata.id).toBe('imported-Paper');
+  expect(current.currentTheme.colors.surface.background).toBe('#f5f3ee');
+  expect(storage.setItem).toHaveBeenCalledWith('varin.imported-themes.v1', expect.any(String));
+  await act(async () => current.removeImportedTheme('imported-Paper'));
+  expect(current.currentTheme.metadata.id).not.toBe('imported-Paper');
+  expect(storage.setItem).toHaveBeenCalledWith('varin.imported-themes.v1', '[]');
+});

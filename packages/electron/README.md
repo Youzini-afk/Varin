@@ -155,6 +155,11 @@ clean build; they contain no user state. CI can import the shared browser produc
 using `VARIN_FRONTEND_ARTIFACT` and `VARIN_KERNEL_ARTIFACT`; imports check both inputs and payload hashes.
 Other native kernels, Host outputs and libraries stay on their matching platform runners.
 
+The Linux x64 release kernel and package are built on Ubuntu 22.04 to avoid requiring
+newer glibc on that platform. The release workflow checks the kernel's required GLIBC
+symbols against 2.35; the check is not a substitute for testing the complete AppImage
+and its native components on the target system. Linux ARM64 has a separate baseline.
+
 Build output remains `packages/electron/dist`. Main-process JavaScript uses ASAR; Node worker and external
 program dependency closures, native binaries and their assets remain physical. The generated builder
 configuration owns those unpack patterns. `afterPack` verifies the actual virtual main-process import

@@ -123,7 +123,7 @@ jobs:
   native-build:
     name: Build shared Linux x64 kernel
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -137,9 +137,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             kernel/target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+          key: rust-ubuntu22-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-ubuntu22-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - run: node scripts/build-products.mjs kernel --export artifacts/shared-kernel
+      - run: node scripts/check-linux-glibc.mjs artifacts/shared-kernel/payload/varin-kernel 2.35
       - uses: actions/upload-artifact@v7
         with:
           name: varin-kernel-linux-x64

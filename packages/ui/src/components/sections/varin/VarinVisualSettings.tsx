@@ -2,6 +2,7 @@ import React from 'react';
 import { runtimeFetch } from '@varin/application-client';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { normalizeCustomColor, type CustomColorField } from '@/lib/theme/customColors';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -235,6 +236,13 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const {
         availableThemes,
+        currentTheme,
+        importedThemes,
+        importTheme,
+        removeImportedTheme,
+        customColors,
+        setCustomColor,
+        resetCustomColors,
         customThemesLoading,
         reloadCustomThemes,
         lightThemeId,
@@ -244,6 +252,27 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
+    const [themeJson, setThemeJson] = React.useState('');
+    const [themeTransferMessage, setThemeTransferMessage] = React.useState('');
+    const handleThemeImport = (raw: string) => {
+        try {
+            importTheme(raw);
+            setThemeTransferMessage(t('settings.varin.visual.field.themeImported'));
+        } catch (error) {
+            setThemeTransferMessage(error instanceof Error && ['json', 'format', 'unsafe', 'size'].includes(error.message)
+                ? t('settings.varin.visual.field.themeInvalid') : t('settings.varin.visual.field.themeStorageError'));
+        }
+    };
+    const handleCopyTheme = async () => {
+        const json = JSON.stringify(currentTheme, null, 2);
+        try {
+            await navigator.clipboard.writeText(json);
+            setThemeTransferMessage(t('settings.varin.visual.field.themeCopied'));
+        } catch {
+            setThemeJson(json);
+            setThemeTransferMessage(t('settings.varin.visual.field.themeCopyFallback'));
+        }
+    };
     const [themePreviewVariant, setThemePreviewVariant] = React.useState<'light' | 'dark'>();
 
     // macOS-desktop-only vibrancy toggle. Changing it needs a full relaunch
@@ -527,6 +556,73 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 onChange={id => { setThemePreviewVariant('dark'); setDarkThemePreference(id); }}
                                                 label={t('settings.varin.visual.field.selectDarkThemeAria')} />
                                         </SettingsFieldRow>
+
+                                        <details className="rounded-lg border border-border/60 p-3">
+                                            <summary className="cursor-pointer font-medium">{t('settings.varin.visual.field.themeTransfer')}</summary>
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
+                                                    onClick={() => void handleCopyTheme()}>{t('settings.varin.visual.field.copyTheme')}</button>
+                                                <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm">
+                                                    {t('settings.varin.visual.field.importThemeFile')}
+                                                    <input type="file" accept="application/json,.json" className="sr-only"
+                                                        onChange={(event) => {
+                                                            const file = event.currentTarget.files?.[0];
+                                                            event.currentTarget.value = '';
+                                                            if (!file) return;
+                                                            if (file.size > 1024 * 1024) { setThemeTransferMessage(t('settings.varin.visual.field.themeInvalid')); return; }
+                                                            void file.text().then(handleThemeImport).catch(() => setThemeTransferMessage(t('settings.varin.visual.field.themeInvalid')));
+                                                        }} />
+                                                </label>
+                                            </div>
+                                            <textarea value={themeJson} onChange={(event) => setThemeJson(event.target.value)} rows={5}
+                                                aria-label={t('settings.varin.visual.field.pasteTheme')}
+                                                placeholder={t('settings.varin.visual.field.pasteTheme')}
+                                                className="mt-3 w-full rounded-md border border-border bg-background p-2 font-mono text-sm" />
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
+                                                    onClick={() => handleThemeImport(themeJson)}>{t('settings.varin.visual.field.importTheme')}</button>
+                                                {importedThemes.some((item) => item.metadata.id === currentTheme.metadata.id) &&
+                                                    <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
+                                                        onClick={() => {
+                                                            try { removeImportedTheme(currentTheme.metadata.id); setThemeTransferMessage(t('settings.varin.visual.field.themeRemoved')); }
+                                                            catch { setThemeTransferMessage(t('settings.varin.visual.field.themeStorageError')); }
+                                                        }}>{t('settings.varin.visual.field.removeImportedTheme')}</button>}
+                                            </div>
+                                            {themeTransferMessage && <p role="status" className="mt-2 typography-meta text-muted-foreground">{themeTransferMessage}</p>}
+                                        </details>
+
+                                        <div className="pt-3">
+                                            <p className="typography-settings-link font-medium">{t('settings.varin.visual.field.customColors')}</p>
+                                            <p className="mb-2 typography-meta text-muted-foreground">{t('settings.varin.visual.field.customColorsHint')}</p>
+                                            {([
+                                                ['accent', t('settings.varin.visual.field.customAccent'), currentTheme.colors.primary.base],
+                                                ['background', t('settings.varin.visual.field.customBackground'), currentTheme.colors.surface.background],
+                                                ['foreground', t('settings.varin.visual.field.customForeground'), currentTheme.colors.surface.foreground],
+                                            ] as [CustomColorField, string, string][]).map(([field, title, value]) => {
+                                                const color = normalizeCustomColor(value) ?? '#808080';
+                                                return <SettingsFieldRow key={field} label={title}>
+                                                    <div className="flex items-center gap-2 rounded-full border border-border px-2 py-1">
+                                                        <input type="color" value={color} aria-label={title}
+                                                            className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+                                                            onChange={(event) => setCustomColor(currentTheme.metadata.id, field, event.target.value)} />
+                                                        <input key={`${currentTheme.metadata.id}-${field}-${color}`} type="text" defaultValue={color.toUpperCase()}
+                                                            aria-label={`${title} HEX`} maxLength={7} spellCheck={false}
+                                                            className="w-20 bg-transparent font-mono text-sm outline-none"
+                                                            onBlur={(event) => {
+                                                                const next = normalizeCustomColor(event.target.value);
+                                                                if (next) setCustomColor(currentTheme.metadata.id, field, next);
+                                                                else event.target.value = color.toUpperCase();
+                                                            }}
+                                                            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+                                                    </div>
+                                                </SettingsFieldRow>;
+                                            })}
+                                            <button type="button" className="typography-settings-link mt-2 disabled:opacity-50"
+                                                disabled={!customColors[currentTheme.metadata.id]}
+                                                onClick={() => resetCustomColors(currentTheme.metadata.id)}>
+                                                {t('settings.varin.visual.field.resetColors')}
+                                            </button>
+                                        </div>
 
                                         <div className="flex items-center gap-2 pt-1">
                                             <button
