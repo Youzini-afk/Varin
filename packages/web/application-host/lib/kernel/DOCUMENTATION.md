@@ -185,6 +185,9 @@ the original call identity, current permission and binding availability. Read-on
 settle as failed reads. Domain mutation receipts retain their actual effect and executor-stop evidence.
 The model's tool name or claimed source is not authority. Nested scripts invoke the same ordinary tools
 through retained parent permission; they cannot upgrade read-only or borrowed authority by changing labels.
+If a continuation's preparation scope outlives an admitted extension owner, the same attempt restores
+the saved exact bindings before starting. It does not substitute current routing, restore revoked grants,
+or replay accepted tool calls; unavailable original implementations remain preparation failures.
 
 Context transforms and budgets are selected extension capabilities. Their candidates remain ordered,
 versioned and separate from the immutable request already sent. Runtime contract discovery exposes the

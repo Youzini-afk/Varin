@@ -1,4 +1,6 @@
 import { expect, it, vi } from 'vitest';
+import { isDeepStrictEqual } from 'node:util';
+import { HostBindingRestoreError } from '@varin/extension-host';
 import { leafHostComposition } from './host-composition.test-helper.js';
 import { AgentRuntimeClient, type McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
@@ -7,6 +9,7 @@ import type {
   ExtensionToolPreparer,
 } from './extension-tool-owner.js';
 import type { McpToolLease } from './tool-bridge.js';
+import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type {
   LiveExtensionToolBinding, LiveMcpBinding, DelegatedExecution,
   LaunchIntent,
@@ -154,15 +157,20 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
   let child: ChildExecutionResponse | null = null;
   let currentProject: string | null = null;
   const preparedScopes: Array<Parameters<ExtensionToolPreparer>[0]> = [];
-  const preparer: ExtensionToolPreparer = async (input) => {
+  const preparedBindings: Array<Parameters<ExtensionToolPreparer>[1]> = [];
+  const closeScope = vi.fn();
+  let preparationFailure: Error | undefined;
+  const preparer: ExtensionToolPreparer = async (input, required) => {
     preparedScopes.push(input);
+    preparedBindings.push(structuredClone(required));
+    if (preparationFailure) throw preparationFailure;
     return {
       initial,
       start(callback) {
         publish = callback;
       },
       inspect: () => [],
-      close() {},
+      close: closeScope,
     };
   };
   const kernel = {
@@ -194,6 +202,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     mcpBinding: () => mcp?.binding,
     mcpLiveBinding: () => mcp,
     mcpImplementationIdentity: () => undefined,
+    registerCredentialOwner: async () => ({}),
     unregisterCredentialOwner() {},
     releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     cancelRunPreparation() {},
@@ -213,6 +222,10 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     discardExtensionTool: (_run: string, live: LiveExtensionToolBinding) => {
       leases.get(live.ownerId)?.lease.release();
       leases.delete(live.ownerId);
+    },
+    retainedExtensionBinding: (_run: string, binding: LiveExtensionToolBinding['binding']) => {
+      const original = [...leases].find(([, retained]) => isDeepStrictEqual(retained.binding, binding));
+      return original ? { ownerId: original[0], generation: original[1].generation, binding } : undefined;
     },
     registerMcpOwner: async (_run: string, lease: McpToolLease) => {
       mcp = { ownerId: 'initial-mcp', binding: lease.binding };
@@ -236,6 +249,8 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
           return structuredClone(launch);
         case 'runtime.run.scope':
           return structuredClone(admittedScope);
+        case 'runtime.model.inspect':
+          return { active: null, desired: null };
         case 'runtime.child.execution.for_run':
           return child;
         case 'runtime.context.inspect':
@@ -304,6 +319,9 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     launch,
     releaseChildHandoff: kernel.releaseChildToolHandoff,
     preparedScopes,
+    preparedBindings, closeScope,
+    loseExtensionOwners: () => { leases.clear(); run.state = 'runnable'; },
+    prepareExtensions: (next: ExtensionToolLease[], failure?: Error) => { initial = next; preparationFailure = failure; },
     child: (value: ChildExecutionResponse) => { child = value; },
     admittedScope: (scope: RunContextScope | null) => {
       admittedScope = scope;
@@ -337,6 +355,46 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     },
   };
 }
+it.each([false, true])('same-Run continuation restores an unavailable exact extension owner without manual retry (credentials: %s)', async credentials => {
+  const released: string[] = [], original = contribution('chosen', '1', released), f = setup([original]);
+  const start = () => credentials
+    ? f.runtime.startRunWithCredentialOwner('run', {} as ExistingHostCredentialOwner)
+    : f.runtime.startRun('run');
+  await start();
+  const first = f.requests.find(request => request.method === 'runtime.run.start')!.params;
+  f.loseExtensionOwners();
+  const restored = contribution('chosen', '1', released);
+  restored.generation++;
+  restored.lease.binding.generation++;
+  f.prepareExtensions([restored]);
+  await start();
+  const starts = f.requests.filter(request => request.method === 'runtime.run.start');
+  expect(starts).toHaveLength(2);
+  expect(f.preparedBindings).toEqual([[], [original.binding]]);
+  expect(f.closeScope).toHaveBeenCalledOnce();
+  expect(starts[1]!.params).toMatchObject({ runId: 'run', extensionBindings: [{ binding: original.binding, generation: 2 }] });
+  expect((starts[1]!.params.extensionBindings as LiveExtensionToolBinding[])[0]!.ownerId)
+    .not.toBe((first.extensionBindings as LiveExtensionToolBinding[])[0]!.ownerId);
+  // A later continuation can reuse the repaired owner without another cold preparation.
+  await start();
+  expect(f.preparedBindings).toHaveLength(2);
+});
+
+it('an unavailable exact implementation remains a preparation failure instead of replacing or omitting its tool', async () => {
+  const original = contribution('chosen', '1', []), f = setup([original]);
+  await f.runtime.startRun('run');
+  f.loseExtensionOwners();
+  const failure = new HostBindingRestoreError('tool', 'implementation_unavailable', original.binding.providerKey);
+  f.prepareExtensions([], failure);
+  await expect(f.runtime.startRun('run')).rejects.toBe(failure);
+  expect(f.preparedBindings).toEqual([[], [original.binding]]);
+  expect(f.requests.filter(request => request.method === 'runtime.run.start')).toHaveLength(1);
+  expect(f.launch.selection.extension_bindings).toEqual([original.binding]);
+  f.prepareExtensions([contribution('chosen', '1', [])]);
+  await f.runtime.startRun('run');
+  expect(f.preparedBindings).toEqual([[], [original.binding], [original.binding]]);
+});
+
 it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted services and derives MCP once before exact same-Run restore', async trigger => {
   const released: string[] = [], extension = contribution('chosen', '1', released), f = setup([extension]);
   const base = contribution('mcp_read', '1', released).lease;
