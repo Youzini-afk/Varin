@@ -57,3 +57,26 @@ describe("managed remote shell observation cancellation", () => {
     }
   });
 });
+
+describe('managed MCP draining control lane', () => {
+  it('keeps the original parsed cleanup/ack contract while refusing new mixed-route execution', async () => {
+    const calls: unknown[] = [];
+    const app = express(); app.use(express.json());
+    const service = { hostId: 'remote-host', sources: () => ({ service: async (_principal: unknown, input: unknown) => { calls.push(input); return { done: true }; } }) } as unknown as ManagedRemoteExecutionService;
+    registerManagedRemoteRoutes(app, {
+      service, isDraining: () => true,
+      resolveAuthContext: async () => ({ type: 'client', clientId: 'test-principal', client: { capabilities: ['filesystem:read', 'filesystem:write', 'logs:read', 'terminal:use', 'process:control'] } as never }),
+    });
+    const server = createServer(app);
+    try {
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      const endpoint = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}/api/harness/managed-execution/v1/sources/service`;
+      const post = (kind: string) => fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ coordinatorHostId: 'original', operation: { kind: 'mcp', action: { kind } } }) });
+      expect((await post('interaction_ack')).status).toBe(200);
+      expect((await post('release')).status).toBe(200);
+      expect((await post('task_cancel')).status).toBe(200);
+      expect((await post('call')).status).toBe(503);
+      expect(calls).toHaveLength(3);
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+});

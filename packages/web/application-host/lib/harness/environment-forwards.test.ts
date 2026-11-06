@@ -51,10 +51,11 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
     const servicePort = await listen(echo);
     const http = createHttpServer((_req, res) => { res.statusCode = 404; res.end(); });
     const httpPort = await listen(http);
-    stops.push(attachServiceForward({
+    const forward = attachServiceForward({
       server: http, hostId: "target-h",
       authenticate: async () => true, originAllowed: () => true,
-    }).stop);
+    });
+    stops.push(forward.stop);
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
@@ -73,8 +74,11 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
       socket.write("hello");
     });
     expect(reply).toBe("echo:hello");
-    socket.destroy();
+    const disconnected = new Promise<void>(resolve => socket.once('close', () => resolve()));
+    forward.beginDraining(); await disconnected;
 
+    // Closing a transport does not claim that its original forward owner was
+    // released or that an application-level executor stopped.
     expect(runtime.list().map((entry) => entry.id)).toEqual([access.id]);
     expect(await runtime.close(access.id)).toBe(true);
     expect(runtime.list()).toEqual([]);

@@ -240,6 +240,10 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     backend: "managed-remote",
     state: target.identity.machine.state === "available" ? "available" : "degraded",
     ...(target.identity.machine.capacity ? { capacity: target.identity.machine.capacity } : {}),
+    // These remain target authority facts. Missing observations clear earlier values,
+    // and the coordinator never subtracts its own reserve from a remote budget.
+    system: target.identity.machine.system ?? null,
+    budget: target.identity.machine.budget ?? null,
     connection: { status: "connected", detail: `authenticated ${target.connection.source} connection` },
     target: {
       hostId: target.hostId,

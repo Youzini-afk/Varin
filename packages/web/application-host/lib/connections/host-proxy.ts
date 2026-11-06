@@ -11,6 +11,7 @@ import { readHostConnections } from './hosts.js';
 export function attachConnectionProxy(options: {
   app: Express;
   server: Server;
+  isDraining?: () => boolean;
   settings: HostSshManager['settingsStore'];
   requireAuth: RequestHandler;
   authenticateUpgrade(request: IncomingMessage): Promise<unknown>;
@@ -18,7 +19,14 @@ export function attachConnectionProxy(options: {
 }) {
   const targets = new WeakMap<IncomingMessage, { target: string; path: string; headers: Record<string, string> }>();
   const sockets = new Set<Duplex>();
-  const rememberSocket = (socket: Duplex) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); };
+  let draining = false;
+  const rememberSocket = (socket: Duplex) => {
+    if (draining || options.isDraining?.()) { socket.destroy(); return; }
+    sockets.add(socket); socket.once('close', () => sockets.delete(socket));
+  };
+  // This bridge carries arbitrary peer routes/bytes, so its lifecycle owner
+  // closes it instead of guessing which frames are observations or writes.
+  const beginDraining = () => { draining = true; for (const socket of sockets) socket.destroy(); sockets.clear(); };
   const resolve = (request: IncomingMessage, id: string, rest: string) => {
     const host = readHostConnections(options.settings).hosts.find((host) => host.id === id);
     if (!host) throw new Error('Host connection was removed');
@@ -70,9 +78,15 @@ export function attachConnectionProxy(options: {
     catch (error) { response.status(404).json({ error: error instanceof Error ? error.message : 'Unknown connection' }); return; }
     void proxy(request, response, next);
   });
+  const refuseDraining = (socket: Duplex): boolean => {
+    if (!draining && !options.isDraining?.()) return false;
+    socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    return true;
+  };
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const match = /^\/api\/connections\/hosts\/([^/]+)\/proxy(\/.*)$/u.exec(request.url ?? '');
     if (!match) return;
+    if (refuseDraining(socket)) return;
     rememberSocket(socket);
     void (async () => {
       // The auth owner validates the original inner WS route against its URL-token
@@ -85,10 +99,11 @@ export function attachConnectionProxy(options: {
       if (!hasHostConnectionAccess(context, 'proxy')) {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
       }
+      if (refuseDraining(socket)) return;
       resolve(request, decodeURIComponent(match[1]!), match[2]!);
       await proxy.upgrade(request, socket as import('node:net').Socket, head);
     })().catch(() => socket.destroy());
   };
   options.server.on('upgrade', upgrade);
-  return { stop: () => { options.server.off('upgrade', upgrade); for (const socket of sockets) socket.destroy(); sockets.clear(); } };
+  return { beginDraining, stop: () => { beginDraining(); options.server.off('upgrade', upgrade); } };
 }

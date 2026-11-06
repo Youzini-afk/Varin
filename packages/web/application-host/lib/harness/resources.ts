@@ -8,7 +8,8 @@
  * submissions from claiming the same remaining capacity. An unread usage dimension is never
  * treated as free.
  */
-import os from "node:os";
+import { createDefaultResourceProbe, readResearchReserve, type LocalMachineProbe } from "./resources-system.js";
+export type { LocalMachineProbe } from "./resources-system.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
@@ -17,6 +18,7 @@ import type {
   ResourceCommitmentView,
   ResourceListResult,
   ResourceMachineView,
+  ResourcePressureView,
 } from "@varin/protocol";
 import {
   allocateGpuDevices,
@@ -34,38 +36,6 @@ const LOCAL_MACHINE_ID = "local";
 const RESOURCE_WORKSPACE_ID = "__varin_host_resources__";
 export const RESOURCE_SAMPLE_STALE_MS = 120_000;
 const DEFAULT_SAMPLE_INTERVAL_MS = 5_000;
-
-export interface LocalMachineProbe {
-  cpuCores: number;
-  memoryMb: number;
-  usedMemoryMb: number;
-  /** 0-100 across all cores, or undefined when not measured. */
-  cpuPercent?: number;
-}
-
-const createDefaultProbe = (): (() => LocalMachineProbe) => {
-  let previous: { total: number; idle: number } | undefined;
-  return () => {
-    const cpuSnapshots = os.cpus();
-    const cores = cpuSnapshots.length;
-    const memoryMb = Math.round(os.totalmem() / (1024 * 1024));
-    const usedMemoryMb = Math.round((os.totalmem() - os.freemem()) / (1024 * 1024));
-    const totals = cpuSnapshots.reduce((sum, cpu) => (
-      sum + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.idle
-    ), 0);
-    const idle = cpuSnapshots.reduce((sum, cpu) => sum + cpu.times.idle, 0);
-    const cpuPercent = previous && totals > previous.total && idle >= previous.idle
-      ? Math.min(100, Math.max(0, Math.round((1 - ((idle - previous.idle) / (totals - previous.total))) * 100)))
-      : undefined;
-    previous = { total: totals, idle };
-    return {
-      cpuCores: cores,
-      memoryMb,
-      usedMemoryMb,
-      ...(cpuPercent === undefined ? {} : { cpuPercent }),
-    };
-  };
-};
 
 export interface ResourceAdmission {
   status: "confirmed" | "insufficient";
@@ -124,8 +94,12 @@ export interface ResourceMachineRegistration {
   capacity?: {
     cpuCores?: number;
     memoryMb?: number;
+    pidsLimit?: number;
     gpus?: Array<{ index: number; uuid?: string; name?: string; memoryMb?: number }>;
   };
+  /** Target-reported facts only. Null explicitly clears a now-unavailable observation. */
+  system?: ResourceMachineView["system"] | null;
+  budget?: ResourceMachineView["budget"] | null;
   connection?: { status: "connected" | "degraded" | "offline" | "unknown"; detail?: string };
   /** Credential-free target identity. Connection secrets remain in the trusted resolver. */
   target?: ResourceMachineView["target"];
@@ -138,7 +112,7 @@ export interface ResourceSample {
   source: string;
   identity: { hostId: string; machineId: string; kind: string; backend: string | null; targetHostId: string | null };
   machineRevision: number;
-  usage: { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; uuid?: string; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> };
+  usage: { pressure?: ResourcePressureView; memoryMb?: number; memoryAvailableMb?: number; pidsCurrent?: number; pidsAvailable?: number; cpuPercent?: number; gpus?: Array<{ index?: number; uuid?: string; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> };
   gpuProbe?: { status: string; reason?: string; detail?: string };
 }
 export interface ResourceMachineObservation {
@@ -154,6 +128,8 @@ interface ResourceServiceDeps {
   /** Monotonic clock injection for tests. */
   now?: () => number;
   probeLocal?: () => LocalMachineProbe;
+  /** Explicit research headroom; defaults to VARIN_RESEARCH_RESERVE_* (zero if unset). */
+  localReserve?: { cpuCores: number; memoryMb: number };
   onError?: (error: Error) => void;
   /** Machine/commitment fact changed — drives UI refresh. Samples never emit. */
   onChange?: (workspaceId: string) => void;
@@ -413,7 +389,11 @@ const withMachineLock = async <Result>(client: KernelClient, machineId: string, 
 
 export function createResourceService(deps: ResourceServiceDeps) {
   const now = deps.now ?? (() => Date.now());
-  const probe = deps.probeLocal ?? createDefaultProbe();
+  const probe = deps.probeLocal ?? createDefaultResourceProbe();
+  const localReserve = { ...(deps.localReserve ?? readResearchReserve()) };
+  if (nonNegative(localReserve.cpuCores) === undefined || nonNegative(localReserve.memoryMb) === undefined) {
+    throw new Error("Local research reserve must contain finite nonnegative CPU and memory budgets");
+  }
   const probeGpu = deps.probeLocalGpu ?? probeNvidiaSmi;
   const contexts = new Map<string, Promise<KernelScopedClient>>();
   const knownWorkspaces = new Set<string>();
@@ -593,8 +573,13 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const capacity = {
       cpuCores,
       memoryMb,
+      ...(nonNegative(observed.pidsLimit) === undefined ? {} : { pidsLimit: observed.pidsLimit }),
       ...(gpuCapacityForProbe(gpu) ? { gpus: gpuCapacityForProbe(gpu) } : {}),
     };
+    const budget = { reserved: localReserve, allocatable: {
+      cpuCores: Math.max(0, cpuCores - localReserve.cpuCores),
+      memoryMb: Math.max(0, memoryMb - localReserve.memoryMb),
+    } };
     const checkedAt = now();
     if (existing) {
       const payload = payloadOf(existing);
@@ -613,6 +598,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
       if (nonNegative(prior.cpuCores) === capacity.cpuCores
         && nonNegative(prior.memoryMb) === capacity.memoryMb
         && priorCapacity === nextCapacity
+        && JSON.stringify(payload.budget) === JSON.stringify(budget)
+        && JSON.stringify(payload.system) === JSON.stringify(observed.system)
         && priorGpuProbe.status === nextGpuProbe.status
         && priorGpuProbe.reason === nextGpuProbe.reason
         && priorGpuProbe.detail === nextGpuProbe.detail
@@ -627,6 +614,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
         payload: {
           ...payload,
           capacity,
+          budget,
+          system: observed.system,
           gpuProbe: nextGpuProbe,
           connection: { status: "connected", checkedAt: checkedAt },
         },
@@ -641,6 +630,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
         kind: "local",
         label: "Local machine",
         capacity,
+        budget,
+        ...(observed.system ? { system: observed.system } : {}),
         gpuProbe: gpuProbeRecord(gpu, checkedAt),
         connection: { status: "connected", checkedAt: checkedAt },
       },
@@ -669,12 +660,16 @@ export function createResourceService(deps: ResourceServiceDeps) {
           controller.signal.throwIfAborted();
           const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(LOCAL_MACHINE_ID));
           const usedMemoryMb = nonNegative(observed.usedMemoryMb);
-          if (usedMemoryMb === undefined) throw new Error('Local machine probe returned invalid memory usage');
+          if (observed.usedMemoryMb !== undefined && usedMemoryMb === undefined) throw new Error('Local machine probe returned invalid memory usage');
           if (disposed || captured !== generation || epoch !== deps.client.kernelEpoch) throw new Error('Resource observation owner changed');
           const sample = await putGlobalRecord({ recordId: recordIdFor.sample(LOCAL_MACHINE_ID), recordType: 'resource.sample', state: 'observed',
             ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
-            payload: { machineId: LOCAL_MACHINE_ID, observedAt, source: 'host-os', identity: machineIdentity(machine), machineRevision: machine.recordRevision,
-              usage: { memoryMb: usedMemoryMb,
+            payload: { machineId: LOCAL_MACHINE_ID, observedAt, source: observed.system?.source ?? 'host-os', identity: machineIdentity(machine), machineRevision: machine.recordRevision,
+              usage: { ...(usedMemoryMb === undefined ? {} : { memoryMb: usedMemoryMb }),
+                ...(nonNegative(observed.memoryAvailableMb) === undefined ? {} : { memoryAvailableMb: observed.memoryAvailableMb }),
+                ...(observed.pressure ? { pressure: observed.pressure } : {}),
+                ...(nonNegative(observed.pidsCurrent) === undefined ? {} : { pidsCurrent: observed.pidsCurrent }),
+                ...(nonNegative(observed.pidsAvailable) === undefined ? {} : { pidsAvailable: observed.pidsAvailable }),
                 ...(percent(observed.cpuPercent) === undefined ? {} : { cpuPercent: percent(observed.cpuPercent) }),
                 ...(gpuUsageForProbe(gpu) ? { gpus: gpuUsageForProbe(gpu) } : {}) }, gpuProbe: gpuProbeRecord(gpu, observedAt) } }, scoped);
           // A committed old-epoch sample remains a domain fact, but cannot enter a new live observer.
@@ -853,6 +848,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const memoryCapacity = nonNegative(capacity?.memoryMb);
     const usedCpuPercent = percent(usage?.cpuPercent);
     const usedMemoryMb = num(usage?.memoryMb);
+    const pidsLimit = nonNegative(capacity?.pidsLimit);
+    const memoryAvailableMb = nonNegative(usage?.memoryAvailableMb);
+    const pidsCurrent = nonNegative(usage?.pidsCurrent);
+    const pidsAvailable = nonNegative(usage?.pidsAvailable);
     return {
       machineId: record.recordId.slice(MACHINE_PREFIX.length),
       kind: str(payload.kind) ?? "unknown",
@@ -882,10 +881,13 @@ export function createResourceService(deps: ResourceServiceDeps) {
           ...(gpuProbeDetail ? { detail: gpuProbeDetail } : {}),
         },
       } : {}),
+      ...(payload.system ? { system: payload.system as NonNullable<ResourceMachineView["system"]> } : {}),
+      ...(payload.budget ? { budget: payload.budget as NonNullable<ResourceMachineView["budget"]> } : {}),
       ...(capacity ? {
         capacity: {
           ...(cpuCapacity === undefined ? {} : { cpuCores: cpuCapacity }),
           ...(memoryCapacity === undefined ? {} : { memoryMb: memoryCapacity }),
+          ...(pidsLimit === undefined ? {} : { pidsLimit }),
           ...(gpus ? { gpus } : {}),
           observedAt: record.updatedAt,
         },
@@ -894,6 +896,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
         usage: {
           ...(usedCpuPercent === undefined ? {} : { cpuPercent: usedCpuPercent }),
           ...(usedMemoryMb === undefined ? {} : { memoryMb: usedMemoryMb }),
+          ...(memoryAvailableMb === undefined ? {} : { memoryAvailableMb }),
+          ...(pidsCurrent === undefined ? {} : { pidsCurrent }),
+          ...(pidsAvailable === undefined ? {} : { pidsAvailable }),
+          ...(usage.pressure ? { pressure: usage.pressure as ResourcePressureView } : {}),
           ...(usageGpus ? { gpus: usageGpus } : {}),
           observedAt,
           source: str(samplePayload?.source) ?? "unknown",
@@ -970,7 +976,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
       if (connection.status !== "connected") {
         return { status: "insufficient", reason: `machine ${machineId} connection is ${str(connection.status) ?? "unknown"}` };
       }
-      const capacity = (machinePayload.capacity ?? {}) as Record<string, unknown>;
+      const effective = (machinePayload.capacity ?? {}) as Record<string, unknown>;
+      const budget = machinePayload.budget as ResourceMachineView["budget"] | undefined;
+      const capacity = machineId === LOCAL_MACHINE_ID && budget
+        ? { ...effective, ...budget.allocatable } : effective;
       const commitmentId = commitmentIdFor(workspaceId, machineId, attemptId);
       const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.commitment(commitmentId));
       if (existing) {
@@ -1061,6 +1070,21 @@ export function createResourceService(deps: ResourceServiceDeps) {
         }
         if ((remaining[dimension] ?? 0) < wanted) {
           return { status: "insufficient", remaining, reason: `insufficient ${dimension} on ${machineId}` };
+        }
+      }
+      // Commitments and observed usage overlap. Constrain by both independently rather than
+      // subtracting usage from the commitment remainder (which would double-count active jobs).
+      if (machineId === LOCAL_MACHINE_ID && (normalized.memoryMb ?? 0) > 0) {
+        const sample = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(machineId));
+        const samplePayload = sample ? payloadOf(sample) : null;
+        const usage = samplePayload?.usage as Record<string, unknown> | undefined;
+        const available = nonNegative(usage?.memoryAvailableMb);
+        const system = machinePayload.system as ResourceMachineView["system"] | undefined;
+        if (system && system.source !== "host-os" && (available === undefined || (num(samplePayload?.observedAt) ?? -Infinity) + RESOURCE_SAMPLE_STALE_MS < now())) {
+          return { status: "insufficient", remaining, reason: "local memory headroom is unavailable or stale" };
+        }
+        if (available !== undefined && normalized.memoryMb! > available) {
+          return { status: "insufficient", remaining, reason: "insufficient observed memory headroom on local" };
         }
       }
       if (!hasResourceDimension(normalized)) return { status: "confirmed" };
@@ -1273,6 +1297,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
           ...(input.capacity.memoryMb === undefined ? {} : {
             memoryMb: nonNegative(input.capacity.memoryMb) ?? (() => { throw new Error("machine memory capacity is invalid"); })(),
           }),
+          ...(input.capacity.pidsLimit === undefined ? {} : {
+            pidsLimit: nonNegative(input.capacity.pidsLimit) !== undefined && Number.isInteger(input.capacity.pidsLimit)
+              ? input.capacity.pidsLimit : (() => { throw new Error("machine PID capacity is invalid"); })(),
+          }),
           ...(input.capacity.gpus === undefined ? {} : {
             gpus: input.capacity.gpus.map((gpu) => {
               const index = nonNegative(gpu?.index);
@@ -1291,6 +1319,32 @@ export function createResourceService(deps: ResourceServiceDeps) {
           }),
         }
       : undefined;
+    const dimensionPair = (value: { cpuCores: number; memoryMb: number }, name: string) => {
+      if (!value || nonNegative(value.cpuCores) === undefined || nonNegative(value.memoryMb) === undefined) {
+        throw new Error(`machine ${name} is invalid`);
+      }
+      return { cpuCores: value.cpuCores, memoryMb: value.memoryMb };
+    };
+    for (const [name, value] of [["system", input.system], ["budget", input.budget]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "object" || Array.isArray(value))) {
+        throw new Error(`machine ${name} observation is invalid`);
+      }
+    }
+    const system = input.system ? (() => {
+      const value = input.system!;
+      if (!["host-os", "linux-cgroup-v1", "linux-cgroup-v2", "linux-cgroup-hybrid"].includes(value.source)
+        || !["available", "partial", "unavailable"].includes(value.status)
+        || !["host", "visible-cgroup-ancestors"].includes(value.scope)
+        || !Array.isArray(value.warnings) || value.warnings.some(warning => typeof warning !== "string")) {
+        throw new Error("machine resource probe provenance is invalid");
+      }
+      return { source: value.source, status: value.status, scope: value.scope,
+        physical: dimensionPair(value.physical, "physical capacity"), warnings: [...value.warnings] };
+    })() : undefined;
+    const budget = input.budget ? {
+      reserved: dimensionPair(input.budget.reserved, "reserved budget"),
+      allocatable: dimensionPair(input.budget.allocatable, "allocatable budget"),
+    } : undefined;
     return withMachineLock(deps.client, machineId, async () => {
       const scoped = await globalContext();
       const recordId = recordIdFor.machine(machineId);
@@ -1322,6 +1376,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
           ...(input.label?.trim() ? { label: input.label.trim() } : prior.label ? { label: prior.label } : {}),
           ...(backend ? { backend } : {}),
           ...(capacity ? { capacity } : prior.capacity ? { capacity: prior.capacity } : {}),
+          ...(input.system === undefined ? (prior.system ? { system: prior.system } : {}) : system ? { system } : {}),
+          ...(input.budget === undefined ? (prior.budget ? { budget: prior.budget } : {}) : budget ? { budget } : {}),
           ...(input.target ? { target: input.target } : prior.target ? { target: prior.target } : {}),
           connection,
         },
@@ -1353,7 +1409,11 @@ export function createResourceService(deps: ResourceServiceDeps) {
           const queued = machine.queued.length
             ? ` · ${machine.queued.length} queued (${machine.queued.map((entry) => entry.attemptId).join(", ")})`
             : "";
-          return `${machine.machineId} · ${machine.kind} · ${machine.state} · ${machine.connection.status} · ${capacity} · ${usage} · ${committed}${queued}`;
+          const budget = machine.budget
+            ? ` · research budget ${machine.budget.allocatable.cpuCores} cpu/${Math.round(machine.budget.allocatable.memoryMb)} MiB (reserved ${machine.budget.reserved.cpuCores} cpu/${machine.budget.reserved.memoryMb} MiB)` : "";
+          const probe = machine.system ? ` · limits ${machine.system.source}/${machine.system.status}${machine.system.warnings.length ? `: ${machine.system.warnings.join("; ")}` : ""}` : "";
+          const pids = machine.capacity?.pidsLimit === undefined ? "" : ` · tasks ${machine.usage?.pidsCurrent ?? "?"}/${machine.capacity.pidsLimit} (${machine.usage?.pidsAvailable ?? "?"} available across ancestors)`;
+          return `${machine.machineId} · ${machine.kind} · ${machine.state} · ${machine.connection.status} · ${capacity} · ${usage} · ${committed}${queued}${budget}${probe}${pids}`;
         }).join("\n");
     return { machines, generatedAt: now(), text };
   };

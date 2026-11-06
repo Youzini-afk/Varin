@@ -303,6 +303,12 @@ export interface ResourceCommitmentView {
   releasedAt?: number;
 }
 
+/** Cumulative controller counters for the named current cgroup subtree, not rates or OOM predictions. */
+export interface ResourcePressureView {
+  cpu?: { scope: string; throttledSeconds?: number; throttleEvents?: number };
+  memory?: { scope: string; oomEvents?: number; oomKills?: number; limitEvents?: number };
+}
+
 export interface ResourceMachineView {
   machineId: string;
   kind: string;
@@ -332,17 +338,38 @@ export interface ResourceMachineView {
     /** Work still waiting for placement needs the named coordinator to remain running. */
     unassignedWorkRequiresCoordinator: boolean;
   };
-  /** Total device capacity, last observed. */
+  /** OS/container probe provenance. Hidden cgroup ancestors cannot be inspected from a private namespace. */
+  system?: {
+    source: "host-os" | "linux-cgroup-v1" | "linux-cgroup-v2" | "linux-cgroup-hybrid";
+    status: "available" | "partial" | "unavailable";
+    scope: "host" | "visible-cgroup-ancestors";
+    physical: { cpuCores: number; memoryMb: number };
+    warnings: string[];
+  };
+  /** Explicit Host headroom withheld from research commitments, not an OS reservation. */
+  budget?: {
+    reserved: { cpuCores: number; memoryMb: number };
+    allocatable: { cpuCores: number; memoryMb: number };
+  };
+  /** Best observed OS/container upper bound; hidden/unread limits may be tighter (see system). Commitments use budget.allocatable. */
   capacity?: {
     cpuCores?: number;
     memoryMb?: number;
     gpus?: ResourceGpuView[];
+    /** Linux task limit includes threads, not only process leaders. */
+    pidsLimit?: number;
     observedAt?: number;
   };
-  /** Currently observed usage; absent means unread, not idle. */
+  /** Currently observed usage; Linux cgroup memory/CPU usage is leaf-scoped. Absent means unread, not idle. */
   usage?: {
     cpuPercent?: number;
     memoryMb?: number;
+    /** Minimum observed memory headroom across visible limiting ancestors and the OS. */
+    memoryAvailableMb?: number;
+    /** Leaf cgroup task count, including threads; ancestor/sibling occupancy is reflected in pidsAvailable. */
+    pidsCurrent?: number;
+    pidsAvailable?: number;
+    pressure?: ResourcePressureView;
     gpus?: ResourceGpuView[];
     observedAt: number;
     source: string;

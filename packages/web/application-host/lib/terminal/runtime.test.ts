@@ -800,6 +800,18 @@ describe('terminal runtime', () => {
       });
       second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-kill' }));
       await second.next('snapshot');
+      runtime.beginDraining();
+      second.socket.send(createTerminalWsControlFrame({ t: 'write', v: 4, s: 'term-kill', i: 'during-drain', d: 'must-not-execute' }));
+      expect(await second.next('error')).toMatchObject({ s: 'term-kill', i: 'during-drain', code: 'INPUT_UNCONFIRMED' });
+      expect(requiredProcess(processes, 2).writes).not.toContain('must-not-execute');
+      const observer = await open();
+      observer.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-kill' }));
+      expect(await observer.next('snapshot')).toMatchObject({ s: 'term-kill', status: 'running' });
+      const refused = await fetch(`${base}/api/terminal/create`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'too-late', cwd: '/repo' }),
+      });
+      expect(refused.status).not.toBe(200);
+      expect(processes).toHaveLength(3);
       const killed = await fetch(`${base}/api/terminal/force-kill`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ cwd: '/repo' }),

@@ -1,15 +1,19 @@
 services:
   varin:
-    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin-slim:latest}
+    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Slim by default. Use docker-compose.toolbelt.yml for the language
+        # Standard (slim) by default. Use docker-compose.toolbelt.yml for the language
         # toolbelt, or build Dockerfile.base --target slim as a local base.
         RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-slim:latest}
     container_name: varin
     init: true
+    # Keep this larger than the Host's complete stop budget below. These retain
+    # the existing 10s application budget with 5s supervision margin; tune both
+    # from representative workloads rather than treating them as a drain SLA.
+    stop_grace_period: ${VARIN_STOP_GRACE_PERIOD:-15s}
     user: "1000:1000"
     ports:
       - "3000:3000"
@@ -25,6 +29,7 @@ services:
       VARIN_DATA_DIR: /home/varin/.config/varin
       VARIN_WORKSPACE_ROOT: /home/varin/workspaces
       VARIN_HOST: ${VARIN_HOST:-0.0.0.0}
+      VARIN_SHUTDOWN_TIMEOUT_MS: ${VARIN_SHUTDOWN_TIMEOUT_MS:-10000}
       # Port publishing makes UI authentication mandatory. Generate a value,
       # for example: VARIN_UI_PASSWORD="$(openssl rand -base64 24)" docker compose up -d
       VARIN_UI_PASSWORD: ${VARIN_UI_PASSWORD:?Set VARIN_UI_PASSWORD before exposing Varin through Docker}

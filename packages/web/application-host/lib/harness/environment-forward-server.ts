@@ -15,18 +15,27 @@ import { WebSocketServer, createWebSocketStream } from "ws";
  */
 export function attachServiceForward(options: {
   server: Server;
+  isDraining?: () => boolean;
   hostId: string;
   authenticate(request: IncomingMessage): Promise<boolean>;
   originAllowed(request: IncomingMessage): boolean | Promise<boolean>;
 }) {
   const server = new WebSocketServer({ noServer: true, maxPayload: 0, perMessageDeflate: false });
   const streams = new Set<Duplex>();
+  let draining = false;
+  const beginDraining = () => { draining = true; for (const stream of streams) stream.destroy(); streams.clear(); };
   server.on("headers", (headers) => {
     headers.push(`x-varin-managed-host: ${options.hostId}`);
   });
+  const refuseDraining = (socket: Duplex): boolean => {
+    if (!draining && !options.isDraining?.()) return false;
+    socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    return true;
+  };
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(request.url ?? "/", "http://local");
     if (url.pathname !== "/api/environment/forward") return;
+    if (refuseDraining(socket)) return;
     void (async () => {
       const expected = request.headers["x-varin-managed-host"];
       if ((expected && expected !== options.hostId) || !await options.authenticate(request) || !await options.originAllowed(request)) {
@@ -39,6 +48,7 @@ export function attachServiceForward(options: {
         socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
         return;
       }
+      if (refuseDraining(socket)) return;
       server.handleUpgrade(request, socket, head, (channel) => {
         const downstream = createWebSocketStream(channel);
         const upstream = connect({ host, port });
@@ -62,10 +72,10 @@ export function attachServiceForward(options: {
   };
   options.server.on("upgrade", upgrade);
   return {
+    beginDraining,
     stop() {
+      beginDraining();
       options.server.off("upgrade", upgrade);
-      for (const stream of streams) stream.destroy();
-      streams.clear();
       server.close();
     },
   };

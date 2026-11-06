@@ -309,7 +309,9 @@ import { createMobileDeviceStore } from './lib/mobile/device-store.js';
 import { createMobilePairingRuntime } from './lib/mobile/pairing-runtime.js';
 import { createMobilePushRuntime } from './lib/mobile/push-runtime.js';
 import { registerMobileRoutes } from './lib/mobile/routes.js';
-import { createGracefulShutdownRuntime, createShutdownCollector } from './lib/shutdown-runtime.js';
+import { createGracefulShutdownRuntime, createShutdownCollector, ShutdownDeadline, resolveShutdownTimeoutMs, reportShutdownOutcome } from './lib/shutdown-runtime.js';
+import { createDrainingAdmission, createHttpObservationDrain } from './lib/draining-admission.js';
+import { assertDataRootMayStart } from './lib/data-restore-guard.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -351,7 +353,7 @@ export type * from './public-contract.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_PORT = 3000;
-const SHUTDOWN_TIMEOUT_MS = 10_000;
+const SHUTDOWN_TIMEOUT_MS = resolveShutdownTimeoutMs(process.env.VARIN_SHUTDOWN_TIMEOUT_MS);
 const CLIENT_RELOAD_DELAY_MS = 800;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
@@ -740,6 +742,7 @@ const requestReachedLanAddress = (req: Request): string | null => {
 };
 
 async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerController> {
+  await assertDataRootMayStart(VARIN_DATA_DIR);
   if (server?.listening) throw new Error('Varin server is already running');
   isShuttingDown = false;
   const port = typeof options.port === 'number' && Number.isFinite(options.port) && options.port >= 0
@@ -799,6 +802,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   console.log(`Starting Varin on port ${port === 0 ? 'auto' : port}`);
   const app = express();
+  const httpObservationDrain = createHttpObservationDrain();
+  app.use(httpObservationDrain.middleware);
+  app.use(createDrainingAdmission(() => isShuttingDown));
   const extensionCatalog = options.extensionCatalog
     || options.extensionRuntime?.catalog
     || new ApplicationExtensionCatalog({ dataDir: VARIN_DATA_DIR });
@@ -842,7 +848,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let relayServiceInstance: RelayService | null = null;
   let tunnelRuntimeContext: TunnelRuntimeContext | null = null;
   let kernelClient: KernelClient | null = null;
-  let realtimeProxyRuntime: Pick<ReturnType<typeof attachRealtimeProxy>, 'stop'> = { stop: () => {} };
+  let realtimeProxyRuntime: Pick<ReturnType<typeof attachRealtimeProxy>, 'stop' | 'beginDraining'> = { beginDraining: () => {}, stop: () => {} };
   let dictationRuntime: ReturnType<typeof createDictationRuntime> | null = null;
 
   const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
@@ -892,12 +898,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getHealthSnapshot: () => {
       return {
         apiOnly,
+        ready: !isShuttingDown && Boolean(kernelClient?.isReady),
+        lifecycle: isShuttingDown ? 'draining' : 'running',
         ...(process.env.VARIN_RELEASE_ID?.trim()
           ? { releaseId: process.env.VARIN_RELEASE_ID.trim() }
           : {}),
         kernel: kernelClient?.handshake
           ? {
-              ready: kernelClient.isReady,
+              ready: !isShuttingDown && kernelClient.isReady,
               epoch: kernelClient.kernelEpoch,
               version: kernelClient.handshake.kernelVersion,
               protocolVersion: kernelClient.handshake.protocolVersion,
@@ -950,6 +958,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({
+    isDraining: () => isShuttingDown,
     app,
     server,
     getDesktopRuntimeConfig,
@@ -2491,18 +2500,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
-  const desktopMedia = attachDesktopMedia({ server, hostId, computers: computerService,
+  const desktopMedia = attachDesktopMedia({ isDraining: () => isShuttingDown, server, hostId, computers: computerService,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
     originAllowed: isRequestOriginAllowed,
   });
   // Target side of `environment.forward`: authenticated coordinator Hosts
   // bridge a WebSocket onto a TCP address resolved on THIS machine.
-  const serviceForward = attachServiceForward({ server, hostId,
+  const serviceForward = attachServiceForward({ isDraining: () => isShuttingDown, server, hostId,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
     originAllowed: isRequestOriginAllowed,
   });
   registerConnectionRoutes(app, connections, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   const connectionProxy = attachConnectionProxy({
+    isDraining: () => isShuttingDown,
     app, server, settings: connections.settingsStore,
     requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
     authenticateUpgrade: (request) => uiAuthController?.resolveAuthContext(request, null, { allowClientAuth: true, allowUrlToken: true }) ?? Promise.resolve(null),
@@ -2510,6 +2520,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   void connections.restore().catch((error) => console.error('[HostConnections]', errorMessage(error)));
   registerManagedRemoteRoutes(app, {
+    isDraining: () => isShuttingDown,
     documents: documentsAuthority,
     service: managedRemoteExecution,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -2977,6 +2988,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     extensionCatalog,
     extensionPackages,
     extensionRuntime,
+    isDraining: () => isShuttingDown,
     ...(options.restartApplicationHost ? { restartApplicationHost: options.restartApplicationHost } : {}),
     uiAuthController,
     documents: documentsAuthority,
@@ -2990,6 +3002,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const previewProxyRuntime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
   previewProxyRuntime.attach(app, {
+    isDraining: () => isShuttingDown,
     server,
     express,
     uiAuthController,
@@ -3008,6 +3021,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     normalizePwaOrientation,
   });
   const startupResult = await startupPipelineRuntime.run({
+    isDraining: () => isShuttingDown,
     app,
     server,
     express,
@@ -3069,182 +3083,182 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
-    isReady: () => kernelClient.isReady,
-    stop: (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => stopTask ??= (async () => {
-      const shutdown = createShutdownCollector();
-      await shutdown.run('observations.stop', () => observations.stop());
-      await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
-      await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
-      // Stop timer/watcher producers before their runtime and storage
-      // dependencies begin shutting down.
-      await shutdown.run('unsubscribeProjectTrust', () => unsubscribeProjectTrust());
-      await shutdown.run('managedMcpOwner.current?.close', () => managedMcpOwner.current?.close());
-      await shutdown.run('targetMcpService.close', () => targetMcpService.close());
-      await shutdown.run('targetScheduleReceipts.dispose', () => targetScheduleReceipts.dispose());
-      await shutdown.run('scriptRuntimeOwner.current?.dispose', () => scriptRuntimeOwner.current?.dispose());
-      await shutdown.run('environmentForwardJobs.dispose', () => environmentForwardJobs.dispose());
-      await shutdown.run('environmentForwards.dispose', () => environmentForwards.dispose());
-      await shutdown.run('computerRuntimeOwner.current?.stop', () => computerRuntimeOwner.current?.stop());
-      await shutdown.run('threadNotifications.dispose', () => threadNotifications.dispose());
-      await shutdown.run('contentMaintenance.dispose', () => {removeWorkspaceIdleMaintenance();return contentMaintenance.dispose();});
-      await shutdown.run('runObservers.stop', () => runObservers.stop());
-      await shutdown.run('collaboration.stop', () => collaboration.stop());
-      await shutdown.run('fileObservations.stop', () => fileObservations.stop());
-      await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
-      await shutdown.run('botPresence.dispose', () => botPresence.dispose());
-      await shutdown.run('botService.dispose', () => botService.dispose());
-      await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
-      await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());
-      await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());
-      await shutdown.run('unregisterRunDriverCapability', () => unregisterRunDriverCapability());
-      await shutdown.run('unregisterComputerCapability', () => unregisterComputerCapability());
-      await shutdown.run('unregisterSettingsCapability', () => unregisterSettingsCapability());
-      await shutdown.run('unregisterEnvironmentForwardCapability', () => unregisterEnvironmentForwardCapability());
-      await shutdown.run('unregisterScriptCapability', () => unregisterScriptCapability());
-      await shutdown.run('unregisterResearchCapability', () => unregisterResearchCapability());
-      await shutdown.run('researchRuntime.dispose', () => researchRuntime.dispose());
-      await shutdown.run('userIntegrations.dispose', () => userIntegrations.dispose());
-      await shutdown.run('managedMcpInteractions.dispose', () => managedMcpInteractions.dispose());
-      await shutdown.run('mcpInteractionRuntime.dispose', () => mcpInteractionRuntime.dispose());
-      await shutdown.run('mcpResourceRuntime.dispose', () => mcpResourceRuntime.dispose());
-      await shutdown.run('mcpTaskRuntime.dispose', () => mcpTaskRuntime.dispose());
-      await shutdown.run('resourceService.dispose', () => resourceService.dispose());
-      await shutdown.run('experimentService.detachObservers', () => experimentService.detachObservers());
-      await shutdown.run('unregisterWorkbenchLayoutService', () => unregisterWorkbenchLayoutService());
-      if (ownsExtensionRuntime) await shutdown.run('extensionRuntime.stop', () => extensionRuntime.stop());
-      await shutdown.run('unregisterMaterialToolCapability', () => unregisterMaterialToolCapability());
-      await shutdown.run('unregisterWebCapability', () => unregisterWebCapability());
-      await shutdown.run('unregisterOfficeCapability', () => unregisterOfficeCapability());
-      await shutdown.run('unregisterBrowserCapability', () => unregisterBrowserCapability());
-      await shutdown.run('unregisterImagesCapability', () => unregisterImagesCapability());
-      await shutdown.run('unregisterResearchDiscoveryCapability', () => unregisterResearchDiscoveryCapability());
-      await shutdown.run('unregisterInteractiveUiCapability', () => unregisterInteractiveUiCapability());
-      await shutdown.run('interactiveUi.close', () => interactiveUi.close());
-      await shutdown.run('unregisterChildIntegrationCapability', () => unregisterChildIntegrationCapability());
-      await shutdown.run('unregisterCodeExchangeCapability', () => unregisterCodeExchangeCapability());
-      await shutdown.run('unregisterScheduleCapability', () => unregisterScheduleCapability());
-      await shutdown.run('unregisterDocumentsCapability', () => unregisterDocumentsCapability());
-      await shutdown.run('unregisterWorkspaceRecoveryCapability', () => unregisterWorkspaceRecoveryCapability());
-      await shutdown.run('unregisterSearchCapability', () => unregisterSearchCapability());
-      await shutdown.run('unregisterLanguageCapability', () => unregisterLanguageCapability());
-      await shutdown.run('unregisterTasksCapability', () => unregisterTasksCapability());
-      await shutdown.run('unregisterDebugCapability', () => unregisterDebugCapability());
-      await shutdown.run('unregisterTestCapability', () => unregisterTestCapability());
-      await shutdown.run('terminalCommandSubscription.dispose', () => terminalCommandSubscription.dispose());
-      // Semantic and graph observers still read Documents and use the kernel
-      // services. Stop them while those owners are alive; otherwise each late
-      // document event can race a disposed mutation authority during shutdown.
-      observeEnvironmentDocumentMutation = () => undefined;
-      await shutdown.run('terminalCommandProjector.close', async () => {
-        const result = await terminalCommandProjector.close();
-        if (result.gap || result.failed) console.warn('[ContextObservations] Terminal projection stopped with coverage gaps:', result);
-      });
-      await shutdown.run('observeEnvironmentGitStatus.close', async () => {
-        const result = await observeEnvironmentGitStatus.close();
-        if (result.gaps) console.warn('[ContextObservations] Git samples stopped with coverage gaps:', result);
-      });
-      await shutdown.run('environmentObservations.dispose', async () => {
-        const result = await environmentObservations.dispose();
-        if (result.producerGaps.length || result.retiredGaps.length || result.sources.some(source => source.availability !== 'ready')) {
-          console.warn('[ContextObservations] Host stopped with unaccepted capture identities:', result);
-        }
-      });
-      await shutdown.run('contextObservationPublication.close', async () => {
-        const sources = await contextObservationPublication.close();
-        if (sources.some(source => source.state !== 'ready')) {
-          console.warn('[ContextObservations] Original legacy import remains incomplete:', sources);
-        }
-      });
+    isReady: () => !isShuttingDown && kernelClient.isReady,
+    stop: (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
+      if (stopTask) return stopTask;
+      const deadline = new ShutdownDeadline(SHUTDOWN_TIMEOUT_MS);
+      // Fence admissions/readiness synchronously, before the first asynchronous owner.
+      isShuttingDown = true;
+      kernelClient.beginDraining();
+      terminalRuntime?.beginDraining();
+      realtimeProxyRuntime.beginDraining();
+      connectionProxy.beginDraining();
+      serviceForward.beginDraining();
+      previewProxyRuntime.beginDraining();
+      stopTask = (async () => {
+        const shutdown = createShutdownCollector({ deadline, stopOnFailure: true });
+        await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
+        await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
+        // Stop timer/watcher producers before their runtime and storage
+        // dependencies begin shutting down.
+        await shutdown.run('unsubscribeProjectTrust', () => unsubscribeProjectTrust());
+        await shutdown.run('managedMcpOwner.current?.close', () => managedMcpOwner.current?.close());
+        await shutdown.run('targetMcpService.close', () => targetMcpService.close());
+        await shutdown.run('targetScheduleReceipts.dispose', () => targetScheduleReceipts.dispose());
+        await shutdown.run('scriptRuntimeOwner.current?.dispose', () => scriptRuntimeOwner.current?.dispose());
+        await shutdown.run('environmentForwardJobs.dispose', () => environmentForwardJobs.dispose());
+        await shutdown.run('environmentForwards.dispose', () => environmentForwards.dispose());
+        await shutdown.run('computerRuntimeOwner.current?.stop', () => computerRuntimeOwner.current?.stop());
+        await shutdown.run('threadNotifications.dispose', () => threadNotifications.dispose());
+        await shutdown.run('contentMaintenance.dispose', () => {removeWorkspaceIdleMaintenance();return contentMaintenance.dispose();});
+        await shutdown.run('runObservers.stop', () => runObservers.stop());
+        await shutdown.run('collaboration.stop', () => collaboration.stop());
+        await shutdown.run('fileObservations.stop', () => fileObservations.stop());
+        await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
+        await shutdown.run('botPresence.dispose', () => botPresence.dispose());
+        await shutdown.run('botService.dispose', () => botService.dispose());
+        await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
+        await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());
+        await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());
+        await shutdown.run('unregisterRunDriverCapability', () => unregisterRunDriverCapability());
+        await shutdown.run('unregisterComputerCapability', () => unregisterComputerCapability());
+        await shutdown.run('unregisterSettingsCapability', () => unregisterSettingsCapability());
+        await shutdown.run('unregisterEnvironmentForwardCapability', () => unregisterEnvironmentForwardCapability());
+        await shutdown.run('unregisterScriptCapability', () => unregisterScriptCapability());
+        await shutdown.run('unregisterResearchCapability', () => unregisterResearchCapability());
+        await shutdown.run('researchRuntime.dispose', () => researchRuntime.dispose());
+        await shutdown.run('userIntegrations.dispose', () => userIntegrations.dispose());
+        await shutdown.run('managedMcpInteractions.dispose', () => managedMcpInteractions.dispose());
+        await shutdown.run('mcpInteractionRuntime.dispose', () => mcpInteractionRuntime.dispose());
+        await shutdown.run('mcpResourceRuntime.dispose', () => mcpResourceRuntime.dispose());
+        await shutdown.run('mcpTaskRuntime.dispose', () => mcpTaskRuntime.dispose());
+        await shutdown.run('resourceService.dispose', () => resourceService.dispose());
+        await shutdown.run('experimentService.detachObservers', () => experimentService.detachObservers());
+        await shutdown.run('unregisterWorkbenchLayoutService', () => unregisterWorkbenchLayoutService());
+        if (ownsExtensionRuntime) await shutdown.run('extensionRuntime.stop', () => extensionRuntime.stop());
+        await shutdown.run('unregisterMaterialToolCapability', () => unregisterMaterialToolCapability());
+        await shutdown.run('unregisterWebCapability', () => unregisterWebCapability());
+        await shutdown.run('unregisterOfficeCapability', () => unregisterOfficeCapability());
+        await shutdown.run('unregisterBrowserCapability', () => unregisterBrowserCapability());
+        await shutdown.run('unregisterImagesCapability', () => unregisterImagesCapability());
+        await shutdown.run('unregisterResearchDiscoveryCapability', () => unregisterResearchDiscoveryCapability());
+        await shutdown.run('unregisterInteractiveUiCapability', () => unregisterInteractiveUiCapability());
+        await shutdown.run('interactiveUi.close', () => interactiveUi.close());
+        await shutdown.run('unregisterChildIntegrationCapability', () => unregisterChildIntegrationCapability());
+        await shutdown.run('unregisterCodeExchangeCapability', () => unregisterCodeExchangeCapability());
+        await shutdown.run('unregisterScheduleCapability', () => unregisterScheduleCapability());
+        await shutdown.run('unregisterDocumentsCapability', () => unregisterDocumentsCapability());
+        await shutdown.run('unregisterWorkspaceRecoveryCapability', () => unregisterWorkspaceRecoveryCapability());
+        await shutdown.run('unregisterSearchCapability', () => unregisterSearchCapability());
+        await shutdown.run('unregisterLanguageCapability', () => unregisterLanguageCapability());
+        await shutdown.run('unregisterTasksCapability', () => unregisterTasksCapability());
+        await shutdown.run('unregisterDebugCapability', () => unregisterDebugCapability());
+        await shutdown.run('unregisterTestCapability', () => unregisterTestCapability());
+        await shutdown.run('terminalCommandSubscription.dispose', () => terminalCommandSubscription.dispose());
+        // Semantic and graph observers still read Documents and use the kernel
+        // services. Stop them while those owners are alive; otherwise each late
+        // document event can race a disposed mutation authority during shutdown.
+        observeEnvironmentDocumentMutation = () => undefined;
+        await shutdown.run('terminalCommandProjector.close', async () => {
+          const result = await terminalCommandProjector.close();
+          if (result.gap || result.failed) console.warn('[ContextObservations] Terminal projection stopped with coverage gaps:', result);
+        });
+        await shutdown.run('observeEnvironmentGitStatus.close', async () => {
+          const result = await observeEnvironmentGitStatus.close();
+          if (result.gaps) console.warn('[ContextObservations] Git samples stopped with coverage gaps:', result);
+        });
+        await shutdown.run('environmentObservations.dispose', async () => {
+          const result = await environmentObservations.dispose();
+          if (result.producerGaps.length || result.retiredGaps.length || result.sources.some(source => source.availability !== 'ready')) {
+            console.warn('[ContextObservations] Host stopped with unaccepted capture identities:', result);
+          }
+        });
+        await shutdown.run('contextObservationPublication.close', async () => {
+          const sources = await contextObservationPublication.close();
+          if (sources.some(source => source.state !== 'ready')) {
+            console.warn('[ContextObservations] Original legacy import remains incomplete:', sources);
+          }
+        });
 
-      // The organizer is a semantic-inference consumer; fence it before closing that owner.
-      const inferenceShutdownErrors: unknown[] = [];
-      await shutdown.run('memoryOrganizer.dispose', () => memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
-      unsubscribeNextStepSettings();
-      await shutdown.run('nextSteps.close', () => nextSteps.close());
-      for (const result of await Promise.allSettled([threadTitles.close(), modelText.close()])) {
-        if (result.status === 'rejected') inferenceShutdownErrors.push(result.reason);
-      }
-      unsubscribeKnowledgeEmbedding();
-      await shutdown.run('localKnowledgeComponent.dispose', () => localKnowledgeComponent.dispose());
-      await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
-      await shutdown.run('delegationModels.close', () => delegationModels.close());
-      await shutdown.run('webRuntime.close', () => webRuntimeOwner.current?.close());
-      await shutdown.run('webRetrievalAssistance.close', () => webRetrievalAssistance.close());
-      await shutdown.run('webFetch.dispose', () => webFetchService.dispose());
-      await shutdown.run('semanticInference.close', () => semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
-      // Stop producers and drain their receipts while process grants are valid.
-      // One refused exit must not prevent the other domains from shutting down.
-      const processShutdown = await Promise.allSettled([
-        terminalRuntime?.shutdown(), targetSourceQuery.dispose(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
-        // Release every supervised native driver so no synthesized input is
-        // left held down when the Host exits.
-        computerService.dispose(),
-        connections.shutdownAll(),
-      ]);
-      const processShutdownErrors = [...inferenceShutdownErrors, ...processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])];
-      await shutdown.run('mcpSettings.close', () => mcpSettings.close());
-      await shutdown.run('mcpCompositions.close', () => mcpCompositions.close());
-      await shutdown.run('mcpAuthority.close', () => mcpAuthority.close());
-      await shutdown.run('globalMcpProcesses.dispose', () => globalMcpProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      await shutdown.run('languageToolProcesses.dispose', () => languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      await shutdown.run('documentProcesses.dispose', () => documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      await shutdown.run('kernelProcesses.dispose', () => kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      await shutdown.run('externalAgents.close', () => externalAgents.close().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      await shutdown.run('externalAgentProcesses.dispose', () => externalAgentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
-      for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
-      await shutdown.run('unsubscribeModelSettings', () => unsubscribeModelSettings());
-      await shutdown.run('unsubscribeModels', () => unsubscribeModels());
-      await shutdown.run('stopModelDirectory', () => stopModelDirectory());
-      await shutdown.run('modelsService.authorizations.close', () => modelsService.authorizations.close());
-      await shutdown.run('searchConnectionSettings.close', () => searchConnectionSettings.close());
-      await shutdown.run('unsubscribeModelKernel', () => unsubscribeModelKernel());
-      await shutdown.run('modelExtensions.close', () => modelExtensions.close());
-      await shutdown.run('documentsAuthority.dispose', () => documentsAuthority.dispose());
-      await shutdown.run('Promise.allSettled', () => Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose())));
-      await shutdown.run('workspaceRecoveryEngines.clear', () => workspaceRecoveryEngines.clear());
-      await shutdown.run('kernelCompute.dispose', () => kernelCompute.dispose());
-      await shutdown.run('kernelStorageAdapter.dispose', () => kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error))));
-      await shutdown.run('kernelClient?.close', () => kernelClient?.close());
-      await shutdown.run('knowledgeVectors?.close', () => knowledgeVectors?.close());
-      await shutdown.run('knowledgeContextRuntime.dispose', () => knowledgeContextRuntime.dispose());
-      await shutdown.run('Promise.allSettled', () => Promise.allSettled([...knowledgeStoreLoads.values()]));
-      const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {
-        await store.close();
-        // A failed native close retains its writer for a retry, not an orphaned
-        // handle hidden by clearing the whole map after allSettled.
-        if (knowledgeStores.get(workspaceId) === store) knowledgeStores.delete(workspaceId);
-      }));
-      for (const result of knowledgeShutdown) {
-        if (result.status !== 'rejected') continue;
-        processShutdownErrors.push(result.reason);
-        console.error('[KnowledgeStore] Shutdown incomplete:', errorMessage(result.reason));
-      }
-      if (userKnowledgeStoreLoad) await userKnowledgeStoreLoad.catch(() => null);
-      try {
-        await userKnowledgeStore?.close();
+        // The organizer is a semantic-inference consumer; fence it before closing that owner.
+        await shutdown.run('memoryOrganizer.dispose', () => memoryOrganizer.dispose());
+        await shutdown.run('unsubscribeNextStepSettings', () => unsubscribeNextStepSettings());
+        await shutdown.run('nextSteps.close', () => nextSteps.close());
+        await shutdown.run('threadTitles.close', () => threadTitles.close());
+        await shutdown.run('modelText.close', () => modelText.close());
+        await shutdown.run('unsubscribeKnowledgeEmbedding', () => unsubscribeKnowledgeEmbedding());
+        await shutdown.run('localKnowledgeComponent.dispose', () => localKnowledgeComponent.dispose());
+        await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
+        await shutdown.run('delegationModels.close', () => delegationModels.close());
+        await shutdown.run('webRuntime.close', () => webRuntimeOwner.current?.close());
+        await shutdown.run('webRetrievalAssistance.close', () => webRetrievalAssistance.close());
+        await shutdown.run('webFetch.dispose', () => webFetchService.dispose());
+        await shutdown.run('semanticInference.close', () => semanticInference.close());
+        // Stop producers and drain their receipts while process grants are valid.
+        // One refused exit must not prevent the other domains from shutting down.
+        await shutdown.run('process owners', async () => {
+          const results = await Promise.allSettled([
+            terminalRuntime?.shutdown(), targetSourceQuery.dispose(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+            computerService.dispose(), connections.shutdownAll(),
+          ]);
+          const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+          if (failures.length) throw new AggregateError(failures, 'Process owners did not drain');
+        });
+        terminalRuntime = null;
+        await shutdown.run('mcpSettings.close', () => mcpSettings.close());
+        await shutdown.run('mcpCompositions.close', () => mcpCompositions.close());
+        await shutdown.run('mcpAuthority.close', () => mcpAuthority.close());
+        await shutdown.run('globalMcpProcesses.dispose', () => globalMcpProcesses.dispose());
+        await shutdown.run('languageToolProcesses.dispose', () => languageToolProcesses.dispose());
+        await shutdown.run('documentProcesses.dispose', () => documentProcesses.dispose());
+        await shutdown.run('kernelProcesses.dispose', () => kernelProcesses.dispose());
+        await shutdown.run('externalAgents.close', () => externalAgents.close());
+        await shutdown.run('externalAgentProcesses.dispose', () => externalAgentProcesses.dispose());
+        await shutdown.run('unsubscribeModelSettings', () => unsubscribeModelSettings());
+        await shutdown.run('unsubscribeModels', () => unsubscribeModels());
+        await shutdown.run('stopModelDirectory', () => stopModelDirectory());
+        await shutdown.run('modelsService.authorizations.close', () => modelsService.authorizations.close());
+        await shutdown.run('searchConnectionSettings.close', () => searchConnectionSettings.close());
+        await shutdown.run('unsubscribeModelKernel', () => unsubscribeModelKernel());
+        await shutdown.run('modelExtensions.close', () => modelExtensions.close());
+        await shutdown.run('documentsAuthority.dispose', () => documentsAuthority.dispose());
+        activeDocumentsAuthority = null;
+        for (const engine of workspaceRecoveryEngines.values()) await shutdown.run('recovery.dispose', () => engine.dispose());
+        await shutdown.run('workspaceRecoveryEngines.clear', () => workspaceRecoveryEngines.clear());
+        await shutdown.run('kernelCompute.dispose', () => kernelCompute.dispose());
+        await shutdown.run('kernelStorageAdapter.dispose', () => kernelStorageAdapter.dispose());
+        await shutdown.run('kernelClient?.close', () => kernelClient?.close(deadline));
+        await shutdown.run('knowledgeVectors?.close', () => knowledgeVectors?.close());
+        await shutdown.run('knowledgeContextRuntime.dispose', () => knowledgeContextRuntime.dispose());
+        await shutdown.run('Promise.allSettled', () => Promise.allSettled([...knowledgeStoreLoads.values()]));
+        for (const [workspaceId, store] of knowledgeStores) {
+          await shutdown.run('knowledge.close', () => store.close());
+          if (knowledgeStores.get(workspaceId) === store) knowledgeStores.delete(workspaceId);
+        }
+        await shutdown.run('userKnowledge.load', () => userKnowledgeStoreLoad?.catch(() => null));
+        await shutdown.run('userKnowledge.close', () => userKnowledgeStore?.close());
         userKnowledgeStore = null;
-      } catch (error) {
-        processShutdownErrors.push(error);
-        console.error('[KnowledgeStore] User-store shutdown incomplete:', errorMessage(error));
-      }
-      try {
-        await egressRuntime.close();
-      } catch (error) {
-        processShutdownErrors.push(error);
-        console.error('[HarnessEgress] Shutdown incomplete:', errorMessage(error));
-      }
-      await shutdown.run('realtimeProxyRuntime.stop', () => realtimeProxyRuntime.stop());
-      await shutdown.run('connectionProxy.stop', () => connectionProxy.stop());
-      await shutdown.run('desktopMedia.stop', () => desktopMedia.stop());
-      await shutdown.run('serviceForward.stop', () => serviceForward.stop());
-      await shutdown.run('clearInterval', () => clearInterval(relayReconcileTimer));
-      await shutdown.run('relayService.stop', () => relayService.stop());
-      await shutdown.run('dictationRuntime?.stop?.', () => dictationRuntime?.stop?.());
-      const stopped = await gracefulShutdownRuntime.gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
-      processShutdownErrors.push(...shutdown.errors);
-      if (processShutdownErrors.length) throw new AggregateError(processShutdownErrors, 'Native process shutdown requires attention');
-      return stopped;
-    })(),
+        await shutdown.run('egress.close', () => egressRuntime.close());
+        await shutdown.run('http.observations.close', () => httpObservationDrain.close());
+        await shutdown.run('realtimeProxyRuntime.stop', () => realtimeProxyRuntime.stop());
+        await shutdown.run('previewProxyRuntime.stop', () => previewProxyRuntime.stop());
+        await shutdown.run('connectionProxy.stop', () => connectionProxy.stop());
+        await shutdown.run('desktopMedia.stop', () => desktopMedia.stop());
+        await shutdown.run('serviceForward.stop', () => serviceForward.stop());
+        await shutdown.run('clearInterval', () => clearInterval(relayReconcileTimer));
+        await shutdown.run('relayService.stop', () => relayService.stop());
+        await shutdown.run('dictationRuntime?.stop?.', () => dictationRuntime?.stop?.());
+        await shutdown.run('observations.stop', () => observations.stop());
+        await gracefulShutdownRuntime.gracefulShutdown({ exitProcess: false, deadline, reportOutcome: false });
+        reportShutdownOutcome(deadline);
+        if (shutdownOptions.exitProcess) process.exit(0);
+      })().catch(error => {
+        reportShutdownOutcome(deadline, error);
+        if (shutdownOptions.exitProcess) process.exit(1);
+        throw error;
+      });
+      return stopTask;
+    },
   };
   stopHostResources = controller.stop;
   return controller;

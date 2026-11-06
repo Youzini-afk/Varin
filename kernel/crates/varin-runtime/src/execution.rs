@@ -1974,6 +1974,8 @@ impl ContextPreparation for NoopContextPreparation {
     }
 }
 
+#[path = "batch_tools.rs"]
+mod batch_tools;
 #[path = "invocation.rs"]
 pub(crate) mod invocation;
 pub use crate::nested_tools::{NestedToolInput, NestedToolReceipt};
@@ -3235,171 +3237,19 @@ impl<
                 class,
                 &operation_cancel,
             )?;
-            planned.push((
+            planned.push(batch_tools::PlannedCall {
                 index,
                 bound,
                 preparation,
                 reservation,
                 class,
-                operation_cancel,
-            ));
+                cancel: operation_cancel,
+            });
         }
-        let mut persistence_failure = None;
-        std::thread::scope(|scope| {
-            let (tx, rx) = mpsc::channel();
-            let count = planned.len();
-            for (index, bound, preparation, mut reservation, class, operation_cancel) in planned {
-                let tx = tx.clone();
-                let call = &calls[index];
-                let tools = &tools;
-                let frozen = &frozen;
-                scope.spawn(move || {
-                    let result = guarded("tool_worker_panicked", || {
-                        let contract = match preparation {
-                            ToolPreparation::Ready(contract) => Ok(contract),
-                            ToolPreparation::Resolve { .. } => {
-                                guarded("tool_prepare_panicked", || {
-                                    bound.prepare(&operation_cancel)
-                                })
-                            }
-                        };
-                        let contract = match contract {
-                            Ok(contract)
-                                if contract.name == call.name
-                                    && contract.schema_version == call.schema_version =>
-                            {
-                                contract
-                            }
-                            Ok(_) => {
-                                return Ok(self.unprepared_result(
-                                    input,
-                                    snapshot,
-                                    call,
-                                    ToolCompletion::failure(
-                                        "contract_mismatch",
-                                        "resolved tool differs from frozen schema",
-                                        Effect::None,
-                                    ),
-                                ));
-                            }
-                            Err(error) => {
-                                return Ok(self.unprepared_result(
-                                    input,
-                                    snapshot,
-                                    call,
-                                    if operation_cancel.is_cancelled() {
-                                        ToolCompletion::cancelled()
-                                    } else {
-                                        ToolCompletion::failed(&error,
-                                            Effect::None,
-                                        )
-                                    },
-                                ));
-                            }
-                        };
-                        if bound.execution_class(&contract) != class {
-                            return Ok(self.unprepared_result(
-                                input,
-                                snapshot,
-                                call,
-                                ToolCompletion::failure(
-                                    "execution_class_mismatch",
-                                    "resolved execution class differs from preplanning",
-                                    Effect::None,
-                                ),
-                            ));
-                        }
-                        if let Err(error) = reservation.resolve(&contract.resources) {
-                            return Ok(self.unprepared_result(
-                                input,
-                                snapshot,
-                                call,
-                                ToolCompletion::failed(&error, Effect::None),
-                            ));
-                        }
-                        let tool = AdmittedTool {
-                            call: call.clone(),
-                            contract,
-                        };
-                        // Each side effect owns its durable intent; pure results retain the
-                        // cheaper in-memory path and enter history when provider pairing closes.
-                        if bound.requires_operation() || !tool.contract.read_only
-                            || tool.contract.completion == CompletionKind::Job
-                        {
-                            self.commit(
-                                input,
-                                ExecutionRecord::ToolAdmitted {
-                                    context: ToolExecutionContext {
-                                        run_id: input.run_id.clone(),
-                                        origin: ToolOrigin::ModelStep {
-                                            request_id: snapshot.view.request_id.clone(),
-                                        },
-                                        operation_id: format!(
-                                            "{}:tool:{}",
-                                            snapshot.view.request_id, call.call_id
-                                        ),
-                                    },
-                                    tool: tool.clone(),
-                                },
-                            )?;
-                        }
-                        let context = ToolExecutionContext {
-                            run_id: input.run_id.clone(),
-                            origin: ToolOrigin::ModelStep {
-                                request_id: snapshot.view.request_id.clone(),
-                            },
-                            operation_id: format!(
-                                "{}:tool:{}",
-                                snapshot.view.request_id, call.call_id
-                            ),
-                        };
-                        let durable = bound.requires_operation() || !tool.contract.read_only
-                            || tool.contract.completion == CompletionKind::Job;
-                        let completion = self.execute_one(
-                            input,
-                            &context,
-                            &tool,
-                            bound.as_ref(),
-                            &operation_cancel,
-                            reservation,
-                            durable,
-                            Some(crate::nested_tools::NestedExecutionScope {
-                                frozen: Arc::new(frozen.clone()),
-                                directory: crate::nested_tools::directory(
-                                    tools.clone(),
-                                    self.tools.clone(),
-                                ),
-                                run_cancel: cancel.clone(),
-                            }),
-                        )?;
-                        Ok(self.unprepared_result(input, snapshot, call, completion))
-                    });
-                    let _ = tx.send((index, result));
-                });
-            }
-            drop(tx);
-            for _ in 0..count {
-                let (index, result) = rx
-                    .recv()
-                    .expect("tool workers retain their completion sender");
-                match result {
-                    Ok(result) => results[index] = Some(result),
-                    Err(error) => {
-                        if persistence_failure.is_none() {
-                            persistence_failure = Some(error);
-                            // No queued successor may remain waiting behind an unconfirmed durable
-                            // receipt. Cancellation stops dispatch but does not release active effects.
-                            for token in &operation_tokens {
-                                token.cancel();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        if let Some(error) = persistence_failure {
-            return Err(error);
-        }
+        self.execute_planned_batch(
+            input, snapshot, &calls, planned, &operation_tokens,
+            &mut results, &frozen, tools, cancel,
+        )?;
         results
             .into_iter()
             .map(|result| {

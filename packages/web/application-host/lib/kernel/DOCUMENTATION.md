@@ -33,7 +33,11 @@ authority from the original branch/pin/record/operation/object owner. A supplied
 
 Large bodies use sequenced acknowledged streams. Control responses stay metadata-only where specified.
 Encoding/decoding and body work run outside the short control owner. `close()` drains admitted work and
-waits for native exit. Protocol mismatch, revoked grants, malformed replies and executable loss are explicit
+waits for native exit. The Application Host passes its single `ShutdownDeadline`; expiry rejects
+without detaching an undrained native workspace transport or adding another termination timeout.
+A late receipt cannot resume Host teardown. Standalone native-workspace clients without a supplied
+deadline still wait for the original physical drain. `beginDraining()` rejects new execution and
+queued execution admission, but leaves control requests and original effect receipts owned. Protocol mismatch, revoked grants, malformed replies and executable loss are explicit
 failures, with no old-backend fallback. Cancelling observation does not reverse a committed domain effect.
 
 `context-service.ts` answers native execution-environment preparation from the actual Source Host.

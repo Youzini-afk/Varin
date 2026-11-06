@@ -541,6 +541,118 @@ mod engines {
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
     }
+    /// Isolate /proc thread accounting from parallel tests in this test executable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn real_engine_queue_uses_bounded_wait_threads() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "engines::measure_real_engine_queue_cost", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("VARIN_QUEUE_PROBE_CALLS", "64")
+            .output().unwrap();
+        assert!(output.status.success(), "queue probe failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("real-engine-queue"), "probe must actually run");
+    }
+
+    /// Real Catalog/ExecutionEngine/admission threads, with a controlled executor gate.
+    /// This is a queue-cost probe, not a container, provider, or CPU workload benchmark.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "opt-in queue thread/RSS/cancellation measurement; run alone with --nocapture"]
+    fn measure_real_engine_queue_cost() {
+        struct BurstProvider { calls: usize, turn: AtomicUsize, request: Arc<Mutex<Option<String>>> }
+        impl ModelProvider for BurstProvider {
+            fn serialize(&self, view: &RequestView, _: Option<&mut RequestCompileReuse>)
+                -> Result<RequestBody, ExecutionError> {
+                Ok(serde_json::to_value(view).unwrap().into())
+            }
+            fn generate(&self, request: &RequestSnapshot, _: &CancellationToken,
+                emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>)
+                -> Result<FinishReason, ModelFailure> {
+                assert_eq!(self.turn.fetch_add(1, Ordering::SeqCst), 0);
+                *self.request.lock().unwrap() = Some(request.view.request_id.clone());
+                for index in 0..self.calls {
+                    emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                        id: format!("queue-item-{index}"),
+                        content: Content::ToolCall { call: ToolCall {
+                            call_id: format!("queue-call-{index}"), name: "read".into(),
+                            schema_version: "1".into(), arguments: json!({}),
+                        } }, opaque: None,
+                    } }).unwrap();
+                }
+                Ok(FinishReason::ToolCalls)
+            }
+        }
+        fn process_sample() -> Value {
+            let status = std::fs::read_to_string("/proc/self/status").unwrap();
+            let value = |key: &str| status.lines().find_map(|line| {
+                line.strip_prefix(key)?.split_whitespace().next()?.parse::<u64>().ok()
+            }).unwrap();
+            json!({"threads":value("Threads:"), "rssKiB":value("VmRSS:"), "virtualKiB":value("VmSize:")})
+        }
+        let count = std::env::var("VARIN_QUEUE_PROBE_CALLS").map(|v| v.parse::<usize>().unwrap()).unwrap_or(128);
+        assert!(count > 0);
+        let root = std::env::temp_dir().join(format!("varin-queue-probe-{}", uuid::Uuid::new_v4()));
+        let db = Arc::new(Mutex::new(Catalog::open(&root).unwrap()));
+        let admission = db.lock().unwrap().resource_admission();
+        admission.set_compute_capacity(NonZeroUsize::new(1).unwrap());
+        let holder = admission.acquire_scheduled("held-capacity", &[],
+            &super::identity("held", "held-capacity"), ExecutionClass::LocalCompute,
+            &CancellationToken::default()).unwrap().unwrap();
+        let input = input(&db, "queue-probe");
+        let request = Arc::new(Mutex::new(None));
+        let (started, events) = mpsc::channel();
+        let engine = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation), persistence: db.clone(),
+            provider: Arc::new(BurstProvider { calls: count, turn: AtomicUsize::new(0), request: request.clone() }),
+            tools: Arc::new(Tools { key: "shared-read".into(), gate: None, started: started.clone(),
+                read_only: true, local_compute: true }),
+            policy: Arc::new(DefaultAgentPolicy), progress: ProgressSink::default(),
+        };
+        let cancel = CancellationToken::default();
+        let child_cancel = cancel.clone();
+        let before = process_sample();
+        let worker = std::thread::spawn(move || engine.run(input, child_cancel));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while admission.summary().queued != count
+            || !request.lock().unwrap().as_ref().is_some_and(|request| (0..count).all(|index| {
+                admission.inspect(&format!("{request}:tool:queue-call-{index}"))
+                    .is_some_and(|entry| entry.reason == Some("capacity"))
+            })) {
+            assert!(Instant::now() < deadline, "probe queue did not reach its observation gate");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let queued = process_sample();
+        let preparation_budget = varin_runtime::execution_capacity::default_compute_capacity().get() as u64;
+        assert!(queued["threads"].as_u64().unwrap() <= before["threads"].as_u64().unwrap() + 1 + preparation_budget,
+            "queued calls must not retain OS wait threads: before={before}, queued={queued}");
+        assert!(events.try_recv().is_err(), "queued compute must not dispatch");
+        let control_input = self::input(&db, "queue-control");
+        let control = ExecutionEngine {
+            context_preparation: Arc::new(NoopContextPreparation), persistence: db.clone(),
+            provider: Arc::new(Provider(AtomicUsize::new(0))),
+            tools: Arc::new(Tools { key: "unrelated-control".into(), gate: None, started,
+                read_only: true, local_compute: false }),
+            policy: Arc::new(DefaultAgentPolicy), progress: ProgressSink::default(),
+        };
+        let control_start = Instant::now();
+        control.run(control_input, CancellationToken::default()).unwrap();
+        let control_ms = control_start.elapsed().as_secs_f64() * 1000.0;
+        assert!(events.try_recv().is_ok(), "unmetered tool progresses while compute queue is held");
+        let cancelled_at = Instant::now();
+        cancel.cancel();
+        worker.join().unwrap().unwrap();
+        let cancellation_ms = cancelled_at.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(admission.summary().queued, 0);
+        assert!(events.try_recv().is_err(), "cancelled compute must never dispatch");
+        let after = process_sample();
+        println!("{}", json!({"probe":"real-engine-queue", "queuedCalls":count,
+            "capacity":1,"before":before,"queued":queued,"after":after,
+            "unmeteredToolCompletionMs":control_ms,"cancelToEngineJoinMs":cancellation_ms}));
+        drop(holder); drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     struct WatchedTools {
         inner: Tools,
         allowed: Arc<std::sync::atomic::AtomicBool>,

@@ -93,6 +93,7 @@ export const createStartupPipelineRuntime = (dependencies: {
     });
 
     const dictationRuntime = createDictationRuntime({
+      ...(options.isDraining ? { isDraining: options.isDraining } : {}),
       app,
       server,
       express,

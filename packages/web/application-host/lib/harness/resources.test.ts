@@ -49,11 +49,17 @@ const probes = {
 describe('original resource admission reconciliation', () => {
   it.each(['remote-reply', 'target-receipt'] as const)('recovers a lost %s through the original target owner without allocating again', async loss => {
     const targetStorage = storage();
-    const targetResources = createResourceService({ client: targetStorage.client, ...probes });
+    const targetResources = createResourceService({ client: targetStorage.client, ...probes,
+      localReserve: { cpuCores: 1, memoryMb: 128 },
+      probeLocal: () => ({ ...probes.probeLocal(), pidsLimit: 64,
+        system: { source: 'linux-cgroup-v2', status: 'partial', scope: 'visible-cgroup-ancestors',
+          physical: { cpuCores: 32, memoryMb: 65536 }, warnings: ['PID ancestor is unreadable'] } }),
+    });
     const targetAdmit = vi.spyOn(targetResources, 'admit');
     const target = createManagedRemoteExecutionService({ client: targetStorage.client, hostId: 'target', resources: targetResources });
     const coordinatorStorage = storage();
     const coordinator = createResourceService({ client: coordinatorStorage.client, ...probes,
+      localReserve: { cpuCores: 3, memoryMb: 512 },
       resolveExternalAuthority: (machine, record) => registry.externalAuthority(machine, record) });
     const routes = new Map<string, RequestHandler[]>();
     const common: RequestHandler[] = [];
@@ -66,6 +72,7 @@ describe('original resource admission reconciliation', () => {
       client: { capabilities: ['filesystem:read', 'filesystem:write', 'logs:read', 'terminal:use', 'process:control'] } as never }) });
     const fetched: string[] = [];
     let loseReply = loss === 'remote-reply';
+    let targetOmitsBudget = false;
     const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const route = String(url).split('/v1')[1]!; fetched.push(route);
       const input = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -89,6 +96,10 @@ describe('original resource admission reconciliation', () => {
         };
         next();
       });
+      if (route === '/identity' && targetOmitsBudget) {
+        const machine = (value as { machine: Record<string, unknown> }).machine;
+        delete machine.system; delete machine.budget;
+      }
       if (route === '/resources/admit' && loseReply) { loseReply = false; throw new Error('remote admission reply lost'); }
       return new Response(JSON.stringify(value), { status, headers });
     };
@@ -96,6 +107,11 @@ describe('original resource admission reconciliation', () => {
       resources: coordinator, readSettings: async () => ({ desktopHosts: [{ id: 'target-connection', apiUrl: 'https://target.example' }] }),
       fetch: fetchMock as typeof fetch });
     await registry.refresh('workspace');
+    expect(await coordinator.getMachine('workspace', 'managed:target')).toMatchObject({
+      capacity: { cpuCores: 4, memoryMb: 1024, pidsLimit: 64 },
+      budget: { reserved: { cpuCores: 1, memoryMb: 128 }, allocatable: { cpuCores: 3, memoryMb: 896 } },
+      system: { source: 'linux-cgroup-v2', status: 'partial', physical: { cpuCores: 32 }, warnings: ['PID ancestor is unreadable'] },
+    });
     expect(await coordinator.reconcileAdmission('workspace', 'managed:target', { cpuCores: 1 }, 'attempt')).toEqual({ status: 'unknown' });
     if (loss === 'target-receipt') targetStorage.loseReceipt();
     await expect(coordinator.admit('workspace', 'managed:target', { cpuCores: 1 }, 'attempt')).rejects.toThrow(/lost/);
@@ -111,6 +127,9 @@ describe('original resource admission reconciliation', () => {
     expect(await coordinator.reconcileAdmission('workspace', 'managed:target', { cpuCores: 1 }, 'attempt')).toEqual({ status: 'not-admitted' });
     expect([...targetStorage.records.values()].filter(v => v.recordType === 'resource.commitment' && v.state === 'confirmed')).toHaveLength(0);
     expect([...targetStorage.records.values()].filter(v => v.recordType === 'managed.remote.admission')).toMatchObject([{ state: 'released' }]);
+    targetOmitsBudget = true; await registry.refresh('workspace');
+    const unknown = await coordinator.getMachine('workspace', 'managed:target');
+    expect(unknown!.budget).toBeUndefined(); expect(unknown!.system).toBeUndefined();
   });
 });
 
@@ -177,4 +196,59 @@ it('does not publish an old captured probe through a newly issued epoch grant', 
   await resources.sampleLocalMachine('workspace'); expect(probesRun).toBe(2);
   expect((await resources.getMachineSample('local'))!.recordRevision).toBe(1);
   await resources.dispose();
+});
+
+it('admits against effective capacity minus explicit reserves, preserving original commitments after shrink', async () => {
+  const f = storage(); let cores = 1.5;
+  const resources = createResourceService({ client: f.client, ...probes,
+    localReserve: { cpuCores: 0.25, memoryMb: 128 },
+    probeLocal: () => ({ cpuCores: cores, memoryMb: 1024, usedMemoryMb: 200, memoryAvailableMb: 300,
+      pidsLimit: 32, pidsCurrent: 20, pidsAvailable: 12,
+      system: { source: 'linux-cgroup-v2', status: 'available', scope: 'visible-cgroup-ancestors',
+        physical: { cpuCores: 64, memoryMb: 65536 }, warnings: [] } }),
+  });
+  try {
+    const first = await resources.admit('a', 'local', { cpuCores: 1, memoryMb: 250 }, 'first');
+    expect(first).toMatchObject({ status: 'confirmed', remaining: { cpuCores: 0.25, memoryMb: 646 } });
+    expect(await resources.admit('b', 'local', { cpuCores: 0.5 }, 'second')).toMatchObject({ status: 'insufficient' });
+    expect(await resources.admit('b', 'local', { memoryMb: 400 }, 'third')).toMatchObject({ status: 'insufficient', reason: 'insufficient observed memory headroom on local' });
+    // Current usage overlaps the first commitment. Do not subtract both from 300 MiB headroom.
+    expect(await resources.admit('b', 'local', { memoryMb: 200 }, 'fourth')).toMatchObject({ status: 'confirmed' });
+    cores = 0.5;
+    expect(await resources.admit('a', 'local', { cpuCores: 1, memoryMb: 250 }, 'first')).toMatchObject({ status: 'confirmed', commitmentId: first.commitmentId });
+    expect(await resources.admit('b', 'local', { cpuCores: 0.1 }, 'fifth')).toMatchObject({ status: 'insufficient' });
+    expect(await resources.getMachine('a', 'local')).toMatchObject({ capacity: { cpuCores: 0.5, memoryMb: 1024, pidsLimit: 32 },
+      budget: { reserved: { cpuCores: 0.25, memoryMb: 128 }, allocatable: { cpuCores: 0.25, memoryMb: 896 } },
+      system: { physical: { cpuCores: 64 } }, usage: { pidsCurrent: 20, pidsAvailable: 12, memoryAvailableMb: 300 } });
+  } finally { await resources.dispose(); }
+});
+
+it('does not admit requested memory against an unread cgroup headroom sample', async () => {
+  const f = storage(); const resources = createResourceService({ client: f.client, ...probes,
+    probeLocal: () => ({ cpuCores: 1, memoryMb: 512, system: { source: 'linux-cgroup-v2', status: 'partial',
+      scope: 'visible-cgroup-ancestors', physical: { cpuCores: 8, memoryMb: 8192 }, warnings: ['memory.current unavailable'] } }),
+  });
+  try {
+    expect(await resources.admit('a', 'local', { memoryMb: 1 }, 'attempt')).toMatchObject({ status: 'insufficient', reason: 'local memory headroom is unavailable or stale' });
+    expect((await resources.getMachineSample('local'))!.usage.memoryMb).toBeUndefined();
+    expect(await resources.admit('a', 'local', { cpuCores: 0.5 }, 'cpu')).toMatchObject({ status: 'confirmed' });
+  } finally { await resources.dispose(); }
+});
+
+it('stores changing pressure counters as usage samples without revising stable machine capacity', async () => {
+  const f = storage(); let throttled = 1;
+  const resources = createResourceService({ client: f.client, ...probes, probeLocal: () => ({ ...probes.probeLocal(),
+    pressure: { cpu: { scope: '/cg/current', throttleEvents: throttled } },
+  }) });
+  try {
+    await resources.sampleLocalMachine('a');
+    const before = await resources.getMachineSample('local');
+    throttled = 2;
+    await resources.sampleLocalMachine('a');
+    const after = await resources.getMachineSample('local');
+    expect(after!.machineRevision).toBe(before!.machineRevision);
+    expect(after!.recordRevision).toBeGreaterThan(before!.recordRevision);
+    expect(after!.usage.pressure?.cpu?.throttleEvents).toBe(2);
+    expect((await resources.getMachine('a', 'local'))!.usage?.pressure?.cpu?.throttleEvents).toBe(2);
+  } finally { await resources.dispose(); }
 });

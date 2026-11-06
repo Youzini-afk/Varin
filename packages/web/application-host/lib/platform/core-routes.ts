@@ -198,16 +198,24 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     }
   };
 
+  // Liveness does not await an identity store or the private kernel.
+  app.get('/live', (_req, res) => { res.json({ status: 'alive' }); });
+
   app.get('/health', async (_req, res) => {
-    const serverId = await resolveServerId();
-    res.json({
-      status: 'ok',
+    let snapshot = getHealthSnapshot();
+    // Once draining, readiness must not wait behind an identity writer that is
+    // itself stopping. Reuse an already resolved identity, if available.
+    const serverId = snapshot.ready === false ? cachedServerId : await resolveServerId();
+    if (snapshot.ready !== false) snapshot = getHealthSnapshot();
+    const unavailable = snapshot.ready === false;
+    res.status(unavailable ? 503 : 200).json({
+      status: unavailable ? 'unavailable' : 'ok',
       timestamp: new Date().toISOString(),
       varinVersion,
       runtime: runtimeName,
       compatibility,
       ...(serverId ? { serverId } : {}),
-      ...getHealthSnapshot(),
+      ...snapshot,
     });
   });
 

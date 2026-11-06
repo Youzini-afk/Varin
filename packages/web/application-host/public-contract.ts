@@ -67,6 +67,8 @@ export interface WebUiServerController {
   getTunnelUrl(): string | null;
   httpServer: Server;
   isReady(): boolean;
+  /** Synchronously fences new admissions. Rejects on incomplete drain; callers
+   * must not treat a rejected/expired stop as permission to reuse the data root. */
   stop(options?: { exitProcess?: boolean | undefined }): Promise<void>;
 }
 

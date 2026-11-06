@@ -3,6 +3,8 @@ import type { Express, Response } from 'express';
 import type { IncomingHttpHeaders, IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { RawData } from 'ws';
+import { isAllowedObservationRequest } from '@varin/application-client';
+import { isAllowedWhileDraining } from './draining-admission.js';
 
 const PROXY_SSE_PATH = '/api/varin/realtime-proxy/sse';
 const PROXY_WS_PATH = '/api/varin/realtime-proxy/ws';
@@ -26,6 +28,7 @@ interface UiAuthController {
 }
 
 interface RealtimeProxyOptions {
+  isDraining?: () => boolean;
   app?: Express | null;
   getDesktopRuntimeConfig?: (() => DesktopRuntimeConfig | null) | null;
   getUiAuthController?: (() => UiAuthController | null) | null;
@@ -166,6 +169,7 @@ export const buildRealtimeProxyWsUrl = (localOrigin: string, targetUrl: string):
 };
 
 export const attachRealtimeProxy = ({
+  isDraining = () => false,
   app,
   server,
   getDesktopRuntimeConfig,
@@ -173,7 +177,7 @@ export const attachRealtimeProxy = ({
   isRequestOriginAllowed,
 }: RealtimeProxyOptions) => {
   if (!app || !server || typeof getDesktopRuntimeConfig !== 'function') {
-    return { stop: () => {} };
+    return { beginDraining: () => {}, stop: () => {} };
   }
 
   const originAllowed = async (req: IncomingMessage): Promise<boolean> => {
@@ -196,6 +200,10 @@ export const attachRealtimeProxy = ({
     return Boolean(token);
   };
 
+  let stopped = false;
+  let draining = false;
+  const rejectsNewWork = () => draining || isDraining();
+  const sseObservers = new Set<AbortController>();
   app.get(PROXY_SSE_PATH, async (req, res) => {
     if (!await ensureAuthenticated(req, res)) {
       res.status(401).json({ error: 'UI authentication required' });
@@ -211,7 +219,9 @@ export const attachRealtimeProxy = ({
       return;
     }
 
+    if (stopped || res.destroyed || res.writableEnded) { res.end(); return; }
     const abort = new AbortController();
+    sseObservers.add(abort);
     req.on('close', () => abort.abort());
     try {
       const response = await fetch(resolved.target.toString(), {
@@ -240,10 +250,11 @@ export const attachRealtimeProxy = ({
       } else if (!res.destroyed) {
         res.end();
       }
-    }
+    } finally { sseObservers.delete(abort); }
   });
 
   const wsServer = new WebSocketServer({ noServer: true });
+  const bridges = new Set<{ observation: boolean; terminate(): void }>();
 
   wsServer.on('connection', (client, request) => {
     const resolved = resolveProxyTarget(request, getDesktopRuntimeConfig, 'ws');
@@ -264,17 +275,55 @@ export const attachRealtimeProxy = ({
     }
     const upstream = new WebSocket(resolved.target.toString(), { headers, followRedirects: false });
     const pending: Array<[RawData, boolean]> = [];
+    const bridge = { observation: resolved.observation, terminate: () => {
+      pending.length = 0;
+      client.terminate(); upstream.terminate();
+    } };
+    bridges.add(bridge);
+    const forget = () => {
+      if (client.readyState === WebSocket.CLOSED && upstream.readyState === WebSocket.CLOSED) bridges.delete(bridge);
+    };
+    client.on('close', forget); upstream.on('close', forget);
+
+    const allowForward = (data: RawData, isBinary: boolean): boolean => {
+      if (stopped) { bridge.terminate(); return false; }
+      if (!rejectsNewWork()) return true;
+      // Terminal/dictation bytes are effect-capable. Disconnect their bridge,
+      // without treating it as an actual remote executor-stop receipt.
+      if (!resolved.observation) { bridge.terminate(); return false; }
+      // The observation protocol also carries provider-acquiring lease opens.
+      // Retain original pull/cancel and approved read opens, not arbitrary bytes.
+      if (!isBinary) {
+        try {
+          const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
+          const frame: unknown = JSON.parse(bytes.toString());
+          if (frame && typeof frame === 'object') {
+            const value = frame as Record<string, unknown>;
+            if (value.type === 'pull' || value.type === 'cancel') return true;
+            if (value.type === 'open' && typeof value.method === 'string' && typeof value.path === 'string'
+              && isAllowedObservationRequest(value.method, value.path)
+              && isAllowedWhileDraining(value.method, value.path.split('?', 1)[0]!)) return true;
+            if (typeof value.id === 'number' && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'error', id: value.id, message: 'Host is draining; new work is not accepted' }));
+              return false;
+            }
+          }
+        } catch { /* malformed frames have no drain-time authority */ }
+      }
+      bridge.terminate(); return false;
+    };
 
     const flush = () => {
       while (pending.length > 0 && upstream.readyState === WebSocket.OPEN) {
         const pendingMessage = pending.shift();
         if (!pendingMessage) break;
         const [data, isBinary] = pendingMessage;
-        upstream.send(data, { binary: isBinary });
+        if (allowForward(data, isBinary)) upstream.send(data, { binary: isBinary });
       }
     };
 
     client.on('message', (data, isBinary) => {
+      if (!allowForward(data, isBinary)) return;
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data, { binary: isBinary });
         return;
@@ -291,7 +340,7 @@ export const attachRealtimeProxy = ({
     });
     upstream.on('close', (code, reason) => {
       if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
-        client.close(code || 1000, reason);
+        client.close([1005, 1006, 1015].includes(code) ? 1011 : code || 1000, reason);
       }
     });
     upstream.on('error', () => {
@@ -311,6 +360,7 @@ export const attachRealtimeProxy = ({
       try { return new URL(req.url || '/', 'http://127.0.0.1').pathname; } catch { return ''; }
     })();
     if (pathname !== PROXY_WS_PATH) return;
+    if (stopped || rejectsNewWork()) { rejectWebSocketUpgrade(socket, 503, 'Host draining'); return; }
     void ensureAuthenticated(req, null).then((authenticated) => {
       if (!authenticated) {
         rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
@@ -321,6 +371,7 @@ export const attachRealtimeProxy = ({
           rejectWebSocketUpgrade(socket, 403, 'Forbidden');
           return;
         }
+        if (stopped || rejectsNewWork()) { rejectWebSocketUpgrade(socket, 503, 'Host draining'); return; }
         if (!resolveProxyTarget(req, getDesktopRuntimeConfig, 'ws')) {
           rejectWebSocketUpgrade(socket, 404, 'Not Found');
           return;
@@ -338,7 +389,14 @@ export const attachRealtimeProxy = ({
 
   server.on('upgrade', upgradeHandler);
   return {
+    beginDraining: () => {
+      draining = true;
+      for (const bridge of bridges) if (!bridge.observation) bridge.terminate();
+    },
     stop: () => {
+      stopped = true;
+      for (const observer of sseObservers) observer.abort();
+      for (const bridge of bridges) bridge.terminate();
       server.off('upgrade', upgradeHandler);
       wsServer.close();
     },

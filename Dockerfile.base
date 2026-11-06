@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # Slim runtime: enough to run the Varin server, Git, SSH, and tunnels.
-# Language toolchains stay in the `runtime-base` stage below.
+# Language toolchains stay in the `toolbelt` stage below.
 FROM oven/bun:1.3.14 AS slim
 WORKDIR /home/varin/app
+LABEL io.varin.image.variant="slim" io.varin.image.role="runtime-base"
+ENV VARIN_IMAGE_VARIANT=slim
 
 ARG TARGETARCH
 ARG NODE_VERSION=24.15.0
@@ -48,6 +50,11 @@ RUN set -eux; \
 
 RUN cloudflared --version
 
+# Installed software metadata is separate from application permission/capability
+# grants. Slim still contains native-module build prerequisites, not a sandbox.
+RUN mkdir -p /etc/varin && \
+  printf '%s\n' '{"schema":1,"variant":"slim","installed":["node","bun","git","ssh","cloudflared","native-build","python3"],"chrome":false}' > /etc/varin/image-capabilities.json
+
 # Replace the base image's 'bun' identity (UID/GID 1000) with Varin so
 # mounted volumes retain predictable ownership on every supported platform.
 RUN (id -u bun >/dev/null 2>&1 && userdel bun || true) \
@@ -69,7 +76,9 @@ RUN mkdir -p /home/varin/.local /home/varin/.config/varin /home/varin/.ssh /home
 ENV NODE_ENV=production
 
 # Full cloud toolbelt: language runtimes, LSPs, rootless BuildKit, and Chrome.
-FROM slim AS runtime-base
+FROM slim AS toolbelt
+LABEL io.varin.image.variant="toolbelt"
+ENV VARIN_IMAGE_VARIANT=toolbelt
 
 ARG TARGETARCH
 ARG GO_VERSION=1.26.3
@@ -149,6 +158,10 @@ RUN set -eux; \
   && echo 'varin:100000:65536' >> /etc/subgid \
   && rm -rf /root/.npm /var/lib/apt/lists/* /tmp/githubcli-archive-keyring.gpg /tmp/go*.tar.gz
 
+RUN set -eu; \
+  case "${TARGETARCH:-$(dpkg --print-architecture)}" in amd64|x86_64) chrome=true ;; arm64|aarch64) chrome=false ;; *) exit 1 ;; esac; \
+  printf '%s\n' "{\"schema\":1,\"variant\":\"toolbelt\",\"installed\":[\"node\",\"bun\",\"git\",\"ssh\",\"cloudflared\",\"native-build\",\"python3\",\"java\",\"maven\",\"go\",\"gopls\",\"rust\",\"rust-analyzer\",\"typescript-lsp\",\"github-cli\",\"ripgrep\",\"rootless-buildkit\"],\"chrome\":${chrome}}" > /etc/varin/image-capabilities.json
+
 USER varin
 
 ENV GOPATH=/home/varin/go
@@ -167,3 +180,6 @@ RUN mkdir -p /home/varin/go /home/varin/.cache/go-build /home/varin/.cargo /home
   npm install -g pnpm tsx typescript typescript-language-server yarn && \
   rust-analyzer --version && rustfmt --version && gopls version && tsc --version && typescript-language-server --version && vitest --version && node -e "require.resolve('@types/node/package.json')" && pnpm --version && yarn --version && \
   docker --version && buildctl --version
+
+# Historical build target remains toolbelt, just like varin-runtime-base tags.
+FROM toolbelt AS runtime-base

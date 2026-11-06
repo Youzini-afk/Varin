@@ -732,3 +732,38 @@ fn all_claim_fifo_blocks_overtaking_without_blocking_unrelated_resources() {
     first.join().unwrap();
     second.join().unwrap();
 }
+
+#[test]
+fn nonblocking_admission_keeps_atomic_claims_order_cancellation_and_compute_capacity() {
+    use std::task::Poll;
+    use varin_runtime::execution_capacity::{AdmissionIdentity, ExecutionClass};
+    let admission = Arc::new(ResourceAdmission::default());
+    admission.set_compute_capacity(std::num::NonZeroUsize::MIN);
+    let token = CancellationToken::default();
+    let identity = AdmissionIdentity { run_id: "run".into(), family_id: "family".into(),
+        owner_generation: 1, origin: ToolOrigin::ModelStep { request_id: "request".into() } };
+    let held = admission.acquire("held", &[claim("b")], &token).unwrap().unwrap();
+    let mut first = admission.reserve("first", vec![ResourceIntent::Exact(claim("a")), ResourceIntent::Exact(claim("b"))],
+        &identity, ExecutionClass::LocalCompute, &token).unwrap();
+    first.resolve(&[claim("a"), claim("b")]).unwrap();
+    assert!(first.try_acquire().is_pending());
+    assert_eq!(admission.summary().local_compute_active, 0);
+    assert_eq!(admission.inspect("first").unwrap().reason, Some("resource_conflict"));
+    let mut later = admission.reserve("later", vec![ResourceIntent::Exact(claim("a"))],
+        &identity, ExecutionClass::LocalCompute, &token).unwrap();
+    later.resolve(&[claim("a")]).unwrap();
+    assert!(later.try_acquire().is_pending(), "cannot bypass earlier atomic write plan");
+    let disjoint = admission.acquire("disjoint", &[claim("c")], &token).unwrap().unwrap();
+    drop(disjoint);
+    drop(held);
+    let Poll::Ready(Ok(Some(lease))) = first.try_acquire() else { panic!("whole plan should now be granted") };
+    assert_eq!(admission.summary().local_compute_active, 1);
+    assert!(later.try_acquire().is_pending());
+    token.cancel();
+    assert!(matches!(later.try_acquire(), Poll::Ready(Ok(None))));
+    drop(later);
+    assert_eq!(admission.summary().local_compute_active, 1, "cancel is not original owner stop evidence");
+    drop(lease);
+    assert_eq!(admission.summary().local_compute_active, 0);
+    assert_eq!(admission.summary().queued, 0);
+}

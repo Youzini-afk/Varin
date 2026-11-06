@@ -76,6 +76,7 @@ const parseRequestPathname = (url: string | undefined): string => {
 };
 
 export function createDictationRuntime({
+  isDraining = () => false,
   app,
   server,
   express,
@@ -84,6 +85,7 @@ export function createDictationRuntime({
   rejectWebSocketUpgrade,
   modelsDir,
 }: {
+  isDraining?: () => boolean;
   app: Express;
   express: { json(options?: { limit?: string }): import('express').RequestHandler };
   isRequestOriginAllowed: (request: IncomingMessage) => boolean | Promise<boolean>;
@@ -212,6 +214,7 @@ export function createDictationRuntime({
       }
       switch (message.type) {
         case 'start': {
+          if (isDraining()) { send({ type: 'error', error: 'Host is draining', retryable: true, reasonCode: 'host-draining' }); return; }
           if (typeof message.dictationId !== 'string' || typeof message.format !== 'string') {
             return;
           }
@@ -272,6 +275,7 @@ export function createDictationRuntime({
       return;
     }
 
+    if (isDraining()) { rejectWebSocketUpgrade(socket, 503, 'Host draining'); return; }
     const handleUpgrade = async () => {
       try {
         if (uiAuthController?.enabled) {
@@ -288,6 +292,7 @@ export function createDictationRuntime({
           }
         }
 
+        if (isDraining()) { rejectWebSocketUpgrade(socket, 503, 'Host draining'); return; }
         wsServer.handleUpgrade(req, socket, head, (ws) => {
           wsServer.emit('connection', ws, req);
         });

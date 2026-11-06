@@ -431,6 +431,7 @@ export function createTerminalRuntime({
     drainEvents(session);
   };
   const writeSession = async (session: TerminalSession, data: string, operationId?: string): Promise<void> => {
+    if (shuttingDown) throw new Error('Terminal runtime is shutting down');
     const process = session.process;
     if (session.status !== 'running' || !process) throw new Error('Terminal is not running');
     try { await process.write(data, operationId); session.lastActivity = Date.now(); }
@@ -1178,5 +1179,5 @@ export function createTerminalRuntime({
     inspectSession,
     subscribeCommands,
   };
-  return { shutdown, ...api };
+  return { beginDraining: () => { shuttingDown = true; }, shutdown, ...api };
 }

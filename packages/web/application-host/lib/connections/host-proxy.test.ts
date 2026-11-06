@@ -66,5 +66,10 @@ describe('Host connection gateway', () => {
     socket.send('terminal input');
     const [data] = await once(socket, 'message');
     expect(JSON.parse(String(data))).toEqual({ data: 'terminal input', authorization: 'Bearer peer-token', cookie: null, url: '/api/terminal/ws' });
+    const closed = once(socket, 'close');
+    const upstreamClosed = Promise.all([...upstreamWs.clients].map(peer => once(peer, 'close')));
+    gateway.beginDraining();
+    await closed; await upstreamClosed;
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
   });
 });

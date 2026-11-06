@@ -4,42 +4,248 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { acceptImageRelease, assertImageReleaseTag, imagePromotionPlan } from './docker-release.mjs';
+import { acceptImageRelease, assertImageReleaseTag, createImageRegistry, imagePromotionPlan,
+  promoteImages, releaseImageAliases, resolveRuntimeBase, verifyImage, writeAnonymousDockerConfig } from './docker-release.mjs';
 
 const source = 'a'.repeat(40);
-const input = { eventName: 'push', ref: 'refs/tags/v1.2.3', sha: source, version: '1.2.3' };
+const input = { eventName: 'push', ref: 'refs/tags/v0.9.39', sha: source, version: '0.9.39' };
+const candidate = acceptImageRelease(input);
+const digest = value => `sha256:${value.repeat(64)}`;
+const prefix = 'ghcr.io/youzini-afk/';
+const images = { standardApp: `${prefix}varin@${digest('1')}`, toolbeltApp: `${prefix}varin-toolbelt@${digest('2')}`,
+  slimBase: `${prefix}varin-runtime-slim@${digest('3')}`, toolbeltBase: `${prefix}varin-runtime-toolbelt@${digest('4')}` };
+const plan = () => imagePromotionPlan(candidate, images, [input.ref]);
 
-test('tag pushes and manual tag releases share exact-source acceptance and stable aliases', () => {
-  const expected = { ref: input.ref, sha: source, version: '1.2.3', aliases: ['1.2.3', '1.2', '1', 'latest', `sha-${source}`] };
-  assert.deepEqual(acceptImageRelease(input), expected);
+// Stateful external-registry boundary: the release owner chooses every source,
+// destination, ordering and retry; the fixture only stores/copies image bytes.
+function registryFixture() {
+  const manifests = new Map(), configs = new Map(), events = [], denied = new Set();
+  const fail = { target: null, lookup: null, copiedDigest: null };
+  const repository = ref => ref.split('@')[0].replace(/:[^/]*$/, '');
+  const add = (image, role, variant) => {
+    const [repo, imageDigest] = image.split('@');
+    const children = ['amd64', 'arm64'].map((architecture, index) => {
+      const childDigest = `${imageDigest.slice(0, -1)}${index + 8}`;
+      configs.set(`${repo}@${childDigest}`, { os: 'linux', architecture, config: {
+        Labels: { 'io.varin.image.role': role, 'io.varin.image.variant': variant,
+          'org.opencontainers.image.version': '0.9.38' }, // An intentionally reused base label.
+        Env: [`VARIN_IMAGE_VARIANT=${variant}`],
+      } });
+      return { digest: childDigest, platform: { os: 'linux', architecture } };
+    });
+    manifests.set(image, { digest: imageDigest, schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json', manifests: children });
+  };
+  add(images.standardApp, 'application', 'slim');
+  add(images.toolbeltApp, 'application', 'toolbelt');
+  add(images.slimBase, 'runtime-base', 'slim');
+  add(images.toolbeltBase, 'runtime-base', 'toolbelt');
+  const access = (ref, options) => {
+    events.push({ type: 'read', ref, ...options });
+    if (options?.anonymous && (denied.has(ref) || denied.has(repository(ref)))) throw new Error('401 Unauthorized');
+    if (ref === fail.lookup) throw new Error('403 Forbidden');
+  };
+  const registry = {
+    manifest(ref, options) {
+      access(ref, options);
+      const value = manifests.get(ref);
+      if (!value && !options?.allowMissing) throw new Error(`Missing fixture manifest: ${ref}`);
+      return value ?? null;
+    },
+    config(ref, options) { access(ref, options); return configs.get(ref); },
+    copy(from, to) {
+      events.push({ type: 'copy', from, to });
+      const value = manifests.get(from);
+      assert.ok(value, `Missing fixture copy source: ${from}`);
+      const repo = repository(to), oldRepo = repository(from);
+      const copied = fail.copiedDigest ? { ...value, digest: fail.copiedDigest } : value;
+      manifests.set(to, copied);
+      manifests.set(`${repo}@${value.digest}`, copied);
+      for (const child of value.manifests) configs.set(`${repo}@${child.digest}`, configs.get(`${oldRepo}@${child.digest}`));
+      if (to === fail.target) { fail.target = null; throw new Error('Connection lost after the registry wrote the tag'); }
+    },
+  };
+  const formalWrites = () => events.filter(event => event.type === 'copy' && !event.to.includes(':candidate-'));
+  return { registry, manifests, configs, events, denied, fail, add, formalWrites };
+}
+
+test('tag pushes and manual tag releases share future-only exact-source acceptance', () => {
+  const expected = { ref: input.ref, sha: source, version: input.version, aliases: ['0.9.39', '0.9', '0', 'latest', `sha-${source}`] };
+  assert.deepEqual(candidate, expected);
   assert.deepEqual(acceptImageRelease({ ...input, eventName: 'workflow_dispatch' }), expected);
+  for (const version of ['0.9.38', '0.9.38-rc.1', '0.9.37', '0.8.99']) {
+    assert.throws(() => acceptImageRelease({ ...input, ref: `refs/tags/v${version}`, version }), /newer than 0.9.38/);
+  }
+  assert.ok(acceptImageRelease({ ...input, ref: 'refs/tags/v0.9.39-rc.1', version: '0.9.39-rc.1' }));
 });
 
-test('main/manual branch/PR/mismatched version and nonexact source cannot publish', () => {
+test('branches, PRs, mismatched versions and nonexact sources cannot publish', () => {
   for (const patch of [{ ref: 'refs/heads/main' }, { eventName: 'workflow_dispatch', ref: 'refs/heads/main' },
-    { eventName: 'pull_request' }, { version: '1.2.4' }, { sha: 'main' }, { sha: source.slice(0, 7) },
+    { eventName: 'pull_request' }, { version: '0.9.40' }, { sha: 'main' }, { sha: source.slice(0, 7) },
     { ref: 'refs/tags/v01.2.3', version: '01.2.3' }, { ref: 'refs/tags/v1.2.3-01', version: '1.2.3-01' }]) {
     assert.throws(() => acceptImageRelease({ ...input, ...patch }));
   }
 });
 
-test('prereleases cannot replace latest or stable major/minor tags', () => {
-  const candidate = acceptImageRelease({ ...input, ref: 'refs/tags/v1.3.0-rc.1', version: '1.3.0-rc.1' });
-  assert.deepEqual(candidate.aliases, ['1.3.0-rc.1', `sha-${source}`]);
+test('only the highest retained stable Git release may move the complete floating set', () => {
+  assert.deepEqual(releaseImageAliases(candidate, [input.ref, 'refs/tags/v0.10.0-rc.1']), candidate.aliases);
+  assert.deepEqual(releaseImageAliases(candidate, [input.ref, 'refs/tags/v0.9.40']), ['0.9.39', `sha-${source}`]);
+  assert.deepEqual(releaseImageAliases(candidate, [input.ref, 'refs/tags/v0.10.0']), ['0.9.39', `sha-${source}`]);
+  assert.throws(() => releaseImageAliases(candidate, []), /remote release-tag evidence/);
+  const prerelease = acceptImageRelease({ ...input, ref: 'refs/tags/v0.10.0-rc.1', version: '0.10.0-rc.1' });
+  assert.deepEqual(releaseImageAliases(prerelease, [prerelease.ref]), ['0.10.0-rc.1', `sha-${source}`]);
 });
 
-test('promotion uses exactly tested digests and validates every required artifact before mutation', () => {
-  const candidate = acceptImageRelease(input);
-  const app = `sha256:${'b'.repeat(64)}`, slimApp = `sha256:${'c'.repeat(64)}`;
-  const plan = imagePromotionPlan(candidate, { app, slimApp });
-  assert.equal(plan.length, 2);
-  assert.equal(plan[0].at(-1), `ghcr.io/youzini-afk/varin@${app}`);
-  assert.equal(plan[1].at(-1), `ghcr.io/youzini-afk/varin-slim@${slimApp}`);
-  assert.ok(plan.flat().includes('ghcr.io/youzini-afk/varin:latest'));
-  assert.ok(!plan.flat().some(argument => argument.endsWith(':main')));
-  assert.equal(imagePromotionPlan(candidate, { app, slimApp, base: app, slimBase: slimApp }).length, 4);
-  assert.throws(() => imagePromotionPlan(candidate, { app }));
-  assert.throws(() => imagePromotionPlan(candidate, { app, slimApp, base: 'mutable:main' }));
+test('new varin and varin-slim share slim bytes while both historical runtime-base and explicit toolbelt bases stay full', () => {
+  const targets = new Map(plan().flatMap(image => image.targets.map(target => [target.ref, image.source])));
+  for (const alias of candidate.aliases) {
+    assert.equal(targets.get(`${prefix}varin:${alias}`), images.standardApp);
+    assert.equal(targets.get(`${prefix}varin-slim:${alias}`), images.standardApp);
+    assert.equal(targets.get(`${prefix}varin-toolbelt:${alias}`), images.toolbeltApp);
+    assert.equal(targets.get(`${prefix}varin-runtime-slim:${alias}`), images.slimBase);
+    assert.equal(targets.get(`${prefix}varin-runtime-toolbelt:${alias}`), images.toolbeltBase);
+    assert.equal(targets.get(`${prefix}varin-runtime-base:${alias}`), images.toolbeltBase);
+  }
+  assert.ok(!targets.has(`${prefix}varin:main`));
+  assert.throws(() => imagePromotionPlan(candidate, { ...images, toolbeltBase: undefined }, [input.ref]), /immutable image/);
+  assert.throws(() => imagePromotionPlan(candidate, { ...images, standardApp: `${prefix}varin:latest` }, [input.ref]), /immutable image/);
+});
+
+test('base overrides resolve once, require real runtime role/variant/platforms, and are the published companion', () => {
+  const fixture = registryFixture(), override = `registry.example:5000/team/reused-base@${digest('5')}`;
+  fixture.add(override, 'runtime-base', 'toolbelt');
+  fixture.manifests.set('registry.example:5000/team/reused-base:stable', fixture.manifests.get(override));
+  const resolved = resolveRuntimeBase('registry.example:5000/team/reused-base:stable', 'toolbelt', fixture.registry);
+  assert.equal(resolved, override);
+  const overridePlan = imagePromotionPlan(candidate, { ...images, toolbeltBase: resolved }, [input.ref]);
+  promoteImages(overridePlan, 'candidate-12-1', fixture.registry);
+  assert.equal(fixture.manifests.get(`${prefix}varin-runtime-toolbelt:0.9.39`).digest, digest('5'));
+  assert.equal(fixture.manifests.get(`${prefix}varin-runtime-base:latest`).digest, digest('5'));
+  assert.throws(() => resolveRuntimeBase(images.toolbeltApp, 'toolbelt', fixture.registry), /runtime-base\/toolbelt metadata/);
+  assert.throws(() => resolveRuntimeBase(images.slimBase, 'toolbelt', fixture.registry), /runtime-base\/toolbelt metadata/);
+  fixture.manifests.get(override).manifests.pop();
+  assert.throws(() => resolveRuntimeBase(override, 'toolbelt', fixture.registry), /Both linux/);
+});
+
+test('whole-plan preflight finds a last-destination immutable conflict before any release alias changes', () => {
+  const fixture = registryFixture();
+  fixture.manifests.set(`${prefix}varin-runtime-base:sha-${source}`, { digest: digest('f') });
+  assert.throws(() => promoteImages(plan(), 'candidate-12-1', fixture.registry), /replace immutable/);
+  assert.equal(fixture.formalWrites().length, 0);
+  assert.equal(fixture.manifests.get(`${prefix}varin-runtime-base:sha-${source}`).digest, digest('f'));
+});
+
+test('public access must include immutable platform configs in every destination before formal tags', () => {
+  const fixture = registryFixture();
+  fixture.denied.add(`${prefix}varin-runtime-toolbelt@${digest('4').slice(0, -1)}9`);
+  assert.throws(() => promoteImages(plan(), 'candidate-12-1', fixture.registry), /Anonymous pull access failed/);
+  assert.equal(fixture.formalWrites().length, 0);
+  assert.ok(fixture.events.some(event => event.anonymous && event.ref.startsWith(`${prefix}varin-toolbelt@`)));
+});
+
+test('unknown authenticated preflight outcomes never count as missing tags', () => {
+  const fixture = registryFixture();
+  fixture.fail.lookup = `${prefix}varin-runtime-base:latest`;
+  assert.throws(() => promoteImages(plan(), 'candidate-12-1', fixture.registry), /403 Forbidden/);
+  assert.equal(fixture.formalWrites().length, 0);
+});
+
+test('invalid source roles, duplicate destinations and altered candidate-copy digests stop before release writes', () => {
+  const fixture = registryFixture(), invalid = plan();
+  invalid[0].targets.push({ ...invalid[1].targets[0] });
+  assert.throws(() => promoteImages(invalid, 'candidate-12-1', fixture.registry), /Duplicate promotion/);
+  assert.equal(fixture.events.filter(event => event.type === 'copy').length, 0);
+  const wrongRole = plan(); wrongRole[0].role = 'runtime-base';
+  assert.throws(() => promoteImages(wrongRole, 'candidate-12-1', fixture.registry), /runtime-base\/slim metadata/);
+  fixture.fail.copiedDigest = digest('f');
+  assert.throws(() => promoteImages(plan(), 'candidate-12-1', fixture.registry), /preserve the verified digest/);
+  assert.equal(fixture.formalWrites().length, 0);
+});
+
+test('same-digest partial publication retries inspect existing tags and complete without rewriting frozen tags', () => {
+  const fixture = registryFixture();
+  fixture.fail.target = `${prefix}varin-slim:0.9.39`;
+  assert.throws(() => promoteImages(plan(), 'candidate-12-1', fixture.registry), /Connection lost/);
+  assert.ok(fixture.formalWrites().every(write => !write.to.endsWith(':latest')));
+  const firstTag = `${prefix}varin:0.9.39`;
+  assert.equal(fixture.formalWrites().filter(write => write.to === firstTag).length, 1);
+  promoteImages(plan(), 'candidate-12-2', fixture.registry);
+  assert.equal(fixture.formalWrites().filter(write => write.to === firstTag).length, 1);
+  assert.equal(fixture.manifests.get(`${prefix}varin:latest`).digest, digest('1'));
+  assert.equal(fixture.manifests.get(`${prefix}varin-toolbelt:latest`).digest, digest('2'));
+  const writes = fixture.formalWrites(), firstFloat = writes.findIndex(write => write.to.endsWith(':0.9'));
+  assert.ok(writes.slice(firstFloat).every(write => !write.to.endsWith(':0.9.39') && !write.to.includes(':sha-')));
+  const before = writes.length;
+  promoteImages(plan(), 'candidate-12-3', fixture.registry);
+  assert.equal(fixture.formalWrites().length, before);
+});
+
+test('a rebuilt retry with different bytes conflicts rather than replacing an exact version', () => {
+  const fixture = registryFixture();
+  promoteImages(plan(), 'candidate-12-1', fixture.registry);
+  const replacement = `${prefix}varin@${digest('6')}`;
+  fixture.add(replacement, 'application', 'slim');
+  const before = fixture.formalWrites().length;
+  assert.throws(() => promoteImages(imagePromotionPlan(candidate, { ...images, standardApp: replacement }, [input.ref]), 'candidate-12-2', fixture.registry), /replace immutable/);
+  assert.equal(fixture.formalWrites().length, before);
+  assert.equal(fixture.manifests.get(`${prefix}varin:0.9.39`).digest, digest('1'));
+});
+
+test('an older release leaves ALL floats untouched after a partial newer publication, despite reused base labels', () => {
+  const fixture = registryFixture();
+  for (const image of plan()) for (const target of image.targets.filter(target => !target.immutable)) {
+    fixture.manifests.set(target.ref, { digest: digest('e') });
+  }
+  const historical = imagePromotionPlan(candidate, images, [input.ref, 'refs/tags/v0.9.40']);
+  promoteImages(historical, 'candidate-12-1', fixture.registry);
+  assert.ok(fixture.formalWrites().every(write => write.to.endsWith(':0.9.39') || write.to.includes(':sha-')));
+  for (const image of plan()) for (const target of image.targets.filter(target => !target.immutable)) {
+    assert.equal(fixture.manifests.get(target.ref).digest, digest('e'));
+  }
+});
+
+test('the registry adapter fails closed and requests digest-preserving copy, not a rebuilt index', () => {
+  const ref = `${prefix}varin:0.9.39`, calls = [];
+  let stderr = `ERROR: ${ref}: not found\n`;
+  const registry = createImageRegistry((args, options) => {
+    calls.push({ args, options });
+    if (args.includes('create')) return '';
+    if (stderr) throw Object.assign(new Error('lookup failed'), { stderr });
+    return JSON.stringify({ digest: digest('1') });
+  });
+  assert.equal(registry.manifest(ref, { allowMissing: true }), null);
+  assert.throws(() => registry.manifest(ref), /lookup failed/);
+  for (const error of ['ERROR: 403 Forbidden', 'ERROR: unauthorized', 'ERROR: network: not found', `ERROR: ${ref}-other: not found`]) {
+    stderr = error; assert.throws(() => registry.manifest(ref, { allowMissing: true }), /lookup failed/);
+  }
+  stderr = '';
+  registry.manifest(ref, { anonymous: true });
+  assert.equal(calls.at(-1).options.anonymous, true);
+  registry.copy(images.standardApp, ref);
+  assert.deepEqual(calls.at(-1).args, ['buildx', 'imagetools', 'create', '--prefer-index=false', '--tag', ref, images.standardApp]);
+  assert.throws(() => createImageRegistry(() => 'null').manifest(ref, { allowMissing: true }), /Invalid registry/);
+});
+
+test('single-platform manifests or duplicate platforms cannot silently change the tested digest shape', () => {
+  const fixture = registryFixture(), manifest = fixture.manifests.get(images.standardApp);
+  manifest.mediaType = 'application/vnd.oci.image.manifest.v1+json';
+  assert.throws(() => verifyImage(images.standardApp, plan()[0], fixture.registry), /multi-platform image index/);
+  manifest.mediaType = 'application/vnd.oci.image.index.v1+json';
+  manifest.manifests[1] = manifest.manifests[0];
+  assert.throws(() => verifyImage(images.standardApp, plan()[0], fixture.registry), /duplicate platform/);
+});
+
+test('anonymous Docker config prevents platform credential-helper autodetection without copying credentials', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-anonymous-config-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeAnonymousDockerConfig(root, '/existing-docker-config');
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
+  assert.deepEqual(config, {
+    auths: { 'ghcr.io': {} }, cliPluginsExtraDirs: [path.join('/existing-docker-config', 'cli-plugins')],
+  });
+  // Nonempty auths makes Docker ContainsAuth true, so it will not discover an
+  // OS keychain helper. The GHCR entry itself contains no authentication data.
+  assert.equal(Object.keys(config.auths).length, 1);
+  assert.equal(Object.keys(config.auths['ghcr.io']).length, 0);
 });
 
 test('promotion rechecks lightweight and annotated release tags and rejects a moved tag', t => {
@@ -51,12 +257,12 @@ test('promotion rechecks lightweight and annotated release tags and rejects a mo
   git('commit', '--quiet', '--allow-empty', '-m', 'candidate');
   const sha = git('rev-parse', 'HEAD');
   git('remote', 'add', 'origin', root);
-  git('tag', 'v1.2.3');
-  assertImageReleaseTag(acceptImageRelease({ ...input, sha }), root);
-  git('tag', '-d', 'v1.2.3');
-  git('tag', '-a', 'v1.2.3', '-m', 'annotated release');
+  git('tag', 'v0.9.39');
+  assert.ok(assertImageReleaseTag(acceptImageRelease({ ...input, sha }), root).includes(input.ref));
+  git('tag', '-d', 'v0.9.39');
+  git('tag', '-a', 'v0.9.39', '-m', 'annotated release');
   assertImageReleaseTag(acceptImageRelease({ ...input, sha }), root);
   git('commit', '--quiet', '--allow-empty', '-m', 'later');
-  git('tag', '-f', 'v1.2.3');
+  git('tag', '-f', 'v0.9.39');
   assert.throws(() => assertImageReleaseTag(acceptImageRelease({ ...input, sha }), root), /tag moved/);
 });

@@ -45,6 +45,7 @@ type SmartSearchDependencies = Parameters<typeof registerSmartSearchRoutes>[1];
 type SmartSearchSpawn = NonNullable<SmartSearchDependencies['spawn']>;
 
 export interface PlatformRouteDependencies {
+  isDraining?: () => boolean;
   modelText: ModelTextService;
   __dirname: string;
   buildAugmentedPath: EnvironmentRuntime['buildAugmentedPath'];
@@ -154,6 +155,7 @@ export const createPlatformRoutesRuntime = ({
     } = dependencies;
 
     registerExtensionRoutes(app, {
+      ...(dependencies.isDraining ? { isDraining: dependencies.isDraining } : {}),
       extensionCatalog,
       extensionPackages,
       uiAuthController,

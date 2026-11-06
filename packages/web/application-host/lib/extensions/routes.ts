@@ -32,6 +32,7 @@ import {
 import { renderExtensionRecoveryPage } from './recovery-page.js';
 
 interface ExtensionRouteDependencies {
+  isDraining?: () => boolean;
   extensionCatalog: ApplicationExtensionCatalog;
   extensionPackages: ExtensionPackageManager;
   extensionRuntime?: ApplicationExtensionRuntime | null;
@@ -155,6 +156,7 @@ const sendMutationError = (res: Response, error: unknown) => {
 };
 
 export const registerExtensionRoutes = (app: Express, {
+  isDraining = () => false,
   extensionCatalog,
   extensionPackages,
   extensionRuntime,
@@ -551,9 +553,11 @@ export const registerExtensionRoutes = (app: Express, {
     '/api/varin/extensions/v1/services/lease',
     uiAuthController.requireAuth,
     async (req, res) => {
+      if (isDraining()) return res.status(503).json({ code: 'host-draining', admission: 'not_started' });
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
       const principal = await servicePrincipal(req, res);
       if (!principal) return res.status(401).json({ error: { code: 'surface_owner_unavailable', retryable: false } });
+      if (isDraining()) return res.status(503).json({ code: 'host-draining', admission: 'not_started' });
       const controller = new AbortController();
       const abort = () => controller.abort(new ExtensionRequestDisconnectedError('Surface service lease disconnected'));
       req.once('aborted', abort); res.once('close', abort);
