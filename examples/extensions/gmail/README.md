@@ -99,5 +99,7 @@ One personal test-mode Google Cloud client completed live browser authorization,
 extension verified its account against Gmail's profile endpoint. A single self-addressed message was
 also sent through an isolated broker using the same Host bundle as the installed extension. Gmail
 accepted the message; the extension read it back and found it in the account's inbox. These checks do
-not establish Google app verification or test a production Host permission configuration and agent
-conversation. Keep the pull request in draft until those remaining requirements are assessed.
+not establish Google app verification. A Varin conversation invoked `gmail_status` and discovered
+the send, search and read tools; the real send itself did not go through an agent conversation, and
+a production Host permission configuration remains untested. Keep the pull request in draft until
+those remaining requirements are assessed.
