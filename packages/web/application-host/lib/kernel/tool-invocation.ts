@@ -26,6 +26,8 @@ export interface ToolInvocationAuthority {
   readonly configurationIdentity?: string | null;
   readonly permissionSettingsRevision?: PermissionSettingsRevision;
   readonly arguments: unknown;
+  /** Set only after the original one-time permission decision has been consumed. */
+  readonly userConfirmedEffect?: true;
 }
 interface Registration {
   authority: ToolInvocationAuthority;
@@ -79,7 +81,16 @@ export async function withToolInvocation<T>(options: {
   }
   Object.freeze(authority);
   const registration: Registration = { authority, owner: Object.freeze({ ...options.owner }), signal: options.signal, accepting: true, nested: new Set(), parts: [], dependencyOwners: new Map() };
+  let confirmationConsumed = false;
   const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null,
+    ...(authority.userConfirmedEffect ? { assertConfirmedEffect: (owner: HostServiceOwnerIdentity, toolName: string, args: JsonValue[]) => {
+      if (confirmationConsumed || !registration.accepting || registration.signal.aborted
+        || serviceOwnerKey(owner) !== serviceOwnerKey(registration.owner) || authority.toolName !== toolName
+        || authority.operation !== 'effect' || args.length !== 1 || !isDeepStrictEqual(args[0], authority.arguments)) {
+        throw new Error('confirmed_effect_invocation_changed');
+      }
+      confirmationConsumed = true;
+    } } : {}),
     invokeDependency: <Result>(from: HostServiceOwnerIdentity, to: HostServiceOwnerIdentity, invoke: () => Promise<Result>): Promise<Result> => {
       if (!registration.accepting || registration.signal.aborted || !ownsInvocation(registration, from)) throw new Error('tool_invocation_unavailable');
       const key = serviceOwnerKey(to);

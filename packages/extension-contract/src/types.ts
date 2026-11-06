@@ -66,6 +66,8 @@ export interface VarinExtensionToolDeclaration {
   /** Independent jobs explicitly bind their accepted lifetime. */
   lifetime?: "thread" | "environment";
   operation: "read" | "effect";
+  /** Require a fresh, non-persistable user decision for every effect invocation. */
+  confirmation?: "always";
   examples?: JsonValue[];
   source?: import("./runtime-source.js").VarinContractSource;
 }

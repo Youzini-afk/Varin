@@ -1,0 +1,44 @@
+{
+  "name": "varin-example-gmail",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "description": "Gmail tools with local Google OAuth for Varin.",
+  "files": [
+    "dist",
+    "runtime",
+    "host.mjs",
+    "public-client.json",
+    "varin.extension.json",
+    "README.md",
+    "settings.mjs",
+    "settings.css"
+  ],
+  "scripts": {
+    "build": "varin-extension build",
+    "check": "varin-extension check",
+    "test": "node --test *.test.mjs"
+  },
+  "dependencies": {
+    "@varin/extension-sdk": "0.2.0"
+  },
+  "devDependencies": {
+    "@varin/extension-cli": "0.2.0",
+    "linkedom": "^0.18.14"
+  },
+  "varin": {
+    "build": {
+      "entrypoints": {
+        "host": {
+          "source": "host.mjs"
+        },
+        "settings": {
+          "source": "settings.mjs"
+        }
+      }
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

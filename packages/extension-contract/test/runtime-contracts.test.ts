@@ -84,6 +84,22 @@ test('tool execution schemas cannot acquire a second method declaration and quer
   }
 });
 
+test('published schema and runtime agree on per-invocation effect confirmation', async () => {
+  const schema = JSON.parse(await readFile(new URL('../schema/varin.extension.schema.json', import.meta.url), 'utf8'));
+  const Constructor = Ajv2020 as unknown as new (options: object) => { compile(schema: unknown): (input: unknown) => boolean };
+  const validate = new Constructor({ strict: false, formats: { 'semver-range': () => true } }).compile(schema);
+  const tool = { name: 'send', description: 'Send an email', inputSchema: true, outputSchema: true,
+    operation: 'effect', completion: 'result', confirmation: 'always' };
+  const valid = manifest({ id: 'example.send', version: 1, tool });
+  assert.equal(validate(valid), true);
+  assert.equal(parseVarinExtensionManifest(valid).provides!.services![0]!.tool!.confirmation, 'always');
+  for (const invalid of [{ ...tool, operation: 'read' }, { ...tool, confirmation: 'sometimes' }]) {
+    const value = manifest({ id: 'example.send', version: 1, tool: invalid });
+    assert.equal(validate(value), false);
+    assert.throws(() => parseVarinExtensionManifest(value));
+  }
+});
+
 test('source query schema and decoder share exact identity, path and byte-page admission', async () => {
   const { VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA, VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
     VARIN_RUNTIME_INSPECTION_REQUEST_SCHEMA, parseVarinRuntimeContractResult } = await import('../src/index.js');

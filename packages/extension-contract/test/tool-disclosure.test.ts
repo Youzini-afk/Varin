@@ -11,3 +11,11 @@ test('tool navigation retains the original contract and validates explicit branc
     const { disclosure: _disclosure, ...ordinary } = declaration;
     assert.equal(parseVarinExtensionToolDeclaration(ordinary).disclosure, undefined);
 });
+
+test('only effect tools may demand a fresh confirmation', () => {
+    const effect = { name: 'send_message', description: 'Send a message.', completion: 'result', operation: 'effect',
+        confirmation: 'always', inputSchema: { type: 'object' }, outputSchema: { type: 'object' } };
+    assert.deepEqual(parseVarinExtensionToolDeclaration(effect), effect);
+    assert.throws(() => parseVarinExtensionToolDeclaration({ ...effect, operation: 'read' }), /confirmation/);
+    assert.throws(() => parseVarinExtensionToolDeclaration({ ...effect, confirmation: 'sometimes' }), /confirmation/);
+});

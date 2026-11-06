@@ -11,6 +11,27 @@ const owner = (extensionId: string, generation: number): HostServiceOwnerIdentit
   generation,
 });
 
+test('a mandatory-confirmation effect cannot be executed through an unscoped service call', async () => {
+  const services = new HostServiceRegistry(hostId);
+  let executions = 0;
+  await services.replaceOwner(owner('dev.example.confirmed', 1), [{
+    descriptor: { id: 'dev.example.send', version: 1, tool: { name: 'send_message', description: 'Send one message',
+      inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, completion: 'result',
+      operation: 'effect', confirmation: 'always' } },
+    handler: method => { if (method === 'execute') executions++; return { ok: true }; },
+  }]);
+  assert.deepEqual(await services.invoke({ serviceId: 'dev.example.send', version: 1, method: 'inspect', args: [] }), { ok: true });
+  await assert.rejects(services.invoke({ serviceId: 'dev.example.send', version: 1, method: 'execute', args: [{}] }), /approved tool invocation/);
+  assert.equal(executions, 0);
+  const binding = services.bind('dev.example.send', 1), pin = binding.pin();
+  try {
+    await assert.rejects(pin.invoke('execute', [{}], undefined, { id: 'unconfirmed-host-scope', value: null }), /approved tool invocation/);
+    assert.deepEqual(await pin.invoke('execute', [{}], undefined, { id: 'host-owned-test-invocation', value: null,
+      assertConfirmedEffect: (actualOwner, tool, args) => { assert.deepEqual(actualOwner, owner('dev.example.confirmed', 1)); assert.equal(tool, 'send_message'); assert.deepEqual(args, [{}]); } }), { ok: true });
+    assert.equal(executions, 1);
+  } finally { pin.release(); binding.release(); }
+});
+
 test("service replacement exposes the new generation while the old invocation drains", async () => {
   const services = new HostServiceRegistry(hostId);
   let release!: () => void;

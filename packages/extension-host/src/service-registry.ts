@@ -22,6 +22,8 @@ export interface HostServiceOwnerIdentity {
 export interface HostInvocationScope {
   readonly id: string;
   readonly value: unknown;
+  /** Host-only, one-use proof for an exact owner, tool and original arguments. */
+  assertConfirmedEffect?(owner: HostServiceOwnerIdentity, toolName: string, args: JsonValue[]): void;
   /** Trusted Host-only lifetime hook, entered only after the supervisor verifies a frozen edge.
    * It preserves the original invocation/permission identity across the actual dependent callback. */
   invokeDependency?<T>(from: HostServiceOwnerIdentity, to: HostServiceOwnerIdentity, invoke: () => Promise<T>): Promise<T>;
@@ -433,6 +435,12 @@ export class HostServiceRegistry {
 
   async #invokeProvider(provider: ActiveProvider, method: string, args: JsonValue[], signal?: AbortSignal, invocation?: HostInvocationScope): Promise<JsonValue> {
     if (signal?.aborted) throw signal.reason ?? new Error("Host service invocation cancelled");
+    // A Surface/direct service call has no Run-owned approval. Mandatory-confirmation effects
+    // may only enter through the Host's admitted tool invocation, never an unscoped RPC.
+    if (method === 'execute' && provider.descriptor.tool?.confirmation === 'always') {
+      if (!invocation?.assertConfirmedEffect) throw new Error('This effect requires an approved tool invocation');
+      invocation.assertConfirmedEffect(provider.owner, provider.descriptor.tool.name, args);
+    }
     const callSignal = signal
       ? AbortSignal.any([signal, provider.revocation.signal])
       : provider.revocation.signal;

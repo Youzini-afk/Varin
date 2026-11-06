@@ -223,6 +223,11 @@ Varin Host tool service 的同一 manifest `tool` descriptor 用于发现、激�
 绑定到原 Run/Operation 的权限及资源事实。Host-only invocation scope 只以 opaque token 跨 broker；
 扩展不能提交一个 scope object 给自己授予另一调用方的权限。
 
+Effect 工具可声明 `confirmation: "always"`，使每次调用都经过原 PermissionService 的一次性用户确认，
+即使普通策略处于 bypass 也不提供持久允许；显式拒绝仍生效。确认界面显示原始调用的全部参数，优先使用
+输入 schema 的 `title` 作为标签。Host 将确认绑定到原 owner、工具和参数，直接 service RPC 或其他工具的
+调用 scope 不可复用该确认。此准入规则不把原生扩展变成 OS 沙箱，也不替代真实用户身份隔离。
+
 工具的 `requirements` 描述来源与进程依赖。`source` 接受已有来源，`physical` 不接受尚为 FixedBranch 的来源，
 `live` 只接受 LiveRoot；没有来源的工具可以独立准备。普通发现将不满足条件的工具标为 unavailable，
 显式恢复所需绑定则返回来源错误，不为了发现工具而准备目录。此检查只是可用性投影，不能代替实际调用的资源授权；
