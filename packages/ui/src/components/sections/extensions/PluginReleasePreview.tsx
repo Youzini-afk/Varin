@@ -41,6 +41,7 @@ export function PluginReleasePreview({ preview, api, onClose, onInstalled, hostL
           <p className="font-medium">{preview.manifest.displayName ?? preview.manifest.id} · {preview.version}</p>
           <p>{preview.source.display}</p><p className="break-all typography-micro">{preview.integrity}</p>
           <p>{preview.manifest.metadata?.description}</p>
+          {preview.releaseNotesUrl ? <a className="underline" href={preview.releaseNotesUrl} target="_blank" rel="noopener noreferrer">{t('settings.plugins.releaseNotes')}</a> : null}
           <p>{t('settings.plugins.capabilities')}</p>
           <ul>{Object.entries(preview.manifest.capabilities ?? {}).flatMap(([realm, values]) => values.map(value => <li key={`${realm}:${value}`}>{realm}: {value}</li>))}</ul>
           {preview.manifest.requires?.services?.length ? <div><p>{t('settings.varin.extensions.inspector.dependencies')}</p><ul>{preview.manifest.requires.services.map(service => <li key={`${service.id}:${service.version}`}>{service.id}@{service.version}{service.optional ? ` · ${t('settings.varin.extensions.inspector.optional')}` : ''}</li>)}</ul></div> : null}

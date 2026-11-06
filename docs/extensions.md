@@ -310,6 +310,10 @@ Accepted-Run tool discovery 读取该 Run 冻结的目录。两者来源不同�
 完整 Host 丢失后，catalog 可能恢复已提交选择，而 Operation 仍为 unknown。
 恢复不会重放 Agent effect 或重新 capture 可变来源来制造一张确定回执。
 
+同一版本号的发行内容可能被作者替换。版本检查保持只读元数据，不下载所有包来比较；“当前发行”仍提供
+“预览发行内容”入口，由显式预览固定新字节、核验摘要并报告同版本内容变化。GitHub 发行预览附带已解析
+具体 tag 的发行说明链接，不将另一个最新版本的说明混入已固定预览。
+
 ## 插件凭据与授权
 
 普通插件通过 Host capability `varin.credentials` 使用现有凭据和授权机制，不新增公共账号服务。
@@ -323,7 +327,8 @@ API Key/OAuth 记录、并发刷新合并和替换保护；模型适配层仍负
 当前 Host 仍使用原单一 owner 登录方式，本次不增加多用户注册或邀请界面。无认证身份的本机调用继续使用
 既有非凭据功能，但不能取得插件秘密。不同可信主体的隔离由原调用链与凭据 owner 强制执行。
 
-插件自行保存连接标签、邮箱、服务端点等非秘密配置，并提供自己的设置页面。Host service 使用调用级 SDK
+插件自行保存连接标签、邮箱、服务端点等非秘密配置，并提供自己的设置页面。SDK `credentialNamespace(call.capabilities)`
+返回按真实用户和插件隔离的稳定 opaque key，供插件在既有 storage 内组织自己的配置；不暴露跨插件主体 ID。Host service 使用调用级 SDK
 `credentials(call.capabilities, connectionId, expectedAccount?)`；`inspect` 返回非秘密绑定身份，`resolve`
 只向可信 Host 适配器返回秘密。已选择连接应保存 `account` 并传回 `expectedAccount`，重连后旧选择将被拒绝，
 不能把新账号无声用于旧操作。秘密不得返回 Surface、工具结果、模型上下文或日志。原生插件仍是受信代码，

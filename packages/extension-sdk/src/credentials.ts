@@ -16,3 +16,14 @@ export function credentials(client: VarinHostCapabilityClient, connectionId: str
     cancel: (id: string) => call<VarinCredentialAuthorizationState>('cancel', { id }),
   };
 }
+
+/** Stable, plugin-specific namespace for nonsecret user configuration in plugin storage. */
+export function credentialNamespace(client: VarinHostCapabilityClient): Promise<string> {
+  return client.call(VARIN_CREDENTIALS_CAPABILITY, 'namespace', {}) as Promise<string>;
+}
+
+/** Call first in every credential adapter handler, before reading or returning OAuth state/tokens.
+ * Ordinary service RPC, including authenticated surfaces, is not credential-owner authority. */
+export async function assertCredentialAuthentication(client: VarinHostCapabilityClient): Promise<void> {
+  await client.call(VARIN_CREDENTIALS_CAPABILITY, 'assertAuthentication', {});
+}

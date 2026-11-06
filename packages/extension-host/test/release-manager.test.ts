@@ -126,6 +126,7 @@ test('GitHub series resolves semver-compatible targets and reports newer undeliv
   } });
   const preview = await manager.preview({ kind: 'github-release', display: 'Plugin', specifier: 'Owner/Repo#stable?tagPrefix=plugin-v&manifest=plugin.release.json' }, 'dev.release.test');
   assert.equal(preview.version, '1.9.0');
+  assert.equal(preview.releaseNotesUrl, 'https://github.com/owner/repo/releases/tag/plugin-v1.9.0');
   assert.match(preview.warnings[0]!, /requires Varin/);
   await manager.install({ previewId: preview.previewId, expectedHostId: 'host', expectedRevision: 0 });
   const before = requests.filter(url => url.endsWith('.tgz')).length;

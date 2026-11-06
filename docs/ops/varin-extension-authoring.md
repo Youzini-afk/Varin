@@ -84,7 +84,7 @@ need neither Varin's private React components nor keys in its translation catalo
 
 | Contribution | Public implementation | Product location |
 | --- | --- | --- |
-| `settings-page` | `defineSettingsPageMount` | Settings navigation; `data.slug`, literal `data.title`, optional `group` / `kind` / `keywords` |
+| `settings-page` | `defineSettingsPageMount` | Settings navigation; `data.slug`, literal `data.title`, optional `group` / `kind` / `keywords` / `primary` (preferred Configure entry; ties keep declaration order) |
 | `command` | `defineCommand` | Command palette; literal `data.title`, optional `keywords` |
 | `message-renderer` | `defineMessageRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.messages` |
 | `tool-renderer` | `defineToolRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.tools` |
@@ -1061,7 +1061,9 @@ provider is a complete built-in method example; owners without such declarations
 
 Declare the Host capability `varin.credentials` in the existing manifest capability list. Keep your
 connection configuration in plugin storage and call `credentials(call.capabilities, connectionId)`
-from an authenticated Host service invocation. Activation-time clients and unauthenticated calls
+from an authenticated Host service invocation. `credentialNamespace(call.capabilities)` supplies a stable,
+plugin-specific user namespace for nonsecret documents in existing plugin storage; it is not a global
+account registry or a caller-selected user identity. Activation-time clients and unauthenticated calls
 cannot access user credentials. The same user is derived from a Surface service lease or the original
 Agent Run, never a user ID supplied by the plugin.
 
@@ -1072,6 +1074,11 @@ later use; replacing credentials invalidates the selection. `resolve` returns a 
 trusted Host adapter. Never forward it to a Surface, tool result, model context or log.
 
 For OAuth, provide an `authenticate` method on a Host service from the same extension entrypoint.
+The handler must first `await assertCredentialAuthentication(call.capabilities)` from the SDK,
+before reading configuration, processing arguments, or returning authorization state or tokens.
+This checks a private Host annotation on the exact retained credential-adapter invocation; an
+ordinary authenticated service call or Surface/dependency call does not establish that authority.
+Do not expose an unguarded alternate entrypoint: direct RPC must never retrieve PKCE state or tokens.
 Pass `{ serviceId, version, provider }` to `start` and `resolve`. The method accepts the public
 `VarinCredentialAuthenticationCall` union: `begin` returns a pending authorization URL and private
 state, `complete` validates the callback and returns an OAuth token, and `refresh` returns a refreshed

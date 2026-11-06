@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseVarinCredentialAuthenticationResult } from '@varin/extension-contract';
-import { HostServiceRegistry, type ApplicationExtensionRuntime, type HostCapabilityCallContext } from '@varin/extension-host';
+import { HostServiceRegistry, type ApplicationExtensionRuntime, type HostCapabilityCallContext, type HostInvocationScope } from '@varin/extension-host';
 import { HostCredentialService, type SecretStore } from '../credentials/service.js';
 import { AuthorizationFlows } from '../authorization-flows.js';
 import { bindPluginInvocationPrincipal } from './invocation-principal.js';
@@ -22,6 +22,16 @@ function setup() {
   return { owner, context, values };
 }
 describe('plugin Host credential capability', () => {
+  it('provides a stable plugin-specific configuration namespace only to authenticated invocations', async () => {
+    const { owner, context } = setup();
+    const first = await owner.call('namespace', {}, context('alice').context);
+    expect(first).toBe(await owner.call('namespace', {}, context('alice').context));
+    expect(first).not.toBe(await owner.call('namespace', {}, context('bob').context));
+    expect(first).not.toBe(await owner.call('namespace', {}, context('alice', 'example.other').context));
+    await expect(owner.call('namespace', { principalId: 'bob' }, context('alice').context)).rejects.toThrow();
+    const user = context('alice'); user.release();
+    await expect(owner.call('namespace', {}, user.context)).rejects.toThrow();
+  });
   it('isolates users, plugins and connections using trusted authority', async () => {
     const { owner, context } = setup();
     const alice = context('alice').context, bob = context('bob').context, other = context('alice', 'example.other').context;
@@ -80,6 +90,7 @@ describe('plugin authorization lifetime', () => {
   async function fixture() {
     const base = setup(), user = base.context('alice');
     let releases = 0, refreshes = 0;
+    let authenticationContext: HostCapabilityCallContext | undefined;
     const revoke = new AbortController();
     let finishRefresh!: (value: unknown) => void;
     const refresh = new Promise(resolve => { finishRefresh = resolve; });
@@ -88,7 +99,11 @@ describe('plugin authorization lifetime', () => {
         getSnapshot: () => ({ providers: [{ ...user.context.owner, providerId: 'provider', status: 'active', descriptor: { id: 'example.auth', version: 1 } }] }),
         bindPinned: () => ({ release() {}, pin: () => ({ providerId: 'provider', revocationSignal: revoke.signal,
           assertAvailable: () => revoke.signal.throwIfAborted(), release: () => { releases++; },
-          invoke: async (_method: string, args: { kind: string }[]) => {
+          invoke: async (_method: string, args: { kind: string }[], signal: AbortSignal, invocation: HostInvocationScope) => {
+            authenticationContext = { owner: user.context.owner, invocation, signal };
+            await owner.call('assertAuthentication', {}, authenticationContext);
+            await expect(owner.call('assertAuthentication', {}, { ...authenticationContext,
+              owner: { ...user.context.owner, extensionId: 'example.dependency' } })).rejects.toThrow();
             if (args[0]!.kind === 'begin') return { kind: 'pending', authorizationUrl: 'https://example.com/login', state: 'state' };
             if (args[0]!.kind === 'complete') return { kind: 'token', token: { kind: 'oauth', provider: 'example', accessToken: 'old', expiresAt: 0 } };
             refreshes++; return refresh;
@@ -104,8 +119,18 @@ describe('plugin authorization lifetime', () => {
       await tick(); return result.id;
     };
     return { ...base, owner, user, adapter, start, tick, revoke, releases: () => releases, refreshes: () => refreshes,
+      authenticationContext: () => authenticationContext,
       finishRefresh: () => finishRefresh({ kind: 'token', token: { kind: 'oauth', provider: 'example', accessToken: 'new', expiresAt: Date.now() + 60000 } }) };
   }
+  it('rejects direct authenticated service calls and expired credential callback authority', async () => {
+    const f = await fixture();
+    await expect(f.owner.call('assertAuthentication', {}, f.user.context)).rejects.toThrow();
+    await expect(f.owner.call('assertAuthentication', { connectionId: 'one' }, f.user.context)).rejects.toThrow();
+    const id = await f.start();
+    expect(f.authenticationContext()).toBeDefined();
+    await expect(f.owner.call('assertAuthentication', {}, f.authenticationContext()!)).rejects.toThrow();
+    await f.owner.call('cancel', { connectionId: 'one', id }, f.user.context);
+  });
   it('finishes authorization after the starting invocation is released, with fresh scoped replies', async () => {
     const f = await fixture(), id = await f.start(); f.user.release(); f.user.controller.abort();
     const next = f.context('alice').context;
@@ -182,7 +207,8 @@ it('uses an admitted original generation after replacement, without selecting th
   const base = setup(), user = base.context('alice'), services = new HostServiceRegistry('host');
   const descriptor = { id: 'example.auth', version: 1 };
   let oldCalls = 0, newCalls = 0;
-  await services.replaceOwner(user.context.owner, [{ descriptor, handler: async () => {
+  await services.replaceOwner(user.context.owner, [{ descriptor, handler: async (_method, _args, call) => {
+    await capability.call('assertAuthentication', {}, { ...call, owner: user.context.owner });
     oldCalls++; return { kind: 'pending', authorizationUrl: 'https://example.com/login', state: null };
   } }]);
   const admission = services.bind(descriptor.id, descriptor.version);

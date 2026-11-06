@@ -1,3 +1,4 @@
+import { pluginConfigurationPages } from '@/lib/extensions/plugin-configuration';
 import { useCodeTrustedProfileSelection, useExtensionCodeTrust } from './ExtensionCodeTrustDialog';
 import { captureExtensionCodeReview } from '@/lib/extensions/code-trust';
 import React from 'react';
@@ -715,8 +716,10 @@ export const ExtensionCard: React.FC<{
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [deleteData, setDeleteData] = React.useState(false);
   const pages = useSettingsPageRegistrations();
-  const configurationIds = new Set(surface.contributions.filter(item => item.owner.extensionId === entry.manifest.id && item.descriptor.kind === 'settings-page').map(item => item.descriptor.id));
-  const configurationPages = pages.filter(page => configurationIds.has(page.contributionId));
+  const configurationPages = pluginConfigurationPages(entry.manifest, entry.desired.enabled, varinSurfaceRuntime.surface, surface, pages, {
+    isWeb: varinSurfaceRuntime.surface === 'web', isDesktop: varinSurfaceRuntime.surface === 'desktop',
+    isMobile: varinSurfaceRuntime.surface === 'mobile', mcpInstalled: true,
+  });
   const status = actualStatus(entry);
   const candidate = entry.candidate;
   const handoff = entry.restartHandoffs?.at(-1);
@@ -998,9 +1001,16 @@ export const ExtensionCard: React.FC<{
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-border/50 pt-3">
-        {configurationPages.map(page => <Button key={page.contributionId} size="xs" variant="outline" onClick={() => useUIStore.getState().setSettingsPage(page.meta.slug)}>
-          {t('settings.plugins.configure')}{configurationPages.length > 1 ? ` · ${page.meta.title}` : ''}
-        </Button>)}
+        {configurationPages.map((page, index) => <div key={page.id} className="min-w-0">
+          <Button size="xs" variant={index === 0 ? 'default' : 'outline'} disabled={!page.slug}
+            aria-describedby={page.unavailable ? `configuration-${page.id}` : undefined}
+            onClick={() => { if (page.slug) useUIStore.getState().setSettingsPage(page.slug); }}>
+            {t('settings.plugins.configure')}{configurationPages.length > 1 ? ` · ${page.titleKey ? t(page.titleKey) : page.title}` : ''}
+          </Button>
+          {page.unavailable ? <p id={`configuration-${page.id}`} className="mt-1 max-w-xs typography-micro text-muted-foreground">
+            {t(`settings.plugins.configuration.${page.unavailable}`, { surfaces: page.supports.join(', ') })}
+          </p> : null}
+        </div>)}
         {entry.source.kind === 'local' ? (
           <Button
             type="button"

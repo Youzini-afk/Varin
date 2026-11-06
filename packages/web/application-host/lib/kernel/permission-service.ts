@@ -24,6 +24,7 @@ export interface PermissionScope {
   toolSchemaVersion: string;
   policyGeneration: string;
   reason: string;
+  confirmation?: 'always';
   persistent?: PersistentPermissionScope;
 }
 interface Pending {
@@ -53,7 +54,8 @@ export class PermissionService {
     const exactCall = structuredClone(call);
     const exactScope = structuredClone(scope);
     const exactTarget = target && structuredClone(target);
-    if (this.persistence && exactTarget) {
+    if (exactScope.confirmation === 'always') delete exactScope.persistent;
+    if (this.persistence && exactTarget && exactScope.confirmation !== 'always') {
       try { exactScope.persistent = await this.persistence.prepare(call.runId, exactTarget); }
       catch { exactScope.persistent = { tool: exactTarget.name, scope: 'tool', available: false }; }
     }

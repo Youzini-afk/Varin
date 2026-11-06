@@ -1,6 +1,6 @@
 /** Scoped access to the existing Host credential and authorization owners. */
 import { createHash, randomUUID } from 'node:crypto';
-import type { ApplicationExtensionRuntime, HostCapabilityCallContext } from '@varin/extension-host';
+import type { ApplicationExtensionRuntime, HostCapabilityCallContext, HostInvocationScope, HostServiceOwnerIdentity } from '@varin/extension-host';
 import { VARIN_CREDENTIALS_CAPABILITY, parseVarinCredentialAuthenticationResult,
   type JsonValue, type VarinCredentialAdapter, type VarinCredentialAuthenticationCall } from '@varin/extension-contract';
 import { HostCredentialService, type OAuthRefreshProvider } from '../credentials/service.js';
@@ -9,6 +9,7 @@ import { bindPluginInvocationPrincipal, requirePluginPrincipal } from './invocat
 const invalid = () => new Error('Plugin credential request is unavailable or invalid');
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export class PluginCredentialCapability {
+  readonly #authentication = new WeakMap<HostInvocationScope, { owner: HostServiceOwnerIdentity; assertAvailable(): void }>();
   readonly #stop = new AbortController();
   readonly #attempts = new Map<string, { scope: string; extensionId: string; cancel(): void }>();
   #unregister: (() => void) | undefined;
@@ -47,11 +48,16 @@ export class PluginCredentialCapability {
     const release = () => { if (--references === 0) { unbind(); pin.release(); } };
     const invoke = async (call: VarinCredentialAuthenticationCall, signal?: AbortSignal) => {
       assertAvailable();
-      const result = parseVarinCredentialAuthenticationResult(await pin.invoke('authenticate', [call as unknown as JsonValue],
-        AbortSignal.any([this.#stop.signal, pin.revocationSignal, ...(signal ? [signal] : [])]), invocation));
-      assertAvailable();
-      if (result.kind === 'token' && result.token.provider !== adapter.provider) throw invalid();
-      return result;
+      // This unforgeable Host annotation admits only the selected adapter exchange.
+      // An authenticated Surface/service invocation alone never grants token access.
+      this.#authentication.set(invocation, { owner: { ...context.owner }, assertAvailable });
+      try {
+        const result = parseVarinCredentialAuthenticationResult(await pin.invoke('authenticate', [call as unknown as JsonValue],
+          AbortSignal.any([this.#stop.signal, pin.revocationSignal, ...(signal ? [signal] : [])]), invocation));
+        assertAvailable();
+        if (result.kind === 'token' && result.token.provider !== adapter.provider) throw invalid();
+        return result;
+      } finally { this.#authentication.delete(invocation); }
     };
     const provider: OAuthRefreshProvider = {
       capture: () => { pin.assertAvailable(); references++; let released = false;
@@ -65,6 +71,22 @@ export class PluginCredentialCapability {
     return { invoke, provider, release, assertAvailable, signal: pin.revocationSignal };
   }
   async call(method: string, raw: JsonValue, context: HostCapabilityCallContext): Promise<JsonValue> {
+    if (method === 'assertAuthentication') {
+      const selected = context.invocation && this.#authentication.get(context.invocation);
+      if (!object(raw) || Object.keys(raw).length || !selected
+        || selected.owner.extensionId !== context.owner.extensionId || selected.owner.entrypointId !== context.owner.entrypointId
+        || selected.owner.extensionVersion !== context.owner.extensionVersion || selected.owner.instanceKey !== context.owner.instanceKey
+        || selected.owner.generation !== context.owner.generation) throw invalid();
+      context.signal.throwIfAborted(); selected.assertAvailable();
+      return null;
+    }
+    if (method === 'namespace') {
+      this.#stop.signal.throwIfAborted();
+      if (!object(raw) || Object.keys(raw).length) throw invalid();
+      // A plugin can organize its own nonsecret connection documents without learning
+      // a Host-wide subject ID or introducing a second platform account directory.
+      return createHash('sha256').update(JSON.stringify([requirePluginPrincipal(context), context.owner.extensionId])).digest('hex');
+    }
     const fields: Record<string, string[]> = { put: ['key'], inspect: [], resolve: ['adapter'], remove: [], start: ['adapter'], read: ['id'], reply: ['id', 'redirect'], cancel: ['id'] };
     if (!object(raw) || !Object.hasOwn(fields, method) || Object.keys(raw).some(key => key !== 'connectionId' && key !== 'expectedAccount' && !fields[method]!.includes(key))
       || typeof raw.connectionId !== 'string' || !raw.connectionId) throw invalid();

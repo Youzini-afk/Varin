@@ -66,6 +66,8 @@ export interface VarinExtensionToolDeclaration {
   /** Independent jobs explicitly bind their accepted lifetime. */
   lifetime?: "thread" | "environment";
   operation: "read" | "effect";
+  /** Require an exact, one-action confirmation regardless of saved allow rules. */
+  confirmation?: "always";
   examples?: JsonValue[];
   source?: import("./runtime-source.js").VarinContractSource;
 }

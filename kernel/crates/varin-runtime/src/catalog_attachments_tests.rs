@@ -256,7 +256,7 @@ fn v84_upgrade_keeps_receipts_and_installs_attachment_edges_atomically() {
     let mut db = open(&root);
     let receipt = submit(&mut db, "original", json!("legacy"));
     db.db
-        .execute_batch("DROP TABLE attachment_deliveries; PRAGMA user_version=84;")
+        .execute_batch("DROP INDEX thread_principals;ALTER TABLE threads DROP COLUMN principal_id;DROP TABLE catalog_principal_owner;UPDATE runs SET body=json_remove(body,'$.principal_id');DROP TABLE attachment_deliveries; PRAGMA user_version=84;")
         .unwrap();
     drop(db);
     let db = Catalog::open(&root.0).unwrap();

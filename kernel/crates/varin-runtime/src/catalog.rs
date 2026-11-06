@@ -145,6 +145,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
     if version >= 87 { principals::check_format(db)?; }
+    else { principals::check_legacy_format(db)?; }
     db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
     db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
     inputs::check_format(db)?;

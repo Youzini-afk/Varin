@@ -61,7 +61,8 @@ import { createThreadMaterialLifetime } from './lib/kernel/thread-material-lifet
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { createRuntimeContractOwner } from './lib/kernel/runtime-contract-owner.js';
-import { VARIN_RUNTIME_CONTRACTS_CAPABILITY } from '@varin/extension-contract';
+import { VARIN_RUNTIME_CONTRACTS_CAPABILITY, VARIN_TOOL_CONFIRMATION_CAPABILITY } from '@varin/extension-contract';
+import { requireConfirmedToolInvocation } from './lib/kernel/tool-confirmation.js';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
@@ -2848,6 +2849,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterRuntimeContractCapability = extensionRuntime.capabilities.register(
     VARIN_RUNTIME_CONTRACTS_CAPABILITY, createRuntimeContractOwner({ extensions: extensionRuntime, kernel: kernelClient }),
   );
+  const unregisterToolConfirmationCapability = extensionRuntime.capabilities.register(VARIN_TOOL_CONFIRMATION_CAPABILITY, (method, params, context) => {
+    if (method !== 'consume') throw new Error('Unknown tool confirmation method');
+    requireConfirmedToolInvocation(context, params);
+    return null;
+  });
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterRunDriverCapability = extensionRuntime.capabilities.register(VARIN_AGENT_DRIVER_CAPABILITY, createRunDriverOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
@@ -3148,6 +3154,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('pluginCredentials.close', () => pluginCredentials.close());
         await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
         await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());
+        await shutdown.run('unregisterToolConfirmationCapability', () => unregisterToolConfirmationCapability());
         await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());
         await shutdown.run('unregisterRunDriverCapability', () => unregisterRunDriverCapability());
         await shutdown.run('unregisterComputerCapability', () => unregisterComputerCapability());

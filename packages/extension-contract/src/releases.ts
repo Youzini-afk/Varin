@@ -18,6 +18,8 @@ export interface VarinExtensionReleasePreview {
   integrity: string;
   sourceChanged: boolean;
   previousVersion?: string;
+  /** Public upstream notes for the exact resolved release, when the source exposes them. */
+  releaseNotesUrl?: string;
   warnings: string[];
 }
 export interface VarinExtensionReleaseInstallRequest {

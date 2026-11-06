@@ -23,6 +23,7 @@ interface ResolvedRelease {
   extensionId?: string;
   engines?: { varin: string };
   warnings?: string[];
+  releaseNotesUrl?: string;
 }
 interface GithubRelease {
   draft: boolean;
@@ -117,7 +118,8 @@ export class ExtensionReleaseManager {
         if (!asset) { reason = `${manifest.version} has no package for ${this.#platform}/${this.#arch}`; warnings.push(reason); continue; }
         const download = release.assets.find(item => item.name === asset.file);
         if (!download) { reason = `${manifest.version} is missing ${asset.file}`; warnings.push(reason); continue; }
-        return { version: manifest.version, url: download.browser_download_url, integrity: `sha256-${Buffer.from(asset.sha256, 'hex').toString('base64')}`, extensionId: manifest.extensionId, engines: manifest.engines, warnings };
+        return { version: manifest.version, url: download.browser_download_url, integrity: `sha256-${Buffer.from(asset.sha256, 'hex').toString('base64')}`, extensionId: manifest.extensionId, engines: manifest.engines, warnings,
+          releaseNotesUrl: `https://github.com/${selection.repository}/releases/tag/${encodeURIComponent(release.tag_name)}` };
       }
       throw new Error(reason);
     }
@@ -167,9 +169,11 @@ export class ExtensionReleaseManager {
     signal?.throwIfAborted();
     let artifact: VarinExtensionPreparedArtifact;
     let warnings: string[] = [];
+    let releaseNotesUrl: string | undefined;
     if (source.kind === 'github-release' || source.kind === 'npm' || source.kind === 'release-archive') {
       const release = source.kind === 'release-archive' ? undefined : await this.#resolve(source);
       warnings = release?.warnings ?? [];
+      releaseNotesUrl = release?.releaseNotesUrl;
       const root = await mkdtemp(join(tmpdir(), 'varin-release-'));
       try {
         const archive = join(root, 'release.tgz');
@@ -216,7 +220,7 @@ export class ExtensionReleaseManager {
     return { previewId, catalogRevision: read.document.revision, hostId: this.#hostId, source: { kind: source.kind, display: source.display }, manifest: structuredClone(artifact.manifest),
       version: artifact.resolvedVersion, integrity: artifact.integrity,
       sourceChanged: !!current && extensionSourceIdentity(current.source) !== extensionSourceIdentity(source),
-      ...(current ? { previousVersion: current.selectedVersion } : {}), warnings };
+      ...(current ? { previousVersion: current.selectedVersion } : {}), ...(releaseNotesUrl ? { releaseNotesUrl } : {}), warnings };
   }
 
   async install(request: VarinExtensionReleaseInstallRequest, signal?: AbortSignal) {

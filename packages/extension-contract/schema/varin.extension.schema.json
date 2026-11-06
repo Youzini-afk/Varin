@@ -694,6 +694,9 @@
             "job"
           ]
         },
+        "confirmation": {
+          "const": "always"
+        },
         "operation": {
           "enum": [
             "read",

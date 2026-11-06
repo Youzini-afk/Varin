@@ -10,6 +10,7 @@ export function PluginUpdateStatus({ update, busy, onCheck, onPreview }: {
     {update ? <div className="mr-auto min-w-0"><span>{t(`settings.plugins.${update.status}`)}{update.version ? ` · ${update.version}` : ''}</span>
       <p>{t('settings.plugins.checked', { time: new Date(update.checkedAt).toLocaleString() })}</p>{update.message ? <p className="break-words">{update.message}</p> : null}</div> : null}
     <Button size="xs" variant="ghost" disabled={busy} onClick={onCheck}>{t('settings.plugins.checkUpdates')}</Button>
+    {update?.status === 'current' ? <Button size="xs" variant="outline" disabled={busy} onClick={onPreview}>{t('settings.plugins.previewRelease')}</Button> : null}
     {update?.status === 'available' ? <Button size="xs" disabled={busy} onClick={onPreview}>{t('settings.plugins.update')}</Button> : null}
   </div>;
 }

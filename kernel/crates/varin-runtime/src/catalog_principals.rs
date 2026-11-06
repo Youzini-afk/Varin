@@ -34,6 +34,20 @@ pub(super) fn upgrade(tx: &Transaction<'_>) -> Result<()> {
     tx.execute_batch("ALTER TABLE threads ADD COLUMN principal_id TEXT; CREATE INDEX thread_principals ON threads(principal_id,id); CREATE TABLE catalog_principal_owner(id INTEGER PRIMARY KEY CHECK(id=1),owner_principal_id TEXT NOT NULL,claim_legacy INTEGER NOT NULL CHECK(claim_legacy IN(0,1)));")?;
     Ok(())
 }
+/// Principal attribution was introduced atomically in 87. A lower format marker
+/// with any of its schema is not a released legacy layout and must stay untouched.
+pub(super) fn check_legacy_format(db: &Connection) -> Result<()> {
+    let present: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('threads') WHERE name='principal_id') OR EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('thread_principals','catalog_principal_owner'))",
+        [], |row| row.get(0),
+    )?;
+    if present {
+        return Err(RuntimeError::Invalid(
+            "Legacy Catalog contains newer principal attribution schema; data was preserved".into(),
+        ));
+    }
+    Ok(())
+}
 pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT principal_id FROM threads")?;
     db.prepare("SELECT owner_principal_id,claim_legacy FROM catalog_principal_owner")?;
@@ -341,6 +355,23 @@ mod tests {
         c.initialize_principals("owner", false).unwrap();
         c.initialize_principals("owner", true).unwrap();
         assert_eq!(c.thread_principal("public").unwrap(), None);
+    }
+    #[test]
+    fn relabeled_current_principal_schema_is_rejected_without_rewriting_assets() {
+        let f = Fixture::new();
+        let mut c = f.open();
+        c.initialize_principals("alice", true).unwrap();
+        create(&mut c, "private", Some("alice"));
+        let receipt = submit(&mut c, "private");
+        c.db.pragma_update(None, "user_version", 86).unwrap();
+        let before: String = c.db.query_row("SELECT body FROM runs WHERE id=?1", [&receipt.run_id], |row| row.get(0)).unwrap();
+        drop(c);
+        let error = match Catalog::open(&f.0) { Ok(_) => panic!("mislabeled schema was accepted"), Err(error) => error };
+        assert!(error.to_string().contains("newer principal attribution schema"));
+        let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+        assert_eq!(raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 86);
+        assert_eq!(thread(&raw, "private").unwrap().as_deref(), Some("alice"));
+        assert_eq!(raw.query_row("SELECT body FROM runs WHERE id=?1", [&receipt.run_id], |row| row.get::<_, String>(0)).unwrap(), before);
     }
     #[test]
     fn explicit_null_is_not_internal_unfiltered_authority() {

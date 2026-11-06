@@ -42,3 +42,15 @@ test('switching Host during confirmation cannot send installation to the next Ho
   await act(async () => resolve(true));
   expect(install).not.toHaveBeenCalled(); expect(container.textContent).toContain('changed');
 });
+
+const { PluginUpdateStatus } = await import('./PluginUpdateStatus');
+test('current versions retain explicit content preview and pinned upstream release notes', async () => {
+  const open = vi.fn();
+  await act(async () => root.render(<PluginUpdateStatus update={{ extensionId: 'example', checkedAt: '2026-01-01T00:00:00Z', status: 'current', version: '1.0.0' }} busy={false} onCheck={vi.fn()} onPreview={open} />));
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Preview release content')!.click());
+  expect(open).toHaveBeenCalledOnce();
+  const notes = 'https://github.com/author/plugin/releases/tag/v1.0.0';
+  await act(async () => root.render(<PluginReleasePreview preview={{ ...preview, releaseNotesUrl: notes }} api={{} as PluginCenterAPI} onClose={vi.fn()} onInstalled={vi.fn()} />));
+  expect(container.querySelector('a')?.getAttribute('href')).toBe(notes);
+  expect(container.querySelector('a')?.textContent).toBe('Release notes');
+});

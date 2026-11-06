@@ -78,3 +78,9 @@ or file-content store.
 
 The coordinated public version for this workbench SDK is 0.2.0. Do not npm tag or publish until that
 release is explicitly approved.
+
+## Connected services
+
+- [Gmail](gmail/README.md): installable settings and mail tools using generic scoped Host credentials,
+  plugin-owned Google OAuth/PKCE, and one-use confirmation of exact send/reply content. Google application
+  registration and production OAuth approval remain publisher/deployment prerequisites.

@@ -312,9 +312,13 @@ credentials or tool owners. A later callback error cannot rewrite the committed 
 ## Scoped Host credentials
 
 `credentials(call.capabilities, connectionId, expectedAccount?)` accesses the Host's existing
-credential lifecycle through `varin.credentials`. Use `inspect` for nonsecret connection metadata,
+credential lifecycle through `varin.credentials`. `credentialNamespace(call.capabilities)` supplies
+a stable plugin-specific user key for nonsecret plugin storage documents. Use `inspect` for nonsecret connection metadata,
 `put` for API keys, and `start/read/reply/cancel` with a same-owner `authenticate` Host service for
-OAuth. Preserve `inspect().account` with a chosen connection and pass it as `expectedAccount` so
+OAuth. Every adapter `authenticate` handler must first await
+`assertCredentialAuthentication(call.capabilities)`, before reading configuration or returning state.
+This requires the Host credential owner’s exact retained callback scope: ordinary service or Surface
+RPC must not expose PKCE state or tokens. Preserve `inspect().account` with a chosen connection and pass it as `expectedAccount` so
 reconnection cannot silently replace an accepted selection. `resolve` is Host-only: never return
 its secret to the renderer, a tool result or model context. The Host supplies authenticated identity;
 JSON user IDs and activation-time clients cannot select another user's credentials.

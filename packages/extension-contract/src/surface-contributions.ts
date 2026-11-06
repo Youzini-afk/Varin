@@ -23,6 +23,8 @@ export interface VarinCommandExecutionContextV1 {
   composer?: { host: number; identity?: { runtime: 'agent'; threadId: string; branchId: string }; source?: JsonObject };
 }
 export interface VarinSettingsPageContributionDataV1 {
+  /** Preferred Configure entry; multiple preferred pages retain declaration order. */
+  primary?: boolean;
   slug: string;
   title: string;
   group?: 'general' | 'projects' | 'harness' | 'connections';
@@ -82,7 +84,8 @@ export const parseVarinSettingsPageContributionData = (data: JsonObject): VarinS
   const group = data.group ?? 'general', kind = data.kind ?? 'single';
   if (!['general', 'projects', 'harness', 'connections'].includes(String(group))) throw new TypeError('Unknown settings page group');
   if (kind !== 'single' && kind !== 'split') throw new TypeError('Settings page kind must be single or split');
-  return { slug, title: nonempty(data.title, 'Settings page title'), group: group as NonNullable<VarinSettingsPageContributionDataV1['group']>, kind, ...keywords(data) };
+  if (data.primary !== undefined && typeof data.primary !== 'boolean') throw new TypeError('Settings page primary must be a boolean');
+  return { ...(data.primary !== undefined ? { primary: data.primary } : {}), slug, title: nonempty(data.title, 'Settings page title'), group: group as NonNullable<VarinSettingsPageContributionDataV1['group']>, kind, ...keywords(data) };
 };
 
 export interface VarinSurfaceAuthorDiagnostic {
