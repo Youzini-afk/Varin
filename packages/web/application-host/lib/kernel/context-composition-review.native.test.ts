@@ -164,12 +164,28 @@ it('packaged default and installable scoped example reach captured model request
   expect(prior.personalization!.revision).toBe(beforeRestart.personalization!.revision);
   expect(prior.personalization!.contextComposition!.transforms).toEqual(beforeRestart.personalization!.contextComposition!.transforms);
   const { contextComposition, ...basis } = prior.personalization!;
-  await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
+  const candidate = {
     ...(prior.resources ? { resources: prior.resources } : {}),
-    effectiveSystemPrompt: prior.proposal.effective_system_prompt + ' UNAUTHORIZED SAME REVISION',
+    effectiveSystemPrompt: prior.proposal.effective_system_prompt + ' Updated Host-rendered guidance.',
     instructionSources: prior.proposal.instruction_sources, memoryCheckpoint: prior.proposal.memory_checkpoint,
     personalization: { ...basis, contextComposition: { ...contextComposition!, transforms: [{ ...contextComposition!.transforms[0]!, contentVersion: 'changed', sections: [] }] } },
-  } })).rejects.toThrow();
+  };
+  // A Host update may render the same profile revision differently, but publication
+  // still requires the current checkpoint and cannot replace its frozen provenance.
+  expect(prior.revision).toBeGreaterThan(old.revision);
+  await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: old.revision, context: candidate }))
+    .rejects.toThrow(/active context checkpoint changed/);
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(prior);
+  await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
+    ...candidate, personalization: { ...candidate.personalization, originalSections: [
+      ...basis.originalSections, { name: 'unadmitted-source', content: 'Must not replace frozen instructions.' },
+    ] },
+  } })).rejects.toThrow(/scope or frozen instruction source changed/);
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(prior);
+  await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
+    ...candidate, memoryCheckpoint: `${prior.proposal.memory_checkpoint ?? 'none'}:changed`,
+  } })).rejects.toThrow(/cannot replace the memory snapshot/);
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(prior);
   await route(f, 'missing.context:host:varin.context.fragments@1', { projectId: 'selected-project' });
   await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
   expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(prior);

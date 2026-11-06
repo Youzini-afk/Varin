@@ -4,13 +4,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentRegistry } from '@varin/ui/lib/documents/registry';
-import type { DocumentsAPI } from '@varin/application-client';
+import { parseDocumentWatchEvent, type DocumentsAPI } from '@varin/application-client';
 // Type-check the Host through its emitted declarations; Vitest loads its source.
 import { createDocumentAuthority, type DocumentAuthority } from '#application-host/lib/documents/authority.js';
 import { createAuthorityTestRuntime } from '#application-host/lib/kernel/authority.test-helper.js';
 import { IntegrationCoordinator } from '#application-host/lib/harness/working-state/integration-coordinator.js';
-
-import { parseDocumentWatchEvent } from '../src/api/documents';
 
 const roots: string[] = [];
 // The direct test transport applies the public client's required epoch shape.

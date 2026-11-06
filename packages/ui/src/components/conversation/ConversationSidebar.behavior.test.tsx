@@ -210,14 +210,16 @@ it('restores a collapsed project group after remount and search reveals matches 
 it.each([
   ['settings', 'settings'], ['shortcuts', 'help'], ['aboutVarin', 'settings'],
 ] as const)('opens the %s footer surface from its own button', async (action, key) => {
-  useUIStore.setState({ isSettingsDialogOpen: false, isHelpDialogOpen: false });
+  useUIStore.setState({ isSettingsDialogOpen: false, isHelpDialogOpen: false, settingsPage: 'home' });
   captureDialogOrigin('settings'); captureDialogOrigin('help');
   const button = container.querySelector<HTMLButtonElement>(`[aria-label="sessions.sidebar.footer.actions.${action}"]`)!;
   expect(button).not.toBeNull();
   Object.assign(button, { getBoundingClientRect: () => ({ left: 24, top: 720, width: 36, height: 36 }) });
   await act(async () => button.click());
-  expect(dialogOrigin(key)?.element.deref()).toBe(button);
-  expect(useUIStore.getState()[key === 'settings' ? 'isSettingsDialogOpen' : 'isHelpDialogOpen']).toBe(true);
+  // Help still animates from its trigger; Settings now owns its full-page transition.
+  if (key === 'help') expect(dialogOrigin(key)?.element.deref()).toBe(button);
+  expect(useUIStore.getState().isSettingsDialogOpen).toBe(key === 'settings');
+  expect(useUIStore.getState().isHelpDialogOpen).toBe(key === 'help');
   if (action === 'aboutVarin') expect(useUIStore.getState().settingsPage).toBe('about');
   await act(async () => { useUIStore.getState().setSettingsDialogOpen(false); useUIStore.getState().setHelpDialogOpen(false); });
 });
