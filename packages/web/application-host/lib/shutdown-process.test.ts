@@ -1,11 +1,31 @@
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { spawn, type ChildProcess, type Serializable } from 'node:child_process';
 import { expect, it } from 'vitest';
 
-it('a real SIGTERM bounds a stuck owner, withdraws readiness, and exits nonzero without claiming store closure', async () => {
-  const runtimeUrl = pathToFileURL(resolve('packages/web/application-host/lib/shutdown-runtime.ts')).href;
+type FixtureMessage = { kind: string; port?: number };
+const loaderUrl = import.meta.resolve('tsx');
+const runtimeUrl = new URL('./shutdown-runtime.ts', import.meta.url).href;
+
+const nextFixtureMessage = (child: ChildProcess, phase: string, diagnostics: () => string): Promise<FixtureMessage> => new Promise((resolve, reject) => {
+  const cleanup = () => { child.off('message', message); child.off('error', error); child.off('close', close); };
+  const message = (value: Serializable) => { cleanup(); resolve(value as FixtureMessage); };
+  const error = (cause: Error) => { cleanup(); reject(new Error(`Shutdown fixture failed before ${phase}: ${cause.message}\n${diagnostics()}`, { cause })); };
+  // close, rather than exit, waits until captured stderr is drained, so an
+  // import/startup failure reports its actual cause instead of a test timeout.
+  const close = (code: number | null, signal: NodeJS.Signals | null) => {
+    cleanup(); reject(new Error(`Shutdown fixture exited before ${phase} (code=${code}, signal=${signal})\n${diagnostics()}`));
+  };
+  child.once('message', message); child.once('error', error); child.once('close', close);
+});
+
+const completion = (child: ChildProcess) => new Promise<[number | null, NodeJS.Signals | null]>(resolve => {
+  child.once('close', (code, signal) => resolve([code, signal]));
+});
+
+// Windows child.kill('SIGTERM') forcibly terminates the process; it does not
+// deliver a POSIX signal handler. Exercise the same real shutdown owner through
+// explicit IPC there, and test both triggers on POSIX without conflating them.
+const triggers = process.platform === 'win32' ? ['explicit stop IPC'] as const : ['POSIX SIGTERM', 'explicit stop IPC'] as const;
+it.each(triggers)('a real child using %s bounds a stuck owner, withdraws readiness, and exits nonzero without claiming store closure', async trigger => {
   const source = `
     import http from 'node:http';
     import { createGracefulShutdownRuntime } from ${JSON.stringify(runtimeUrl)};
@@ -24,25 +44,26 @@ it('a real SIGTERM bounds a stuck owner, withdraws readiness, and exits nonzero 
       getActiveTunnelController: () => null, setActiveTunnelController() {}, tunnelAuthController: { clearActiveTunnel() {} },
     });
     process.on('SIGTERM', () => { void runtime.gracefulShutdown(); });
+    process.on('message', message => { if (message?.kind === 'stop') void runtime.gracefulShutdown(); });
     server.listen(0, '127.0.0.1', () => process.send({ kind: 'ready', port: server.address().port }));
   `;
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
-  const messages: Array<{ kind: string; port?: number }> = [];
+  const child = spawn(process.execPath, ['--import', loaderUrl, '--input-type=module', '-e', source], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const messages: FixtureMessage[] = [];
   let stdout = '', stderr = '';
   child.stdout!.on('data', bytes => { stdout += bytes; });
   child.stderr!.on('data', bytes => { stderr += bytes; });
-  child.on('message', value => { messages.push(value as { kind: string; port?: number }); });
-  const exit = once(child, 'exit');
+  child.on('message', value => { messages.push(value as FixtureMessage); });
+  const exit = completion(child);
   try {
-    const first = await once(child, 'message');
-    const ready = first[0] as { kind: string; port: number };
+    const ready = await nextFixtureMessage(child, 'ready IPC', () => stdout + stderr);
     expect(ready.kind).toBe('ready');
     const endpoint = `http://127.0.0.1:${ready.port}/health`;
     expect((await fetch(endpoint)).status).toBe(200);
-    const draining = once(child, 'message');
+    const draining = nextFixtureMessage(child, 'draining IPC', () => stdout + stderr);
     const started = performance.now();
-    child.kill('SIGTERM');
-    expect((await draining)[0]).toEqual({ kind: 'draining' });
+    if (trigger === 'POSIX SIGTERM') child.kill('SIGTERM');
+    else child.send({ kind: 'stop' });
+    expect(await draining).toEqual({ kind: 'draining' });
     const health = await fetch(endpoint);
     expect(health.status).toBe(503); expect(await health.json()).toEqual({ ready: false });
     const [code, signal] = await exit;
@@ -54,6 +75,22 @@ it('a real SIGTERM bounds a stuck owner, withdraws readiness, and exits nonzero 
     expect(summary).toMatchObject({ outcome: 'incomplete', owner: 'scheduledTasks.stop', reason: 'deadline', deadlineMs: 500 });
     expect(summary.elapsedMs).toBeGreaterThanOrEqual(490);
   } finally {
-    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
   }
 }, 15_000);
+
+it('reports a real child import failure before readiness with the startup diagnostic', async () => {
+  const missing = new URL('./missing-shutdown-runtime-for-failure-probe.ts', import.meta.url).href;
+  const child = spawn(process.execPath, ['--import', loaderUrl, '--input-type=module', '-e', `import ${JSON.stringify(missing)};`], {
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  child.stderr!.on('data', bytes => { stderr += bytes; });
+  const exit = completion(child);
+  try {
+    await expect(nextFixtureMessage(child, 'ready IPC', () => stderr)).rejects.toThrow(/exited before ready IPC[\s\S]*ERR_MODULE_NOT_FOUND/);
+    expect(await exit).toEqual([1, null]);
+  } finally {
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
+  }
+});

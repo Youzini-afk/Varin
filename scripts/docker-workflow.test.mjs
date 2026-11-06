@@ -52,6 +52,20 @@ test('reusable container validation only pushes to its disposable local registry
   }
 });
 
+test('release smokes run candidate-owned scripts with their supported Node runtime', () => {
+  for (const id of ['smoke-amd64', 'smoke-amd64-slim']) {
+    const job = release.jobs[id];
+    assert.equal(job.permissions.contents, 'read', `${id} must be able to check out its smoke scripts`);
+    const checkout = job.steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
+    const node = job.steps.findIndex(step => step.uses?.startsWith('actions/setup-node@'));
+    const execute = job.steps.findIndex(step => step.run);
+    assert.ok(checkout >= 0 && checkout < execute, `${id} must check out the candidate before running scripts`);
+    assert.equal(job.steps[checkout].with.ref, '${{ github.sha }}');
+    assert.ok(node >= 0 && node < execute, `${id} must prepare Node before running scripts`);
+    assert.equal(job.steps[node].with['node-version'], 24);
+  }
+});
+
 
 test('default local builds follow a published release base, not a retired main alias', () => {
   const dockerfile = fs.readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');

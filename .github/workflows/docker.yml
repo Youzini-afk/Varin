@@ -321,11 +321,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-app]
     permissions:
+      contents: read
       packages: read
     env:
       IMAGE_REF: ghcr.io/youzini-afk/varin@${{ needs.build-app.outputs.digest }}
       EXPECTED_RELEASE_ID: image-${{ github.sha }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -379,11 +386,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-app-slim]
     permissions:
+      contents: read
       packages: read
     env:
       IMAGE_REF: ghcr.io/youzini-afk/varin-slim@${{ needs.build-app-slim.outputs.digest }}
       EXPECTED_RELEASE_ID: image-${{ github.sha }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
