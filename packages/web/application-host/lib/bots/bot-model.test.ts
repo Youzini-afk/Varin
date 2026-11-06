@@ -12,3 +12,12 @@ it('resolves profile thinking and inherited defaults, and detects thinking-only 
   expect(resolveBotModelSelection(null, { defaultProvider: 'channel', defaultModel: 'alias', defaultThinkingLevel: 'high' }, models)).toEqual(high);
   expect(() => resolveBotModelSelection({ ...high, thinkingLevel: 'max' }, {}, models)).toThrow('thinking level is unavailable');
 });
+
+it('uses the shared conversation defaults before the first available chat model', () => {
+  const available = [{ providerId: 'first', modelId: 'chat', thinkingLevels: ['off', 'low'] as const }, ...models].map(model => ({ ...model, thinkingLevels: [...(model.thinkingLevels ?? [])] }));
+  expect(resolveBotModelSelection(null, { defaultProvider: 'channel', defaultModel: 'alias', defaultThinkingLevel: 'high' }, available))
+    .toEqual({ providerId: 'channel', modelId: 'alias', thinkingLevel: 'high' });
+  expect(resolveBotModelSelection(null, { defaultThinkingLevel: 'low' }, available))
+    .toEqual({ providerId: 'first', modelId: 'chat', thinkingLevel: 'low' });
+  expect(resolveBotModelSelection(null, {}, [] )).toBeNull();
+});

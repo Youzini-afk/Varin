@@ -9,7 +9,7 @@ import { HarnessSelector } from './HarnessSelector';
 import { ExternalConnectionStatus } from './ExternalConnectionStatus';
 import { externalSessionInput, normalizeExternalSessionChoice, type ExternalSessionChoice } from './externalSessionChoice';
 import { useExternalDraftPreparation } from './useExternalDraftPreparation';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, defaultConversationModel, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadModelInfo, type ThreadsAPI } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
 import { useThreadWorkFocus } from './useThreadWorkFocus';
@@ -134,14 +134,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     void createModelConnectionsHttpAPI(generation).readSettings(draft.workspacePath, controller.signal).then(settings => {
       if (controller.signal.aborted || generation !== getRuntimeEndpointGeneration()) return;
       const effective = { ...settings.global, ...(settings.projectTrusted ? settings.project : {}) };
-      if (typeof effective.defaultProvider !== 'string' || typeof effective.defaultModel !== 'string') return;
-      patch(current => current.model?.providerId || current.model?.modelId ? {} : { model: {
-        providerId: effective.defaultProvider as string, modelId: effective.defaultModel as string,
-        thinkingLevel: effective.defaultThinkingLevel as ThreadThinkingLevel | undefined,
-      } });
+      const selection = defaultConversationModel(effective, models);
+      if (selection) patch(current => current.model?.providerId || current.model?.modelId ? {} : { model: selection });
     }).catch(cause => { if (!controller.signal.aborted) setModelError(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [generation, draft.harnessId, model?.providerId, model?.modelId, draft.workspacePath, patch, settingsRevision]);
+  }, [generation, draft.harnessId, model?.providerId, model?.modelId, draft.workspacePath, patch, settingsRevision, models]);
   React.useSyncExternalStore(subscribeEditorContextAttachments, getEditorContextAttachmentsRevision, () => 0);
   const editorContext = listEditorContextAttachments(threadHostKey(), draftKey);
   const buckets = useInlineCommentDraftStore(state => state.drafts);

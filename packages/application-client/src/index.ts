@@ -21,6 +21,7 @@ export * from "./transport/index.js";
 export { projectFolders, projectPathKey, projectContainsPath, parseVersionedProjectWorkspace } from './project-folders.js';
 export type { ProjectFolders } from './project-folders.js';
 export * from "./threads.js";
+export { defaultConversationModel } from './default-conversation-model.js';
 export * from "./thread-source-files.js";
 export * from "./thread-dispatch.js";
 export * from "./thread-workflows.js";

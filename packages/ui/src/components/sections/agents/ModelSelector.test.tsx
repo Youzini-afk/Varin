@@ -106,12 +106,12 @@ const renderPicker = () => act(async () => root!.render(<ModelSelector providerI
 const emit = (event: VarinEvent) => { for (const listener of runtime.events) listener(event); };
 
 describe('model catalog activation', () => {
-  it('guides an empty catalog toward configuration without advertising unavailable keyboard selection', async () => {
+  it('keeps the original empty model list when there are no configured chat models', async () => {
     runtime.read.mockResolvedValue({ channels: [] });
     const document = await mountPicker();
-    expect(document.body.textContent).toContain('settings.agents.modelSelector.state.noModelsConfigured');
+    expect(document.body.textContent).toContain('settings.agents.modelSelector.state.noModelsFound');
     expect(document.body.textContent).toContain('settings.models.addChannel');
-    expect(document.body.textContent).not.toContain('settings.agents.modelSelector.keyboardHints');
+    expect(document.body.textContent).toContain('settings.agents.modelSelector.keyboardHints');
   });
 
   it('does not report missing models when the user collapses their provider', async () => {
@@ -120,7 +120,6 @@ describe('model catalog activation', () => {
     await act(async () => useModelPickerSectionsStore.setState({ collapsedSections: { 'provider:local': true } }));
     expect(document.body.textContent).toContain('Local');
     expect(document.querySelector('[role="option"]')).toBeNull();
-    expect(document.body.textContent).not.toContain('settings.agents.modelSelector.state.noModelsConfigured');
     expect(document.body.textContent).not.toContain('settings.agents.modelSelector.state.noModelsFound');
   });
 

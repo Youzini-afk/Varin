@@ -1,15 +1,13 @@
-import type { BotModelSelection, ThreadModelInfo } from '@varin/application-client';
+import { defaultConversationModel, type BotModelSelection, type ThreadModelInfo } from '@varin/application-client';
 
 /** Resolve the profile once for foreground, background and existing Bot conversations. */
 export function resolveBotModelSelection(profile: BotModelSelection | null, defaults: Record<string, unknown>, models: ThreadModelInfo[]): BotModelSelection | null {
-  const selection = profile ?? (typeof defaults.defaultProvider === 'string' && typeof defaults.defaultModel === 'string'
-    ? { providerId: defaults.defaultProvider, modelId: defaults.defaultModel } : null);
-  if (!selection) return null;
+  if (!profile) return defaultConversationModel(defaults, models);
+  const selection = profile;
   const model = models.find(candidate => candidate.providerId === selection.providerId && candidate.modelId === selection.modelId);
   if (!model) throw new Error('Bot model is no longer registered. Select an available Agent model in Bot settings.');
-  const levels = model.thinkingLevels ?? ['off'];
-  const requested = profile ? profile.thinkingLevel : defaults.defaultThinkingLevel;
-  const thinkingLevel = requested ?? levels[0];
+  const levels = model.thinkingLevels?.length ? model.thinkingLevels : ['off'];
+  const thinkingLevel = profile.thinkingLevel ?? levels.find(level => level === defaults.defaultThinkingLevel) ?? levels[0];
   if (!levels.some(level => level === thinkingLevel)) throw new Error('Bot thinking level is unavailable for the selected model. Update its thinking setting.');
   return { ...selection, thinkingLevel: thinkingLevel as NonNullable<BotModelSelection['thinkingLevel']> };
 }

@@ -7,7 +7,6 @@ import { composerFileSelections, composerHistoryAttachments, selectComposerFile,
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { composerInputReferences } from '@/components/chat/composer/submit/references';
 import { canRespondToQuestion } from './threadOperations';
-import { THINKING_LEVELS } from '@varin/protocol';
 import { openThreadContext } from '@/lib/openThreadContext';
 import { toast } from '@/components/ui';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
@@ -31,7 +30,7 @@ import { addContentReference, acknowledgeEditorContextAttachments, getEditorCont
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
-import { useThreadStore, threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadHostKey, threadComposerKey, selectedComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput, type ThreadMaterialAttachment } from '@/stores/useThreadDraftStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { ThreadMaterials } from './ThreadMaterials';
@@ -63,7 +62,7 @@ import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import React from 'react';
 import { tapHaptic } from '@/lib/motion/haptics';
-import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, defaultConversationModel, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
@@ -94,10 +93,10 @@ const resourceErrorMessages = new Map([
   ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
 ]);
 
-export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, onActivity, readOnly = false, messageHandoff, emptyHero, surface = 'workbench' }: { surface?: 'workbench' | 'bot'; emptyHero?: { visual: React.ReactNode; title: string }; messageHandoff?: MessageHandoff; onWorkChanged?: () => void;
+export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel: configuredPreferredModel, inheritWorkbenchModel = false, onWorkChanged, onActivity, readOnly = false, messageHandoff, emptyHero, surface = 'workbench' }: { surface?: 'workbench' | 'bot'; emptyHero?: { visual: React.ReactNode; title: string }; messageHandoff?: MessageHandoff; onWorkChanged?: () => void;
   /** Peripheral observers (the Bot figure) follow what the current Run visibly does; null once unmounted. */
   onActivity?: (activity: ThreadLiveActivity | null) => void;
-  preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
+  preferredModel?: ThreadModel | null; inheritWorkbenchModel?: boolean; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const botSurface = surface === 'bot';
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -166,6 +165,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
+  // Capture the ordinary workbench/IDE selection when entering an unconfigured
+  // Bot conversation. Do not turn another conversation's later edits into a binding.
+  const workbenchModel = React.useMemo(() => {
+    if (!inheritWorkbenchModel) return null;
+    const navigation = useThreadStore.getState();
+    if (navigation.hostKey !== threadHostKey()) return null;
+    const key = selectedComposerKey(navigation);
+    if (!key || key === draftKey) return null;
+    return useThreadDraftStore.getState().drafts[key]?.model ?? null;
+  }, [inheritWorkbenchModel, draftKey]);
+  const inheritedModel = workbenchModel && models.some(model => model.providerId === workbenchModel.providerId && model.modelId === workbenchModel.modelId)
+    ? defaultConversationModel({ defaultProvider: workbenchModel.providerId, defaultModel: workbenchModel.modelId, defaultThinkingLevel: workbenchModel.thinkingLevel }, models) : null;
+  const preferredModel = inheritedModel ?? configuredPreferredModel;
   const [modelError, setModelError] = React.useState<string>();
   const [defaultsVersion, refreshDefaults] = React.useReducer(version => version + 1, 0);
   React.useEffect(() => {
@@ -281,13 +293,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel, setProviderId, setModelId, setThinkingLevel]);
   React.useEffect(() => {
     if (!snapshot || preferredModel === undefined) return;
+    if (inheritWorkbenchModel && (!models.length || providerId || modelId)) return;
     const key = JSON.stringify([host, identity.threadId, identity.branchId, preferredModel]);
     if (appliedModelPreference.current === key) return;
     appliedModelPreference.current = key;
     // Active work consumes the original desired-selection owner. Idle drafts may follow a
     // changed Bot profile even when their latest Run was cancelled; later renders preserve edits.
     if (!active) { setProviderId(preferredModel?.providerId ?? ''); setModelId(preferredModel?.modelId ?? ''); setThinkingLevel(preferredModel?.thinkingLevel ?? 'off'); }
-  }, [snapshot, active, host, identity.threadId, identity.branchId, preferredModel, setProviderId, setModelId, setThinkingLevel]);
+  }, [snapshot, active, host, identity.threadId, identity.branchId, preferredModel, inheritWorkbenchModel, models.length, providerId, modelId, setProviderId, setModelId, setThinkingLevel]);
   const needsDefaultModel = Boolean(snapshot && !run && preferredModel === undefined && !providerId && !modelId);
   React.useEffect(() => {
     if (!needsDefaultModel) return;
@@ -296,16 +309,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     void createModelConnectionsHttpAPI(host).readSettings(settingsWorkspace, controller.signal).then(settings => {
       if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
       const effective = { ...settings.global, ...(settings.projectTrusted ? settings.project : {}) };
-      if (typeof effective.defaultProvider !== 'string' || typeof effective.defaultModel !== 'string') return;
+      const selection = defaultConversationModel(effective, models);
+      if (!selection) return;
       useThreadDraftStore.getState().patch(draftKey, current => {
         if (current.model?.providerId || current.model?.modelId || current.workspacePath !== draft.workspacePath) return {};
-        const thinking = effective.defaultThinkingLevel;
-        return { model: { providerId: effective.defaultProvider as string, modelId: effective.defaultModel as string,
-          ...(typeof thinking === 'string' && (THINKING_LEVELS as readonly string[]).includes(thinking) ? { thinkingLevel: thinking as ThreadThinkingLevel } : {}) } };
+        return { model: selection };
       });
     }).catch(failure => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(failure instanceof Error ? failure.message : String(failure)); });
     return () => controller.abort();
-  }, [needsDefaultModel, host, draftKey, draft.workspacePath, workspacePath, initialWorkspacePath, botSurface, defaultsVersion]);
+  }, [needsDefaultModel, host, draftKey, draft.workspacePath, workspacePath, initialWorkspacePath, botSurface, defaultsVersion, models]);
   const act = async (work: () => Promise<unknown>, interrupt = false, propagate = false) => {
     if (readOnly || currentViewScope.current !== viewScope || pendingAction.current && !interrupt) { if (propagate) throw new Error(t('composer.menu.unavailable')); return; }
     const action = {}; pendingAction.current = action;

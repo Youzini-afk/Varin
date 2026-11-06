@@ -429,6 +429,30 @@ it('keeps Bot conversation independent of workspace drafts and saved work-overvi
   expect(f.api.prepareSource).not.toHaveBeenCalled();
 });
 
+it('inherits the workbench model and thinking for an unconfigured Bot and sends that exact selection', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'bot';
+  const ordinary: ThreadIdentity = { runtime: 'agent', threadId: 'ordinary-work', branchId: 'main' };
+  const originalNavigation = useThreadStore.getState();
+  const inherited = { providerId: 'other-channel', modelId: 'strong', thinkingLevel: 'high' as const };
+  useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: ordinary, selectedDraftKey: null });
+  useThreadDraftStore.getState().patch(threadComposerKey(threadHostKey(), ordinary), { model: inherited, text: 'Unrelated workbench draft' });
+  f.api.listModels = async () => [
+    { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevels: ['off'] },
+    { ...inherited, thinkingLevels: ['off', 'high'] },
+  ];
+  try {
+    await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} inheritWorkbenchModel
+      preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' }} />));
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model).toEqual(inherited);
+    await edit('[aria-label="Message thread"]', 'Hello from Varin');
+    await submitForm(composerForm());
+    expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: inherited, text: 'Hello from Varin' }));
+  } finally {
+    useThreadStore.setState({ hostKey: originalNavigation.hostKey, selectedIdentity: originalNavigation.selectedIdentity, selectedDraftKey: originalNavigation.selectedDraftKey });
+  }
+});
+
 it('keeps an existing physical conversation on its source without automatically requiring a mount backend', async () => {
   const f = fixture(true); pauseView(f.view);
   const previous = { ...f.view.activeRun!, state: 'completed' as const };

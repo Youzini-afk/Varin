@@ -324,9 +324,6 @@ interface ModelPickerListProps {
   labels: {
     searchPlaceholder: string;
     noResults: string;
-    noModelsConfigured?: string;
-    addServiceHint?: string;
-    noMatchHint?: string;
     favorites: string;
     recent: string;
     keyboardHint: string;
@@ -776,10 +773,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           ) : null}
 
           {!hasResults ? (
-            <div role="status" className="px-4 py-6 text-center">
-              <p className="typography-ui-label text-foreground">{searchQuery.trim() ? labels.noResults : labels.noModelsConfigured ?? labels.noResults}</p>
-              {(searchQuery.trim() ? labels.noMatchHint : labels.addServiceHint) ? <p className="mt-1.5 typography-meta leading-relaxed text-muted-foreground">{searchQuery.trim() ? labels.noMatchHint : labels.addServiceHint}</p> : null}
-            </div>
+            <div className="px-2 py-4 text-center typography-meta text-muted-foreground">{labels.noResults}</div>
           ) : null}
 
           {filteredFavorites.length > 0 ? (
@@ -832,9 +826,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         </div>
       </ScrollableOverlay>
 
-      {flatModelList.length > 0 && <div className="px-3 py-2 typography-micro text-muted-foreground">
+      <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
         <ModelPickerFooter store={selectionStore} flatModelList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />
-      </div>}
+      </div>
     </>
   );
 };
