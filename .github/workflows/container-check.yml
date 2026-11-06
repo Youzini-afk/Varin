@@ -48,6 +48,11 @@ jobs:
             [registry."localhost:5000"]
               http = true
 
+      - name: Verify release promotion against the disposable registry
+        env:
+          VARIN_TEST_IMAGE_REGISTRY: localhost:5000
+        run: node --test scripts/docker-release-registry.test.mjs
+
       - name: Build slim runtime base
         id: slim-base
         uses: docker/build-push-action@v7
@@ -72,7 +77,7 @@ jobs:
           platforms: linux/amd64
           pull: true
           load: true
-          tags: varin-slim:check-${{ inputs.source_sha }}
+          tags: varin:check-${{ inputs.source_sha }}
           build-args: |
             RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-slim:check-${{ inputs.source_sha }}
             VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
@@ -83,7 +88,7 @@ jobs:
         if: ${{ !cancelled() && steps.slim-app.outcome == 'success' }}
         shell: bash
         env:
-          IMAGE_REF: varin-slim:check-${{ inputs.source_sha }}
+          IMAGE_REF: varin:check-${{ inputs.source_sha }}
           EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
         run: |
           cleanup() {
@@ -128,11 +133,11 @@ jobs:
         with:
           context: .
           file: Dockerfile.base
-          target: runtime-base
+          target: toolbelt
           platforms: linux/amd64
           pull: true
           push: true
-          tags: localhost:5000/varin-runtime-base:check-${{ inputs.source_sha }}
+          tags: localhost:5000/varin-runtime-toolbelt:check-${{ inputs.source_sha }}
           cache-from: type=gha,scope=varin-check-runtime-base
           cache-to: type=gha,scope=varin-check-runtime-base,mode=max
 
@@ -146,9 +151,9 @@ jobs:
           platforms: linux/amd64
           pull: true
           load: true
-          tags: varin:check-${{ inputs.source_sha }}
+          tags: varin-toolbelt:check-${{ inputs.source_sha }}
           build-args: |
-            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-base:check-${{ inputs.source_sha }}
+            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-toolbelt:check-${{ inputs.source_sha }}
             VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
           cache-from: type=gha,scope=varin-check-app
           cache-to: type=gha,scope=varin-check-app,mode=max
@@ -157,7 +162,7 @@ jobs:
         if: ${{ !cancelled() && steps.toolbelt-app.outcome == 'success' }}
         shell: bash
         env:
-          IMAGE_REF: varin:check-${{ inputs.source_sha }}
+          IMAGE_REF: varin-toolbelt:check-${{ inputs.source_sha }}
           EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
         run: |
           cleanup() {

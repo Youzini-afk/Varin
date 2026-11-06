@@ -13,8 +13,9 @@ docker('exec', name, 'node', '-e', `
   if (value.schema !== 1 || value.variant !== variant || process.env.VARIN_IMAGE_VARIANT !== variant
     || value.chrome !== (variant === 'toolbelt' && process.arch === 'x64')) throw new Error('Image capabilities do not match the selected variant/architecture');
 `, variant);
-if (docker('inspect', '--format', '{{index .Config.Labels "io.varin.image.variant"}}', name) !== variant) {
-  throw new Error('Image variant label does not match its capability metadata');
+if (docker('inspect', '--format', '{{index .Config.Labels "io.varin.image.variant"}}', name) !== variant
+  || docker('inspect', '--format', '{{index .Config.Labels "io.varin.image.role"}}', name) !== 'application') {
+  throw new Error('Application role or variant label does not match its capability metadata');
 }
 const started = performance.now();
 docker('kill', '--signal=TERM', name);

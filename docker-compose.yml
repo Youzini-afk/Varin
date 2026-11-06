@@ -1,11 +1,11 @@
 services:
   varin:
-    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin-slim:latest}
+    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Slim by default. Use docker-compose.toolbelt.yml for the language
+        # Standard (slim) by default. Use docker-compose.toolbelt.yml for the language
         # toolbelt, or build Dockerfile.base --target slim as a local base.
         RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-slim:latest}
     container_name: varin
