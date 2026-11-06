@@ -29,13 +29,6 @@ export const applyPersistedDirectoryPreferences = async (
   const ignoredDirectory = options.ignorePersistedDirectory?.trim() || null;
   const savedDirectory = observedDirectory === ignoredDirectory ? null : observedDirectory;
 
-  // Home directory is intentionally NOT restored from localStorage here.
-  // The persisted value is only a boot-time cache already consumed by the
-  // directory store's initial state; replaying it through
-  // synchronizeHomeDirectory would persist a possibly stale value back into
-  // desktop settings, overriding the authoritative resolution
-  // (initializeHomeDirectory → /api/fs/home) that runs on every startup.
-
   let workspaceRoot: string | null = null;
   if (apis) {
     try {
@@ -48,6 +41,15 @@ export const applyPersistedDirectoryPreferences = async (
   }
 
   if (getRuntimeKey() !== runtimeKey) return;
+
+  // Web/mobile and remote desktop navigation belong to the authenticated Host.
+  // Its workspace root is accessible even when the OS home (or a previous
+  // Host's cached home) is outside the allowed boundary. Update home as well as
+  // the initial directory so Go Home and leaving a project keep that authority.
+  // Local desktop keeps its preload-provided home instead.
+  if (workspaceRoot) {
+    useDirectoryStore.getState().synchronizeHomeDirectory(workspaceRoot);
+  }
 
   const directoryState = useDirectoryStore.getState();
   const hasSelectedWorkspace = useProjectsStore.getState().activeProjectId !== null;

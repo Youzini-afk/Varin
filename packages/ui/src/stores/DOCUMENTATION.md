@@ -94,6 +94,11 @@ complete snapshot reset to canonical client defaults, including an omitted proje
 Transport or load failure dispatches no synchronization event and preserves current state. Partial save
 responses do not clear unrelated in-memory preferences or local mirrors.
 
+Directory restoration runs after authentication/settings synchronization. Web, mobile and remote
+desktop take their navigation home from the active Host's WorkspaceAPI root, not the OS home or a
+browser cache from another Host. Local desktop retains its preload-provided home. Selected projects
+keep their own directory; leaving a project returns to that same Host-owned navigation home.
+
 `usePreferencesStore` owns speech preferences for Settings and dictation. Recording start reads the
 current model/provider/language from that store; the Host supplies the downloadable STT catalog and
 supported languages. Shared defaults select Whisper large-v3 Turbo without replacing a saved choice.
