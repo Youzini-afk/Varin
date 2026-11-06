@@ -24,6 +24,10 @@ export interface PermissionScope {
   toolSchemaVersion: string;
   policyGeneration: string;
   reason: string;
+  /** This call must be approved individually; do not offer or accept a permanent rule. */
+  confirmation?: 'always';
+  /** Optional labels from the selected tool schema; values still come from the exact call. */
+  previewLabels?: Record<string, string>;
   persistent?: PersistentPermissionScope;
 }
 interface Pending {
@@ -53,7 +57,7 @@ export class PermissionService {
     const exactCall = structuredClone(call);
     const exactScope = structuredClone(scope);
     const exactTarget = target && structuredClone(target);
-    if (this.persistence && exactTarget) {
+    if (this.persistence && exactTarget && exactScope.confirmation !== 'always') {
       try { exactScope.persistent = await this.persistence.prepare(call.runId, exactTarget); }
       catch { exactScope.persistent = { tool: exactTarget.name, scope: 'tool', available: false }; }
     }

@@ -124,6 +124,12 @@ so cold discovery and activation use one declaration. `execute(input, call)` rec
 cooperative cancellation and `call.capabilities`, a client bound to that invocation. Schema compilation
 and admission remain with the executing Host; the SDK never owns history, Operations or resource facts.
 Return the tool's JSON data directly. Null and empty results are valid; missing/non-JSON results fail.
+An effect can declare `confirmation: "always"` to require a fresh authenticated user decision for
+each invocation, even if the general policy would allow it. The Host displays every original input
+field, using optional JSON Schema property `title` values as labels; it does not offer persistent
+approval. The decision is bound to the exact owner and input, and direct or unrelated service calls
+cannot reuse it. Explicit policy denial still wins. This is a Host admission contract, not an OS
+sandbox for native extension code.
 For Result callbacks, use `await call.output({ kind: 'text', text })` or
 `await call.output({ kind: 'media', media: { media_type, data_base64 } })` for explicit ordered
 presentation parts. `call.output`, like `call.tools`, requires the reviewed Host `runtime.tools`

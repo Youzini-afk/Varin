@@ -197,7 +197,7 @@ export async function retainExtensionTool(
       throw new HostBindingRestoreError('tool', 'binding_changed', required.providerKey);
     const validateInput = compileToolJsonSchema(schema.schema),
       validateOutput = compileToolJsonSchema(schema.output_schema);
-    const approved = new Map<string, { identity: string; policy: string; subjects: PermissionSubject[]; permissionSettingsRevision?: PermissionSettingsRevision; arguments: ReturnType<typeof parseVarinToolJson> }>();
+    const approved = new Map<string, { identity: string; policy: string; subjects: PermissionSubject[]; permissionSettingsRevision?: PermissionSettingsRevision; arguments: ReturnType<typeof parseVarinToolJson>; userConfirmedEffect?: true }>();
     let released = false;
     const policy = async (run: string) => {
       const current = await options.currentPolicy(run);
@@ -330,7 +330,13 @@ export async function retainExtensionTool(
         )
           throw new Error('extension_tool_permission_changed');
         let permissionSettingsRevision = previous?.permissionSettingsRevision;
-        if (!previous && decision.decision === 'ask')
+        const confirmEveryCall = originalDescriptor.tool?.confirmation === 'always' || descriptor.tool!.confirmation === 'always';
+        let userConfirmedEffect = previous?.userConfirmedEffect;
+        if (!previous && (decision.decision === 'ask' || confirmEveryCall)) {
+          const inputSchema = descriptor.tool!.inputSchema;
+          const properties = object(inputSchema) && object(inputSchema.properties) ? inputSchema.properties : {};
+          const previewLabels = Object.fromEntries(Object.entries(properties).flatMap(([key, value]) =>
+            object(value) && typeof value.title === 'string' && value.title.trim() ? [[key, value.title]] : []));
           permissionSettingsRevision = await permissionService(kernel).authorize(
             call,
             {
@@ -338,12 +344,15 @@ export async function retainExtensionTool(
               ownerGeneration: provider.generation,
               toolSchemaVersion: schema.version,
               policyGeneration: current.identity,
-              reason: decision.reason ?? 'Extension tool permission required',
+              reason: confirmEveryCall ? 'Review and confirm this action before it runs.' : decision.reason ?? 'Extension tool permission required',
+              ...(confirmEveryCall ? { confirmation: 'always' as const, previewLabels } : {}),
             },
             combined,
             { name: call.name, arguments: object(call.arguments) ? call.arguments : { input: call.arguments },
               ...(semantic ? { subjects } : {}) },
           );
+          if (confirmEveryCall) userConfirmedEffect = true;
+        }
         combined.throwIfAborted();
         assertAvailable(call);
         const latest = await policy(call.runId);
@@ -351,7 +360,7 @@ export async function retainExtensionTool(
           if (evaluatePermissionSubjects(subjects, latest.value).decision !== 'allow') throw new HostToolAdmissionError('extension_tool_permission_changed');
           current = latest;
         }
-        approved.set(call.operationId, { identity, policy: current.identity, subjects: structuredClone(subjects), ...(permissionSettingsRevision ? { permissionSettingsRevision } : {}), arguments: args });
+        approved.set(call.operationId, { identity, policy: current.identity, subjects: structuredClone(subjects), ...(permissionSettingsRevision ? { permissionSettingsRevision } : {}), ...(userConfirmedEffect ? { userConfirmedEffect } : {}), arguments: args });
       },
       async execute(call, signal, owner): Promise<ToolExecutionReceipt> {
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
@@ -374,7 +383,8 @@ export async function retainExtensionTool(
             throw new Error('authorization changed');
           args = previous.arguments;
           context = { ...await authority(call, combined, owner),
-            ...(previous.permissionSettingsRevision ? { permissionSettingsRevision: previous.permissionSettingsRevision } : {}) };
+            ...(previous.permissionSettingsRevision ? { permissionSettingsRevision: previous.permissionSettingsRevision } : {}),
+            ...(previous.userConfirmedEffect ? { userConfirmedEffect: true as const } : {}) };
           combined.throwIfAborted();
           assertAvailable(call);
         } catch {

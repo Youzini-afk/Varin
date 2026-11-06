@@ -33,7 +33,10 @@ export function createSettingsExtension() {
       statusBox.append(statusTitle, status, account, error, actions);
       const setup = element('div', 'varin-gmail-card');
       const setupTitle = element('h2', 'varin-gmail-section-title', text('连接 Google 账号', 'Connect a Google account'));
-      const explain = element('p', 'varin-gmail-copy', text('首次使用需要 Google Cloud 的桌面应用 OAuth 客户端 JSON。选择文件后，点击连接并在系统浏览器中登录和授权。', 'First, create a Google Cloud Desktop OAuth client JSON. Select it, then sign in and grant access in your system browser.'));
+      const explain = element('p', 'varin-gmail-copy');
+      const configError = element('p', 'varin-gmail-error', text('发布者的 Gmail 登录配置不完整。请联系发布者或使用自己的客户端。', 'The publisher Gmail login is not configured correctly. Contact the publisher or use your own client.'));
+      const manual = element('details', 'varin-gmail-copy');
+      const manualTitle = element('summary', '', text('高级：使用自己的 OAuth 客户端', 'Advanced: use your own OAuth client'));
       const steps = element('ol', 'varin-gmail-steps');
       for (const item of [
         text('在 Google Cloud 启用 Gmail API，创建桌面应用 OAuth 客户端。', 'Enable the Gmail API in Google Cloud and create a Desktop OAuth client.'),
@@ -47,7 +50,8 @@ export function createSettingsExtension() {
       label.append(file);
       const connect = element('button', 'varin-gmail-button primary', text('连接 Gmail', 'Connect Gmail')); connect.type = 'button';
       const privacy = element('p', 'varin-gmail-note', text('此扩展请求读取和发送邮件权限。客户端凭据和登录令牌保存在本机受限文件中，目前未使用系统密钥环。', 'This extension requests mail read and send access. Client credentials and tokens are stored in a restricted local file, not the OS keyring.'));
-      setup.append(setupTitle, explain, steps, docs, label, connect, privacy);
+      manual.append(manualTitle, steps, docs, label);
+      setup.append(setupTitle, explain, configError, manual, connect, privacy);
       root.append(heading, subtitle, statusBox, setup); container.append(root);
       let disposed = false, current = { phase: 'disconnected' }, busy = false, accountName = '', timer;
       const showError = value => { if (!disposed) error.textContent = value || ''; };
@@ -62,7 +66,12 @@ export function createSettingsExtension() {
         fallback.hidden = !waiting || !current.authorizationUrl;
         if (current.authorizationUrl) fallback.href = current.authorizationUrl;
         setup.hidden = waiting || connected;
-        connect.disabled = busy || !file.files?.length;
+        const publisherConfigured = current.publisherConfigured === true;
+        explain.textContent = publisherConfigured
+          ? text('点击连接，在系统浏览器中登录并授权自己的 Google 账号。', 'Connect and authorize your own Google account in your system browser.')
+          : text('发布者尚未配置一键登录。可在高级选项导入自己的 Google 桌面 OAuth 客户端。', 'The publisher has not configured one-click login. You can import your own Desktop OAuth client in Advanced.');
+        configError.hidden = !current.publisherConfigError;
+        connect.disabled = busy || (!publisherConfigured && !file.files?.length);
         verify.disabled = disconnect.disabled = cancel.disabled = busy;
         if (current.message && !error.textContent) showError(current.message);
       };
@@ -80,9 +89,12 @@ export function createSettingsExtension() {
       file.addEventListener('change', render);
       connect.addEventListener('click', () => void run(async () => {
         const selected = file.files?.[0];
-        if (!selected || selected.size > 65536) throw new Error(text('请选择小于 64 KB 的 OAuth 客户端 JSON。', 'Choose an OAuth client JSON smaller than 64 KB.'));
-        const json = await selected.text();
-        await service.start(json);
+        if (selected) {
+          if (selected.size > 65536) throw new Error(text('请选择小于 64 KB 的 OAuth 客户端 JSON。', 'Choose an OAuth client JSON smaller than 64 KB.'));
+          await service.start(await selected.text());
+        } else {
+          await service.start();
+        }
         file.value = '';
       }));
       cancel.addEventListener('click', () => void run(async () => { await service.cancel(); accountName = ''; }));

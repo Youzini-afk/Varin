@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { saveCredentials } from './credentials.mjs';
+import { publisherClient } from './publisher-client.mjs';
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -22,9 +23,13 @@ async function tokenRequest(parameters, fetchImpl, signal) {
   return payload;
 }
 
-export async function refreshAccessToken(credentials, { fetchImpl = fetch, signal } = {}) {
+export async function refreshAccessToken(credentials, { fetchImpl = fetch, signal, getPublisherClient = publisherClient } = {}) {
+  const configured = credentials.kind === 'publisher' ? getPublisherClient() : null;
+  if (credentials.kind === 'publisher' && (!configured || configured.client_id !== credentials.client_id)) {
+    throw new Error('The Gmail publisher OAuth client changed or is unavailable; reconnect the account');
+  }
   const result = await tokenRequest({
-    client_id: credentials.client_id, client_secret: credentials.client_secret,
+    client_id: credentials.client_id, client_secret: configured?.client_secret || credentials.client_secret,
     refresh_token: credentials.refresh_token, grant_type: 'refresh_token',
   }, fetchImpl, signal);
   if (typeof result?.access_token !== 'string' || !result.access_token) throw new Error('Google OAuth did not return an access token');
@@ -59,7 +64,7 @@ export async function authorizeDesktop(client, directory, { fetchImpl = fetch, o
       rejectCode(new Error('Google authorization was not completed'));
       return;
     }
-    response.writeHead(200).end('Authorization received. Return to the terminal to finish connecting Gmail.');
+    response.writeHead(200).end('Authorization received. Return to your application to finish connecting Gmail.');
     resolveCode(code);
   });
   await new Promise((resolve, reject) => {

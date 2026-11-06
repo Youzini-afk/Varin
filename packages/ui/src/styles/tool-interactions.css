@@ -27,6 +27,10 @@
 .thread-permission { padding: 16px 0; margin-block: 14px; border-top: 1px solid var(--border); min-width: 0; }
 .thread-permission h3 { font-size: var(--text-meta); font-weight: 500; margin-bottom: 10px; }
 .thread-permission-subject { font-size: var(--text-meta); overflow-wrap: anywhere; line-height: 1.7; }
+.thread-permission-preview { max-height: 20rem; overflow: auto; padding: 4px 12px; margin-block: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--text-meta); }
+.thread-permission-preview > div { display: grid; grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr); gap: 10px; padding-block: 7px; }
+.thread-permission-preview dt { color: var(--muted-foreground); }
+.thread-permission-preview dd, .thread-permission-preview pre { min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .thread-permission-scope { margin-block: 8px; color: var(--muted-foreground); font-size: var(--text-meta); line-height: 1.7; }
 .thread-permission-details { margin-block: 8px 12px; color: var(--muted-foreground); font-size: var(--text-micro); }
 .thread-permission-details summary { cursor: pointer; }

@@ -700,6 +700,9 @@
             "effect"
           ]
         },
+        "confirmation": {
+          "const": "always"
+        },
         "examples": {
           "type": "array"
         },
@@ -757,6 +760,10 @@
               ]
             }
           }
+        },
+        {
+          "if": { "required": ["confirmation"] },
+          "then": { "properties": { "operation": { "const": "effect" } } }
         }
       ]
     },

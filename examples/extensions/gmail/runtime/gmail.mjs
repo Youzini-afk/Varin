@@ -1,5 +1,6 @@
 import { credentialDirectory, loadCredentials } from './credentials.mjs';
 import { refreshAccessToken } from './oauth.mjs';
+import { publisherClient } from './publisher-client.mjs';
 
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const addressPattern = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u;
@@ -72,11 +73,11 @@ function extractMessage(message) {
     bodyTruncated: body.length > maxBodyChars, attachments };
 }
 
-export function createGmailClient({ directory = credentialDirectory(), fetchImpl = fetch } = {}) {
+export function createGmailClient({ directory = credentialDirectory(), fetchImpl = fetch, getPublisherClient = publisherClient } = {}) {
   async function auth(signal) {
     const credentials = await loadCredentials(directory);
     if (!credentials) throw new Error('Gmail is not connected. Run the local authorization command described in the extension README.');
-    return refreshAccessToken(credentials, { fetchImpl, signal });
+    return refreshAccessToken(credentials, { fetchImpl, signal, getPublisherClient });
   }
   async function get(path, parameters, signal) {
     const token = await auth(signal);

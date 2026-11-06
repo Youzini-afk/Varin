@@ -579,6 +579,12 @@ and a trusted domain adapter. `operation: "read"` is not a permission or a guara
 `execute(input, call)` receives invocation-scoped capabilities and cancellation; return JSON data,
 including null or empty values, and use `call.output` for ordered Result presentation parts.
 
+An effect may additionally declare `confirmation: "always"`. The Host requires a separate
+one-time decision for every exact invocation even under bypass policy; explicit denial still wins.
+All original arguments are shown before approval, using optional input-schema property `title`
+labels. Direct service RPCs and unrelated tool invocations cannot reuse that approval. This does
+not sandbox native code or provide user identity isolation.
+
 Optional `requirements` declare `source: "source" | "physical" | "live"` and `process: boolean`.
 Source availability is checked during preparation, separately from actual resource authorization.
 Optional `disclosure` provides summary, aliases, namespace and paths into original `oneOf`/`anyOf`

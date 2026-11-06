@@ -1,13 +1,14 @@
 {
   "name": "varin-example-gmail",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Gmail tools with local Google OAuth for Varin.",
   "files": [
     "dist",
     "runtime",
     "host.mjs",
+    "public-client.json",
     "varin.extension.json",
     "README.md",
     "settings.mjs",

@@ -51,3 +51,23 @@ test('settings page connects, cancels, checks and disconnects using its Host ser
   dispose();
   assert.equal(main.querySelector('.varin-gmail'), null);
 });
+
+test('publisher-provided OAuth configuration enables one-click login without a client file', async () => {
+  const { document } = parseHTML('<html><body><main></main></body></html>');
+  const main = document.querySelector('main'), abort = new AbortController();
+  let starts = 0, argumentCount = -1, implementation;
+  const service = {
+    async status() { return { phase: 'disconnected', publisherConfigured: true }; },
+    async start(...args) { starts++; argumentCount = args.length; },
+  };
+  await createSettingsExtension().activate({ styles: { async use() {} }, useService() { return service; },
+    contribute(_value, impl) { implementation = impl; } });
+  const dispose = implementation.mount(main, { signal: abort.signal, props: { region: 'content' } });
+  const button = [...main.querySelectorAll('button')].find(node => node.textContent === 'Connect Gmail');
+  await until(() => button.disabled === false);
+  assert.match(main.textContent, /authorize your own Google account/u);
+  button.click();
+  await until(() => starts === 1);
+  assert.equal(argumentCount, 0);
+  dispose();
+});

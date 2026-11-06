@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { credentialDirectory, loadCredentials, parseDesktopClient, removeCredentials } from './credentials.mjs';
 import { authorizeDesktop } from './oauth.mjs';
 import { createGmailClient } from './gmail.mjs';
+import { publisherClient } from './publisher-client.mjs';
 
 function openSystemBrowser(url) {
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? null : 'xdg-open';
@@ -14,19 +15,22 @@ function openSystemBrowser(url) {
 // A single Host-owned account and at most one pending authorization per extension generation.
 // The Surface receives only a short-lived authorization URL, account status and sanitized errors.
 export function createConnectionController({ directory = credentialDirectory(), fetchImpl = fetch,
-  openBrowser = openSystemBrowser, authorize = authorizeDesktop } = {}) {
+  openBrowser = openSystemBrowser, authorize = authorizeDesktop, getPublisherClient = publisherClient } = {}) {
   let active = null;
   let failure = null;
-  const gmail = createGmailClient({ directory, fetchImpl });
+  const gmail = createGmailClient({ directory, fetchImpl, getPublisherClient });
   async function status() {
-    if (active) return { phase: 'authorizing', authorizationUrl: active.url || null };
+    let publisherConfigured = false, publisherConfigError = false;
+    try { publisherConfigured = Boolean(getPublisherClient()); } catch { publisherConfigError = true; }
+    if (active) return { phase: 'authorizing', authorizationUrl: active.url || null, publisherConfigured, publisherConfigError };
     const configured = Boolean(await loadCredentials(directory));
     return { phase: configured ? 'connected' : failure ? 'error' : 'disconnected',
-      message: failure, authorizationUrl: null };
+      message: failure, authorizationUrl: null, publisherConfigured, publisherConfigError };
   }
   async function start(json) {
     if (active) throw new Error('A Gmail connection is already in progress');
-    const client = parseDesktopClient(json);
+    const client = typeof json === 'string' && json.trim() ? parseDesktopClient(json) : getPublisherClient();
+    if (!client) throw new Error('The publisher has not configured Gmail login; import a Desktop OAuth client or contact the publisher');
     const attempt = { controller: new AbortController(), url: null, task: null };
     active = attempt; failure = null;
     try {

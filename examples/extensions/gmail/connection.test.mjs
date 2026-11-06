@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,6 +7,7 @@ import test from 'node:test';
 import { createConnectionController } from './runtime/connection.mjs';
 import { loadCredentials, saveCredentials } from './runtime/credentials.mjs';
 import { GMAIL_SCOPES } from './runtime/oauth.mjs';
+import { publisherClient } from './runtime/publisher-client.mjs';
 
 const client = { client_id: 'test-desktop-client', client_secret: 'test-client-secret' };
 const json = (value, options) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' }, ...options });
@@ -75,4 +76,58 @@ test('a failed revoke retains credentials and a malformed client cannot start au
   assert.equal((await controller.status()).phase, 'connected');
   assert.equal((await loadCredentials(directory)).refresh_token, 'refresh-secret');
   await controller.dispose();
+}));
+
+test('publisher configuration enables login without importing a client file or storing the publisher secret', async () => fixture(async directory => {
+  const configured = { kind: 'publisher', client_id: 'fixture.apps.googleusercontent.com', client_secret: 'publisher-secret' };
+  const controller = createConnectionController({ directory, getPublisherClient: () => configured, openBrowser() {}, async fetchImpl(url, options) {
+    if (String(url) === 'https://oauth2.googleapis.com/token') {
+      assert.equal(options.body.get('client_secret'), configured.client_secret);
+      return options.body.get('grant_type') === 'authorization_code'
+        ? json({ refresh_token: 'user-refresh', scope: GMAIL_SCOPES.join(' ') })
+        : json({ access_token: 'user-access' });
+    }
+    assert.equal(options.headers.authorization, 'Bearer user-access');
+    return json({ emailAddress: 'fixture@example.com' });
+  } });
+  assert.equal((await controller.status()).publisherConfigured, true);
+  const started = await controller.start();
+  assert.equal(JSON.stringify(started).includes(configured.client_secret), false);
+  const auth = new URL(started.authorizationUrl), callback = new URL(auth.searchParams.get('redirect_uri'));
+  callback.searchParams.set('state', auth.searchParams.get('state')); callback.searchParams.set('code', 'fixture-code');
+  assert.equal((await fetch(callback)).status, 200);
+  await waitForPhase(controller, 'connected');
+  assert.deepEqual(await controller.check(), { emailAddress: 'fixture@example.com' });
+  const stored = await readFile(join(directory, 'credentials.json'), 'utf8');
+  assert.equal(stored.includes(configured.client_secret), false);
+  assert.equal(JSON.stringify(await controller.status()).includes('user-refresh'), false);
+  assert.deepEqual(await loadCredentials(directory), { kind: 'publisher', client_id: configured.client_id, refresh_token: 'user-refresh' });
+  await controller.dispose();
+}));
+
+test('publisher client is deployment-owned and a changed client cannot use a previous user token', async () => fixture(async directory => {
+  assert.equal(publisherClient({}), null);
+  assert.throws(() => publisherClient({ VARIN_GMAIL_PUBLISHER_CLIENT_ID: 'fixture.apps.googleusercontent.com' }), /isolated single-user Host/u);
+  assert.throws(() => publisherClient({ VARIN_GMAIL_ISOLATED_HOST: '1', VARIN_GMAIL_PUBLISHER_CLIENT_ID: 'fixture.apps.googleusercontent.com' }), /not configured/u);
+  const configured = publisherClient({ VARIN_GMAIL_ISOLATED_HOST: '1', VARIN_GMAIL_PUBLISHER_CLIENT_ID: 'fixture.apps.googleusercontent.com', VARIN_GMAIL_PUBLISHER_CLIENT_SECRET: 'private-secret' });
+  assert.equal(publisherClient({ VARIN_GMAIL_ISOLATED_HOST: '1', VARIN_GMAIL_PUBLISHER_CLIENT_SECRET: 'private-secret' }, { client_id: 'fixture.apps.googleusercontent.com' }).client_id, configured.client_id);
+  assert.throws(() => publisherClient({}, { client_id: null, client_secret: 'should-not-be-public' }), /public client configuration/u);
+  await saveCredentials(directory, { ...configured, refresh_token: 'user-refresh' });
+  let networkCalls = 0;
+  const controller = createConnectionController({ directory, getPublisherClient: () => ({ ...configured, client_id: 'other.apps.googleusercontent.com' }),
+    async fetchImpl() { networkCalls++; throw new Error('unexpected'); } });
+  await assert.rejects(controller.check(), /changed or is unavailable/u);
+  assert.equal(networkCalls, 0);
+  await controller.dispose();
+}));
+
+test('separately provisioned Host directories retain separate user credentials', async () => fixture(async directory => {
+  const config = { kind: 'publisher', client_id: 'fixture.apps.googleusercontent.com', client_secret: 'publisher-secret' };
+  const one = join(directory, 'host-one'), two = join(directory, 'host-two');
+  await saveCredentials(one, { ...config, refresh_token: 'first-user' });
+  await saveCredentials(two, { ...config, refresh_token: 'second-user' });
+  assert.equal((await loadCredentials(one)).refresh_token, 'first-user');
+  assert.equal((await loadCredentials(two)).refresh_token, 'second-user');
+  // Separate directories on the same OS account are not a security boundary; deployments need
+  // distinct OS users/Hosts until Varin supplies a trusted per-user identity to the extension.
 }));

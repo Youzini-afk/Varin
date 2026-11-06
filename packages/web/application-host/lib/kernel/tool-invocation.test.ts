@@ -13,6 +13,20 @@ const authority: ToolInvocationAuthority = {
 const input = { operation: 'effect' as const, domain: 'collaboration.integrations', toolName: 'integrate_child', arguments: authority.arguments as { childOperationId: string; resultRevision: number } };
 const receipt: ToolExecutionReceipt = { completion: { kind: 'result', outcome: 'indeterminate', effect: 'partial', content: { data: { status: 'conflict', appliedPaths: ['a'] }, parts: [] } }, executor_stopped: true };
 
+test('confirmed effect proof is exact, owner-bound, short-lived, and usable once', async () => {
+  const signal = new AbortController().signal;
+  let retained!: NonNullable<import('@varin/extension-host').HostInvocationScope['assertConfirmedEffect']>;
+  await withToolInvocation({ authority: { ...authority, userConfirmedEffect: true }, owner, signal }, async invocation => {
+    retained = invocation.assertConfirmedEffect!;
+    assert.throws(() => retained({ ...owner, extensionId: 'other' }, authority.toolName, [authority.arguments as never]), /changed/);
+    assert.throws(() => retained(owner, 'other_tool', [authority.arguments as never]), /changed/);
+    assert.throws(() => retained(owner, authority.toolName, [{ childOperationId: 'different' }]), /changed/);
+    assert.doesNotThrow(() => retained(owner, authority.toolName, [authority.arguments as never]));
+    assert.throws(() => retained(owner, authority.toolName, [authority.arguments as never]), /changed/);
+  });
+  assert.throws(() => retained(owner, authority.toolName, [authority.arguments as never]), /changed/);
+});
+
 test('a returned broker callback cannot retire its still-running domain effect or forge its receipt', async () => {
   const signal = new AbortController().signal;
   let finish!: () => void;

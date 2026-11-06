@@ -41,7 +41,7 @@ test('Gmail example installs and activates in the actual broker without account 
     assert.equal(connection.phase, 'disconnected');
     // No Google request can be issued without the isolated credential fixture.
     await assert.rejects(runtime.invokeService({ serviceId: 'example.gmail.send', version: 1, method: 'execute',
-      args: [{ to: ['nobody@example.com'], subject: 'fixture', body: 'fixture' }] }));
+      args: [{ to: ['nobody@example.com'], subject: 'fixture', body: 'fixture' }] }), /approved tool invocation/);
   } finally {
     await runtime?.stop();
     if (previousDirectory === undefined) delete process.env.VARIN_GMAIL_CONFIG_DIR;

@@ -31,3 +31,22 @@ it('shows exact settings scope and preserves one original permission decision th
   expect(container.textContent).toContain('chat.permission.saved');
   expect(container.querySelectorAll('button')).toHaveLength(0);
 });
+
+it('shows every message field before a mandatory one-time decision', async () => {
+  const permission = { id: 'send-permission', decision: null,
+    call: { name: 'gmail_send', arguments: { to: ['one@example.test'], subject: 'Meeting', body: 'Original message' } },
+    scope: { reason: 'Review and confirm this action before it runs.', confirmation: 'always', previewLabels: { to: '收件人 / To', subject: '主题 / Subject', body: '正文 / Message' } } };
+  const operation = { id: 'send', phase: 'waiting', cancel_requested: false,
+    result: { kind: 'control', value: { permission } } } as unknown as Operation;
+  const decide = vi.fn().mockResolvedValue(operation);
+  await act(async () => root.render(<ThreadPermission operation={operation} enabled onDecide={decide} />));
+  const preview = container.querySelector('dl.thread-permission-preview');
+  expect(preview?.textContent).toContain('收件人 / To');
+  expect(preview?.textContent).toContain('one@example.test');
+  expect(preview?.textContent).toContain('Meeting');
+  expect(preview?.textContent).toContain('Original message');
+  expect(preview?.closest('details')).toBeNull();
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'chat.permission.always')).toBe(false);
+  await act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.permission.once')!.click(); });
+  expect(decide).toHaveBeenCalledExactlyOnceWith('send-permission', 'allow_once');
+});
