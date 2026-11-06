@@ -6,6 +6,8 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [container, output] = process.argv.slice(2);
+const profile = process.env.BENCHMARK_PROFILE || 'mixed';
+assert.ok(['mixed','cpu'].includes(profile));
 const root = '/home/varin/workspaces/memory-fixture';
 const corpus = `${root}/corpus`;
 const files = 256, bytesPerFile = 65536;
@@ -17,7 +19,10 @@ function contents(i) {
   return data;
 }
 const sha = data => createHash('sha256').update(data).digest('hex');
-const expectedAggregate = sha(Array.from({length: files}, (_, i) => `${sha(contents(i))}  corpus/${filename(i)}\n`).join(''));
+const listing = Array.from({length: files}, (_, i) => `${sha(contents(i))}  corpus/${filename(i)}\n`).join('');
+const expectedAggregate = sha(listing);
+const cpuCommand = "for batch in $(seq 1 100); do find corpus -type f -name '*.txt' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; done | sha256sum";
+const cpuAggregate = sha(listing.repeat(100));
 const command = "find corpus -type f -name '*.txt' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum";
 execFileSync('docker', ['exec', container, 'node', '-e', `
 const fs = require('node:fs');
@@ -50,11 +55,11 @@ for(let i=0;i<32;i++) {
   threads.push(data);
 }
 fs.writeFileSync(path.join(output, 'workload.json'), JSON.stringify({
-  model:'none; no mocked or real model inference', fixture:{files,bytesPerFile,totalBytes:files*bytesPerFile,threads:threads.length},
+  profile, model:'none; no mocked or real model inference', fixture:{files,bytesPerFile,totalBytes:files*bytesPerFile,threads:threads.length},
   mix:['file-read-64KiB','directory-list-256-files','filename-search-Rust-directory-compute','thread-snapshot-Rust-Catalog','thread-list-Rust-Catalog','real-shell-sha256-entire-16MiB-corpus'],
-  command, expectedAggregate, setup:setup.data,
+  command, expectedAggregate, ...(profile==='cpu'?{cpuCommand,cpuAggregate,cpuWorkPerJobBytes:files*bytesPerFile*100}:{}), setup:setup.data,
   phases:[{name:'warmup',seconds:30,concurrency:4,thinkMs:250},{name:'typical',seconds:120,concurrency:4,thinkMs:500},
-    {name:'high',seconds:600,concurrency:64,thinkMs:0}],
+    ...(profile==='cpu'?[{name:'cpu-full',seconds:180,concurrency:4,thinkMs:0}]:[{name:'high',seconds:600,concurrency:64,thinkMs:0}])],
   limitations:['Representative defined local-workspace workload, not a population average or universal memory maximum.',
     'Threads have no model messages or model inference; no browser, embedding, language server, compiler, or external MCP workload.',
     'fs.exec job receipts are retained for 30 minutes by the application; output is bounded to one aggregate checksum per job.'],
@@ -73,14 +78,14 @@ const reports=[];
 let failures=0;
 function setPhase(name){const temp=path.join(output,'phase.next');fs.writeFileSync(temp,name);fs.renameSync(temp,path.join(output,'phase'));}
 function aggregate(values){values.sort((a,b)=>a-b);return {count:values.length,p50:values[Math.floor(values.length*.5)]??null,p95:values[Math.floor(values.length*.95)]??null,max:values.at(-1)??null};}
-async function phase(name,seconds,concurrency,thinkMs){
+async function phase(name,seconds,concurrency,thinkMs,selectedOperations=operations){
   setPhase(name);
   const started=performance.now(), startUnixMs=Date.now(), deadline=started+seconds*1000;
-  const stats=Object.fromEntries(operations.map(op=>[op.name,{success:0,errors:0,responseBytes:0,latencyMs:[],errorExamples:[]} ]));
+  const stats=Object.fromEntries(selectedOperations.map(op=>[op.name,{success:0,errors:0,responseBytes:0,latencyMs:[],errorExamples:[]} ]));
   await Promise.all(Array.from({length:concurrency},async(_,worker)=>{
     let iteration=worker;
     while(performance.now()<deadline && failures<10){
-      const op=operations[iteration%operations.length], record=stats[op.name], begin=performance.now();
+      const op=selectedOperations[iteration%selectedOperations.length], record=stats[op.name], begin=performance.now();
       try{record.responseBytes+=await op.run(iteration);record.success++;}
       catch(error){record.errors++;failures++;if(record.errorExamples.length<3)record.errorExamples.push(String(error));}
       record.latencyMs.push(performance.now()-begin);
@@ -97,4 +102,9 @@ async function phase(name,seconds,concurrency,thinkMs){
 }
 await phase('warmup',30,4,250);
 await phase('typical',120,4,500);
-await phase('high',600,64,0);
+if(profile==='mixed') await phase('high',600,64,0);
+else {
+  const cpuOperation={name:'cpu-full-checksum',async run(){const {data,bytes}=await request('/api/fs/exec',{commands:[cpuCommand],cwd:root,background:false});assert.equal(data.status,'done');assert.equal(data.success,true);assert.equal(data.results.length,1);const r=data.results[0];assert.equal(r.success,true);assert.equal(r.exitCode,0);assert.equal(r.stdout.trim(),`${cpuAggregate}  -`);assert.equal(r.stderr,'');return bytes;}};
+  await cpuOperation.run();
+  await phase('cpu-full',180,4,0,[cpuOperation]);
+}

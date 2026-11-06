@@ -23,3 +23,7 @@ Rust 文件名搜索、Rust Thread 快照、Rust Thread 列表、真实 shell �
 原始证据在 Actions artifact：`samples.jsonl`、`requests.json`、`workload.json`、
 `summary.json`、容器/镜像 inspect 与运行环境。所有密码、路径与正文都是本次生成的测试 fixture；
 会话 cookie 不写日志或 artifact。
+
+附加 `profile=cpu` 工况保留空载、预热与典型段，将高压段替换为4个持续并行的真实fs.exec请求，
+每个job对16 MiB文件集完整校验100遍并验证聚合hash，持续180秒。这是CPU密集文件工具工况，
+用来区分CPU真正打满与混合API吞吐瓶颈；不是内存人为填充，也不声称覆盖任意工具的峰值。

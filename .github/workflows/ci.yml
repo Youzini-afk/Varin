@@ -1,5 +1,5 @@
 name: Backend memory experiment (diagnostic branch only)
-run-name: Backend memory 4 CPU 4 GiB endurance for ${{ inputs.source_sha }}
+run-name: Backend memory 4 CPU 4 GiB ${{ inputs.profile }} for ${{ inputs.source_sha }}
 on:
   workflow_dispatch:
     inputs:
@@ -7,6 +7,11 @@ on:
         description: Exact application source to measure
         required: true
         default: 246cc03b294970399df0d17f71ce8915ce3b275f
+      profile:
+        description: Mixed ten-minute request load, or sustained full-CPU file checksums
+        type: choice
+        options: [mixed, cpu]
+        default: mixed
 permissions:
   contents: read
 jobs:
@@ -64,6 +69,7 @@ jobs:
       - name: Measure slim
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          BENCHMARK_PROFILE: ${{ inputs.profile }}
         run: bash harness/benchmarks/backend-memory/run.sh varin:memory-slim slim "$SOURCE_SHA" evidence/slim
       - name: Upload slim observations promptly
         if: always()
@@ -106,6 +112,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          BENCHMARK_PROFILE: ${{ inputs.profile }}
         run: bash harness/benchmarks/backend-memory/run.sh varin:memory-toolbelt toolbelt "$SOURCE_SHA" evidence/toolbelt
       - name: Upload raw and summarized evidence
         if: always()
