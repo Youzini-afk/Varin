@@ -35,6 +35,7 @@ desired enablement、已审查 grant，以及每个 realm 的 actual generation 
 Installed 不等于 enabled，enabled 不等于 active 或健康。公开目录不暴露安装路径或来源凭据。
 
 Package manager 接受 npm、Git、本地目录和已注册 built-in source，不执行安装 lifecycle script。
+插件中心另提供 GitHub Releases、npm registry tarball 和本地发行包的预览交付入口，仍发布到同一 artifact 和 Catalog。
 运行使用核验后的不可变 artifact，不使用可变 checkout。浏览器 bundle 经认证读取并校验后加载，
 可复用凭据不进入 module URL。包括 archive-backed 桌面发行在内，内置 package root 必须先解析为真实
 unpacked directory，再准备 artifact。
@@ -65,6 +66,42 @@ Thread 分区，也不是权限边界。需要区分多个实体时，作者应�
 安装、启用或应用候选代码是**代码信任**，不等同于逐项批准 Varin capability。Broker 继承 Host 环境并以
 Host OS 账户运行；未申请 capability 的代码仍可能直接访问进程、文件、网络与环境变量。Managed Surface
 也在应用页面 realm 中执行。能力撤销约束 Varin API，不能撤回第三方代码已取得的系统访问或已经发生的效果。
+
+## 插件中心与发行交付
+
+设置中的“插件”分为“发现”和“已安装”。服务路由、工作台组合、目录来源与诊断保留在高级管理；
+内置能力与外部安装分别展示。内置版本随 Varin 发行管理，不能单独卸载或从作者 Release 更新。
+“配置”只打开该插件当前可用的 settings-page contribution，不推断账号业务状态，也不会为显示配置偷偷启用代码。
+
+公开收录资料由 [Varin-plugins](https://github.com/Astrmira/Varin-plugins) 维护。默认目录为该仓库
+main 的 `catalog/v1.json`，可在高级管理更换或添加 HTTPS 目录。Host 保存配置及最近有效目录，使用 ETag
+重新验证；网络失败或无效替换保留原列表并显示失败原因。发现页只读取目录与同源图标，不批量查询作者发行。
+同一目录的 ID 必须唯一；不同目录只在 ID 和规范化发行来源相同的情况下合并来源信息。
+市场介绍只有在已安装身份及来源匹配时才可关联，目录修改不改变安装来源或代码。
+
+公开目录和用户安装 Catalog 是两个不同 owner。市场离线、下架或修改作者仓库地址，不妨碍已安装插件运行，
+也不会改写保存的更新来源。跨来源替换先显示来源变化，要求明确确认；普通更新仍沿原 candidate 审查、应用和退役流程。
+
+发行交付由 `ExtensionReleaseManager` 解析作者元数据，复用 `ExtensionArtifactStore` 与
+`ExtensionPackageManager`。GitHub 来源保存仓库、渠道和可选发行系列；npm 来源直接读取 registry 元数据和
+带 integrity 的 tarball，不要求用户安装 npm CLI。归档为标准 gzip tar，使用 `package/` 根目录，拒绝链接和越界路径，
+流式下载及摘要核验，不执行 lifecycle script 或插件模块。当前平台、架构和 Varin 兼容范围决定选择。
+较新的不兼容、缺资产发行会有明确说明；结构错误的发行清单直接报错，已有安装保持不变。
+
+预览准备不可变 artifact，返回实际 manifest、能力请求、内容摘要、Host 和当时 Catalog revision。
+确认仅使用原 preview ID 和核验后的内容，不重新解析 latest；Host 或 Catalog 已变化则重新预览。
+同版本不同内容显示警告并成为独立 candidate。首次安装保持禁用，启用仍走代码信任及能力审查，
+不以“下载成功”冒充正在运行。更新检查只读元数据、合并并发请求，不下载所有归档或启动插件。
+本地上传包只保留文件名来源，后续手动替换，不猜测远端仓库。
+
+所有网络请求复用 Application Host 的 egress/proxy owner。发行包与目录服务不接管原生对话、工具权限、
+已受理调用或凭据。桌面、Web 和移动 Surface 使用同一扩展 Host；这里的 Host 与对话执行位置选择不是同一个概念。
+插件页面显示实际 Host 身份，预览和迟到响应绑定原目标。`varin://extensions/install` 及 Web 查询入口只传递
+公开 npm/GitHub 来源与可选插件 ID，未安装时打开预览而不授权安装。已安装且来源匹配时定位管理，
+即使目录已下架也由 Host 的安装记录识别；链接不能指定本地路径或携带访问凭据。
+
+公共插件账号、稳定跨端用户归属和 Gmail 接入仍是[后续设计](design/plugin-center-and-marketplace.md#9-公共账号能力与插件自己的配置页面)，
+不是插件中心已经交付的能力。现有模型和 MCP 凭据 owner 保持原语义。
 
 ## 模型接入贡献
 

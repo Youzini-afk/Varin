@@ -10,6 +10,8 @@
  * context — including, eventually, a tiny encoder shared with the native widget/extension.
  */
 
+import { parsePluginInstallLink, type PluginInstallIntent } from '@varin/application-client';
+
 export const DEEP_LINK_SCHEME = 'varin';
 
 export type SessionsFilter = 'all' | 'attention' | 'recent';
@@ -21,6 +23,7 @@ export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
  * that keeps the "blocks" composable without leaking ad-hoc URL parsing into features.
  */
 export type DeepLinkIntent =
+  | ({ type: 'plugin-install' } & PluginInstallIntent)
   | { type: 'thread'; threadId: string; branchId: string; hostKey: string; directory?: string }
   | { type: 'new-thread'; directory?: string; projectId?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
@@ -69,6 +72,10 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
   const query = url.searchParams;
 
   switch (route) {
+    case 'extensions': {
+      const intent = parsePluginInstallLink(raw);
+      return intent ? { type: 'plugin-install', ...intent } : null;
+    }
     case 'thread': {
       let threadId: string;
       try { threadId = decodeURIComponent(rest[0] || ''); } catch { return null; }
@@ -145,6 +152,8 @@ export function buildDeepLink(intent: DeepLinkIntent): string {
   };
 
   switch (intent.type) {
+    case 'plugin-install':
+      return withQuery('extensions/install', { source: JSON.stringify(intent.source), extensionId: intent.extensionId });
     case 'thread':
       return withQuery(`thread/${encodeURIComponent(intent.threadId)}`, { branch: intent.branchId, host: intent.hostKey, dir: intent.directory });
     case 'new-thread':

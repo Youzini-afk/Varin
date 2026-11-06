@@ -16,7 +16,8 @@
       "import": "./dist/index.js"
     },
     "./schema/manifest": "./schema/varin.extension.schema.json",
-    "./schema/discovery": "./schema/varin.discovery-catalog.schema.json"
+    "./schema/discovery": "./schema/varin.discovery-catalog.schema.json",
+    "./schema/release": "./schema/varin.release.schema.json"
   },
   "repository": {
     "type": "git",

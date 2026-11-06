@@ -13,3 +13,5 @@ export { HostCompositionPreparationRequiredError } from "./service-composition.j
 export * from "./service-routing-store.js";
 export * from "./storage-store.js";
 export * from "./workbench-profile-store.js";
+
+export * from "./release-manager.js";

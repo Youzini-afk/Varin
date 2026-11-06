@@ -1,8 +1,8 @@
 # 插件中心、公开收录目录与作者发行来源
 
-状态：设计方案，待实施。日期：2026-11-06。源码基线：`d0d5f579d`。
+状态：目录、发行交付与插件中心已实现；公共账号、Gmail 接入及生产站点部署仍待完成。原设计日期：2026-11-06。设计源码基线：`d0d5f579d`。
 
-本文整合插件界面、内置与外部插件管理、公开市场、发行包安装更新，以及连接类插件所需的公共能力。当前已实现的扩展机制见[扩展](../extensions.md)和[作者指南](../ops/varin-extension-authoring.md)。本文中的新页面、目录仓库、发行包合同和账号服务均为目标设计。
+本文整合插件界面、内置与外部插件管理、公开市场、发行包安装更新，以及连接类插件所需的公共能力。当前已实现的扩展机制见[扩展](../extensions.md)和[作者指南](../ops/varin-extension-authoring.md)。目录合同、发行包合同、固定内容预览、插件中心及链接入口已经落地；账号服务仍为目标设计。当前行为见[扩展](../extensions.md#插件中心与发行交付)。
 
 需求背景见 [#288](https://github.com/Youzini-afk/Varin/issues/288)；[Gmail PR #285](https://github.com/Youzini-afk/Varin/pull/285)作为接入案例与实现参考，尚未作为完成的公共账号方案合入本设计基线。
 
@@ -403,4 +403,6 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 - Cloudflare：[GitHub 集成](https://developers.cloudflare.com/pages/configuration/git-integration/github-integration/)、[预览部署](https://developers.cloudflare.com/pages/configuration/preview-deployments/)。
 - Google：[桌面 OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)。
 
-实施时需初始化收录仓库的目录与站点，并确认站点域名、Cloudflare 项目、部署权限和首个连接插件的生产 OAuth 应用归属。
+收录仓库已提供静态目录、网站、资料校验和不执行插件代码的发行材料核验。生产站点域名、Cloudflare 项目与部署仍需另行配置；默认目录先使用既定仓库 main 的 GitHub raw 地址。
+
+未完成边界：公共账号服务需要稳定、受信的跨端用户归属，不能将现有 default 路由用户、clientId 或会话 token 当作跨端账号身份；Gmail 配置页、真实本机/远程 OAuth、实际发信操作预览和生产 OAuth 应用均尚未交付。当前实现不注册伪账号 API、不读取插件私有业务状态，也不宣称已经满足第 9、10 节验收。

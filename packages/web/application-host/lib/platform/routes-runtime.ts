@@ -10,6 +10,9 @@ import type { DocumentAuthority } from '../documents/authority.js';
 import { DocumentPathError, DocumentUntrustedError } from '../documents/errors.js';
 import { registerExternalAccessRoutes } from '../external-access/routes.js';
 import { registerExtensionRoutes } from '../extensions/routes.js';
+import { ExtensionReleaseManager } from '@varin/extension-host';
+import { PluginDiscoveryService } from '../extensions/discovery.js';
+import { registerPluginCenterRoutes } from '../extensions/plugin-center-routes.js';
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
@@ -58,6 +61,7 @@ export interface PlatformRouteDependencies {
   extensionCatalog: ExtensionRouteDependencies['extensionCatalog'];
   extensionPackages: ExtensionRouteDependencies['extensionPackages'];
   extensionRuntime: ExtensionRouteDependencies['extensionRuntime'];
+  pluginFetch?: import('@varin/extension-host').ExtensionReleaseFetch;
   restartApplicationHost?: () => Promise<void>;
   formatSettingsResponse: SettingsHelpers['formatSettingsResponse'];
   fsPromises: typeof fsPromisesModule;
@@ -163,6 +167,22 @@ export const createPlatformRoutesRuntime = ({
       readProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
       ...(extensionRuntime !== undefined ? { extensionRuntime } : {}),
       ...(restartApplicationHost ? { restartApplicationHost } : {}),
+    });
+
+    const pluginHostId = (await extensionCatalog.snapshot()).hostId;
+    const pluginDiscovery = new PluginDiscoveryService({ dataDir: varinDataDir, hostId: pluginHostId, hostLabel: os.hostname(), catalog: extensionCatalog,
+      ...(dependencies.pluginFetch ? { fetch: dependencies.pluginFetch } : {}) });
+    const pluginReleases = new ExtensionReleaseManager({
+      packages: extensionPackages,
+      hostId: pluginHostId,
+      ...(dependencies.pluginFetch ? { fetch: dependencies.pluginFetch } : {}),
+      ...(extensionRuntime ? { install: extensionRuntime.installPreparedRelease.bind(extensionRuntime) } : {}),
+    });
+    registerPluginCenterRoutes(app, {
+      discovery: pluginDiscovery,
+      releases: pluginReleases,
+      requireAuth: uiAuthController.requireAuth,
+      ...(dependencies.isDraining ? { isDraining: dependencies.isDraining } : {}),
     });
 
     registerSettingsUtilityRoutes(app, {

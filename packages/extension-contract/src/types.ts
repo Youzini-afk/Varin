@@ -166,7 +166,7 @@ export interface VarinExtensionManifest {
   version: string;
 }
 
-export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm" | "source_view";
+export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm" | "source_view" | "github-release" | "release-archive";
 
 export interface VarinExtensionPackageSource {
   provenance?: import("./package-authoring.js").VarinExtensionSourceViewProvenance;

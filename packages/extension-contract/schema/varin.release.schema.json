@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://varin.dev/schemas/varin.release.v1.json",
+  "title": "Varin Extension Release",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "extensionId",
+    "version",
+    "engines",
+    "assets"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "extensionId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "format": "semver"
+    },
+    "engines": {
+      "type": "object",
+      "required": [
+        "varin"
+      ],
+      "properties": {
+        "varin": {
+          "type": "string",
+          "format": "semver-range"
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "sha256",
+          "platform",
+          "arch"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "platform": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arch": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

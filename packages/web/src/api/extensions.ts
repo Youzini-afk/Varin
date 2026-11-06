@@ -23,6 +23,7 @@ import {
   type VarinExtensionLocalSourceReloadRequest,
 } from '@varin/extension-contract';
 import type { ExtensionsAPI } from '@varin/application-client';
+import { createPluginCenterHttpAPI } from '@varin/application-client';
 import { refreshLocalRuntimeUrlAuthToken } from '@varin/application-client';
 import { fetchWithoutRuntimeRouting } from '@varin/application-client';
 
@@ -92,6 +93,13 @@ const readJsonOrThrow = async (response: Response): Promise<unknown> => {
 };
 
 export const createWebExtensionsAPI = (): ExtensionsAPI => ({
+  pluginCenter: createPluginCenterHttpAPI(async (path, options) => {
+    const origin = applicationHostOrigin();
+    const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
+    const headers = new Headers(options.headers);
+    if (origin && origin !== currentOrigin()) headers.set('X-Varin-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
+    return fetchWithoutRuntimeRouting(target, { ...options, headers, credentials: 'include' });
+  }),
   queryContracts: async (request, context, signal) => parseVarinRuntimeContractResult(
     await readJsonOrThrow(await applicationHostRequest(
       '/api/varin/extensions/v1/contracts/query', { request, ...(context ? { context } : {}) }, signal,

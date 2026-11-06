@@ -286,6 +286,21 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  /** Publish a fixed reviewed release without re-resolving its floating source. */
+  installPreparedRelease(artifact: import('@varin/extension-contract').VarinExtensionPreparedArtifact,
+    expectedRevision: number, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot> {
+    return this.#mutate(async () => {
+      const result = await this.packages.installPrepared(artifact, expectedRevision, true, signal);
+      try { await this.supervisor.reconcileCandidatePreparations(); }
+      catch (error) {
+        try { this.#onObserverError(error); }
+        catch { console.error("[VarinExtensions] Candidate cleanup error reporting failed"); }
+      }
+      this.#publish();
+      return result;
+    });
+  }
+
   stageCapturedPackage(directory: string, provenance: VarinExtensionSourceViewProvenance, expectedRevision: number,
     signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionPackageResult> {
     return this.#mutate(async () => {

@@ -830,7 +830,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Varin-Application-Token,X-Varin-Directory,X-Varin-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Varin-Application-Token,X-Varin-Directory,X-Varin-Directory-Encoding,X-Varin-Archive-Name');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') return res.status(204).end();
@@ -2951,6 +2951,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayService.registerRoutes(app);
 
   await platformRoutesRuntime.registerRoutes(app, {
+    pluginFetch: (url, init) => {
+      const { dispatcher: _dispatcher, ...request } = init ?? {};
+      return egressRuntime.fetch(url, request);
+    },
     renderOffice: (bytes, format, signal) => officeRenderer.convert(bytes, format, 'pdf', signal),
     crypto,
     os,

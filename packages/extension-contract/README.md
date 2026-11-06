@@ -202,3 +202,9 @@ choice selects the native default, not the only installed extension. The reserve
 the native driver; it is not a fake Host service registration. Removing the scope rule restores
 inheritance. Unavailable, empty, conflicting or unsupported-version explicit choices remain
 unavailable; legacy `allowFallback` does not authorize silently switching a Run's algorithm.
+
+`releases.ts` defines the shared `varin.release.json` manifest, redacted installation preview,
+Host-bound confirmation, update-check result and canonical logical-source identity. GitHub release and
+local archive sources persist beside existing local/Git/npm sources. Discovery adds optional author,
+repository, categories and content version; an individual catalog still has unique extension IDs,
+while different catalogs may present separately identified sources for the same extension ID.

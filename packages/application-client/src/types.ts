@@ -1562,6 +1562,7 @@ export interface RuntimeContractContext {
 }
 
 export interface ExtensionsAPI {
+  pluginCenter?: import('./plugin-center.js').PluginCenterAPI;
   queryContracts(request: VarinRuntimeContractRequest, context?: RuntimeContractContext, signal?: AbortSignal): Promise<VarinRuntimeContractResult>;
   activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<VarinExtensionCatalogAvailability>;

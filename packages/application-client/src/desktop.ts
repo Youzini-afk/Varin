@@ -335,6 +335,7 @@ export type VarinDesktopEventMap = {
   'varin:update-progress': DesktopUpdateProgressEvent;
   'varin:open-thread': { directory: string | null; threadId: string; branchId: string; apiBaseUrl?: string | undefined; relayHostId?: string | undefined };
   'varin:open-draft-thread': { directory: string; projectId: string };
+  'varin:plugin-install-link': { url: string };
   'varin:window-resized': void;
   'varin:window-maximized-changed': { maximized: boolean };
   'varin:installed-apps-updated': DesktopInstalledApp[];
@@ -707,6 +708,7 @@ export const VARIN_DESKTOP_EVENT_CATALOG = {
   'varin:update-progress': true,
   'varin:open-thread': true,
   'varin:open-draft-thread': true,
+  'varin:plugin-install-link': true,
   'varin:window-resized': true,
   'varin:window-maximized-changed': true,
   'varin:installed-apps-updated': true,

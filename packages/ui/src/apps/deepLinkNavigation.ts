@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeKey, getRuntimeEndpointGeneration } from '@varin/application-client';
+import { getRuntimeKey, getRuntimeEndpointGeneration, publishPluginInstallIntent } from '@varin/application-client';
 import { followThreadDeepLink } from './threadDeepLinkNavigation';
 
 import { connectMobileDeepLinkHost } from './mobileConnections';
@@ -44,6 +44,11 @@ let navigationSequence = 0;
 
 const execute = (intent: DeepLinkIntent): boolean => {
   switch (intent.type) {
+    case 'plugin-install':
+      if (!handlers.openSettings) return false;
+      publishPluginInstallIntent(intent);
+      handlers.openSettings('extensions');
+      return true;
     case 'thread': {
       const sequence = navigationSequence;
       void followThreadDeepLink(intent, {

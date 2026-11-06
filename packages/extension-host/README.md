@@ -296,3 +296,25 @@ Rust-owned, and the original request owns usage and continuation evidence. Kerne
 and drains actual Host callbacks, removes stale product contributions and resets the registry epoch;
 a new ready epoch prepares fresh candidates. Shutdown does not depend on static Rust destructors
 sending release notifications after the control channel has closed.
+
+## Direct release delivery
+
+`ExtensionReleaseManager` resolves GitHub Releases and npm registry metadata through an injected trusted
+Host fetch, with concurrent request coalescing and ETag revalidation. GitHub selectors are
+`owner/repository#stable?tagPrefix=v&manifest=varin.release.json`; `prerelease` opts into prereleases.
+The newest compatible platform asset is selected semantically, while skipped newer incompatible or
+incomplete releases remain visible as warnings. npm metadata and tarballs are fetched directly, with
+registry integrity verification and no npm CLI. Legacy development local/Git/npm materialization remains.
+
+Preview reads a standard `package/` tar archive, rejects links, devices, duplicate paths and traversal,
+checks the package identity against the selected entry and release manifest, and captures an immutable
+artifact through `ExtensionArtifactStore`. It never evaluates an entrypoint. Local uploaded archives use
+`previewArchive`; their stored filename is manual-replacement provenance, not an inferred remote source.
+`previewInstalled` reads the private logical source without exposing filesystem paths or credentials.
+
+Confirmation names an opaque process-local preview and exact Host/revision. It does not download or
+resolve again. A changed source requires explicit replacement approval. The Application Host injects
+`ApplicationExtensionRuntime.installPreparedRelease`, which keeps catalog/candidate mutation, observer
+publication and obsolete preparation retirement with the original owners. New installs remain disabled;
+updates remain candidates until ordinary capability review and publication. Failed preparation or stale
+confirmation does not replace the selected artifact. Restarting a Host invalidates pending previews.

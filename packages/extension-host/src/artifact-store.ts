@@ -521,6 +521,15 @@ export class ExtensionArtifactStore {
     return this.#prepare(source, signal);
   }
 
+  async verifyPrepared(artifact: VarinExtensionPreparedArtifact, signal?: AbortSignal): Promise<void> {
+    await this.#readVerifiedIndex(artifact.resolvedPath, artifact.integrity, artifact.manifest, true, signal);
+  }
+
+  /** Release bytes were already verified and extracted by the trusted delivery owner. */
+  async prepareRelease(directory: string, source: VarinExtensionPackageSource, signal?: AbortSignal): Promise<VarinExtensionPreparedArtifact> {
+    return this.#prepare(source, signal, await realpath(directory));
+  }
+
   /** Trusted Host seam: directory is owned by the original Source capture, never supplied by a public source specifier. */
   async prepareCaptured(directory: string, provenanceValue: VarinExtensionSourceViewProvenance, signal?: AbortSignal): Promise<VarinExtensionPreparedArtifact> {
     const provenance = parseVarinExtensionSourceViewProvenance(provenanceValue);
@@ -592,7 +601,8 @@ export class ExtensionArtifactStore {
           await copyFile(resolve(sourceRoot, entrypoint.file), modulePath, signal);
           entrypoints[entrypoint.id] = {
             module: toLogicalPath(relative(artifactRoot, modulePath)),
-            styles: [],
+            styles: await exists(resolve(sourceRoot, entrypoint.file.replace(/\.cjs$/, '.css')))
+              ? [toLogicalPath(join('package', entrypoint.file.replace(/\.cjs$/, '.css')))] : [],
           };
           continue;
         }
@@ -624,7 +634,9 @@ export class ExtensionArtifactStore {
         const stylePath = join(outputDirectory, "module.css");
         entrypoints[entrypoint.id] = {
           module: toLogicalPath(relative(artifactRoot, modulePath)),
-          styles: await exists(stylePath) ? [toLogicalPath(relative(artifactRoot, stylePath))] : [],
+          styles: await exists(stylePath) ? [toLogicalPath(relative(artifactRoot, stylePath))]
+            : await exists(resolve(sourceRoot, entrypoint.file.replace(/\.[^.]+$/, '.css')))
+              ? [toLogicalPath(join('package', entrypoint.file.replace(/\.[^.]+$/, '.css')))] : [],
         };
       }
 

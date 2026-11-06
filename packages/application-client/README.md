@@ -421,3 +421,21 @@ silently to a skill with the same name.
 
 `references` contains exact task/branch or current-source directory locators and text ranges. These add
 context; they never change the message recipient, impersonate an Agent or authorize additional files.
+
+## Plugin center
+
+`ExtensionsAPI.pluginCenter` uses the same authenticated Application Host transport as the extension
+catalog. `createPluginCenterHttpAPI` accepts that transport and fences responses through body parsing
+against endpoint changes. Discovery reads cached public listings; explicit refresh reads only registered
+catalogs. Release preview and installed update checks are separate requests, never side effects of listing
+or searching. Installed update preview sends an extension ID so the Host resolves its saved source without
+exposing private source locators. Archive imports upload bytes to the same Host.
+
+Installation sends a retained preview ID, expected Host and catalog revision; it never resolves `latest`
+after code review. Source replacement is an explicit flag. Preview discard does not cancel an already
+accepted install. The existing extension candidate, capability review and publication APIs remain owners
+of the resulting installation lifecycle.
+
+`plugin-install-intent` parses public npm/GitHub release links and retains navigation until the plugin
+page mounts. It grants no code trust, capability, install or execution permission. Native and web entries
+publish the same intention; local filesystem locations and credentials are not valid public install links.
