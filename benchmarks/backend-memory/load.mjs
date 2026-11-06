@@ -54,7 +54,7 @@ fs.writeFileSync(path.join(output, 'workload.json'), JSON.stringify({
   mix:['file-read-64KiB','directory-list-256-files','filename-search-Rust-directory-compute','thread-snapshot-Rust-Catalog','thread-list-Rust-Catalog','real-shell-sha256-entire-16MiB-corpus'],
   command, expectedAggregate, setup:setup.data,
   phases:[{name:'warmup',seconds:30,concurrency:4,thinkMs:250},{name:'typical',seconds:120,concurrency:4,thinkMs:500},
-    {name:'high',seconds:120,concurrency:32,thinkMs:0}],
+    {name:'high',seconds:600,concurrency:64,thinkMs:0}],
   limitations:['Representative defined local-workspace workload, not a population average or universal memory maximum.',
     'Threads have no model messages or model inference; no browser, embedding, language server, compiler, or external MCP workload.',
     'fs.exec job receipts are retained for 30 minutes by the application; output is bounded to one aggregate checksum per job.'],
@@ -97,4 +97,4 @@ async function phase(name,seconds,concurrency,thinkMs){
 }
 await phase('warmup',30,4,250);
 await phase('typical',120,4,500);
-await phase('high',120,32,0);
+await phase('high',600,64,0);

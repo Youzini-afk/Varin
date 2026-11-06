@@ -15,7 +15,11 @@ def number(name):
 def fields(name):
     return {line.split()[0]: int(line.split()[1]) for line in (root / name).read_text().splitlines()}
 
-metadata = {'cgroup': str(root), 'pid': pid, 'memoryMax': number('memory.max'),
+ancestors = []
+for group in [root, *root.parents]:
+    if not str(group).startswith('/sys/fs/cgroup'): break
+    ancestors.append({'path':str(group), **{name:(group/name).read_text().strip() for name in ['cpu.max','cpuset.cpus.effective','memory.max','memory.current'] if (group/name).exists()}})
+metadata = {'hostLogicalCpus':os.cpu_count(), 'samplerAffinityCpus':sorted(os.sched_getaffinity(0)), 'visibleCgroupAncestors':ancestors, 'cgroup': str(root), 'pid': pid, 'memoryMax': number('memory.max'),
             'swapMax': number('memory.swap.max'), 'pidsMax': number('pids.max'),
             'cpuMax': (root / 'cpu.max').read_text().strip(), 'intervalMs': 250,
             'samplerPlacement': 'host outside measured container',

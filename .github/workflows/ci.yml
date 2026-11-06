@@ -1,5 +1,5 @@
 name: Backend memory experiment (diagnostic branch only)
-run-name: Backend memory experiment for ${{ inputs.source_sha }}
+run-name: Backend memory 4 CPU 4 GiB endurance for ${{ inputs.source_sha }}
 on:
   workflow_dispatch:
     inputs:

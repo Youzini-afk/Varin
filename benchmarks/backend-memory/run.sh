@@ -20,7 +20,7 @@ cleanup() {
 trap cleanup EXIT
 printf 'startup' > "$output/phase"
 # Explicit benchmark limits, not a proposed production hard limit.
-docker run --detach --init --cpus=2 --memory=2g --memory-swap=2g --pids-limit=512 \
+docker run --detach --init --cpus=4 --memory=4g --memory-swap=4g --pids-limit=512 \
   --name "$name" --env VARIN_UI_PASSWORD=varin-memory-fixture-only \
   --publish 127.0.0.1:3000:3000 "$image"
 docker inspect "$name" > "$output/container-initial.json"
