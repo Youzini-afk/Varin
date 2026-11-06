@@ -134,6 +134,6 @@ the model adapter keeps channel, endpoint/header and Run semantics. `extensions/
 registers `varin.credentials`, using trusted Surface/Run principal attribution and existing
 `AuthorizationFlows`. Plugin secrets are stored separately from connection settings and existing model
 credentials. The plugin handles provider-specific OAuth and remote revocation, while Host storage
-handles scoped references, concurrent refresh and stale-write protection. No Gmail-specific business
+handles scoped references, concurrent refresh and stale-write protection. No provider-specific business
 state or public account service is introduced. Existing password/passkey/pairing entrypoints retain
 a durable Host-owner subject; this does not add multi-user enrollment.

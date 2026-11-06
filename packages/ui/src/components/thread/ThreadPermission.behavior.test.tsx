@@ -33,10 +33,10 @@ it('shows exact settings scope and preserves one original permission decision th
 });
 
 it('always-confirm tools display full exact content outside collapsed details and offer only once or deny', async () => {
-  const permission = { id: 'mail-permission', decision: null, call: { name: 'gmail_send', arguments: {
+  const permission = { id: 'effect-permission', decision: null, call: { name: 'fixture_effect', arguments: {
     from: 'me@example.test', to: ['to@example.test'], cc: ['cc@example.test'], bcc: ['bcc@example.test'], subject: 'Exact subject', body: 'Line one\nLine two <script>not HTML</script>',
     attachments: [{ filename: 'data.txt', sha256: 'fixed-content-identity', contentBase64: 'ZGF0YQ==' }],
-  } }, scope: { reason: 'Confirm only this message', confirmation: 'always' } };
+  } }, scope: { reason: 'Confirm only this operation', confirmation: 'always' } };
   const operation = { id: 'send', phase: 'waiting', cancel_requested: false, result: { kind: 'control', value: { permission } } } as unknown as Operation;
   const decide = vi.fn(async () => ({ ...operation, result: { kind: 'control', value: { permission: { ...permission, decision: 'deny' } } } }) as unknown as Operation);
   await act(async () => root.render(<ThreadPermission operation={operation} enabled onDecide={decide} />));
@@ -45,5 +45,5 @@ it('always-confirm tools display full exact content outside collapsed details an
   expect(preview.closest('details')).toBeNull(); expect(preview.querySelector('script')).toBeNull();
   expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['chat.permission.once', 'chat.permission.deny']);
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.permission.deny')!.click());
-  expect(decide).toHaveBeenCalledExactlyOnceWith('mail-permission', 'deny');
+  expect(decide).toHaveBeenCalledExactlyOnceWith('effect-permission', 'deny');
 });
