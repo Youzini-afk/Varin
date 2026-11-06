@@ -27,6 +27,7 @@ import type { KernelClient } from './kernel-client.js';
 import { createComputerRuntime } from './computer-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './nested-tool-owner.js';
 
+// Real bundles, file catalogs and broker processes use the suite's shared timeout.
 it('installed SDK declaration reaches shared bridge, compiled schemas, validated model/policy scope and real material adapter', async () => {
   const repository = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -381,7 +382,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       await fs.rm(root, { recursive: true, force: true });
     }
   }
-}, 20_000);
+});
 
 it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, and preserves invalid output body', async () => {
   const repository = path.resolve(
@@ -769,4 +770,4 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       await fs.rm(root, { recursive: true, force: true });
     }
   }
-}, 20_000);
+});

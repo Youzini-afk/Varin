@@ -5,6 +5,7 @@ import express from 'express';
 import request, { type Response } from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import * as imagePreview from './image-preview.js';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import type { CommandResult } from './types.js';
 
@@ -581,21 +582,34 @@ describe('fs exec git-read cache', () => {
 });
 
 describe('fs raw download Content-Disposition', () => {
-  it('serves an authenticated image derivative with dimensions and validates cached previews', async () => {
-    const { createCanvas } = await import('@napi-rs/canvas');
-    const bytes = await createCanvas(32, 24).encode('png');
+  it('serves the image owner result and validates cached previews after path authorization', async () => {
+    // Real codec, resize and original-byte preservation belong to image-preview.test.ts.
+    const bytes = Buffer.from('original image bytes');
+    const preview = { bytes: Buffer.from('prepared derivative'), mime: 'image/webp', width: 3200, height: 2400, cropped: false };
+    const render = vi.spyOn(imagePreview, 'renderImagePreview').mockResolvedValue(preview);
     const handler = createFsApp({ fsPromises: { stat: async () => ({ isFile: () => true }), readFile: async () => bytes } });
     const query = { path: '/repo/image.png', preview: 'image' };
-    const response = await request(handler).get('/api/fs/raw').query(query);
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual(bytes);
-    expect(response.headers['x-varin-image-width']).toBe('32');
-    expect(response.headers['x-varin-image-height']).toBe('24');
-    const etag = response.headers.etag;
-    if (!etag) throw new Error('Image preview must include its cache validator');
-    const repeated = await request(handler).get('/api/fs/raw').query(query).set('if-none-match', etag);
-    expect(repeated.statusCode).toBe(304);
-    expect(repeated.text).toBe('');
+    try {
+      const response = await request(handler).get('/api/fs/raw').query(query);
+      expect(response.statusCode).toBe(200);
+      expect(render).toHaveBeenCalledWith(bytes, 'image/png');
+      expect(response.body).toEqual(preview.bytes);
+      expect(response.headers['content-type']).toContain(preview.mime);
+      expect(response.headers['x-varin-image-width']).toBe('3200');
+      expect(response.headers['x-varin-image-height']).toBe('2400');
+      expect(response.headers['x-varin-image-cropped']).toBe('false');
+      expect(response.headers['cache-control']).toBe('private, max-age=0, must-revalidate');
+      const etag = response.headers.etag;
+      if (!etag) throw new Error('Image preview must include its cache validator');
+      const repeated = await request(handler).get('/api/fs/raw').query(query).set('if-none-match', etag);
+      expect(repeated.statusCode).toBe(304);
+      expect(repeated.text).toBe('');
+      await request(handler).get('/api/fs/raw').query({ ...query, path: '/outside/image.png' }).set('if-none-match', etag)
+        .expect(400, { error: 'Path is outside of active workspace' });
+      expect(render).toHaveBeenCalledTimes(1);
+    } finally {
+      render.mockRestore();
+    }
   });
   it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
     const fsPromises = {
