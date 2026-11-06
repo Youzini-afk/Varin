@@ -2,14 +2,45 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { expect, it } from 'vitest';
+import { execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { promisify } from 'node:util';
+import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createKernelClient, type KernelClient } from './kernel-client.js';
 import { ShutdownDeadline } from '../shutdown-runtime.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as { version: string }).version;
+let artifactPath = kernelPath;
+let stagedDirectory: string | undefined;
+const fixtureClients = new Set<KernelClient>();
+
+beforeAll(async () => {
+  await fs.access(kernelPath);
+  const hasManifest = await fs.lstat(path.join(path.dirname(kernelPath), 'manifest.json')).then(() => true, error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  });
+  if (hasManifest) return;
+  // The unified native runner can select a raw Cargo release binary (Windows
+  // --build-only does not stage). This test also requires installed-artifact
+  // validation, so stage that exact prebuilt binary using the production
+  // packager. Do not compile another kernel or manufacture a test manifest.
+  // An existing but invalid manifest must still fail the original validator.
+  stagedDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-native-stop-artifact-'));
+  await promisify(execFile)(process.execPath, [path.join(repository, 'scripts/build-kernel.mjs'),
+    '--stage', stagedDirectory, '--build-identity', buildVersion], {
+    cwd: repository, env: { ...process.env, VARIN_KERNEL_PREBUILT: path.resolve(kernelPath) },
+  });
+  artifactPath = path.join(stagedDirectory, process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
+});
+afterAll(async () => {
+  if ([...fixtureClients].some(client => {
+    const child = lifetime(client).child;
+    return child && child.exitCode === null && child.signalCode === null;
+  })) throw new Error('Native shutdown fixture still owns a live process; retaining its staged artifact');
+  if (stagedDirectory) await fs.rm(stagedDirectory, { recursive: true, force: true });
+});
 
 // Inspect process/transport lifetime, not a replacement implementation of their stop.
 const lifetime = (client: KernelClient) => client as unknown as { child: ChildProcessWithoutNullStreams | null; transport: unknown };
@@ -25,9 +56,10 @@ async function verifyStopAndReopen(freeze: boolean) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-native-stop-'));
   const clients: KernelClient[] = [];
   const open = async () => {
-    const host = createKernelClient({ hostId: 'native-stop', storageRoot: root, buildVersion, kernelPath,
+    const host = createKernelClient({ hostId: 'native-stop', storageRoot: root, buildVersion, kernelPath: artifactPath,
       requireKernelManifest: true, allowCargoDevRunner: false });
     clients.push(host);
+    fixtureClients.add(host);
     await host.start();
     const grant = await host.issueGrant({ grantId: 'writer', owningWorkspace: 'workspace', executionWorkspace: 'workspace',
       capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
