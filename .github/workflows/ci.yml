@@ -1,570 +1,120 @@
-name: CI
-
+name: Backend memory experiment (diagnostic branch only)
+run-name: Backend memory experiment for ${{ inputs.source_sha }}
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-  schedule:
-    # Complete qualification is owned here, not silently deferred forever.
-    - cron: '17 3 * * *'
-  workflow_call:
     inputs:
       source_sha:
+        description: Exact application source to measure
         required: true
-        type: string
-      full:
-        default: true
-        type: boolean
-
+        default: 246cc03b294970399df0d17f71ce8915ce3b275f
 permissions:
   contents: read
-
-concurrency:
-  # Ordinary pushes supersede old validation, not explicit release checks or
-  # the complete daily qualification that owns deferred platform combinations.
-  group: varin-ci-${{ (inputs.source_sha != '' || github.event_name == 'workflow_dispatch') && github.run_id || github.event_name == 'schedule' && 'qualification' || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ inputs.source_sha == '' && github.event_name != 'workflow_dispatch' }}
-
 jobs:
-  changes:
-    name: Identify affected owners
+  measure:
     runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.surface.outputs.code }}
-      frontend: ${{ steps.surface.outputs.frontend }}
-      native: ${{ steps.surface.outputs.native }}
-      rust: ${{ steps.surface.outputs.rust }}
-      windows: ${{ steps.surface.outputs.windows }}
-      macos: ${{ steps.surface.outputs.macos }}
-      production: ${{ steps.surface.outputs.production }}
-      container: ${{ steps.surface.outputs.container }}
-      toolbelt: ${{ steps.surface.outputs.toolbelt }}
-      android: ${{ steps.surface.outputs.android }}
-      security: ${{ steps.surface.outputs.security }}
-      full: ${{ steps.surface.outputs.full }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
-          fetch-depth: 0
+          path: harness
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: candidate
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - id: surface
+      - name: Verify exact application source
+        working-directory: candidate
         env:
-          CI_FULL: ${{ inputs.full || false }}
-          CI_CALLED: ${{ inputs.source_sha != '' }}
-        run: node scripts/ci-scope.mjs
-
-  production-preflight:
-    name: Production lock preflight
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    steps:
-      - uses: actions/checkout@v7
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Start isolated build registry
+        run: docker run --detach --name varin-memory-registry --publish 127.0.0.1:5000:5000 registry:2
+      - uses: docker/setup-buildx-action@v4
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+      - name: Build exact slim base
+        uses: docker/build-push-action@v7
         with:
-          node-version: 24
-      # No install/build: block consumers of an invalid production graph while
-      # unrelated source and native-owner checks still report their results.
-      - run: node --test scripts/cloud-runtime-layout.test.js
-
-  portable-source:
-    name: Portable source checks
-    runs-on: ubuntu-latest
-    needs: changes
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-source-{0}', github.run_id) }}
-      queue: max
-    steps:
-      - uses: actions/checkout@v7
+          context: candidate
+          file: candidate/Dockerfile.base
+          target: slim
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: localhost:5000/varin-runtime-slim:memory
+          cache-from: type=gha,scope=varin-check-runtime-slim
+      - name: Build exact slim app
+        uses: docker/build-push-action@v7
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      # Documentation checks use only Node built-ins; prose-only changes do not
-      # need the workspace/native dependency installation or postinstall hooks.
-      - if: needs.changes.outputs.code == 'true'
-        id: dependencies
-        run: bun install --frozen-lockfile
-      - run: bun run test:docs
-      - run: bun run docs:validate
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        name: Verify security repairs and applicable advisories
+          context: candidate
+          file: candidate/Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: varin:memory-slim
+          build-args: |
+            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-slim:memory
+            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-app
+      - name: Measure slim
         env:
-          LIVE_AUDIT: ${{ needs.changes.outputs.security }}
-        run: |
-          if [ "$LIVE_AUDIT" = true ]; then bun run audit:dependencies;
-          else node scripts/audit-dependencies.mjs --local-only; fi
-      - if: ${{ !cancelled() && needs.changes.outputs.security == 'true' && steps.dependencies.outcome == 'success' }}
-        id: rust-audit-tool
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: bash harness/benchmarks/backend-memory/run.sh varin:memory-slim slim "$SOURCE_SHA" evidence/slim
+      - name: Upload slim observations promptly
+        if: always()
+        uses: actions/upload-artifact@v6
         with:
-          tool: cargo-audit@0.22.2
-      - if: ${{ !cancelled() && steps.rust-audit-tool.outcome == 'success' }}
-        name: Audit Rust kernel dependencies
-        run: cargo audit --file kernel/Cargo.lock
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        id: prepare
-        run: bun run build:type-dependencies
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run type-check:prepared
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: bun run lint
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: bun run test:tooling
-      # Package consumers do not require a native executable; collect their
-      # results independently of the parallel native build and acceptance.
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run test:packages
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        name: Test desktop driver protocols on a private D-Bus
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-gi dbus
-          dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:linux-desktop
-      - if: ${{ !cancelled() && needs.changes.outputs.frontend == 'true' && needs.changes.outputs.production != 'true' && steps.prepare.outcome == 'success' }}
-        name: Build browser and desktop shell consumers
-        run: |
-          bun run build:frontend
-          bun run --cwd packages/electron build
-          bun run --cwd packages/mobile build:assets
-
-  native-build:
-    name: Build shared Linux kernel
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.production == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-kernel-{0}', github.run_id) }}
-      queue: max
-    steps:
-      - uses: actions/checkout@v7
+          name: backend-memory-slim-${{ inputs.source_sha }}
+          path: evidence/slim
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Release slim output image
+        if: always()
+        run: docker image rm varin:memory-slim 2>/dev/null || true
+      - name: Build exact toolbelt base
+        if: ${{ !cancelled() }}
+        uses: docker/build-push-action@v7
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
+          context: candidate
+          file: candidate/Dockerfile.base
+          target: toolbelt
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: localhost:5000/varin-runtime-toolbelt:memory
+          cache-from: type=gha,scope=varin-check-runtime-base
+      - name: Build exact toolbelt app
+        if: ${{ !cancelled() }}
+        uses: docker/build-push-action@v7
         with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+          context: candidate
+          file: candidate/Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: varin:memory-toolbelt
+          build-args: |
+            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-toolbelt:memory
+            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-app
+      - name: Measure toolbelt
+        if: ${{ !cancelled() }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: bash harness/benchmarks/backend-memory/run.sh varin:memory-toolbelt toolbelt "$SOURCE_SHA" evidence/toolbelt
+      - name: Upload raw and summarized evidence
+        if: always()
+        uses: actions/upload-artifact@v6
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target/release
-          key: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
-      - run: node scripts/build-products.mjs kernel --export artifacts/shared-kernel
-      - uses: actions/upload-artifact@v7
-        with:
-          name: varin-ci-kernel-linux-x64
-          path: artifacts/shared-kernel/
-          include-hidden-files: true
-          compression-level: 0
+          name: backend-memory-${{ inputs.source_sha }}
+          path: evidence
+          retention-days: 30
           if-no-files-found: error
-
-  linux-native:
-    name: Linux native verification
-    runs-on: ubuntu-latest
-    needs: [changes, native-build]
-    if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && needs.native-build.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-native-{0}', github.run_id) }}
-      queue: max
-    env:
-      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
-      VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
-      VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@v6
-        id: rust-cache
-        if: needs.changes.outputs.rust == 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target/debug
-          key: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
-      - uses: actions/download-artifact@v8
-        with:
-          name: varin-ci-kernel-linux-x64
-          path: .build-input/kernel
-      - id: native-restore
-        run: node scripts/build-products.mjs kernel
-      - id: dependencies
-        run: bun install --frozen-lockfile
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        id: prepare
-        run: bun run build:type-dependencies
-      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
-        name: Prepare FUSE for native workspace acceptance
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fuse3
-          sudo modprobe fuse
-          test -c /dev/fuse
-      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
-        name: Verify native kernel authority
-        run: node scripts/test-kernel-authority.mjs
-      # Rust state-machine/unit tests have one Linux owner. The release-binary
-      # acceptance above and on Windows exercises the Host/native boundary.
-      # An acceptance failure stays red but must not hide independent Rust
-      # results when their required native artifact was successfully built.
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
-        id: rust-build
-        name: Build Rust workspace tests
-        run: bun run test:rust --no-run
-      # Keep cold compilation outside the execution budget. Successful workspace
-      # execution takes about 90 seconds; ten minutes allows runner variance but
-      # fails visibly if a test retains a worker or waits indefinitely.
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
-        name: Compile native FUSE workspace adapter
-        working-directory: kernel
-        run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
-        name: Compile public libfuse3 mount transport
-        working-directory: kernel
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfuse3-dev
-          cargo check -p varin-kernel --lib --features workspace-mount,fuser/libfuse3 --locked
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
-        name: Test Rust workspace
-        timeout-minutes: 10
-        env:
-          VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
-          RUST_BACKTRACE: 1
-        # Report failures from every test binary in one round; Cargo still fails
-        # the step if any binary fails, and the execution timeout bounds hangs.
-        run: bun run test:rust --no-fail-fast
-
-      - if: ${{ !cancelled() && steps.rust-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
-        name: Preserve compiled Rust test inputs
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target/debug
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-
-  windows-runtime:
-    name: Windows runtime
-    runs-on: windows-latest
-    needs: changes
-    if: needs.changes.outputs.windows == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-{0}', github.run_id) }}
-      queue: max
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@v6
-        id: rust-cache
-        if: needs.changes.outputs.native == 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
-      - id: dependencies
-        run: bun install --frozen-lockfile
-      - id: prepare
-        run: bun run build:type-dependencies
-      # OS-sensitive package checks do not depend on native compilation.
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run test:packages:platform
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:packaging-tools
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Build and verify native Windows Computer helper without desktop input
-        shell: pwsh
-        run: |
-          node --test packages/computer-driver/windows/test_build_helper.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node packages/computer-driver/windows/build-helper.mjs --test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node packages/computer-driver/windows/smoke-helper.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # Linux owns the complete platform-independent Host behavior matrix.
-      # Qualification retains the full second-OS sweep; normal PRs exercise
-      # actual file/lock/CAS/credential/process owners, not a copied core suite.
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Verify Windows Host owners
-        shell: bash
-        env:
-          FULL: ${{ needs.changes.outputs.full }}
-        run: |
-          if [ "$FULL" = true ]; then bun run --cwd packages/web test;
-          else bun run --cwd packages/web test:platform; fi
-      - if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && steps.prepare.outcome == 'success' }}
-        id: native-build
-        name: Build native kernel
-        run: node scripts/test-kernel-authority.mjs --build-only
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
-        name: Prepare WinFsp for native workspace acceptance
-        shell: pwsh
-        run: |
-          node packages/electron/scripts/prepare-workspace-component.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
-          $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"
-          $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
-          if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
-        name: Verify native workspace storage and runtime on Windows
-        shell: cmd
-        working-directory: kernel
-        run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-          set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
-          cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
-      # Successful compilation is reusable even if a later native assertion
-      # fails. Save before acceptance: a red teardown must not force another
-      # cold Rust build, and a cache never substitutes for those assertions.
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
-        name: Preserve compiled Windows Rust inputs
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
-        name: Verify Windows native resources and teardown
-        shell: bash
-        env:
-          FULL: ${{ needs.changes.outputs.full }}
-        run: |
-          if [ "$FULL" = true ]; then node scripts/test-kernel-authority.mjs;
-          else node scripts/test-kernel-authority.mjs --platform; fi
-
-  macos-storage:
-    name: macOS platform
-    runs-on: macos-latest
-    needs: changes
-    if: needs.changes.outputs.macos == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-macos-{0}', github.run_id) }}
-      queue: max
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@v6
-        id: rust-cache
-        if: needs.changes.outputs.rust == 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target/debug
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
-      - id: dependencies
-        run: bun install --frozen-lockfile
-      - id: prepare
-        run: bun run build:type-dependencies
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Verify macOS file, credential and process owners
-        run: |
-          bun run test:packages:platform
-          bun run --cwd packages/web test:platform
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Compile the native macOS Computer helper
-        run: node packages/computer-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-computer"
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
-        name: Compile and ad-hoc sign the bundled FSKit executor
-        run: |
-          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
-          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
-          node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace" "$(node -p process.arch)"
-          node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace-intel" x64
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
-        name: Verify workspace tree publication on macOS
-        working-directory: kernel
-        run: cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
-        name: Verify native executor bytes, cache boundaries and admitted-inode import
-        working-directory: kernel
-        run: |
-          cargo test -p varin-kernel --lib workspace_mount:: --locked
-      # Compile callback contracts without installing a filesystem component or
-      # changing the runner's system-extension policy. Actual mount tests remain
-      # explicit qualification on a machine with an already-enabled component.
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
-        id: rust-compile
-        name: Compile macOS workspace callbacks without system installation
-        working-directory: kernel
-        run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
-
-      - if: ${{ !cancelled() && steps.rust-compile.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
-        name: Preserve compiled macOS Rust inputs
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target/debug
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-
-  production-build:
-    name: Production build
-    runs-on: ubuntu-latest
-    needs: [changes, native-build, production-preflight]
-    if: ${{ !cancelled() && needs.changes.outputs.production == 'true' && needs.native-build.result == 'success' && needs.production-preflight.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-build-{0}', github.run_id) }}
-      queue: max
-    env:
-      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/download-artifact@v8
-        with:
-          name: varin-ci-kernel-linux-x64
-          path: .build-input/kernel
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      # Imports the built server artifact under plain Node: vitest's CJS
-      # interop hides require/import mismatches that break `node server/index.js`.
-      - name: Smoke built server artifact under Node
-        run: node --test packages/web/application-host/lib/knowledge/store.smoke.test.ts
-      - name: Verify Linux x64 VM guest bundle
-        run: node scripts/build-vm-guest-bundle.mjs --skip-build
-      # This stages and verifies the production lock/layout once, then exercises
-      # the same archive through install, health checks and rollback.
-      - name: Smoke atomic cloud deployment and rollback
-        run: bash scripts/smoke-cloud-deploy.sh --archive packages/computer-driver/linux/guest-bundle-x64/runtime.tgz
-      - run: bun run test:packages:dist
-
-  container-check:
-    name: Container contract
-    needs: [changes, production-preflight]
-    if: needs.changes.outputs.container == 'true' && needs.production-preflight.result == 'success'
-    uses: ./.github/workflows/container-check.yml
-    with:
-      source_sha: ${{ inputs.source_sha || github.sha }}
-      toolbelt: ${{ needs.changes.outputs.toolbelt == 'true' }}
-
-  android-build:
-    name: Android unsigned build
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.android == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-android-{0}', github.run_id) }}
-      queue: max
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: ./.github/actions/android-setup
-      - run: bun install --frozen-lockfile
-      - run: bun run mobile:build:android:debug
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
-  # Keep one always-present check, including affected platform/product results.
-  # A cancelled, failed, missing or unexpectedly skipped requirement is not green.
-  source-quality:
-    name: Source quality
-    runs-on: ubuntu-latest
-    needs: [changes, production-preflight, portable-source, native-build, linux-native, windows-runtime, macos-storage, production-build, container-check, android-build]
-    if: ${{ always() }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - name: Require every applicable check
-        env:
-          CI_NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/ci-scope.mjs gate
+      - name: Cleanup disposable registry
+        if: always()
+        run: docker rm --force varin-memory-registry 2>/dev/null || true
