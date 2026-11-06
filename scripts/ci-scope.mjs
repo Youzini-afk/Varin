@@ -10,7 +10,7 @@ export const surfaces = ['code', 'frontend', 'native', 'rust', 'windows', 'macos
 const empty = () => Object.fromEntries(surfaces.map(name => [name, false]));
 const all = () => Object.fromEntries(surfaces.map(name => [name, true]));
 const prose = /(?:^docs\/|^packages\/docs\/|^\.github\/readme\/|(?:^|\/)(?:README(?:\.[a-z]{2}(?:-[A-Z]{2})?)?|DOCUMENTATION|AGENTS|CHANGELOG)\.md$)/u;
-const hostPlatform = /^packages\/web\/application-host\/(?:index\.ts|lib\/(?:[^/]+$|(?:kernel|storage|recovery|documents|fs|process|terminal|workspace|git|github|mcp|platform|knowledge|memory|lsp|computer|external-agents|agent-resources|service-credentials|credentials|client-auth|ui-auth|connections|tunnels|relay|structure|language-support|projects)\/))/u;
+const hostPlatform = /^packages\/web\/application-host\/(?:index\.ts|lib\/(?:[^/]+$|(?:kernel|storage|recovery|documents|fs|process|terminal|workspace|git|github|mcp|extensions|platform|knowledge|memory|lsp|computer|external-agents|agent-resources|service-credentials|credentials|client-auth|ui-auth|connections|tunnels|relay|structure|language-support|projects)\/))/u;
 
 export function classifyChanges(files, { full = false, called = false } = {}) {
   const result = full || files === null ? all() : empty();

@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.application-host.json",
+  "exclude": ["application-host/**/*.test.ts"]
+}
