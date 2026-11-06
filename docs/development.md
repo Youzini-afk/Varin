@@ -66,10 +66,14 @@ CI 的 cloud 部署 smoke 通过 `--archive` 直接消费 VM guest 已生成并�
 `bun run test:cloud-deploy` 在 Linux/Bash 下复用这一验收：先准备正式 build，再验证临时目录与 loopback 上的
 安装、重复投递、保密配置拒绝、部署锁、链接提交失败和启动失败回滚。退出时关闭该 Host 并清理本次临时目录。
 PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workflow；共享 builder 先验证 slim，
-基础镜像/公共容器配置改动再验证 toolbelt。不会向 GHCR 发布。镜像发行只接受版本匹配的 release tag，
-先验证精确 SHA，再构建、启动并提升同一 digest；main 推送不再更新 `latest`。
-包含新镜像契约且版本大于 0.9.38 的发行使用 `varin` 标准环境与 `varin-toolbelt` 工具链环境；
-旧精确版本/SHA 不重写，正式标签推广前验证所有 companion base 与匿名访问。见[部署说明](ops/cloud-deployment.md#container-images)。
+基础镜像/公共容器配置改动再验证 toolbelt。不会向 GHCR 发布，手动 `ci.yml` 也只是完整资格检查。
+正式镜像发行由版本匹配的 release tag 进入 `Docker Images`；`Docker Commit Images` 则从 main 手动选择
+精确 main 历史 SHA，独立发布 `commit-<完整 SHA>`，不占版本号、不触发 Desktop/npm/完整 Release。
+两个通道都先做所选源码完整资格，再构建、启动并推广同一 digest；发布工具与产品源码分开固定。
+main push 与按提交发布均不更新 `latest`。新命名采用 `varin` 标准环境与 `varin-toolbelt` 工具链环境；
+正式版本必须大于 0.9.38，独立 commit 标签允许源码版本仍为 0.9.38，旧精确版本/SHA 不重写。
+推广前核验 companion base 与匿名访问；commit 通道额外执行新 runner 上的匿名 amd64 pull，并保存可核验
+候选清单，失败时用原 digest 恢复而不重建覆盖。入口、版本隔离和恢复边界见[部署说明](ops/cloud-deployment.md#container-images)。
 
 ## 命令入口
 
