@@ -15,8 +15,10 @@ Google requires an OAuth client registered to a Google Cloud project. No client 
 bundled here, so this version is **not yet a zero-configuration sign-in**:
 
 1. Create or select a project in [Google Cloud](https://console.cloud.google.com/), enable the Gmail
-   API, and configure the OAuth consent screen. Create a **Desktop app** OAuth client and download its
-   JSON file. Add the Gmail account as a test user if the application is in testing mode.
+   API, and configure the OAuth consent screen. Create a **Desktop app** OAuth client, mark it for use
+   by an AI-powered agent, and download its JSON file. Add the Gmail account as a test user if the
+   application is in testing mode. Google recommends separate clients for agent and conventional
+   interactive workflows; see [OAuth clients for AI agents](https://support.google.com/cloud/answer/15549257#agentic-client).
 2. Add `https://www.googleapis.com/auth/gmail.readonly` and
    `https://www.googleapis.com/auth/gmail.send` to the consent screen. Google classifies the first as
    restricted and the second as sensitive; production access may require verification. For an
@@ -72,7 +74,8 @@ and should only be used after an explicit user request. A policy that automatica
 will not show a per-send confirmation; configure Varin's permissions accordingly. Recipients must be
 individual email addresses without display names. `gmail_search` accepts Gmail search syntax and
 `gmail_read` returns a bounded body plus attachment metadata. Email content is untrusted data, not
-instructions to the agent.
+instructions to the agent. Mail returned to a conversation may be sent to the AI model provider
+configured for that conversation; review the provider's data handling before using these tools.
 
 Gmail may receive a send even if the client loses the response or is cancelled. The extension never
 automatically retries a dispatched send. Varin records a failed or ambiguous effect callback
@@ -92,6 +95,7 @@ settings-page interaction, cancellation and revocation failures, SDK registratio
 validation and uncertain sends. The separate `packages/extension-host/test/gmail-example.test.ts`
 installs the example and exercises services in a real broker with an isolated credential directory.
 The settings page was also loaded in a running Varin instance and rejected an invalid client file.
-These checks do not perform a live Google authorization, test Google verification, prove a production
-Host permission configuration, or send a real message. Test with a user-owned Google Cloud client and
-account before promoting this pull request from draft.
+One personal test-mode Google Cloud client completed live browser authorization, and the installed
+extension verified its account against Gmail's profile endpoint. This does not establish Google app
+verification, test a production Host permission configuration, or verify live email delivery; no
+real message was sent. Keep the pull request in draft until those remaining requirements are assessed.
