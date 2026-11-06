@@ -41,24 +41,28 @@ pub(super) fn execute(
             .map_err(|_| KernelError::Protocol("event cursor must be nonnegative".into()))?;
         let limit = u32::try_from(p.limit)
             .map_err(|_| KernelError::Protocol("event limit out of range".into()))?;
-        let read = owner
-            .lock()
-            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .capture_events_read(cursor, limit)
-            .map_err(domain)?;
+        let read = {
+            let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            match p.principal_id {
+                Some(principal) => catalog.capture_events_read_for_principal(cursor, limit, principal.as_deref()),
+                None => catalog.capture_events_read(cursor, limit),
+            }.map_err(domain)?
+        };
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
     if method == "runtime.thread.attention.read" {
-        let _: crate::protocol_generated::KernelEmptyParams = serde_json::from_value(params)?;
+        let query: crate::protocol_generated::PrincipalQuery = serde_json::from_value(params)?;
         let read = owner.lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_attention_read();
-        let snapshot = read.load_cancellable(cancelled.clone()).map_err(domain)?;
+        let mut snapshot = read.load_cancellable(cancelled.clone()).map_err(domain)?;
         if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
         // The read connection can outlive owner replacement; never publish the old generation.
-        if owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.epoch() != snapshot.epoch {
+        let catalog = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+        if catalog.epoch() != snapshot.epoch {
             return Err(KernelError::Protocol("attention snapshot belongs to a previous owner epoch".into()));
         }
+        if let Some(principal) = query.principal_id { catalog.filter_attention_principal(&mut snapshot, principal.as_deref()).map_err(domain)?; }
         return Ok(serde_json::to_value(snapshot)?);
     }
     if method == "runtime.thread.operations.active" {

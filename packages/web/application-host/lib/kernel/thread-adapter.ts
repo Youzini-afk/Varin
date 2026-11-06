@@ -1,3 +1,4 @@
+import { currentRequestPrincipal, assertPrincipalOwnership } from './request-principal.js';
 import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
 import type { ContextCompactionOwner } from './context-compaction.js';
 import type { ContextAgentOwner } from './context-agent.js';
@@ -671,13 +672,14 @@ export class ThreadAdapter {
     let replaced: Error | undefined;
     const detach = this.runtime.onExit(error => { replaced = error; });
     try {
-      const snapshot = await this.runtime.attention(signal);
+      const snapshot = await this.runtime.attention(signal, currentRequestPrincipal());
       if (replaced) throw replaced;
       return snapshot;
     } finally { detach?.(); }
   }
   list(options: import('@varin/application-client').ThreadListOptions = {}, signal?: AbortSignal) {
-    return this.runtime.threadCatalog(options, signal);
+    const principalId = currentRequestPrincipal();
+    return this.runtime.threadCatalog({ ...options, ...(principalId !== undefined ? { principalId } : {}) }, signal);
   }
   update(input: import('@varin/application-client').ThreadUpdate) {
     const { runtime: _runtime, ...command } = input;
@@ -695,9 +697,10 @@ export class ThreadAdapter {
   }
 
   async create(key: string): Promise<ThreadIdentity> {
-    const digest = createHash('sha256').update(key).digest('hex');
+    const principalId = currentRequestPrincipal();
+    const digest = createHash('sha256').update(principalId ? `${principalId}\0${key}` : key).digest('hex');
     const identity: ThreadIdentity = { runtime: 'agent', threadId: `thread:${digest}`, branchId: `branch:${digest}` };
-    await this.runtime.createThread(identity.threadId, identity.branchId);
+    await this.runtime.createThread(identity.threadId, identity.branchId, undefined, principalId);
     return identity;
   }
 
@@ -1265,18 +1268,21 @@ export class ThreadAdapter {
   async requireIdentity(identity: ThreadIdentity, signal?: AbortSignal) {
     this.assertIdentity(identity);
     const thread = await this.runtime.thread(identity.threadId, signal);
+    assertPrincipalOwnership(thread.principal_id);
     if (!thread.branches.some(branch => branch.branch_id === identity.branchId)) throw new Error('Branch does not belong to the selected thread');
     return thread;
   }
 
   async requireRun(runId: string, signal?: AbortSignal) {
     const run = await this.runtime.run(runId, signal);
+    assertPrincipalOwnership(run.principal_id);
     if (!run.thread_id.startsWith('thread:')) throw new Error('Run is not owned by a thread');
     return run;
   }
 
   async requireInput(inputId: string) {
     const input = await this.runtime.input(inputId);
+    if (currentRequestPrincipal() !== undefined) assertPrincipalOwnership((await this.runtime.thread(input.thread_id)).principal_id);
     if (!input.thread_id.startsWith('thread:')) throw new Error('Input is not owned by a thread');
     return input;
   }
@@ -1589,6 +1595,9 @@ export class ThreadAdapter {
 
   /** Listener registration precedes replay. Notifications only wake the durable cursor reader. */
   observe(cursor: number, emit: (event: unknown) => boolean, fail: (error: unknown) => void): () => void {
+    const observerPrincipal = currentRequestPrincipal();
+    // Immutable Catalog ownership is checked once per observed Thread for this reader.
+    const progressAccess = new Map<string, Promise<boolean>>();
     let closed = false;
     let reading = false;
     let dirty = false;
@@ -1601,7 +1610,7 @@ export class ThreadAdapter {
           dirty = false;
           let events;
           do {
-            events = await this.runtime.events(cursor, 256);
+            events = await this.runtime.events(cursor, 256, undefined, observerPrincipal);
             for (const event of events) {
               if (closed) return;
               if (!emit(event)) { close(); return; }
@@ -1615,12 +1624,19 @@ export class ThreadAdapter {
     const remove = this.runtime.onEvent((event: AgentRuntimeStreamEvent) => {
       if (event.stream === 'durable') void replay();
       else if (!closed) {
-        try { if (!emit(event)) close(); }
-        catch (error) { close(); fail(error); }
+        if (observerPrincipal === undefined) { try { if (!emit(event)) close(); } catch (error) { close(); fail(error); } }
+        else {
+          let access = progressAccess.get(event.threadId);
+          if (!access) {
+            access = this.runtime.thread(event.threadId).then(thread => thread.principal_id === observerPrincipal || thread.principal_id === null);
+            progressAccess.set(event.threadId, access);
+          }
+          void access.then(allowed => { if (!closed && allowed && !emit(event)) close(); }).catch(error => { close(); fail(error); });
+        }
       }
     });
     const removeExit = this.runtime.onExit(error => { close(); fail(error); });
-    const close = () => { closed = true; remove(); removeExit(); };
+    const close = () => { closed = true; progressAccess.clear(); remove(); removeExit(); };
     void replay();
     return close;
   }

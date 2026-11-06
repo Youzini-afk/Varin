@@ -73,20 +73,20 @@ export class ExtensionPackageManager {
     signal?: AbortSignal,
   ): Promise<VarinExtensionCatalogSnapshot> {
     const candidate = await this.artifacts.prepare(source, signal);
-    return this.#installPrepared(candidate, expectedRevision, false, signal);
+    return this.installPrepared(candidate, expectedRevision, false, signal);
   }
 
   async stageCaptured(directory: string, provenance: VarinExtensionSourceViewProvenance, expectedRevision: number,
     signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionPackageResult> {
     const artifact = await this.artifacts.prepareCaptured(directory, provenance, signal);
-    const snapshot = await this.#installPrepared(artifact, expectedRevision, true, signal, onMutation);
+    const snapshot = await this.installPrepared(artifact, expectedRevision, true, signal, onMutation);
     const installed = snapshot.extensions.find(entry => entry.manifest.id === artifact.manifest.id)!;
     const staged = installed.candidate?.integrity === artifact.integrity;
     return { outcome: staged ? "candidate_staged" : "installed_disabled", extensionId: artifact.manifest.id,
       artifactIntegrity: artifact.integrity, catalogRevision: snapshot.revision, applicationRequested: false, resumesOnRestart: false };
   }
 
-  async #installPrepared(candidate: VarinExtensionPreparedArtifact, expectedRevision: number,
+  async installPrepared(candidate: VarinExtensionPreparedArtifact, expectedRevision: number,
     forceDisabled: boolean, signal?: AbortSignal, onMutation?: () => void): Promise<VarinExtensionCatalogSnapshot> {
     signal?.throwIfAborted();
     assertVarinExtensionManifestCompatibility(candidate.manifest, this.varinVersion);

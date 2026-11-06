@@ -40,6 +40,7 @@ import {
   type ToolExecutionReceipt,
 } from './tool-bridge.js';
 import { permissionService } from './permission-service.js';
+import { withToolConfirmation } from './tool-confirmation.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 import {
   withToolInvocation,
@@ -79,6 +80,7 @@ export function extensionToolSchema(
       completion: tool.completion,
       ...(tool.lifetime ? { lifetime: tool.lifetime } : {}),
       operation: tool.operation,
+      ...(tool.confirmation ? { confirmation: tool.confirmation } : {}),
       ...(tool.examples ? { examples: structuredClone(tool.examples) } : {}),
       ...(tool.source ? { source: structuredClone(tool.source) } : {}),
     },
@@ -282,6 +284,7 @@ export async function retainExtensionTool(
         invocationId: randomUUID(),
         runId: call.runId,
         threadId: run.thread_id,
+        ...(typeof run.principal_id === 'string' ? { principalId: run.principal_id } : {}),
         operationId: call.operationId,
         callId: call.callId,
         executorOwner: owner,
@@ -330,7 +333,7 @@ export async function retainExtensionTool(
         )
           throw new Error('extension_tool_permission_changed');
         let permissionSettingsRevision = previous?.permissionSettingsRevision;
-        if (!previous && decision.decision === 'ask')
+        if (!previous && (descriptor.tool!.confirmation === 'always' || decision.decision === 'ask'))
           permissionSettingsRevision = await permissionService(kernel).authorize(
             call,
             {
@@ -338,7 +341,10 @@ export async function retainExtensionTool(
               ownerGeneration: provider.generation,
               toolSchemaVersion: schema.version,
               policyGeneration: current.identity,
-              reason: decision.reason ?? 'Extension tool permission required',
+              reason: descriptor.tool!.confirmation === 'always'
+                ? 'Confirm this exact action and full content once. Saved rules and bypass mode do not approve it.'
+                : decision.reason ?? 'Extension tool permission required',
+              ...(descriptor.tool!.confirmation ? { confirmation: descriptor.tool!.confirmation } : {}),
             },
             combined,
             { name: call.name, arguments: object(call.arguments) ? call.arguments : { input: call.arguments },
@@ -360,10 +366,12 @@ export async function retainExtensionTool(
         try {
           combined.throwIfAborted();
           assertAvailable(call);
-          const previous = approved.get(call.operationId),
-            current = await policy(call.runId);
-          const { subjects } = await permissionSubjects(call, combined);
+          // Claim the one-action approval synchronously before any async validation.
+          // Concurrent execute calls must never mint two scopes from the same approval.
+          const previous = approved.get(call.operationId);
           approved.delete(call.operationId);
+          const current = await policy(call.runId);
+          const { subjects } = await permissionSubjects(call, combined);
           if (
             !previous ||
             previous.identity !== canonical(call) ||
@@ -400,13 +408,11 @@ export async function retainExtensionTool(
                 domainReceipt = receipt;
               },
             },
-            (scope) =>
-              pin.invoke(
-                'execute',
-                [args],
-                combined,
-                scope,
-              ),
+            (scope) => {
+              const execute = () => pin.invoke('execute', [args], combined, scope);
+              return descriptor.tool!.confirmation === 'always'
+                ? withToolConfirmation(scope, provider, context, execute) : execute();
+            },
           );
           if (domainReceipt) return completeDomain(domainReceipt);
           if (!validateOutput(output))

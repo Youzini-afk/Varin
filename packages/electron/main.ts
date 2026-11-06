@@ -2249,6 +2249,14 @@ const dispatchDeepLink = (link: DeepLink | undefined): void => {
     void switchToHostById(link.value);
     return;
   }
+  if (link.type === 'extensions' && link.value === 'install' && link.raw) {
+    // Navigation only. The current Application Host still owns preview, code review and installation.
+    emitToWindow(state.mainWindow, 'varin:plugin-install-link', { url: link.raw });
+    if (state.mainWindow?.isMinimized()) state.mainWindow.restore();
+    state.mainWindow?.show();
+    state.mainWindow?.focus();
+    return;
+  }
   log.warn('[electron] unknown deep-link action:', link.type);
 };
 

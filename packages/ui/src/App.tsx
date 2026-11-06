@@ -55,6 +55,7 @@ import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime';
 import { ThreadAppEffects } from '@/apps/ThreadAppEffects';
+import { usePluginInstallLinks } from '@/apps/pluginInstallNavigation';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence';
@@ -233,6 +234,7 @@ function App({ apis }: AppProps) {
   });
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
+  usePluginInstallLinks(!embeddedSessionChat);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
 
   React.useEffect(() => {

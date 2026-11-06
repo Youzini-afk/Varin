@@ -61,3 +61,19 @@ requires both gates while leaving the normal origin and server authentication ch
   - `beginAuthentication(req)`
   - `finishAuthentication(payload)`
   - `dispose()`
+
+## Stable authentication subjects
+
+`principals.ts` persists the authentication owner's subject independently of JWT secrets,
+passkeys, bearer IDs and device rotation. Existing password and trusted-local bootstrap flows
+issue that subject; passkeys and pairing retain the issuing subject. Legacy authenticated
+credentials migrate to the existing owner, while arbitrary cookies on an unauthenticated Host
+remain unattributed. The subject store is not a plugin account directory or a new user enrollment
+API. Additional subjects must come from a trusted authentication owner, not request bodies.
+
+The authenticated request context supplies Thread creation ownership. Rust Catalog persists it
+on Threads and Runs and preserves it for child/summary work. Its first initialization records
+whether existing single-owner history is claimed; enabling authentication later never silently
+reassigns previously public work. Plugin credential capability calls borrow a subject only from
+an authenticated Surface service lease or an actual retained Run tool invocation. Service
+arguments, routing labels and copied invocation IDs cannot establish identity.

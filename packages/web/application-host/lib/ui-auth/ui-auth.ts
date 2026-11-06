@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
 import { createUiPasskeys } from './ui-passkeys.js';
+import { hostPrincipals, type PrincipalStore } from './principals.js';
 import { resolveVarinDataDir } from '../platform/data-paths.js';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { NextFunction } from 'express';
@@ -50,6 +51,7 @@ interface UiAuthResponse extends UiAuthHeaderResponse {
 interface ClientAuthResult {
   /** A short-lived token derived from an authenticated UI session. */
   session?: boolean;
+  principalId?: string;
   client?: VarinAuthenticatedClient;
   clientId?: string;
   id?: string;
@@ -72,6 +74,7 @@ interface UiAuthOptions {
   readSettingsFromDisk?: () => Promise<Record<string, unknown>>;
   requireClientAuth?: boolean;
   sessionTtlMs?: number;
+  principals?: PrincipalStore;
 }
 
 interface RateLimitRecord {
@@ -504,8 +507,23 @@ export const createUiAuth = ({
   readSettingsFromDisk,
   clientAuthController = null,
   requireClientAuth = false,
+  principals = hostPrincipals(),
 }: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
+  let jwtSecret = getOrCreateJwtSecret();
+  const sessionPrincipal = async (token: string | null): Promise<string | null> => {
+    if (!token) return null;
+    try {
+      const { payload } = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] });
+      if (payload.type !== 'ui-session') return null;
+      // Only cryptographically valid old password sessions migrate to the existing owner.
+      const id = payload.sub ?? (normalizedPassword ? await principals.ownerId() : null);
+      return id ? principals.resolve(id) : null;
+    } catch { return null; }
+  };
+  const signSubject = async (principalId: string, ttlMs: number) => new SignJWT({ type: 'ui-session' })
+    .setProtectedHeader({ alg: 'HS256' }).setSubject(principalId).setIssuedAt()
+    .setExpirationTime(ttlMs / 1000 + 's').sign(jwtSecret);
   const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
   const removeUrlAuthToken = (token: string): void => {
     const entry = urlAuthTokens.get(token);
@@ -552,7 +570,9 @@ export const createUiAuth = ({
         return result?.ok ? result : null;
       } catch { return null; }
     }
-    return { ok: true, session: true, sessionToken: entry.sessionToken };
+    const principalId = await sessionPrincipal(entry.sessionToken);
+    if (normalizedPassword && !principalId) return null;
+    return { ok: true, session: true, sessionToken: entry.sessionToken, ...(principalId ? { principalId } : {}) };
   };
 
   const authenticateClientRequest = async (
@@ -591,13 +611,33 @@ export const createUiAuth = ({
   };
 
   const clientAuthContext = (clientAuth: ClientAuthResult) => clientAuth.session === true
-    ? { type: 'session', token: clientAuth.sessionToken }
+    ? { type: 'session', token: clientAuth.sessionToken, principalId: clientAuth.principalId }
     : ({
     type: 'client',
     token: clientSessionToken(clientAuth),
     clientId: clientAuthClientId(clientAuth),
     client: clientAuth?.client || null,
+    principalId: clientAuth.principalId ?? clientAuth.client?.principalId,
   });
+
+  const requirePrincipalAccess = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction): Promise<unknown> => {
+    const cookieToken = parseCookies(req.headers.cookie)[cookieName] ?? null;
+    const client = await authenticateClientRequest(req);
+    const subject = await sessionPrincipal(cookieToken) ?? client?.principalId ?? client?.client?.principalId;
+    if (typeof subject !== 'string' || await principals.isOwner(subject)) return next();
+    const pathname = getRequestPathname(req);
+    const privateResourceRoute = /^\/api\/threads\/(?:source|resources|research|computer|process|recovery)(?:\/|$)/.test(pathname);
+    const scoped = !privateResourceRoute && (pathname === '/api/varin/observations/ws' || pathname === '/api/threads' || pathname.startsWith('/api/threads/') || pathname.startsWith('/auth/')
+      || /^\/api\/client-auth\/(?:clients|pairing\/(?:sessions|transports)|connection\/candidates)(?:\/|$)/.test(pathname)
+      || /^\/api\/varin\/extensions\/v1\/(?:catalog|contracts\/query|host-state(?:\/wait)?|services\/(?:invoke|lease)|assets\/read|entrypoints\/read)$/.test(pathname));
+    if (scoped) return next();
+    return res.status(403).json({ error: 'This Host-wide capability is only available to the Host owner', code: 'host-owner-required' });
+  };
+
+  const filterWebSocketPrincipal = async <T extends { principalId?: unknown } | null>(req: UiAuthRequest, context: T): Promise<T | null> => {
+    if (typeof context?.principalId !== 'string' || await principals.isOwner(context.principalId)) return context;
+    return getRequestPathname(req) === '/api/varin/observations/ws' ? context : null;
+  };
 
   if (!normalizedPassword) {
     const setSessionCookie = (req: UiAuthRequest, res: UiAuthHeaderResponse, token: string, ttlMs = sessionTtlMs): void => {
@@ -628,14 +668,14 @@ export const createUiAuth = ({
 
     const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
       if (!requireClientAuth) {
-        return next();
+        return requirePrincipalAccess(req, res, next);
       }
       if (req.method === 'OPTIONS') {
-        return next();
+        return requirePrincipalAccess(req, res, next);
       }
       const clientAuth = await authenticateClientRequest(req);
       if (clientAuth) {
-        return next();
+        return requirePrincipalAccess(req, res, next);
       }
       return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
     };
@@ -657,7 +697,7 @@ export const createUiAuth = ({
     ) => {
       const cookies = parseCookies(req.headers.cookie);
       if (!requireClientAuth && cookies[cookieName]) {
-        return { type: 'session', token: cookies[cookieName] };
+        return { type: 'session', token: cookies[cookieName], principalId: await sessionPrincipal(cookies[cookieName]) ?? undefined };
       }
       if (allowClientAuth) {
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
@@ -666,7 +706,7 @@ export const createUiAuth = ({
       if (!requireClientAuth) {
         if (!res) return null;
         const token = await ensureSessionToken(req, res);
-        return { type: 'session', token };
+        return { type: 'session', token, principalId: await sessionPrincipal(token) ?? undefined };
       }
       return null;
     };
@@ -675,16 +715,17 @@ export const createUiAuth = ({
       if (!requireClientAuth) {
         const cookies = parseCookies(req.headers?.cookie);
         if (cookies[cookieName]) {
-          return { type: 'session', token: cookies[cookieName] };
+          return filterWebSocketPrincipal(req, { type: 'session', token: cookies[cookieName], principalId: await sessionPrincipal(cookies[cookieName]) ?? undefined });
         }
       }
       const clientAuth = await authenticateClientRequest(req);
-      if (clientAuth) return clientAuthContext(clientAuth);
+      if (clientAuth) return filterWebSocketPrincipal(req, clientAuthContext(clientAuth));
       return requireClientAuth ? null : { type: 'anonymous', token: 'anonymous' };
     };
 
     return {
       enabled: false,
+      requirePrincipalAccess,
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
@@ -741,7 +782,7 @@ export const createUiAuth = ({
         res.status(400).json({ error: 'UI password not configured' });
       },
       issueTrustedSession: async (req: UiAuthRequest, res: UiAuthResponse) => {
-        const token = crypto.randomBytes(32).toString('base64url');
+        const token = await signSubject(await principals.ownerId(), TRUSTED_DEVICE_SESSION_TTL_MS);
         setSessionCookie(req, res, token, TRUSTED_DEVICE_SESSION_TTL_MS);
         return token;
       },
@@ -757,11 +798,11 @@ export const createUiAuth = ({
 
   const salt = crypto.randomBytes(16);
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
-  let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
   const resolveSessionTtlMs = (trustDevice: unknown): number => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
+    ownerPrincipalId: () => principals.ownerId(),
     ...(readSettingsFromDisk ? { readSettingsFromDisk } : {}),
   });
 
@@ -770,6 +811,7 @@ export const createUiAuth = ({
     passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
     passkeyController = createUiPasskeys({
       passwordBinding,
+      ownerPrincipalId: () => principals.ownerId(),
       ...(readSettingsFromDisk ? { readSettingsFromDisk } : {}),
     });
   };
@@ -828,29 +870,15 @@ export const createUiAuth = ({
     }
   };
 
-  const isSessionValid = async (token: string | null): Promise<boolean> => {
-    if (!token) {
-      return false;
-    }
-    try {
-      await jwtVerify(token, jwtSecret);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const isSessionValid = async (token: string | null): Promise<boolean> => Boolean(await sessionPrincipal(token));
 
   const issueSession = async (
     req: UiAuthRequest,
     res: UiAuthHeaderResponse,
-    { trustDevice = false }: { trustDevice?: boolean } = {},
+    { trustDevice = false, principalId }: { trustDevice?: boolean; principalId?: string } = {},
   ): Promise<string> => {
     const ttlMs = resolveSessionTtlMs(trustDevice);
-    const token = await new SignJWT({ type: 'ui-session' })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime(ttlMs / 1000 + 's')
-      .sign(jwtSecret);
+    const token = await signSubject(principalId ?? await principals.ownerId(), ttlMs);
     setSessionCookie(req, res, token, ttlMs);
     return token;
   };
@@ -871,15 +899,15 @@ export const createUiAuth = ({
 
   const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
-      return next();
+      return requirePrincipalAccess(req, res, next);
     }
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
-      return next();
+      return requirePrincipalAccess(req, res, next);
     }
     const clientAuth = await authenticateClientRequest(req);
     if (clientAuth) {
-      return next();
+      return requirePrincipalAccess(req, res, next);
     }
     clearSessionCookie(req, res);
     return respondUnauthorized(req, res);
@@ -900,12 +928,13 @@ export const createUiAuth = ({
   const handleSessionStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
-      res.json({ authenticated: true });
+      res.json({ authenticated: true, hostOwner: await principals.isOwner((await sessionPrincipal(token))!) });
       return;
     }
     const clientAuth = await authenticateClientRequest(req);
     if (clientAuth) {
-      res.json({ authenticated: true, scope: 'client' });
+      const id = clientAuth.principalId ?? clientAuth.client?.principalId;
+      res.json({ authenticated: true, scope: 'client', hostOwner: typeof id === 'string' && await principals.isOwner(id) });
       return;
     }
     clearSessionCookie(req, res);
@@ -931,14 +960,14 @@ export const createUiAuth = ({
   ) => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
-      return { type: 'session', token };
+      return { type: 'session', token, principalId: await sessionPrincipal(token) ?? undefined };
     }
     if (!allowClientAuth) return null;
     const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
     return clientAuth ? clientAuthContext(clientAuth) : null;
   };
 
-  const resolveWebSocketAuthContext = async (req: UiAuthRequest) => resolveAuthContext(req, null);
+  const resolveWebSocketAuthContext = async (req: UiAuthRequest) => filterWebSocketPrincipal(req, await resolveAuthContext(req, null));
 
   const handleUrlAuthToken = async (req: UiAuthRequest, res: UiAuthResponse) => {
     const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
@@ -970,7 +999,8 @@ export const createUiAuth = ({
     }
 
     const candidate = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (!verifyPassword(candidate)) {
+    const principalId = verifyPassword(candidate) ? await principals.ownerId() : null;
+    if (!principalId) {
       await recordFailedAttempt(req);
       clearSessionCookie(req, res);
       res.status(401).json({ error: 'Invalid credentials' });
@@ -981,7 +1011,7 @@ export const createUiAuth = ({
 
     const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
     const ttlMs = resolveSessionTtlMs(trustDevice);
-    await issueSession(req, res, { trustDevice });
+    await issueSession(req, res, { trustDevice, principalId });
     let clientTokenResult = null;
     if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
       clientTokenResult = await clientAuthController.createClient({
@@ -992,6 +1022,7 @@ export const createUiAuth = ({
         dedupeKey: req.body?.dedupeKey,
         reuseDedupeIdentity: true,
         authMethod: 'password',
+        principalId,
         deviceName: req.body?.deviceName,
         devicePlatform: req.body?.devicePlatform,
         deviceModel: req.body?.deviceModel,
@@ -1022,7 +1053,9 @@ export const createUiAuth = ({
   const handlePasskeyRegistrationOptions = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const label = typeof req.body?.label === 'string' ? req.body.label : '';
-      const options = await passkeyController.beginRegistration(req, { label });
+      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
+      const options = await passkeyController.beginRegistration(req, { label, principalId });
       res.json(options);
     } catch (error) {
       respondPasskeyError(res, error);
@@ -1049,10 +1082,12 @@ export const createUiAuth = ({
 
   const handlePasskeyAuthenticationVerify = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      await passkeyController.finishAuthentication(req.body);
+      const verified = await passkeyController.finishAuthentication(req.body);
+      const principalId = verified.principalId ?? await principals.ownerId();
+      if (!await principals.resolve(principalId)) throw new Error('Authentication principal unavailable');
       const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
       const ttlMs = resolveSessionTtlMs(trustDevice);
-      await issueSession(req, res, { trustDevice });
+      await issueSession(req, res, { trustDevice, principalId });
       let clientTokenResult = null;
       if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
         clientTokenResult = await clientAuthController.createClient({
@@ -1061,6 +1096,7 @@ export const createUiAuth = ({
           clientKind: req.body?.clientKind,
           dedupeKey: req.body?.dedupeKey,
           authMethod: 'passkey',
+          principalId,
           deviceName: req.body?.deviceName,
           devicePlatform: req.body?.devicePlatform,
           deviceModel: req.body?.deviceModel,
@@ -1078,7 +1114,9 @@ export const createUiAuth = ({
 
   const handlePasskeyList = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      res.json({ passkeys: await passkeyController.listPasskeys(req) });
+      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
+      res.json({ passkeys: await passkeyController.listPasskeys(req, principalId) });
     } catch (error) {
       respondPasskeyError(res, error);
     }
@@ -1086,7 +1124,9 @@ export const createUiAuth = ({
 
   const handlePasskeyRevoke = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      const result = await passkeyController.revokePasskey(req, req.params?.id);
+      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
+      const result = await passkeyController.revokePasskey(req, req.params?.id, principalId);
       res.json(result);
     } catch (error) {
       respondPasskeyError(res, error);
@@ -1095,6 +1135,8 @@ export const createUiAuth = ({
 
   const handleResetAuth = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
+      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      if (!principalId || !await principals.isOwner(principalId)) throw Object.assign(new Error('Host owner required'), { statusCode: 403 });
       const passkeyResult = await passkeyController.clearAllPasskeys();
       rotateJwtSecret();
       clearSessionCookie(req, res);
@@ -1117,6 +1159,7 @@ export const createUiAuth = ({
 
   return {
     enabled: true,
+    requirePrincipalAccess,
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,

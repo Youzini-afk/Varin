@@ -6,6 +6,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ThreadListQuery {
+    #[serde(default, skip_serializing_if="Option::is_none", deserialize_with="super::principals::optional_principal")]
+    pub principal_id: Option<Option<String>>,
     pub query: Option<String>,
     pub archived: Option<ArchiveFilter>,
 }
@@ -285,6 +287,10 @@ impl Catalog {
         let needle = query.query.as_deref().unwrap_or("").trim().to_lowercase();
         let mut result = Vec::new();
         for id in ids {
+            if let Some(principal) = &query.principal_id {
+                let owner = super::principals::thread(&self.db, &id)?;
+                if owner.is_some() && &owner != principal { continue; }
+            }
             let summary = self.inspect_thread(&id)?;
             if needle.is_empty()
                 || id.to_lowercase().contains(&needle)
@@ -479,6 +485,7 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
         .ok_or_else(|| RuntimeError::Invalid("Thread has no initial branch".into()))?["branch_id"]
         .clone();
     summary["thread_id"] = json!(thread_id);
+    summary["principal_id"] = json!(super::principals::thread(db,thread_id)?);
     summary["agent_code"] = json!(db.query_row("SELECT agent_code FROM threads WHERE id=?1", [thread_id], |r| r.get::<_,String>(0))?);
     let child: Option<(String, Option<String>)> = db.query_row(
         "SELECT json_extract(body,'$.parent_thread_id'), json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=?1",

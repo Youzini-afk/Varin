@@ -2,6 +2,7 @@
  * carry an opaque identifier; extension-supplied Run/workspace fields never grant authority.
  */
 import { randomUUID } from 'node:crypto';
+import { bindPluginInvocationPrincipal } from '../extensions/invocation-principal.js';
 import { isDeepStrictEqual } from 'node:util';
 import { parseVarinToolJson, parseIncomingOutputPart, type JsonValue, type OutputPart, type IncomingMedia } from '@varin/extension-contract';
 import { failedReadToolReceipt, unknownToolReceipt, type ToolExecutionReceipt } from './tool-bridge.js';
@@ -12,6 +13,7 @@ import { toolOperationId, validToolOrigin, type ExecutorOwner, type LaunchSource
  * Never supplied by an extension, and never a general stale-revision exemption. */
 export interface PermissionSettingsRevision { readonly before: string; readonly after: string }
 export interface ToolInvocationAuthority {
+  readonly principalId?: string;
   readonly invocationId: string;
   readonly runId: string;
   readonly threadId: string;
@@ -100,6 +102,9 @@ export async function withToolInvocation<T>(options: {
   }
   registrations.set(scope, registration);
   liveOperations.set(authority.operationId, registration);
+  const releasePrincipal = authority.principalId ? bindPluginInvocationPrincipal(scope, authority.principalId, context => {
+    try { return requireToolInvocation(context) === authority; } catch { return false; }
+  }) : undefined;
   try { return await work(scope); }
   finally {
     // A broker response/exit stops new capabilities, but does not stop a Host file writer
@@ -113,7 +118,7 @@ export async function withToolInvocation<T>(options: {
           ? failedReadToolReceipt('host_tool_read_failed') : unknownToolReceipt());
         options.onEffectReceipt?.(receipt);
       }
-    } finally { options.onOutput?.(registration.parts); registrations.delete(scope); liveOperations.delete(authority.operationId); }
+    } finally { releasePrincipal?.(); options.onOutput?.(registration.parts); registrations.delete(scope); liveOperations.delete(authority.operationId); }
   }
 }
 

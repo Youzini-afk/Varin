@@ -84,7 +84,7 @@ need neither Varin's private React components nor keys in its translation catalo
 
 | Contribution | Public implementation | Product location |
 | --- | --- | --- |
-| `settings-page` | `defineSettingsPageMount` | Settings navigation; `data.slug`, literal `data.title`, optional `group` / `kind` / `keywords` |
+| `settings-page` | `defineSettingsPageMount` | Settings navigation; `data.slug`, literal `data.title`, optional `group` / `kind` / `keywords` / `primary` (preferred Configure entry; ties keep declaration order) |
 | `command` | `defineCommand` | Command palette; literal `data.title`, optional `keywords` |
 | `message-renderer` | `defineMessageRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.messages` |
 | `tool-renderer` | `defineToolRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.tools` |
@@ -769,9 +769,10 @@ ordinary model through the retrieval settings. See [retrieval ownership](../retr
 
 ## Install and development workflow
 
-Open **Settings → Varin Extensions → Install or update** and choose npm, Git, or local folder. The
-specifier is passed to the application-host package source resolver; the UI does not maintain an
-allowlist. For a local folder, the application host reads the real project directory and builds a new
+Open **Settings → Plugins** for Discover and Installed. Direct install accepts GitHub Releases,
+npm registry packages, Git, local folders, and imported release archives; the advanced management
+section retains the development-source workflow. A pasted public installation link opens the same
+Host-bound preview. The Host resolves the actual source; the directory is not an allowlist. For a local folder, the application host reads the real project directory and builds a new
 immutable content-addressed artifact without copying or modifying the working tree. If `package.json`
 declares dependencies, install them in the project first; Varin never runs `npm install` in a local
 extension project.
@@ -784,7 +785,9 @@ and integrity, then choose **Apply update**. A failed candidate keeps the select
 generation; reviewing capabilities alone never approves the new code.
 
 The UI asks for explicit code trust before installing the exact source, enabling external code,
-or applying an exact candidate. Installation itself may execute code: the broker worker is not an
+or applying an exact candidate. Release previews download and inspect immutable prebuilt contents
+without evaluating plugin modules or running lifecycle scripts. First release installation remains
+disabled. The older development-source install workflow may execute code: the broker worker is not an
 OS sandbox, and managed/native Surface code shares its realm with the application. Capability grants
 constrain broker APIs, not trusted code's direct filesystem, network, or environment access. Code trust
 and capability decisions are separate; confirmation never creates a grant or a persistent allow rule.
@@ -796,7 +799,8 @@ cleanup to the new Host. Rejection does not claim that an already dispatched pre
 its original Host remains the authority for that result. Profile controls ask only when they would newly enable external code;
 ordinary navigation cannot approve a disabled external Shell implicitly.
 
-An extension without requested capabilities is enabled on first installation. An extension that
+In the advanced development-source workflow, an extension without requested capabilities is enabled
+on first installation. Release delivery always starts disabled. An extension that
 requests Host or Surface capabilities is installed disabled; decide every request in its card, then
 enable it with the ordinary lifecycle switch. A denial is still a completed decision—the extension
 may activate with only the capabilities actually granted and must handle their absence.
@@ -892,12 +896,38 @@ is user/application state; workspace scope affects layout rather than automatica
 The explicit enable-and-switch path can enable the selected shell with rollback if its commit fails;
 it does not apply the profile's full extension set. See [profile ownership](../workbench.md#profiles-and-shell-switching).
 
+## Prebuilt release delivery
+
+`varin-extension release ./my-extension --output ./release --platform any --arch any` builds and
+checks the project, then writes a standard `package/` gzip tar archive and `varin.release.json`.
+The manifest binds the plugin identity, version, Varin range, platform/architecture and SHA-256 of
+each asset. Upload the archive and manifest to the author's GitHub Release. The default tag is
+`v<version>`; `owner/repository#stable?tagPrefix=weather-v&manifest=weather.release.json` supports
+multiple release series in one repository. See the [CLI release workflow](../../packages/extension-cli/README.md#release-packages).
+
+Entrypoints and emitted styles are included. List other runtime files/directories explicitly in
+`package.json` `files`; links, path traversal, `.git`, `.env*`, and `node_modules` are not release
+assets. JavaScript dependencies are bundled. Target-specific native helpers must be included and
+checked on their claimed platform. The CLI does not run lifecycle scripts or certify native compatibility.
+
+npm delivery reads registry metadata and integrity-pinned tarballs directly, without an npm CLI on
+the user's Host. Publish prebuilt entrypoints and runtime assets. An npm `engines.varin` field helps
+metadata-only compatibility selection; the package's actual Varin manifest is verified during preview.
+A selector may be a dist-tag or SemVer range, such as `@example/weather@>=1.0.0 <2.0.0`.
+
+The Host previews the actual downloaded manifest, version, capabilities, digest and source. Confirming
+that preview uses those fixed bytes, not a fresh resolution of `latest`. A source change needs explicit
+approval; updates use the existing candidate/apply lifecycle. A same-version content replacement is
+visible and cannot silently mutate the selected artifact. Imported local archives have a manual update
+source. The market never substitutes its own latest-version database for author release metadata.
+
 ## Optional discovery catalogs
 
 `@varin/extension-contract` exports `parseVarinExtensionDiscoveryDocument` and the
 `@varin/extension-contract/schema/discovery` JSON schema. A discovery document contains presentation
-metadata plus a complete npm, Git, local, or built-in source specifier. A catalog entry is a shortcut
-that fills an ordinary install request. It is never an allowlist and grants no capability or trust.
+metadata and a source reference. The public market accepts GitHub Releases and npm registry identities;
+the underlying contract also retains development and distribution source kinds. A listing grants no
+capability or code trust, and does not rewrite an installed plugin's saved source.
 
 ```json
 {
@@ -907,18 +937,28 @@ that fills an ordinary install request. It is never an allowlist and grants no c
       "id": "dev.example.my-extension",
       "displayName": "My Extension",
       "description": "A custom workspace extension",
+      "author": "Example",
+      "categories": ["Workspace"],
+      "icon": "../assets/my-extension.svg",
+      "repository": "https://github.com/example/my-extension",
       "source": {
         "kind": "npm",
         "display": "@example/varin-my-extension",
-        "specifier": "npm:@example/varin-my-extension"
+        "specifier": "@example/varin-my-extension"
       }
     }
   ]
 }
 ```
 
-Catalogs are optional metadata distribution. Direct npm, Git, and local installation remains a
-first-class workflow even when no catalog contains the extension.
+The Host reads configured HTTPS directories, persists the last valid document, and revalidates it with
+ETag. Invalid or unavailable replacements leave prior listings visible with stale/error status. Icons
+resolve against the directory origin. Browsing does not query all authors; release metadata is requested
+only for a preview or installed-plugin update check. The official static catalog and contribution guide
+live in [Astrmira/Varin-plugins](https://github.com/Astrmira/Varin-plugins).
+
+Catalogs remain optional metadata distribution. Direct release, Git, and local installation works even
+when no catalog contains the extension. Removing a listing does not remove users' installations.
 
 ## Publishing checklist
 
@@ -1015,3 +1055,43 @@ relative and do not expose Host installation paths. Import that same descriptor 
 Ordinary tool execute metadata derives from the existing tool declaration. The context-fragments
 provider is a complete built-in method example; owners without such declarations report
 `undeclared`. Discovery does not synthesize missing method contracts or full Application API reflection. Complete service and tool catalogs are returned only on explicit inspection.
+
+
+## Host credentials for connected services
+
+Declare the Host capability `varin.credentials` in the existing manifest capability list. Keep your
+connection configuration in plugin storage and call `credentials(call.capabilities, connectionId)`
+from an authenticated Host service invocation. `credentialNamespace(call.capabilities)` supplies a stable,
+plugin-specific user namespace for nonsecret documents in existing plugin storage; it is not a global
+account registry or a caller-selected user identity. Activation-time clients and unauthenticated calls
+cannot access user credentials. The same user is derived from a Surface service lease or the original
+Agent Run, never a user ID supplied by the plugin.
+
+The SDK exposes `put`, `inspect`, `resolve`, `remove`, and authorization `start/read/reply/cancel`.
+`inspect` returns safe connection metadata including its `account` identity. Keep that identity with
+an explicit user selection and construct the client with the third `expectedAccount` argument for
+later use; replacing credentials invalidates the selection. `resolve` returns a secret only to your
+trusted Host adapter. Never forward it to a Surface, tool result, model context or log.
+
+For OAuth, provide an `authenticate` method on a Host service from the same extension entrypoint.
+The handler must first `await assertCredentialAuthentication(call.capabilities)` from the SDK,
+before reading configuration, processing arguments, or returning authorization state or tokens.
+This checks a private Host annotation on the exact retained credential-adapter invocation; an
+ordinary authenticated service call or Surface/dependency call does not establish that authority.
+Do not expose an unguarded alternate entrypoint: direct RPC must never retrieve PKCE state or tokens.
+Pass `{ serviceId, version, provider }` to `start` and `resolve`. The method accepts the public
+`VarinCredentialAuthenticationCall` union: `begin` returns a pending authorization URL and private
+state, `complete` validates the callback and returns an OAuth token, and `refresh` returns a refreshed
+token for the same provider and account. Optional device codes use the existing Host authorization
+interaction. The Host pins the exact service generation, scopes the attempt to the authenticated
+user/plugin/connection, merges concurrent refreshes, and rejects stale completion after replacement.
+
+Your adapter owns provider-specific OAuth application configuration, state and PKCE verification,
+registered callback/loopback handling, request signing and remote revocation. No provider catalog,
+mailbox model or extra public account service is required. Plugin settings own connection status;
+the plugin center only opens those settings. Local deletion and provider revocation are different
+outcomes. Explicit uninstall-with-data-deletion removes the extension's Host credential namespace.
+
+Current Host login remains the existing single-owner password/passkey/pairing flow. The credential
+boundary isolates trusted subjects, but this feature does not add multi-user enrollment or grant
+anonymous local calls a credential identity.

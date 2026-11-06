@@ -35,6 +35,7 @@ desired enablement、已审查 grant，以及每个 realm 的 actual generation 
 Installed 不等于 enabled，enabled 不等于 active 或健康。公开目录不暴露安装路径或来源凭据。
 
 Package manager 接受 npm、Git、本地目录和已注册 built-in source，不执行安装 lifecycle script。
+插件中心另提供 GitHub Releases、npm registry tarball 和本地发行包的预览交付入口，仍发布到同一 artifact 和 Catalog。
 运行使用核验后的不可变 artifact，不使用可变 checkout。浏览器 bundle 经认证读取并校验后加载，
 可复用凭据不进入 module URL。包括 archive-backed 桌面发行在内，内置 package root 必须先解析为真实
 unpacked directory，再准备 artifact。
@@ -65,6 +66,42 @@ Thread 分区，也不是权限边界。需要区分多个实体时，作者应�
 安装、启用或应用候选代码是**代码信任**，不等同于逐项批准 Varin capability。Broker 继承 Host 环境并以
 Host OS 账户运行；未申请 capability 的代码仍可能直接访问进程、文件、网络与环境变量。Managed Surface
 也在应用页面 realm 中执行。能力撤销约束 Varin API，不能撤回第三方代码已取得的系统访问或已经发生的效果。
+
+## 插件中心与发行交付
+
+设置中的“插件”分为“发现”和“已安装”。服务路由、工作台组合、目录来源与诊断保留在高级管理；
+内置能力与外部安装分别展示。内置版本随 Varin 发行管理，不能单独卸载或从作者 Release 更新。
+“配置”只打开该插件当前可用的 settings-page contribution，不推断账号业务状态，也不会为显示配置偷偷启用代码。
+
+公开收录资料由 [Varin-plugins](https://github.com/Astrmira/Varin-plugins) 维护。默认目录为该仓库
+main 的 `catalog/v1.json`，可在高级管理更换或添加 HTTPS 目录。Host 保存配置及最近有效目录，使用 ETag
+重新验证；网络失败或无效替换保留原列表并显示失败原因。发现页只读取目录与同源图标，不批量查询作者发行。
+同一目录的 ID 必须唯一；不同目录只在 ID 和规范化发行来源相同的情况下合并来源信息。
+市场介绍只有在已安装身份及来源匹配时才可关联，目录修改不改变安装来源或代码。
+
+公开目录和用户安装 Catalog 是两个不同 owner。市场离线、下架或修改作者仓库地址，不妨碍已安装插件运行，
+也不会改写保存的更新来源。跨来源替换先显示来源变化，要求明确确认；普通更新仍沿原 candidate 审查、应用和退役流程。
+
+发行交付由 `ExtensionReleaseManager` 解析作者元数据，复用 `ExtensionArtifactStore` 与
+`ExtensionPackageManager`。GitHub 来源保存仓库、渠道和可选发行系列；npm 来源直接读取 registry 元数据和
+带 integrity 的 tarball，不要求用户安装 npm CLI。归档为标准 gzip tar，使用 `package/` 根目录，拒绝链接和越界路径，
+流式下载及摘要核验，不执行 lifecycle script 或插件模块。当前平台、架构和 Varin 兼容范围决定选择。
+较新的不兼容、缺资产发行会有明确说明；结构错误的发行清单直接报错，已有安装保持不变。
+
+预览准备不可变 artifact，返回实际 manifest、能力请求、内容摘要、Host 和当时 Catalog revision。
+确认仅使用原 preview ID 和核验后的内容，不重新解析 latest；Host 或 Catalog 已变化则重新预览。
+同版本不同内容显示警告并成为独立 candidate。首次安装保持禁用，启用仍走代码信任及能力审查，
+不以“下载成功”冒充正在运行。更新检查只读元数据、合并并发请求，不下载所有归档或启动插件。
+本地上传包只保留文件名来源，后续手动替换，不猜测远端仓库。
+
+所有网络请求复用 Application Host 的 egress/proxy owner。发行包与目录服务不接管原生对话、工具权限、
+已受理调用或凭据。桌面、Web 和移动 Surface 使用同一扩展 Host；这里的 Host 与对话执行位置选择不是同一个概念。
+插件页面显示实际 Host 身份，预览和迟到响应绑定原目标。`varin://extensions/install` 及 Web 查询入口只传递
+公开 npm/GitHub 来源与可选插件 ID，未安装时打开预览而不授权安装。已安装且来源匹配时定位管理，
+即使目录已下架也由 Host 的安装记录识别；链接不能指定本地路径或携带访问凭据。
+
+插件通过通用 Host capability 复用现有授权与凭据机制，调用主体从可信 Surface/Run 链路取得，
+详见[插件凭据与授权](#插件凭据与授权)。具体业务由插件作者维护，现有模型和 MCP 凭据 owner 保持原语义。
 
 ## 模型接入贡献
 
@@ -272,6 +309,39 @@ Accepted-Run tool discovery 读取该 Run 冻结的目录。两者来源不同�
 
 完整 Host 丢失后，catalog 可能恢复已提交选择，而 Operation 仍为 unknown。
 恢复不会重放 Agent effect 或重新 capture 可变来源来制造一张确定回执。
+
+同一版本号的发行内容可能被作者替换。版本检查保持只读元数据，不下载所有包来比较；“当前发行”仍提供
+“预览发行内容”入口，由显式预览固定新字节、核验摘要并报告同版本内容变化。GitHub 发行预览附带已解析
+具体 tag 的发行说明链接，不将另一个最新版本的说明混入已固定预览。
+
+## 插件凭据与授权
+
+普通插件通过 Host capability `varin.credentials` 使用现有凭据和授权机制，不新增公共账号服务。
+[共享凭据 owner](../packages/web/application-host/lib/credentials/service.ts) 从模型凭据实现提取存储、
+API Key/OAuth 记录、并发刷新合并和替换保护；模型适配层仍负责模型请求头、端点、渠道与 Run 绑定。
+现有模型、搜索、代理和 MCP 凭据文件不会因此迁移或合并。
+
+凭据引用按真实用户、插件与连接隔离。Surface 配置调用从已认证的 service lease 取得用户，Agent 工具
+从 Rust Catalog 保存的 Thread/Run 取得用户；调用参数、路由标签和 activation context 都不能指定用户。
+密码、passkey 和配对设备沿原认证入口关联持久主体，session 或设备 token 轮换不会创建另一个凭据所有者。
+当前 Host 仍使用原单一 owner 登录方式，本次不增加多用户注册或邀请界面。无认证身份的本机调用继续使用
+既有非凭据功能，但不能取得插件秘密。不同可信主体的隔离由原调用链与凭据 owner 强制执行。
+
+插件自行保存连接标签、邮箱、服务端点等非秘密配置，并提供自己的设置页面。SDK `credentialNamespace(call.capabilities)`
+返回按真实用户和插件隔离的稳定 opaque key，供插件在既有 storage 内组织自己的配置；不暴露跨插件主体 ID。Host service 使用调用级 SDK
+`credentials(call.capabilities, connectionId, expectedAccount?)`；`inspect` 返回非秘密绑定身份，`resolve`
+只向可信 Host 适配器返回秘密。已选择连接应保存 `account` 并传回 `expectedAccount`，重连后旧选择将被拒绝，
+不能把新账号无声用于旧操作。秘密不得返回 Surface、工具结果、模型上下文或日志。原生插件仍是受信代码，
+这不是进程账户权限之外的 OS 沙箱。
+
+OAuth 服务商逻辑由同一插件的 `authenticate` Host service 实现。Host 复用 `AuthorizationFlows` 展示授权
+地址、设备码、接收回调输入与取消；授权尝试保留实际服务 generation，并绑定原用户、插件和连接。
+初始配置请求返回后授权可继续，取消、撤权和 Host 停止会终止等待。凭据替换与刷新均核对原账号身份，
+迟到的令牌不能覆盖重连或已删除连接。插件负责 OAuth 应用配置、服务商的 state/PKCE 校验、回调部署、
+请求签名及远端撤销；平台不从市场资料推断这些业务。
+
+普通卸载保留插件数据；明确选择删除数据后，原扩展退役流程删除该插件的凭据命名空间。
+此操作不代表服务商已撤销 OAuth 授权，远端撤销仍需由插件实现并如实报告。
 
 ## 验证边界
 

@@ -1,8 +1,10 @@
 import { createSettingsFileStore } from '@varin/settings-store';
 import type { SettingsFileStore } from '@varin/settings-store';
 import type cryptoModule from 'node:crypto';
+import pathModule from 'node:path';
+import { createPrincipalStore, type PrincipalStore } from '../ui-auth/principals.js';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
 const FINGERPRINT_BYTES = 4;
@@ -14,6 +16,7 @@ const GENERIC_REDEEM_ERROR = 'Invalid or expired pairing session';
 type ClientKind = 'desktop' | 'mobile';
 
 interface PairingSession {
+  principalId: string;
   allowedClientKinds: ClientKind[];
   cancelledAt: string | null;
   clientId: string | null;
@@ -34,6 +37,7 @@ interface PairingStore extends Record<string, unknown> {
 }
 
 interface RemoteClientCreateInput extends Record<string, unknown> {
+  principalId: string;
   authMethod: string;
   clientKind: ClientKind;
   dedupeKey: string;
@@ -51,6 +55,7 @@ interface RemoteClientAuthRuntime {
 }
 
 interface PairingRuntimeOptions {
+  principals?: PrincipalStore;
   crypto?: typeof cryptoModule;
   fsPromises?: unknown;
   pairingStore?: SettingsFileStore;
@@ -61,6 +66,7 @@ interface PairingRuntimeOptions {
 }
 
 interface CreatePairingInput {
+  principalId?: string;
   allowedClientKinds?: unknown;
   createdByClientId?: unknown;
   label?: unknown;
@@ -135,6 +141,7 @@ const constantTimeEqual = (left: unknown, right: unknown, crypto: typeof cryptoM
 
 const publicSession = (session: PairingSession) => ({
   id: session.id,
+  principalId: session.principalId,
   createdAt: session.createdAt,
   expiresAt: session.expiresAt,
   usedAt: session.usedAt,
@@ -166,11 +173,13 @@ export const createClientPairingRuntime = ({
   remoteClientAuthRuntime,
   pairingStore: providedPairingStore,
   ttlMs = DEFAULT_TTL_MS,
+  principals: providedPrincipals,
 }: PairingRuntimeOptions = {}) => {
   if (!crypto || !storePath || !remoteClientAuthRuntime) {
     throw new Error('createClientPairingRuntime requires crypto, storePath, and remoteClientAuthRuntime');
   }
 
+  const principals = providedPrincipals ?? createPrincipalStore(pathModule.join(pathModule.dirname(storePath), 'ui-principals.json'));
   const nowIso = () => new Date().toISOString();
   const hashSecret = (secret: string) => crypto.createHash('sha256').update(secret).digest('hex');
   const generateId = () => `${PAIRING_ID_PREFIX}${crypto.randomBytes(12).toString('hex')}`;
@@ -182,9 +191,9 @@ export const createClientPairingRuntime = ({
     defaultValue: emptyStore(),
   });
 
-  const normalizeStore = (value: unknown): PairingStore => {
+  const normalizeStore = (value: unknown, legacyOwnerId: string): PairingStore => {
     const payload = asRecord(value);
-    if (!payload || payload.version !== STORE_VERSION) {
+    if (!payload || payload.version !== 1 && payload.version !== STORE_VERSION) {
       throw new Error(`Unsupported pairing store version: ${String(payload?.version)}`);
     }
     if (!Array.isArray(payload.sessions)) {
@@ -200,8 +209,10 @@ export const createClientPairingRuntime = ({
           if (!id || !secretHash) {
             throw new Error('Pairing store contains an incomplete session');
           }
+          if (payload.version === STORE_VERSION && !normalizeOptionalString(session.principalId)) throw new Error('Pairing store has an unbound principal');
           return {
           id,
+          principalId: normalizeOptionalString(session.principalId) ?? legacyOwnerId,
           secretHash,
           createdAt: typeof session.createdAt === 'string' ? session.createdAt : nowIso(),
           expiresAt: normalizeTimestamp(session.expiresAt) || new Date(Date.now() + ttlMs).toISOString(),
@@ -218,15 +229,15 @@ export const createClientPairingRuntime = ({
     return { version: STORE_VERSION, sessions };
   };
 
-  const readStore = async () => normalizeStore(await pairingStore.read());
+  const readStore = async () => mutateStore(async store => ({ result: store }));
 
   const mutateStore = <Result>(mutator: (store: PairingStore) => Promise<PairingMutation<Result>>): Promise<Result> => pairingStore.transact(async (persisted) => {
-    const store = normalizeStore(persisted);
+    const store = normalizeStore(persisted, await principals.ownerId());
     const transaction = await mutator(store);
     return {
       document: store,
       result: transaction.result,
-      write: transaction.write !== false,
+      write: transaction.write !== false || asRecord(persisted)?.version !== STORE_VERSION,
     };
   });
 
@@ -245,12 +256,15 @@ export const createClientPairingRuntime = ({
     });
   };
 
-  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay }: CreatePairingInput = {}) => {
+  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay, principalId }: CreatePairingInput = {}) => {
     return mutateStore(async (store) => {
       sweepExpiredSessionsFromStore(store);
+      const subject = principalId ?? await principals.ownerId();
+      if (!await principals.resolve(subject)) throw new Error('Unknown authentication principal');
       const secret = generateSecret();
       const session = {
         id: generateId(),
+        principalId: subject,
         secretHash: hashSecret(secret),
         createdAt: nowIso(),
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
@@ -335,6 +349,7 @@ export const createClientPairingRuntime = ({
         || 'Remote client';
       const result = await remoteClientAuthRuntime.createClient({
         label,
+        principalId: session.principalId,
         clientKind: normalizedKind,
         dedupeKey: normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
         authMethod: 'pairing',

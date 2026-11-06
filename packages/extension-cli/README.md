@@ -61,3 +61,35 @@ real broker, render a browser, or certify every supported platform.
 
 The complete manifest, lifecycle, update, distribution-profile, and publishing workflow is in the
 [Varin extension authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
+
+## Release packages
+
+`varin-extension release ./my-extension --output ./release --platform any --arch any`
+builds and checks the project without running package lifecycle scripts. It writes a standard gzip
+tar archive with a `package/` root and a separate `varin.release.json` containing the exact SHA-256,
+identity, version, Varin compatibility range and platform/architecture target. Upload both files to
+the author's GitHub Release, whose tag is `v<version>` by default.
+
+Entrypoints, their emitted styles, the manifest and minimal runtime package metadata are included.
+Declare additional styles, static assets, native helpers and runtime files explicitly in `package.json`
+`files` as relative files or directories (no glob patterns). Links, traversal, `.git`, `.env*` and
+`node_modules` are rejected. JavaScript dependencies are bundled at build time; native libraries and
+helpers must be supplied as explicit runtime files for a concrete target. Inspect and test the produced
+archive on each claimed target; successful bundling does not certify an external system dependency.
+
+For a multi-target release, run the command into separate output directories, combine their `assets`
+arrays into one release manifest (same identity/version/compatibility), and upload every referenced
+archive. A monorepo can use distinct tag prefixes and manifest filenames; register its source as
+`owner/repository#stable?tagPrefix=my-plugin-v&manifest=my-plugin.release.json`.
+
+A minimal GitHub Actions release step after checkout and dependency installation is:
+
+```yaml
+- run: npx --package @varin/extension-cli varin-extension release . --output release
+- uses: softprops/action-gh-release@v2
+  with:
+    files: release/*
+```
+
+Configure the workflow for the author's release tags with the repository's normal protected publishing
+permissions. Varin does not run this workflow or execute install scripts when previewing a release.

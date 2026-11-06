@@ -135,6 +135,15 @@ interface ToolCompositionState {
 export class AgentRuntimeClient {
   /** Explicit Host deployment confinement; desktop installs default to device access. */
   deviceFileAccess = true;
+  /** Auth owner supplies role resolution; original Catalog Run fixes the subject. */
+  principalCanUseHostResources?: (principalId: string | null | undefined) => Promise<boolean>;
+  async canUseRunHostResources(runId: string, signal?: AbortSignal): Promise<boolean> {
+    return !this.principalCanUseHostResources || this.principalCanUseHostResources((await this.run(runId, signal)).principal_id);
+  }
+  private async requireRunHostResources(runId: string, signal?: AbortSignal): Promise<void> {
+    if (!await this.canUseRunHostResources(runId, signal)) throw Object.assign(new Error('Host resource execution requires the Host owner'), { code: 'source_authority_denied' });
+  }
+
   executionEnvironment = () => defaultExecutionEnvironment.snapshot();
   async executionEnvironmentForSource(source: CalendarProtocol.LaunchSource | null | undefined, signal?: AbortSignal) {
     if (source?.resource_owner.kind !== 'managed_host') return this.executionEnvironment();
@@ -928,8 +937,8 @@ export class AgentRuntimeClient {
   threads(signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.list', {}, signal);
   }
-  attention(signal?: AbortSignal): Promise<import('@varin/application-client').ThreadAttentionSnapshot> {
-    return this.kernel.agentRuntimeRequest('runtime.thread.attention.read', {}, signal);
+  attention(signal?: AbortSignal, principalId?: string | null): Promise<import('@varin/application-client').ThreadAttentionSnapshot> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.attention.read', principalId === undefined ? {} : { principalId }, signal);
   }
   threadCatalog(query: import('./protocol.generated.js').ThreadCatalogQuery = {}, signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.catalog.list', query, signal);
@@ -978,10 +987,11 @@ export class AgentRuntimeClient {
     threadId: string,
     branchId: string,
     signal?: AbortSignal,
+    principalId?: string | null,
   ): Promise<{ threadId: string; branchId: string }> {
     return this.kernel.agentRuntimeRequest(
       'runtime.thread.create',
-      { threadId, branchId },
+      { threadId, branchId, ...(principalId !== undefined ? { principalId } : {}) },
       signal,
     );
   }
@@ -1298,6 +1308,10 @@ export class AgentRuntimeClient {
     signal?: AbortSignal,
   ): Promise<McpBinding | undefined> {
     return this.withRunPreparation(runId, signal, async (signal) => {
+      if (!await this.canUseRunHostResources(runId, signal)) {
+        if ((await this.launch(runId, signal))?.selection.mcp_binding) throw new Error('Host MCP capabilities require the Host owner');
+        return undefined;
+      }
       const existing = this.kernel.mcpBinding(runId);
       if (existing) return existing;
       const saved = await this.launch(runId, signal);
@@ -1359,6 +1373,7 @@ export class AgentRuntimeClient {
   }
   /** Called by the actual MCP scope's configuration/tool events, never by each model request. */
   async refreshMcp(runId: string): Promise<void> {
+    await this.requireRunHostResources(runId);
     const input = this.mcpPreparations.get(runId);
     if (!input || !this.prepareMcpOwner) return;
     const controller = new AbortController();
@@ -1443,15 +1458,16 @@ export class AgentRuntimeClient {
       signal?: AbortSignal;
     } = {},
   ): Promise<RunStartReceipt> {
-    return this.withRunPreparation(selection.runId, options.signal, (signal) =>
-      startRunFromSource(this.kernel, this, selection, {
+    return this.withRunPreparation(selection.runId, options.signal, async (signal) => {
+      await this.requireRunHostResources(selection.runId, signal);
+      return startRunFromSource(this.kernel, this, selection, {
         ...options,
         signal,
         ...(this.resolveLiveSource
           ? { resolveLiveSource: this.resolveLiveSource }
           : {}),
-      }),
-    );
+      });
+    });
   }
   /** Reacquire fresh authority from a saved selection; unresolved model/effect waits still reject start. */
   async rebindLaunch(
@@ -1780,6 +1796,10 @@ export class AgentRuntimeClient {
       const run = await this.run(runId, signal);
       if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for policy preparation');
       let saved = await this.launch(runId, signal);
+      if (!await this.canUseRunHostResources(runId, signal)) {
+        if (saved?.policy_target.kind === 'extension') throw new Error('Host execution policies require the Host owner');
+        return undefined;
+      }
       if (saved?.selection.policy.name === 'context_compaction') return undefined;
       const generation = saved?.policy_generation ?? 0;
       const existing = this.kernel.policyBinding(runId, generation);
@@ -1818,6 +1838,10 @@ export class AgentRuntimeClient {
   async prepareDriver(runId: string, signal: AbortSignal,
     credentialScope?: Awaited<ReturnType<ExistingHostCredentialOwner['scope']>>): Promise<DriverBinding | undefined> {
     let saved = await this.launch(runId, signal);
+    if (!await this.canUseRunHostResources(runId, signal)) {
+      if (saved?.selection.driver.kind === 'extension') throw new Error('Host Run drivers require the Host owner');
+      return undefined;
+    }
     if (saved?.selection.policy.name === 'context_compaction') return undefined;
     const existing = this.kernel.driverBinding(runId);
     if (existing) return existing;
@@ -1864,6 +1888,7 @@ export class AgentRuntimeClient {
 
   private async admitStartingSource(runId: string, signal: AbortSignal): Promise<void> {
     const source = (await this.launch(runId, signal))?.selection.source;
+    if (source) await this.requireRunHostResources(runId, signal);
     if (source && source.mode !== 'live_root') await this.admitSourceRegistration({
       resourceOwner: source.resource_owner,
       workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
@@ -1876,6 +1901,7 @@ export class AgentRuntimeClient {
     toolBinding?: CalendarProtocol.SourceToolBinding,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
+      await this.admitStartingSource(runId, signal);
       const delegatedChild = await this.childExecutionForRun(runId, signal);
       const driverBinding = await this.prepareDriver(runId, signal);
       const policyBinding = driverBinding ? undefined : await this.preparePolicy(runId, signal);
@@ -1920,6 +1946,7 @@ export class AgentRuntimeClient {
     toolBinding?: CalendarProtocol.SourceToolBinding,
   ): Promise<RunStartReceipt> {
     return this.withRunPreparation(runId, signal, async (signal) => {
+      await this.admitStartingSource(runId, signal);
       const delegatedChild = await this.childExecutionForRun(runId, signal);
       const selected = await this.modelSelections(runId, signal);
       const credentialScope = await this.kernel.registerCredentialOwner(
@@ -2259,10 +2286,11 @@ export class AgentRuntimeClient {
     cursor: number,
     limit: number,
     signal?: AbortSignal,
+    principalId?: string | null,
   ): Promise<RuntimeEvent[]> {
     return this.kernel.agentRuntimeRequest(
       'runtime.events.read',
-      { cursor, limit },
+      { cursor, limit, ...(principalId !== undefined ? { principalId } : {}) },
       signal,
     );
   }

@@ -666,3 +666,21 @@ A virtualized viewport size is not a stored-history/content limit.
 Reduced motion, keyboard navigation, focus return, narrow layouts and touch must be checked through their
 real interaction paths. Unit/contract tests and source inspection do not establish browser timing,
 real-device usability, authenticated provider success, or packaged Electron/mobile acceptance.
+
+## Plugin center
+
+Settings presents Discover and Installed in `components/sections/extensions/ExtensionsPage.tsx`.
+Discovery searches cached catalog metadata locally; only a selected package starts release preparation.
+The Host supplies source-matched installed flags so sanitized installed source labels are never mistaken
+for exact package provenance. Catalog failures retain the last valid entries and remain visible beside them.
+
+The preview component displays exact version/content and target Host before the existing code-trust dialog.
+It rejects a changed Host or catalog revision after confirmation. Prepared updates return to the existing
+candidate/capability/restart controls, rather than publishing generations from the page. Configuration links
+come only from registered settings-page contributions; navigation never implicitly enables a plugin.
+
+`ExtensionManagement` retains lifecycle controls and diagnostic, routing and workbench composition views
+behind advanced management. Business/account state belongs to each plugin's configuration, not this center.
+View filters and scroll are persisted per Host; changing Host unmounts its pending confirmation and fences
+late results. Source management, explicit source installation and archive file upload remain independently
+available when discovery is unavailable.

@@ -597,6 +597,12 @@ export class BrokeredHostSupervisor {
     const retained = this.#ownerGrants.get(ownerStorageKey(owner));
     return retained?.owner.extensionVersion === owner.extensionVersion ? retained.artifactIntegrity : undefined;
   }
+  /** Trusted capability consumers read the calling generation, including a draining retained one. */
+  getRetainedManifest(owner: HostServiceOwnerIdentity): VarinExtensionManifest | undefined {
+    const instance = this.#instance(owner);
+    return instance && !instance.revoked && this.getRetainedArtifactIdentity(owner) === instance.artifactIntegrity
+      ? structuredClone(instance.manifest) : undefined;
+  }
   getRetainedComposition(owner: HostServiceOwnerIdentity): VarinHostServiceComposition | undefined {
     return this.#instance(owner)?.composition;
   }

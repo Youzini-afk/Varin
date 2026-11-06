@@ -1,6 +1,8 @@
 import type { JsonValue, VarinExtensionToolDeclaration } from "./types.js";
 import { parseVarinContractSource } from "./runtime-source.js";
 
+export const VARIN_TOOL_CONFIRMATION_CAPABILITY = 'varin.tools.confirmation';
+
 export const VARIN_RUNTIME_TOOLS_CAPABILITY = 'runtime.tools';
 
 /** Detached normal JSON, preserving null and empty values and rejecting missing/non-JSON values. */
@@ -18,7 +20,7 @@ export function parseVarinToolJson(value: unknown, path = "tool value"): JsonVal
 export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensionToolDeclaration {
   const declaration = parseVarinToolJson(value, "tool");
   if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) throw new Error("tool must be an object");
-  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "examples", "source", "requirements", "disclosure"]);
+  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "confirmation", "examples", "source", "requirements", "disclosure"]);
   for (const key of Object.keys(declaration)) if (!keys.has(key)) throw new Error(`Unknown tool declaration field: ${key}`);
   for (const key of ["name", "description"] as const) {
     if (typeof declaration[key] !== "string" || !declaration[key].trim()) throw new Error(`tool.${key} must be a non-empty string`);
@@ -34,6 +36,7 @@ export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensi
     throw new Error("Only a job declaration has an explicit thread or environment lifetime");
   }
   if (declaration.operation !== "read" && declaration.operation !== "effect") throw new Error("tool.operation must be read or effect");
+  if (declaration.confirmation !== undefined && declaration.confirmation !== "always") throw new Error("tool.confirmation must be always");
   if (declaration.examples !== undefined && !Array.isArray(declaration.examples)) throw new Error("tool.examples must be an array");
   if (declaration.requirements !== undefined) {
     const requirement = declaration.requirements;

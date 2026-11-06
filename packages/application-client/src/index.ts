@@ -58,3 +58,7 @@ export * from "./conversation-content.js";
 export * from './resource-files.js';
 export * from './documents-http.js';
 export * from './transport/document-watch-events.js';
+
+export * from "./plugin-center.js";
+
+export * from "./plugin-install-intent.js";

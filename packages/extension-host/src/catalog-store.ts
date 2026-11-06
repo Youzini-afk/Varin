@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
   VarinExtensionContractError,
+  extensionSourceIdentity,
   parseVarinExtensionManifest,
   parseVarinExtensionCatalogDocument,
   parseVarinExtensionHostIdentityDocument,
@@ -495,7 +496,8 @@ export class ExtensionCatalogStore {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[candidate.manifest.id];
       if (!record) throw new Error(`Varin extension is not installed: ${candidate.manifest.id}`);
-      if (record.candidate?.integrity === candidate.integrity) return false;
+      if (record.candidate?.integrity === candidate.integrity
+        && extensionSourceIdentity(record.candidate.source) === extensionSourceIdentity(candidate.source)) return false;
       const selectedCapabilities = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
       const candidateCapabilities = manifestCapabilities(candidate.manifest);
       const candidateKeys = new Set(candidateCapabilities.map(capabilityKey));

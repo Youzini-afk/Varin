@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { releaseProject } from "./release.js";
 import { buildProject } from "./build.js";
 import { initProject } from "./init.js";
 import { checkProject, formatContractError } from "./project.js";
@@ -12,6 +13,7 @@ const usage = `Usage:
   varin-extension check [dir]
   varin-extension build [dir]
   varin-extension test [dir]
+  varin-extension release [dir] [--output dir] [--platform any|linux|darwin|win32] [--arch any|x64|arm64]
 
 Global output options:
   --quiet  Emit one concise result line
@@ -21,6 +23,9 @@ Global output options:
 interface ParsedArgs {
   command: string | undefined;
   directory: string | undefined;
+  output?: string;
+  platform?: string;
+  arch?: string;
   help: boolean;
   id: string | undefined;
   json: boolean;
@@ -44,6 +49,12 @@ const parseArgs = (args: string[]): ParsedArgs => {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (!value) continue;
+    if (value === "--output" || value === "--platform" || value === "--arch") {
+      const next = args[++index];
+      if (!next || next.startsWith("--")) throw new Error(`${value} requires a value`);
+      result[value.slice(2) as "output" | "platform" | "arch"] = next;
+      continue;
+    }
     if (value === "--help" || value === "-h") result.help = true;
     else if (value === "--json") result.json = true;
     else if (value === "--quiet") result.quiet = true;
@@ -92,7 +103,7 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
       cliOutput.success({
         human: [usage],
         json: { command: "help", usage },
-        quiet: "varin-extension init|check|build|test",
+        quiet: "varin-extension init|check|build|test|release",
       });
       return 0;
     }
@@ -170,6 +181,16 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
         },
         quiet: `built ${result.project.manifest.id}@${result.project.manifest.version} outputs:${result.outputs.length}`,
       });
+      return 0;
+    }
+    if (parsed.command === "release") {
+      const result = await releaseProject(parsed.directory, {
+        ...(parsed.output ? { output: parsed.output } : {}),
+        ...(parsed.platform ? { platform: parsed.platform } : {}),
+        ...(parsed.arch ? { arch: parsed.arch } : {}),
+      });
+      cliOutput.success({ human: [`Created ${result.archive}`, `Release manifest: ${result.manifestPath}`],
+        json: { command: "release", ...result }, quiet: `released ${result.archive}` });
       return 0;
     }
     if (parsed.command === "test") {

@@ -66,6 +66,8 @@ export interface VarinExtensionToolDeclaration {
   /** Independent jobs explicitly bind their accepted lifetime. */
   lifetime?: "thread" | "environment";
   operation: "read" | "effect";
+  /** Require an exact, one-action confirmation regardless of saved allow rules. */
+  confirmation?: "always";
   examples?: JsonValue[];
   source?: import("./runtime-source.js").VarinContractSource;
 }
@@ -166,7 +168,7 @@ export interface VarinExtensionManifest {
   version: string;
 }
 
-export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm" | "source_view";
+export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm" | "source_view" | "github-release" | "release-archive";
 
 export interface VarinExtensionPackageSource {
   provenance?: import("./package-authoring.js").VarinExtensionSourceViewProvenance;

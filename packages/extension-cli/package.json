@@ -43,7 +43,8 @@
     "@varin/extension-contract": "0.2.0",
     "@varin/extension-sdk": "0.2.0",
     "@varin/extension-surface": "0.2.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "tar": "^7.5.22"
   },
   "engines": {
     "node": ">=22.19.0"

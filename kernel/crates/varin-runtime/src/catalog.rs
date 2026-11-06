@@ -51,7 +51,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 86;
+pub(crate) const FORMAT: i64 = 87;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -144,6 +144,8 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
+    if version >= 87 { principals::check_format(db)?; }
+    else { principals::check_legacy_format(db)?; }
     db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
     db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
     inputs::check_format(db)?;
@@ -342,12 +344,20 @@ impl Catalog {
         self.nested_tools.clone()
     }
     pub fn create_thread(&mut self, thread_id: &str, branch_id: &str) -> Result<()> {
-        self.create_thread_with_bot(thread_id, branch_id, None)
+        self.create_thread_with_principal(thread_id, branch_id, None)
+    }
+    pub fn create_thread_with_principal(&mut self, thread_id: &str, branch_id: &str, principal: Option<&str>) -> Result<()> {
+        self.create_thread_owned(thread_id, branch_id, None, principal)
     }
     fn create_thread_with_bot(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>) -> Result<()> {
+        self.create_thread_owned(thread_id, branch_id, bot_id, None)
+    }
+    fn create_thread_owned(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>, principal: Option<&str>) -> Result<()> {
         let tx = self.db.transaction()?;
+        if let Some(value) = principal { principals::validate(value)?; }
         let initial:Option<String>=tx.query_row("SELECT json_extract(data,'$.branch_id') FROM events WHERE subject=?1 AND kind='thread.created' ORDER BY cursor LIMIT 1",[thread_id],|r|r.get(0)).optional()?;
         if let Some(initial) = initial {
+            if principals::thread(&tx, thread_id)?.as_deref() != principal { return Err(RuntimeError::Conflict("Thread principal changed".into())); }
             let bound: Option<String> = tx.query_row("SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1", [thread_id], |r| r.get(0)).optional()?;
             if bound.as_deref() != bot_id { return Err(RuntimeError::Conflict("Thread Bot binding changed".into())); }
             if initial == branch_id {
@@ -359,6 +369,7 @@ impl Catalog {
         }
 
         threads::insert(&tx, thread_id)?;
+        principals::assign_new(&tx, thread_id, principal)?;
         if let Some(bot_id) = bot_id {
             if !bot::permitted(&tx, bot_id, self.epoch)? { return Err(RuntimeError::RequestActivationHeld); }
             tx.execute("INSERT INTO bot_thread_bindings(thread_id,bot_id) VALUES(?1,?2)", params![thread_id, bot_id])?;
@@ -426,7 +437,7 @@ impl Catalog {
             submissions::SubmissionOrigin::Ingress { execution_id, .. } => execution_id.as_deref(),
             _ => None,
         };
-        let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary);
+        let create_thread = matches!(origin, submissions::SubmissionOrigin::Summary { .. });
         let duplicate: Option<(String, String)> = tx
             .query_row(
                 "SELECT intent,receipt FROM commands WHERE id=?1",
@@ -488,6 +499,10 @@ impl Catalog {
         }
         if create_thread {
             threads::insert(&tx, &command.thread_id)?;
+            if let submissions::SubmissionOrigin::Summary { source_branch_id } = origin {
+                let principal = principals::branch(&tx, source_branch_id)?;
+                principals::assign_new(&tx, &command.thread_id, principal.as_deref())?;
+            }
             tx.execute(
                 "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
                 params![command.branch_id, command.thread_id],
@@ -574,6 +589,7 @@ impl Catalog {
             params![input_id, thread, history.parent, encode(&history)?, run_id],
         )?;
         let run = Run {
+            principal_id: principals::thread(&tx, &thread)?,
             waiting_on: None,
             id: run_id.clone(),
             thread_id: thread,
@@ -1724,9 +1740,11 @@ fn read_all<T: DeserializeOwned>(db: &Connection, table: &str) -> Result<Vec<T>>
 const SCHEMA: &str = r#"
 CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT NULL);
 INSERT INTO runtime_meta VALUES(1,0);
-CREATE TABLE threads(id TEXT PRIMARY KEY,agent_code TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
+CREATE TABLE catalog_principal_owner(id INTEGER PRIMARY KEY CHECK(id=1),owner_principal_id TEXT NOT NULL,claim_legacy INTEGER NOT NULL CHECK(claim_legacy IN(0,1)));
+CREATE TABLE threads(id TEXT PRIMARY KEY,principal_id TEXT,agent_code TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
 CREATE TABLE retired_agent_codes(code TEXT PRIMARY KEY);
 CREATE TRIGGER retire_agent_code BEFORE DELETE ON threads BEGIN INSERT INTO retired_agent_codes(code) VALUES(old.agent_code); END;
+CREATE INDEX thread_principals ON threads(principal_id,id);
 CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),head TEXT,active_run TEXT);
 CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),run_id TEXT NOT NULL REFERENCES runs(id) DEFERRABLE INITIALLY DEFERRED,body TEXT NOT NULL);
@@ -1768,6 +1786,9 @@ mod execution_persistence;
 
 #[path = "catalog_external.rs"]
 pub mod external;
+
+#[path = "catalog_principals.rs"]
+pub mod principals;
 
 #[path = "catalog_upgrade.rs"]
 mod upgrades;

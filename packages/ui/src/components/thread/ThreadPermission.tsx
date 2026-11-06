@@ -35,6 +35,7 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
     } finally { busy.current = false; if (mounted.current && active.current === id) setPending(false); }
   };
   const tool = String(persistent?.tool ?? call.name), args = record(call.arguments);
+  const onceOnly = scope.confirmation === 'always';
   const targets = Array.isArray(persistent?.targets) ? persistent.targets.map(record).filter((target): target is Record<string, unknown> => target !== null) : [];
   const subject = typeof args?.path === 'string' ? args.path : typeof args?.url === 'string' ? args.url : '';
   return <section aria-label={t('chat.permission.title')} className="thread-permission">
@@ -45,6 +46,13 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
       {String(target.label ?? target.tool)}{target.authority ? <> · {t('settings.permissions.authority')}</> : null}
     </li>)}</ul>}
     {persistent?.available === false && permission.decision === null && <p className="text-status-warning typography-meta">{t('chat.permission.unavailable')}</p>}
+    {onceOnly && <div className="thread-permission-preview">
+      <p>{String(scope.reason)}</p>
+      <dl>{Object.entries(args ?? { input: call.arguments }).map(([name, value]) => <div key={name}>
+        <dt className="font-medium">{name}</dt>
+        <dd className="whitespace-pre-wrap break-words">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</dd>
+      </div>)}</dl>
+    </div>}
     <details className="thread-permission-details"><summary>{t('chat.permission.details')}</summary>
       <p>{String(scope.reason)}</p><pre>{JSON.stringify({ arguments: call.arguments, scope, actor: permission.actor }, null, 2)}</pre>
     </details>
@@ -55,7 +63,7 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
       {Boolean(permission.persisted_rule) && <p>{t('chat.permission.revokeHint')}</p>}
     </div> : <div className="thread-permission-actions">
       <Button size="sm" disabled={!ready || pending} onClick={() => void choose('allow_once')}>{t('chat.permission.once')}</Button>
-      <Button size="sm" variant="outline" disabled={!ready || pending || persistent?.available !== true} onClick={() => void choose('allow_always')}>{t('chat.permission.always')}</Button>
+      {!onceOnly && <Button size="sm" variant="outline" disabled={!ready || pending || persistent?.available !== true} onClick={() => void choose('allow_always')}>{t('chat.permission.always')}</Button>}
       <Button size="sm" variant="ghost" disabled={!ready || pending} onClick={() => void choose('deny')}>{t('chat.permission.deny')}</Button>
       {pending && <Icon name="loader-4" className="size-3.5 animate-spin motion-reduce:animate-none" />}
     </div>}

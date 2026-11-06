@@ -728,3 +728,6 @@ export * from "./tools.js";
 export * from "./models.js";
 
 export * from "./surface-contributions.js";
+export * from './credentials.js';
+
+export { confirmToolEffect } from './tool-confirmation.js';

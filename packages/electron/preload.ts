@@ -12,6 +12,7 @@ import {
 
 type NativeEventHandler = (payload: unknown) => void;
 const eventListeners = new Map<VarinDesktopEvent, Set<NativeEventHandler>>();
+let pendingPluginInstallLink: VarinDesktopEventMap['varin:plugin-install-link'] | undefined;
 
 const bootstrap = (() => {
   try {
@@ -115,6 +116,13 @@ const addListener = <E extends VarinDesktopEvent>(
   listeners.add(wrapped);
   eventListeners.set(event, listeners);
 
+  // A cold-launch link can arrive before React mounts. Keep only the latest navigation intent.
+  if (event === 'varin:plugin-install-link' && pendingPluginInstallLink) {
+    const pending = pendingPluginInstallLink;
+    pendingPluginInstallLink = undefined;
+    wrapped(pending);
+  }
+
   return () => {
     const current = eventListeners.get(event);
     if (!current) {
@@ -129,6 +137,10 @@ const addListener = <E extends VarinDesktopEvent>(
 
 const dispatchNativeEvent = (event: VarinDesktopEvent, detail: unknown): void => {
   const listeners = eventListeners.get(event);
+  if (event === 'varin:plugin-install-link' && !listeners?.size) {
+    const value = recordOf(detail);
+    if (typeof value.url === 'string') pendingPluginInstallLink = { url: value.url };
+  }
   if (listeners) {
     for (const listener of listeners) {
       try {

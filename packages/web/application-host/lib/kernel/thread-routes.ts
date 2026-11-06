@@ -1,3 +1,4 @@
+import { currentRequestPrincipal } from './request-principal.js';
 import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
 import { parseThreadObjectReferences } from './thread-object-input.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
@@ -609,7 +610,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('operation/retrieval-file', (body, signal) => adapter.retrievalFileTarget(text(body.operationId), text(body.itemId), text(body.path), signal));
   post('operation/retrieval-trace', (body, signal) => adapter.retrievalTrace(text(body.operationId),
     body.beforeId === undefined ? undefined : { headId: text(body.headId), beforeId: text(body.beforeId) }, signal));
-  post('events', body => adapter.runtime.events(revision(body.cursor), 256));
+  post('events', body => adapter.runtime.events(revision(body.cursor), 256, undefined, currentRequestPrincipal()));
   app.get('/api/threads/observe', requireAuth, async (request, response) => {
     let cursor: number;
     if (request.query.cursor === undefined) {

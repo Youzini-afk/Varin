@@ -125,3 +125,15 @@ remains distinct from an admitted effect's original completion. No universal mod
 or comprehensive queue/execution/observation budget has been introduced. Individual owners retain
 their existing cancellation and actual-exit contracts; deadline expiry is a crash-recovery path,
 not proof of a clean checkpoint. The supervisor must also bound a stalled JavaScript event loop.
+
+
+### Plugin credentials
+
+The Host's model-neutral credential lifecycle lives in `application-host/lib/credentials/service.ts`;
+the model adapter keeps channel, endpoint/header and Run semantics. `extensions/credentials.ts`
+registers `varin.credentials`, using trusted Surface/Run principal attribution and existing
+`AuthorizationFlows`. Plugin secrets are stored separately from connection settings and existing model
+credentials. The plugin handles provider-specific OAuth and remote revocation, while Host storage
+handles scoped references, concurrent refresh and stale-write protection. No provider-specific business
+state or public account service is introduced. Existing password/passkey/pairing entrypoints retain
+a durable Host-owner subject; this does not add multi-user enrollment.

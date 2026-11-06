@@ -377,11 +377,12 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         ? context.clientId
         : (typeof client.id === 'string' ? client.id : '');
       if (!clientId || typeof client.id !== 'string') return null;
-      return { type: 'client', clientId, client: client as VarinAuthenticatedClient };
+      return { type: 'client', clientId, client: client as VarinAuthenticatedClient, ...(typeof context.principalId === 'string' ? { principalId: context.principalId } : typeof client.principalId === 'string' ? { principalId: client.principalId } : {}) };
     }
     if (context.type === 'session') {
       return {
         type: 'session',
+        ...(typeof context.principalId === 'string' ? { principalId: context.principalId } : {}),
         ...(typeof context.token === 'string' && context.token ? { token: context.token } : {}),
       };
     }
@@ -666,7 +667,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       if (context) {
         req.varinAuth = context;
         attachExternalAudit(req, res, context);
-        return next();
+        return uiAuthController.requirePrincipalAccess ? uiAuthController.requirePrincipalAccess(req, res, next) : next();
       }
     }
     return uiAuthController.requireAuth(req, res, next);
@@ -812,13 +813,14 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         }
       }
       const clients = await remoteClientAuthRuntime.listClients();
-      res.json({ clients });
+      res.json({ clients: clients.filter(client => !authContext.principalId || client.principalId === authContext.principalId) });
     });
   });
 
   app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
-    await runWithClientCreateAuth(req, res, next, async () => {
+    await runWithClientCreateAuth(req, res, next, async (authContext) => {
       const result = await remoteClientAuthRuntime.createClient({
+        ...(authContext.principalId ? { principalId: authContext.principalId } : {}),
         label: req.body?.label,
         expiresAt: req.body?.expiresAt,
         clientKind: req.body?.clientKind,
@@ -845,6 +847,8 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
           }
         }
       }
+      const target = (await remoteClientAuthRuntime.listClients()).find(client => client.id === req.params?.id);
+      if (authContext.principalId && target?.principalId !== authContext.principalId) return res.status(403).json({ revoked: false, error: 'Device belongs to another user' });
       const result = await remoteClientAuthRuntime.revokeClient(req.params?.id);
       if (!result.revoked) {
         return res.status(404).json({ revoked: false, error: 'Client not found' });
@@ -864,7 +868,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
           return res.status(403).json({ purged: 0, error: 'Client tokens cannot purge revoked devices' });
         }
       }
-      const result = await remoteClientAuthRuntime.purgeRevokedClients();
+      const result = await remoteClientAuthRuntime.purgeRevokedClients(authContext.principalId);
       void reconcileRelay();
       res.json(result);
     });
@@ -889,6 +893,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       }
       const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
       const result = await clientPairingRuntime.createPairingSession({
+        ...(authContext.principalId ? { principalId: authContext.principalId } : {}),
         label: req.body?.label,
         allowedClientKinds: req.body?.allowedClientKinds,
         createdByClientId: clientIdFromAuthContext(authContext),
@@ -956,15 +961,17 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
   // Pending pairing sessions (link created, device not yet connected) for the
   // "pending devices" list. Secrets are never included.
   app.get('/api/client-auth/pairing/sessions', async (req, res, next) => {
-    await runWithClientCreateAuth(req, res, next, async () => {
+    await runWithClientCreateAuth(req, res, next, async (authContext) => {
       const pending = await clientPairingRuntime.listPendingSessions();
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ pending });
+      res.json({ pending: pending.filter(session => !authContext.principalId || session.principalId === authContext.principalId) });
     });
   });
 
   app.delete('/api/client-auth/pairing/sessions/:id', async (req, res, next) => {
-    await runWithClientCreateAuth(req, res, next, async () => {
+    await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      const target = await clientPairingRuntime.getPairingSession(req.params?.id);
+      if (authContext.principalId && target?.principalId !== authContext.principalId) return res.status(403).json({ cancelled: false, error: 'Pairing belongs to another user' });
       const result = await clientPairingRuntime.cancelPairingSession(req.params?.id);
       if (!result.cancelled) {
         return res.status(404).json({ cancelled: false, error: 'Pairing session not found' });

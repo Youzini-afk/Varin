@@ -43,3 +43,6 @@ export * from "./recovery-files.js";
 export * from "./model-protocol.generated.js";
 
 export * from "./surface-contributions.js";
+
+export * from "./releases.js";
+export * from './credentials.js';

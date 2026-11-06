@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { t as listTar } from 'tar';
+import { releaseProject } from '../src/release.js';
+
+test('release builds executable bundles and packages explicit runtime assets without lifecycle scripts or ambient secrets', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-cli-release-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, 'src'));
+  await mkdir(join(directory, 'runtime'));
+  await writeFile(join(directory, 'src/main.ts'), 'export default { activate() {} };');
+  await writeFile(join(directory, 'runtime/helper.txt'), 'runtime resource');
+  await writeFile(join(directory, '.env'), 'PRIVATE=never-package');
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dev.release.cli', version: '1.0.0+build.7', type: 'module', files: ['runtime'], scripts: { prepack: 'exit 1' }, varin: { build: { entrypoints: { host: 'src/main.ts' } } } }));
+  await writeFile(join(directory, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'dev.release.cli', version: '1.0.0+build.7', engines: { varin: '^1.0.0' }, entrypoints: { host: { mode: 'brokered', file: 'dist/host.cjs' } } }));
+  const result = await releaseProject(directory);
+  assert.equal(result.manifest.version, '1.0.0+build.7');
+  assert.equal(result.manifest.assets[0]?.file, 'dev.release.cli-1.0.0_build.7-any-any.tgz');
+  const paths: string[] = [];
+  await listTar({ file: result.archive, onReadEntry: entry => { paths.push(entry.path); } });
+  assert.ok(paths.includes('package/dist/host.cjs'));
+  assert.ok(paths.includes('package/runtime/helper.txt'));
+  assert.ok(!paths.some(path => path.includes('.env') || path.includes('/src/')));
+  assert.equal(result.manifest.assets[0]?.sha256, createHash('sha256').update(await readFile(result.archive)).digest('hex'));
+  const metadata = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+  metadata.files = ['../escape'];
+  await writeFile(join(directory, 'package.json'), JSON.stringify(metadata));
+  await assert.rejects(releaseProject(directory), /safe relative paths/);
+});

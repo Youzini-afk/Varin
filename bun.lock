@@ -92,6 +92,7 @@
         "@varin/extension-sdk": "0.2.0",
         "@varin/extension-surface": "0.2.0",
         "esbuild": "^0.28.2",
+        "tar": "^7.5.22",
       },
     },
     "packages/extension-contract": {
@@ -113,7 +114,11 @@
         "@varin/extension-contract": "workspace:*",
         "esbuild": "^0.28.2",
         "jsonc-parser": "^3.3.1",
+        "semver": "^7.8.5",
         "tar": "^7.5.22",
+      },
+      "devDependencies": {
+        "@types/semver": "^7.8.0",
       },
     },
     "packages/extension-loader": {

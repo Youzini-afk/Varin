@@ -117,7 +117,7 @@ const CONTRIBUTION_KINDS = new Set<VarinExtensionContributionKind>([
   "tool-renderer",
   "view",
 ]);
-const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm", "source_view"]);
+const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm", "source_view", "github-release", "release-archive"]);
 const ACTUAL_STATUSES = new Set<VarinExtensionActualStatus>([
   "active",
   "activating",

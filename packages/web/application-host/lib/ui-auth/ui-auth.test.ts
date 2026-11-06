@@ -191,7 +191,7 @@ describe('ui auth client credential seam', () => {
 
     await auth.handleSessionStatus(req, res);
 
-    expect(res.body).toEqual({ authenticated: true, scope: 'client' });
+    expect(res.body).toEqual({ authenticated: true, scope: 'client', hostOwner: false });
   });
 
   it('exchanges bearer credentials for short-lived URL auth tokens', async () => {
@@ -450,5 +450,34 @@ describe('ui auth client credential seam', () => {
     const expiresAt = Date.parse(String(capturedInput.expiresAt));
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
+  });
+});
+
+describe('stable UI user ownership', () => {
+  it('keeps the owner across JWT rotation and passkey clearing', async () => {
+    const { createPrincipalStore } = await import('./principals.js');
+    const principals = createPrincipalStore(path.join(dataDir, 'subjects-test.json'));
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'owner-secret', principals });
+    const cookie = (res: ReturnType<typeof createResponse>) => String(res.getHeader('set-cookie')).split(';')[0]!;
+    try {
+      const login = createResponse();
+      await auth.handleSessionCreate({ headers: {}, body: { password: 'owner-secret' } }, login);
+      const ownerRequest = { headers: { cookie: cookie(login) } };
+      const before = await auth.resolveAuthContext(ownerRequest, null);
+      expect(before?.principalId).toBe(await principals.ownerId());
+      const reset = createResponse(); await auth.handleResetAuth(ownerRequest, reset);
+      expect(reset.statusCode).toBe(200);
+      expect(await auth.resolveAuthContext(ownerRequest, null)).toBeNull();
+      const relogin = createResponse(); await auth.handleSessionCreate({ headers: {}, body: { password: 'owner-secret' } }, relogin);
+      expect((await auth.resolveAuthContext({ headers: { cookie: cookie(relogin) } }, null))?.principalId).toBe(before?.principalId);
+    } finally { auth.dispose(); }
+  });
+  it('never grants user/account authority to arbitrary no-password cookies', async () => {
+    const auth = (await loadCreateUiAuth())({ password: '' });
+    try {
+      const context = await auth.resolveAuthContext({ headers: { cookie: 'varin_ui_session=attacker-chosen' } }, createResponse());
+      expect(context?.principalId).toBeUndefined();
+    } finally { auth.dispose(); }
   });
 });
