@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 81;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 82;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1333,6 +1333,8 @@ pub(crate) struct ModelPresentationParams {
 
 pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadListQuery;
 
+pub(crate) type PrincipalQuery = varin_runtime::catalog::principals::PrincipalQuery;
+
 pub(crate) type ThreadMetadataUpdateParams = varin_runtime::catalog::threads::ThreadUpdate;
 
 pub(crate) type ThreadTitlePrepareParams = varin_runtime::catalog::titles::TitlePrepare;
@@ -1635,6 +1637,14 @@ pub(crate) struct AdmissionInspectParams {
 pub(crate) struct ThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PrincipalInitializeParams {
+    pub(crate) owner_principal_id: String,
+    pub(crate) claim_legacy: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1694,12 +1704,7 @@ pub(crate) struct RuntimeProcessAccessParams {
     pub(crate) tool_binding: Value,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct EventsParams {
-    pub(crate) cursor: i64,
-    pub(crate) limit: i64,
-}
+pub(crate) type EventsParams = varin_runtime::catalog::principals::EventsQuery;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -4761,11 +4766,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.thread.attention.read" => {
-            serde_json::from_value::<KernelEmptyParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+        "runtime.thread.attention.read" => serde_json::from_value::<PrincipalQuery>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.thread.update" => {
             serde_json::from_value::<ThreadMetadataUpdateParams>(params.clone())
                 .map(|_| ())
@@ -4950,6 +4953,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.thread.create" => serde_json::from_value::<ThreadCreateParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.principals.initialize" => {
+            serde_json::from_value::<PrincipalInitializeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.input.submit" => serde_json::from_value::<InputSubmitParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

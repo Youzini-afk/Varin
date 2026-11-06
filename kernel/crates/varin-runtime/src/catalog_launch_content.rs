@@ -239,6 +239,7 @@ pub(super) fn stage_policy_models(
         .collect()
 }
 pub struct LaunchRead {
+    principal_id: Option<String>,
     startable: bool,
     policy_preparable: bool,
     driver_preparable: bool,
@@ -253,6 +254,7 @@ impl LaunchRead {
     }
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
+            principal_id: self.principal_id,
             policy_generation: self.metadata.policy_generation,
             policy_target: self.metadata.policy_target.load(&self.content)?,
             startable: self.startable,
@@ -880,6 +882,7 @@ impl Catalog {
     }
     pub(super) fn launch_read(&self, metadata: LaunchMetadata) -> Result<LaunchRead> {
         Ok(LaunchRead {
+            principal_id: self.run(&metadata.run_id)?.principal_id,
             driver_preparable: super::driver::preparable(&self.db, &metadata.run_id, &metadata)?,
             startable: self.run_startable(&metadata.run_id)?,
             policy_preparable: super::launches::policy_preparable(

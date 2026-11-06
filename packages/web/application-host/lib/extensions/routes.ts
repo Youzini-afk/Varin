@@ -165,12 +165,13 @@ export const registerExtensionRoutes = (app: Express, {
   readProjects,
   uiAuthController,
 }: ExtensionRouteDependencies): void => {
-  const servicePrincipal = async (req: Request, res: Response): Promise<string | undefined> => {
+  const servicePrincipal = async (req: Request, res: Response): Promise<{ leaseOwner?: string; principalId?: string }> => {
     const value = req.varinAuth ?? await uiAuthController.resolveAuthContext?.(req, res, { allowClientAuth: true });
     const auth = asRecord(value);
     const identity = auth?.type === 'client' && typeof auth.clientId === 'string' ? auth.clientId
       : auth?.type === 'session' && typeof auth.token === 'string' ? auth.token : undefined;
-    return identity ? `${auth!.type}:${createHash('sha256').update(identity).digest('hex')}` : undefined;
+    return { ...(identity ? { leaseOwner: `${auth!.type}:${createHash('sha256').update(identity).digest('hex')}` } : {}),
+      ...(typeof auth?.principalId === 'string' ? { principalId: auth.principalId } : {}) };
   };
   app.post(
     '/api/varin/extensions/v1/contracts/query',
@@ -534,7 +535,7 @@ export const registerExtensionRoutes = (app: Express, {
       res.once('close', abort);
       try {
         const principal = asRecord(req.body)?.lease ? await servicePrincipal(req, res) : undefined;
-        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal, principal) });
+        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal, principal?.leaseOwner, principal?.principalId) });
       } catch (error) {
         return res.status(400).json({
           error: {
@@ -556,7 +557,7 @@ export const registerExtensionRoutes = (app: Express, {
       if (isDraining()) return res.status(503).json({ code: 'host-draining', admission: 'not_started' });
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
       const principal = await servicePrincipal(req, res);
-      if (!principal) return res.status(401).json({ error: { code: 'surface_owner_unavailable', retryable: false } });
+      if (!principal.leaseOwner) return res.status(401).json({ error: { code: 'surface_owner_unavailable', retryable: false } });
       if (isDraining()) return res.status(503).json({ code: 'host-draining', admission: 'not_started' });
       const controller = new AbortController();
       const abort = () => controller.abort(new ExtensionRequestDisconnectedError('Surface service lease disconnected'));
@@ -571,7 +572,7 @@ export const registerExtensionRoutes = (app: Express, {
         }
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       };
-      try { await extensionRuntime.watchServiceLease(req.body, principal, emit, controller.signal); }
+      try { await extensionRuntime.watchServiceLease(req.body, principal.leaseOwner, emit, controller.signal, principal.principalId); }
       catch (error) { if (!controller.signal.aborted && !res.destroyed && !res.writableEnded) emit({ kind: 'error', message: error instanceof Error ? error.message : String(error) }); }
       finally { req.off('aborted', abort); res.off('close', abort); if (!res.destroyed && !res.writableEnded) res.end(); }
     },

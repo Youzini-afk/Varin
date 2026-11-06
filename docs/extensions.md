@@ -310,6 +310,34 @@ Accepted-Run tool discovery 读取该 Run 冻结的目录。两者来源不同�
 完整 Host 丢失后，catalog 可能恢复已提交选择，而 Operation 仍为 unknown。
 恢复不会重放 Agent effect 或重新 capture 可变来源来制造一张确定回执。
 
+## 插件凭据与授权
+
+普通插件通过 Host capability `varin.credentials` 使用现有凭据和授权机制，不新增公共账号服务。
+[共享凭据 owner](../packages/web/application-host/lib/credentials/service.ts) 从模型凭据实现提取存储、
+API Key/OAuth 记录、并发刷新合并和替换保护；模型适配层仍负责模型请求头、端点、渠道与 Run 绑定。
+现有模型、搜索、代理和 MCP 凭据文件不会因此迁移或合并。
+
+凭据引用按真实用户、插件与连接隔离。Surface 配置调用从已认证的 service lease 取得用户，Agent 工具
+从 Rust Catalog 保存的 Thread/Run 取得用户；调用参数、路由标签和 activation context 都不能指定用户。
+密码、passkey 和配对设备沿原认证入口关联持久主体，session 或设备 token 轮换不会创建另一个凭据所有者。
+当前 Host 仍使用原单一 owner 登录方式，本次不增加多用户注册或邀请界面。无认证身份的本机调用继续使用
+既有非凭据功能，但不能取得插件秘密。不同可信主体的隔离由原调用链与凭据 owner 强制执行。
+
+插件自行保存连接标签、邮箱、服务端点等非秘密配置，并提供自己的设置页面。Host service 使用调用级 SDK
+`credentials(call.capabilities, connectionId, expectedAccount?)`；`inspect` 返回非秘密绑定身份，`resolve`
+只向可信 Host 适配器返回秘密。已选择连接应保存 `account` 并传回 `expectedAccount`，重连后旧选择将被拒绝，
+不能把新账号无声用于旧操作。秘密不得返回 Surface、工具结果、模型上下文或日志。原生插件仍是受信代码，
+这不是进程账户权限之外的 OS 沙箱。
+
+OAuth 服务商逻辑由同一插件的 `authenticate` Host service 实现。Host 复用 `AuthorizationFlows` 展示授权
+地址、设备码、接收回调输入与取消；授权尝试保留实际服务 generation，并绑定原用户、插件和连接。
+初始配置请求返回后授权可继续，取消、撤权和 Host 停止会终止等待。凭据替换与刷新均核对原账号身份，
+迟到的令牌不能覆盖重连或已删除连接。插件负责 OAuth 应用配置、服务商的 state/PKCE 校验、回调部署、
+请求签名及远端撤销；平台不从市场资料推断这些业务。
+
+普通卸载保留插件数据；明确选择删除数据后，原扩展退役流程删除该插件的凭据命名空间。
+此操作不代表服务商已撤销 OAuth 授权，远端撤销仍需由插件实现并如实报告。
+
 ## 验证边界
 
 生命周期测试随 Host、loader 和 Surface owner 维护，native consumer test 验证实际绑定边界。

@@ -2861,6 +2861,11 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 .map_err(domain)?,
         )?);
     }
+    if method == "runtime.principals.initialize" {
+        let p: PrincipalInitializeParams = serde_json::from_value(params)?;
+        catalog.initialize_principals(&p.owner_principal_id, p.claim_legacy).map_err(domain)?;
+        return Ok(json!({}));
+    }
     if method == "runtime.thread.inspect" {
         let p: ThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);

@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 81 as const;
+export const KERNEL_PROTOCOL_VERSION = 82 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,10 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.driver.finish","runtime
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["runtime.driver.model","runtime.driver.tool","runtime.driver.wait","process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.child.user.receipt":"branchId","runtime.child.user.accept":"branchId","runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.finish","runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v81" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v82" as const;
 
 export type KernelMethod =
+  | "runtime.principals.initialize"
   | "runtime.driver.finish"
   | "runtime.driver.wait"
   | "runtime.driver.context"
@@ -2944,7 +2945,7 @@ export interface ThreadBranch {
   latest_run: Run | null;
 }
 
-export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; }
+export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; principalId?: string | null; }
 
 export interface ThreadTitleJob { key: string; threadId: string; branchId: string; headId: string; checkpointId: string | null; activeRunId: string | null; rounds: number; generation: number; title: string; initial: boolean; }
 
@@ -2961,6 +2962,7 @@ export interface BranchDeleteParams { threadId: string; branchId: string; key: s
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {
+  principal_id?: string | null;
   agent_code?: string;
   parent_thread_id: string | null;
   main_branch_id: string;
@@ -2982,7 +2984,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 81; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 82; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3343,6 +3345,7 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  principal_id?: string | null;
   driver_preparable: boolean;
   policy_preparable: boolean;
   policy_generation: number;
@@ -3688,7 +3691,15 @@ export type DeliveryState = "selected" | "sent" | "committed";
 export interface ThreadCreateParams {
   threadId: string;
   branchId: string;
+  principalId?: string | null;
 }
+
+export interface PrincipalInitializeParams {
+  ownerPrincipalId: string;
+  claimLegacy: boolean;
+}
+
+export interface PrincipalQuery { principalId?: string | null; }
 
 export interface SystemSection {
   name: string;
@@ -3946,10 +3957,7 @@ export interface ContextInspectParams {
   checkpointId?: string;
 }
 
-export interface EventsParams {
-  cursor: number;
-  limit: number;
-}
+export interface EventsParams { cursor: number; limit: number; principalId?: string | null; }
 
 export interface ObserverReadParams {
   observerId: string;
@@ -4036,6 +4044,7 @@ export interface RunFailure {
 }
 
 export interface Run {
+  principal_id?: string | null;
   waiting_on: string | null;
   id: string;
   thread_id: string;
@@ -7056,7 +7065,7 @@ export type KernelMethodParams = {
   "runtime.usage.summary": UsageSummaryParams;
   "runtime.model.presentations": ModelPresentationParams;
   "runtime.thread.catalog.list": ThreadCatalogQuery;
-  "runtime.thread.attention.read": KernelEmptyParams;
+  "runtime.thread.attention.read": PrincipalQuery;
   "runtime.thread.update": ThreadMetadataUpdateParams;
   "runtime.thread.title.prepare": ThreadTitlePrepareParams;
   "runtime.thread.title.finish": ThreadTitleFinishParams;
@@ -7107,6 +7116,7 @@ export type KernelMethodParams = {
   "runtime.tokenizers.references": KernelEmptyParams;
   "runtime.admission.inspect": AdmissionInspectParams;
   "runtime.thread.create": ThreadCreateParams;
+  "runtime.principals.initialize": PrincipalInitializeParams;
   "runtime.input.submit": InputSubmitParams;
   "runtime.input.receipt": InputSubmitParams;
   "runtime.run.scope": RunParams;
@@ -8847,7 +8857,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.thread.attention.read";
-      params: KernelEmptyParams;
+      params: PrincipalQuery;
       epoch?: string;
       grantId?: string;
     }
@@ -9298,6 +9308,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.create";
       params: ThreadCreateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.principals.initialize";
+      params: PrincipalInitializeParams;
       epoch?: string;
       grantId?: string;
     }

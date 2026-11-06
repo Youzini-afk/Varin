@@ -1743,7 +1743,7 @@ export interface ThreadBranch {
   latest_run: Run | null;
 }
 
-export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; }
+export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; principalId?: string | null; }
 
 export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; titleMode?: 'automatic' | 'manual'; }
 
@@ -1754,6 +1754,7 @@ export interface BranchDeleteParams { threadId: string; branchId: string; key: s
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {
+  principal_id?: string | null;
   agent_code?: string;
   parent_thread_id: string | null;
   main_branch_id: string;
@@ -1775,7 +1776,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 81; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 82; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2114,6 +2115,7 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  principal_id?: string | null;
   driver_preparable: boolean;
   policy_preparable: boolean;
   policy_generation: number;
@@ -2421,7 +2423,15 @@ export type DeliveryState = "selected" | "sent" | "committed";
 export interface ThreadCreateParams {
   threadId: string;
   branchId: string;
+  principalId?: string | null;
 }
+
+export interface PrincipalInitializeParams {
+  ownerPrincipalId: string;
+  claimLegacy: boolean;
+}
+
+export interface PrincipalQuery { principalId?: string | null; }
 
 export interface SystemSection {
   name: string;
@@ -2674,10 +2684,7 @@ export interface HistoryParams {
   branchId: string;
 }
 
-export interface EventsParams {
-  cursor: number;
-  limit: number;
-}
+export interface EventsParams { cursor: number; limit: number; principalId?: string | null; }
 
 export interface ObserverReadParams {
   observerId: string;
@@ -2764,6 +2771,7 @@ export interface RunFailure {
 }
 
 export interface Run {
+  principal_id?: string | null;
   waiting_on: string | null;
   id: string;
   thread_id: string;

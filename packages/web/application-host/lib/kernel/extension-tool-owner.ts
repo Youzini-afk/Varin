@@ -282,6 +282,7 @@ export async function retainExtensionTool(
         invocationId: randomUUID(),
         runId: call.runId,
         threadId: run.thread_id,
+        ...(typeof run.principal_id === 'string' ? { principalId: run.principal_id } : {}),
         operationId: call.operationId,
         callId: call.callId,
         executorOwner: owner,

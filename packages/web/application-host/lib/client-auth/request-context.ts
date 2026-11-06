@@ -2,6 +2,7 @@ export interface VarinAuthenticatedClient extends Record<string, unknown> {
   allowedDirectories?: string[];
   capabilities?: string[];
   id: string;
+  principalId?: string;
   label?: string;
   profile?: string;
 }
@@ -11,12 +12,14 @@ export type VarinRequestAuthContext =
       client: VarinAuthenticatedClient;
       clientId: string;
       type: 'client';
+      principalId?: string;
     }
   | {
     client?: VarinAuthenticatedClient;
     clientId?: string;
     token?: string;
     type: 'session';
+    principalId?: string;
   };
 
 declare global {

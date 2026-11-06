@@ -18,7 +18,7 @@ import type { SettingsFileStore } from '@varin/settings-store';
 import { resolveVarinDataDir } from '../platform/data-paths.js';
 import type { IncomingHttpHeaders } from 'node:http';
 
-const DEFAULT_STORE_VERSION = 1;
+const DEFAULT_STORE_VERSION = 2;
 const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_RP_NAME = 'Varin';
 
@@ -26,6 +26,7 @@ const VARIN_DATA_DIR = resolveVarinDataDir(process);
 const PASSKEY_STORE_FILE = path.join(VARIN_DATA_DIR, 'ui-passkeys.json');
 
 interface StoredPasskey {
+  principalId?: string;
   backedUp: boolean;
   counter: number;
   createdAt: number;
@@ -54,11 +55,13 @@ interface ChallengeRecord {
 }
 
 interface RegistrationChallengeRecord extends ChallengeRecord {
+  principalId?: string;
   label: string;
   rpID: string;
 }
 
 interface UiPasskeysOptions {
+  ownerPrincipalId?: () => Promise<string>;
   challengeTtlMs?: number;
   passkeyStore?: Pick<SettingsFileStore, 'transact'>;
   passwordBinding?: string;
@@ -166,6 +169,7 @@ const parseStoredPasskey = (value: unknown): StoredPasskey | null => {
 
   return {
     id: record.id as Base64URLString,
+    ...(typeof record.principalId === 'string' ? { principalId: record.principalId } : {}),
     publicKey: record.publicKey,
     counter: typeof record.counter === 'number' && Number.isFinite(record.counter) ? record.counter : 0,
     transports: Array.isArray(record.transports)
@@ -185,6 +189,7 @@ const parseStoredPasskey = (value: unknown): StoredPasskey | null => {
 
 export const createUiPasskeys = ({
   passwordBinding,
+  ownerPrincipalId,
   readSettingsFromDisk,
   storeFile = PASSKEY_STORE_FILE,
   rpName = DEFAULT_RP_NAME,
@@ -208,7 +213,7 @@ export const createUiPasskeys = ({
 
   const normalizeStore = (value: unknown): PasskeyStore => {
     const candidate = asRecord(value);
-    if (!candidate || candidate.version !== DEFAULT_STORE_VERSION) {
+    if (!candidate || candidate.version !== 1 && candidate.version !== DEFAULT_STORE_VERSION) {
       throw new Error(`Unsupported passkey store version: ${String(candidate?.version)}`);
     }
     if (typeof candidate.userID !== 'string' || !decodeUserId(candidate.userID)
@@ -244,8 +249,13 @@ export const createUiPasskeys = ({
     };
   };
 
-  const loadStore = () => passkeyStore.transact((persisted) => {
+  const loadStore = () => passkeyStore.transact(async (persisted) => {
     const binding = applyPasswordBinding(normalizeStore(persisted));
+    if (ownerPrincipalId) {
+      const owner = await ownerPrincipalId();
+      for (const passkey of binding.store.passkeys) if (!passkey.principalId) { passkey.principalId = owner; binding.changed = true; }
+    }
+    binding.changed ||= asRecord(persisted)?.version !== DEFAULT_STORE_VERSION;
     return {
       document: binding.store,
       result: binding.store,
@@ -255,6 +265,11 @@ export const createUiPasskeys = ({
 
   const mutateStore = <Result>(mutator: (store: PasskeyStore) => Promise<PasskeyMutation<Result>>): Promise<Result> => passkeyStore.transact(async (persisted) => {
     const binding = applyPasswordBinding(normalizeStore(persisted));
+    if (ownerPrincipalId) {
+      const owner = await ownerPrincipalId();
+      for (const passkey of binding.store.passkeys) if (!passkey.principalId) { passkey.principalId = owner; binding.changed = true; }
+    }
+    binding.changed ||= asRecord(persisted)?.version !== DEFAULT_STORE_VERSION;
     const transaction = await mutator(binding.store);
     return {
       document: binding.store,
@@ -310,7 +325,7 @@ export const createUiPasskeys = ({
     };
   };
 
-  const listPasskeys = async (req: PasskeyRequest) => {
+  const listPasskeys = async (req: PasskeyRequest, principalId?: string) => {
     assertEnabled();
 
     const store = await loadStore();
@@ -319,7 +334,7 @@ export const createUiPasskeys = ({
       return [];
     }
 
-    return getPasskeysForRpId(store, rpID).map((passkey) => ({
+    return getPasskeysForRpId(store, rpID).filter(p => !principalId || p.principalId === principalId).map((passkey) => ({
       id: passkey.id,
       label: passkey.label,
       createdAt: passkey.createdAt,
@@ -329,7 +344,7 @@ export const createUiPasskeys = ({
     }));
   };
 
-  const revokePasskey = async (req: PasskeyRequest, passkeyId: unknown) => {
+  const revokePasskey = async (req: PasskeyRequest, passkeyId: unknown, principalId?: string) => {
     assertEnabled();
 
     const normalizedPasskeyId = typeof passkeyId === 'string' ? passkeyId.trim() : '';
@@ -339,7 +354,7 @@ export const createUiPasskeys = ({
 
     const rpID = getCurrentRpId(req);
     return mutateStore(async (store) => {
-      const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+      const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID && (!principalId || passkey.principalId === principalId));
       if (!existingPasskey) {
         throw httpError('Passkey not found for this host', 404);
       }
@@ -358,13 +373,12 @@ export const createUiPasskeys = ({
     assertEnabled();
     return mutateStore(async (store) => {
       const clearedCount = store.passkeys.length;
-      store.userID = crypto.randomBytes(32).toString('base64url');
       store.passkeys = [];
       return { result: { cleared: true, clearedCount } };
     });
   };
 
-  const beginRegistration = async (req: PasskeyRequest, { label }: { label?: unknown } = {}) => {
+  const beginRegistration = async (req: PasskeyRequest, { label, principalId }: { label?: unknown; principalId?: string } = {}) => {
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
 
@@ -379,7 +393,7 @@ export const createUiPasskeys = ({
     }
 
     const store = await loadStore();
-    const userID = decodeUserId(store.userID);
+    const userID = principalId ? new TextEncoder().encode(principalId) : decodeUserId(store.userID);
     if (!userID) {
       throw httpError('Passkey storage is invalid. Please try again.', 500);
     }
@@ -409,6 +423,7 @@ export const createUiPasskeys = ({
       expectedOrigins: await buildOriginCandidates(req),
       expectedRPIDs: [rpID],
       rpID,
+      ...(principalId ? { principalId } : {}),
       label: normalizeLabel(label, 'This device'),
       createdAt: Date.now(),
       expiresAt: Date.now() + challengeTtlMs,
@@ -457,6 +472,7 @@ export const createUiPasskeys = ({
       store.passkeys = store.passkeys.filter((passkey) => passkey.id !== credential.id);
       store.passkeys.push({
         id: credential.id,
+        ...(matchingRecord.principalId ? { principalId: matchingRecord.principalId } : {}),
         publicKey: Buffer.from(credential.publicKey).toString('base64url'),
         counter: credential.counter,
         transports: Array.isArray(credential.transports)
@@ -554,7 +570,7 @@ export const createUiPasskeys = ({
 
       passkey.counter = verification.authenticationInfo.newCounter;
       passkey.lastUsedAt = Date.now();
-      return { result: { verified: true } };
+      return { result: { verified: true, principalId: passkey.principalId } };
     });
   };
 

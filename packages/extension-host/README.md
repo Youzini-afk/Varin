@@ -318,3 +318,11 @@ resolve again. A changed source requires explicit replacement approval. The Appl
 publication and obsolete preparation retirement with the original owners. New installs remain disabled;
 updates remain candidates until ordinary capability review and publication. Failed preparation or stale
 confirmation does not replace the selected artifact. Restarting a Host invalidates pending previews.
+
+
+The authenticated Surface service lease may bind a Host-only invocation principal through
+`bindSurfacePrincipal`; neither the service request JSON nor routing labels supply that authority.
+Native and brokered callbacks propagate the same opaque invocation scope. Principal annotation is
+released when the actual call settles. Long-lived authorization owners explicitly retain a separate
+scoped operation rather than keeping an expired service-call client. Explicit uninstall data deletion
+can delegate additional trusted domains through `deleteExtensionData` after extension retirement.

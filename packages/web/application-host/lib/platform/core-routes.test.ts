@@ -300,7 +300,7 @@ describe('core-routes', () => {
         exchangeBootstrapToken: vi.fn(),
       },
       uiAuthController: {
-        resolveAuthContext: vi.fn(async () => ({ type: 'session', token: 'session-token' })),
+        resolveAuthContext: vi.fn(async () => ({ type: 'session', token: 'session-token', principalId: 'owner' })),
         requireAuth: vi.fn((_req, _res, next) => next()),
         requireSessionAuth: vi.fn((_req, _res, next) => next()),
         handleSessionStatus: vi.fn(),
@@ -354,6 +354,7 @@ describe('core-routes', () => {
       label: 'Pair phone',
       allowedClientKinds: ['mobile'],
       createdByClientId: null,
+      principalId: 'owner',
       usesRelay: false,
     });
   });
@@ -677,7 +678,7 @@ describe('client auth routes', () => {
     }> = [];
     const requireAuth = vi.fn((_req, _res, next) => next());
     const requireSessionAuth = vi.fn((_req, _res, next) => next());
-    const resolveAuthContext = vi.fn(options.resolveAuthContext || (async () => ({ type: 'session' })));
+    const resolveAuthContext = vi.fn(options.resolveAuthContext || (async () => ({ type: 'session', principalId: 'owner' })));
     return {
       express,
       tunnelAuthController: {
@@ -706,6 +707,7 @@ describe('client auth routes', () => {
         createClient: async ({ label, clientKind }: { clientKind?: string; label?: string }) => {
           const client = {
             id: `client-${clients.length + 1}`,
+            principalId: 'owner',
             label: label || 'Remote client',
             createdAt: 'now',
             lastUsedAt: null,
@@ -764,6 +766,18 @@ describe('client auth routes', () => {
     expect(listedAfterPurge.body.clients).toHaveLength(0);
   });
 
+  it('keeps existing local no-password client management admitted without inventing request identity', async () => {
+    const app = express();
+    const dependencies = createDependencies({ resolveAuthContext: async () => ({ type: 'session', token: 'local-session' }) });
+    const create = vi.spyOn(dependencies.remoteClientAuthRuntime, 'createClient');
+    registerAuthAndAccessRoutes(app, dependencies);
+    const created = await request(app).post('/api/client-auth/clients').send({ label: 'Local device', principalId: 'forged' });
+    expect(created.status).toBe(201);
+    expect(create.mock.calls[0]![0]).not.toHaveProperty('principalId');
+    expect((await request(app).get('/api/client-auth/clients')).body.clients).toHaveLength(1);
+    expect((await request(app).delete(`/api/client-auth/clients/${created.body.client.id}`)).status).toBe(200);
+  });
+
   it('reports current connection candidates with server identity for paired devices', async () => {
     const app = express();
     const relayCandidate = {
@@ -816,7 +830,7 @@ describe('client auth routes', () => {
 
   it('scopes non-desktop client credentials to list and revoke only themselves', async () => {
     const app = express();
-    let authContext: Record<string, unknown> = { type: 'session' };
+    let authContext: Record<string, unknown> = { type: 'session', principalId: 'owner' };
     const dependencies = createDependencies({
       resolveAuthContext: async () => authContext,
     });
@@ -851,7 +865,7 @@ describe('client auth routes', () => {
 
   it('lets the local desktop client list and revoke every device', async () => {
     const app = express();
-    let authContext: Record<string, unknown> = { type: 'session' };
+    let authContext: Record<string, unknown> = { type: 'session', principalId: 'owner' };
     const dependencies = createDependencies({
       resolveAuthContext: async () => authContext,
     });
@@ -884,7 +898,7 @@ describe('client auth routes', () => {
 
   it('allows only the local desktop client token to create remote client tokens', async () => {
     const app = express();
-    let authContext: Record<string, unknown> = { type: 'session' };
+    let authContext: Record<string, unknown> = { type: 'session', principalId: 'owner' };
     const dependencies = createDependencies({
       resolveAuthContext: async () => authContext,
     });

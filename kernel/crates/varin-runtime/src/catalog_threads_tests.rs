@@ -122,6 +122,7 @@ fn catalog_archive_search_pin_and_restore_use_real_metadata() {
     let rows = db.list_thread_catalog(&ThreadListQuery::default()).unwrap();
     assert_eq!(rows[0]["thread_id"], "thread");
     let query = ThreadListQuery {
+            principal_id: None,
         query: Some("RÉSUMÉ".into()),
         archived: None,
     };
@@ -131,6 +132,7 @@ fn catalog_archive_search_pin_and_restore_use_real_metadata() {
     db.update_thread(&archive).unwrap();
     assert!(db.list_thread_catalog(&query).unwrap().is_empty());
     let only = ThreadListQuery {
+            principal_id: None,
         query: None,
         archived: Some(ArchiveFilter::Only),
     };
@@ -252,6 +254,7 @@ fn catalog_tombstone_keeps_original_live_executor_queue_and_receipts() {
     assert!(tombstone["deleted_at_ms"].is_number());
     assert!(db
         .list_thread_catalog(&ThreadListQuery {
+            principal_id: None,
             query: None,
             archived: Some(ArchiveFilter::Include)
         })

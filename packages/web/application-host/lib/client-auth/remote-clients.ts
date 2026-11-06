@@ -3,8 +3,9 @@ import type { SettingsFileStore } from '@varin/settings-store';
 import type cryptoModule from 'node:crypto';
 import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
+import { createPrincipalStore, type PrincipalStore } from '../ui-auth/principals.js';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const TOKEN_PREFIX = 'varin_client_';
 const TOKEN_BYTES = 32;
 const MAX_LABEL_LENGTH = 80;
@@ -25,6 +26,7 @@ export const REMOTE_CLIENT_PROFILE = Object.freeze({
 type ClientTransport = 'direct' | 'relay';
 
 interface RemoteClientRecord {
+  principalId: string;
   allowedDirectories: string[];
   appVersion: string | null;
   authMethod: string | null;
@@ -53,6 +55,7 @@ interface RemoteClientStore extends Record<string, unknown> {
 }
 
 interface RemoteClientRuntimeOptions {
+  principals?: PrincipalStore;
   clientStore?: SettingsFileStore;
   crypto: typeof cryptoModule;
   fsPromises: typeof fsPromisesModule;
@@ -66,6 +69,7 @@ interface ClientMutation<Result> {
 }
 
 interface CreateClientInput {
+  principalId?: string;
   allowedDirectories?: unknown;
   appVersion?: unknown;
   authMethod?: unknown;
@@ -91,6 +95,7 @@ interface RequestLike {
 type PublicRemoteClient = Omit<RemoteClientRecord, 'dedupeKey' | 'tokenHash'>;
 
 interface AuthenticatedClient {
+  principalId: string;
   client: PublicRemoteClient;
   clientId: string;
   ok: true;
@@ -232,6 +237,7 @@ export const createRemoteClientAuthRuntime = ({
   crypto,
   storePath,
   clientStore: providedClientStore,
+  principals = createPrincipalStore(path.join(path.dirname(storePath), 'ui-principals.json')),
 }: RemoteClientRuntimeOptions) => {
   const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
   const nowIso = () => new Date().toISOString();
@@ -244,9 +250,9 @@ export const createRemoteClientAuthRuntime = ({
     defaultValue: emptyStore(),
   });
 
-  const normalizeStore = (value: unknown): RemoteClientStore => {
+  const normalizeStore = (value: unknown, legacyOwnerId: string): RemoteClientStore => {
     const payload = asRecord(value);
-    if (!payload || payload.version !== STORE_VERSION) {
+    if (!payload || payload.version !== 2 && payload.version !== STORE_VERSION) {
       throw new Error(`Unsupported remote clients version: ${String(payload?.version)}`);
     }
     if (!Array.isArray(payload.clients)) {
@@ -262,9 +268,11 @@ export const createRemoteClientAuthRuntime = ({
           if (!id || !tokenHash) {
             throw new Error('Remote clients file contains an incomplete client');
           }
+          if (payload.version === STORE_VERSION && !normalizeOptionalString(client.principalId)) throw new Error('Remote clients file has an unbound principal');
           const profile = normalizeProfile(client.profile);
           return {
             id,
+            principalId: normalizeOptionalString(client.principalId) ?? legacyOwnerId,
             label: normalizeLabel(client.label),
             tokenHash,
             createdAt: typeof client.createdAt === 'string' ? client.createdAt : nowIso(),
@@ -284,21 +292,22 @@ export const createRemoteClientAuthRuntime = ({
     return { version: STORE_VERSION, clients };
   };
 
-  const readStore = async () => normalizeStore(await clientStore.read());
+  const readStore = async () => mutateStore(async store => ({ result: store }));
 
   const mutateStore = <Result>(mutator: (store: RemoteClientStore) => Promise<ClientMutation<Result>>): Promise<Result> => clientStore.transact(async (persisted) => {
-    const store = normalizeStore(persisted);
+    const store = normalizeStore(persisted, await principals.ownerId());
     const transaction = await mutator(store);
     return {
       document: store,
       result: transaction.result,
-      write: transaction.write !== false,
+      write: transaction.write !== false || asRecord(persisted)?.version !== STORE_VERSION,
     };
   });
 
   function publicClient(client: RemoteClientRecord): PublicRemoteClient {
     return {
     id: client.id,
+    principalId: client.principalId,
     label: client.label,
     createdAt: client.createdAt,
     lastUsedAt: client.lastUsedAt,
@@ -338,6 +347,7 @@ export const createRemoteClientAuthRuntime = ({
   };
 
   const createClient = async ({
+    principalId,
     label,
     expiresAt,
     clientKind,
@@ -355,14 +365,17 @@ export const createRemoteClientAuthRuntime = ({
     reuseDedupeIdentity = false,
   }: CreateClientInput = {}) => {
     return mutateStore(async (store) => {
+      const subject = principalId ?? await principals.ownerId();
+      if (!await principals.resolve(subject)) throw new Error('Unknown authentication principal');
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const normalizedProfile = normalizeProfile(profile);
       const token = generateToken();
       const priorDedupeClient = reuseDedupeIdentity && normalizedDedupeKey
-        ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey)
+        ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey && entry.principalId === subject)
         : null;
       const client = {
         id: priorDedupeClient?.id || generateId(),
+        principalId: subject,
         label: normalizeLabel(label),
         tokenHash: hashToken(token),
         createdAt: priorDedupeClient?.createdAt || nowIso(),
@@ -384,14 +397,14 @@ export const createRemoteClientAuthRuntime = ({
         lastTransport: null,
       };
       if (normalizedDedupeKey) {
-        store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey);
+        store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey || entry.principalId !== subject);
         // Migrate pre-clientKind desktop tokens: a deduped, kind-tagged mint
         // supersedes legacy records with the same label that carry neither a
         // kind nor a dedupe key — those tokens can no longer pass the
         // desktop-local client-create gate and would otherwise linger forever.
         if (client.clientKind) {
           store.clients = store.clients.filter((entry) =>
-            !(entry.label === client.label && !entry.clientKind && !entry.dedupeKey));
+            !(entry.principalId === subject && entry.label === client.label && !entry.clientKind && !entry.dedupeKey));
         }
       }
       store.clients.push(client);
@@ -412,10 +425,10 @@ export const createRemoteClientAuthRuntime = ({
     });
   };
 
-  const purgeRevokedClients = async () => {
+  const purgeRevokedClients = async (principalId?: string) => {
     return mutateStore(async (store) => {
       const before = store.clients.length;
-      store.clients = store.clients.filter((entry) => !entry.revokedAt);
+      store.clients = store.clients.filter((entry) => !entry.revokedAt || principalId !== undefined && entry.principalId !== principalId);
       const purged = before - store.clients.length;
       return { result: { purged }, write: purged > 0 };
     });
@@ -432,7 +445,7 @@ export const createRemoteClientAuthRuntime = ({
     return mutateStore<AuthenticatedClient | null>(async (store) => {
       const tokenHash = hashToken(token);
       const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));
-      if (!client) return { result: null, write: false };
+      if (!client || !await principals.resolve(client.principalId)) return { result: null, write: false };
       if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return { result: null, write: false };
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
@@ -452,7 +465,7 @@ export const createRemoteClientAuthRuntime = ({
         client.lastTransport = transport;
       }
       return {
-        result: { ok: true, clientId: client.id, sessionToken: client.id, client: publicClient(client) },
+        result: { ok: true, principalId: client.principalId, clientId: client.id, sessionToken: client.id, client: publicClient(client) },
         write: shouldWrite,
       };
     });

@@ -140,6 +140,7 @@ import { registerThreadExportRoutes } from './lib/kernel/thread-export-routes.js
 import { createThreadRemember } from './lib/memory/thread-remember.js';
 import { registerThreadRememberRoutes } from './lib/memory/thread-remember-routes.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { createThreadPrincipalMiddleware } from './lib/kernel/request-principal.js';
 import { ExternalAgentsService } from './lib/external-agents/service.js';
 import { createExternalSourceOwner } from './lib/external-agents/source.js';
 import { registerExternalAgentRoutes } from './lib/external-agents/routes.js';
@@ -287,6 +288,11 @@ import { registerEgressRoutes } from './lib/harness/egress-routes.js';
 import { createServiceCredentialStore } from './lib/service-credentials/store.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
+import { hostPrincipals } from './lib/ui-auth/principals.js';
+import { bindPluginInvocationPrincipal } from './lib/extensions/invocation-principal.js';
+import { HostCredentialService, fileSecretStore } from './lib/credentials/service.js';
+import { AuthorizationFlows } from './lib/authorization-flows.js';
+import { PluginCredentialCapability } from './lib/extensions/credentials.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
@@ -816,6 +822,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     varinVersion: VARIN_VERSION,
   });
   let extensionRuntime = options.extensionRuntime || null;
+  const pluginCredentialOwner: { current?: PluginCredentialCapability } = {};
   const ownsExtensionRuntime = !extensionRuntime;
   app.set('trust proxy', true);
   app.use((_req, res, next) => {
@@ -973,6 +980,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
+      bindSurfacePrincipal: bindPluginInvocationPrincipal,
+      deleteExtensionData: extensionId => {
+        if (!pluginCredentialOwner.current) throw new Error('Plugin credential owner is unavailable');
+        return pluginCredentialOwner.current.deleteExtensionData(extensionId);
+      },
       brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@varin/extension-host'))),
       catalog: extensionCatalog,
       dataDir: VARIN_DATA_DIR,
@@ -988,6 +1000,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[VarinKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
+  await kernelClient.agentRuntimeRequest('runtime.principals.initialize', {
+    ownerPrincipalId: await hostPrincipals().ownerId(), claimLegacy: uiAuthController.enabled,
+  });
   const scopeDirectory = async (scopeId: string): Promise<string> => { if (isBotScopeId(scopeId)) return botScopeRoot(scopeId); return (await documentsAuthority.inspectWorkspace(scopeId)).root; };
   const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isBotScopeId(scopeId) ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
   const recoveryCoordinatorWorkspace = `recovery-coordinator:${extensionRuntime.services.hostId}`;
@@ -2008,6 +2023,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const cwd=workspace?.canonicalPath??VARIN_DATA_DIR;
     return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
   }}), documentsAuthority.admitWorkspaceRegistration, createAgentDriver(extensionRuntime));
+  agentRuntime.principalCanUseHostResources = async principalId => principalId === null || typeof principalId === 'string' && await hostPrincipals().isOwner(principalId);
   agentRuntime.bindManagedSources(managedRemoteTargets);
   agentRuntime.executionEnvironment = () => executionEnvironment.snapshot();
   agentRuntime.deviceFileAccess = !workspaceConfig.lockdown;
@@ -2185,6 +2201,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { workspaceId: selected.workspaceId, canonicalRoot: workspace.root };
     } }));
   documentSources.bindAttachments(threadAttachments);
+  app.use('/api/threads', uiAuthController.requireAuth, createThreadPrincipalMiddleware(agentRuntime,
+    (req, res) => uiAuthController!.resolveAuthContext(req, res), id => hostPrincipals().isOwner(id)));
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
   registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
@@ -2809,6 +2827,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
 
+  const pluginCredentials = new PluginCredentialCapability(extensionRuntime,
+    new HostCredentialService(extensionRuntime.services.hostId, fileSecretStore(path.join(VARIN_DATA_DIR, 'plugin-credentials.json'))),
+    new AuthorizationFlows());
+  pluginCredentialOwner.current = pluginCredentials;
+  pluginCredentials.start();
+
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
   const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
@@ -3121,6 +3145,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
         await shutdown.run('botPresence.dispose', () => botPresence.dispose());
         await shutdown.run('botService.dispose', () => botService.dispose());
+        await shutdown.run('pluginCredentials.close', () => pluginCredentials.close());
         await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
         await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());
         await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());

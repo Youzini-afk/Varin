@@ -48,7 +48,7 @@ pub(super) enum SubmissionOrigin {
         checkpoint: Option<String>,
         history: Value,
     },
-    Summary,
+    Summary { source_branch_id: String },
 }
 pub struct PreparedSubmission {
     pub(super) attachments: Vec<super::attachments::Attachment>,
@@ -404,7 +404,7 @@ impl PreparedSubmission {
             | SubmissionOrigin::Child { checkpoint, .. }
             | SubmissionOrigin::ChildContinuation { checkpoint, .. }
             | SubmissionOrigin::Ingress { checkpoint, .. } => checkpoint,
-            SubmissionOrigin::Summary => &None,
+            SubmissionOrigin::Summary { .. } => &None,
         };
         let active = current.map(context::CheckpointRead::load).transpose()?;
         let selected_source = launch.as_ref().and_then(|launch| launch.source.clone());
@@ -579,7 +579,7 @@ impl PreparedSubmission {
             SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. } => {
                 content.save_user_history(&input_id, &input_material)?
             }
-            SubmissionOrigin::Summary => content.save_history(&input_material, &None)?,
+            SubmissionOrigin::Summary { .. } => content.save_history(&input_material, &None)?,
         };
         // The intent retains the original content and requested selection. Inherited source and
         // the initial prompt are separately frozen by the atomic admission, never by a retry.

@@ -108,6 +108,8 @@ pub struct ExternalReceiptMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Run {
     #[serde(default)]
+    pub principal_id: Option<String>,
+    #[serde(default)]
     pub waiting_on: Option<String>,
     pub id: String,
     pub thread_id: String,

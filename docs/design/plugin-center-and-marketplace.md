@@ -1,6 +1,6 @@
 # 插件中心、公开收录目录与作者发行来源
 
-状态：设计方案，待实施。日期：2026-11-06。源码基线：`d0d5f579d`。
+状态：目录、发行交付、插件中心及通用 Host 凭据接线已实现；生产站点部署与具体插件的生产 OAuth 交付另行验证。原设计日期：2026-11-06。源码基线：`d0d5f579d`。
 
 本文整合插件界面、内置与外部插件管理、公开市场和发行包安装更新。连接类插件通过现有 Host 的授权与凭据机制接入。当前已实现的扩展机制见[扩展](../extensions.md)和[作者指南](../ops/varin-extension-authoring.md)。
 
@@ -309,7 +309,7 @@ Host 系统和架构决定执行包，当前 Surface 决定配置页和视觉 co
 
 插件自己组织邮箱、工作区、服务端点及配置界面。它可以把连接配置放在现有插件存储中，将秘密保存为 Host 凭据引用。插件 Host 端适配器处理服务商特有的授权参数、令牌交换、请求签名或撤销行为。Host 端按真实调用身份解析引用并用于目标请求，前端、工具参数与模型上下文只使用配置所需的非秘密信息。
 
-实际缺口是普通扩展调用与凭据归属的接线。现有 Surface service lease 会校验认证主体，通用扩展服务调用还没有将该主体交给凭据能力。配置页授权和 Agent 工具执行都要由 Host 从各自的可信调用链解析同一用户身份，并将凭据范围绑定到插件与连接。一个用户可拥有同一插件的多条连接，同一 Host 上的不同用户各自管理自己的连接。模型渠道、MCP 或其他插件的凭据仍按各自的归属解析。
+普通扩展调用通过 Host capability `varin.credentials` 接通凭据归属。Surface service lease 的认证主体与 Rust Catalog 保存的 Thread/Run 主体分别进入 Host-only 调用 scope，插件参数不能替代它们。配置页授权和 Agent 工具执行都要由 Host 从各自的可信调用链解析同一用户身份，并将凭据范围绑定到插件与连接。一个用户可拥有同一插件的多条连接，同一 Host 上的不同可信主体各自管理自己的连接。当前登录入口仍为原单一 Host owner 的密码、passkey 与设备配对；多用户注册和邀请不在本次实现中。模型渠道、MCP 或其他插件的凭据仍按各自的归属解析。
 
 上述归属约束作用于 Host 凭据 API。原生插件仍以其进程账户权限运行，代码信任沿用现有安装与执行边界。
 
@@ -391,4 +391,4 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 - Cloudflare：[GitHub 集成](https://developers.cloudflare.com/pages/configuration/git-integration/github-integration/)、[预览部署](https://developers.cloudflare.com/pages/configuration/preview-deployments/)。
 - Google：[桌面 OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)。
 
-实施时需初始化收录仓库的目录与站点，并确认站点域名、Cloudflare 项目、部署权限和首个连接插件的生产 OAuth 应用归属。
+收录仓库的目录、静态站点和校验流程已在 Astrmira/Varin-plugins 初始化。生产发布仍需确认站点域名、Cloudflare 项目与部署权限；具体连接插件另行确认生产 OAuth 应用归属。

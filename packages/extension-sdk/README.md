@@ -307,3 +307,16 @@ arriving afterward. The SDK never reruns the algorithm automatically to hide thi
 After `committed`, no new primitive calls are admitted. Return from the callback to let its actual
 work drain; logical completion does not authorize early release of the original callback, provider,
 credentials or tool owners. A later callback error cannot rewrite the committed execution result.
+
+
+## Scoped Host credentials
+
+`credentials(call.capabilities, connectionId, expectedAccount?)` accesses the Host's existing
+credential lifecycle through `varin.credentials`. Use `inspect` for nonsecret connection metadata,
+`put` for API keys, and `start/read/reply/cancel` with a same-owner `authenticate` Host service for
+OAuth. Preserve `inspect().account` with a chosen connection and pass it as `expectedAccount` so
+reconnection cannot silently replace an accepted selection. `resolve` is Host-only: never return
+its secret to the renderer, a tool result or model context. The Host supplies authenticated identity;
+JSON user IDs and activation-time clients cannot select another user's credentials.
+See the [author guide](../../docs/ops/varin-extension-authoring.md#host-credentials-for-connected-services)
+for adapter responsibilities and deployment boundaries.

@@ -1055,3 +1055,36 @@ relative and do not expose Host installation paths. Import that same descriptor 
 Ordinary tool execute metadata derives from the existing tool declaration. The context-fragments
 provider is a complete built-in method example; owners without such declarations report
 `undeclared`. Discovery does not synthesize missing method contracts or full Application API reflection. Complete service and tool catalogs are returned only on explicit inspection.
+
+
+## Host credentials for connected services
+
+Declare the Host capability `varin.credentials` in the existing manifest capability list. Keep your
+connection configuration in plugin storage and call `credentials(call.capabilities, connectionId)`
+from an authenticated Host service invocation. Activation-time clients and unauthenticated calls
+cannot access user credentials. The same user is derived from a Surface service lease or the original
+Agent Run, never a user ID supplied by the plugin.
+
+The SDK exposes `put`, `inspect`, `resolve`, `remove`, and authorization `start/read/reply/cancel`.
+`inspect` returns safe connection metadata including its `account` identity. Keep that identity with
+an explicit user selection and construct the client with the third `expectedAccount` argument for
+later use; replacing credentials invalidates the selection. `resolve` returns a secret only to your
+trusted Host adapter. Never forward it to a Surface, tool result, model context or log.
+
+For OAuth, provide an `authenticate` method on a Host service from the same extension entrypoint.
+Pass `{ serviceId, version, provider }` to `start` and `resolve`. The method accepts the public
+`VarinCredentialAuthenticationCall` union: `begin` returns a pending authorization URL and private
+state, `complete` validates the callback and returns an OAuth token, and `refresh` returns a refreshed
+token for the same provider and account. Optional device codes use the existing Host authorization
+interaction. The Host pins the exact service generation, scopes the attempt to the authenticated
+user/plugin/connection, merges concurrent refreshes, and rejects stale completion after replacement.
+
+Your adapter owns provider-specific OAuth application configuration, state and PKCE verification,
+registered callback/loopback handling, request signing and remote revocation. No provider catalog,
+mailbox model or extra public account service is required. Plugin settings own connection status;
+the plugin center only opens those settings. Local deletion and provider revocation are different
+outcomes. Explicit uninstall-with-data-deletion removes the extension's Host credential namespace.
+
+Current Host login remains the existing single-owner password/passkey/pairing flow. The credential
+boundary isolates trusted subjects, but this feature does not add multi-user enrollment or grant
+anonymous local calls a credential identity.

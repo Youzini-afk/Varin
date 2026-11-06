@@ -99,6 +99,9 @@ impl RunAssembly {
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             catalog.run(&p.run_id).map_err(domain)?
         };
+        let host_authority = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .thread_has_host_authority(&run.thread_id).map_err(domain)?;
+        if !host_authority && tool_binding.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host resources".into())); }
         let is_bot = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.bot_for_thread(&run.thread_id).map_err(domain)?.is_some();
         let saved_schema_generation = runtime
             .catalog()
@@ -272,7 +275,7 @@ impl RunAssembly {
                 )
                 .map_err(|e| KernelError::Operation(e.to_string()))?;
         }
-        if !is_context_job {
+        if !is_context_job && host_authority {
             // Context ownership is independent of the selected tool profile.
             // Children synchronize their own notes even when no memory tool was selected.
             start =
@@ -294,6 +297,7 @@ impl RunAssembly {
                 start.binding.tools =
                     crate::run_tools::builtin_schemas(&kinds, plan_eligible, true, is_bot);
             }
+            if !host_authority { start.binding.tools.clear(); }
             start
                 .binding
                 .tools
@@ -325,6 +329,7 @@ impl RunAssembly {
                     })
                 })
                 .transpose()?;
+            if !host_authority && source.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host resources".into())); }
             if source.is_none() && kinds.iter().any(|kind| *kind!=crate::tools::ToolKind::FileRead) {
                 return Err(KernelError::Protocol(
                     "selected tools require a source owner".into(),
@@ -466,6 +471,8 @@ impl RunAssembly {
                 .tools;
             declarations.retain(|declaration| admitted.contains(&declaration.schema));
         }
+        if !host_authority && !is_context_job { declarations.clear(); }
+        if !host_authority && p.mcp_binding.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host MCP servers".into())); }
         let mcp_live = p.mcp_binding.map(live_mcp_binding).transpose()?;
         let mcp_binding = mcp_live.as_ref().map(|live| live.binding.clone());
         let extensions = p

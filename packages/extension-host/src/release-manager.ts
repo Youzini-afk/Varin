@@ -60,7 +60,6 @@ export class ExtensionReleaseManager {
   readonly #inflight = new Map<string, Promise<unknown>>();
   readonly #previews = new Map<string, { artifact: VarinExtensionPreparedArtifact; revision: number }>();
   readonly #install: (artifact: VarinExtensionPreparedArtifact, revision: number, signal?: AbortSignal) => ReturnType<ExtensionPackageManager["installPrepared"]>;
-  readonly #updateRequests = new Map<string, Promise<VarinExtensionUpdateCheck[]>>();
   readonly #checks = new Map<string, Promise<VarinExtensionUpdateCheck>>();
   constructor(options: { packages: ExtensionPackageManager; hostId: string; fetch?: ExtensionReleaseFetch; platform?: string; arch?: string; install?: (artifact: VarinExtensionPreparedArtifact, revision: number, signal?: AbortSignal) => ReturnType<ExtensionPackageManager["installPrepared"]> }) {
     this.#packages = options.packages;
@@ -239,23 +238,15 @@ export class ExtensionReleaseManager {
 
   discard(previewId: string): void { this.#previews.delete(previewId); }
 
-  checkUpdates(extensionId?: string): Promise<VarinExtensionUpdateCheck[]> {
-    const key = extensionId ?? '*';
-    const existing = this.#updateRequests.get(key);
-    if (existing) return existing;
-    const pending = this.#checkUpdates(extensionId);
-    this.#updateRequests.set(key, pending);
-    void pending.then(() => this.#updateRequests.delete(key), () => this.#updateRequests.delete(key));
-    return pending;
-  }
-
-  async #checkUpdates(extensionId?: string): Promise<VarinExtensionUpdateCheck[]> {
+  async checkUpdates(extensionId?: string): Promise<VarinExtensionUpdateCheck[]> {
+    // Read current installation facts before deduplicating. A Host-wide request
+    // can span an update or source replacement while upstream metadata is pending.
     const read = await this.#packages.catalog.store.read();
     if (!read.authoritative) throw new Error('Cannot check updates from a stale extension catalog');
     const records = Object.values(read.document.extensions)
       .filter(record => record.source.kind !== 'builtin' && (!extensionId || record.manifest.id === extensionId));
     return Promise.all(records.map(record => {
-      const key = `${record.manifest.id}:${extensionSourceIdentity(record.source)}:${record.selectedVersion}`;
+      const key = JSON.stringify([record.manifest.id, extensionSourceIdentity(record.source), record.selectedVersion]);
       const pending = this.#checks.get(key);
       if (pending) return pending;
       const check = (async (): Promise<VarinExtensionUpdateCheck> => {

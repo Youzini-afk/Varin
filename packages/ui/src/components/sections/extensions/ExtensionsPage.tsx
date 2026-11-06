@@ -1,6 +1,6 @@
 import React from 'react';
 import { consumePluginInstallIntent, subscribePluginInstallIntent, getRuntimeEndpointGeneration, type PluginDiscoverySnapshot, type PluginInstallIntent } from '@varin/application-client';
-import type { VarinExtensionPackageSource, VarinExtensionUpdateCheck } from '@varin/extension-contract';
+import type { VarinExtensionPackageSource } from '@varin/extension-contract';
 import { useI18n } from '@/lib/i18n';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useVarinExtensionCatalog, refreshVarinExtensionCatalog, getVarinExtensionCatalogState } from '@/lib/extensions/catalog-store';
@@ -18,6 +18,7 @@ import { installedPluginListing, routePluginInstallIntent } from './plugin-cente
 import { PluginSources } from './PluginSources';
 import { PluginReleasePreview } from './PluginReleasePreview';
 import { usePluginReleasePreparation } from './usePluginReleasePreparation';
+import { usePluginUpdateChecks } from './usePluginUpdateChecks';
 import { PluginUpdateStatus } from './PluginUpdateStatus';
 import { readPluginCenterView, savePluginCenterView, matchesPluginQuery } from './plugin-center-state';
 
@@ -47,8 +48,6 @@ function PluginCenter({ hostId }: { hostId: string }) {
   const [loading, setLoading] = React.useState(false);
   const preparation = usePluginReleasePreparation(api, hostId);
   const { busy, preview } = preparation;
-  const [updates, setUpdates] = React.useState<VarinExtensionUpdateCheck[]>([]);
-  const [checking, setChecking] = React.useState(false);
   const life = React.useRef(true);
   const [owner] = React.useState(getRuntimeEndpointGeneration);
   const isCurrent = React.useCallback(() => life.current && owner === getRuntimeEndpointGeneration(), [owner]);
@@ -96,17 +95,7 @@ function PluginCenter({ hostId }: { hostId: string }) {
     if (!api || loaded.current || view.tab !== 'discover') return;
     loaded.current = true; void refresh();
   }, [api, refresh, view.tab]);
-  const check = React.useCallback(async (extensionId?: string) => {
-    if (!api) return;
-    setChecking(true);
-    try {
-      const next = await api.checkUpdates(extensionId);
-      if (isCurrent()) setUpdates(current => extensionId ? [...current.filter(item => item.extensionId !== extensionId), ...next] : next);
-    } catch (failure) { if (isCurrent()) setError(failure instanceof Error ? failure.message : String(failure)); }
-    finally { if (isCurrent()) setChecking(false); }
-  }, [api, isCurrent]);
-  const checked = React.useRef(false);
-  React.useEffect(() => { if (view.tab === 'installed' && !checked.current && api) { checked.current = true; void check(); } }, [view.tab, check, api]);
+  const { updates, checking, error: updateError, check } = usePluginUpdateChecks(api, catalogRevision, view.tab === 'installed', isCurrent);
   const closePreparation = preparation.close;
   const intentSequence = React.useRef(0);
   const prepareRelease = preparation.prepare;
@@ -161,7 +150,7 @@ function PluginCenter({ hostId }: { hostId: string }) {
             <Button variant="outline" disabled={checking || !api} onClick={() => { void check(); }}>{t('settings.plugins.checkUpdates')}</Button></>}
       </div>
       {busy ? <p role="status" className="py-2 typography-meta">{t('settings.plugins.preparing')}</p> : null}
-      {error || state.error || preparation.error ? <p role="alert" className="py-2 typography-meta text-[var(--status-error)]">{error ?? state.error ?? preparation.error}</p> : null}
+      {error || state.error || preparation.error || updateError ? <p role="alert" className="py-2 typography-meta text-[var(--status-error)]">{error ?? state.error ?? preparation.error ?? updateError}</p> : null}
       {directInstall ? <><ExtensionInstallSection onIntent={intent => { void openIntent(intent); }} onPreview={source => { void prepare(source); }} />
         <label className="block py-3 typography-meta">{t('settings.plugins.importArchive')}<input type="file" accept=".tgz,.tar.gz" className="mt-2 block w-full" disabled={!api || busy !== null} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void prepare(file); }} /></label></> : null}
       {view.tab === 'discover' ? <>

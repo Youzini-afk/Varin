@@ -208,3 +208,9 @@ Host-bound confirmation, update-check result and canonical logical-source identi
 local archive sources persist beside existing local/Git/npm sources. Discovery adds optional author,
 repository, categories and content version; an individual catalog still has unique extension IDs,
 while different catalogs may present separately identified sources for the same extension ID.
+
+
+`credentials.ts` defines the `varin.credentials` Host capability and a small authentication callback
+contract (`begin`, `complete`, `refresh`). It has no plugin account/provider registry: plugins own
+connection configuration and provider-specific exchanges. Credential metadata and authorization state
+are safe presentation values; credential values are confined to trusted Host adapters.

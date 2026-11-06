@@ -1387,7 +1387,7 @@ impl ContextJobPreparation {
             current: None,
             personalization: None,
             resources: None,
-            origin: submissions::SubmissionOrigin::Summary,
+            origin: submissions::SubmissionOrigin::Summary { source_branch_id: self.request.branch_id.clone() },
             epoch: self.epoch,
             content: self.content,
             publication: self.publication,

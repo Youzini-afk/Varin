@@ -66,6 +66,7 @@ import {
 import { queryRuntimeContracts, resolveDeclaredServiceRouting, registeredWorkbenchDeclarations } from "./runtime-contracts.js";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, ExtensionUpdateReadinessError, type BrokeredHostTransportFactory, type HostCompositionLease } from "./broker-supervisor.js";
+import type { HostInvocationScope } from './service-registry.js';
 import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { HostServiceRegistry, HostServiceBindingError, type HostServiceBinding, type HostServicePin } from "./service-registry.js";
@@ -99,6 +100,10 @@ export interface ApplicationExtensionRuntimeOptions {
   transportFactory?: BrokeredHostTransportFactory;
   workbench?: WorkbenchProfileStore;
   onObserverError?: (error: unknown) => void;
+  /** Trusted application domains delete only after retirement and explicit uninstall deleteData. */
+  deleteExtensionData?: (extensionId: string) => Promise<void>;
+  /** Host annotates only scopes admitted by the real authenticated Surface lease. */
+  bindSurfacePrincipal?: (scope: HostInvocationScope, principalId: string) => () => void;
 }
 
 export class ExtensionPackageApplicationError extends Error {
@@ -118,18 +123,22 @@ export class ApplicationExtensionRuntime {
   readonly supervisor: BrokeredHostSupervisor;
   readonly workbench: WorkbenchProfileStore;
   readonly #listeners = new Set<() => void>();
+  readonly #bindSurfacePrincipal: ApplicationExtensionRuntimeOptions['bindSurfacePrincipal'];
+  readonly #deleteExtensionData: ApplicationExtensionRuntimeOptions['deleteExtensionData'];
   readonly #onObserverError: (error: unknown) => void;
   readonly #serviceUnsubscribe: () => void;
   #revision = 0;
   readonly #mutations = new Set<Promise<void>>();
   readonly #reads = new Set<Promise<void>>();
   readonly #builtinPreparations = new Map<string, Promise<void>>();
-  readonly #surfaceLeases = new Map<string, { principal: string; owner: VarinSurfaceServiceInvocationLease['owner'];
+  readonly #surfaceLeases = new Map<string, { signal: AbortSignal; principalId?: string; principal: string; owner: VarinSurfaceServiceInvocationLease['owner'];
     services: Map<string, { pin: HostServicePin; serviceId: string; version: number }>; revoke(): void }>();
   #stop: Promise<void> | undefined;
   #stopped = false;
 
   private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
+    this.#bindSurfacePrincipal = options.bindSurfacePrincipal;
+    this.#deleteExtensionData = options.deleteExtensionData;
     this.#onObserverError = options.onObserverError ?? (error => {
       console.error("[VarinExtensions] Observer failed:", error instanceof Error ? error.message : "Unknown observer failure");
     });
@@ -398,10 +407,11 @@ export class ApplicationExtensionRuntime {
           if (request.deleteData) {
             try {
               await this.storage.deleteExtensionData(request.extensionId);
+              await this.#deleteExtensionData?.(request.extensionId);
             } catch (error) {
               throw new ExtensionStorageError(
                 "storage_write_failed",
-                `Varin extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
+                `Varin extension ${request.extensionId} was removed, but some of its owned data could not be deleted`,
                 { cause: error },
               );
             }
@@ -575,16 +585,20 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal, principal?: string): Promise<JsonValue> {
+  invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal, principal?: string, principalId?: string): Promise<JsonValue> {
     if (this.#stopped) return Promise.reject(new Error("Application extension runtime is stopped"));
     const parsed = parseVarinExtensionServiceInvocationRequest(request);
     if (parsed.lease) {
       const lease = this.#surfaceLeases.get(parsed.lease.id), service = lease?.services.get(parsed.providerId!);
-      if (!principal || lease?.principal !== principal || !isDeepStrictEqual(lease.owner, parsed.lease.owner)
+      if (!principal || lease?.principal !== principal || lease.principalId !== principalId || !isDeepStrictEqual(lease.owner, parsed.lease.owner)
         || !service || service.serviceId !== parsed.serviceId || service.version !== parsed.version) {
         return Promise.reject(new Error('Surface service invocation does not belong to this authenticated composition owner'));
       }
-      return service.pin.invoke(parsed.method, parsed.args, signal);
+      const invocationSignal = signal ? AbortSignal.any([signal, lease.signal]) : lease.signal;
+      if (!principalId || !this.#bindSurfacePrincipal) return service.pin.invoke(parsed.method, parsed.args, invocationSignal);
+      const scope: HostInvocationScope = Object.freeze({ id: randomUUID(), value: null });
+      const release = this.#bindSurfacePrincipal(scope, principalId);
+      return service.pin.invoke(parsed.method, parsed.args, invocationSignal, scope).finally(release);
     }
     const providerId = parsed.providerId;
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
@@ -597,7 +611,7 @@ export class ApplicationExtensionRuntime {
 
   /** The authenticated response stream is the sole owner of these preparation references. */
   async watchServiceLease(requestValue: VarinSurfaceServiceLeaseRequest | unknown, principal: string,
-    emit: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void> {
+    emit: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal, principalId?: string): Promise<void> {
     if (!principal || this.#stopped) throw new Error('Authenticated Surface owner is unavailable');
     const request = parseVarinSurfaceServiceLeaseRequest(requestValue);
     signal.throwIfAborted();
@@ -670,7 +684,7 @@ export class ApplicationExtensionRuntime {
       if (!latest.authoritative || latest.document.revision !== request.expectedRoutingRevision) throw new Error('Surface service routing changed during preparation');
       const owner = { realmId: request.owner.realmId, extensionId: request.owner.extensionId,
         entrypointId: request.owner.entrypointId, generation: request.owner.generation };
-      this.#surfaceLeases.set(id, { principal, owner, revoke, services: new Map(bindings.map((binding, index) => [binding.providerId,
+      this.#surfaceLeases.set(id, { signal: lifetime, ...(principalId ? { principalId } : {}), principal, owner, revoke, services: new Map(bindings.map((binding, index) => [binding.providerId,
         { pin: pins[index]!, serviceId: binding.descriptor.id, version: binding.descriptor.version }])) });
       let checking = false, dirty = false;
       const check = async () => {

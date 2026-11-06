@@ -482,10 +482,16 @@ test("remove retains storage by default and deletes only when explicitly request
   const source = await temporaryDirectory("varin-remove-storage-source-");
   const id = "dev.example.removable";
   await writeSurfaceOnlyExtension(source, id);
+  const deletedDomains: string[] = [];
+  let failDeletion = false;
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
     varinVersion,
+    deleteExtensionData: async extensionId => {
+      if (failDeletion) throw new Error("credential store unavailable");
+      deletedDomains.push(extensionId);
+    },
   });
   const dataAddress = { extensionId: id, key: "preferences", scope: "profile" as const };
   try {
@@ -503,6 +509,7 @@ test("remove retains storage by default and deletes only when explicitly request
     });
     assert.equal(retained.extensions.some((entry) => entry.manifest.id === id), false);
     assert.deepEqual((await runtime.storage.read(dataAddress)).document.data, { retained: true });
+    assert.deepEqual(deletedDomains, [], "keep-data removal must not call other domain deletion owners");
 
     const reinstalled = await runtime.installOrStage({
       expectedRevision: retained.revision,
@@ -515,6 +522,17 @@ test("remove retains storage by default and deletes only when explicitly request
       extensionId: id,
     });
     assert.equal((await runtime.storage.read(dataAddress)).exists, false);
+    assert.deepEqual(deletedDomains, [id], "explicit deletion reaches the trusted application owner once");
+    const installedAgain = await runtime.installOrStage({
+      expectedRevision: (await runtime.catalog.snapshot()).revision,
+      source: { display: "Removable", kind: "local", specifier: source },
+    });
+    const disabledThird = await runtime.setEnabled(id, false, installedAgain.revision);
+    failDeletion = true;
+    await assert.rejects(runtime.removeExtension({ deleteData: true, extensionId: id, expectedRevision: disabledThird.revision }),
+      /was removed, but some of its owned data could not be deleted/);
+    assert.equal((await runtime.catalog.snapshot()).extensions.some(entry => entry.manifest.id === id), false,
+      "a secondary credential deletion failure must not pretend the completed uninstall was rolled back");
   } finally {
     await runtime.stop();
   }

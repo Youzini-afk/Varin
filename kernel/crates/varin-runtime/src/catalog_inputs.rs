@@ -416,6 +416,7 @@ impl Catalog {
                     )
                 })?;
             let next = Run {
+                principal_id: super::principals::thread(&tx, &thread)?,
                 id: id(),
                 thread_id: thread,
                 branch_id: command.branch_id.clone(),

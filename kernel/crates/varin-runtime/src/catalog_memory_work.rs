@@ -390,6 +390,7 @@ impl Catalog {
         let thread_id = format!("{id}:thread");
         let branch_id = format!("{id}:branch");
         let run = Run {
+            principal_id: None,
             id: run_id.clone(),
             thread_id: thread_id.clone(),
             branch_id: branch_id.clone(),

@@ -179,6 +179,10 @@ test('a frozen installed tool makes its first call on v1 after v2 publishes and 
     assert.equal(v1.version, '1.0.0');
     assert.equal(h.runtime.supervisor.getActiveArtifactIdentity(originalOwner), undefined);
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), originalArtifact);
+    const retainedManifest = h.runtime.supervisor.getRetainedManifest(originalOwner)!;
+    assert.equal(retainedManifest.version, '1.0.0', 'capability declarations belong to the retained calling generation');
+    retainedManifest.version = 'mutated';
+    assert.equal(h.runtime.supervisor.getRetainedManifest(originalOwner)!.version, '1.0.0', 'callers cannot modify the retained manifest');
     const childBinding = h.runtime.services.bindPinned(`${id}.query`, 1, original.providerId);
     const child = childBinding.pin();
     childBinding.release();
@@ -191,6 +195,7 @@ test('a frozen installed tool makes its first call on v1 after v2 publishes and 
       await delay(10);
     }
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), undefined);
+    assert.equal(h.runtime.supervisor.getRetainedManifest(originalOwner), undefined);
     assert.equal((await next.invoke('execute', [null]) as { version: string }).version, '2.0.0');
     for (const [version, failure] of [['3.0.0', 'mismatch'], ['4.0.0', 'omit']] as const) {
       const bad = await h.runtime.installOrStage({ source: await h.source(id, version, failure), expectedRevision: (await h.runtime.catalog.snapshot()).revision });

@@ -62,9 +62,12 @@ test('npm metadata is deduplicated and revalidated, downloads honor integrity an
   let downloads = 0;
   let metadata = 0;
   let wrongBytes = false;
+  let finishMetadata: (() => void) | undefined;
+  let pendingMetadata: Promise<void> | undefined;
   const fetcher = new ExtensionReleaseManager({ packages, hostId: 'host', fetch: async (url, init) => {
     if (url.endsWith('.tgz')) { downloads++; return new Response(wrongBytes ? 'wrong' : bytes); }
     metadata++;
+    await pendingMetadata;
     if (new Headers(init?.headers).get('if-none-match')) return new Response(null, { status: 304 });
     return Response.json({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { dist: { tarball: 'https://example.org/package.tgz', integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` } } } }, { headers: { etag: 'v1' } });
   } });
@@ -72,7 +75,22 @@ test('npm metadata is deduplicated and revalidated, downloads honor integrity an
   const preview = await fetcher.preview(source, 'dev.release.test');
   await fetcher.install({ previewId: preview.previewId, expectedHostId: 'host', expectedRevision: 0 });
   assert.equal(downloads, 1);
-  const checks = await Promise.all([fetcher.checkUpdates(), fetcher.checkUpdates()]);
+  pendingMetadata = new Promise<void>(resolve => { finishMetadata = resolve; });
+  const read = packages.catalog.store.read.bind(packages.catalog.store);
+  let reads = 0;
+  let readBoth!: () => void;
+  const bothRead = new Promise<void>(resolve => { readBoth = resolve; });
+  const readMock = t.mock.method(packages.catalog.store, 'read', async () => {
+    const result = await read();
+    if (++reads === 2) readBoth();
+    return result;
+  });
+  const checksPending = Promise.all([fetcher.checkUpdates(), fetcher.checkUpdates()]);
+  await bothRead;
+  finishMetadata!();
+  const checks = await checksPending;
+  readMock.mock.restore();
+  pendingMetadata = undefined;
   assert.equal(checks[0]?.[0]?.status, 'current');
   assert.equal(metadata, 2);
   assert.equal(downloads, 1);
@@ -143,3 +161,46 @@ test('runtime release staging publishes observer state without cold-activating a
   assert.equal(starts, 0);
   assert.equal((await runtime.catalog.snapshot()).extensions[0]?.desired.enabled, false);
 });
+
+for (const replaceSource of [false, true]) {
+  test(`update checks use current installed facts while an old ${replaceSource ? 'source' : 'version'} check is pending`, async t => {
+    const { root, catalog, packages } = await fixture(t);
+    const firstBytes = await readFile(await archive(root, '1.0.0'));
+    const nextBytes = await readFile(await archive(root, '2.0.0'));
+    let latest = '1.0.0';
+    let delayOld = false;
+    let releaseOld!: () => void, enteredOld!: () => void;
+    const oldGate = new Promise<void>(resolve => { releaseOld = resolve; });
+    const oldEntered = new Promise<void>(resolve => { enteredOld = resolve; });
+    const manager = new ExtensionReleaseManager({ packages, hostId: 'host', fetch: async url => {
+      if (url.endsWith('.tgz')) return new Response(url.includes('2.0.0') ? nextBytes : firstBytes);
+      if (delayOld && url.endsWith('/original')) { enteredOld(); await oldGate; }
+      const available = url.endsWith('/replacement') ? '1.0.0' : latest;
+      return Response.json({ 'dist-tags': { latest: available }, versions: Object.fromEntries(([
+        ['1.0.0', firstBytes], ['2.0.0', nextBytes],
+      ] as const).map(([version, bytes]) => [version, { engines: { varin: '^1.0.0' }, dist: {
+        tarball: `https://example.org/${version}.tgz`, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
+      } }])) });
+    } });
+    const source = { kind: 'npm' as const, display: 'Original', specifier: 'original' };
+    const first = await manager.preview(source);
+    await manager.install({ previewId: first.previewId, expectedHostId: 'host', expectedRevision: first.catalogRevision });
+    latest = '2.0.0';
+    const replacement = await manager.preview(replaceSource ? { ...source, specifier: 'replacement' } : source);
+    delayOld = true;
+    const oldCheck = manager.checkUpdates();
+    await oldEntered;
+    const staged = await manager.install({ previewId: replacement.previewId, expectedHostId: 'host',
+      expectedRevision: replacement.catalogRevision, replaceSource });
+    const requested = await catalog.requestCandidateApplication('dev.release.test', replacement.integrity, staged.revision);
+    await catalog.selectCandidate('dev.release.test', replacement.integrity, requested.revision);
+    const currentCheck = manager.checkUpdates();
+    releaseOld();
+    assert.equal((await oldCheck)[0]?.status, 'available');
+    const current = (await currentCheck)[0];
+    assert.equal(current?.status, 'current');
+    assert.equal(current?.version, replaceSource ? '1.0.0' : '2.0.0');
+    assert.equal((await catalog.store.read()).document.extensions['dev.release.test']?.source.specifier,
+      replaceSource ? 'replacement' : 'original');
+  });
+}

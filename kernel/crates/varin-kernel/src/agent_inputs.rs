@@ -90,7 +90,9 @@ fn submit_input(
         .with_resources(initial_resources)
         .with_input_preparation(p.input_preparation)
         .with_expected_context_checkpoint(p.expected_context_checkpoint);
-    let plan_eligible = preparation.scope().is_some_and(|scope| {
+    let host_authority = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+        .thread_has_host_authority(preparation.thread_id()).map_err(domain)?;
+    let plan_eligible = host_authority && preparation.scope().is_some_and(|scope| {
         matches!(scope.mode.as_str(), "agent" | "bot")
             && scope.thread_role == "main"
             && scope.thread_id == preparation.thread_id()
@@ -100,10 +102,17 @@ fn submit_input(
         .as_ref()
         .and_then(|launch| launch.inherit_source)
         .unwrap_or(false);
-    let launch = p
+    let mut launch = p
         .launch
         .map(|selected| selected_launch(&configuration, selected, plan_eligible, preparation.scope().is_some_and(|scope| scope.mode == "bot")))
         .transpose()?;
+    if !host_authority {
+        if let Some(launch) = launch.as_mut() {
+            if launch.source.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host resources".into())); }
+            launch.tools.clear();
+            launch.child_dispatch = None;
+        }
+    }
     if receipt_only {
         let receipt = preparation
             .existing_receipt(&launch, inherit_source)
@@ -116,7 +125,7 @@ fn submit_input(
     // New user rounds inherit the selected names, resolved against today's owner
     // declarations. Old launches and already accepted requests stay immutable.
     let bot = preparation.scope().is_some_and(|scope| scope.mode == "bot");
-    let available = crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot);
+    let available = if host_authority { crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot) } else { Vec::new() };
     let prepared = preparation.with_tool_catalog(available).load(launch, inherit_source).map_err(domain)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
@@ -331,7 +340,7 @@ pub(super) fn execute(
                 return Err(KernelError::Cancelled);
             }
             owner
-                .create_thread(&p.thread_id, &p.branch_id)
+                .create_thread_with_principal(&p.thread_id, &p.branch_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()))
                 .map_err(domain)?;
             Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
         }

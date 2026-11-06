@@ -1,3 +1,4 @@
+import { requirePluginPrincipal } from '../extensions/invocation-principal.js';
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
@@ -215,4 +216,22 @@ test('frozen broker/native dependencies borrow only each actual root invocation 
       finish(); await pending;
     } finally { finish(); pin?.release(); binding?.release(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
   }
+});
+
+
+test('plugin user follows the admitted invocation, rejects forged scopes and expires with the call', async () => {
+  const signal = new AbortController().signal;
+  let currentLogin = 'alice';
+  let saved!: HostCapabilityCallContext;
+  await withToolInvocation({ authority: { ...authority, principalId: currentLogin }, owner, signal }, async invocation => {
+    saved = { owner, signal, invocation };
+    currentLogin = 'bob';
+    assert.equal(requirePluginPrincipal(saved), 'alice');
+    assert.throws(() => requirePluginPrincipal({ ...saved, invocation: { ...invocation } }), /unavailable/);
+    assert.throws(() => requirePluginPrincipal({ ...saved, owner: { ...owner, extensionId: 'other' } }), /unavailable/);
+  });
+  assert.throws(() => requirePluginPrincipal(saved), /unavailable/);
+  await withToolInvocation({ authority, owner, signal }, async invocation => {
+    assert.throws(() => requirePluginPrincipal({ owner, signal, invocation }), /unavailable/);
+  });
 });

@@ -746,6 +746,7 @@ pub(super) fn validate_policy_models(models: &[PolicyModelCapability]) -> Result
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
+    pub principal_id: Option<String>,
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTarget,
     pub startable: bool,
