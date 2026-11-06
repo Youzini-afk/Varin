@@ -142,6 +142,12 @@ A logical research reservation or Rust compute slot is not a hard limit on all m
 and background processes. The current container shares one failure domain; this change does not add
 per-tool cgroups, a global semaphore, a hard queued-task count or an unmeasured memory-per-job estimate.
 
+Container validation constrains its disposable candidate to 0.75 CPU, 2 GiB and 512 tasks, then checks
+health, native runtime and brokered services. It copies the selected source's unchanged resource probe
+to a temporary path and runs it inside that same container, comparing effective capacity/headroom to
+Docker's configured limits before the real SIGTERM check. These are test fixtures, not deployment
+defaults or a mixed-workload benchmark; this probe check does not replace research admission tests.
+
 Passwords and tunnel tokens are runtime values. They are never accepted as Docker build arguments or
 embedded in an image.
 

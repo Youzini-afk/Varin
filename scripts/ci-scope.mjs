@@ -27,6 +27,9 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
     if (/^(?:Dockerfile(?:\.base)?$|\.dockerignore$|docker-compose(?:\.toolbelt)?\.yml$|\.github\/workflows\/(?:docker|container-check)\.yml$|scripts\/docker-)/u.test(file)) {
       enable('container', 'toolbelt'); continue;
     }
+    if (file === 'scripts/smoke-container-budget.mjs' || file === 'scripts/smoke-container-stop.mjs') {
+      enable('container', 'toolbelt'); continue;
+    }
     if (/^packages\/(?:ui\/|web\/(?:src\/|public\/|(?:index|mobile|mini-chat|companion)\.html$|vite\.config\.ts$|postcss\.config\.js$))/u.test(file)) {
       enable('frontend'); continue;
     }
@@ -50,6 +53,7 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
     }
     if (file.startsWith('packages/web/application-host/') || file.startsWith('packages/web/cli/')) {
       enable('native', 'production');
+      if (file === 'packages/web/application-host/lib/harness/resources-system.ts') enable('container');
       if (hostPlatform.test(file) || file.startsWith('packages/web/cli/')) enable('windows', 'macos');
       continue;
     }

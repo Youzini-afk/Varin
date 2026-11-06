@@ -92,6 +92,9 @@ test('owner/dependency/build input decisions include the actual downstream bound
     ['packages/electron/main.ts', ['windows', 'macos', 'frontend'], ['native', 'container']],
     ['Dockerfile.base', ['container', 'toolbelt'], ['windows', 'rust']],
     ['.github/workflows/container-check.yml', ['container', 'toolbelt'], ['windows']],
+    ...['smoke-container-budget.mjs', 'smoke-container-stop.mjs'].map(helper =>
+      [`scripts/${helper}`, ['container', 'toolbelt'], ['frontend', 'native', 'rust', 'production', 'windows', 'macos', 'android', 'full']]),
+    ['packages/web/application-host/lib/harness/resources-system.ts', ['native', 'production', 'container'], ['frontend', 'rust', 'windows', 'macos', 'toolbelt', 'android', 'full']],
     ['packages/web/package.json', surfaces, []],
     ['bun.lock', surfaces, []],
     ['scripts/build-products.mjs', surfaces, []],

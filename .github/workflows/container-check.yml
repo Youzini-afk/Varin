@@ -92,7 +92,9 @@ jobs:
             docker image rm "$IMAGE_REF" 2>/dev/null || true
           }
           trap cleanup EXIT
+          # Test fixtures only: constrain the candidate, never production defaults.
           docker run --detach \
+            --cpus=0.75 --memory=2g --pids-limit=512 \
             --name varin-check-smoke \
             --env VARIN_UI_PASSWORD=varin-ci-smoke-only \
             --publish 127.0.0.1:3000:3000 \
@@ -113,6 +115,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
           docker exec varin-check-smoke node verify-services.mjs
+          node scripts/smoke-container-budget.mjs varin-check-smoke
           node scripts/smoke-container-stop.mjs varin-check-smoke slim
 
       # Both final variants use this same BuildKit instance and source, so its
@@ -163,7 +166,9 @@ jobs:
             docker image rm "$IMAGE_REF" 2>/dev/null || true
           }
           trap cleanup EXIT
+          # Test fixtures only: constrain the candidate, never production defaults.
           docker run --detach \
+            --cpus=0.75 --memory=2g --pids-limit=512 \
             --name varin-check-smoke \
             --env VARIN_UI_PASSWORD=varin-ci-smoke-only \
             --publish 127.0.0.1:3000:3000 \
@@ -184,6 +189,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
           docker exec varin-check-smoke node verify-services.mjs
+          node scripts/smoke-container-budget.mjs varin-check-smoke
           node scripts/smoke-container-stop.mjs varin-check-smoke toolbelt
 
       - name: Remove the local registry
