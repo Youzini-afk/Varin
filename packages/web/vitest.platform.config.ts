@@ -3,8 +3,9 @@ import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config.js';
 
 // These owners touch paths, files, credentials, locks or real subprocesses.
-// Linux still runs the whole portable suite; qualification runs it on Windows
-// too. New tests within these owners are discovered without a per-file list.
+// Linux runs the complete portable suite. Other operating systems verify these
+// owners without duplicating platform-independent Host tests, even in qualification.
+// New tests within these owners are discovered without a per-file list.
 export const PLATFORM_TEST_INCLUDE = [
   'cli/**/*.test.ts',
   // Shared Host plumbing includes watcher canonicalization, shutdown and updates.

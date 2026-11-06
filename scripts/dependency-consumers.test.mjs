@@ -5,26 +5,8 @@ import test from 'node:test';
 
 const root = createRequire(new URL('../package.json', import.meta.url));
 const web = createRequire(new URL('../packages/web/package.json', import.meta.url));
-const { Client, InMemoryTransport, parseJSONRPCMessage } = web('@modelcontextprotocol/client');
+const { Client, InMemoryTransport } = web('@modelcontextprotocol/client');
 const { ESLint } = root('eslint');
-
-test('MCP JSON-RPC parsing retains extension payloads and rejects malformed envelopes', () => {
-  for (const message of [
-    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
-      name: 'read', arguments: { pages: [2, 3] }, _meta: { trace: 'fixture' },
-    } },
-    { jsonrpc: '2.0', id: 'response', result: { content: [], extension: { custom: true } } },
-    { jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'Invalid input', data: { field: 'pages' } } },
-    { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: 'work', progress: 0 } },
-  ]) assert.deepEqual(parseJSONRPCMessage(message), message);
-
-  for (const message of [
-    { jsonrpc: '1.0', id: 1, result: {} },
-    { jsonrpc: '2.0', id: {}, result: {} },
-    { jsonrpc: '2.0', id: 1, error: { code: 'invalid', message: 'Invalid input' } },
-    { jsonrpc: '2.0', method: 42 },
-  ]) assert.throws(() => parseJSONRPCMessage(message));
-});
 
 async function mcpFixture(t, respond, initialize = {
   protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' },

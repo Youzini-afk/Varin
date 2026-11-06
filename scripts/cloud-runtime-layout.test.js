@@ -10,6 +10,7 @@ import {
   findUndeclaredWorkspaceImports,
   verifyCloudRuntimeLayout,
   verifyCloudRuntimeIdentity,
+  verifyCloudRuntimeLock,
 } from './build-cloud-runtime.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -73,7 +74,7 @@ const createFixture = () => {
 
   for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
     const packageRoot = path.join(root, 'packages', directory);
-    writeJson(path.join(packageRoot, 'package.json'), manifests[directory]);
+    writeJson(path.join(packageRoot, 'package.json'), { version: '0.1.0', ...manifests[directory] });
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
     if (directory === 'web') {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
@@ -99,19 +100,29 @@ afterEach(() => {
 });
 
 describe('Varin cloud runtime layout', () => {
-  it('keeps the committed lock in sync with each staged production manifest', () => {
-    // `--frozen-lockfile` only proves the lock resolves; it does not fail when a
-    // manifest gains a production dependency the lock never recorded. That gap
-    // is what let the cloud daemon ship without @varin/extension-builtins.
-    const lockText = fs.readFileSync(path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock'), 'utf8');
-    const lock = JSON.parse(lockText.replace(/,(\s*[}\]])/g, '$1'));
-    const lockWorkspaces = lock.workspaces ?? {};
-    for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
-      const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
-      const lockEntry = lockWorkspaces[`packages/${directory}`] ?? {};
-      assert.deepEqual(lockEntry.dependencies ?? {}, manifest.dependencies ?? {}, `cloud lock is stale for packages/${directory}; regenerate with \`node scripts/build-cloud-runtime.mjs --update-lock\``);
-      assert.equal(lockEntry.version, manifest.version);
-    }
+  it('rejects a stale production graph before staging, including missing workspaces', () => {
+    const root = createFixture();
+    const lock = { workspaces: Object.fromEntries(CLOUD_RUNTIME_PACKAGE_DIRS.map(directory => [
+      `packages/${directory}`, readJson(path.join(root, 'packages', directory, 'package.json')),
+    ])) };
+    const lockPath = path.join(root, 'scripts/cloud-runtime.bun.lock');
+    writeJson(lockPath, lock);
+    assert.doesNotThrow(() => verifyCloudRuntimeLock(root));
+    const manifestPath = path.join(root, 'packages/web/package.json');
+    const manifest = readJson(manifestPath);
+    manifest.dependencies['new-production-dependency'] = '1.0.0';
+    writeJson(manifestPath, manifest);
+    assert.throws(() => verifyCloudRuntimeLock(root), /Cloud lock is stale for packages\/web/);
+    lock.workspaces['packages/web'] = manifest;
+    writeJson(lockPath, lock);
+    assert.doesNotThrow(() => verifyCloudRuntimeLock(root));
+    manifest.version = '0.2.0';
+    writeJson(manifestPath, manifest);
+    assert.throws(() => verifyCloudRuntimeLock(root), /Cloud lock is stale/);
+    manifest.dependencies['@varin/not-shipped'] = 'workspace:*';
+    writeJson(manifestPath, manifest);
+    writeJson(lockPath, lock);
+    assert.throws(() => verifyCloudRuntimeLock(root), /depends on missing workspace @varin\/not-shipped/);
   });
 
   it('declares every workspace import in the shipped web server as a production dependency', () => {
@@ -148,21 +159,6 @@ describe('Varin cloud runtime layout', () => {
       'subpaths.js -> @varin/application-client-extra/runtime',
       'subpaths.js -> @varin/missing-runtime/nested/entry',
     ]);
-  });
-
-  it('contains the complete native application runtime dependency closure', () => {
-    const packageNames = new Set(CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => (
-      readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name
-    )));
-
-    for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
-      const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
-      for (const dependencyName of Object.keys(manifest.dependencies || {})) {
-        if (dependencyName.startsWith('@varin/')) {
-          assert.equal(packageNames.has(dependencyName), true, `${manifest.name} -> ${dependencyName}`);
-        }
-      }
-    }
   });
 
   it('accepts the canonical application-host runtime tree', () => {

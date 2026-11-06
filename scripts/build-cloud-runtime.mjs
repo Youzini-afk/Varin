@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   cpSync,
   existsSync,
@@ -31,6 +32,30 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'settings-store',
   'web',
 ]);
+
+// A frozen install alone can accept a workspace manifest whose new production
+// dependency was never recorded. Keep this inexpensive check with the builder,
+// so CI preflight and normal packaging use the same production boundary.
+export const verifyCloudRuntimeLock = (root = repoRoot) => {
+  const lock = JSON.parse(readFileSync(path.join(root, 'scripts/cloud-runtime.bun.lock'), 'utf8')
+    .replace(/,(\s*[}\]])/g, '$1'));
+  const manifests = CLOUD_RUNTIME_PACKAGE_DIRS.map(directory => ({
+    directory, ...JSON.parse(readFileSync(path.join(root, 'packages', directory, 'package.json'), 'utf8')),
+  }));
+  const names = new Set(manifests.map(manifest => manifest.name));
+  for (const manifest of manifests) {
+    const entry = lock.workspaces?.[`packages/${manifest.directory}`];
+    if (!entry || entry.version !== manifest.version
+      || !isDeepStrictEqual(entry.dependencies ?? {}, manifest.dependencies ?? {})) {
+      throw new Error(`Cloud lock is stale for packages/${manifest.directory}; regenerate with bun run update:cloud-runtime-lock`);
+    }
+    for (const name of Object.keys(manifest.dependencies ?? {})) {
+      if (name.startsWith('@varin/') && !names.has(name)) {
+        throw new Error(`${manifest.name} depends on missing workspace ${name}`);
+      }
+    }
+  }
+};
 
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
@@ -500,6 +525,7 @@ export const buildCloudRuntime = ({
   json = false,
 } = {}) => {
   const resolvedOutput = path.resolve(outputDir || path.join(repoRoot, 'artifacts', 'cloud-runtime'));
+  if (generateLock && !updateLock) verifyCloudRuntimeLock();
   if (build) buildSourcePackages({ json });
   const runtimeManifest = stageRuntimeTree(resolvedOutput, build);
 
@@ -589,15 +615,17 @@ const parseArgs = (argv) => {
       case '--skip-build': options.build = false; break;
       case '--no-lock': options.generateLock = false; break;
       case '--update-lock': options.updateLock = true; break;
+      case '--check-lock': options.checkLock = true; break;
       case '--install': options.install = true; break;
       case '--cache-dir': options.cacheDir = value(); break;
       case '--json': options.json = true; break;
       case '--help':
-        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate scripts/cloud-runtime.bun.lock\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
+        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate scripts/cloud-runtime.bun.lock\n  --check-lock        Check committed production manifests without building\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
         return null;
       default: throw new Error(`Unknown option: ${arg}`);
     }
   }
+  if (options.checkLock && argv.length !== 1) throw new Error('--check-lock must be used on its own.');
   return options;
 };
 
@@ -607,7 +635,10 @@ const isDirectExecution = process.argv[1]
 if (isDirectExecution) {
   try {
     const options = parseArgs(process.argv.slice(2));
-    if (options) {
+    if (options?.checkLock) {
+      verifyCloudRuntimeLock();
+      console.log('Cloud runtime lock matches the production workspace.');
+    } else if (options) {
       const result = buildCloudRuntime(options);
       if (options.json) console.log(JSON.stringify(result));
       else {
