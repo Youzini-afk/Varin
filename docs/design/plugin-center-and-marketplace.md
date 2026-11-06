@@ -156,7 +156,7 @@ Varin 提供应用内插件中心和独立的公开插件市场。市场帮助�
 
 ### 5.1 仓库职责
 
-建议独立建立 `Youzini-afk/Varin-plugins`，站点建议使用 `plugins.varin.dev`。名称与域名是部署建议，本文没有创建仓库或部署站点。
+插件市场使用已建立的 [Astrmira/Varin-plugins](https://github.com/Astrmira/Varin-plugins) 作为收录仓库。站点域名建议使用 `plugins.varin.dev`，待部署时确认。
 
 仓库承载收录资料、静态图标、网站源码和校验脚本。插件源码与发行包保留在作者自己的项目中。
 
@@ -403,4 +403,4 @@ Google 桌面应用属于公共客户端，应按原生 OAuth 与 PKCE 处理；
 - Cloudflare：[GitHub 集成](https://developers.cloudflare.com/pages/configuration/git-integration/github-integration/)、[预览部署](https://developers.cloudflare.com/pages/configuration/preview-deployments/)。
 - Google：[桌面 OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)。
 
-执行时还需落实收录仓库及域名、Cloudflare 项目与部署权限，以及首个连接插件的生产 OAuth 应用归属。这些是具体部署和服务配置，不改变本文已经确定的数据路径与界面职责。
+实施时需初始化收录仓库的目录与站点，并确认站点域名、Cloudflare 项目、部署权限和首个连接插件的生产 OAuth 应用归属。
