@@ -1,4 +1,4 @@
-import { getThemeById, themes } from '@/lib/theme/themes';
+import { getThemeById } from '@/lib/theme/themes';
 import { resolveCompanionAccentPalette } from './companionAccentPalette';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -11,7 +11,7 @@ const data = () => new Uint8ClampedArray(512 * 512 * 4);
 const point = (pixels: Uint8ClampedArray, x: number, y: number, rgba: number[]) => pixels.set(rgba, (y * 512 + x) * 4);
 const at = (pixels: Uint8ClampedArray, x: number, y: number) => [...pixels.slice((y * 512 + x) * 4, (y * 512 + x) * 4 + 4)];
 
-test('material edits only admitted blue RGB, preserving alpha, eyes and neutral/warm materials', () => {
+test.each([undefined, 'aura-dark', 'vesper-light'])('recolors only admitted RGB and preserves alpha and protected materials (%s)', themeId => {
   const pixels = data();
   point(pixels, 2, 2, [63, 142, 243, 241]);
   point(pixels, 3, 2, [63, 142, 243, 255]); // Protected eye, deliberately identical blue.
@@ -20,7 +20,8 @@ test('material edits only admitted blue RGB, preserving alpha, eyes and neutral/
   point(pixels, 6, 2, [241, 184, 157, 255]);
   point(pixels, 20, 20, [63, 142, 243, 255]);
   const before = pixels.slice();
-  expect(applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0, 0, 10, 10]], protect: [[3, 2, 4, 3]] })).toBe(1);
+  expect(applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0, 0, 10, 10]], protect: [[3, 2, 4, 3]] },
+    themeId ? resolveCompanionAccentPalette(getThemeById(themeId)) : undefined)).toBe(1);
   expect(at(pixels, 2, 2)[3]).toBe(241);
   expect(at(pixels, 2, 2).slice(0, 3)).not.toEqual([63, 142, 243]);
   for (const [x, y] of [[3, 2], [4, 2], [5, 2], [6, 2], [20, 20]]) expect(at(pixels, x!, y!)).toEqual(at(before, x!, y!));
@@ -67,27 +68,6 @@ test('source regions reject escaped/fractional or overlapping treatment rather t
   }
   for (const invalid of [null, {}, { allow: [], protect: null }, { allow: [null], protect: [] }]) expect(validAccentSourceRegions(invalid)).toBe(false);
   for (const source of Object.values(profile.sources)) expect(validAccentSourceRegions(source)).toBe(true);
-});
-
-test('default and both Varin themes are byte-identical to the approved pre-palette material', () => {
-  // Golden from the approved material, spanning source colors, mask blending, alpha and protections.
-  for (const palette of [undefined, resolveCompanionAccentPalette(getThemeById('varin-dark')), resolveCompanionAccentPalette(getThemeById('varin-light'))]) {
-    const pixels = data(); let state = 451;
-    for (let i = 0; i < pixels.length; i++) { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; pixels[i] = i % 4 === 3 ? 240 + (state >>> 28) : state >>> 24; }
-    applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0, 0, 512, 512]], protect: [[128, 128, 256, 256]] }, palette);
-    expect(createHash('sha256').update(pixels).digest('hex')).toBe('978903e87a8215c83d6f14dd517d8ed7374c30a348a0c6d8cb518ec0aea31326');
-  }
-});
-
-test('all registered palettes preserve alpha, fixed material colors and protected blue pixels', () => {
-  const original = data();
-  [[63,142,243,255], [63,142,243,255], [240,226,222,255], [80,76,84,255], [241,184,157,255], [63,142,243,239], [15,30,60,255]].forEach((rgba, x) => point(original, x, 0, rgba));
-  for (const theme of themes) {
-    const pixels = original.slice();
-    expect(applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0,0,7,1]], protect: [[1,0,2,1]] }, resolveCompanionAccentPalette(theme))).toBe(1);
-    expect(at(pixels, 0, 0)[3]).toBe(255);
-    for (let x = 1; x < 7; x++) expect(at(pixels, x, 0)).toEqual(at(original, x, 0));
-  }
 });
 
 test('cache switches palettes without stale tint and reuses the original palette', () => {

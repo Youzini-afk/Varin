@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   parseVarinExtensionPackageInstallRequest, parseVarinExtensionPackageRequest, VarinExtensionContractError,
   type VarinExtensionSourceViewProvenance,
@@ -211,7 +211,8 @@ test('captured compilation preserves package-local JSONC extends and aliases wit
     const config = '// Captured author configuration\n{ "extends": ["./config/base", "@fixture/config"], }';
     await writeFile(join(f.directory, 'tsconfig.json'), config);
     const prepared = await f.runtime.packages.artifacts.prepareCaptured(f.directory, source());
-    assert.match(await readFile(join(prepared.resolvedPath, 'runtime/host/module.cjs'), 'utf8'), /captured-config-value/);
+    const loaded = await import(pathToFileURL(join(prepared.resolvedPath, 'runtime/host/module.cjs')).href);
+    assert.equal((loaded.default.default ?? loaded.default).activate(), 'captured-config-value');
     assert.equal(await readFile(join(f.directory, 'tsconfig.json'), 'utf8'), config);
     assert.equal(await readFile(join(prepared.resolvedPath, 'package/tsconfig.json'), 'utf8'), config);
     assert.doesNotMatch(await readFile(join(prepared.resolvedPath, 'artifact-index.json'), 'utf8'), /varin-tsconfig-/);

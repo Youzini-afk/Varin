@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const refreshLocalRuntimeUrlAuthToken = vi.fn();
 const fetchWithoutRuntimeRouting = vi.fn();
 
-vi.mock('@varin/application-client', () => ({
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
   fetchWithoutRuntimeRouting,
   refreshLocalRuntimeUrlAuthToken,
 }));

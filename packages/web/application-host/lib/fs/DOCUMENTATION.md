@@ -1,7 +1,7 @@
 # FS Module Documentation
 
 ## Purpose
-Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and background command execution jobs.
+Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, foreground command execution, and job observations. Background execution requests are rejected.
 
 ## Entrypoints and structure
 - `packages/web/application-host/lib/fs/routes.ts`: route registration and runtime-owned state for `/api/fs/*` endpoints.

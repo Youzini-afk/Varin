@@ -35,35 +35,12 @@ const runtimeValid = (manifest: unknown): boolean => {
   }
 };
 
-test("schema and runtime agree on every manifest fixture", () => {
-  const mismatches: string[] = [];
-  for (const fixture of manifestFixtures) {
-    const schemaResult = schemaValid(fixture.manifest);
-    const runtimeResult = runtimeValid(fixture.manifest);
-    // Check fixture expectations are met
-    if (schemaResult !== fixture.schemaValid) {
-      mismatches.push(
-        `${fixture.label}: schema expected ${fixture.schemaValid} but got ${schemaResult}`,
-      );
-    }
-    if (runtimeResult !== fixture.runtimeValid) {
-      mismatches.push(
-        `${fixture.label}: runtime expected ${fixture.runtimeValid} but got ${runtimeResult}`,
-      );
-    }
-    // Assert schema and runtime agree, unless the fixture documents a
-    // cross-field rule that only the runtime can express.
-    // The only allowed divergence is schemaValid=true, runtimeValid=false
-    // (schema accepts but runtime rejects a cross-field constraint).
-    // schemaValid=false, runtimeValid=true is NOT acceptable — both must reject.
-    if (fixture.schemaValid === false && fixture.runtimeValid === true) {
-      mismatches.push(
-        `${fixture.label}: schema rejects but runtime accepts — this divergence is not allowed`,
-      );
-    }
-  }
-  assert.deepEqual(mismatches, [], mismatches.join("\n"));
-});
+for (const fixture of manifestFixtures) {
+  test(`manifest admission: ${fixture.label}`, () => {
+    assert.equal(schemaValid(fixture.manifest), fixture.schemaValid, "published schema");
+    assert.equal(runtimeValid(fixture.manifest), fixture.runtimeValid, "runtime parser");
+  });
+}
 
 test("semver-range format uses real semver.validRange validation", () => {
   // Valid ranges

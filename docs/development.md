@@ -125,8 +125,8 @@ macOS 验证文件/凭据/进程 owner 和真实 Swift Computer helper；涉及 
 FSKit 双架构编译、真实 storage 测试及 mount feature 编译。它不代证已安装系统组件的实际挂载或桌面授权。
 Android native/toolchain 变更执行无签名 debug build，release 使用同一个 Android setup action。
 
-手动 CI 和每日完整资格检查不依赖最近一次 diff，并保留完整 Windows native 组合；
-与平台无关的 Host 行为只在 Linux 验证，Windows/macOS 始终运行文件、锁、凭据和进程等真实平台 owner 子集；
+手动 CI 和每日完整资格检查不依赖最近一次 diff，并保留完整 Windows portable 与 native 组合；
+普通 PR 的 Windows/macOS 检查按文件、锁、凭据和进程等真实平台 owner 选择；Windows 完整资格检查继续兜底 owner 之间的覆盖空隙；
 普通 push 不会取消这两种完整资格。发行调用固定候选 SHA，container caller 的实际镜像由它自己验证，
 不递归调用 container check。定期红项有其 owner，未解决的真实平台故障不能用绿色局部检查代证。
 真实设备、FSKit enablement、桌面权限与远端多机仍按[运行时验收](runtime-acceptance.md)单独说明。
@@ -180,6 +180,7 @@ CLI 按所选 Host 产物的声明编译，清洁构建不依赖开发目录中�
 入口、产物布局和重试方式见 [Desktop 打包说明](../packages/electron/README.md#packaging)。
 
 Host 类型由独立 Node 工程检查，Web/CLI/跨层测试通过 `#application-host` 读取新生成声明；Vitest 使用真实 Host 源码。
+生产类型/构建不把 `*.test-helper.ts` 与 `*.fixture.ts` 当成入口；测试工程仍包含它们，避免先生成测试声明和产物再清理。
 不要用旧 server/ 或旧声明验证新源码。Electron 的类型准备不需要覆盖正在运行的 server generation。
 
 私有 wire 改动后运行 `bun run kernel:protocol`，生成检查使用同一脚本的 `--check`。正常 kernel build 生成与当前
