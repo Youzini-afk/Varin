@@ -1,9 +1,10 @@
 import { ApplicationExtensionRuntime } from '../../src/application-runtime.js';
 import { createAuthoredPanelConsumer } from '../../../ui/src/lib/extensions/authored-surface-consumer.test-support.js';
 import type { SurfaceExtensionHost } from '@varin/extension-loader';
+import { fileURLToPath } from 'node:url';
 
 const runtime = await ApplicationExtensionRuntime.create({ dataDir: process.argv[2]!, varinVersion: '1.2.3',
-  brokerScript: new URL('../../broker/broker-child.mjs', import.meta.url).pathname });
+  brokerScript: fileURLToPath(new URL('../../broker/broker-child.mjs', import.meta.url)) });
 let consumer: Awaited<ReturnType<typeof createAuthoredPanelConsumer>> | undefined;
 let releaseMount: (() => void) | undefined;
 const globals = globalThis as typeof globalThis & { handoffMountGate?: Promise<void>; handoffMounts?: string[]; failHandoffMount?: boolean };

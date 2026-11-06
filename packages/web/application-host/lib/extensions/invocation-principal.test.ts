@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import type { VarinSurfaceServiceLeaseEvent } from '@varin/extension-contract';
 import { bindPluginInvocationPrincipal, requirePluginPrincipal } from './invocation-principal.js';
@@ -10,7 +11,7 @@ for (const mode of ['native', 'brokered'] as const) test(`${mode}: only the auth
   const root = await mkdtemp(join(tmpdir(), 'varin-surface-principal-'));
   const runtime = await ApplicationExtensionRuntime.create({
     dataDir: join(root, 'data'), varinVersion: '1.2.3', bindSurfacePrincipal: bindPluginInvocationPrincipal,
-    brokerScript: new URL('../../../../extension-host/broker/broker-child.mjs', import.meta.url).pathname,
+    brokerScript: fileURLToPath(new URL('../../../../extension-host/broker/broker-child.mjs', import.meta.url)),
   });
   const controller = new AbortController();
   let watching: Promise<void> | undefined;
