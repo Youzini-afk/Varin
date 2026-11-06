@@ -37,12 +37,14 @@ const equalState = (actual, expected) => {
 };
 
 // Test dependencies are passed explicitly; production endpoints cannot be changed by an environment variable.
-export async function authorizeDesktop(client, directory, { fetchImpl = fetch, onAuthorizationUrl, timeoutMs = 300000 } = {}) {
+export async function authorizeDesktop(client, directory, { fetchImpl = fetch, onAuthorizationUrl, timeoutMs = 300000, signal } = {}) {
+  signal?.throwIfAborted();
   const verifier = randomBytes(48).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   const state = randomBytes(32).toString('base64url');
   let resolveCode, rejectCode, timer, consumed = false;
   const pending = new Promise((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
+  const abort = () => rejectCode(new Error('Google authorization cancelled'));
   const server = createServer((request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     response.setHeader('Cache-Control', 'no-store');
@@ -72,18 +74,23 @@ export async function authorizeDesktop(client, directory, { fetchImpl = fetch, o
     code_challenge: challenge, code_challenge_method: 'S256', state,
   }).toString();
   try {
+    signal?.addEventListener('abort', abort, { once: true });
+    signal?.throwIfAborted();
     timer = setTimeout(() => rejectCode(new Error('Google authorization timed out')), timeoutMs);
     const [, code] = await Promise.all([Promise.resolve().then(() => onAuthorizationUrl(url.toString())), pending]);
+    signal?.throwIfAborted();
     const result = await tokenRequest({ code, client_id: client.client_id, client_secret: client.client_secret,
-      code_verifier: verifier, redirect_uri: redirect, grant_type: 'authorization_code' }, fetchImpl);
+      code_verifier: verifier, redirect_uri: redirect, grant_type: 'authorization_code' }, fetchImpl, signal);
     if (typeof result?.refresh_token !== 'string' || !result.refresh_token) {
       throw new Error('Google did not return a refresh token; revoke the app in Google and connect again');
     }
     if (typeof result.scope !== 'string' || !GMAIL_SCOPES.every(scope => result.scope.split(' ').includes(scope))) {
       throw new Error('Google did not grant both requested Gmail scopes; connect again');
     }
-    await saveCredentials(directory, { ...client, refresh_token: result.refresh_token });
+    signal?.throwIfAborted();
+    await saveCredentials(directory, { ...client, refresh_token: result.refresh_token }, { signal });
   } finally {
+    signal?.removeEventListener('abort', abort);
     clearTimeout(timer);
     await new Promise(resolve => server.close(resolve));
   }

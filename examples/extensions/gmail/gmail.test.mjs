@@ -146,7 +146,7 @@ test('uncertain or rejected sends never retry and are not reported as successful
     assert.equal(result.status, type === 'client' ? 'rejected' : 'unknown');
     assert.equal(sends, 1);
     const handlers = new Map();
-    createExtension(api).activate({ services: { provide(descriptor, handler) { handlers.set(descriptor.tool.name, handler); } } });
+    createExtension(api).activate({ effect() {}, services: { provide(descriptor, handler) { if (descriptor.tool) handlers.set(descriptor.tool.name, handler); } } });
     const send = handlers.get('gmail_send');
     const invocation = { callId: 'fixture', signal: new AbortController().signal, capabilities: { async call() { throw new Error('unexpected'); } } };
     await assert.rejects(send.execute([{ to: ['person@example.com'], subject: 'test', body: 'test' }], invocation));

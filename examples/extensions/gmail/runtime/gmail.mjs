@@ -91,6 +91,11 @@ export function createGmailClient({ directory = credentialDirectory(), fetchImpl
   }
   return {
     async status() { return { configured: Boolean(await loadCredentials(directory)), note: 'Local credentials found does not prove Google authorization is still valid.' }; },
+    async profile(signal) {
+      const data = await get('/profile', {}, signal);
+      if (typeof data.emailAddress !== 'string' || !data.emailAddress) throw new Error('Gmail returned an invalid account profile');
+      return { emailAddress: data.emailAddress };
+    },
     async search(input, signal) {
       if (input.query !== undefined && typeof input.query !== 'string') throw new Error('Gmail search query must be text');
       if (input.pageToken !== undefined && typeof input.pageToken !== 'string') throw new Error('Page token must be text');

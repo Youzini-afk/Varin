@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "example.gmail",
   "displayName": "Gmail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "varin": "*"
   },
@@ -13,7 +13,21 @@
       "activation": [
         "service-request"
       ]
-    }
+    },
+    "surfaces": [
+      {
+        "id": "settings",
+        "file": "dist/settings.cjs",
+        "mode": "managed",
+        "supports": [
+          "web",
+          "desktop"
+        ],
+        "activation": [
+          "application-startup"
+        ]
+      }
+    ]
   },
   "capabilities": {
     "host": []
@@ -148,7 +162,46 @@
             "type": "object"
           }
         }
+      },
+      {
+        "id": "example.gmail.connection",
+        "version": 1
       }
     ]
-  }
+  },
+  "requires": {
+    "services": [
+      {
+        "id": "example.gmail.connection",
+        "version": 1,
+        "realms": [
+          "surface"
+        ],
+        "binding": "single"
+      }
+    ]
+  },
+  "contributions": [
+    {
+      "id": "example.gmail.settings",
+      "entrypoint": "settings",
+      "kind": "settings-page",
+      "contractVersion": 1,
+      "supports": [
+        "web",
+        "desktop"
+      ],
+      "data": {
+        "slug": "gmail",
+        "title": "Gmail",
+        "group": "connections",
+        "keywords": [
+          "email",
+          "oauth",
+          "google",
+          "mail"
+        ]
+      }
+    }
+  ]
 }

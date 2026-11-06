@@ -27,7 +27,7 @@ function validateCredentials(value) {
   return { client_id: value.client_id, client_secret: value.client_secret, refresh_token: value.refresh_token };
 }
 
-export async function saveCredentials(directory, value) {
+export async function saveCredentials(directory, value, { signal } = {}) {
   const credentials = validateCredentials(value);
   await privateDirectory(directory, true);
   const target = join(directory, 'credentials.json');
@@ -35,6 +35,7 @@ export async function saveCredentials(directory, value) {
   try {
     const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
     try { await file.writeFile(JSON.stringify(credentials)); await file.sync(); } finally { await file.close(); }
+    signal?.throwIfAborted();
     await rename(temporary, target);
   } finally { await rm(temporary, { force: true }); }
 }
@@ -56,14 +57,29 @@ export async function loadCredentials(directory = credentialDirectory()) {
   }
 }
 
-export async function readDesktopClient(path) {
+export function parseDesktopClient(json) {
   let content;
-  try { content = JSON.parse(await readFile(path, 'utf8')); }
-  catch { throw new Error('Could not read the Google Desktop OAuth client JSON file'); }
+  try {
+    if (typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > 65536) throw new Error();
+    content = JSON.parse(json);
+  } catch { throw new Error('Could not read the Google Desktop OAuth client JSON file'); }
   const client = content?.installed;
   if (!client || typeof client.client_id !== 'string' || !client.client_id ||
       typeof client.client_secret !== 'string' || !client.client_secret) {
     throw new Error('Expected the JSON file for a Google Desktop OAuth client');
   }
   return { client_id: client.client_id, client_secret: client.client_secret };
+}
+
+export async function readDesktopClient(path) {
+  let json;
+  try { json = await readFile(path, 'utf8'); }
+  catch { throw new Error('Could not read the Google Desktop OAuth client JSON file'); }
+  return parseDesktopClient(json);
+}
+
+export async function removeCredentials(directory = credentialDirectory()) {
+  try { await privateDirectory(directory, false); }
+  catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+  await rm(join(directory, 'credentials.json'), { force: true });
 }

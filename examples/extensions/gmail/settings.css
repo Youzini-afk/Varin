@@ -1,0 +1,21 @@
+.varin-gmail { box-sizing: border-box; width: 100%; max-width: 900px; margin: 0 auto; padding: 28px 32px 60px; color: var(--foreground, #252525); }
+.varin-gmail * { box-sizing: border-box; }
+.varin-gmail-title { margin: 0 0 6px; font-size: 26px; font-weight: 650; }
+.varin-gmail-subtitle, .varin-gmail-copy, .varin-gmail-note, .varin-gmail-steps { color: var(--muted-foreground, #777); line-height: 1.6; font-size: 14px; }
+.varin-gmail-subtitle { margin: 0 0 24px; }
+.varin-gmail-card { border: 1px solid var(--border, #dedede); border-radius: 14px; padding: 22px; margin-bottom: 16px; background: var(--card, transparent); }
+.varin-gmail-section-title { margin: 0 0 10px; font-size: 17px; font-weight: 600; }
+.varin-gmail-status { font-size: 14px; margin: 0 0 8px; }
+.varin-gmail-account { margin: 0 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.varin-gmail-error { margin: 0; color: var(--destructive, #bb3b31); font-size: 13px; overflow-wrap: anywhere; }
+.varin-gmail-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.varin-gmail-button { font: inherit; font-size: 14px; border: 1px solid var(--border, #dedede); border-radius: 9px; padding: 8px 14px; cursor: pointer; }
+.varin-gmail-button.primary { background: var(--primary, #222); color: var(--primary-foreground, #fff); }
+.varin-gmail-button.secondary { color: inherit; background: transparent; }
+.varin-gmail-button:disabled { opacity: .48; cursor: not-allowed; }
+.varin-gmail-link { color: var(--primary, #4668c9); font-size: 13px; text-decoration: underline; overflow-wrap: anywhere; }
+.varin-gmail-steps { padding-left: 22px; }
+.varin-gmail-label { display: block; margin: 20px 0 12px; font-size: 14px; font-weight: 600; }
+.varin-gmail-file { display: block; width: 100%; margin-top: 8px; font-size: 13px; font-weight: 400; }
+.varin-gmail-note { margin: 16px 0 0; font-size: 12px; }
+.varin-gmail [hidden] { display: none !important; }
