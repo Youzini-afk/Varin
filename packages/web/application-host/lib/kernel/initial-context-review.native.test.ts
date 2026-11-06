@@ -14,7 +14,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
 import { createKernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -65,13 +65,16 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
   const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
   const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }) });
-  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
+  const runtime = new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
+  const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project',
+    botForThread: async threadId => (await runtime.thread(threadId)).bot_id
+      ? { id: 'recovery-bot', name: 'Recovery Bot', instructions: null, revision: 1 } : null });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
 
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
+  const adapter = new ThreadAdapter(runtime, {
     describeModel: async selection => ({ providerId: selection.providerId, model: selection.modelId, contextWindowTokens: null, maxOutputTokens: configuration.maxOutputTokens }),
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
@@ -91,10 +94,54 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { prepareContext, refreshPersonalization: () => adapter.refreshPersonalization(), submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { adapter, prepareContext, refreshPersonalization: () => adapter.refreshPersonalization(), submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
+it.each(['agent', 'bot'] as const)('refreshes the built-in prompt and sends again after recovering a projectless %s conversation', async mode => {
+  const f = await fixture((_body, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'answer' }] }] } })}\n\n`);
+  });
+  if (mode === 'bot') {
+    await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish', { botId: 'recovery-bot', profileRevision: 1, activityOperationId: null, permitted: true });
+  }
+  // Seed an already accepted older conversation, without starting a provider request.
+  const launch = vi.spyOn(f.adapter, 'continueLaunch').mockResolvedValue();
+  const main = f.prepareContext.main;
+  const initial = vi.spyOn(f.prepareContext, 'main').mockImplementation(async (...args) => {
+    const context = await main(...args);
+    return mode === 'agent' ? { ...context, personalization: { ...context.personalization!, originalSections: [
+      ...context.personalization!.originalSections, { name: 'work_focus', content: 'LEGACY_WORK_FOCUS' },
+    ] } } : context;
+  });
+  const identity = mode === 'bot' ? { runtime: 'agent' as const, ...await f.runtime.createBotThread('recovery-bot', 'thread:bot', 'branch:bot') }
+    : await f.api.create('recovery-empty');
+  const first = await f.api.submit({ ...identity, key: 'first', expectedHead: null, text: 'first question', model });
+  await f.runtime.cancelRun(first.run_id);
+  initial.mockRestore();
+  if (mode === 'agent') launch.mockRestore();
+  const before = await f.api.snapshot(identity);
+  await f.api.navigate({ ...identity, key: 'rewind', expectedHeadId: before.historyPage.head, targetHeadId: null });
+  // An application update changes the built-in rendering without editing the user's profile.
+  const render = f.prepareContext.refresh!;
+  vi.spyOn(f.prepareContext, 'refresh').mockImplementation(async (...args) => {
+    const context = await render(...args);
+    return { ...context, effectiveSystemPrompt: `${context.effectiveSystemPrompt}\nUpdated built-in presentation guidance.` };
+  });
+  const next = await f.api.submit({ ...identity, key: 'next', expectedHead: null, text: 'replacement question', model });
+  const refreshed = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(refreshed.proposal.effective_system_prompt).toContain('Updated built-in presentation guidance.');
+  expect(refreshed.personalization!.revision).toBe(before.context.checkpoint!.personalization!.revision);
+  expect(refreshed.revision).toBeGreaterThan(before.context.checkpoint!.revision);
+  expect(refreshed.proposal.memory_checkpoint).toBe(before.context.checkpoint!.proposal.memory_checkpoint);
+  expect(refreshed.personalization!.memorySnapshot).toEqual(before.context.checkpoint!.personalization!.memorySnapshot);
+  expect(refreshed.personalization!.originalSections).toEqual(before.context.checkpoint!.personalization!.originalSections);
+  expect(refreshed.proposal.effective_system_prompt).not.toContain('LEGACY_WORK_FOCUS');
+  expect(refreshed.resources!.source).toBeNull();
+  if (mode === 'bot') await f.runtime.cancelRun(next.run_id);
+  else await expect.poll(async () => (await f.api.run(next.run_id)).state).toBe('completed');
+});
 const messages = (body: Record<string, unknown>) => body.input as Array<{ role?: string; content?: unknown }>;
 const system = (body: Record<string, unknown>) => messages(body).filter(value => value.role === 'system');
 it('initial context preserves pinned AGENTS and request roles while current personalization survives retry, restart, compaction and fork', async () => {

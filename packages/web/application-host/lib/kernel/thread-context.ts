@@ -69,7 +69,6 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
     signal?.throwIfAborted();
-    basis = { ...basis, originalSections: basis.originalSections.filter(section => section.name !== 'work_focus') };
     const bot = await owners.botForThread?.(basis.threadId) ?? null;
     if ((basis.mode === 'bot') !== (bot !== null)) throw new Error('Context mode differs from the original Thread owner');
     const catalog = bot ? { revision: bot.revision, prompts: {}, memories: [] } : await owners.personalization.catalog();
@@ -90,7 +89,9 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       ...(basis.projectId ? { projectId: basis.projectId } : {}),
       profiles, memories: memorySnapshot.memories as AgentMemoryNote[],
     };
-    const original = Object.fromEntries(basis.originalSections.map(section => [section.name, section.content]));
+    // Historical sections remain the admitted provenance. Work focus is rendered by the
+    // current launch owner, so omit its old text without rewriting that provenance.
+    const original = Object.fromEntries(basis.originalSections.filter(section => section.name !== 'work_focus').map(section => [section.name, section.content]));
     // projectRoot is the original admitted configuration namespace, never the execution cwd.
     const composition = owners.composition ? await owners.composition({ threadId: basis.threadId,
       ...(basis.projectId ? { projectId: basis.projectId } : {}),

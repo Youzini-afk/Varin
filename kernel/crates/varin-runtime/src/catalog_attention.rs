@@ -398,7 +398,8 @@ impl AttentionRead {
             );
         }
         // No result/intent content is hydrated. Independent effects can outlive their Run.
-        let mut q=db.prepare(&format!("SELECT o.body,r.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE {OPEN_OPERATION} ORDER BY o.id"))?;
+        // Standalone inference has a UtilityRun, no conversation branch, and its own product status.
+        let mut q=db.prepare(&format!("SELECT o.body,r.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE r.branch_id IS NOT NULL AND {OPEN_OPERATION} ORDER BY o.id"))?;
         let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             check(cancel)?;
@@ -547,7 +548,7 @@ impl AttentionRead {
             ));
         }
         // Queued/activating work need not yet own a branch's active pointer.
-        let mut q=db.prepare(&format!("SELECT DISTINCT branch_id FROM runs WHERE {OPEN_RUN} UNION SELECT branch_id FROM input_queue WHERE state='queued' AND activation='activating'"))?;
+        let mut q=db.prepare(&format!("SELECT DISTINCT branch_id FROM runs WHERE branch_id IS NOT NULL AND {OPEN_RUN} UNION SELECT branch_id FROM input_queue WHERE state='queued' AND activation='activating'"))?;
         for id in q.query_map([], |r| r.get::<_, String>(0))? {
             check(cancel)?;
             if let Some(b) = branches.get_mut(&id?) {

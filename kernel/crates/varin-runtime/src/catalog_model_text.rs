@@ -553,6 +553,9 @@ mod tests {
         let id = admit(&mut db, &p);
         let inference = generate(&mut db, &p);
         db.dispatch_inference_generation(&inference).unwrap();
+        let attention = db.capture_attention_read().load(&|| false).unwrap();
+        assert!(attention.branches.is_empty());
+        assert!(attention.items.is_empty());
         drop(db);
         let mut db = Catalog::open(path).unwrap();
         let view = db.capture_model_text(&id).unwrap().load().unwrap();
@@ -567,6 +570,10 @@ mod tests {
             .unwrap();
         assert!(db.admit_inference_generation(&p.generation, body).is_err());
         assert!(db.list_threads().unwrap().is_empty());
+        // Its unknown effect remains inspectable above, without poisoning conversation attention.
+        let attention = db.capture_attention_read().load(&|| false).unwrap();
+        assert!(attention.branches.is_empty());
+        assert!(attention.items.is_empty());
     }
     #[test]
     fn physical_worker_stop_retains_unknown_receipt_when_body_publication_failed() {

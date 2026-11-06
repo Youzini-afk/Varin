@@ -48,6 +48,13 @@ Source-less user submissions supply the Host's default live directory as an inhe
 atomically retains any existing selected source. No project, inventory, baseline or mount is created for it.
 File transactions and recovery keep relative identities inside that directory and absolute identities outside.
 
+Conversation recovery moves the branch head and keeps the original context provenance. Prompt refresh
+uses the context checkpoint's revision for publication; the personalization revision belongs to user
+settings and need not change when an application update renders the same settings differently. Refresh
+still preserves source/scope and memory, including when recovery leaves the branch with an empty history.
+Conversation attention reads branch-owned Runs; standalone text/knowledge inference retains its own
+product status and must not be decoded as a conversational Run.
+
 Typed `ExecutionError` code/message/details survive kernel, managed-source and script transport.
 Original completion state decides whether a model-facing error is projected; opaque successful tool
 data is not reclassified. The Catalog stores error details with its existing completion and GC roots,

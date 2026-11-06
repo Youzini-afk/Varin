@@ -105,6 +105,12 @@ it('only accepts original method-matched transport evidence after entering nativ
     catch (error) { expect(error).toBeInstanceOf(ThreadRequestError); expect((error as ThreadRequestError).admission).toBe(admission); }
   }
 });
+it('keeps context preparation conflicts as conflicts before input admission', async () => {
+  const f = fixture();
+  f.models.resolveModel.mockRejectedValueOnce(new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: active context checkpoint changed' }));
+  await expect(f.api.submit(input)).rejects.toMatchObject({ status: 409, code: 'thread-conflict', admission: 'not_started' });
+  expect(f.runtime.submit).not.toHaveBeenCalled();
+});
 it('classifies malformed input before calling the adapter rather than treating arbitrary 400 responses as rejected input', async () => {
   const f = fixture();
   await expect(f.api.submit({ ...input, images: [{ mimeType: 'image/png', data: 'invalid-base64' }] })).rejects.toMatchObject({ status: 400, admission: 'not_started' });

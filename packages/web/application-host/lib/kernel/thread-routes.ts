@@ -247,7 +247,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         const sourceCode = sourceFailureCode(error instanceof ThreadPreAdmissionError ? error.reason : error);
         const admission = error instanceof ThreadPreAdmissionError ? { admission: 'not_started' as const } : {};
         if (sourceCode) { response.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409).json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode), ...admission }); return; }
-        const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
+        const conflict = reason instanceof PlanConflict || reason instanceof KernelClientError && reason.code === 'operation-error' && reason.message.startsWith('operation error: conflict:');
         if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-execution-stale' ? 409 : error.computerCode === 'computer-request-invalid' ? 400 : 503).json({ code: error.computerCode, error: error.message }); return; }
         const suppliedCode = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
           : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';

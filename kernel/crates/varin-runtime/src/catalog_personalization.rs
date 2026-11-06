@@ -148,13 +148,9 @@ impl PersonalizationRefresh {
         if current.revision != expected_revision {
             return Err(RuntimeError::Conflict("active context checkpoint changed".into()));
         }
-        if personalization.revision == previous.revision
-            && (current.proposal.effective_system_prompt != effective_system_prompt
-                || current.proposal.instruction_sources != instruction_sources
-                || current.proposal.memory_checkpoint != memory_checkpoint
-                || personalization.context_composition == previous.context_composition) {
-            return Err(RuntimeError::Conflict("personalization content changed without a new committed revision".into()));
-        }
+        // The profile revision belongs to user settings, not the Host's prompt renderer.
+        // A new application can render those same settings differently. The captured
+        // checkpoint revision fences publication; scope, source and memory stay checked above.
         let proposal = context::ContextProposal {
             key: format!("personalization:{branch_id}:{}", current.revision.checked_add(1).ok_or_else(|| RuntimeError::Invalid("context revision exhausted".into()))?),
             branch_id, through_id: current.proposal.through_id,
