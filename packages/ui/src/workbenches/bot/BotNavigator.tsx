@@ -10,6 +10,7 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import { cn } from '@/lib/utils';
 import { BotFigure } from './BotFigure';
+import { BotSessionMenu, type BotSessionAction } from './BotSessionMenu';
 import { isWaitingStatus, liveRun, runStatus, shortState, type BotFigureState, type BotSessionView } from './botPresentation';
 
 const rowId = (identity: ThreadIdentity) => `session:${identity.threadId}:${identity.branchId}`;
@@ -27,7 +28,7 @@ function SessionMark({ waiting, running, unread }: { waiting: boolean; running: 
  * Only the selected Bot lists its conversations; the others stay folded until chosen.
  */
 export function BotNavigator({ bots, selectedId, sessions, current, figures, busy, showArchived, isMobile, sessionTitle,
-  onSelectBot, onSelectSession, onNewSession, onBotAction, onCreateBot, onToggleArchived, onRefresh, onOpenSettings }: {
+  onSelectBot, onSelectSession, onSessionAction, onNewSession, onBotAction, onCreateBot, onToggleArchived, onRefresh, onOpenSettings }: {
   bots: BotSummary[] | null;
   selectedId: string | null;
   sessions: BotSessionView[] | null;
@@ -39,6 +40,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   sessionTitle(session: BotSessionView): string;
   onSelectBot(botId: string): void;
   onSelectSession(identity: ThreadIdentity): void;
+  onSessionAction(session: BotSessionView, identity: ThreadIdentity, action: BotSessionAction): void;
   onNewSession(): void;
   onBotAction(bot: BotSummary, action: BotMenuAction): void;
   onCreateBot(): void;
@@ -57,7 +59,8 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   useSelectionGlide(list, currentRow);
   useHoverPill(list);
   const needle = query.trim().toLocaleLowerCase();
-  const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle)) ?? null;
+  const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle))
+    .sort((a, b) => Number(b.thread.pinned) - Number(a.thread.pinned)) ?? null;
   const titleCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
     const title = sessionTitle(session);
@@ -122,23 +125,27 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
               const title = sessionTitle(session);
               const updated = session.thread.updated_at_ms;
               return <React.Fragment key={main.threadId}>
+                <BotSessionMenu session={session} identity={main} label={title} disabled={busy} onAction={action => onSessionAction(session, main, action)}>
                 <button type="button" data-sidebar-row={rowId(main)} data-current={mainCurrent || undefined} aria-current={mainCurrent ? 'page' : undefined}
                   className="bot-nav-row bot-nav-session" disabled={busy && !mainCurrent} onClick={() => onSelectSession(main)}>
                   <Icon name="chat-3" className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{title}</span>
+                  {session.thread.pinned ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" /> : null}
                   {(titleCounts.get(title) ?? 0) > 1 && Number.isFinite(updated) ? <time dateTime={new Date(updated).toISOString()} title={new Date(updated).toLocaleString(getCurrentIntlLocale())}
                     className="shrink-0 typography-micro font-normal text-muted-foreground">{formatSessionCompactDateLabel(updated)}</time> : null}
                   <SessionMark waiting={session.waiting} running={session.running} unread={session.unread && !mainCurrent} />
                 </button>
+                </BotSessionMenu>
                 {session.branches.map((branch, index) => {
                   const branchCurrent = current?.threadId === branch.threadId && current.branchId === branch.branchId;
                   const status = runStatus(liveRun(session.thread, branch.branchId, null));
-                  return <button key={branch.branchId} type="button" data-sidebar-row={rowId(branch)} data-current={branchCurrent || undefined} data-branch=""
+                  return <BotSessionMenu key={branch.branchId} session={session} identity={branch} label={`${title} · ${t('bot.session.branch', { index: index + 1 })}`} disabled={busy} onAction={action => onSessionAction(session, branch, action)}>
+                  <button type="button" data-sidebar-row={rowId(branch)} data-current={branchCurrent || undefined} data-branch=""
                     aria-current={branchCurrent ? 'page' : undefined} className="bot-nav-row bot-nav-session" disabled={busy && !branchCurrent} onClick={() => onSelectSession(branch)}>
                     <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 truncate">{t('bot.session.branch', { index: index + 1 })}</span>
                     <SessionMark waiting={isWaitingStatus(status)} running={status !== null && !isWaitingStatus(status)} unread={false} />
-                  </button>;
+                  </button></BotSessionMenu>;
                 })}
               </React.Fragment>;
             })}

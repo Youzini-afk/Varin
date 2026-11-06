@@ -9,6 +9,8 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { toast } from '@/components/ui';
 import {
   archiveBot, changeBotState, createBot, createBotSession, ensureBotEntry, ensurePrimaryBot, listBots, listBotSessions, listBotWork,
   openBotConversation, openBotWorkInWorkbench, updateBot, useBotNavigation, useBotReturn,
@@ -43,6 +45,7 @@ import { useBotStage } from './useBotStage';
 import { BotFigure } from './BotFigure';
 import { BotMobileTitle } from './BotMobileTitle';
 import { BotNavigator } from './BotNavigator';
+import type { BotSessionAction } from './BotSessionMenu';
 import { BotPanel } from './BotPanel';
 import { useBotWorkspaces } from './useBotWorkspaces';
 import { BotWorkspaceNavigationContext } from './botWorkspaceViews';
@@ -149,8 +152,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [actionBusy, setActionBusy] = React.useState<string | null>(null);
-  const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | null>(null);
+  const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | { mode: 'session'; session: BotSessionView } | null>(null);
   const [nameDraft, setNameDraft] = React.useState('');
+  const sessionForkKeys = React.useRef(new Map<string, string>());
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const [profileOpen, setProfileOpen] = React.useState(false);
@@ -412,19 +416,61 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     const dialog = nameDialog;
     const trimmed = nameDraft.trim();
     if (!dialog || !trimmed) return;
-    setActionBusy(dialog.mode === 'create' ? 'create' : `rename:${dialog.bot.id}`);
+    setActionBusy(dialog.mode === 'create' ? 'create' : `rename:${dialog.mode === 'session' ? dialog.session.identity.threadId : dialog.bot.id}`);
     setError(null);
     try {
-      const bot = dialog.mode === 'create' ? await createBot({ name: trimmed }) : await updateBot(dialog.bot.id, { name: trimmed });
-      if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
-      setBots((list) => dialog.mode === 'create' ? [...(list ?? []), bot] : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
-      if (dialog.mode === 'create') { useBotNavigation.setState({ botId: null, entry: null }); setShowArchived(false); setSelectedId(bot.id); }
+      if (dialog.mode === 'session') {
+        await useThreadStore.getState().updateThread(dialog.session.identity.threadId, { title: trimmed });
+        if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
+        refreshWork();
+      } else {
+        const bot = dialog.mode === 'create' ? await createBot({ name: trimmed }) : await updateBot(dialog.bot.id, { name: trimmed });
+        if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
+        setBots((list) => dialog.mode === 'create' ? [...(list ?? []), bot] : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
+        if (dialog.mode === 'create') { useBotNavigation.setState({ botId: null, entry: null }); setShowArchived(false); setSelectedId(bot.id); }
+      }
       setNameDialog(null);
     } catch (cause) {
       setError(message(cause));
     } finally {
       setActionBusy(null);
     }
+  };
+
+  const sessionAction = async (session: BotSessionView, identity: ThreadIdentity, action: BotSessionAction) => {
+    if (!selected || !threads) return;
+    if (action === 'rename') {
+      setError(null); setNameDraft(sessionTitleOf(session)); setNameDialog({ mode: 'session', session }); return;
+    }
+    if (action === 'open' || action === 'tree') {
+      openSession(identity);
+      if (action === 'tree') openConversationTree('bot');
+      return;
+    }
+    const host = getRuntimeEndpointGeneration(), botId = selected.id;
+    const current = () => alive.current && host === getRuntimeEndpointGeneration();
+    setActionBusy(`session:${identity.threadId}`); setError(null);
+    try {
+      if (action === 'copy') {
+        const result = await copyTextToClipboard(identity.branchId === session.thread.main_branch_id ? identity.threadId : identity.branchId);
+        if (!result.ok) throw new Error(result.error);
+        if (current()) toast.success(t('sessions.sidebar.session.menu.copied'));
+      } else if (action === 'fork') {
+        const head = session.thread.branches.find(branch => branch.branch_id === identity.branchId)?.head;
+        if (!head) return;
+        const intent = JSON.stringify([host, identity, head]);
+        const key = sessionForkKeys.current.get(intent) ?? crypto.randomUUID();
+        sessionForkKeys.current.set(intent, key);
+        const branch = await threads.fork({ ...identity, key, headId: head });
+        sessionForkKeys.current.delete(intent);
+        if (current() && useBotNavigation.getState().botId === botId) await openBotConversation(botId, branch);
+        if (current()) { refreshWork(); void useThreadStore.getState().loadCatalog().catch(() => {}); }
+      } else {
+        await useThreadStore.getState().updateThread(identity.threadId, action === 'pin' ? { pinned: !session.thread.pinned } : { titleMode: 'automatic' });
+        if (current()) refreshWork();
+      }
+    } catch (cause) { if (current()) setError(message(cause)); }
+    finally { if (current()) setActionBusy(null); }
   };
 
   const mutateBot = React.useCallback(async (bot: BotSummary, action: BotMenuAction) => {
@@ -551,6 +597,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const navigator = () => <BotNavigator bots={bots} selectedId={selectedId} sessions={sessionsWithWork} current={ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
     onSelectBot={selectBot} onSelectSession={openSession} onNewSession={() => { void newSession(); }}
+    onSessionAction={(session, identity, action) => { void sessionAction(session, identity, action); }}
     onBotAction={(bot, action) => { void mutateBot(bot, action); }} onCreateBot={openCreateDialog}
     onToggleArchived={() => setShowArchived(value => !value)} onRefresh={refresh} onOpenSettings={openSettings} />;
 
@@ -583,8 +630,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     )}
     <BotNameDialog
       open={nameDialog !== null}
-      title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
-      submitLabel={nameDialog?.mode === 'rename' ? t('settings.bots.save') : t('settings.bots.createAction')}
+      title={nameDialog?.mode === 'session' ? t('sessions.sidebar.session.menu.rename') : nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
+      submitLabel={nameDialog?.mode === 'create' ? t('settings.bots.createAction') : t('settings.bots.save')}
       name={nameDraft}
       busy={actionBusy !== null}
       error={error}

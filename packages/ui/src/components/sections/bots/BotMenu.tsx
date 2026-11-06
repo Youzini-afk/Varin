@@ -11,6 +11,13 @@ export function BotMenu({ bot, disabled, onAction, children, persistentActions =
   bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode; persistentActions?: boolean;
 }) {
   const { t } = useI18n();
+  const pending = React.useRef<BotMenuAction | null>(null);
+  const returnFocus = React.useRef(true);
+  const opened = (open: boolean) => { if (open) { pending.current = null; returnFocus.current = true; } };
+  const complete = (open: boolean) => {
+    if (open || !pending.current) return;
+    const action = pending.current; pending.current = null; onAction(action);
+  };
   const state = bot.activity?.state ?? 'awake';
   const transitioning = state === 'sleeping' || state === 'waking';
   const actions: Array<{ id: BotMenuAction; icon: IconName; label: string; disabled?: boolean } | null> = bot.deletion ? [
@@ -38,22 +45,25 @@ export function BotMenu({ bot, disabled, onAction, children, persistentActions =
   const items = (dropdown: boolean) => {
     const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
     const Separator = dropdown ? DropdownMenuSeparator : ContextMenuSeparator;
-    return actions.map((action, index) => action ? <Item key={action.id} className={action.id === 'delete' ? 'text-destructive' : undefined} disabled={disabled || action.disabled} onSelect={() => onAction(action.id)}>
+    return actions.map((action, index) => action ? <Item key={action.id} className={action.id === 'delete' ? 'text-destructive' : undefined} disabled={disabled || action.disabled} onClick={() => {
+      pending.current = action.id;
+      returnFocus.current = !['rename', 'profile', 'memory', 'delete'].includes(action.id);
+    }}>
       <Icon name={action.icon} className="size-4" />{action.label}
     </Item> : <Separator key={`separator-${index}`} />);
   };
-  return <ContextMenu>
+  return <ContextMenu onOpenChange={opened} onOpenChangeComplete={complete}>
     <ContextMenuTrigger asChild>
       <div className="group flex items-center rounded-md focus-within:bg-interactive-hover data-[state=open]:bg-interactive-hover">
         {children}
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={opened} onOpenChangeComplete={complete}>
           <DropdownMenuTrigger asChild><button type="button" disabled={disabled} aria-label={`${bot.name} · ${t('settings.bots.actions')}`} className={`mr-1 rounded p-1 text-muted-foreground hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 ${persistentActions ? 'opacity-100' : 'opacity-0'}`}>
             <Icon name="more" className="size-4" />
           </button></DropdownMenuTrigger>
-          <DropdownMenuContent align="start">{items(true)}</DropdownMenuContent>
+          <DropdownMenuContent align="start" finalFocus={() => returnFocus.current}>{items(true)}</DropdownMenuContent>
         </DropdownMenu>
       </div>
     </ContextMenuTrigger>
-    <ContextMenuContent>{items(false)}</ContextMenuContent>
+    <ContextMenuContent finalFocus={() => returnFocus.current}>{items(false)}</ContextMenuContent>
   </ContextMenu>;
 }

@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
   create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
+  fork: vi.fn(), copy: vi.fn(),
 }));
 vi.mock('@/lib/bots', async original => ({
   ...await original<typeof import('@/lib/bots')>(),
@@ -35,7 +36,8 @@ vi.mock('@/lib/bots', async original => ({
   openBotWorkInWorkbench: state.openWork,
   deleteBot: vi.fn(),
 }));
-vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { sources: { list: async () => ({ targets: [], unavailable: [] }) } }; return { useRuntimeAPIs: () => ({ threads }) }; });
+vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { fork: state.fork, sources: { list: async () => ({ targets: [], unavailable: [] }) } }; return { useRuntimeAPIs: () => ({ threads }) }; });
+vi.mock('@/lib/clipboard', () => ({ copyTextToClipboard: state.copy }));
 vi.mock('@/lib/computers', () => ({ listComputers: async () => ({ desktops: [], machines: [], defaultDesktopId: null }) }));
 vi.mock('./BotWorkDetail', async () => {
   const { useBotPanel } = await import('./botPanelModel');
@@ -55,11 +57,34 @@ vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }), getCurrentIntlLocale: () => 'en-US' }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipContent: () => null }));
+// Model menu activation and close completion, including the native Item's onClick contract.
+vi.mock('@/components/ui/context-menu', async () => {
+  const { createContext, useContext, useState } = await import('react');
+  const Menu = createContext({ open: false, toggle: (_open: boolean) => {} });
+  return {
+    ContextMenu: ({ children, onOpenChange, onOpenChangeComplete }: React.PropsWithChildren<{ onOpenChange?(open: boolean): void; onOpenChangeComplete?(open: boolean): void }>) => {
+      const [open, setOpen] = useState(false);
+      return <Menu.Provider value={{ open, toggle(next) { onOpenChange?.(next); setOpen(next); onOpenChangeComplete?.(next); } }}>{children}</Menu.Provider>;
+    },
+    ContextMenuTrigger: ({ children }: React.PropsWithChildren) => {
+      const menu = useContext(Menu);
+      return <div onContextMenu={event => { event.preventDefault(); event.stopPropagation(); menu.toggle(true); }}>{children}</div>;
+    },
+    ContextMenuContent: ({ children }: React.PropsWithChildren) => useContext(Menu).open ? <div role="menu">{children}</div> : null,
+    ContextMenuItem: ({ children, onClick, disabled }: React.PropsWithChildren<{ onClick?(): void; disabled?: boolean }>) => {
+      const menu = useContext(Menu);
+      return <button role="menuitem" disabled={disabled} onClick={event => { event.stopPropagation(); onClick?.(); menu.toggle(false); }}>{children}</button>;
+    },
+    ContextMenuSeparator: () => null,
+  };
+});
 vi.mock('@/components/ui/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({ children, onOpenChangeComplete }: React.PropsWithChildren<{ onOpenChangeComplete?(open: boolean): void }>) => <div onClick={event => {
+    if ((event.target as HTMLElement).closest('[data-menu-item]')) onOpenChangeComplete?.(false);
+  }}>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div data-menu="">{children}</div>,
-  DropdownMenuItem: ({ children, onSelect, disabled }: { children: React.ReactNode; onSelect?: () => void; disabled?: boolean }) => <button type="button" data-menu-item="" disabled={disabled} onClick={() => onSelect?.()}>{children}</button>,
+  DropdownMenuItem: ({ children, onSelect, onClick, disabled }: { children: React.ReactNode; onSelect?: () => void; onClick?: () => void; disabled?: boolean }) => <button type="button" data-menu-item="" disabled={disabled} onClick={() => { onClick?.(); onSelect?.(); }}>{children}</button>,
   DropdownMenuSeparator: () => null,
 }));
 vi.mock('@/components/sections/harness/useHarnessSettings', () => ({ useHarnessSettings: () => ({ harness: null, update: vi.fn(), error: null }) }));
@@ -153,6 +178,7 @@ describe('Bot workbench', () => {
     state.change.mockReset().mockResolvedValue(bot('a'));
     state.open.mockReset();
     state.openWork.mockReset().mockResolvedValue(undefined);
+    state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
     useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {} });
   });
@@ -160,6 +186,7 @@ describe('Bot workbench', () => {
     act(() => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('opens ordinary settings from the sidebar and preserves the last settings page', async () => {
@@ -245,6 +272,68 @@ describe('Bot workbench', () => {
     expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
     expect(container.textContent).not.toContain('New thread');
     expect([...container.querySelectorAll('[data-sidebar-row]')].map(row => row.getAttribute('data-sidebar-row'))).toContain('session:thread:bot:a:fresh:branch:bot:a:fresh');
+  });
+
+  it('renames and pins the right-clicked session without selecting it or changing the Bot profile', async () => {
+    const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip planning', title_mode: 'manual' });
+    state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', {}, true), trip]);
+    const update = vi.spyOn(useThreadStore.getState(), 'updateThread').mockImplementation(async (id, patch) => {
+      useThreadStore.setState(current => ({ threads: current.threads.map(thread => thread.thread_id === id ? { ...thread, ...patch } : thread) }));
+    });
+    useThreadStore.setState({ threads: [trip.thread] });
+    await render();
+    const menu = async (action: string) => {
+      const row = container.querySelector('[data-sidebar-row="session:trip:trip-main"]')!;
+      await act(async () => { row.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })); });
+      expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
+      const item = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === action)!;
+      await act(async () => { item.click(); });
+    };
+    await menu('sessions.sidebar.session.menu.rename');
+    await click('set-name');
+    await act(async () => { document.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    expect(update).toHaveBeenCalledWith('trip', { title: 'Named bot' });
+    expect(state.update).not.toHaveBeenCalled();
+    await menu('sessions.sidebar.session.menu.pin');
+    expect(update).toHaveBeenLastCalledWith('trip', { pinned: true });
+    expect(container.querySelector('[data-sidebar-row^="session:"]')?.getAttribute('data-sidebar-row')).toBe('session:trip:trip-main');
+  });
+
+  it('keeps branch menu actions on the clicked branch and exposes no conversation rename on it', async () => {
+    const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip', branches: [
+      { branch_id: 'trip-main', head: 'main-head', active_run_id: null, latest_run: null },
+      { branch_id: 'trip-alternative', head: 'alternative-head', active_run_id: null, latest_run: null },
+    ] });
+    state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', {}, true), trip]);
+    state.fork.mockResolvedValue({ runtime: 'agent', threadId: 'trip', branchId: 'new-branch' });
+    await render();
+    const menu = async () => {
+      await act(async () => { container.querySelector('[data-sidebar-row="session:trip:trip-alternative"]')!
+        .dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })); });
+      return [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    };
+    let items = await menu();
+    expect(items.some(item => item.textContent === 'sessions.sidebar.session.menu.rename')).toBe(false);
+    await act(async () => items.find(item => item.textContent === 'bot.session.menu.copyBranchId')!.click());
+    expect(state.copy).toHaveBeenCalledExactlyOnceWith('trip-alternative');
+    expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
+    items = await menu();
+    await act(async () => items.find(item => item.textContent === 'bot.session.menu.fork')!.click());
+    expect(state.fork).toHaveBeenCalledWith({ runtime: 'agent', threadId: 'trip', branchId: 'trip-alternative', key: expect.any(String), headId: 'alternative-head' });
+    expect(useBotNavigation.getState().entry?.branchId).toBe('new-branch');
+  });
+
+  it('activates the Bot profile context menu through click, like its dropdown menu', async () => {
+    const { BotMenu } = await vi.importActual<typeof import('@/components/sections/bots/BotMenu')>('@/components/sections/bots/BotMenu');
+    const action = vi.fn();
+    await act(async () => root.render(<BotMenu bot={bot('a')} disabled={false} onAction={action}><button>Bot profile</button></BotMenu>));
+    await act(async () => { find('Bot profile')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })); });
+    const item = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'settings.bots.rename')!;
+    await act(async () => item.click());
+    expect(action).toHaveBeenCalledExactlyOnceWith('rename');
+    const dropdownItem = [...container.querySelectorAll<HTMLButtonElement>('[data-menu-item]')].find(item => item.textContent === 'settings.bots.sleep')!;
+    await act(async () => dropdownItem.click());
+    expect(action).toHaveBeenLastCalledWith('sleep');
   });
 
   it('cannot start a conversation while the Bot rests', async () => {
