@@ -13,8 +13,9 @@ agent worker, SDK dependency closure, Node Storage or PTY authority is installed
 
 ## Container images
 
-包含本发布实现、且版本 **大于 0.9.38** 的后续发行采用以下命名。已发行的 `v0.9.38`
-及更早版本不重新解释，不补写其精确版本、SHA 标签，也不替换已有 digest。
+正式版本发行采用以下命名的边界是：包含本发布实现、且版本 **大于 0.9.38**。
+独立的按提交发布使用 `commit-<完整 SHA>`，不占用版本号，源码 package version 仍为 0.9.38 也可以构建。
+已发行的 `v0.9.38` 及更早版本不重新解释，不补写其精确版本、SHA 标签，也不替换已有 digest。
 
 | 镜像 | 内容与兼容名 |
 | --- | --- |
@@ -41,7 +42,9 @@ ripgrep、无常驻 daemon 的 rootless BuildKit，以及 amd64 上的 Chrome/Pl
 依赖 Java、Go、Rust、LSP、Chrome 或其他预装工具的部署，应在跟进新发行前改用
 `varin-toolbelt` 或下面的 Compose overlay。只跟随 `varin:latest` 的现有部署会在升级后失去这些
 额外工具，不能把镜像名称相同视为环境内容不变。追求可复现部署时固定精确版本或已核验 digest。
-新 `*-toolbelt` 名称在首次成功发布之前并不存在；这段过渡期可继续固定已发行的旧环境：
+新 `*-toolbelt` 仓库及其 `latest` 不是同一件事：仅完成按提交发布后，仓库可以已有 `commit-*`，
+但首次正式版本推广前仍可能没有 `latest`。因此这段过渡期必须同时固定应用和 base 的已发布引用，
+不能假定默认 toolbelt overlay 的 `latest` 已可拉取；也可继续固定旧环境：
 
 ```bash
 VARIN_IMAGE=ghcr.io/youzini-afk/varin:0.9.38 \
@@ -49,13 +52,13 @@ VARIN_RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-base:0.9.38 \
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-本实现拒绝以 `<=0.9.38` 的版本发布，拒绝覆盖任何已存在且 digest 不同的精确版本/SHA 标签。
+正式版本入口拒绝以 `<=0.9.38` 的版本发布，拒绝覆盖任何已存在且 digest 不同的精确版本/SHA 标签。
 相同 digest 的部分发布可以续做。**历史 tag 上的旧 workflow/helper 仍是旧代码**，不受这些新检查
 约束；不要通过重跑旧 tag 的 Docker workflow 修复或回滚部署。回滚应选择保留的已核验镜像引用，
 并单独确认持久化数据格式兼容性。更强的历史 workflow/registry 写入限制需要 owner 另行配置权限，
 本流程不会修改权限、可见性、凭据或历史 Git tag。
 
-### 构建、验证与发布边界
+### 正式版本发布
 
 四种产物在发行时构建 `linux/amd64` 和 `linux/arm64`，不是每次 main push 都发布。
 `Docker Images` 只接受与 package version 匹配的 `v<version>` tag push，或显式选择该 tag 的手动运行。
@@ -78,7 +81,7 @@ brokered services 检查，再验证 role/variant/capabilities，并收到真实
 15 秒 supervision 窗口内必须有 graceful 回执和前台退出码 143；不完整或强制退出失败。
 arm64 的 native 依赖与 kernel 在镜像组装时校验，但这不等同于 arm64 服务启动验收。
 
-推广在跨发行的全局锁内重新核对 Git tag，并按以下顺序执行：
+推广在两个发布通道共享的全局锁内重新核对 Git tag，并按以下顺序执行：
 
 1. 核对完整四种来源的固定 digest、双架构和 role/variant，再把候选复制到全部六个目标仓库。
    复制必须保持来源 index digest；候选标签只使用该 run/attempt 的唯一名称。
@@ -93,17 +96,115 @@ arm64 的 native 依赖与 kernel 在镜像组装时校验，但这不等同于 
    更旧稳定发行和 prerelease 只处理其精确版本/SHA，避免部分新发行后又被旧重试回退。
    即使更高稳定 tag 尚未通过资格检查，也保守地暂停旧发行的所有浮动更新，包括旧版本线的 minor 别名。
    该顺序依据要求保留已发行 Git tags，不以复用 base 中的旧 OCI version 标签推测发布时间。
+5. 回读完整目标清单，所有 digest 一致才报告完成。
 
 这不是跨仓库原子事务。中断后只续跑推广，复用原来已经验证的 immutable 来源与成功 build job 输出；
 已写入相同 digest 的标签会跳过。重新构建可能因时间戳/attestation 得到新 digest，不能借重试覆盖冻结的
 精确版本/SHA。Git tag 被移动、访问结果未知或冲突时，先查明状态，不把失败当作未执行。
 
+### 独立按提交发布
+
+`Docker Commit Images`（`docker-commit.yml`）只接受从本仓库 `main` 手动发起的运行，不接受分支、PR
+或版本 tag 上的 dispatch。默认构建 dispatch 时固定的 main SHA；`source_sha` 可以指定这个 main
+快照历史中的完整、小写 40 位 SHA。恢复时未填写 `source_sha` 则沿用已保存候选的来源，不换成新的 main。
+后续 main 正常前移不会改变已受理来源，也不会使长构建失效；若已受理来源或发布工具提交被移出 main 历史，
+推广拒绝继续。这里验证的是 Git 来源和受信入口，不是对 GitHub branch protection 设置的审计。
+
+使用 GitHub Actions 页面：选择 **Docker Commit Images → Run workflow → Branch: main**。
+首次构建只填写需要的 `source_sha`，或留空选择本次 main；不要选择旧版本 tag。
+等价 CLI：
+
+```bash
+# 当前 main 的精确来源；没有版本 bump、Git tag 或 GitHub Release 创建。
+gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main
+
+# SHA 为已核实的 main 历史完整提交号。
+gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main -f source_sha="$SHA"
+```
+
+workflow 和准入、推广、容器烟测脚本固定来自 dispatch 的 tooling SHA；Docker 构建上下文来自所选 source SHA。
+源码自己的完整 CI 必须通过后，才允许 GHCR 候选写入。历史 main 源码仍须通过当前资格检查并提供所需的
+role/variant/capabilities 契约，不能因为“曾在 main”就跳过缺失的检查。四个产物均构建双架构，应用消费
+对应的固定 base digest；这个入口不接收任意 base override。
+
+两个 amd64 应用按 digest 真实启动，核对 `/health` 的 `releaseId: image-<source SHA>` 和源码版本，
+再通过 kernel、brokered services、镜像能力和 graceful SIGTERM 检查。每个平台配置中的 OCI revision/version
+描述实际源码；独立的 `io.varin.build.tooling_sha`、run ID/attempt 描述构建流程，
+`io.varin.image.base` 固定应用实际消费的 companion。不能用 workflow 上下文默认 revision 代替所选源码。
+
+验证后先保存完整四个 digest 的候选 artifact，再进入同一推广 owner。它复制全部六个仓库的候选，检查匿名
+manifest/config，并在未曾认证拉取应用层的新 runner 上用空 Docker 认证配置执行 **linux/amd64 匿名 pull**。
+随后整批预检并仅写入以下不可变标签，最后回读全部目标和匿名引用：
+
+- `varin:commit-<SHA>` 与 `varin-slim:commit-<SHA>`：同一个标准应用 digest。
+- `varin-toolbelt:commit-<SHA>`：工具链应用。
+- `varin-runtime-slim:commit-<SHA>`：标准 base。
+- `varin-runtime-toolbelt:commit-<SHA>` 与 `varin-runtime-base:commit-<SHA>`：同一个工具链 base digest。
+
+这是真实 GHCR 发布，不是 CI 的临时 registry。成功 run 的 Summary 和 `varin-commit-publication-<attempt>`
+artifact 给出六个可拉取引用、digest、source/build/tooling 身份；只有完整回读成功才生成 `status: complete`。
+amd64 pull 之间可能复用共享层缓存；双架构元数据与构建验证不等于 arm64 服务启动验收。
+新 package 若仍私有，匿名门禁会在 commit 标签前停止，须由有权限的 owner 按预期公开访问策略处理，
+workflow 不会自行更改可见性、权限或凭据。
+
+此通道不写 `latest`、major/minor、major、版本号或正式 `sha-*` 标签，也不增加 `main`/`edge` 浮动别名，
+避免手动验证构建悄悄升级其他部署。它不触发 Desktop、npm 或完整 GitHub Release。
+以后创建 `v0.9.39` 仍自动进入正式 `Docker Images`，使用该版本 tag 的源码和独立精确标签；先前的
+`commit-*` 不占用 0.9.39，也不要求两次独立构建的 digest 相同。相同正式版本不能重新指向另一份源码。
+
+首次成功发布所选 SHA 后，可以显式拉取或选择 Compose 镜像：
+
+```bash
+docker pull "ghcr.io/youzini-afk/varin:commit-$SHA"
+docker pull "ghcr.io/youzini-afk/varin-toolbelt:commit-$SHA"
+
+VARIN_IMAGE="ghcr.io/youzini-afk/varin:commit-$SHA" \
+VARIN_RUNTIME_BASE_IMAGE="ghcr.io/youzini-afk/varin-runtime-slim:commit-$SHA" \
+docker compose up -d
+
+VARIN_IMAGE="ghcr.io/youzini-afk/varin-toolbelt:commit-$SHA" \
+VARIN_RUNTIME_BASE_IMAGE="ghcr.io/youzini-afk/varin-runtime-toolbelt:commit-$SHA" \
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```
+
+#### 失败与恢复
+
+跨仓库推广不是原子事务。优先在原 run 选择 **Re-run failed jobs**，保留成功 build 的原 digest 和候选清单。
+不要把 **Re-run all jobs** 当成幂等：时间戳、attestation 或上游解析会使同一源码重建出不同 digest，
+不同 digest 与已有 `commit-*` 冲突时仍会拒绝，不能用重建覆盖部分发布。
+
+需要从新的 main tooling 恢复时，指定原 run ID；`resume_run_attempt` 可省略选择该 run 最新保存的候选
+artifact，也可显式选择确切 attempt。它不会从失败、过期或不可验证的新候选悄悄回退到旧候选：
+
+```bash
+gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main \
+  -f resume_run_id="$RUN_ID" -f resume_run_attempt="$ATTEMPT"
+```
+
+恢复只接受同仓库、同 workflow ID/path、从 main dispatch 的 run，核对对应 attempt 的
+`Record verified candidate` job 成功、artifact 身份与 ZIP 字节摘要、唯一清单及其源码版本/祖先关系。
+原 run 整体可以因推广失败而为红色，但 producer 不能失败、跳过或缺失。候选中的每个平台配置重新绑定
+来源、构建 run/tooling/attempt 和实际 base；允许同一 run 的 base attempt 1、app attempt 2，
+不允许未来 attempt 或另一来源混入。恢复跳过四个 build，仍重新执行精确源码资格和两个实际容器烟测，
+再保存新 run 的候选清单并以原 digest 续做。已存在且相同 digest 的 commit 标签跳过，未知请求结果先回读。
+
+候选 artifact 名称是 `varin-commit-images-<attempt>`；保留期受仓库 Actions artifact 设置约束。
+artifact 被删除、过期、摘要不符，或原候选 registry digest 已不可访问时，不能宣称可恢复；先检查原发布状态。
+若已有部分不可变标签，不能通过删 tag、强推或另一次重建抹掉冲突。失败时成功写入的标签可能保留，
+只有随后完整清单核验通过才算发布完成。
+失败的推广 job 也保留 `status: incomplete` 回执，列出已知的预期引用和停止阶段；它不会把未知写入结果
+描述为“未执行”，也不代表此前成功写入的标签已回滚。
+
+### 不发布的 CI 验证
+
 PR/main 的容器验证仍是只读发行检查：CI 按 kernel、构建图、依赖和容器配置等输入调用
 `container-check.yml`，使用 runner 本地 registry 和共享 Buildx builder，先验证标准环境，
 公共/base 变化再验证 toolbelt。完整资格检查验证两种环境；普通 renderer 变化不重复构建镜像。
 该 workflow 没有 GHCR 发布权限。它还在同一本地 registry 上运行极小 scratch 双架构夹具，
-真实验证 Buildx adapter 的不存在标签识别、跨仓库 index digest 保真、全计划冲突和同 digest 重试。
+真实验证 Buildx adapter 的不存在标签识别、跨仓库 index digest 保真、两个通道的全计划冲突和同 digest 重试。
 这些夹具只证明推广协议，不代替后续真实应用启动，也不证明 GHCR 的实际可见性。
+`container-check.yml` 仅支持 `workflow_call`；手动运行 `ci.yml` 会执行完整资格与两个 amd64 应用的构建/烟测，
+但仍不发布 GHCR，也不会产生可供部署的公开镜像引用。
 
 ### Docker Compose
 
