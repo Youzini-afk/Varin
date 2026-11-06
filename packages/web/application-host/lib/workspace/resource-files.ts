@@ -121,7 +121,11 @@ export function createResourceFilesOwner(documents: DocumentAuthority, files: Ke
               const result = await files.applyStateDetailed(identity, destination.relativePath, captured.state, { expected: { kind: 'missing' }, operationId: command.key });
               if (result.status !== 'applied') throw new Error('The destination already exists');
             } else {
-              const result = await files.writeStream(identity, destination.relativePath, createReadStream(file.absolutePath), { byteLength: stats.size, mode: stats.mode, operationId: command.key, expected: { kind: 'missing' }, ...(signal ? { signal } : {}) });
+              // Node stat modes include the file type. The native file state carries the kind separately.
+              const result = await files.writeStream(identity, destination.relativePath, createReadStream(file.absolutePath), {
+                byteLength: stats.size, mode: stats.mode & 0o7777, operationId: command.key,
+                expected: { kind: 'missing' }, ...(signal ? { signal } : {}),
+              });
               if (result.status !== 'applied') throw new Error('The destination already exists');
             }
           }
