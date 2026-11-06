@@ -40,6 +40,19 @@ test('cloud smoke consumes the supplied bytes, preserves the input, and cleans f
   assert.deepEqual(fs.readdirSync(temporary), []);
 });
 
+test('installed service CLI executes through the deployment current symlink', { skip: process.platform !== 'linux' }, t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-service-cli-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const current = path.join(directory, 'current');
+  fs.symlinkSync(path.join(root, 'scripts'), current, 'dir');
+  const result = spawnSync(process.execPath, [path.join(current, 'smoke-cloud-services.mjs'),
+    'http://127.0.0.1:1', path.join(directory, 'missing-runtime')], { encoding: 'utf8' });
+  // A missing installed contract must fail, not silently skip the CLI body
+  // because argv retains "current" while import.meta.url resolves its target.
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Cannot find module .*extension-contract/u);
+});
+
 test('installed service smoke uses the normal session and preserves service failures without logging bodies', async t => {
   const requests = [];
   const server = createServer(async (req, res) => {

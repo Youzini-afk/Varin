@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 // Exercise the installed Host's normal authentication and brokered service route.
 // Never print session cookies, credentials, response bodies or workspace records.
@@ -41,7 +41,7 @@ export async function smokeCloudServices({ baseUrl, runtimeRoot, password = proc
   return { brokeredWorkspaceRecovery: 'ready' };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     const report = await smokeCloudServices({
       baseUrl: process.argv[2] ?? 'http://127.0.0.1:3000',
