@@ -336,7 +336,7 @@ jobs:
       - name: Pull immutable candidate
         run: docker pull --platform linux/amd64 "$IMAGE_REF"
 
-      - name: Verify health and native kernel runtime
+      - name: Verify health, native kernel and brokered services
         shell: bash
         run: |
           cleanup() {
@@ -371,6 +371,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
 
           docker exec varin-smoke node verify-kernel.mjs packages/web
+          docker exec varin-smoke node verify-services.mjs
 
   smoke-amd64-slim:
     name: Smoke immutable amd64 slim candidate
@@ -392,7 +393,7 @@ jobs:
       - name: Pull immutable slim candidate
         run: docker pull --platform linux/amd64 "$IMAGE_REF"
 
-      - name: Verify health and native kernel runtime
+      - name: Verify health, native kernel and brokered services
         shell: bash
         run: |
           cleanup() {
@@ -427,6 +428,7 @@ jobs:
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
 
           docker exec varin-slim-smoke node verify-kernel.mjs packages/web
+          docker exec varin-slim-smoke node verify-services.mjs
 
   promote:
     name: Promote verified release image tags

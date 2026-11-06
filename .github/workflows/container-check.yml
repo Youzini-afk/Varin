@@ -112,6 +112,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health \
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
+          docker exec varin-check-smoke node verify-services.mjs
 
       # Both final variants use this same BuildKit instance and source, so its
       # common Rust/Web/browser builder stages are reused, not built on a second
@@ -181,6 +182,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health \
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
           docker exec varin-check-smoke node verify-kernel.mjs packages/web
+          docker exec varin-check-smoke node verify-services.mjs
 
       - name: Remove the local registry
         if: always()

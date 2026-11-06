@@ -65,6 +65,7 @@ bash scripts/deploy-cloud-runtime.sh \
   --data-dir "$DATA_DIR"
 
 verify_good
+node "$ROOT/current/verify-services.mjs" "http://127.0.0.1:$PORT" "$ROOT/current"
 
 cp "$BAD_SOURCE" "$IDEMPOTENT_ARCHIVE"
 bash scripts/deploy-cloud-runtime.sh \
