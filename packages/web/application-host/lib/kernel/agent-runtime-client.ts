@@ -320,7 +320,7 @@ export class AgentRuntimeClient {
     runId: string,
     signal: AbortSignal,
   ): Promise<LiveExtensionToolBinding[]> {
-    const state = this.toolComposition(runId);
+    let state = this.toolComposition(runId);
     const [run, launch] = await Promise.all([
       this.run(runId, signal),
       this.launch(runId, signal),
@@ -328,11 +328,14 @@ export class AgentRuntimeClient {
     if (state.scope) {
       // Ready contributions are candidates until a closed model boundary activates them.
       // Resume the committed directory; RunTools retains the candidate for the next boundary.
-      return (launch?.selection.extension_bindings ?? []).map(binding => {
-        const retained = this.kernel.retainedExtensionBinding(runId, binding);
-        if (!retained) throw new Error('The admitted extension tool owner is unavailable');
-        return retained;
-      });
+      const retained = (launch?.selection.extension_bindings ?? []).map(binding =>
+        this.kernel.retainedExtensionBinding(runId, binding));
+      if (retained.every(binding => binding !== undefined)) return retained;
+      // A live preparation scope can outlast its original provider. Rebuild the saved
+      // bindings in this same continuation, through the ordinary exact-restore path.
+      // Closing preparation does not discard accepted calls or their original receipts.
+      this.releaseToolComposition(runId);
+      state = this.toolComposition(runId);
     }
     state.mcp = this.kernel.mcpLiveBinding(runId) ?? state.mcp;
     // ContextJobs own a frozen tool-free plan, including pure text runs. Current
@@ -1877,8 +1880,8 @@ export class AgentRuntimeClient {
       const driverBinding = await this.prepareDriver(runId, signal);
       const policyBinding = driverBinding ? undefined : await this.preparePolicy(runId, signal);
       const mcpBinding = this.kernel.mcpLiveBinding(runId);
-      const extensionBindings = await this.prepareExtensions(runId, signal);
       try {
+        const extensionBindings = await this.prepareExtensions(runId, signal);
         await this.reconcileMemory(runId, signal);
         await this.reconcilePlan(runId, signal);
         await this.admitStartingSource(runId, signal);
