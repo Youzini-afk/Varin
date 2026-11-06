@@ -19,6 +19,7 @@ function versionParts(version) {
   }
   return match.slice(1);
 }
+export { versionParts as imageVersionParts };
 function compareCore(left, right) {
   const a = versionParts(left), b = versionParts(right);
   for (let index = 0; index < 3; index++) {
@@ -75,6 +76,13 @@ export function releaseImageAliases(candidate, releaseRefs) {
 
 export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBase, toolbeltBase }, releaseRefs) {
   const aliases = releaseImageAliases(candidate, releaseRefs);
+  return imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases,
+    new Set([candidate.version, `sha-${candidate.sha}`]));
+}
+
+// Both publication channels share the artifact/compatibility-name owner. Their
+// admission and alias policies remain separate; this function grants neither.
+export function imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases, immutableAliases) {
   const images = [
     [standardApp, 'application', 'slim', ['varin', 'varin-slim']],
     [toolbeltApp, 'application', 'toolbelt', ['varin-toolbelt']],
@@ -85,7 +93,7 @@ export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBa
     const { digest } = pinnedImage(source);
     const repositories = names.map(name => `${registryPrefix}${name}`);
     return { source, digest, role, variant, repositories, targets: repositories.flatMap(repository => aliases.map(alias => ({
-      ref: `${repository}:${alias}`, immutable: alias === candidate.version || alias === `sha-${candidate.sha}`,
+      ref: `${repository}:${alias}`, immutable: immutableAliases.has(alias),
     }))) };
   });
 }
@@ -115,6 +123,9 @@ export function createImageRegistry(runDocker) {
     config: (reference, options) => inspect(reference, 'Image', options),
     copy(source, target) {
       runDocker(['buildx', 'imagetools', 'create', '--prefer-index=false', '--tag', target, source]);
+    },
+    pull(reference, options) {
+      runDocker(['pull', '--platform', 'linux/amd64', reference], options);
     },
   };
 }
@@ -160,7 +171,7 @@ export function resolveRuntimeBase(reference, variant, registry) {
   return verifyImage(image, { role: 'runtime-base', variant }, registry);
 }
 
-export function promoteImages(plan, stageTag, registry) {
+export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {} } = {}) {
   if (!/^candidate-\d+-\d+$/.test(stageTag)) throw new Error('Promotion requires this run’s unique candidate tag');
   const desired = new Map();
   for (const artifact of plan) {
@@ -187,6 +198,9 @@ export function promoteImages(plan, stageTag, registry) {
       throw new Error(`Anonymous pull access failed for ${repository}@${artifact.digest}. The package owner must enable intended public access, then retry promotion; no release aliases were changed.`, { cause: error });
     }
   }
+  // A channel may require additional real consumption (e.g. anonymous Docker
+  // pulls on a fresh runner) before any immutable or floating tag changes.
+  verifyStaged(plan);
   // Complete-plan preflight, including every alias repository. Unknown lookup
   // outcomes fail closed. Identical partial publication can be retried safely.
   const writes = [];
@@ -199,6 +213,9 @@ export function promoteImages(plan, stageTag, registry) {
   // Freeze the complete exact release before advancing any mutable alias.
   for (const immutable of [true, false]) for (const write of writes.filter(item => item.immutable === immutable)) {
     copy(write.source, write.ref, write.digest);
+  }
+  for (const artifact of plan) for (const target of artifact.targets) {
+    if (registry.manifest(target.ref)?.digest !== artifact.digest) throw new Error(`Incomplete image publication at ${target.ref}`);
   }
 }
 
