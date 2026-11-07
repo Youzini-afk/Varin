@@ -11,7 +11,8 @@ interface SettingsWindowProps {
 }
 
 /**
- * Settings fades in place above the retained conversation.
+ * Settings settles in place above the retained conversation. The portal stays
+ * mounted until its CSS exit completes, including when closing is interrupted.
  * Used for desktop and web (non-mobile) environments.
  */
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {

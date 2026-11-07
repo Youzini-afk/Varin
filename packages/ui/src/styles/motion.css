@@ -212,21 +212,38 @@
   from { opacity: 0; translate: 0 2px; }
 }
 
-/* Settings stays at its final geometry, including during an interrupted close. */
+/* Settings settles in place, without travelling to or from its launcher. CSS
+   transitions reverse from the current frame when opening interrupts a close. */
 .motion-settings-window,
 .motion-settings-backdrop {
-  transition: opacity 200ms var(--motion-ease-out);
+  opacity: 1;
+  transition: opacity 220ms cubic-bezier(.2, .65, .25, 1);
 }
 .motion-settings-window {
-  transition-property: opacity, filter;
+  scale: 1;
+  transform-origin: center;
+  transition-property: opacity, scale, filter;
 }
 .motion-settings-window:is([data-starting-style], [data-ending-style]),
 .motion-settings-backdrop:is([data-starting-style], [data-ending-style]) {
   opacity: 0;
 }
+.motion-settings-window:is([data-starting-style], [data-ending-style]) {
+  scale: .99;
+}
 .motion-settings-window[data-ending-style],
 .motion-settings-backdrop[data-ending-style] {
   transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(.4, 0, .6, 1);
+}
+/* The settings module is lazy. Its first Dialog.Root mounts already open, so
+   Base UI has no starting-style phase. Supply the first painted frame as well. */
+@starting-style {
+  .motion-settings-window[data-open] { opacity: 0; scale: .99; }
+  .motion-settings-backdrop[data-open] { opacity: 0; }
+}
+:root[data-motion="reduced"] .motion-settings-window {
+  scale: 1;
 }
 
 /* Dialogs: the backdrop fades; the window settles from 98.5% on glide and leaves on the exit tween. */
