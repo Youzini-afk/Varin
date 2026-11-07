@@ -3,6 +3,35 @@
 Varin supports user-defined themes. Drop a JSON file into the Varin data directory's `themes`
 folder and reload it without restarting the application.
 
+## Import and copy in the appearance settings
+
+In **Settings → Appearance → Import a theme**, copy the active theme as JSON, paste a
+shared JSON theme and choose **Import and apply**, or choose a JSON file. Imported themes
+are stored in this browser or desktop profile, can be selected like other themes, and can
+be removed from the same panel. This device-local library is separate from the Host
+`themes` directory described below. The color controls save per-theme overrides locally;
+copying the active theme includes the currently applied colors.
+
+The importer accepts Codex exported theme JSON, complete Varin theme JSON, or this compact palette format:
+
+```json
+{
+  "name": "Paper",
+  "variant": "light",
+  "colors": { "accent": "#da7756", "background": "#f5f3ee", "foreground": "#1d1b16" }
+}
+```
+
+A compact palette builds the remaining component and syntax colors from the corresponding
+light or dark default. Codex imports translate `chromeTheme` accent/surface/ink, editor colors,
+common TextMate scopes and diff colors into Varin's theme model. Available UI and code font
+stacks are used when the corresponding Varin font setting is System; an explicit Varin font
+setting takes precedence. Fonts must be installed or otherwise available on the device. Codex's
+content font, contrast derivation, `skill` color and native `opaqueWindows` behavior have no
+exact equivalent here; unrecognized fields are not applied. Other applications' formats are not
+generally supported.
+
+
 ## Quick start
 
 1. Create the themes directory for the Host’s platform (see [Theme location](#theme-location)).

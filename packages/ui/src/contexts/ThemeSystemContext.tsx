@@ -13,6 +13,8 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
+import { IMPORTED_THEMES_STORAGE_KEY, parseImportedTheme, readImportedThemes, writeImportedThemes } from '@/lib/theme/importedThemes';
+import { applyCustomColors, CUSTOM_COLORS_STORAGE_KEY, normalizeCustomColor, readCustomColors, writeCustomColors, type CustomColorField } from '@/lib/theme/customColors';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
   themes,
@@ -146,6 +148,9 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
   const [preferences, setPreferences] = useState<ThemePreferences>(() => buildInitialPreferences(defaultThemeId));
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getInitialSystemPreference());
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
+  const [customColors, setCustomColors] = useState(readCustomColors);
+  const [importedThemes, setImportedThemes] = useState<Theme[]>(readImportedThemes);
+  const [pendingImportedTheme, setPendingImportedTheme] = useState<string | null>(null);
   const [developmentThemes, setDevelopmentThemes] = useState<Theme[]>([]);
   const [embeddedBootstrapTheme] = useState<Theme | null>(() => readEmbeddedCurrentTheme());
   const [embeddedSyncedTheme, setEmbeddedSyncedTheme] = useState<Theme | null>(null);
@@ -180,14 +185,15 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
     }
 
     // Custom themes first so they can override built-ins with the same id.
+    importedThemes.forEach(add);
     customThemes.forEach(add);
     // Vite publishes valid built-in JSON edits through this development-only
     // runtime channel, avoiding a full page reload for theme work.
     developmentThemes.forEach(add);
     themes.forEach(add);
 
-    return merged;
-  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme]);
+    return merged.map((theme) => applyCustomColors(theme, customColors[theme.metadata.id]));
+  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, customColors, importedThemes]);
 
   useEffect(() => {
     const handleThemeHmr = (event: Event) => {
@@ -663,10 +669,77 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
     [availableThemes, persistThemePreferences, preferences, passiveTransparent],
   );
 
+  const setCustomColor = useCallback((themeId: string, field: CustomColorField, value: string) => {
+    const color = normalizeCustomColor(value);
+    if (!color || passiveTransparent || receivesParentThemeSync) return;
+    setCustomColors((previous) => {
+      const next = { ...previous, [themeId]: { ...previous[themeId], [field]: color } };
+      writeCustomColors(next);
+      return next;
+    });
+  }, [passiveTransparent, receivesParentThemeSync]);
+
+  const resetCustomColors = useCallback((themeId: string) => {
+    if (passiveTransparent || receivesParentThemeSync) return;
+    setCustomColors((previous) => {
+      const next = { ...previous };
+      delete next[themeId];
+      writeCustomColors(next);
+      return next;
+    });
+  }, [passiveTransparent, receivesParentThemeSync]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === CUSTOM_COLORS_STORAGE_KEY) setCustomColors(readCustomColors());
+      if (event.key === IMPORTED_THEMES_STORAGE_KEY) setImportedThemes(readImportedThemes());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const importTheme = useCallback((raw: string) => {
+    if (passiveTransparent || receivesParentThemeSync) throw new Error('unavailable');
+    const theme = parseImportedTheme(raw);
+    const next = [...importedThemes.filter((item) => item.metadata.id !== theme.metadata.id), theme];
+    writeImportedThemes(next);
+    setImportedThemes(next);
+    setPendingImportedTheme(theme.metadata.id);
+  }, [importedThemes, passiveTransparent, receivesParentThemeSync]);
+
+  useEffect(() => {
+    if (!pendingImportedTheme) return;
+    const theme = availableThemes.find((item) => item.metadata.id === pendingImportedTheme);
+    if (!theme) return;
+    const next = { ...preferences, themeMode: theme.metadata.variant,
+      ...(theme.metadata.variant === 'light' ? { lightThemeId: theme.metadata.id } : { darkThemeId: theme.metadata.id }) };
+    setPreferences(next);
+    persistThemePreferences(next);
+    setPendingImportedTheme(null);
+  }, [availableThemes, pendingImportedTheme, persistThemePreferences, preferences]);
+
+  const removeImportedTheme = useCallback((themeId: string) => {
+    if (passiveTransparent || receivesParentThemeSync) return;
+    const nextThemes = importedThemes.filter((item) => item.metadata.id !== themeId);
+    writeImportedThemes(nextThemes);
+    setImportedThemes(nextThemes);
+    const next = { ...preferences,
+      lightThemeId: preferences.lightThemeId === themeId ? DEFAULT_LIGHT_ID : preferences.lightThemeId,
+      darkThemeId: preferences.darkThemeId === themeId ? DEFAULT_DARK_ID : preferences.darkThemeId };
+    setPreferences(next);
+    persistThemePreferences(next);
+  }, [importedThemes, passiveTransparent, receivesParentThemeSync, preferences, persistThemePreferences]);
+
   const value: ThemeContextValue = {
     currentTheme,
     availableThemes,
     customThemesLoading,
+    customColors,
+    importedThemes,
+    importTheme,
+    removeImportedTheme,
+    setCustomColor,
+    resetCustomColors,
     reloadCustomThemes,
     themeMode: preferences.themeMode,
     setThemeMode: setThemeModeHandler,

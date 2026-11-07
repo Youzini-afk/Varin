@@ -13,7 +13,7 @@ export function releaseTargets(includeIntel = false) {
   const targets = [
     ['Windows x64', 'windows', 'win', 'win32', 'x64', 'windows-latest', 'x86_64-pc-windows-msvc'],
     ['Windows ARM64', 'windows', 'win', 'win32', 'arm64', 'windows-11-arm', 'aarch64-pc-windows-msvc'],
-    ['Linux x64', 'linux', 'linux', 'linux', 'x64', 'ubuntu-latest', 'x86_64-unknown-linux-gnu'],
+    ['Linux x64', 'linux', 'linux', 'linux', 'x64', 'ubuntu-22.04', 'x86_64-unknown-linux-gnu'],
     ['Linux ARM64', 'linux', 'linux', 'linux', 'arm64', 'ubuntu-24.04-arm', 'aarch64-unknown-linux-gnu'],
     ['macOS Apple Silicon', 'macos', 'mac', 'darwin', 'arm64', 'macos-15', 'aarch64-apple-darwin'],
     ...(includeIntel ? [['macOS Intel', 'macos', 'mac', 'darwin', 'x64', 'macos-15-intel', 'x86_64-apple-darwin']] : []),
