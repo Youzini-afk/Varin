@@ -104,6 +104,15 @@ before later size measurements. Layout-only changes settle without starting a fo
 new messages and streaming growth retain the interruptible follow spring. Resuming following after
 entry still preserves end space the user manually revealed.
 
+The pinned LegendList `/react` CJS and ESM exports skip 0×0 measurements in the synchronous
+container layout pass, matching its observer path. A mounted list hidden by an ancestor must retain
+its measured sizes rather than collapse rows and recursively allocate more containers. Nonzero-width,
+zero-height rows still measure normally, and visible updates resume measurement. The existing immediate
+shrink patch remains independent. `LegendListMeasurement.behavior.test.tsx` exercises both real exports
+and the conversation timeline using injected geometry. [LegendList #567](https://github.com/LegendApp/legend-list/issues/567)
+is a related upstream report; these tests do not establish browser layout timing or the original
+reporter's trigger in [#301](https://github.com/Youzini-afk/Varin/issues/301).
+
 Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
 commands use native user Operations and the existing Integration journal. Preview refresh reads those
 records; it does not repeat writes. Dirty editor buffers keep their Documents revision checks.

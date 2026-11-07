@@ -105,3 +105,41 @@ test('explicit kernel product targets override environment aliases and still rej
     { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: 'pipe' }),
   error => /binary is linux\/x64, expected linux\/arm64/.test(error.stderr));
 });
+
+test('frontend reuse and artifact restore include dependency patch bytes', async t => {
+  const root = await fixture(t);
+  for (const file of ['scripts/build-products.mjs', 'scripts/build-cache.mjs',
+    'scripts/kernel-binary-identity.cjs', 'package.json']) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.copyFile(new URL(`../${file}`, import.meta.url), path.join(root, file));
+  }
+  await fs.mkdir(path.join(root, 'bun-patches'));
+  const patch = path.join(root, 'bun-patches/list.patch');
+  await fs.writeFile(patch, 'original dependency patch');
+  // Use the production frontend input selection and real cache/transfer code. Only the expensive
+  // bundler is replaced: its output identifies the dependency bytes that it consumed.
+  const run = action => execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import fs from 'node:fs/promises';
+    import path from 'node:path';
+    import { BuildCache } from './scripts/build-cache.mjs';
+    const task = BuildCache.prototype.task;
+    BuildCache.prototype.task = function (name, spec) {
+      if (name !== 'frontend') throw new Error('Unexpected producer: ' + name);
+      return task.call(this, name, { ...spec, async build() {
+        await fs.mkdir(spec.outputs[0], { recursive: true });
+        await fs.copyFile('bun-patches/list.patch', path.join(spec.outputs[0], 'app.js'));
+      } });
+    };
+    const { prepareFrontend, exportFrontend } = await import('./scripts/build-products.mjs');
+    ${action}
+  `], { cwd: root, encoding: 'utf8', windowsHide: true, stdio: 'pipe',
+    env: { ...process.env, BUN: process.execPath, VARIN_FRONTEND_ARTIFACT: '' } });
+  run('await exportFrontend("exported-frontend");');
+  assert.match(run('await prepareFrontend();'), /frontend: reused/);
+  await fs.writeFile(patch, 'updated dependency patch');
+  assert.throws(() => run('await prepareFrontend({ importDirectory: "exported-frontend" });'),
+    error => /artifact source or build options mismatch/.test(error.stderr));
+  assert.match(run('await prepareFrontend();'), /frontend: building/);
+  assert.equal(await fs.readFile(path.join(root, 'artifacts/build/frontend/app.js'), 'utf8'),
+    'updated dependency patch');
+});

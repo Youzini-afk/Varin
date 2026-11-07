@@ -1,8 +1,21 @@
 diff --git a/react.js b/react.js
-index 4500177b44094138489d1581f6ece97e719dc4de..3b1a8c3880876ad65a72c3275fca91e0f0c63c1a 100644
+index 4500177b44094138489d1581f6ece97e719dc4de..e08bb6435632c4e43daf92280dd7f2b64ed35820 100644
 --- a/react.js
 +++ b/react.js
-@@ -5995,6 +5995,12 @@ var pendingWebShrinkFrame;
+@@ -5504,6 +5504,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element && isContainerItemCurrent(ctx, containerId, itemKey)) {
+       const generation = (_b = ctx.state.containerItemGenerations[containerId]) != null ? _b : 0;
+       const rect = element.getBoundingClientRect();
++      // Varin: a mounted list under display:none has no measurable layout. Keep its last
++      // sizes/baseline instead of collapsing rows and synchronously allocating more containers.
++      // Match useOnLayoutSync: a real zero-height row with nonzero width must still be measured.
++      if (rect.width === 0 && rect.height === 0) {
++        continue;
++      }
+       setContainerLayoutBaseline(element, rect);
+       measurements.push({
+         containerId,
+@@ -5995,6 +6001,12 @@ var pendingWebShrinkFrame;
  function cancelWebShrinkMeasurement(state) {
    pendingWebShrinkMeasurements.delete(state);
  }
@@ -15,7 +28,7 @@ index 4500177b44094138489d1581f6ece97e719dc4de..3b1a8c3880876ad65a72c3275fca91e0
  function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
    pendingWebShrinkMeasurements.set(state, confirmMeasurement);
    if (pendingWebShrinkFrame === void 0) {
-@@ -6028,7 +6034,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6028,7 +6040,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -25,10 +38,23 @@ index 4500177b44094138489d1581f6ece97e719dc4de..3b1a8c3880876ad65a72c3275fca91e0
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
 diff --git a/react.mjs b/react.mjs
-index 1dab5e5a279a58ba07deb490aa87231415d37210..89c864921dc8e9164963a8350b895746194e1863 100644
+index 1dab5e5a279a58ba07deb490aa87231415d37210..4fd76107720baa4c35c12adf488daea0e872e5a7 100644
 --- a/react.mjs
 +++ b/react.mjs
-@@ -5974,6 +5974,12 @@ var pendingWebShrinkFrame;
+@@ -5483,6 +5483,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element && isContainerItemCurrent(ctx, containerId, itemKey)) {
+       const generation = (_b = ctx.state.containerItemGenerations[containerId]) != null ? _b : 0;
+       const rect = element.getBoundingClientRect();
++      // Varin: a mounted list under display:none has no measurable layout. Keep its last
++      // sizes/baseline instead of collapsing rows and synchronously allocating more containers.
++      // Match useOnLayoutSync: a real zero-height row with nonzero width must still be measured.
++      if (rect.width === 0 && rect.height === 0) {
++        continue;
++      }
+       setContainerLayoutBaseline(element, rect);
+       measurements.push({
+         containerId,
+@@ -5974,6 +5980,12 @@ var pendingWebShrinkFrame;
  function cancelWebShrinkMeasurement(state) {
    pendingWebShrinkMeasurements.delete(state);
  }
@@ -41,7 +67,7 @@ index 1dab5e5a279a58ba07deb490aa87231415d37210..89c864921dc8e9164963a8350b895746
  function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
    pendingWebShrinkMeasurements.set(state, confirmMeasurement);
    if (pendingWebShrinkFrame === void 0) {
-@@ -6007,7 +6013,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6007,7 +6019,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
