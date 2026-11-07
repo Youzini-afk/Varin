@@ -171,8 +171,9 @@ export function resolveRuntimeBase(reference, variant, registry) {
   return verifyImage(image, { role: 'runtime-base', variant }, registry);
 }
 
-export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {} } = {}) {
+export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {}, replaceVersion } = {}) {
   if (!/^candidate-\d+-\d+$/.test(stageTag)) throw new Error('Promotion requires this run’s unique candidate tag');
+  if (replaceVersion !== undefined) versionParts(replaceVersion);
   const desired = new Map();
   for (const artifact of plan) {
     if (pinnedImage(artifact.source).digest !== artifact.digest) throw new Error('Source digest does not match promotion plan');
@@ -207,7 +208,8 @@ export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {
   for (const artifact of plan) for (const target of artifact.targets) {
     const existing = registry.manifest(target.ref, { allowMissing: true });
     if (existing?.digest === artifact.digest) continue;
-    if (existing && target.immutable) throw new Error(`Refusing to replace immutable image tag ${target.ref}`);
+    const replaceSelectedVersion = replaceVersion !== undefined && target.ref.endsWith(`:${replaceVersion}`);
+    if (existing && target.immutable && !replaceSelectedVersion) throw new Error(`Refusing to replace immutable image tag ${target.ref}`);
     writes.push({ ...target, source: artifact.source, digest: artifact.digest });
   }
   // Freeze the complete exact release before advancing any mutable alias.
@@ -257,7 +259,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // Preserve only plugin discovery, never auths/credential helpers from the
       // logged-in config. Imagetools reads both platform manifests/configs.
       writeAnonymousDockerConfig(directory);
-      promoteImages(plan, `candidate-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`, createImageRegistry(dockerCommand(directory)));
+      const replaceVersion = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && process.env.VARIN_REPLACE_VERSION === 'true'
+        ? candidate.version : undefined;
+      promoteImages(plan, `candidate-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`, createImageRegistry(dockerCommand(directory)), { replaceVersion });
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   }
 }

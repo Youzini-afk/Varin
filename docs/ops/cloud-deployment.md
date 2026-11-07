@@ -52,7 +52,7 @@ VARIN_RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-base:0.9.38 \
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-正式版本入口拒绝以 `<=0.9.38` 的版本发布，拒绝覆盖任何已存在且 digest 不同的精确版本/SHA 标签。
+正式版本入口拒绝以 `<=0.9.38` 的版本发布，默认拒绝覆盖任何已存在且 digest 不同的精确版本/SHA 标签。
 相同 digest 的部分发布可以续做。**历史 tag 上的旧 workflow/helper 仍是旧代码**，不受这些新检查
 约束；不要通过重跑旧 tag 的 Docker workflow 修复或回滚部署。回滚应选择保留的已核验镜像引用，
 并单独确认持久化数据格式兼容性。更强的历史 workflow/registry 写入限制需要 owner 另行配置权限，
@@ -64,6 +64,10 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 `Docker Images` 只接受与 package version 匹配的 `v<version>` tag push，或显式选择该 tag 的手动运行。
 在任何 GHCR 候选写入之前，先接受精确 tag/SHA/version，并完成该 SHA 的完整源码、Rust/native
 及平台资格检查。每个应用只消费本次对应基础镜像的 immutable digest，不读取浮动 base。
+
+需要保留版本号重发时，先将对应 Git tag 移到修复提交，再手动选择该 tag 并启用 `replace_version`。
+本次验证通过后可替换所选精确版本及其适用的浮动别名，全部 SHA 标签和原 digest 保持原样可用。
+普通 tag push 和未启用该项的重试仍拒绝同版本不同内容；重发仍执行完整资格、镜像检查与推广前 tag 核对。
 
 手动输入 `runtime_slim_image` 或 `runtime_base_image` 分别选择标准或 toolbelt 基础镜像。
 **该输入同时授权把实际消费的基础镜像发布为本次发行的 companion base**，不是只修改应用构建参数。
@@ -90,7 +94,8 @@ arm64 的 native 依赖与 kernel 在镜像组装时校验，但这不等同于 
    用户能访问。若失败，停止在正式别名之前，由 owner 按预期公开访问策略配置包，再续跑推广；
    workflow 不自动扩大可见性或请求新凭据。这一门禁验证 registry 内容访问，不宣称已匿名下载每一层。
 3. 对全部目标的精确版本、SHA 与计划更新的浮动标签完成预检。仅明确不存在可当作新标签；
-   认证失败、网络错误或未知结果都停止。已有精确/SHA 标签只能与目标 digest 相同，否则整批拒绝。
+   认证失败、网络错误或未知结果都停止。已有 SHA 标签只能与目标 digest 相同；精确版本默认也如此，
+   只有手动启用 `replace_version` 才允许替换本次所选版本。
 4. 先补齐全部精确版本/SHA 标签，再更新浮动别名，每次复制后核对目标 digest。
    仅远端保留的最高稳定 Git release tag 可以更新整组 `latest`、major/minor、major 别名。
    更旧稳定发行和 prerelease 只处理其精确版本/SHA，避免部分新发行后又被旧重试回退。

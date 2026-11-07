@@ -7,6 +7,11 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
+      replace_version:
+        description: Republish the selected version after moving its Git tag; preserve all SHA image tags
+        required: true
+        default: false
+        type: boolean
       runtime_base_image:
         description: Optional toolbelt runtime-base; its resolved digest also becomes a published companion base (select a release tag)
         required: false
@@ -450,6 +455,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Recheck, stage publicly readable candidates and promote tested digests
         env:
+          VARIN_REPLACE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_version || false }}
           VARIN_STANDARD_APP_IMAGE: ghcr.io/youzini-afk/varin@${{ needs.build-app-standard.outputs.digest }}
           VARIN_TOOLBELT_APP_IMAGE: ghcr.io/youzini-afk/varin-toolbelt@${{ needs.build-app-toolbelt.outputs.digest }}
           VARIN_SLIM_BASE_IMAGE: ${{ needs.build-app-standard.outputs.base-image }}

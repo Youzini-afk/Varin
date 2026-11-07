@@ -5,9 +5,6 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
-- Allow local, LAN and Docker-network HTTP(S) targets across Web, Docker and desktop deployments, including model discovery, web acquisition and image reads. Keep proxy routing and explicit domain rules. Fixes the private-network rejection reported in #300.
-- Web、Docker 与桌面端的 HTTP(S) 请求统一支持本机、局域网和 Docker 内网，覆盖模型发现、网页读取与图片获取；保留代理路由及用户明确配置的域名规则，修复 #300 反馈的内网地址拦截。
-
 ## 0.9.39 - 2026-11-07
 
 ### English
@@ -29,6 +26,7 @@ private runtime protocol and product surfaces still move together.
 
 #### Conversation and runtime fixes
 
+- Fix #300: model connections, web acquisition, search, image reads and explicitly selected browser previews can reach localhost, LAN and Docker-network services in all deployments. Proxy routing, explicit domain rules and request authentication remain in effect.
 - Hand off work from the workbench to a chosen Bot conversation with **your own message** and a reference to the original task. The Bot can inspect the task history and continue from there.
 - Move conversation-recovery controls out of Varin's message content and remove the inappropriate handoff action from Bot conversations. Restore smooth settings entrance and dismissal.
 - Retain the original extension owners when continuing a Run. Restore brokered services in cloud packages and correct Web workspace defaults and Windows path handling.
@@ -58,6 +56,7 @@ Desktop release targets are Windows x64/ARM64, macOS Apple Silicon and Linux x64
 
 #### 聊天与运行时修复
 
+- 修复 #300：各部署方式中的模型连接、网页抓取、搜索、图片读取及用户指定的网页预览统一支持本机、局域网和 Docker 内网，保留代理路由、明确配置的域名规则及请求认证。
 - 工作台任务可以交给选定的 Bot 会话：**发送内容由你填写**，同时附上原任务引用，Bot 可继续读取任务记录、了解进展。
 - 将会话回退的恢复入口移出 Varin 聊天正文，移除 Bot 对话中不合适的交接菜单；恢复设置页面平滑的打开和关闭动效。
 - 修复 Run 接续时扩展执行归属的保留，补齐云端产物中的代理服务，并修正 Web 工作区默认值与 Windows 路径处理。

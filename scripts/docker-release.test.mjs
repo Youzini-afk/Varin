@@ -141,6 +141,26 @@ test('a rebuilt retry with different bytes conflicts rather than replacing an ex
   assert.equal(fixture.manifests.get(`${prefix}varin:0.9.39`).digest, digest('1'));
 });
 
+test('explicit version republication replaces release aliases and preserves prior source tags', () => {
+  const fixture = registryFixture();
+  promoteImages(plan(), 'candidate-12-1', fixture.registry);
+  const replacement = `${prefix}varin@${digest('6')}`;
+  fixture.add(replacement, 'application', 'slim');
+  const next = acceptImageRelease({ ...input, eventName: 'workflow_dispatch', sha: 'b'.repeat(40) });
+  const nextPlan = imagePromotionPlan(next, { ...images, standardApp: replacement }, [input.ref]);
+  promoteImages(nextPlan, 'candidate-13-1', fixture.registry, { replaceVersion: next.version });
+  for (const name of ['varin', 'varin-slim']) {
+    assert.equal(fixture.manifests.get(`${prefix}${name}:0.9.39`).digest, digest('6'));
+    assert.equal(fixture.manifests.get(`${prefix}${name}:latest`).digest, digest('6'));
+    assert.equal(fixture.manifests.get(`${prefix}${name}:sha-${source}`).digest, digest('1'));
+    assert.equal(fixture.manifests.get(`${prefix}${name}:sha-${next.sha}`).digest, digest('6'));
+  }
+  const before = fixture.formalWrites().length;
+  assert.throws(() => promoteImages(imagePromotionPlan(next, images, [input.ref]), 'candidate-14-1', fixture.registry,
+    { replaceVersion: next.version }), /replace immutable/);
+  assert.equal(fixture.formalWrites().length, before);
+});
+
 test('an older release leaves ALL floats untouched after a partial newer publication, despite reused base labels', () => {
   const fixture = registryFixture();
   for (const image of plan()) for (const target of image.targets.filter(target => !target.immutable)) {
