@@ -33,6 +33,9 @@ pub enum MessageActor {
     /// A domain result can exist before a child Run starts. It is never a user instruction
     /// or a synthetic model/tool invocation. Only the report owner creates this actor.
     AgentReport { execution_id: String, operation_id: String },
+    /// A regular conversation's terminal reply to an original accepted work request.
+    /// The completed Run owns this result; it is not a synthetic tool invocation.
+    WorkReport { run_id: String, request_message_id: String },
     Agent {
         run_id: String,
         operation_id: String,
@@ -224,6 +227,18 @@ fn route(
     actor: &MessageActor,
 ) -> Result<(String, String)> {
     branch_owner(db, sender, branch)?;
+    if let MessageActor::WorkReport { run_id, request_message_id } = actor {
+        let run: Run = record(db, "runs", run_id)?;
+        let request: QueuedInputMetadata = record(db, "input_queue", request_message_id)?;
+        let original = message_identity(&request)?;
+        if !run.state.terminal() || run.thread_id != sender || run.branch_id != branch
+            || request.run_id.as_deref() != Some(run_id) || request.state != InputState::Delivered
+            || original.kind != MessageKind::Request || !matches!(original.actor, MessageActor::Agent { .. })
+            || input.reply_to.as_deref() != Some(request_message_id)
+        {
+            return Err(RuntimeError::Conflict("Work report does not belong to its original request and completed Run".into()));
+        }
+    }
     if let MessageActor::AgentReport { execution_id, operation_id } = actor {
         let execution = super::delegated::execution(db, execution_id)?;
         let child = super::delegated::relation(db, operation_id)?;
@@ -393,6 +408,7 @@ impl Catalog {
             MessageIdentity {
                 source_agent: input.source_agent.clone(),
                 message_id: match &actor {
+                    MessageActor::WorkReport { .. } => format!("message:{key}"),
                     MessageActor::Agent { .. } | MessageActor::AgentReport { .. } if key.starts_with("bot-report:") => format!("message:{key}"),
                     MessageActor::Agent { operation_id, .. } | MessageActor::AgentReport { operation_id, .. } => format!("message:{operation_id}"),
                     MessageActor::User => id(),
@@ -725,7 +741,7 @@ impl MessagePreparation {
         );
         let body = match &self.identity.actor {
             MessageActor::User => super::attachments::incoming_input(&envelope,&self.attachments,&self.attachment_media),
-            MessageActor::Agent { .. } | MessageActor::AgentReport { .. } => {
+            MessageActor::Agent { .. } | MessageActor::AgentReport { .. } | MessageActor::WorkReport { .. } => {
                 serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
                     resource_activation: None,
                     id: self.identity.message_id.clone(),

@@ -105,10 +105,10 @@ export function CollaborationMessage({ api, identity, item, members, original, e
               <span>{t('collaboration.dispatch')}</span>
               {item.dispatch.preset && <span className="collaboration-dispatch-preset">{item.dispatch.preset}</span>}
             </div>}
-            {report && <div className="collaboration-dispatch-label">
+            {(report || message?.actor.kind === 'work_report') && <div className="collaboration-dispatch-label">
               <Icon name="reply" className="size-3.5" />
               <span>{t('collaboration.report')}</span>
-              {report.outcome !== 'succeeded' && <ChildState state={report.outcome} />}
+              {report && report.outcome !== 'succeeded' && <ChildState state={report.outcome} />}
             </div>}
             {message?.replyTo && <div className="collaboration-message-quote">
               <Icon name="reply" className="size-3 shrink-0" />
@@ -125,7 +125,7 @@ export function CollaborationMessage({ api, identity, item, members, original, e
                 <ChildState state={target.detail.state} />
               </span>}
             </div>}
-            {report && <div className="collaboration-dispatch-footer">
+            {(report || message?.actor.kind === 'work_report') && <div className="collaboration-dispatch-footer">
               <button type="button" onClick={() => onMember(sourceId, sourceBranch)}>
                 {t('collaboration.openAgent')}<Icon name="arrow-right-s" className="size-3.5" />
               </button>

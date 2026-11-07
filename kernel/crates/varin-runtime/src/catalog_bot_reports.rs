@@ -1,6 +1,24 @@
 //! Bot report delivery uses the original durable message ingress. No second scheduler.
 use super::delegated::DelegatedTrigger;
 use super::*;
+#[path = "catalog_work_reports.rs"]
+mod work;
+
+fn requested_by_bot(db: &Connection, execution: &delegated::DelegatedExecution) -> Result<bool> {
+    let DelegatedTrigger::MessageRequest { message_id, .. } = &execution.trigger else { return Ok(false); };
+    let request: inputs::QueuedInputMetadata = record(db, "input_queue", message_id)?;
+    let inputs::InputOrigin::Message { identity, .. } = request.origin else { return Ok(false); };
+    Ok(matches!(identity.actor, messages::MessageActor::Agent { .. })
+        && super::bot::thread_bot(db, &identity.sender_thread_id)?.is_some())
+}
+
+pub(super) fn publish_run_pending(tx: &Transaction<'_>, run: &Run) -> Result<()> {
+    work::publish_pending(tx, run)
+}
+
+pub(super) fn directly_requested_by(db: &Connection, run: &Run, bot: &str) -> Result<bool> {
+    work::directly_requested_by(db, run, bot)
+}
 
 /// Only a newly published result creates work. Opening a store does not replay every
 /// historical report as a fresh request.
@@ -13,7 +31,7 @@ pub(super) fn publish_pending(
     // Report publication needs the durable lineage, not a launch-ready ChildTask.
     let execution = delegated::execution(tx, execution_id)?;
     let child = delegated::relation(tx, &execution.child_operation_id)?;
-    if super::bot::thread_bot(tx, &child.child_thread_id)?.is_some() {
+    if super::bot::thread_bot(tx, &child.child_thread_id)?.is_some() || requested_by_bot(tx, &execution)? {
         event(
             tx,
             execution_id,
@@ -35,7 +53,7 @@ impl Catalog {
         for id in ids {
             let execution = delegated::execution(&self.db, &id)?;
             let child = delegated::relation(&self.db, &execution.child_operation_id)?;
-            if self.bot_for_thread(&child.child_thread_id)?.is_some() {
+            if self.bot_for_thread(&child.child_thread_id)?.is_some() || requested_by_bot(&self.db, &execution)? {
                 pending.push(execution);
             }
         }
@@ -137,6 +155,7 @@ pub fn deliver_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             failure.get_or_insert(error);
         }
     }
+    if let Err(error) = work::deliver(catalog) { failure.get_or_insert(error); }
     failure.map_or(Ok(()), Err)
 }
 

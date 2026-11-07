@@ -140,3 +140,11 @@ it('keeps send bubbles visible when ordinary activity is folded in dialogue and 
   const sequence = projectChatDialogue([calls('file_read', 'before'), calls('send', 'message'), calls('file_list', 'after')]);
   expect(sequence.map(item => item.kind)).toEqual(['process', 'tool', 'process']);
 });
+
+it('shows a completed ordinary conversation reply as an Agent report bubble', () => {
+  const text = 'Task message message:work-report\nSender: work / work-route\nTarget: bot / bot-route\nActor: {"kind":"work_report","runId":"finished-run","requestMessageId":"original-request"}\nKind: request\nReply to: original-request\n\nThe requested work is complete.';
+  const message = receivedAgentMessage({ entryId: 'message:work-report', nativeId: 'message:work-report',
+    senderThreadId: 'work', targetThreadId: 'bot', text });
+  expect(message).toMatchObject({ kind: 'report', text: 'The requested work is complete.',
+    senderBranchId: 'work-route', targetBranchId: 'bot-route' });
+});

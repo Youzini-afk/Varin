@@ -80,11 +80,15 @@ pub(super) fn external_report(
     Ok(())
 }
 pub(super) fn completed(tx: &Transaction<'_>, run: &Run) -> Result<()> {
+    super::bot_reports::publish_run_pending(tx, run)?;
     let owner = super::bot::thread_bot(tx, &run.thread_id)?;
     if owner.is_some() {
         return Ok(());
     } // Bot-family work reports through its exact delegated requester.
     for bot in super::bot_work::followers(tx, &run.thread_id, &run.branch_id)? {
+        // The direct request owns the return session. Do not also wake the Bot's
+        // default entry for this same completion merely because it follows the work.
+        if super::bot_reports::directly_requested_by(tx, run, &bot)? { continue; }
         let target = super::bot_work::entry(tx, &bot)?;
         let branch = super::threads::branch(tx, &target)?;
         event(

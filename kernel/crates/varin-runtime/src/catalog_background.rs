@@ -25,6 +25,7 @@ pub(super) fn authorize(
         )?;
         if owner != reference.thread_id
             || (scheduling::thread_family(db, caller)? != scheduling::thread_family(db, &owner)?
+                && !super::bot_work::ordinary_conversation(db, caller, &owner)?
                 && !super::bot_work::linked(
                     db,
                     caller,

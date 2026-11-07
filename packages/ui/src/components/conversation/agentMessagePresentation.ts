@@ -32,8 +32,11 @@ export function receivedAgentMessage(input: {
   }
   if (nativeId.startsWith('message:')) {
     const envelope = /^Task message ([^\n]+)\nSender: ([^\n]+) \/ ([^\n]+)\nTarget: ([^\n]+) \/ ([^\n]+)\nActor: ([^\n]+)\nKind: (?:request|inform)\nReply to: [^\n]+\n\n([\s\S]*)$/.exec(text);
-    if (envelope?.[1] === nativeId && envelope[2] === senderThreadId && envelope[4] === targetThreadId)
-      return { ...base, text: envelope[7]!, senderBranchId: envelope[3], targetBranchId: envelope[5] };
+    if (envelope?.[1] === nativeId && envelope[2] === senderThreadId && envelope[4] === targetThreadId) {
+      let report = false;
+      try { report = record(JSON.parse(envelope[6]!)).kind === 'work_report'; } catch { /* Preserve ordinary message text. */ }
+      return { ...base, kind: report ? 'report' : 'message', text: envelope[7]!, senderBranchId: envelope[3], targetBranchId: envelope[5] };
+    }
     return base;
   }
   if (entryId.startsWith('child-report:') && nativeId === entryId && text.startsWith(`Report from child ${senderThreadId}. `)) {

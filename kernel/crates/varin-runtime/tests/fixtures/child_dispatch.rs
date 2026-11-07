@@ -1091,6 +1091,11 @@ impl Fixture {
         waits
     }
     pub(crate) fn admit_policy_call(&mut self, call: ToolCall) -> ToolExecutionContext {
+        let contract = ToolContract { name: call.name.clone(), schema_version: call.schema_version.clone(),
+            read_only: true, completion: CompletionKind::Job, lifetime: Lifetime::Thread, resources: vec![] };
+        self.admit_policy_call_with_contract(call, contract)
+    }
+    pub(crate) fn admit_policy_call_with_contract(&mut self, call: ToolCall, contract: ToolContract) -> ToolExecutionContext {
         let run_id = self.context.run_id.clone();
         let epoch = self.db.epoch();
         self.db
@@ -1166,14 +1171,7 @@ impl Fixture {
                 &ExecutionRecord::ToolAdmitted {
                     context: context.clone(),
                     tool: AdmittedTool {
-                        contract: ToolContract {
-                            name: call.name.clone(),
-                            schema_version: call.schema_version.clone(),
-                            read_only: true,
-                            completion: CompletionKind::Job,
-                            lifetime: Lifetime::Thread,
-                            resources: vec![],
-                        },
+                        contract,
                         call,
                     },
                 },

@@ -182,8 +182,9 @@ impl Read {
         let sql = format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id JOIN operations owner ON owner.id=c.id WHERE coalesce(json_extract(owner.body,'$.executor'),'')!='code_retrieval'),
             feed(kind,body,content,extra,cursor,accepted_at_ms) AS (
                 SELECT 'message',q.body,c.intent,c.id,q.cursor,0
-                FROM input_queue q JOIN commands c ON c.id=json_extract(q.body,'$.origin.command_key')
-                WHERE q.origin='message' AND q.sender_thread_id IN (SELECT id FROM family)
+                FROM input_queue q JOIN commands c ON c.id=json_extract(q.body,'$.origin.command_key') JOIN branches receiver ON receiver.id=q.branch_id
+                WHERE q.origin='message' AND (q.sender_thread_id IN (SELECT id FROM family) OR receiver.thread_id IN (SELECT id FROM family))
+                  AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id IN (q.sender_thread_id,receiver.thread_id) AND json_extract(owner.body,'$.executor')='code_retrieval')
                 UNION ALL
                 SELECT 'dispatch',c.body,d.body,c.id,e.cursor,coalesce(json_extract(e.data,'$.acceptedAtMs'),t.created_at_ms)
                 FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id AND json_extract(d.body,'$.trigger.kind')='dispatch'
