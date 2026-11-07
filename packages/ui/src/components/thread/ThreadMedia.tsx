@@ -1,5 +1,5 @@
 import { useI18n } from '@/lib/i18n';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { Icon } from '@/components/icon/Icon';
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
@@ -125,7 +125,7 @@ function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = 
     {!thumbnail && actions}
     {(!url || displayFailed) && !loading && <Button type="button" variant="ghost" size="sm" title={error} onClick={() => void load()}>{t(error ? 'chat.media.retry' : image ? 'chat.media.view' : 'chat.media.read')}</Button>}
     {loading && <span role="status" className="inline-flex items-center gap-2 typography-meta text-muted-foreground"><Icon name="loader-4" className="size-3.5 animate-spin" />{t('chat.media.loading')}</span>}
-    {url && image && <Dialog open={expanded} onOpenChange={setExpanded}><DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle><img src={url} alt={t('chat.media.image')} className={thumbnail ? "max-h-[75vh] w-full object-contain" : "max-h-[85vh] w-full object-contain"} />{thumbnail && <div className="px-2 pb-2">{actions}</div>}</DialogContent></Dialog>}
+    {url && image && expanded && <ConversationImageViewer src={url} identity={identity} sourceId={JSON.stringify([holder,partIndex,media])} label={saveName} onClose={()=>setExpanded(false)} footer={thumbnail?actions:undefined} />}
   </figure>;
 }
 

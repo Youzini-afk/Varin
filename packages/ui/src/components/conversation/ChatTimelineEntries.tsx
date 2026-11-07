@@ -9,6 +9,7 @@ import { standaloneDescendants } from './standaloneTools';
 import { scriptToolLabels } from './scriptPresentation';
 import { toolSubject } from './toolSubject';
 import React from 'react';
+import { ConversationImage } from '@/components/images/ConversationImage';
 import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard';
 import type { JsonValue } from '@varin/protocol';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry, ChatToolCall, ChatToolResultMessage, ChatUserContent, ChatUserMessage } from './types';
@@ -180,20 +181,7 @@ const ChatUserContentView: React.FC<{
             />}
           </ChatTextSource>
         ) : (
-          <a
-            key={`${messageId}:image:${index}`}
-            href={imageUrl(part)}
-            target="_blank"
-            rel="noreferrer"
-            className="relative mt-2 block w-fit max-w-full overflow-hidden rounded-lg border border-border/70 bg-background"
-          >
-            <img
-              src={imageUrl(part)}
-              alt={part.mimeType}
-              className="max-h-[32rem] max-w-full object-contain"
-            />
-            {part.reference !== undefined && <span className="absolute bottom-1 left-1 rounded bg-background/85 px-1.5 py-0.5 typography-micro tabular-nums text-muted-foreground">{part.reference}</span>}
-          </a>
+          <ConversationImage key={`${messageId}:image:${index}`} sourceId={`${messageId}:image:${index}`} src={imageUrl(part)} label={part.mimeType} reference={part.reference} />
         )
       ))}
     </>

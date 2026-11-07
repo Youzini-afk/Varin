@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, expect, test, vi } from 'vitest';
-import { MarkdownImageViewer } from './MarkdownImageViewer';
+import { ImageViewer } from './ImageViewer';
 
 const dialog = vi.hoisted(() => ({ finish: (_open: boolean) => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -41,7 +41,7 @@ test('measures a deferred portal, fits/zooms originals, reuses group reads and r
     return image;
   };
   try {
-    await act(async () => root.render(<MarkdownImageViewer items={[{ source: 'one', label: 'One' }, { source: 'two', label: 'Two' }]} initialIndex={0} load={load} onClose={closed} />));
+    await act(async () => root.render(<ImageViewer items={[{ source: 'one', label: 'One' }, { source: 'two', label: 'Two' }]} initialIndex={0} load={load} onClose={closed} />));
     const image = await decoded();
     expect(image.style.width).toBe('800px'); expect(image.style.height).toBe('600px');
     await click('[aria-label="markdownRenderer.mermaid.actions.zoomInTitle"]');

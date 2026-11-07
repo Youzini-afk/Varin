@@ -49,6 +49,22 @@ it('rejects mixed original identity, inconsistent chunk metadata and corrupt byt
   }
 });
 
+it('does not transmit image-editor originals or undo history on any image input path', async () => {
+  const original=globalThis.fetch, bodies: Array<Record<string,unknown>>=[];
+  globalThis.fetch=async (_url,init)=>{bodies.push(JSON.parse(String(init?.body)));return Response.json({});};
+  try {
+    const api=createThreadsHttpAPI(), images=[{data:'flattened-pixels',mimeType:'image/png',reference:3,annotation:{source:{data:'private-original'},past:[['private-edit']]}}];
+    const input={runtime:'agent' as const,threadId:'thread',branchId:'branch',key:'key',text:'[Image 3]',images};
+    await api.submit({...input,expectedHead:null,model:{providerId:'provider',modelId:'model'}});
+    await api.enqueue({...input,mode:'boundary'});
+    await api.collaboration!.continueChild({...input,previousRunId:'run',expectedHead:null});
+    await api.editInput('input',1,input.text,images);
+    for(const body of bodies)assert.deepEqual(body.images,[{data:'flattened-pixels',mimeType:'image/png',reference:3}]);
+    assert.equal(JSON.stringify(bodies).includes('private-'),false);
+    assert.equal(images[0]!.annotation.source.data,'private-original');
+  } finally {globalThis.fetch=original;}
+});
+
 it('preserves the Host failure and rejects a late response after cancellation or endpoint replacement', async () => {
   const original = globalThis.fetch;
   let release!: (value: unknown) => void;

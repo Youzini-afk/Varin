@@ -73,7 +73,8 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   const editor = editing && <form className="mt-2 space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
     <label className="text-xs text-muted-foreground">{t(editing.input.mode === 'next_run' ? 'thread.composer.afterRun' : editing.input.mode === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</label>
     {images === undefined ? <ThreadContent api={api} identity={identity} holder={{ kind: 'input', inputId: editing.input.id, expectedRevision: editing.input.revision }}
-      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text' && part.kind !== 'attachment')} /> : <ImageAttachmentStrip images={images}
+      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text' && part.kind !== 'attachment')} /> : <ImageAttachmentStrip key={editing.input.id} images={images}
+        onUpdate={pending || !editIsCurrent ? undefined : (index,image)=>changeImages(images.map((current,i)=>i===index?image:current))}
         onReference={pending || !editIsCurrent ? undefined : number => {
           const input = textarea.current; if (!input) return;
           const token = t('chat.imageReference.token', { number });

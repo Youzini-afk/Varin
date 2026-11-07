@@ -71,6 +71,8 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  /** Unsent edits of historical images, owned by this conversation's local draft. */
+  imageAnnotations?: Record<string, import('@/lib/images/annotations').ImageAnnotationDocument>;
   /** Latest explicit action per source; retry snapshots share this draft's in-memory lifetime. */
   interactionSends?: Record<string, { fingerprint: string; pending?: ThreadPendingInput; receipt?: { status: 'sent' | 'queued'; inputId?: string } }>;
   interactions?: readonly InteractionRange[];
@@ -87,7 +89,7 @@ export interface ThreadDraft {
   externalModels?: Record<string, string>;
   externalOptions?: Record<string, { thinking?: string; mode?: string; config?: Record<string, string> }>;
   text: string;
-  images: ImageAttachment[];
+  images: import('@/lib/images/annotations').EditableImageAttachment[];
   /** High-water mark retained after removing an image, reset after sending the draft. */
   imageReferenceSequence?: number;
   materials: ThreadMaterialAttachment[];

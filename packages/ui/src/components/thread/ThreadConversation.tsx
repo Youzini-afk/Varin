@@ -54,7 +54,8 @@ import { useThreadRecovery } from './useThreadRecovery';
 import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
-import { removeDraftImage } from '@/components/chat/composer/imageAttachments';
+import { removeDraftImage, updateDraftImage } from '@/components/chat/composer/imageAttachments';
+import { prepareAnnotatedImages } from '@/lib/images/annotations';
 import { selectThreadFiles, prepareThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadFileDrafts } from './ThreadAttachments';
 import { useI18n } from '@/lib/i18n';
@@ -594,7 +595,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onSave={async (input, text, images) => {
         let saved = false;
         await act(async () => {
-          await (images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images));
+          await (images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, await prepareAnnotatedImages(images)));
           saved = true;
         });
         return saved;
@@ -734,7 +735,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           {item.fileLabel} · {item.startLine}–{item.endLine} ×
         </Button>))}
       </div>}
-      <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+      <ImageAttachmentStrip key={draftKey} images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+        onUpdate={pending || draft.pendingInput || draft.firstSend ? undefined : (index,image)=>updateDraftImage(draftKey,index,image)}
         onReference={pending || draft.pendingInput || draft.firstSend ? undefined : number => {
           messageInput.current?.insertText(t('chat.imageReference.token', { number })); messageInput.current?.focus();
         }}

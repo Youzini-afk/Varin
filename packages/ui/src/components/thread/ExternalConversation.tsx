@@ -24,6 +24,9 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ChatThinkingBlock } from '@/components/conversation/ChatThinkingBlock';
 import { ToolDisclosure, ToolDisclosureScope, ToolStatus } from '@/components/conversation/ToolDisclosure';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
+import { prepareAnnotatedImages } from '@/lib/images/annotations';
+import { ConversationImageViewer } from '@/components/images/ConversationImage';
+import { ImageReplyDraftContext } from '@/components/images/useImageReply';
 import {
   removeDraftImage,
 } from '@/components/chat/composer/imageAttachments';
@@ -72,7 +75,7 @@ const Item = React.memo(function Item({
   cwd: string;
 }) {
   const { t } = useI18n();
-  const [image, setImage] = React.useState<string>();
+  const [image, setImage] = React.useState<{src:string;index:number}>();
   const json = React.useRef({ raw: '', reader: new PartialJson() });
   let input = item.tool?.input;
   if (typeof input === 'string' && input.trimStart().startsWith('{')) {
@@ -185,7 +188,7 @@ const Item = React.memo(function Item({
               key={index}
               type="button"
               className="relative overflow-hidden rounded-lg border border-border"
-              onClick={() => setImage(`data:${value.mimeType};base64,${value.data}`)}
+              onClick={() => setImage({src:`data:${value.mimeType};base64,${value.data}`,index})}
               aria-label={t('chat.imageReference.token', { number: index + 1 })}
             >
               <img
@@ -207,19 +210,7 @@ const Item = React.memo(function Item({
         variant={item.kind === 'notice' ? 'tool' : 'assistant'}
       />
       <ThreadAttachments attachments={item.attachments} read={readAttachment} />
-      <Dialog
-        open={Boolean(image)}
-        onOpenChange={(open) => {
-          if (!open) setImage(undefined);
-        }}
-      >
-        <DialogContent className="max-w-[90vw]">
-          <DialogHeader>
-            <DialogTitle>{t('chat.imageReference.token', { number: 1 })}</DialogTitle>
-          </DialogHeader>
-          {image && <img src={image} alt="" className="max-h-[80vh] w-full object-contain" />}
-        </DialogContent>
-      </Dialog>
+      {image&&<ConversationImageViewer src={image.src} sourceId={`${item.id}:image:${image.index}`} label={t('chat.imageReference.token',{number:image.index+1})} onClose={()=>setImage(undefined)}/>}
     </div>
   );
 });
@@ -644,7 +635,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     {t('external.history')}
                   </Button>
                 )}
-                <Messages readAttachment={(ref, signal) => api.readAttachment(id, ref, signal)} items={messages} activeTurn={activeTurn} cwd={c.cwd} receipts={snapshot.turns} />
+                <ImageReplyDraftContext.Provider value={readOnly?null:key}><Messages readAttachment={(ref, signal) => api.readAttachment(id, ref, signal)} items={messages} activeTurn={activeTurn} cwd={c.cwd} receipts={snapshot.turns} /></ImageReplyDraftContext.Provider>
               </ToolDisclosureScope>
             </div>
           </div>
@@ -726,8 +717,9 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                       (file, signal) => api.uploadAttachment(id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
                     if (!isCurrent()) return;
                     const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text,
-                      images: draft.images.map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })),
+                      images: (await prepareAnnotatedImages(draft.images)).map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })),
                       ...externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities) };
+                    if (!isCurrent()) return;
                     patch({ externalInput: request });
                     try {
                       await api.send(id, request.key, request);
@@ -817,7 +809,9 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                 >
                   <ThreadFileDrafts files={draft.files} locked={pending || unresolvedInput} onRemove={id => patch({ files: draft.files?.filter(file => file.id !== id) })} />
                   <ImageAttachmentStrip
+                    key={key}
                     images={draft.images}
+                    onUpdate={pending || unresolvedInput ? undefined : (index,image)=>patch({images:draft.images.map((current,i)=>i===index?image:current)})}
                     onRemove={(index) => removeDraftImage(key, index)}
                     onReference={(number) =>
                       editor.current?.insertText(t('chat.imageReference.token', { number }))

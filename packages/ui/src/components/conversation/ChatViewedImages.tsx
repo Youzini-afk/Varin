@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { ThreadMedia } from '@/components/thread/ThreadMedia';
 import { useI18n } from '@/lib/i18n';
 import { useOptionalConversationPresentation } from './ConversationContext';
@@ -14,7 +14,7 @@ export function ChatViewedImages({ callId, images, status, children }: {
 }) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
-  const [preview, setPreview] = React.useState<string>();
+  const [preview, setPreview] = React.useState<{src:string;id:string}>();
   return <ToolDisclosure id={`images:${callId}`} className="tool-viewed-images">
     <summary className="tool-viewed-images-heading typography-meta">
       <Icon name="file-image" className="size-3.5 shrink-0" />
@@ -31,7 +31,7 @@ export function ChatViewedImages({ callId, images, status, children }: {
               media={image.media} partIndex={image.partIndex} thumbnail />
             : <span key={image.partIndex} className="typography-micro text-muted-foreground">{t('chat.images.unavailable')}</span>;
           const src = image.image.data.startsWith('data:') ? image.image.data : `data:${image.image.mimeType};base64,${image.image.data}`;
-          return <button key={image.partIndex} type="button" className="tool-viewed-image" aria-label={t('chat.media.view')} onClick={() => setPreview(src)}>
+          return <button key={image.partIndex} type="button" className="tool-viewed-image" aria-label={t('chat.media.view')} onClick={() => setPreview({src,id:`${callId}:${image.partIndex}`})}>
             <img src={src} alt={t('chat.media.image')} loading="lazy" decoding="async" />
           </button>;
         })}
@@ -42,11 +42,7 @@ export function ChatViewedImages({ callId, images, status, children }: {
           <ExpandedToolContext.Provider value={true}>{children}</ExpandedToolContext.Provider>
         </ViewedImageDetailsContext.Provider>
       </ToolDisclosure>
-      {preview && <Dialog open onOpenChange={open => { if (!open) setPreview(undefined); }}>
-        <DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle>
-          <img src={preview} alt={t('chat.media.image')} className="max-h-[85vh] w-full object-contain" />
-        </DialogContent>
-      </Dialog>}
+      {preview && <ConversationImageViewer src={preview.src} sourceId={preview.id} onClose={()=>setPreview(undefined)} />}
     </div>
   </ToolDisclosure>;
 }

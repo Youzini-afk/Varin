@@ -1,6 +1,7 @@
 import { getRuntimeEndpointGeneration, ThreadRequestError, type ThreadsAPI } from '@varin/application-client';
 import type { ThreadPendingInput } from '@/stores/useThreadDraftStore';
 import { observeMessageTime } from '@varin/protocol';
+import { prepareAnnotatedImages, type EditableImageAttachment } from '@/lib/images/annotations';
 
 const deliveries = new Map<string, Promise<string | undefined>>();
 /** Reopening the view while a send is still in flight joins its original observation. */
@@ -23,12 +24,23 @@ export function deliverThreadInput(api: ThreadsAPI, original: ThreadPendingInput
  * pre-admission result can release a first attempt; earlier uncertainty remains sticky. */
 async function deliver(api: ThreadsAPI, original: ThreadPendingInput, update: (pending: ThreadPendingInput | undefined) => void): Promise<string | undefined> {
   let pending = original;
+  const generation=getRuntimeEndpointGeneration();
+  let media: { images?: import('@varin/protocol').ImageAttachment[] };
   try {
-    if (pending.kind === 'enqueue') return (await api.enqueue(pending.input)).input_id;
-    else if (pending.kind === 'continue') return (await api.collaboration!.continueChild(pending.input)).receipt?.input_id;
+    const images=pending.input.images;
+    const needsExport=!(pending.kind==='submit'&&pending.acceptedRunId)&&images?.some(image=>(image as EditableImageAttachment).annotation);
+    media = images === undefined ? {} : { images: needsExport ? await prepareAnnotatedImages(images) : images };
+    if(generation!==getRuntimeEndpointGeneration())throw new Error('Application Host changed while preparing images');
+  } catch(error) {
+    update(original.status==='unknown'?{...original,status:'unknown'}:undefined);
+    throw error;
+  }
+  try {
+    if (pending.kind === 'enqueue') return (await api.enqueue({ ...pending.input, ...media })).input_id;
+    else if (pending.kind === 'continue') return (await api.collaboration!.continueChild({ ...pending.input, ...media })).receipt?.input_id;
     else {
       if (!pending.acceptedRunId) {
-        const receipt = await api.submit(pending.input);
+        const receipt = await api.submit({ ...pending.input, ...media });
         pending = { ...pending, acceptedRunId: receipt.run_id, acceptedInputId: receipt.input_id };
         // Persist the accepted identity before the separate Goal action can fail or unmount.
         update(pending);

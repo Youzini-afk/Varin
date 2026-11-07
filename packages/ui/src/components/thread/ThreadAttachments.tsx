@@ -3,6 +3,7 @@ import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } fr
 import type { Attachment } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { attachmentSize } from '@/lib/agent-runtime/fileAttachments';
@@ -38,6 +39,7 @@ export function ThreadFileDrafts({ files = [], locked, onRemove }: {
 
 function AttachmentCard({ attachment, data, api, identity, read }: { attachment: Attachment; data?: Blob; read?: (ref: string, signal: AbortSignal) => Promise<Blob> } & Partial<Reader>) {
   const { t } = useI18n();
+  const localId=React.useId();
   const host = getRuntimeEndpointGeneration();
   const image = attachment.mimeType.startsWith('image/');
   const pdf = attachment.mimeType === 'application/pdf';
@@ -107,7 +109,7 @@ function AttachmentCard({ attachment, data, api, identity, read }: { attachment:
     </div>
     {busy && <p role="status">{t('chat.media.loading')}</p>}
     {error && <p role="alert" className="break-words text-destructive">{error}</p>}
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-[90vw]" aria-describedby={undefined}><DialogTitle className="break-words">{attachment.filename}</DialogTitle>
+    {open && url && image ? <ConversationImageViewer src={url} identity={identity} sourceId={attachment.ref || localId} label={attachment.filename} onClose={()=>setOpen(false)}/> : <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-[90vw]" aria-describedby={undefined}><DialogTitle className="break-words">{attachment.filename}</DialogTitle>
       {url && image ? <img src={url} alt={attachment.filename} className="max-h-[70vh] max-w-full object-contain" />
         : url && pdf ? <iframe sandbox="" src={url} title={attachment.filename} className="h-[65vh] w-full" />
           : preview !== undefined ? <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap break-words text-sm">{preview}</pre>
@@ -118,6 +120,6 @@ function AttachmentCard({ attachment, data, api, identity, read }: { attachment:
         {/* Do not open executable/HTML bytes under the application's Blob origin. */}
         {url && (image && attachment.mimeType !== 'image/svg+xml' || pdf) && <a href={url} target="_blank" rel="noopener noreferrer">{t('chat.attachments.open')}</a>}
       </div>
-    </DialogContent></Dialog>
+    </DialogContent></Dialog>}
   </div>;
 }

@@ -1,24 +1,26 @@
 import React from 'react';
-import type { ImageAttachment } from '@varin/protocol';
+import type { EditableImageAttachment } from '@/lib/images/annotations';
 import { Icon } from '@/components/icon/Icon';
 import { imageAttachmentUrl } from './imageAttachments';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ImageViewer } from '@/components/images/ImageViewer';
 import { useI18n } from '@/lib/i18n';
 
-export function ImageAttachmentStrip({ images, removeLabel, onRemove, onReference }: {
-  images: readonly ImageAttachment[];
+export function ImageAttachmentStrip({ images, removeLabel, onRemove, onReference, onUpdate }: {
+  images: readonly EditableImageAttachment[];
   removeLabel?: string;
   onRemove?: (index: number) => void;
   onReference?: (reference: number) => void;
+  onUpdate?: (index: number, image: EditableImageAttachment) => void;
 }) {
   const { t } = useI18n();
-  const [preview, setPreview] = React.useState<ImageAttachment | null>(null);
-  const [previewOpen, setPreviewOpen] = React.useState(false);
-  const visiblePreview = preview && images.includes(preview) ? preview : null;
+  const [preview, setPreview] = React.useState<{ reference:number; editing:boolean }>();
+  const current = React.useRef({images,onUpdate});current.current={images,onUpdate};
+  const load=React.useCallback(async(source:string)=>{const image=current.current.images.find((image,index)=>String(image.reference??index+1)===source);if(!image)throw new Error('Image removed');return {src:imageAttachmentUrl(image.annotation?.source??image)};},[]);
+  const initialIndex=preview?images.findIndex((image,index)=>(image.reference??index+1)===preview.reference):-1;
   if (!images.length) return null;
   return <><div className="flex flex-wrap gap-2 px-3 pt-3">
     {images.map((image, index) => <div key={image.reference ?? index} className="composer-attachment group/image relative overflow-hidden rounded-lg border border-border bg-muted/20">
-      <button type="button" onClick={() => { setPreview(image); setPreviewOpen(true); }} aria-label={`${t('chat.media.view')} ${image.reference ?? index + 1}`}
+      <button type="button" onClick={() => setPreview({reference:image.reference??index+1,editing:false})} aria-label={`${t('chat.media.view')} ${image.reference ?? index + 1}`}
         className="block rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
         <img src={imageAttachmentUrl(image)} alt={t('chat.imageReference.token', { number: image.reference ?? index + 1 })} className="size-20 object-cover" />
       </button>
@@ -34,10 +36,13 @@ export function ImageAttachmentStrip({ images, removeLabel, onRemove, onReferenc
         aria-label={removeLabel}>
         <Icon name="close" className="size-3.5" />
       </button>}
+      {image.annotation?.marks.length ? <span className="composer-image-edited" title={t('imageEditor.edited')} /> : null}
+      {onUpdate && <button type="button" className="composer-image-annotate" aria-label={t('imageEditor.annotate')} onClick={()=>setPreview({reference:image.reference??index+1,editing:true})}><Icon name="pencil" className="size-3.5"/></button>}
     </div>)}
-  </div><Dialog open={previewOpen && Boolean(visiblePreview)} onOpenChange={setPreviewOpen}>
-    <DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle>
-      {visiblePreview && <img src={imageAttachmentUrl(visiblePreview)} alt={t('chat.media.image')} className="max-h-[85vh] w-full object-contain" />}
-    </DialogContent>
-  </Dialog></>;
+  </div>{preview&&initialIndex>=0&&<ImageViewer initialIndex={initialIndex} initiallyEditing={preview.editing} onClose={()=>setPreview(undefined)} load={load}
+    items={images.map((image,index)=>({source:String(image.reference??index+1),label:t('chat.imageReference.token',{number:image.reference??index+1})}))}
+    annotation={onUpdate?{mode:'draft',get:source=>current.current.images.find((image,index)=>String(image.reference??index+1)===source)?.annotation,
+      save:(source,annotation)=>{const index=current.current.images.findIndex((image,index)=>String(image.reference??index+1)===source);if(index>=0)current.current.onUpdate?.(index,{...current.current.images[index]!,annotation});},
+      apply:(source,image,annotation)=>{const index=current.current.images.findIndex((image,index)=>String(image.reference??index+1)===source);if(index>=0)current.current.onUpdate?.(index,{...current.current.images[index]!,...image,annotation});},
+    }:undefined}/>}</>;
 }

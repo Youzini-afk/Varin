@@ -4,6 +4,7 @@
 @import "./styles/shapes.css";
 @import "./styles/typography.css";
 @import "./styles/markdown.css";
+@import "./styles/image-annotations.css";
 @import "./styles/mobile.css";
 @import "./styles/motion.css";
 @import "./styles/workbench.css";

@@ -1796,6 +1796,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
   } });
   registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch, kernelClient);
+  const { registerImageReadRoute } = await import('./lib/images/image-read-route.js');
+  registerImageReadRoute(app, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch);
   const unsubscribeModelSettings = modelsService.settings.subscribe((scope, _cwd, revision) => {
     for (const listener of extensionConfigurationListeners) listener();
     for (const client of uiVarinEventClients) {

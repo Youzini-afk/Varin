@@ -1,0 +1,49 @@
+.image-annotation-image { position:relative; flex:none; }
+.image-annotation-image > img { display:block; max-width:none; max-height:none; user-select:none; }
+.image-annotation-layer { position:absolute; inset:0; pointer-events:none; }
+.image-annotation-layer[data-active] { pointer-events:auto; touch-action:none; cursor:crosshair; }
+.image-annotation-layer[data-tool=select] { cursor:default; }
+.image-annotation-layer > svg { display:block; overflow:visible; }
+.image-annotation-layer > svg:focus-visible { outline:1px solid var(--ring); outline-offset:3px; }
+.image-annotation-selection { stroke:var(--primary); fill:var(--background); }
+.image-annotation-selection [data-handle] { cursor:nwse-resize; }
+.image-annotation-text { position:absolute; resize:none; min-width:120px; padding:0; border:1px dashed var(--primary); border-radius:3px; outline:none; background:color-mix(in srgb,var(--background) 90%,transparent); font-family:system-ui,sans-serif; font-weight:600; box-sizing:content-box; }
+.md-image-viewer-viewport { background:color-mix(in srgb,var(--muted) 32%,var(--background)); touch-action:none; }
+.image-annotation-tools { flex:none; padding:8px 16px 9px; border-bottom:1px solid var(--border); background:var(--background); animation:image-tools-in 160ms var(--motion-ease-out); }
+.image-annotation-toolrow { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
+.image-annotation-toolrow > button { display:inline-flex; align-items:center; justify-content:center; width:34px; height:32px; border-radius:var(--radius-item,7px); color:var(--muted-foreground); transition:background-color 120ms,color 120ms; }
+.image-annotation-toolrow > button:is(:hover,:focus-visible):not(:disabled) { background:var(--interactive-hover); color:var(--foreground); }
+.image-annotation-toolrow > button[aria-pressed=true] { background:color-mix(in srgb,var(--primary) 12%,var(--background)); color:var(--primary); }
+.image-annotation-toolrow > button:disabled { opacity:.3; cursor:default; }
+.image-annotation-toolrow > .image-annotation-clear { width:auto; padding:0 9px; margin-left:auto; font-size:12px; }
+.image-annotation-divider { height:18px; width:1px; background:var(--border); margin:0 6px; }
+.image-annotation-properties { display:flex; align-items:center; flex-wrap:wrap; gap:16px; min-height:34px; padding-top:6px; font-size:11px; color:var(--muted-foreground); }
+.image-annotation-colors { display:flex; gap:8px; align-items:center; }
+.image-annotation-colors > button { width:17px; height:17px; border-radius:50%; background:var(--swatch); border:1px solid color-mix(in srgb,var(--foreground) 18%,transparent); outline:2px solid transparent; outline-offset:3px; transition:outline-color 120ms; }
+.image-annotation-colors > button[aria-pressed=true] { outline-color:var(--primary); }
+.image-annotation-colors > button:disabled { opacity:.35; }
+.image-annotation-properties label { display:flex; align-items:center; gap:8px; }
+.image-annotation-properties input { width:82px; accent-color:var(--primary); }
+.image-annotation-hint { margin-left:auto; }
+.image-annotation-entry { padding:0 10px; font-size:12px; }
+.image-annotation-entry[aria-pressed=true] { color:var(--primary); background:var(--interactive-hover); }
+.image-annotation-done { padding:6px 12px; border-radius:var(--radius-control,7px); font-size:12px; font-weight:500; background:var(--primary); color:var(--primary-foreground); }
+.image-annotation-done:disabled { opacity:.5; }
+.image-annotation-footer { display:flex; align-items:center; gap:16px; padding:8px 16px; border-top:1px solid var(--border); color:var(--muted-foreground); font-size:11px; }
+.image-annotation-footer button[aria-pressed=true] { color:var(--primary); }
+.image-annotation-status { flex:none; display:flex; gap:12px; align-items:center; margin:0; padding:8px 16px; font-size:12px; color:var(--muted-foreground); }
+.image-annotation-status[role=alert] { color:var(--destructive); }
+.image-annotation-status button { text-decoration:underline; }
+.image-viewer-extra-actions { flex:none; max-height:30vh; overflow:auto; padding:10px 16px; border-top:1px solid var(--border); }
+.composer-image-annotate { position:absolute; right:1px; bottom:1px; display:grid; place-items:center; width:24px; height:24px; border-radius:7px; background:color-mix(in srgb,var(--background) 90%,transparent); opacity:0; transition:opacity 140ms; }
+.composer-attachment:is(:hover,:focus-within) .composer-image-annotate { opacity:1; }
+.composer-image-edited { position:absolute; left:4px; top:4px; width:6px; height:6px; border-radius:50%; background:var(--primary); box-shadow:0 0 0 2px var(--background); }
+.image-annotation-tools button:focus-visible,.image-annotation-footer button:focus-visible,.image-annotation-done:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+@keyframes image-tools-in { from { opacity:0; translate:0 -3px; } }
+@media (max-width:600px) {
+  .md-image-viewer[data-slot=dialog-content] { width:100vw; max-width:100vw; height:100dvh; max-height:100dvh; border-radius:0; flex-shrink:0; }
+  .image-annotation-tools { padding:6px 9px; }
+  .image-annotation-hint { display:none; }
+  .image-annotation-properties { gap:14px; }
+  .composer-image-annotate { opacity:1; }
+}

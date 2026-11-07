@@ -39,5 +39,11 @@ export function removeDraftImage(key: string, index: number) {
   });
 }
 
+export function updateDraftImage(key: string, index: number, image: import('@/lib/images/annotations').EditableImageAttachment) {
+  useThreadDraftStore.getState().patch(key, draft => draft.pendingInput || draft.firstSend || !draft.images[index] ? {} : {
+    images: draft.images.map((current,i) => i===index ? {...image,reference:current.reference} : current),
+  });
+}
+
 export const removeImageReference = (text: string, number: number) =>
   text.replace(new RegExp(`\\[(?:Image ${number}|图片${number}|圖片${number})\\]`, 'g'), '');

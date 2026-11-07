@@ -22,7 +22,8 @@ import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachment
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadFileDrafts } from './ThreadAttachments';
-import { removeDraftImage } from '@/components/chat/composer/imageAttachments';
+import { removeDraftImage, updateDraftImage } from '@/components/chat/composer/imageAttachments';
+import { prepareAnnotatedImages } from '@/lib/images/annotations';
 import { ActiveEditorSuggestion } from '@/components/conversation/ActiveEditorSuggestion';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -212,7 +213,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
               (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
             if (!current()) return;
             const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-              images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
+              images: (await prepareAnnotatedImages(draft.images)).map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
+            if (!current()) return;
             patch({ externalInput: request });
             await externalApi.send(conversation.id, request.key, request);
             if (!current()) return;
@@ -282,7 +284,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             <EditorContextAttachmentChips threadKey={draftKey} />
             {inlineDrafts.map(item => <Button key={item.id} type="button" size="sm" variant="outline" disabled={locked}
               onClick={() => { for (const bucket of inlineContext) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, [item]); }}>{item.fileLabel} · {item.startLine}–{item.endLine} ×</Button>)}
-            <ImageAttachmentStrip images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+            <ImageAttachmentStrip key={draftKey} images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+              onUpdate={locked ? undefined : (index,image)=>updateDraftImage(draftKey,index,image)}
               onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
               onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
             <ComposerSelectedFiles files={draft.selectedAttachments} locked={sending} onRemove={id => removeComposerFile(draftKey, id)} />

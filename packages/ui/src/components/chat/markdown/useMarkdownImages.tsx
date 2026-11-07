@@ -6,11 +6,13 @@ import { getOutsideFileGrant, ensureOutsideFileGrantForDesktop } from '@/lib/out
 import { useI18n } from '@/lib/i18n';
 import { resolveMarkdownImageSource } from './imageSources';
 import { MarkdownImageRegistry, type MarkdownImageAsset, type MarkdownImageItem } from './markdownImages';
-import { MarkdownImageViewer } from './MarkdownImageViewer';
+import { ImageViewer } from '@/components/images/ImageViewer';
+import { useImageReply } from '@/components/images/useImageReply';
 
 export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement | null>, onChange?: (reason: 'structural') => void) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
+  const annotation = useImageReply();
   const preview = React.useContext(ConversationPreviewContext);
   const navigationDirectory = useEffectiveDirectory() ?? '';
   const directory = conversation ? conversation.fileDirectory ?? '' : navigationDirectory;
@@ -48,5 +50,5 @@ export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement |
     return () => { manager.cleanup(); if (registry.current === manager) registry.current = null; };
   }, [containerRef, scope, labels, loadPreview, loadOriginal, preview]);
   const refresh = React.useCallback(() => registry.current?.refresh(), []);
-  return { labels, refresh, viewer: viewer?.scope === scope ? <MarkdownImageViewer key={scope + viewer.items.map(item => item.source).join('|') + viewer.index} items={viewer.items} initialIndex={viewer.index} load={loadOriginal} onClose={() => setViewer(current => current === viewer ? undefined : current)} /> : null };
+  return { labels, refresh, viewer: viewer?.scope === scope ? <ImageViewer annotation={annotation} key={scope + viewer.items.map(item => item.source).join('|') + viewer.index} items={viewer.items} initialIndex={viewer.index} load={loadOriginal} onClose={() => setViewer(current => current === viewer ? undefined : current)} /> : null };
 }

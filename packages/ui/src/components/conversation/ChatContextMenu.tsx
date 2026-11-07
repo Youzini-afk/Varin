@@ -3,7 +3,7 @@ import { ChatTextSourceContext } from './chatTextSourceContext';
 import type { ChatSessionMessageEntry } from './types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, conversationContentText, type ChatMemoryPassage } from '@varin/application-client';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
@@ -107,7 +107,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const file = element?.closest<HTMLElement>('[data-varin-file-link="true"]');
     if (!element || !root.current?.contains(element)
       || element.closest('input,textarea,[contenteditable="true"]')
-      || (element.closest('button') && !file && !element.closest('[data-chat-more], [data-md-image-src]'))) return null;
+      || (element.closest('button') && !file && !element.closest('img, [data-chat-more], [data-md-image-src]'))) return null;
     const runtimeKey = getRuntimeKey();
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -192,6 +192,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
   const openTarget = (value: MenuTarget) => {
     const figure = value.element?.closest('[data-md-image-src]');
     if (value.kind === 'image' && figure) figure.querySelector<HTMLButtonElement>('.md-image-frame')?.click();
+    else if(value.kind==='image'&&value.element?.closest('button'))value.element.closest('button')?.click();
     else if (value.kind === 'image' && value.href) setImagePreview(value.href);
     else if (value.element?.isConnected) value.element.click();
     else if (value.href && /^(https?:|data:image\/|blob:)/u.test(value.href)) window.open(value.href, '_blank', 'noopener,noreferrer');
@@ -280,11 +281,6 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     </ContextMenu>
     {memorySources ? <ChatMemoryDialog sessionId={props.sessionId} sources={memorySources} onClose={closeMemory} /> : null}
     {handingOff && canHandoff && <React.Suspense fallback={null}><BotHandoffDialog identity={presentation.identity} onClose={() => setHandingOff(false)} /></React.Suspense>}
-    {imagePreview ? <Dialog open onOpenChange={(open) => { if (!open) setImagePreview(null); }}>
-      <DialogContent className="sm:max-w-4xl">
-        <DialogHeader><DialogTitle>{t('chat.context.openImage')}</DialogTitle></DialogHeader>
-        <img src={imagePreview} alt={t('chat.context.openImage')} className="max-h-[75dvh] w-full object-contain" />
-      </DialogContent>
-    </Dialog> : null}
+    {imagePreview ? <ConversationImageViewer src={imagePreview} onClose={()=>setImagePreview(null)} /> : null}
   </ChatFileTargetsContext.Provider></ChatActionsContext.Provider>;
 };

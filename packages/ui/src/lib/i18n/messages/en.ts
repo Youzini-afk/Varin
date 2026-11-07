@@ -11,7 +11,9 @@ import { toolMessagesEn } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
+import { imageAnnotationsEn } from './imageAnnotations';
 export const dict = {
+  ...imageAnnotationsEn,
   'ui.question.supplement': 'Add your own thoughts…',
   'ui.question.supplementPlaceholder': 'Add an answer or any context you want to share…',
   'ui.question.multiple': 'Choose any',

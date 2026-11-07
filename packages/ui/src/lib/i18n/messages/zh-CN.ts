@@ -10,8 +10,10 @@ import { toolMessagesZhCN } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
+import { imageAnnotationsZhCN } from './imageAnnotations';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...imageAnnotationsZhCN,
   'ui.question.supplement': '补充自己的想法…',
   'ui.question.supplementPlaceholder': '写下你的回答，或者补充一些背景…',
   'ui.question.multiple': '可多选',

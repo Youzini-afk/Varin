@@ -13,8 +13,10 @@ export class ThreadRequestError extends Error {
 
 /** Uses the same Application Host transport/auth selection as the other RuntimeAPIs. */
 export function createThreadsHttpAPI(): ThreadsAPI {
-  const withClientTime = <T extends { clientTime?: import('@varin/protocol').MessageTimeObservation }>(input: T) => ({
-    ...input, clientTime: input.clientTime ?? observeMessageTime(),
+  // Image editor source pixels and undo history are local draft state, never request media.
+  const imagePayload = (images: readonly import('@varin/protocol').ImageAttachment[]) => images.map(({ data, mimeType, reference }) => ({ data, mimeType, ...(reference === undefined ? {} : { reference }) }));
+  const withClientTime = <T extends { clientTime?: import('@varin/protocol').MessageTimeObservation; images?: readonly import('@varin/protocol').ImageAttachment[] }>(input: T) => ({
+    ...input, ...(input.images === undefined ? {} : { images: imagePayload(input.images) }), clientTime: input.clientTime ?? observeMessageTime(),
   });
   const post = async <T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> => {
     signal?.throwIfAborted();
@@ -190,7 +192,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     contextHistory: (identity, runId, cursor) => post('context/history', { ...identity, runId, ...cursor }),
     cancelContext: (identity, runId) => post('context/cancel', { ...identity, runId }),
     async resumeContext(identity, runId) { await post('context/resume', { ...identity, runId }); },
-    editInput: (inputId, expectedRevision, text, images, skills) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }), ...(skills === undefined ? {} : { skills }) }),
+    editInput: (inputId, expectedRevision, text, images, skills) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images: imagePayload(images) }), ...(skills === undefined ? {} : { skills }) }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     sendInputNow: (inputId, expectedRevision, expectedRunId) => post('input/send-now', { inputId, expectedRevision, expectedRunId }),
     mediaRead: (input, signal) => post('media/read', input, signal),
