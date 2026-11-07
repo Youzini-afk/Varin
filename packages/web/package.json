@@ -116,7 +116,7 @@
     "triviumdb": "0.9.0",
     "triviumdb-upgrade-0.8": "npm:triviumdb@0.8.10",
     "turndown": "7.2.4",
-    "undici": "8.12.3",
+    "undici": "8.12.4",
     "web-push": "^3.6.7",
     "web-tree-sitter": "^0.27.1",
     "ws": "^8.22.1",
