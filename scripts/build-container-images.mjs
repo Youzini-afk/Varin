@@ -97,6 +97,7 @@ export function builtImageReferences(config, plan, metadata) {
 }
 
 export function buildLogMetrics(log) {
+  const exports = new Set([...log.matchAll(/^#(\d+) (?:\[[^\]]+\] )?exporting cache to registry$/gm)].map(match => match[1]));
   const cached = new Set([...log.matchAll(/^#(\d+) CACHED\s*$/gm)].map(match => match[1]));
   const vertices = stage => [...log.matchAll(new RegExp(`^#(\\d+) \\[[^\\]]*${stage}[^\\]]*\\] RUN `, 'gm'))]
     .map(match => match[1]);
@@ -108,7 +109,7 @@ export function buildLogMetrics(log) {
     kernelBuildExecutions: [...builds].filter(id => !cached.has(id)).length,
     rustReleaseCompilations: (log.match(/Finished `release` profile/g) ?? []).length,
     cacheExportSeconds: [...log.matchAll(/#(\d+) DONE ([\d.]+)s/g)].reduce((total, match) =>
-      log.includes(`#${match[1]} exporting cache to registry`) ? total + Number(match[2]) : total, 0) };
+      exports.has(match[1]) ? total + Number(match[2]) : total, 0) };
 }
 
 export async function buildContainerImages(config, { run, resolveBase, now = () => Date.now() }) {

@@ -182,7 +182,8 @@ test('cache metrics distinguish restored dependency cooks from required source r
     '#14 [standard_app linux/arm64 kernel-builder 3/3] RUN set -eux; cargo build',
     '#14 2.0 Finished `release` profile [optimized]',
     '#14 DONE 2.1s',
-    '#15 exporting cache to registry',
+    '#15 [standard_app] exporting cache to registry',
+    '#15 [standard_app] exporting cache to registry',
     '#15 DONE 2.5s',
   ].join('\n'));
   assert.deepEqual(result, { cachedVertices: 2, dependencyCookCacheHits: 2, dependencyCookExecutions: 0,
