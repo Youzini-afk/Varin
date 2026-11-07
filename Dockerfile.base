@@ -1,4 +1,20 @@
 # syntax=docker/dockerfile:1
+ARG GO_VERSION=1.26.3
+
+# Compile the language server on the native builder, not under ARM emulation.
+# CGO is disabled so the copied executable has no builder libc dependency.
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS gopls-builder
+ARG GOPLS_VERSION=v0.21.1
+ARG TARGETARCH
+RUN set -eux; \
+  case "$TARGETARCH" in amd64|arm64) ;; *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; esac; \
+  GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" GOBIN= go install golang.org/x/tools/gopls@${GOPLS_VERSION}; \
+  mkdir -p /out; \
+  if [ "$TARGETARCH" = "$(go env GOHOSTARCH)" ]; then \
+    cp /go/bin/gopls /out/gopls; \
+  else \
+    cp "/go/bin/linux_${TARGETARCH}/gopls" /out/gopls; \
+  fi
 
 # Slim runtime: enough to run the Varin server, Git, SSH, and tunnels.
 # Language toolchains stay in the `toolbelt` stage below.
@@ -81,10 +97,7 @@ LABEL io.varin.image.variant="toolbelt"
 ENV VARIN_IMAGE_VARIANT=toolbelt
 
 ARG TARGETARCH
-ARG GO_VERSION=1.26.3
-ARG GOPLS_VERSION=v0.21.1
-ARG NODE_TYPES_VERSION=24.12.4
-ARG VITEST_VERSION=4.1.6
+ARG GO_VERSION
 
 USER root
 
@@ -174,9 +187,12 @@ ENV PATH=/home/varin/app/node_modules/.bin:${VARIN_VALIDATION_NODE_MODULES}/.bin
 RUN mkdir -p /home/varin/go /home/varin/.cache/go-build /home/varin/.cargo /home/varin/.rustup /home/varin/.varin-validation && \
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
   rustup component add rust-analyzer rustfmt && \
-  rustc --version && cargo --version && \
-  go install golang.org/x/tools/gopls@${GOPLS_VERSION} && \
-  npm install --prefix /home/varin/.varin-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
+  rustc --version && cargo --version && rust-analyzer --version && rustfmt --version
+
+COPY --from=gopls-builder --chown=varin:varin /out/gopls /home/varin/go/bin/gopls
+ARG NODE_TYPES_VERSION=24.12.4
+ARG VITEST_VERSION=4.1.6
+RUN npm install --prefix /home/varin/.varin-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
   npm install -g pnpm tsx typescript typescript-language-server yarn && \
   rust-analyzer --version && rustfmt --version && gopls version && tsc --version && typescript-language-server --version && vitest --version && node -e "require.resolve('@types/node/package.json')" && pnpm --version && yarn --version && \
   docker --version && buildctl --version

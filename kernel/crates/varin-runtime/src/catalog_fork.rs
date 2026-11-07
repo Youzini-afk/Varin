@@ -49,23 +49,30 @@ impl Catalog {
         head: Option<&str>,
         plan_capture: Option<plan::PlanForkCapture>,
     ) -> Result<BranchForkPreparation> {
-        context_jobs::require_regular_branch(&self.db, source)?;
-        let source_view = self.plan_view(source, head)?;
         let mut identity = json!({"source":source,"head":head});
-        if let Some(capture) = plan_capture {
-            if capture.source_thread_id != source_view.thread_id
-                || capture.source_branch_id != source
-                || capture.target_branch_id != target
-                || capture.head_id.as_deref() != head
-                || capture.inherited_ref != source_view.inherited_ref
-            {
-                return Err(RuntimeError::Conflict(
-                    "plan capture does not identify the source fork".into(),
-                ));
-            }
+        if let Some(capture) = &plan_capture {
             identity["planCapture"] = serde_json::to_value(capture)?;
         }
+        // Exact replay reads retained creation evidence before touching GC-able
+        // source history. It returns the old receipt, never recreates a branch.
         let existing = self.fork_creation(target, &identity)?;
+        let thread = if existing {
+            self.branch_thread_id(target)?
+        } else {
+            context_jobs::require_regular_branch(&self.db, source)?;
+            let source_view = self.plan_view(source, head)?;
+            if let Some(capture) = &plan_capture {
+                if capture.source_thread_id != source_view.thread_id
+                    || capture.source_branch_id != source
+                    || capture.target_branch_id != target
+                    || capture.head_id.as_deref() != head
+                    || capture.inherited_ref != source_view.inherited_ref
+                {
+                    return Err(RuntimeError::Conflict("plan capture does not identify the source fork".into()));
+                }
+            }
+            source_view.thread_id
+        };
         let contents = if existing {
             None
         } else {
@@ -86,7 +93,7 @@ impl Catalog {
             source: source.into(),
             target: target.into(),
             head: head.map(str::to_owned),
-            thread: source_view.thread_id,
+            thread,
             identity,
             epoch: self.epoch,
             contents,

@@ -60,12 +60,17 @@ pub(super) fn now_ms() -> Result<u64> {
     u64::try_from(elapsed.as_millis())
         .map_err(|_| RuntimeError::Invalid("system clock exceeds catalog range".into()))
 }
-pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str) -> Result<()> {
+pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str, initial_branch: &str, domain: &str, bot_id: Option<&str>) -> Result<()> {
+    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)", [thread_id], |r| r.get(0))?;
+    if exists { return Err(RuntimeError::IdentityUnavailable(thread_id.into())); }
+    let branch_exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM branches WHERE id=?1)", [initial_branch], |r| r.get(0))?;
+    if branch_exists { return Err(RuntimeError::Conflict("initial branch identity already exists".into())); }
     loop {
         let code = Uuid::new_v4().simple().to_string()[..8].to_uppercase();
         let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE agent_code=?1 UNION ALL SELECT 1 FROM retired_agent_codes WHERE code=?1)", [&code], |r| r.get(0))?;
         if !used {
             tx.execute("INSERT INTO threads(id,agent_code) VALUES(?1,?2)", params![thread_id,code])?;
+            super::identity::record(tx, thread_id, initial_branch, domain, bot_id)?;
             return Ok(());
         }
     }
@@ -493,7 +498,16 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
     ).optional()?;
     summary["parent_thread_id"] = json!(child.as_ref().map(|(parent, _)| parent));
     if let Some((_, Some(avatar))) = child { summary["avatar"] = json!(avatar); }
-    summary["bot_id"] = json!(bot::thread_bot(db, thread_id)?);
+    // Descriptive reads must remain usable for unknown legacy tombstones. This
+    // absence is not execution authority: thread_permitted propagates unavailable.
+    match bot::thread_bot(db, thread_id) {
+        Ok(bot) => summary["bot_id"] = json!(bot),
+        Err(RuntimeError::IdentityUnavailable(_)) => {
+            summary["bot_id"] = Value::Null;
+            summary["creation_identity_known"] = json!(false);
+        }
+        Err(error) => return Err(error),
+    }
     summary["title_mode"] = serde_json::to_value(titles::mode(db,thread_id)?)?;
     summary["branches"] = json!(branches);
     summary["observer_project_ids"] = json!(observer_project_ids);

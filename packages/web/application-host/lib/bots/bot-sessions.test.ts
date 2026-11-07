@@ -1,46 +1,54 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { BotSummary } from '@varin/application-client';
-import type { ThreadSummary } from '@varin/protocol';
+import { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
+import type { KernelClient } from '../kernel/kernel-client.js';
+import { KernelClientError } from '../kernel/kernel-error.js';
 import { createBotSessions } from './bot-sessions.js';
 
-it('opens an active Bot conversation when its original entry is archived or deleted', async () => {
-  const bot: BotSummary = {
-    id: 'bot', name: 'Varin', coordinatorHostId: 'host', homeDir: '/bots/bot', revision: 1,
-    createdAt: '', updatedAt: '', archived: false, instructions: null, model: null,
-    entry: { runtime: 'agent', threadId: 'original', branchId: 'original-main' },
-  };
-  const catalog = new Map<string, ThreadSummary>();
-  const runtime = {
-    thread: async (threadId: string) => {
-      const thread = catalog.get(threadId);
-      if (!thread) throw new Error('Unknown thread');
-      return thread;
-    },
-    botScope: async () => ({ botId: bot.id, sessions: [...catalog.keys()], threads: [...catalog.values()], runs: [] }),
-    createBotThread: async (_botId: string, threadId: string, branchId: string) => {
-      if (catalog.has(threadId)) return { threadId, branchId };
-      catalog.set(threadId, {
-        thread_id: threadId, main_branch_id: branchId, bot_id: bot.id, parent_thread_id: null,
-        title: 'New thread', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false,
-        deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, observer_project_ids: [],
-        branches: [{ branch_id: branchId, head: null, active_run_id: null, latest_run: null }],
-      });
-      return { threadId, branchId };
-    },
-  };
-  const sessions = createBotSessions(() => runtime);
-  expect(await sessions.ensureEntry(bot)).toEqual(bot.entry);
-  const original = catalog.get(bot.entry.threadId)!;
-  original.archived = true;
-  expect((await sessions.listSessions(bot)).find(session => session.primary)?.thread.archived).toBe(true);
+const bot: BotSummary = {
+  id: 'bot', name: 'Varin', coordinatorHostId: 'host', homeDir: '/bots/bot', revision: 1,
+  createdAt: '', updatedAt: '', archived: false, instructions: null, model: null,
+  entry: { runtime: 'agent', threadId: 'original', branchId: 'original-main' },
+};
+function fixture() {
+  const request = vi.fn();
+  const runtime = new AgentRuntimeClient({
+    agentRuntimeRequest: request, subscribeExit: vi.fn(), onToolReleased: vi.fn(),
+  } as unknown as KernelClient);
+  return { request, sessions: createBotSessions(() => runtime) };
+}
 
-  const other = await sessions.createSession(bot, { runtime: 'agent', threadId: 'other', branchId: 'other-main' });
-  expect(await sessions.ensureEntry(bot)).toEqual(other.identity);
-  original.deleted_at_ms = 1;
-  catalog.get(other.identity.threadId)!.deleted_at_ms = 2;
-  expect(await sessions.listSessions(bot)).toEqual([]);
-  const next = await sessions.ensureEntry(bot);
-  expect(next.threadId).not.toBe(original.thread_id);
-  expect(await createBotSessions(() => runtime).ensureEntry(bot)).toEqual(next);
-  expect(catalog.size).toBe(3);
+it.each([
+  { threadId: 'original', branchId: 'original-main' },
+  { threadId: 'surviving', branchId: 'surviving-main' },
+  { threadId: 'fresh', branchId: 'fresh-main' },
+])('returns the Catalog-resolved entry through the real runtime client: $threadId', async identity => {
+  const { request, sessions } = fixture();
+  request.mockResolvedValue(identity);
+  expect(await sessions.ensureEntry(bot)).toEqual({ runtime: 'agent', ...identity });
+  expect(request.mock.calls).toEqual([[
+    'runtime.bot.entry.resolve', { botId: 'bot', threadId: 'original', branchId: 'original-main' }, undefined,
+  ]]);
+  expect(bot.entry).toEqual({ runtime: 'agent', threadId: 'original', branchId: 'original-main' });
+});
+
+it.each(['identity-unavailable', 'not-found', 'storage-error', 'unauthorized', 'activation-held', 'transport-error'])(
+  'preserves %s without a read/create fallback or retry', async code => {
+    const { request, sessions } = fixture();
+    const error = new KernelClientError({ code, message: 'Original result is unavailable' });
+    request.mockRejectedValue(error);
+    await expect(sessions.ensureEntry(bot)).rejects.toBe(error);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toBe('runtime.bot.entry.resolve');
+  },
+);
+
+it('reopens with the original profile identity after an unknown response', async () => {
+  const { request, sessions } = fixture();
+  const unknown = new Error('Connection lost after admission');
+  request.mockRejectedValueOnce(unknown).mockResolvedValueOnce({ threadId: 'accepted', branchId: 'accepted-main' });
+  await expect(sessions.ensureEntry(bot)).rejects.toBe(unknown);
+  expect(await sessions.ensureEntry(bot)).toEqual({ runtime: 'agent', threadId: 'accepted', branchId: 'accepted-main' });
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[0]).toEqual(request.mock.calls[1]);
 });

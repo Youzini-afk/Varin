@@ -3,7 +3,7 @@ import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
 export class ScheduleRequestError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = 'ScheduleRequestError'; }
+  constructor(readonly status: number, message: string, readonly code?: string) { super(message); this.name = 'ScheduleRequestError'; }
 }
 const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const decodeTask = (value: unknown): ScheduledTask => {
@@ -26,7 +26,7 @@ export function createScheduledTasksHttpAPI(): ScheduledTasksAPI {
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during schedule request');
     const result = await response.json();
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during schedule request');
-    if (!response.ok) throw new ScheduleRequestError(response.status, typeof result?.error === 'string' ? result.error : 'Scheduled task request failed');
+    if (!response.ok) throw new ScheduleRequestError(response.status, typeof result?.error === 'string' ? result.error : 'Scheduled task request failed', typeof result?.code === 'string' ? result.code : undefined);
     if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Invalid scheduled task response');
     return result as T;
   };

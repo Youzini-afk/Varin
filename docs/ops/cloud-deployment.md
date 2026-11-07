@@ -62,8 +62,9 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 四种产物在发行时构建 `linux/amd64` 和 `linux/arm64`，不是每次 main push 都发布。
 `Docker Images` 只接受与 package version 匹配的 `v<version>` tag push，或显式选择该 tag 的手动运行。
-在任何 GHCR 候选写入之前，先接受精确 tag/SHA/version，并完成该 SHA 的完整源码、Rust/native
-及平台资格检查。每个应用只消费本次对应基础镜像的 immutable digest，不读取浮动 base。
+先接受精确 tag/SHA/version 并验证生产锁，候选构建与该 SHA 的完整源码、Rust/native 及平台资格并行。
+完整资格与两种真实应用 smoke 全部通过后才允许最终标签推广；计算完成不代表发行合格。
+每个应用只消费本次对应基础镜像的 immutable digest，不读取浮动 base。
 
 需要保留版本号重发时，先将对应 Git tag 移到修复提交，再手动选择该 tag 并启用 `replace_version`。
 本次验证通过后可替换所选精确版本及其适用的浮动别名，全部 SHA 标签和原 digest 保持原样可用。
@@ -128,7 +129,8 @@ gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main -f source_
 ```
 
 workflow 和准入、推广、容器烟测脚本固定来自 dispatch 的 tooling SHA；Docker 构建上下文来自所选 source SHA。
-源码自己的完整 CI 必须通过后，才允许 GHCR 候选写入。历史 main 源码仍须通过当前资格检查并提供所需的
+准入后的候选计算与源码完整 CI 并行；完整 CI 及两个真实 smoke 成功后才保存合格 receipt，最终推广继续验证该 receipt。
+历史 main 源码仍须通过当前资格检查并提供所需的
 role/variant/capabilities 契约，不能因为“曾在 main”就跳过缺失的检查。四个产物均构建双架构，应用消费
 对应的固定 base digest；这个入口不接收任意 base override。
 
@@ -208,8 +210,15 @@ PR/main 的容器验证仍是只读发行检查：CI 按 kernel、构建图、�
 该 workflow 没有 GHCR 发布权限。它还在同一本地 registry 上运行极小 scratch 双架构夹具，
 真实验证 Buildx adapter 的不存在标签识别、跨仓库 index digest 保真、两个通道的全计划冲突和同 digest 重试。
 这些夹具只证明推广协议，不代替后续真实应用启动，也不证明 GHCR 的实际可见性。
-`container-check.yml` 仅支持 `workflow_call`；手动运行 `ci.yml` 会执行完整资格与两个 amd64 应用的构建/烟测，
-但仍不发布 GHCR，也不会产生可供部署的公开镜像引用。
+`container-check.yml` 仅支持 `workflow_call`；完整资格会构建双架构产物，验证两个 amd64 应用启动，并在 QEMU 下
+验证 arm64 原生依赖与内核，后者不等于原生 ARM 主机完整服务验收。手动运行 `ci.yml` 时可以启用
+`container_benchmark`，重复同一构建图，检查热构建不重编 Rust，并上传冷/热计时与 digest。
+这些操作仍不发布 GHCR，也不会产生可供部署的公开镜像引用。
+
+正式和 commit 候选共用两阶段 Bake 图：先共享两种 base 的公共层，再固定各自 base digest 同时组装应用，
+Rust/Web 公共阶段只构建一次。Rust 依赖 recipe 层和完整 vendor 补丁参与缓存身份，真实源码与版本身份仍单独编译。
+大型中间层写入各镜像的 `buildcache-v2` registry 引用；只读 CI 只能读取，不能污染发布缓存。缓存是计算加速，
+不是信任或资格证据。历史源码仍使用自己的 Dockerfile，因此只有包含这些阶段设计的源码获得相应编译优化。
 
 ### Docker Compose
 

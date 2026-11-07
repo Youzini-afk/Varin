@@ -139,3 +139,11 @@ it('cancelling source resolution propagates through the HTTP route to the shared
   await failure;
   expect(ownerSignal?.aborted).toBe(true);
 });
+
+it('retired manual requests remain a typed conflict and are never retried with a new key', async () => {
+  const f = fixture();
+  f.service.run.mockRejectedValueOnce(new KernelClientError({ code: 'identity-unavailable', message: 'Retired invocation' }));
+  await expect(f.api.run('project', 'task', 'original-key')).rejects.toMatchObject({ status: 409, code: 'identity-unavailable' });
+  expect(f.service.run).toHaveBeenCalledTimes(1);
+  expect(f.service.run).toHaveBeenCalledWith('project', 'task', 'original-key');
+});
