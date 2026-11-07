@@ -234,6 +234,13 @@ test('release automation can build an older source without borrowing its tool se
   assert.equal(checkout.with.ref, '${{ github.sha }}');
   assert.ok(checkout.with['sparse-checkout'].includes('.github/actions/android-setup'));
   assert.ok(steps.indexOf(checkout) < steps.indexOf(setup));
+  const build = release.jobs['native-build'];
+  assert.equal(build['runs-on'], 'ubuntu-22.04');
+  const glibcCheck = build.steps.find(step => step.run?.includes('check-linux-glibc.mjs'));
+  const tooling = build.steps.find(step => step.with?.path === '.release-automation');
+  assert.equal(tooling.with.ref, '${{ github.sha }}');
+  assert.ok(glibcCheck.run.includes('.release-automation/scripts/check-linux-glibc.mjs'));
+  assert.ok(build.steps.indexOf(tooling) < build.steps.indexOf(glibcCheck));
   const native = release.jobs['native-quality'];
   assert.ok(native.steps.some(step => step.run?.includes('bun run test:rust --no-fail-fast')));
   assert.ok(release.jobs.assemble.needs.includes('native-quality'));
