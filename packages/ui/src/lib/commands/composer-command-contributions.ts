@@ -21,7 +21,7 @@ export const COMPOSER_COMMAND_DEFINITIONS: Array<{ meta: WorkbenchCommandMeta & 
   {"name": "contact", "group": "collaboration", "icon": "send-plane", "interaction": "select", "keywords": ["contact", "message", "agent"]},
   {"name": "handoff", "group": "collaboration", "icon": "share-forward", "interaction": "select", "keywords": ["handoff", "delegate"]},
   {"name": "schedule", "group": "collaboration", "icon": "timer", "interaction": "action", "keywords": ["schedule", "followup"]},
-  {"name": "follow", "group": "collaboration", "icon": "robot", "interaction": "action", "keywords": ["follow", "varin", "bot"]},
+  {"name": "bot", "group": "collaboration", "icon": "robot", "interaction": "select", "keywords": ["handoff", "varin", "bot"]},
   {"name": "attachments", "group": "resources", "icon": "command", "interaction": "select", "keywords": ["attachments", "files"]},
   {"name": "memory", "group": "resources", "icon": "book", "interaction": "action", "keywords": ["memory", "notes"]},
   {"name": "remember", "group": "resources", "icon": "save-3", "interaction": "select", "keywords": ["remember", "save"]},

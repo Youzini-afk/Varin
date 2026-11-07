@@ -40,7 +40,7 @@ it('authorizes exact task branches through paginated family metadata without ope
   expect(output).not.toContain('Renamed task');
   expect(references).toEqual([threadReference(text)]);
   expect(f.runtime.familyList.mock.calls.map(([request]) => request)).toEqual([
-    { callerThreadId: identity.threadId, includeSelf: true }, { callerThreadId: identity.threadId, includeSelf: true, cursor: 'next' },
+    { callerThreadId: identity.threadId, includeSelf: true, scope: 'all', query: 'thread:target' }, { callerThreadId: identity.threadId, includeSelf: true, scope: 'all', query: 'thread:target', cursor: 'next' },
   ]);
   expect(f.runtime.thread).not.toHaveBeenCalled(); expect(f.runtime.launch).not.toHaveBeenCalled(); expect(f.admitSource).not.toHaveBeenCalled();
 });

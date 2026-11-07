@@ -16,7 +16,7 @@ import { ThreadTokenUsage } from './ThreadTokenUsage';
 import { ThreadMemory } from './ThreadMemory';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
-import { BotFollowDialog } from '@/components/sections/bots/BotFollowDialog';
+import { BotHandoffDialog } from '@/components/sections/bots/BotHandoffDialog';
 
 export function useThreadComposerCommands({ api, identity, snapshot, sourcePath, disabled, onHistory, onFork, refresh, onSources, act }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; sourcePath?: string; disabled?: string;
@@ -53,7 +53,7 @@ export function useThreadComposerCommands({ api, identity, snapshot, sourcePath,
     schedule: snapshot ? { disabled: nativeDisabled ?? (!run && !snapshot.followups.some(independentFollowup) ? t('followups.needsRun') : undefined), content: <ThreadFollowups api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={target}
       run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={Boolean(disabled)} act={work => act(async () => { verify(); await work(); })} cancelObservation={id => act(async () => { verify(); await api.cancelOperation(id); })} /> } : undefined,
     memory: snapshot && (thread?.bot_id || snapshot.context.checkpoint?.personalization) ? { content: <ThreadMemory identity={target} botId={thread?.bot_id ?? null} basis={snapshot.context.checkpoint?.personalization} expanded /> } : undefined,
-    follow: thread && !thread.bot_id ? { content: complete => <React.Suspense fallback={<p>{t('common.loading')}</p>}><BotFollowDialog embedded identity={target} onClose={complete} /></React.Suspense> } : undefined,
+    bot: thread && (!thread.bot_id || thread.parent_thread_id) ? { content: complete => <React.Suspense fallback={<p>{t('common.loading')}</p>}><BotHandoffDialog embedded identity={target} onClose={complete} /></React.Suspense> } : undefined,
     mcp: { run: () => settings('mcp-connections') },
     terminal: { run: () => { verify(); if (sourcePath) useUIStore.getState().openContextSurface(sourcePath, 'terminal'); else onSources(); } },
     pet: isDesktopShell() ? { run: () => settings('companion') } : undefined,

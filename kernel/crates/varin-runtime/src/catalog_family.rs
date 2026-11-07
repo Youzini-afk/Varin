@@ -440,6 +440,7 @@ impl FamilyRead {
         if let Some((target, branch, _)) = &self.target {
             super::threads::require_available(&current, target)?;
             if super::scheduling::thread_family(&current, target)? != super::scheduling::thread_family(&current, &self.caller)?
+                && !super::bot_work::ordinary_conversation(&current, &self.caller, target)?
                 && !super::bot_work::linked(&current, &self.caller, target, Some(branch), false, false)? {
                 return Err(RuntimeError::Conflict("followed conversation access changed during read".into()));
             }
@@ -504,6 +505,7 @@ impl FamilyRead {
         let root = super::scheduling::thread_family(&db, &self.caller)?;
         if let Some((target, branch, _)) = &self.target {
             if super::scheduling::thread_family(&db, target)? != root
+                && !super::bot_work::ordinary_conversation(&db, &self.caller, target)?
                 && !super::bot_work::linked(&db, &self.caller, target, Some(branch), false, false)? {
                 return Err(RuntimeError::Conflict(
                     "Thread is outside the caller's task family".into(),
@@ -618,7 +620,7 @@ impl FamilyRead {
         let scope_filter = match scope { "current"=>CURRENT.to_owned(),"history"=>format!("NOT {CURRENT}"),_=>"1".into() };
         let limit=query.limit.unwrap_or(usize::MAX);
         let read_limit=query.limit.map(|limit|sql_number(limit.saturating_add(1) as u64)).transpose()?.unwrap_or(-1);
-        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN family f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=upper(?6))
+        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT id FROM family UNION SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 JOIN bot_thread_bindings bot ON bot.thread_id=caller.id WHERE candidate.principal_id IS caller.principal_id AND NOT EXISTS(SELECT 1 FROM bot_thread_bindings other WHERE other.thread_id=candidate.id)) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=upper(?6))
           AND (?8 IS NULL OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id AND json_extract(c.body,'$.parent_thread_id')=?8 AND (?9 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?9)))
           AND (?10 IS NULL OR EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=t.id AND json_extract(l.body,'$.selection.source.workspace_id')=?10))
           AND (?11 IS NULL OR t.updated_at_ms>=?11) AND (?12 IS NULL OR t.updated_at_ms<=?12)
@@ -628,7 +630,8 @@ impl FamilyRead {
         let next_cursor=if candidates.len()>limit { Some(self.sign(&MemberCursor{caller:self.caller.clone(),root:root.clone(),before:candidates[limit-1].1,maximum,scope:scope.into(),query:query.query.clone(),filters})?) } else {None};
         for (thread,_,current,updated_at_ms) in candidates.into_iter().take(limit) {
             check(cancel)?;
-            if super::scheduling::thread_family(&db, &thread)? != root {
+            if super::scheduling::thread_family(&db, &thread)? != root
+                && !super::bot_work::ordinary_conversation(&db, &self.caller, &thread)? {
                 return Err(RuntimeError::Invalid("inconsistent task lineage".into()));
             }
             let child: Option<String> = db

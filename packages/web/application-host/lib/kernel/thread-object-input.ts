@@ -35,15 +35,17 @@ export function createThreadObjectInputPreparer(owners: {
     const references = parseThreadObjectReferences(input.references, input.text) ?? [];
     if (!references.length) return input.text;
     const targets = references.filter((item): item is Extract<ThreadObjectReference, { kind: 'thread' }> => item.kind === 'thread');
-    const pending = new Map(targets.map(item => [JSON.stringify([item.threadId, item.branchId]), item]));
-    let cursor: string | undefined;
-    const seen = new Set<string>();
-    while (pending.size) {
-      const page = await owners.runtime.familyList({ callerThreadId: input.threadId, includeSelf: true, ...(cursor ? { cursor } : {}) }, signal);
-      for (const member of page.members) for (const branch of member.branches) pending.delete(JSON.stringify([member.threadId, branch.branchId]));
-      if (!pending.size) break;
-      if (!page.nextCursor || seen.has(page.nextCursor)) throw Object.assign(new Error('A referenced task or branch is no longer readable in this task family'), { code: 'reference-denied' });
-      seen.add(page.nextCursor); cursor = page.nextCursor;
+    for (const threadId of new Set(targets.map(item => item.threadId))) {
+      const pending = new Set(targets.filter(item => item.threadId === threadId).map(item => item.branchId));
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      while (pending.size) {
+        const page = await owners.runtime.familyList({ callerThreadId: input.threadId, includeSelf: true, scope: 'all', query: threadId, ...(cursor ? { cursor } : {}) }, signal);
+        for (const member of page.members) if (member.threadId === threadId) for (const branch of member.branches) pending.delete(branch.branchId);
+        if (!pending.size) break;
+        if (!page.nextCursor || seen.has(page.nextCursor)) throw Object.assign(new Error('A referenced conversation is no longer available'), { code: 'reference-denied' });
+        seen.add(page.nextCursor); cursor = page.nextCursor;
+      }
     }
     let source = input.source;
     let runId: string | undefined;

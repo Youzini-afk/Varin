@@ -388,7 +388,7 @@ fn incremental_history_reads_only_the_selected_tail_and_identifies_a_rewound_bou
 }
 
 #[test]
-fn bot_following_keeps_original_identity_and_separates_read_send_and_memory_grants() {
+fn bot_following_preserves_associations_without_gating_ordinary_conversation_access() {
     use super::bot_work::{BotMatter, MatterThread, MatterUpdate};
     let fixture = Fixture::new(); let mut db = fixture.open(); bot_submit(&mut db);
     db.create_thread("ordinary", "ordinary-main").unwrap();
@@ -408,8 +408,38 @@ fn bot_following_keeps_original_identity_and_separates_read_send_and_memory_gran
     assert!(super::bot_work::can_message(&db.db,"thread","main","ordinary","ordinary-main").unwrap());
     update.key = "unfollow".into(); update.expected_revision = saved.revision; update.matter = saved; update.matter.archived = true;
     db.update_bot_matter(update,None).unwrap();
-    assert!(read.authorize(&||false).is_err());
+    assert!(read.authorize(&||false).is_ok());
     assert_eq!(db.bot_for_thread("ordinary").unwrap(),None);
+}
+
+#[test]
+fn bot_sessions_discover_read_and_contact_user_work_without_matter_links() {
+    use super::family::{FamilyReadQuery, ReadRequest};
+    let fixture = Fixture::new(); let mut db = fixture.open(); bot_submit(&mut db);
+    db.create_bot_thread("second-session", "second-route", "bot").unwrap();
+    db.publish_bot_gate(BotGate { bot_id: "other-bot".into(), ..gate(1, true) }).unwrap();
+    db.create_bot_thread("other-bot-session", "other-bot-route", "other-bot").unwrap();
+    db.create_thread("ordinary", "ordinary-main").unwrap();
+    let mut input = command(); input.key = "ordinary-input".into();
+    input.thread_id = "ordinary".into(); input.branch_id = "ordinary-main".into();
+    input.input = json!({"text":"Original task context"}); db.submit(&input).unwrap();
+    db.create_thread("another-users-task", "another-users-route").unwrap();
+    db.db.execute("UPDATE threads SET principal_id='someone-else' WHERE id='another-users-task'", []).unwrap();
+    assert!(db.bot_matters("bot").unwrap().is_empty());
+    for caller in ["thread", "second-session", "other-bot-session"] {
+        let list = db.capture_family_read(caller, None, None).unwrap().list(false, &||false).unwrap();
+        assert!(list.members.iter().any(|member| member.thread_id == "ordinary"));
+        assert!(!list.members.iter().any(|member| member.thread_id == "another-users-task"));
+        let page = db.capture_family_read(caller, Some("ordinary"), Some("ordinary-main")).unwrap().read(ReadRequest {
+            run_id: None, anchor: None, cursor: None,
+            query: FamilyReadQuery::Recent { limit: Some(10), max_item_bytes: None },
+        }, &||false).unwrap();
+        assert!(serde_json::to_string(&page).unwrap().contains("Original task context"));
+        assert!(super::bot_work::can_message(&db.db,caller,"second-route","ordinary","ordinary-main").unwrap());
+        assert!(!super::bot_work::can_message(&db.db,caller,"second-route","another-users-task","another-users-route").unwrap());
+        assert!(db.capture_family_read(caller, Some("another-users-task"), Some("another-users-route")).unwrap().authorize(&||false).is_err());
+    }
+    assert_eq!(db.bot_for_thread("ordinary").unwrap(), None);
 }
 
 #[test]

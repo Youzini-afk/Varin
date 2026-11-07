@@ -2,6 +2,7 @@ import { ThreadRequestError, type ThreadIdentity, type ThreadRememberInput, type
 export interface ComposerRecipient { identity: ThreadIdentity; name: string; avatar?: string | null }
 /** Disposable composer projection only. Original owners keep all save/send receipts. */
 export interface ComposerWorkflowState {
+  botHandoff?: { botId: string; target?: ThreadIdentity; pending?: import('@/stores/useThreadDraftStore').ThreadPendingInput; receipt?: boolean };
   assist?: { cancelRequested?: boolean; pending?: import('@varin/application-client').ThreadDispatchInput; rejected?: boolean; receipt?: import('@varin/application-client').ThreadDispatchReceipt; result?: string; failure?: string };
   handoff?: { rejected?: boolean; pending?: Parameters<NonNullable<import('@varin/application-client').ThreadsAPI['collaboration']>['dispatch']>[0]; receipt?: Awaited<ReturnType<NonNullable<import('@varin/application-client').ThreadsAPI['collaboration']>['dispatch']>> };
   recipient?: ComposerRecipient;

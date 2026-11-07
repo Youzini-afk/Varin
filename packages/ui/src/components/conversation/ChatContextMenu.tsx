@@ -22,7 +22,7 @@ import { ReferenceNavigationContext } from './ReferenceNavigation';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { ChatFileMenu } from './ChatFileMenu';
 import { ChatFileTargetsContext, type ChatFileTarget } from './chatFileTargets';
-const BotFollowDialog = React.lazy(() => import('@/components/sections/bots/BotFollowDialog').then(module => ({ default: module.BotFollowDialog })));
+const BotHandoffDialog = React.lazy(() => import('@/components/sections/bots/BotHandoffDialog').then(module => ({ default: module.BotHandoffDialog })));
 
 const SOURCE_LINK = '#varin-chat-source:';
 export const CHAT_QUOTE_EVENT = 'varin:chat-quote';
@@ -73,8 +73,8 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
 > & { projection: ChatTimelineProjection; children: React.ReactNode; onRevealEntry(entryId: string): void | Promise<void> }> = (props) => {
   const { t } = useI18n();
   const presentation = useConversationPresentation();
-  const canFollow = presentation.identity.runtime === 'agent' && !presentation.readOnly
-    && Boolean(presentation.snapshot && !presentation.snapshot.thread.bot_id);
+  const canHandoff = presentation.identity.runtime === 'agent' && !presentation.readOnly
+    && Boolean(presentation.snapshot && (!presentation.snapshot.thread.bot_id || presentation.snapshot.thread.parent_thread_id));
   const navigation = React.useContext(ReferenceNavigationContext);
   React.useEffect(() => {
     if (!navigation) return;
@@ -89,13 +89,13 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
   const targetRef = React.useRef<MenuTarget | null>(null);
   const [memorySources, setMemorySources] = React.useState<ChatMemoryPassage[] | null>(null);
   const [imagePreview, setImagePreview] = React.useState<string | null>(null);
-  const [following, setFollowing] = React.useState(false);
+  const [handingOff, setHandingOff] = React.useState(false);
   const closeMemory = React.useCallback(() => setMemorySources(null), []);
   const context = React.useMemo(() => ({ sources, more: (element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom }));
   } }), [sources]);
-  React.useEffect(() => subscribeRuntimeEndpointChanged(() => { setOpen(false); setMemorySources(null); setImagePreview(null); setFollowing(false); }), []);
+  React.useEffect(() => subscribeRuntimeEndpointChanged(() => { setOpen(false); setMemorySources(null); setImagePreview(null); setHandingOff(false); }), []);
   React.useEffect(() => {
     if (!open || !target?.selection || typeof Highlight === 'undefined' || !CSS.highlights) return;
     CSS.highlights.set('varin-chat-selection', new Highlight(target.selection));
@@ -261,7 +261,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
         </> : target ? <>
           <ContextMenuItem onClick={() => perform((value) => copy(value.copyText ?? value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(quote)}>{t('chat.context.quote')}</ContextMenuItem>
-          {canFollow && <ContextMenuItem onClick={() => setFollowing(true)}>{t('bot.follow.title')}</ContextMenuItem>}
+          {canHandoff && <ContextMenuItem onClick={() => setHandingOff(true)}>{t('bot.handoff.title')}</ContextMenuItem>}
           {target.kind === 'selection' && presentation.memory && presentation.head ? <>
             <ContextMenuSeparator />
             <ContextMenuItem disabled={!presentation.memory || !presentation.head || !target.complete} title={target.complete ? undefined : t('chat.context.sourceUnavailable')}
@@ -279,7 +279,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       </ContextMenuContent>
     </ContextMenu>
     {memorySources ? <ChatMemoryDialog sessionId={props.sessionId} sources={memorySources} onClose={closeMemory} /> : null}
-    {following && canFollow && <React.Suspense fallback={null}><BotFollowDialog identity={presentation.identity} onClose={() => setFollowing(false)} /></React.Suspense>}
+    {handingOff && canHandoff && <React.Suspense fallback={null}><BotHandoffDialog identity={presentation.identity} onClose={() => setHandingOff(false)} /></React.Suspense>}
     {imagePreview ? <Dialog open onOpenChange={(open) => { if (!open) setImagePreview(null); }}>
       <DialogContent className="sm:max-w-4xl">
         <DialogHeader><DialogTitle>{t('chat.context.openImage')}</DialogTitle></DialogHeader>

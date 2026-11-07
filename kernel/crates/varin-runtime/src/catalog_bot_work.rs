@@ -63,6 +63,14 @@ pub(super) fn linked(
     let Some(bot) = bot else { return Ok(false) };
     db.query_row("SELECT EXISTS(SELECT 1 FROM events e,json_each(e.data,'$.threads') link WHERE e.subject=?1 AND e.kind='bot.matter.updated' AND json_extract(e.data,'$.archived')=0 AND json_extract(link.value,'$.threadId')=?2 AND (?3 IS NULL OR json_extract(link.value,'$.branchId')=?3) AND (NOT ?4 OR json_extract(link.value,'$.send')=1) AND (NOT ?5 OR json_extract(link.value,'$.memory')=1) AND NOT EXISTS(SELECT 1 FROM events later WHERE later.subject=e.subject AND later.kind='bot.matter.updated' AND json_extract(later.data,'$.id')=json_extract(e.data,'$.id') AND later.cursor>e.cursor))", params![format!("bot-work:{bot}"),target,branch,send,memory], |row|row.get(0)).map_err(Into::into)
 }
+/// Bot conversations can work with the user's ordinary conversations directly.
+/// Matters describe ongoing work; they are not required to discover or contact it.
+pub(super) fn ordinary_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM bot_thread_bindings bot JOIN threads caller ON caller.id=bot.thread_id JOIN threads target ON target.id=?2 WHERE bot.thread_id=?1 AND caller.principal_id IS target.principal_id AND NOT EXISTS(SELECT 1 FROM bot_thread_bindings other WHERE other.thread_id=target.id))",
+        params![caller, target], |row| row.get(0),
+    ).map_err(Into::into)
+}
 pub(super) fn can_message(
     db: &Connection,
     sender: &str,
@@ -71,7 +79,9 @@ pub(super) fn can_message(
     target_branch: &str,
 ) -> Result<bool> {
     Ok(
-        linked(db, sender, target, Some(target_branch), true, false)?
+        ordinary_conversation(db, sender, target)?
+            || ordinary_conversation(db, target, sender)?
+            || linked(db, sender, target, Some(target_branch), true, false)?
             || linked(db, target, sender, Some(branch), true, false)?,
     )
 }
