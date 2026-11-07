@@ -37,7 +37,7 @@ import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, onOpenRecovery, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
@@ -49,6 +49,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
   prepareSendMode?(mode: 'boundary' | 'next_run' | undefined): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void | Promise<void>; onOpenHistory?(): void;
+  onOpenRecovery?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void | Promise<void>;
   modelDisabled: boolean; attachmentDisabled: boolean; imageDisabled: boolean; sendDisabled: boolean;
@@ -466,6 +467,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                     <Icon name="file" className="size-4" />{t('chat.attachments.choose')}
                   </DropdownMenuItem>
                   {onOpenHistory && <DropdownMenuItem onClick={onOpenHistory}><Icon name="git-branch" className="size-4" />{t('chat.timeline.title')}</DropdownMenuItem>}
+                  {onOpenRecovery && <DropdownMenuItem onClick={onOpenRecovery}><Icon name="history" className="size-4" />{t('chat.recovery.title')}</DropdownMenuItem>}
                   <DropdownMenuItem onClick={toggleExpandedInput} className="gap-2.5 py-1.5">
                     <Icon name={isExpandedInput ? 'fullscreen-exit' : 'fullscreen'} className="size-4" />
                     {isExpandedInput ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}

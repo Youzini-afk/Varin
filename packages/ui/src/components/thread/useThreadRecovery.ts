@@ -4,6 +4,7 @@ import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/applicat
 import type { ImageAttachment, NavigationReceipt } from '@varin/protocol';
 import type { WorkspaceCombinedRecoveryApplyInput, WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 import { getWorkspaceRecoveryAPI, requireWorkspaceRecoveryResult } from '@/lib/recovery/workspaceRecovery';
 import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '../recovery/combinedRecoveryResult';
 import { shouldOpenRecoveryDialog } from '../recovery/recoveryPolicy';
@@ -18,6 +19,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
   snapshot?: ThreadSnapshot;
   onRecovered(editor: EditorContent): Promise<void>;
 }) {
+  const { t } = useI18n();
   const preference = useUIStore(state => state.recoveryPreference);
   const scope = React.useMemo(() => ({ api, identity, host }), [api, identity, host]);
   const latest = React.useRef(scope); latest.current = scope;
@@ -54,15 +56,15 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     inFlight.current = true; setBusy(true); setError(undefined);
     try { await work(); }
     catch (cause) { if (current()) setError(cause instanceof ThreadRequestError && cause.status === 409
-      ? 'The prepared recovery no longer matches the conversation. Review its current history and active work, then choose the recovery point again.'
-      : cause instanceof Error ? cause.message : 'Recovery is unavailable. Check the original connection and retry.'); }
+      ? t('chat.recovery.stale')
+      : cause instanceof Error ? cause.message : t('chat.recovery.failed')); }
     finally { if (current()) { inFlight.current = false; setBusy(false); } }
   };
   const finishNavigation = async (intent: Navigation, result: NavigationReceipt) => {
     if (!current()) return;
     if (result.threadId !== identity.threadId || result.branchId !== identity.branchId || result.key !== intent.input.key) throw new Error('Recovery returned a different conversation receipt. Refresh this conversation.');
     setNavigation(undefined); setConversationAlternative(undefined); setReceipt(intent.input.undoOf ? undefined : result); setCombined(undefined); setOperation(undefined); setDialogOpen(false);
-    setNotice(intent.input.undoOf ? 'Conversation recovery undone.' : 'Conversation restored. Files and independent work are unchanged.');
+    setNotice(t(intent.input.undoOf ? 'chat.recovery.undone' : 'chat.recovery.restored'));
     await callback.current(intent.editor);
   };
   const navigate = async (intent: Navigation, retry = false) => {
@@ -95,7 +97,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     setOperation(result);
     if (result.state === 'complete') {
       setCombined(undefined); setNavigation(undefined); setConversationAlternative(undefined); setReceipt(undefined); setDialogOpen(false);
-      setNotice(result.undoOf ? 'Conversation and file recovery undone.' : 'Conversation and journalled files restored.');
+      setNotice(t(result.undoOf ? 'chat.recovery.combinedUndone' : 'chat.recovery.combinedRestored'));
       await callback.current(restoreEditor ? result : {});
     } else setError(combinedRecoveryStatus(result));
   };
@@ -177,7 +179,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     if (!current()) return;
     setDialogOpen(false);
     if (result.state === 'aborted' || result.state === 'compensated') {
-      setCombined(undefined); setNavigation(undefined); setError(undefined); setNotice('Recovery cancelled.');
+      setCombined(undefined); setNavigation(undefined); setError(undefined); setNotice(t('chat.recovery.cancelled'));
       await callback.current({});
     }
   });
@@ -209,7 +211,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     assertCombinedRecoveryIdentity(result, original);
     await acceptCombined(result, false);
     if (!current()) return;
-    if (result.state === 'aborted' || result.state === 'compensated') { setError(undefined); setNotice('Recovery cancelled.'); }
+    if (result.state === 'aborted' || result.state === 'compensated') { setError(undefined); setNotice(t('chat.recovery.cancelled')); }
     await callback.current({});
   });
   return {

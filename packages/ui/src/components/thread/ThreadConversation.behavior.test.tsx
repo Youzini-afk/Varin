@@ -114,6 +114,7 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
   <button type="button" disabled={!props.onCompact} onClick={() => { void Promise.resolve(props.onCompact?.()).catch(() => {}); }}>Generate context summary</button>
   <button type="button" onClick={props.onOpenHistory}>Open conversation history</button>
+  {props.onOpenRecovery && <button type="button" onClick={props.onOpenRecovery}>Open conversation recovery</button>}
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
   <ComposerCommandFixture actions={props.commandActions} />
@@ -3476,6 +3477,7 @@ it('applies a changed Bot model to the next draft after a cancelled Run and pres
 });
 
 function navigationFixture() {
+  Object.assign(translations.dictionary, Object.fromEntries(Object.entries(en).filter(([key]) => key.startsWith('chat.recovery.'))));
   const f = fixture();
   const user = { id: 'restore-user', thread_id: identity.threadId, run_id: 'finished-run', parent: 'retained-assistant', source: 'user' as const, provider: null, content: { text: 'Original user instruction', attachments: [storedImage] } };
   const assistant = { ...user, id: 'retained-assistant', parent: null, source: 'assistant' as const, content: { id: 'retained-assistant', content: { kind: 'text', text: 'Retained assistant answer' } } };
@@ -3792,16 +3794,26 @@ it('thread recovery resumes a stopped nonterminal combined operation using its o
   expect(f.navigate).not.toHaveBeenCalled(); expect(container.querySelectorAll('article')).toHaveLength(1);
 });
 
-it.each([false, true])('thread recovery rebuilds independent navigation Undo after reopening with combined recovery unavailable=%s', async combinedUnavailable => {
+it.each([
+  { surface: 'workbench' as const, combinedUnavailable: false },
+  { surface: 'workbench' as const, combinedUnavailable: true },
+  { surface: 'bot' as const, combinedUnavailable: false },
+  { surface: 'bot' as const, combinedUnavailable: true },
+])('thread recovery rebuilds independent navigation Undo in $surface with combined recovery unavailable=$combinedUnavailable', async ({ surface, combinedUnavailable }) => {
   const f = navigationFixture();
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await openOverview('recovery');
+  await act(async () => root.render(<ThreadConversation surface={surface} api={f.api} identity={identity} />));
+  await act(async () => button('Open conversation recovery').click());
   await act(async () => button('Restore before this message').click());
   const receipt = await f.navigate.mock.results[0]!.value;
   f.view.recovery = { navigation: receipt, operations: [], ...(combinedUnavailable ? { combinedUnavailable: 'Managed file recovery is unavailable. Conversation navigation remains available.' } : {}) };
   await act(async () => { root.unmount(); }); root = createRoot(container);
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await openOverview('recovery');
+  await act(async () => root.render(<ThreadConversation surface={surface} api={f.api} identity={identity} />));
+  if (surface === 'bot') {
+    expect(container.querySelector('[aria-label="Conversation recovery"]')).toBeNull();
+    expect(button('Undo conversation recovery')).toBeUndefined();
+  }
+  await act(async () => button('Open conversation recovery').click());
+  expect(container.querySelectorAll('[aria-label="Conversation recovery"]')).toHaveLength(1);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   expect(f.navigate).toHaveBeenCalledOnce();
   await edit('[aria-label="Message thread"]', 'Fresh draft after reopening');
@@ -3826,13 +3838,14 @@ it('thread recovery reopens combined recovery through its original operation and
   expect(f.navigate).not.toHaveBeenCalled();
 });
 
-it('thread recovery rediscovers and reconciles an interrupted combined operation after reopening without replaying the old user draft', async () => {
+it('Bot thread recovery reveals interrupted operations on demand without replaying the old user draft', async () => {
   const f = navigationFixture(); const recovery = combinedFixture(f);
   const interrupted = { ...recovery.operation, state: 'files-restored' as const, conversationState: 'unchanged' as const };
   f.view.recovery = { navigation: null, operations: [interrupted] };
   recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await openOverview('recovery');
+  await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} />));
+  expect(container.querySelector('[aria-label="Conversation recovery"]')).toBeNull();
+  await act(async () => button('View recovery').click());
   await edit('[aria-label="Message thread"]', 'New draft while reviewing recovery');
   expect(button('Send').disabled).toBe(true);
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();

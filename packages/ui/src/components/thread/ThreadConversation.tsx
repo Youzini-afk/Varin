@@ -371,6 +371,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     await projection.current?.refresh();
   } });
   const pending = actionPending || recovery.blocked || draft.firstSend?.status === 'sending';
+  const recoveryAttention = recovery.error || recovery.unavailable
+    || (recovery.blocked || recovery.savedOperations.some(operation => operation.state === 'needs-attention')
+      ? t('chat.recovery.attention') : undefined);
   const nextStep = useThreadNextStep(api, identity, { owner: `${host}:${draftKey}`, runId: run?.id, headId: branch?.head,
     eligible: Boolean(!readOnly && snapshot && !active && !snapshot.thread.parent_thread_id && !snapshot.thread.bot_id
       && run && ['completed', 'failed', 'cancelled'].includes(run.state) && !pending && !draft.pendingInput && !draft.firstSend) });
@@ -537,7 +540,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <div ref={scrollbarTrack} className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-main relative min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-content flex h-full min-h-0 min-w-0 flex-col">
-    {botSurface && !readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}
+    {botSurface && !readOnly && recoveryAttention && <div role="status" className="chat-input-column flex items-center gap-3 py-2 typography-meta text-muted-foreground">
+      <span className="min-w-0 flex-1 break-words">{recoveryAttention}</span>
+      <Button variant="ghost" size="sm" onClick={() => showOverview('recovery')}>{t('chat.recovery.inspect')}</Button>
+    </div>}
     {run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
       {runFailure && <p className="break-words">{runFailureMessage(runFailure, t)}</p>}
@@ -703,6 +709,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         agentControls={!botSurface && !snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { userText?: unknown })?.userText === 'string' ? (item.content as { userText: string }).userText : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
+        onOpenRecovery={snapshot ? () => showOverview('recovery') : undefined}
         onCompact={branch?.head && !active && providerId && modelId ? async () => { showOverview('context'); await compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={(text, references, interactions) => useThreadDraftStore.getState().patch(draftKey, { text, references, interactions })} references={draft.references} interactions={draft.interactions} api={api} identity={identity} source={preparedSource?.source} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
