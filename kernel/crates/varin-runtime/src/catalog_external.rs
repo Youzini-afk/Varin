@@ -480,24 +480,31 @@ impl ExternalRead {
             }
         }
         if let Some(reference) = self.result.get("externalInputRef") {
-            let mut input = self.content.load(reference)?;
+            let original = self.content.load(reference)?;
+            let mut inputs = Vec::new();
+            for reference in self.result["externalInforms"].as_array().into_iter().flatten() {
+                inputs.push(self.content.load(reference)?);
+            }
+            let primary = inputs.len();
+            inputs.push(original);
+            for reference in self.result["externalTrailingInforms"].as_array().into_iter().flatten() {
+                inputs.push(self.content.load(reference)?);
+            }
+            if self.result["projectEventInputs"] == true {
+                followups::external::project_inputs(&self.content, &mut inputs)?;
+            }
+            let mut input = inputs[primary].clone();
             let mut texts = Vec::new();
             let mut messages = Vec::new();
             let mut images = Vec::new();
-            for reference in self.result["externalInforms"]
-                .as_array()
-                .into_iter()
-                .flatten()
-            {
-                let message = self.content.load(reference)?;
+            for (index, message) in inputs.into_iter().enumerate() {
                 if let Some(text) = message["text"].as_str() {
                     texts.push(text.to_owned());
                 }
                 if let Some(media)=message["images"].as_array() {images.extend(media.iter().cloned());}
-                messages.push(message);
+                if index != primary { messages.push(message); }
             }
             if !messages.is_empty() {
-                texts.push(input["text"].as_str().unwrap_or("").to_owned());
                 input["task"] = input
                     .get("task")
                     .cloned()
@@ -505,7 +512,6 @@ impl ExternalRead {
                 input["text"] = json!(texts.join("\n\n"));
                 input["messages"] = json!(messages);
                 if !images.is_empty() {
-                    if let Some(media)=input["images"].as_array() {images.extend(media.iter().cloned());}
                     input["images"]=json!(images);
                 }
             }
@@ -1015,7 +1021,7 @@ impl Catalog {
                     // No state changes and no synthetic execution while its original control is held.
                     return Err(RuntimeError::Conflict(reason));
                 }
-                t["arrangementInforms"]=json!(followups::external::bind_passive(&tx,&id,&turn_id)?);
+                t["arrangementInforms"]=json!(followups::external::bind_pending(&tx,&id,&turn_id)?);
                 t["status"] = json!("preparing");
                 t["epoch"] = json!(self.epoch);
                 t["updatedAt"] = json!(now());
@@ -1122,11 +1128,16 @@ impl Catalog {
                         .map(|v| Ok(serde_json::from_str::<Value>(&v?)?))
                         .collect::<Result<Vec<_>>>()?
                 };
+                let mut trailing = Vec::new();
                 if original != Some(true) {
-                    let mut q=tx.prepare("SELECT json_extract(body,'$.inputRef') FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId')=?2 ORDER BY rowid")?;
-                    informs.extend(q.query_map(params![id,turn_id],|r|r.get::<_,String>(0))?.map(|r|Ok(serde_json::from_str::<Value>(&r?)?)).collect::<Result<Vec<_>>>()?);
+                    let mut q=tx.prepare("SELECT json_extract(body,'$.inputRef'), rowid < (SELECT rowid FROM external_turns WHERE id=?2) FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId')=?2 ORDER BY rowid")?;
+                    for row in q.query_map(params![id,turn_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?)))? {
+                        let (reference, before) = row?;
+                        let reference = serde_json::from_str::<Value>(&reference)?;
+                        if before { informs.push(reference); } else { trailing.push(reference); }
+                    }
                 }
-                json!({"externalInputRef":turn(&tx,&id,&turn_id)?["inputRef"],"externalInforms":informs})
+                json!({"externalInputRef":turn(&tx,&id,&turn_id)?["inputRef"],"externalInforms":informs,"externalTrailingInforms":trailing,"projectEventInputs":original!=Some(true)})
             }
         };
         if let Some(key) = key {

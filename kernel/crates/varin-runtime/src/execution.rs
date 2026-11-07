@@ -1669,6 +1669,8 @@ pub trait Persistence: Send + Sync + 'static {
 #[derive(Debug, Clone, Default)]
 pub struct InputBatch {
     pub items: ConversationHistory,
+    /// Initial arrangement evidence compacted before this Run's first request.
+    pub replacements: ConversationHistory,
     pub input_ids: Vec<String>,
     pub activating: bool,
 }
@@ -2150,6 +2152,11 @@ impl<
                     history_cursor.as_deref(),
                 )?;
                 let interrupted_without_activation = !incoming.activating && interrupted_generation;
+                for replacement in incoming.replacements {
+                    if let Some(item) = history.iter_mut().find(|item| item.id == replacement.id) {
+                        *item = replacement;
+                    }
+                }
                 if !incoming.items.is_empty() {
                     let activating = incoming.activating;
                     let input_ids = incoming.input_ids;

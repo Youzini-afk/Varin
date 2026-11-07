@@ -75,6 +75,10 @@ export interface VarinIncomingEvent {
   content: OutputBody<IncomingMedia>;
   files?: VarinEventFile[];
   echoOf?: { ownerHostId?: string; followupId: string; occurrenceId: string; operationId?: string };
+  /** Opt-in complete state snapshot. Scope is source/account + object + sender + key.
+   * sequence is the source's ordered safe integer (also on backfill), value names the
+   * current state. Ordinary messages and independent facts must omit this field. */
+  state?: { key: string; sequence: number; value: string };
 }
 export interface VarinEventCoverage { kind: 'complete' | 'from'; fromMs?: number }
 export interface VarinEventBatch {
@@ -118,13 +122,16 @@ export function parseVarinEventBatch(raw: unknown): VarinEventBatch {
     || value.coverage.kind === 'from' && (!Number.isSafeInteger(value.coverage.fromMs) || Number(value.coverage.fromMs) < 0)
     || value.coverage.kind === 'complete' && value.coverage.fromMs !== undefined)) throw new Error('Invalid event coverage');
   for (const event of value.events) {
-    if (!object(event) || !fields(event, ['eventId', 'objectId', 'senderId', 'revision', 'occurredAtMs', 'attributes', 'content', 'files', 'echoOf'])
+    if (!object(event) || !fields(event, ['eventId', 'objectId', 'senderId', 'revision', 'occurredAtMs', 'attributes', 'content', 'files', 'echoOf', 'state'])
       || !text(event.eventId) || event.senderId !== undefined && !text(event.senderId) || event.objectId !== undefined && !text(event.objectId) || event.revision !== undefined && !text(event.revision)
       || !Number.isSafeInteger(event.occurredAtMs) || Number(event.occurredAtMs) < 0 || !object(event.attributes)
       || !object(event.content) || !fields(event.content, ['data', 'parts']) || !Object.hasOwn(event.content, 'data')
       || !Array.isArray(event.content.parts)) throw new Error('Invalid inbound event');
     if (event.content.parts.some(part => object(part) && part.kind === 'attachment')) throw new Error('Inbound events require inline content bytes, not unscoped attachment references');
     event.content.parts = event.content.parts.map(parseIncomingOutputPart) as unknown as JsonValue[];
+    if (event.state !== undefined && (!object(event.state) || !fields(event.state, ['key', 'sequence', 'value'])
+      || !text(event.state.key) || !text(event.state.value)
+      || !Number.isSafeInteger(event.state.sequence) || Number(event.state.sequence) < 0)) throw new Error('Invalid event state snapshot');
     if (event.files !== undefined) {
       if (!Array.isArray(event.files)) throw new Error('Invalid event files');
       const ids = new Set<string>();

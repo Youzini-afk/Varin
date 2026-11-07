@@ -98,9 +98,11 @@ describe('durable plugin event ingress', () => {
     const f = await fixture(); f.add('one'); f.events.start(); await tick();
     const input = batch('saved', 'next');
     input.events[0]!.files = [{ fileId: 'pdf', filename: 'invoice.pdf', mimeType: 'application/pdf', bytesBase64: 'JVBERi0xLjQ=' }];
+    input.events[0]!.state = { key: 'checks', sequence: 3, value: 'healthy' };
     input.events[0]!.echoOf = { ownerHostId: 'local-host', followupId: 'one', occurrenceId: 'receipt', operationId: 'send' };
     await f.submit(0, input);
     expect(f.received[0]!.events[0]!.files).toEqual(input.events[0]!.files);
+    expect(f.received[0]!.events[0]!.state).toEqual(input.events[0]!.state);
     expect(f.received[0]!.events[0]!.echoOf?.ownerHostId).toBeNull();
     input.events[0]!.echoOf.ownerHostId = 'foreign-host'; await f.submit(0, input);
     expect(f.received[1]!.events[0]!.echoOf?.ownerHostId).toBe('foreign-host');

@@ -426,6 +426,7 @@ pub struct InputDeliveryPreparation {
     run: Run,
     head: Option<String>,
     reads: Vec<QueuedInputRead>,
+    initial: Vec<HistoryItem>,
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedInputDelivery {
@@ -433,29 +434,55 @@ pub struct PreparedInputDelivery {
     pub(super) head: Option<String>,
     pub(super) selected: Vec<QueuedInputMetadata>,
     pub(super) items: crate::execution::ConversationHistory,
+    pub(super) projections: std::collections::BTreeMap<String, Value>,
+    pub(super) initial: Vec<HistoryItem>,
+    pub(super) replacements: crate::execution::ConversationHistory,
     pub(super) _publication: crate::content::ContentPublication,
 }
 impl InputDeliveryPreparation {
     pub fn load(self) -> Result<PreparedInputDelivery> {
         let mut selected = Vec::new();
         let mut items = Vec::new();
-        for read in self.reads {
-            selected.push(read.metadata.clone());
-            let (content, provider) = read.content.load_history_payload(&read.reference)?;
+        let mut projections = std::collections::BTreeMap::new();
+        let mut replacements = Vec::new();
+        let references = self.reads.iter().map(|read| {
+            matches!(read.metadata.origin, InputOrigin::Followup { user_input: false, .. })
+                .then(|| read.reference.clone())
+        }).collect::<Vec<_>>();
+        let projected = if let Some(read) = self.reads.first() {
+            super::super::followups::event_input::project_batch(&read.content, &references)?
+        } else { vec![] };
+        for (index, (read, projection)) in self.reads.into_iter().zip(projected).enumerate() {
+            let initial = index < self.initial.len();
+            if !initial { selected.push(read.metadata.clone()); }
+            let (content, provider) = if let Some(mut projection) = projection {
+                projection.item.id = read.metadata.id.clone();
+                let reference = read.content.save_conversation_with_dependencies(
+                    &projection.item, &None, projection.dependencies,
+                )?;
+                projections.insert(read.metadata.id.clone(), reference);
+                (serde_json::to_value(projection.item)?, None)
+            } else {
+                read.content.load_history_payload(&read.reference)?
+            };
             if provider.is_some() {
                 return Err(RuntimeError::Invalid("input has provider original".into()));
             }
-            items.extend(execution_persistence::history_input_items(
+            let projected_items = execution_persistence::history_input_items(
                 &read.metadata.id,
                 read.metadata.origin.history_source(),
                 &content,
-            )?);
+            )?;
+            if initial { replacements.extend(projected_items); } else { items.extend(projected_items); }
         }
         Ok(PreparedInputDelivery {
             run: self.run,
             head: self.head,
             selected,
             items,
+            projections,
+            initial: self.initial,
+            replacements,
             _publication: self.publication,
         })
     }
@@ -514,10 +541,28 @@ impl Catalog {
         }
         reads.sort_by_key(|read| read.metadata.cursor);
 
+        // Admission records the original waking input before the worker exists. Include
+        // that input at its first model boundary, alongside the other ready arrangements.
+        // Once a request exists, its history prefix is immutable, including on retries.
+        let mut initial = Vec::new();
+        let mut first_reads = Vec::new();
+        let mut query = self.db.prepare("SELECT h.body FROM history h JOIN input_queue q ON q.id=h.id WHERE h.run_id=?1 AND q.origin='followup' AND q.state='delivered' AND NOT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1) ORDER BY q.cursor")?;
+        let originals = query.query_map([run_id], |row| row.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+        for raw in originals {
+            let item: HistoryItem = serde_json::from_str(&raw)?;
+            let read = self.capture_input_row(&item.id)?;
+            if matches!(read.metadata.origin, InputOrigin::Followup { user_input: false, .. }) && item.content == read.reference {
+                initial.push(item);
+                first_reads.push(read);
+            }
+        }
+        first_reads.extend(reads);
+
         Ok(InputDeliveryPreparation {
             run,
             head: head.map(str::to_owned),
-            reads,
+            reads: first_reads,
+            initial,
             publication: self.content.begin_publication(),
         })
     }

@@ -3963,7 +3963,14 @@ export interface FollowupEventEcho {
   operationId?: string | null;
 }
 
+export interface FollowupEventState {
+  key: string;
+  sequence: number;
+  value: string;
+}
+
 export interface FollowupPluginEventInput {
+  state?: FollowupEventState | null;
   files?: FollowupEventFile[];
   senderId?: string | null;
   eventId: string;
@@ -4040,6 +4047,7 @@ export interface FollowupOccurrenceFact {
 export interface FollowupOccurrenceView {
   occurrence: FollowupOccurrence;
   facts: FollowupOccurrenceFact[];
+  events?: unknown[];
 }
 
 export interface FollowupOccurrencesParams {

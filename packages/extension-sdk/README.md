@@ -361,6 +361,17 @@ cannot supply it, disclose that limitation rather than inventing the current tim
 without creating model work. The plugin chooses a provider-appropriate polling cadence and retries;
 the Host retries unavailable receiver startup, not individual network requests on the plugin's behalf.
 
+For a complete, replaceable state snapshot only, set `state: { key, sequence, value }`.
+`key` identifies a state stream within the same source/account, object and sender; `sequence` is
+the source's non-negative safe integer ordering, preserved on backfill; `value` names the current state.
+At a receiving boundary Varin expands the latest snapshot and retains changes in `value` (for example,
+failed → healthy). Equal sequences with distinct events retain their bodies rather than guessing order.
+Omit `state` for ordinary messages, comments, requests or independent facts that must each be processed.
+Split those facts from a replaceable snapshot when necessary. Original events and files remain readable
+through the arrangement occurrence after delivery; coalescing never edits an already supplied model request.
+Overlapping arrangements share event bodies within the same delivery while keeping all their intentions,
+filters and receipts. Native and remote Hosts carry the same state declaration without regenerating it.
+
 Submit text and inline media bytes in the existing `OutputBody<IncomingMedia>` shape. Submit arbitrary
 original files separately as `files: [{ fileId, filename, mimeType, bytesBase64 }]`. This typed boundary
 supports PDF, CSV, ZIP and empty files; it does not treat file bytes as media or ordinary JSON data.

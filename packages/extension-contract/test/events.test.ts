@@ -53,3 +53,15 @@ test('original files and Host-scoped echo correlations keep typed bytes without 
   assert.throws(() => parseVarinEventBatch({ ...batch, events: [{ ...batch.events[0], files: [file, file] }] }));
   assert.doesNotThrow(() => parseVarinEventBatch({ ...batch, events: [{ ...batch.events[0], files: [{ ...file, bytesBase64: '' }] }] }));
 });
+
+test('replaceable state is explicit and retains source ordering without changing ordinary messages', () => {
+  const event = { eventId: 'build-3', occurredAtMs: 10, attributes: {}, content: { data: null, parts: [] } };
+  const batch = { expectedCursor: null, nextCursor: 'a', events: [event] };
+  assert.equal(parseVarinEventBatch(batch).events[0]!.state, undefined);
+  const state = { key: 'checks', sequence: 3, value: 'healthy' };
+  assert.deepEqual(parseVarinEventBatch({ ...batch, events: [{ ...event, state }] }).events[0]!.state, state);
+  for (const invalid of [{ ...state, sequence: -1 }, { ...state, sequence: 0.5 }, { ...state, sequence: Number.MAX_SAFE_INTEGER + 1 },
+    { ...state, key: '' }, { key: 'checks', sequence: 3 }]) {
+    assert.throws(() => parseVarinEventBatch({ ...batch, events: [{ ...event, state: invalid }] }), /Invalid event state snapshot/);
+  }
+});

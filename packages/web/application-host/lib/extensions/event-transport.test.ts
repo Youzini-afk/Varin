@@ -13,6 +13,7 @@ const source = { extensionId: 'example.mail', sourceId: 'messages', connectionId
 const descriptor = { ...source, displayName: 'Messages', filterSchema: true, modes: ['poll'], credentials: 'required', recovery: 'history',
   available: true, connections: [{ connectionId: 'mailbox', accountId: source.accountId, displayName: 'Inbox', available: true }] };
 const event: FollowupPluginEventInput = { eventId: 'stable-message', objectId: 'conversation', senderId: 'sender', revision: null, occurredAtMs: 1,
+  state: { key: 'checks', sequence: 3, value: 'healthy' },
   attributes: {}, files: [{ fileId: 'pdf', filename: 'invoice.pdf', mimeType: 'application/pdf', bytesBase64: 'JVBERi0xLjQ=' }], echoOf: { followupId: 'foreign-followup', occurrenceId: 'foreign-occurrence', operationId: 'same-id-on-another-host' },
   content: { data: null, parts: [{ kind: 'text', text: 'Original message' }] } };
 async function fixture(options: { failAdmission?: boolean; echoOwnerHostId?: string; failAckOnce?: boolean } = {}) {
@@ -65,6 +66,7 @@ async function fixture(options: { failAdmission?: boolean; echoOwnerHostId?: str
       expect(input.identity).toEqual(identity); if (input.events.length) {
         expect(input.events[0]?.echoOf?.ownerHostId).toBe(options.echoOwnerHostId === 'receiver-host' ? null : options.echoOwnerHostId ?? 'source-host');
         expect(input.events[0]?.senderId).toBe('sender'); expect(input.events[0]?.files).toEqual(event.files);
+        expect(input.events[0]?.state).toEqual(event.state);
       }
       commits.push(input); admitted = true; checkpoint.cursor = input.nextCursor;
       return { accepted: input.events.length, duplicates: 0, checkpoint: structuredClone(checkpoint) };

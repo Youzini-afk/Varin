@@ -442,6 +442,16 @@ impl ContentStore {
         &self,
         item: &crate::execution::ConversationItem,
         provider: &Option<crate::types::ProviderOriginal>,
+        dependencies: Vec<String>,
+    ) -> Result<Value> {
+        self.save_conversation_with_metadata(item, provider, None, dependencies)
+    }
+    /// Private delivery metadata is kept outside the model-facing conversation body.
+    pub(crate) fn save_conversation_with_metadata(
+        &self,
+        item: &crate::execution::ConversationItem,
+        provider: &Option<crate::types::ProviderOriginal>,
+        metadata: Option<Value>,
         mut dependencies: Vec<String>,
     ) -> Result<Value> {
         let stored = item.clone().map_media(|media| {
@@ -449,7 +459,8 @@ impl ContentStore {
             dependencies.push(stored.content_ref.content_object.clone());
             Ok::<_, RuntimeError>(stored)
         })?;
-        let payload = serde_json::json!({"format":"conversation", "content":stored,"provider":provider});
+        let mut payload = serde_json::json!({"format":"conversation", "content":stored,"provider":provider});
+        if let Some(metadata) = metadata { payload["metadata"] = metadata; }
         self.index_history_text(self.save_with_dependencies(&payload, dependencies)?, &payload)
     }
     pub(crate) fn save_user_history(&self, input_id: &str, input: &Value) -> Result<Value> {
@@ -466,6 +477,8 @@ impl ContentStore {
             format: String,
             content: Value,
             provider: Option<crate::types::ProviderOriginal>,
+            #[serde(default, rename = "metadata")]
+            _metadata: Option<Value>,
         }
         let payload: Payload =
             serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
@@ -512,6 +525,8 @@ impl ContentStore {
             format: String,
             content: Value,
             provider: Option<crate::types::ProviderOriginal>,
+            #[serde(default, rename = "metadata")]
+            _metadata: Option<Value>,
         }
         let mut payload: Payload =
             serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;

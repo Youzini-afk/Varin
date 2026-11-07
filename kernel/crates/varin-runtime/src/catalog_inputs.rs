@@ -673,6 +673,9 @@ impl Catalog {
             head,
             selected: queued,
             items,
+            projections,
+            initial,
+            replacements,
             _publication,
         } = prepared;
         if captured.epoch != self.epoch {
@@ -684,6 +687,14 @@ impl Catalog {
         let run = bodies::validate_delivery(&tx, &captured.id, captured.epoch, head.as_deref())?;
         if super::observations::next(&tx, &run.id)?.is_some() {
             return Ok(Some(InputBatch::default()));
+        }
+        if !initial.is_empty() {
+            let requested: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1)", [&run.id], |row| row.get(0))?;
+            if requested { return Ok(None); }
+            for item in &initial {
+                let current: HistoryItem = record(&tx, "history", &item.id)?;
+                if encode(&current)? != encode(item)? { return Ok(None); }
+            }
         }
         let mut holds=ingress::HoldBatch::default();
         for input in &queued {
@@ -711,8 +722,14 @@ impl Catalog {
             super::goals::detach_ended_for_input(&tx, &run.id)?;
         }
         let superseding = input_ids.last().cloned();
+        for mut item in initial {
+            if let Some(reference) = projections.get(&item.id) {
+                item.content = reference.clone();
+                put(&tx, "history", &item.id, &item)?;
+            }
+        }
         for input in queued {
-            deliver(&tx, &run, &input)?;
+            deliver_projected(&tx, &run, &input, projections.get(&input.id))?;
         }
         if let Some(input_id) = superseding {
             let mut statement=tx.prepare("SELECT body FROM model_steps WHERE run_id=?1 AND state IN ('interrupted','failed','cancelled')")?;
@@ -734,16 +751,20 @@ impl Catalog {
             items,
             input_ids,
             activating,
+            replacements,
         }))
     }
 }
 pub(super) fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Result<()> {
+    deliver_projected(tx, run, input, None)
+}
+fn deliver_projected(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata, projection: Option<&Value>) -> Result<()> {
     let reference: String = tx.query_row(
         "SELECT body FROM input_history_content WHERE input_id=?1",
         [&input.id],
         |row| row.get(0),
     )?;
-    let history_content: Value = serde_json::from_str(&reference)?;
+    let history_content: Value = projection.cloned().map(Ok).unwrap_or_else(|| serde_json::from_str(&reference))?;
     let parent: Option<String> = tx.query_row(
         "SELECT head FROM branches WHERE id=?1",
         [&run.branch_id],

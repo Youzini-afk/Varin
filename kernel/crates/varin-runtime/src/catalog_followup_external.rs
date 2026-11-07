@@ -53,6 +53,10 @@ fn target_reason(db: &Connection, id: &str) -> Result<Option<String>> {
 pub(super) fn prepare_input(content: &crate::content::ContentStore, history: &Value) -> Result<Value> {
     let (value, _) = content.load_history_payload(history)?;
     let item: ConversationItem = serde_json::from_value(value)?;
+    let input = input_value(item, history)?;
+    content.save_with_dependencies(&input, history["content_object"].as_str().map(str::to_owned).into_iter().collect())
+}
+fn input_value(item: ConversationItem, history: &Value) -> Result<Value> {
     let user_input=matches!(item.provenance,Provenance::UserInstruction {..});
     let mut texts = vec![];
     let mut files = vec![];
@@ -73,7 +77,16 @@ pub(super) fn prepare_input(content: &crate::content::ContentStore, history: &Va
         _ => return Err(RuntimeError::Invalid("external event input requires its original text and material".into())),
     }
     let text = texts.join("\n\n");
-    content.save_with_dependencies(&json!({"text":text,"task":text,"attachments":files,"images":images,"_eventHistory":history,"_arrangement":true,"_userInput":user_input}), history["content_object"].as_str().map(str::to_owned).into_iter().collect())
+    Ok(json!({"text":text,"task":text,"attachments":files,"images":images,"_eventHistory":history,"_arrangement":true,"_userInput":user_input}))
+}
+pub(crate) fn project_inputs(content: &crate::content::ContentStore, inputs: &mut [Value]) -> Result<()> {
+    let references = inputs.iter().map(|input| {
+        if input["_userInput"] == true { None } else { input.get("_eventHistory").cloned() }
+    }).collect::<Vec<_>>();
+    for (input, projection) in inputs.iter_mut().zip(super::event_input::project_batch(content, &references)?) {
+        if let Some(projection) = projection { *input = input_value(projection.item, &input["_eventHistory"])?; }
+    }
+    Ok(())
 }
 pub(super) fn accept(tx: &Transaction<'_>, conversation: &str, occurrence: &str, input_ref: &Value, passive: bool, epoch: u64) -> Result<ExternalEventDelivery> {
     let c = harness::conversation(tx, conversation)?;
@@ -136,6 +149,8 @@ pub(super) fn cancel(tx: &Transaction<'_>, delivery: &ExternalEventDelivery) -> 
     t["status"] = json!("cancelled");
     t["inputRef"] = Value::Null;
     put(tx,"external_turns",&delivery.turn_id,&t)?;
+    // Withdrawing one arrangement before dispatch does not withdraw other intentions.
+    tx.execute("UPDATE external_turns SET body=json_remove(body,'$.consumedByTurnId') WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId')=?2",params![delivery.conversation_id,delivery.turn_id])?;
     tx.execute("DELETE FROM attachment_deliveries WHERE holder_kind='external_turn' AND holder_id=?1",[&delivery.turn_id])?;
     let mut c:Value = record(tx,"external_conversations",&delivery.conversation_id)?;
     if c["activeTurn"] == delivery.turn_id { c.as_object_mut().unwrap().remove("activeTurn"); }
@@ -153,12 +168,23 @@ pub(super) fn retry(tx: &Transaction<'_>, delivery: &ExternalEventDelivery) -> R
     }
     Ok(())
 }
-pub(crate) fn bind_passive(tx: &Transaction<'_>, conversation: &str, turn: &str) -> Result<Vec<String>> {
-    let mut q = tx.prepare("SELECT body FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.status')='awaiting_input' AND json_extract(body,'$.consumedByTurnId') IS NULL ORDER BY rowid")?;
+pub(crate) fn bind_pending(tx: &Transaction<'_>, conversation: &str, turn: &str) -> Result<Vec<String>> {
+    let mut q = tx.prepare("SELECT body FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.status') IN ('awaiting_input','queued') AND json_extract(body,'$.consumedByTurnId') IS NULL ORDER BY rowid")?;
     let rows = q.query_map([conversation], |r| r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
     let mut bound=vec![];
+    let mut passed_current = false;
+    let mut join_queued = true;
     for raw in rows {
         let mut input: Value = serde_json::from_str(&raw)?;
+        if input["id"] == turn { passed_current = true; continue; }
+        if input["status"] == "queued" {
+            if !passed_current || !join_queued { continue; }
+            // Do not jump an ordinary queued user message or merge its trust boundary.
+            if !occurrence_for_turn(tx, &input)?.is_some_and(|(_, v)| !v.user_input) {
+                join_queued = false;
+                continue;
+            }
+        }
         if turn_hold(tx,&input)?.is_some() { continue; }
         input["consumedByTurnId"] = json!(turn);
         bound.push(input["id"].as_str().unwrap().to_owned());
@@ -219,6 +245,7 @@ pub(crate) fn publish_reports(tx: &Transaction<'_>, completed: &Value) -> Result
     let turn_id=completed["id"].as_str().unwrap();
     let mut q=tx.prepare("SELECT body FROM external_turns WHERE id=?1 OR json_extract(body,'$.consumedByTurnId')=?1 ORDER BY rowid")?;
     let turns=q.query_map([turn_id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+    let mut reports = std::collections::BTreeMap::<(String, String), (u64, Vec<Value>)>::new();
     for raw in turns {
         let turn:Value=serde_json::from_str(&raw)?;
         let Some((d,v))=occurrence_for_turn(tx,&turn)? else {continue};
@@ -228,7 +255,11 @@ pub(crate) fn publish_reports(tx: &Transaction<'_>, completed: &Value) -> Result
         let (target,branch)=if let (Some(thread),Some(branch))=(parent["parent"]["threadId"].as_str(),parent["parent"]["branchId"].as_str()) {
             (thread,branch)
         } else {(target,branch)};
-        event(tx,"bot-work-pending",d.revision,"bot.work_pending",json!({"kind":"external_arrangement_report","targetThreadId":target,"targetBranchId":branch,"conversationId":completed["conversationId"],"turnId":turn_id,"occurrenceId":v.id,"followupId":d.id,"state":completed["status"],"error":completed["error"]}))?;
+        let report = reports.entry((target.into(), branch.into())).or_insert_with(|| (d.revision, Vec::new()));
+        report.1.push(json!({"occurrenceId":v.id,"followupId":d.id}));
+    }
+    for ((target, branch), (revision, arrangements)) in reports {
+        event(tx,"bot-work-pending",revision,"bot.work_pending",json!({"kind":"external_arrangement_report","targetThreadId":target,"targetBranchId":branch,"conversationId":completed["conversationId"],"turnId":turn_id,"occurrenceId":arrangements[0]["occurrenceId"],"followupId":arrangements[0]["followupId"],"arrangements":arrangements,"state":completed["status"],"error":completed["error"]}))?;
     }
     Ok(())
 }
@@ -258,7 +289,10 @@ mod tests {
         command(db,json!({"action":"create","key":"target","id":"external:task","configurationId":"agent","harness":"codex","title":"Existing work","cwd":"/workspace","principalId":null})).unwrap();
     }
     fn arrangement(db:&mut Catalog,timing:Value)->Followup {
-        let input=serde_json::from_value(json!({"key":"watch","botId":"bot","threadId":"owner","branchId":"main","externalConversationId":"external:task","name":"Watch replies","instruction":"Continue the original investigation with new replies","source":{"extensionId":"mail","sourceId":"replies","connectionId":"account","accountId":"account"},"filter":{},"timing":timing,"repeat":"each"})).unwrap();
+        named_arrangement(db,"watch","Continue the original investigation with new replies",timing)
+    }
+    fn named_arrangement(db:&mut Catalog,key:&str,instruction:&str,timing:Value)->Followup {
+        let input=serde_json::from_value(json!({"key":key,"botId":"bot","threadId":"owner","branchId":"main","externalConversationId":"external:task","name":"Watch replies","instruction":instruction,"source":{"extensionId":"mail","sourceId":"replies","connectionId":"account","accountId":"account"},"filter":{},"timing":timing,"repeat":"each"})).unwrap();
         let p=db.prepare_arrangement(input).unwrap().load().unwrap();db.admit_arrangement(p).unwrap()
     }
     fn receive(db:&mut Catalog){
@@ -270,6 +304,52 @@ mod tests {
         assert!(matches!(db.admit_followup_continuation(p).unwrap(),ContinuationAdmission::Admitted(_)));
         let v:Occurrence=record(&db.db,"followup_occurrences",&db.db.query_row("SELECT id FROM followup_occurrences WHERE followup_id='watch' ORDER BY accepted_cursor DESC LIMIT 1",[],|r|r.get::<_,String>(0)).unwrap()).unwrap();
         v.external_delivery.unwrap()
+    }
+    fn deliver_all(db:&mut Catalog)->Vec<Value> {
+        for p in db.capture_followup_continuations().unwrap() {
+            db.admit_followup_continuation(p.load().unwrap()).unwrap();
+        }
+        let mut query=db.db.prepare("SELECT body FROM external_turns ORDER BY rowid").unwrap();
+        query.query_map([],|r|r.get::<_,String>(0)).unwrap().map(|r|serde_json::from_str(&r.unwrap()).unwrap()).collect()
+    }
+    #[test]
+    fn overlapping_arrangements_share_one_external_turn_and_keep_independent_receipts(){
+        let f=Fixture::new();let mut db=f.open();setup(&mut db);
+        named_arrangement(&mut db,"watch","Investigate the new evidence",json!({"kind":"immediate"}));
+        named_arrangement(&mut db,"digest","Include this reply in the digest",json!({"kind":"immediate"}));
+        receive(&mut db);let turns=deliver_all(&mut db);assert_eq!(turns.len(),2);
+        let first=turns[0]["id"].as_str().unwrap();let second=turns[1]["id"].as_str().unwrap();
+        command(&mut db,json!({"action":"begin","id":"external:task","turnId":first})).unwrap();
+        let input=command(&mut db,json!({"action":"input","id":"external:task","turnId":first})).unwrap();
+        let text=input["text"].as_str().unwrap();
+        assert_eq!(text.matches("Customer supplied actual new evidence").count(),1);
+        assert!(text.contains("Investigate the new evidence") && text.contains("Include this reply in the digest"));
+        assert_eq!(harness::turn(&db.db,"external:task",second).unwrap()["consumedByTurnId"],first);
+        command(&mut db,json!({"action":"observe","id":"external:task","turnId":first,"status":"running"})).unwrap();
+        command(&mut db,json!({"action":"observe","id":"external:task","turnId":first,"status":"completed"})).unwrap();
+        assert_eq!(harness::turn(&db.db,"external:task",second).unwrap()["status"],"completed");
+        let original=command(&mut db,json!({"action":"input","id":"external:task","turnId":second,"original":true})).unwrap();
+        assert!(original["text"].as_str().unwrap().contains("Customer supplied actual new evidence"));
+        assert!(pending(&db.db).unwrap().is_empty());
+        let reports:Vec<Value> = db.db.prepare("SELECT data FROM events WHERE kind='bot.work_pending' AND json_extract(data,'$.kind')='external_arrangement_report'").unwrap()
+            .query_map([],|r|r.get::<_,String>(0)).unwrap().map(|r|serde_json::from_str(&r.unwrap()).unwrap()).collect();
+        assert_eq!(reports.len(),1);assert_eq!(reports[0]["arrangements"].as_array().unwrap().len(),2);
+    }
+    #[test]
+    fn withdrawing_the_leading_external_arrangement_releases_its_other_unsent_intentions(){
+        let f=Fixture::new();let mut db=f.open();setup(&mut db);
+        named_arrangement(&mut db,"watch","Investigate",json!({"kind":"immediate"}));
+        named_arrangement(&mut db,"digest","Digest",json!({"kind":"immediate"}));
+        receive(&mut db);let turns=deliver_all(&mut db);
+        let first=turns[0]["id"].as_str().unwrap();let second=turns[1]["id"].as_str().unwrap();
+        command(&mut db,json!({"action":"begin","id":"external:task","turnId":first})).unwrap();
+        let (d,_)=occurrence_for_turn(&db.db,&turns[0]).unwrap().unwrap();
+        db.control_followup(&d.id,d.revision,FollowupControlAction::Cancel).unwrap();
+        assert!(harness::turn(&db.db,"external:task",second).unwrap()["consumedByTurnId"].is_null());
+        command(&mut db,json!({"action":"begin","id":"external:task","turnId":second})).unwrap();
+        let input=command(&mut db,json!({"action":"input","id":"external:task","turnId":second})).unwrap();
+        assert!(input["text"].as_str().unwrap().contains("Customer supplied actual new evidence"));
+        assert!(!input["text"].as_str().unwrap().contains("sharedWith"));
     }
     #[test]
     fn original_event_file_is_readable_only_through_its_real_external_delivery(){

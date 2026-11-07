@@ -463,6 +463,17 @@ Catalog 的 `followups` 同时保存原工作的条件接续和显式 Bot 长期
 Calendar 的关联到期只选择事件批次，不再额外提交另一份相同日程提示；不执行的空批次记录为 `skipped`。
 暂停、提问、Goal 门控、Bot sleep 与原取消仍由原 ingress／activation 决定，不新增平行 writer。
 
+事件合并发生在实际输入消费边界，不把多条关注合成一个无法单独控制的队列身份。原生输入批次共享重复事件正文，
+各 input、occurrence、处理意图与消费回执分别保留。准备结果提交时重新核对各原输入及 hold；期间撤回任一输入，
+本次准备失效后按剩余输入重新构建。冷启动先登记的唤醒输入也参与第一次边界：在尚无 model step 时同步更新
+其历史展示和 worker 内存；已有请求的历史前缀不再改变。历史保存本次固定表示，原输入及 ContentStore 依赖保留原文，
+重启和重读不会因后来事件重新计算旧表示。`follow_up` occurrence 读取返回已准入批次的原始 `events`。
+
+插件可在完整状态快照上声明 `state: { key, sequence, value }`。同一关注内按原来源／账号、对象、发送者和 key 汇集，
+按来源 sequence 保留最新正文及 value 的变化过程；sequence 必须是可跨 JSON 传输的非负安全整数，补拉不改写顺序。
+相同序号存在多个不同事件时保留原文，不猜先后；未声明 state 的事件和明确映射的个人用户输入不作状态覆盖。
+不同筛选关注分别决定哪些状态属于本次交办，再在同一接收边界共用重复正文，不能借另一关注的新状态删掉本关注的依据。
+
 来源对象路由保存真实 Thread/branch 或 external conversation。同一 principal 下的原生与外部 Harness 普通任务可继续，不按 Bot 人为隔离任务池，
 但其他 Bot 的入口会话不成为隐式接收目标。个人聊天映射须由已认证用户显式指定 object 与 sender；模型建立普通任务映射不能提升用户身份。
 默认不按每个外部对象创建会话。显式 `firstContact: create_bot_session` 仅用于原生 Bot 接收：首次对象事件由原 identity owner 创建
@@ -471,6 +482,10 @@ Calendar 的关联到期只选择事件批次，不再额外提交另一份相�
 外部目标显式保存 `externalConversationId`，原生 thread/branch 仅作为定义归属和回报位置，不伪造外部任务的原生锚点。
 批次与原 external turn 在同一 Catalog 事务受理；Host 唤醒现有 external owner，实际发送前再次检查暂停、Bot sleep 与配置身份。
 被动输入留在该外部会话原 turn 账本，随下一条真实输入处理；原 turn 已发送或结果未知时不自动重放。
+外部 Harness 在 Begin 固定本次可接收的被动输入及连续就绪安排，同一会话内共享正文并沿一次真实 turn 发送；
+不越过排队的普通用户消息。各安排仍关联自己的原 turn，通过 `consumedByTurnId` 跟踪实际执行，发送前再次核验全部关联。
+撤回领头安排会释放其他尚未发送意图，延期则解除整批绑定，重试按当前控制重新选择。相同 turn 的结果按实际回报目标汇集一次，
+并列出所有相关安排；不同回报目标各自收到结果。
 每次结果保留本次 turn 的报告身份，经原 Bot work ingress 回到交办位置，不覆盖早先 child dispatch 的完成回执。
 外部会话 principal 来自可信 UI 身份或真实 parent Thread，旧数据只沿既有一次性归属初始化迁移，不从会话 ID 或资源分支猜测。
 

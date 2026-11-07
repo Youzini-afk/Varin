@@ -325,6 +325,7 @@ mod tests {
                 content: crate::output::OutputBody::text("original PDF"),
                 files: vec![file(&bytes)],
                 echo_of: None,
+                state: None,
             }],
         };
         let prepared = catalog

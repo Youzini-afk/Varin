@@ -93,6 +93,16 @@ pub struct EventEcho {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventState {
+    /// A complete, replaceable snapshot within this source, object and sender.
+    pub key: String,
+    /// Source ordering, preserved by backfill. Receipt order is not version order.
+    pub sequence: u64,
+    /// Human-readable state; changes remain visible when snapshot bodies are folded.
+    pub value: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginEventInput {
     pub event_id: String,
     pub object_id: Option<String>,
@@ -104,6 +114,8 @@ pub struct PluginEventInput {
     #[serde(default)]
     pub files: Vec<EventFileInput>,
     pub echo_of: Option<EventEcho>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<EventState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -460,6 +472,8 @@ pub(super) struct ReceivedEvent {
     pub(super) attributes: Value,
     pub(super) echo_of: Option<EventEcho>,
     pub(super) fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) state: Option<EventState>,
     #[serde(default)]
     pub(super) files: Vec<super::event_files::StoredEventFile>,
 }
@@ -480,6 +494,14 @@ impl EventReceivePreparation {
         let mut events = Vec::new();
         for input in &self.input.events {
             valid_text(&input.event_id)?;
+            if let Some(state) = &input.state {
+                valid_text(&state.key)?;
+                valid_text(&state.value)?;
+                // Event metadata also travels through JSON/JavaScript Hosts.
+                if state.sequence > 9_007_199_254_740_991 {
+                    return Err(RuntimeError::Invalid("event state sequence must be a non-negative safe integer".into()));
+                }
+            }
             if !input.attributes.is_object() {
                 return Err(RuntimeError::Invalid(
                     "event attributes must be an object".into(),
@@ -546,6 +568,7 @@ impl EventReceivePreparation {
                 attributes: input.attributes.clone(),
                 echo_of: input.echo_of.clone(),
                 fingerprint,
+                state: input.state.clone(),
                 files,
             };
             events.push((id, event, content));
@@ -1074,7 +1097,9 @@ pub(super) fn occurrence_refs(db: &Connection, v: &Occurrence) -> Result<Vec<(Va
         let (source,raw,content,received):(String,String,Option<String>,u64)=db.query_row("SELECT s.body,e.body,e.content_ref,e.received_at_ms FROM followup_events e JOIN followup_event_sources s ON s.id=e.source_id WHERE e.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,read_number(r,3)?)))?;
         let cp:EventSourceCheckpoint=serde_json::from_str(&source)?;let event:ReceivedEvent=serde_json::from_str(&raw)?;
         let reference=serde_json::from_str(&content.ok_or_else(||RuntimeError::Invalid("pending event content was released".into()))?)?;
-        Ok((json!({"id":id,"source":cp.identity.source,"eventId":event.event_id,"objectId":event.object_id,"senderId":event.sender_id,"revision":event.revision,"occurredAtMs":event.occurred_at_ms,"receivedAtMs":received,"attributes":event.attributes}),reference))
+        let mut metadata = json!({"id":id,"source":cp.identity.source,"eventId":event.event_id,"objectId":event.object_id,"senderId":event.sender_id,"revision":event.revision,"occurredAtMs":event.occurred_at_ms,"receivedAtMs":received,"attributes":event.attributes});
+        if let Some(state) = event.state { metadata["state"] = serde_json::to_value(state)?; }
+        Ok((metadata,reference))
     }).collect()
 }
 pub(super) fn projection(
@@ -2096,6 +2121,7 @@ mod retirement_tests {
                     content: crate::output::OutputBody::text("body"),
                     files: vec![],
                     echo_of: None,
+                    state: None,
                 }],
             })
             .unwrap()

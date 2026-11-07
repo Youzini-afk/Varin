@@ -318,6 +318,7 @@ impl PreparedEventTransportRead {
                 content,
                 files: super::event_files::hydrate_files(&self.content, &event.files)?,
                 echo_of: event.echo_of,
+                state: event.state,
             });
         }
         Ok(EventTransportPage {
@@ -486,6 +487,7 @@ mod tests {
                     bytes_base64: "JVBERi0xLjQ=".into(),
                 }],
                 echo_of: None,
+                state: Some(EventState { key: "checks".into(), sequence: 3, value: "healthy".into() }),
             }],
         };
         let prepared = catalog
@@ -513,6 +515,7 @@ mod tests {
             .unwrap();
         assert_eq!(first.events.len(), 1);
         assert_eq!(first.events[0].sender_id.as_deref(), Some("actual-sender"));
+        assert_eq!(first.events[0].state.as_ref().unwrap().sequence, 3);
         assert_eq!(first.events[0].content.parts.len(), 2);
         assert_eq!(first.events[0].files[0].bytes_base64, "JVBERi0xLjQ=");
         assert!(first.status.is_none());

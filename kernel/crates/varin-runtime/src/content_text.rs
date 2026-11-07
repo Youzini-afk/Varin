@@ -124,7 +124,7 @@ impl ContentStore {
                 && object.contains_key("provider")
                 && object
                     .keys()
-                    .all(|key| matches!(key.as_str(), "format" | "content" | "provider"))
+                    .all(|key| matches!(key.as_str(), "format" | "content" | "provider" | "metadata"))
         }) || !matches!(
             payload["format"].as_str(),
             Some("data" | "conversation" | "user_input")

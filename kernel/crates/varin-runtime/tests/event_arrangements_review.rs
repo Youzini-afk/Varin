@@ -105,6 +105,7 @@ fn incoming(id: &str, revision: Option<&str>) -> PluginEventInput {
         content: varin_runtime::output::OutputBody::text(format!("Original message {id}")),
         files: vec![],
         echo_of: None,
+        state: None,
     }
 }
 fn receive_input(
@@ -145,6 +146,110 @@ fn deliver(db: &mut Catalog) -> Vec<String> {
             },
         )
         .collect()
+}
+
+fn consume_events(db: &mut Catalog, run: &str) -> varin_runtime::execution::InputBatch {
+    let prepared = db.prepare_input_delivery(run, db.epoch(), db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
+    db.admit_input_delivery(prepared).unwrap().unwrap()
+}
+fn start_event_run(db: &mut Catalog) -> varin_runtime::Receipt {
+    db.submit(&SubmitInput { key: "active".into(), thread_id: "chat".into(), branch_id: "main".into(),
+        expected_head: None, input: json!("Watch the work"), configuration: json!({}) }).unwrap()
+}
+fn state_event(id: &str, sequence: u64, value: &str) -> PluginEventInput {
+    let mut event = incoming(id, None);
+    event.state = Some(EventState { key: "build".into(), sequence, value: value.into() });
+    event
+}
+#[test]
+fn event_delivery_shares_bodies_preserves_intents_and_orders_replaceable_states() {
+    let f = Fixture::new(); let mut db = f.open(); setup(&mut db);
+    let run = start_event_run(&mut db);
+    for (key, intent) in [("watch", "Investigate failures"), ("summary", "Prepare the status digest")] {
+        let mut draft = input(key, EventTiming::Immediate); draft.instruction = intent.into();
+        let p = db.prepare_arrangement(draft).unwrap().load().unwrap(); db.admit_arrangement(p).unwrap();
+    }
+    receive(&mut db, vec![state_event("recovered", 3, "healthy"), state_event("failed", 1, "failed"),
+        state_event("still-failed", 2, "failed"), incoming("mail-one", None), incoming("mail-two", None)], None, Some("a")).unwrap();
+    let ids = deliver(&mut db); assert_eq!(ids.len(), 2);
+    let batch = consume_events(&mut db, &run.run_id);
+    let text = serde_json::to_string(&batch.items).unwrap();
+    for needle in ["Original message recovered", "Original message mail-one", "Original message mail-two"] {
+        assert_eq!(text.matches(needle).count(), 1, "{text}");
+    }
+    assert!(!text.contains("Original message failed"));
+    assert!(!text.contains("Original message still-failed"));
+    assert!(text.contains("Investigate failures") && text.contains("Prepare the status digest"));
+    let changes: Vec<_> = batch.items.iter().filter_map(|item| match &item.content {
+        varin_runtime::execution::Content::Output { output } => output.data["events"].as_array()
+            .and_then(|events| events.iter().find_map(|e| e.get("stateChanges"))).cloned(), _ => None,
+    }).collect();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0][0]["value"], "failed"); assert_eq!(changes[0][1]["value"], "healthy");
+    let occurrence = db.followup_occurrences("watch", None).unwrap().occurrences.remove(0);
+    db.reconcile_followup_facts_at(u64::MAX / 2).unwrap();
+    db.prepare_content_collection(Default::default()).run();
+    let originals = db.capture_followup_occurrence("watch", &occurrence.id).unwrap().load().unwrap();
+    assert_eq!(originals.events.len(), 5);
+    assert!(serde_json::to_string(&originals.events).unwrap().contains("Original message failed"));
+    let history = serde_json::to_value(db.history("main").unwrap()).unwrap();
+    drop(db); let mut db = f.open();
+    assert_eq!(serde_json::to_value(db.history("main").unwrap()).unwrap(), history);
+    assert!(consume_events(&mut db, &run.run_id).items.is_empty());
+}
+
+#[test]
+fn coalescing_rechecks_each_arrangement_before_delivery_and_rebuilds_after_cancellation() {
+    let f = Fixture::new(); let mut db = f.open(); setup(&mut db);
+    let run = start_event_run(&mut db);
+    arrange(&mut db, "first", EventTiming::Immediate); arrange(&mut db, "second", EventTiming::Immediate);
+    receive(&mut db, vec![incoming("shared", None)], None, Some("a")).unwrap(); deliver(&mut db);
+    let prepared = db.prepare_input_delivery(&run.run_id, db.epoch(), db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
+    db.control_followup("first", 1, FollowupControlAction::Cancel).unwrap();
+    assert!(db.admit_input_delivery(prepared).unwrap().is_none());
+    let batch = consume_events(&mut db, &run.run_id);
+    assert_eq!(batch.items.len(), 1);
+    assert!(serde_json::to_string(&batch.items).unwrap().contains("Original message shared"));
+}
+
+#[test]
+fn passive_state_batches_coalesce_across_pause_when_intent_is_unchanged() {
+    let f = Fixture::new(); let mut db = f.open(); setup(&mut db);
+    let run = start_event_run(&mut db);
+    arrange(&mut db, "watch", EventTiming::Passive);
+    receive(&mut db, vec![state_event("failed", 1, "failed")], None, Some("a")).unwrap(); deliver(&mut db);
+    db.control_followup("watch", 1, FollowupControlAction::Pause).unwrap();
+    let revision = db.followup("watch").unwrap().revision;
+    db.control_followup("watch", revision, FollowupControlAction::Resume).unwrap();
+    receive(&mut db, vec![state_event("recovered", 2, "healthy")], Some("a"), Some("b")).unwrap(); deliver(&mut db);
+    let batch = consume_events(&mut db, &run.run_id);
+    let text = serde_json::to_string(&batch.items).unwrap();
+    assert!(!text.contains("Original message failed"));
+    assert_eq!(text.matches("Original message recovered").count(), 1);
+}
+
+#[test]
+fn cold_bot_coalesces_its_original_wake_with_the_first_ready_event_batch() {
+    use varin_runtime::catalog::{context, launches, personalization};
+    use varin_runtime::execution::{AgentPolicy, DefaultAgentPolicy};
+    let f = Fixture::new(); let mut db = f.open(); setup(&mut db);
+    arrange(&mut db, "first", EventTiming::Immediate); arrange(&mut db, "second", EventTiming::Immediate);
+    receive(&mut db, vec![incoming("shared", None)], None, Some("a")).unwrap(); deliver(&mut db);
+    let work = db.pending_cold_bot_work().unwrap().remove(0);
+    let initial = context::ContextProposal { key: "initial".into(), branch_id: "main".into(), through_id: None,
+        expected_revision: 0, summary: String::new(), effective_system_prompt: "Assistant".into(), instruction_sources: vec![], memory_checkpoint: None };
+    let basis: personalization::PersonalizationBasis = serde_json::from_value(json!({"mode":"bot","threadRole":"main","revision":0,
+        "configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"threadId":"chat","projectId":null,
+        "originalSections":[{"name":"preamble","content":"Assistant"}],"instructionSources":[]})).unwrap();
+    let launch: launches::LaunchSelection = serde_json::from_value(json!({"connection_identity":"fixture","provider_family":"test","model":"mock",
+        "configuration_generation":1,"tool_schema_generation":1,"tools":[],"extension_bindings":[],"policy":DefaultAgentPolicy.identity()})).unwrap();
+    let prepared = db.prepare_cold_bot_work(work, json!({}), initial, basis, None).unwrap().load(launch).unwrap();
+    let run = db.admit_cold_bot_work(prepared).unwrap();
+    let batch = consume_events(&mut db, &run.run_id);
+    assert_eq!(batch.replacements.len(), 1); assert_eq!(batch.items.len(), 1);
+    let history = serde_json::to_string(&db.history("main").unwrap()).unwrap();
+    assert_eq!(history.matches("Original message shared").count(), 1);
+    assert!(consume_events(&mut db, &run.run_id).replacements.is_empty());
 }
 
 #[test]

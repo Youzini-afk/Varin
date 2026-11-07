@@ -414,16 +414,28 @@ pub struct FollowupOccurrenceFact {
 pub struct FollowupOccurrenceView {
     pub occurrence: FollowupOccurrence,
     pub facts: Vec<FollowupOccurrenceFact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Value>,
 }
 pub struct FollowupOccurrenceRead {
     occurrence: FollowupOccurrence,
     refs: Vec<(usize, u64, Value)>,
+    input_history: Option<Value>,
+    external_input: Option<Value>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 impl FollowupOccurrenceRead {
     pub fn load(self) -> Result<FollowupOccurrenceView> {
+        let history = match self.input_history {
+            Some(reference) => Some(reference),
+            None => self.external_input.as_ref().map(|reference| {
+                self.content.load(reference).map(|input| input.get("_eventHistory").cloned())
+            }).transpose()?.flatten(),
+        };
+        let events = history.as_ref().map(|reference| super::event_input::original_events(&self.content, reference)).transpose()?.unwrap_or_default();
         Ok(FollowupOccurrenceView {
+            events,
             occurrence: self.occurrence,
             facts: self
                 .refs
@@ -447,7 +459,16 @@ impl Catalog {
     ) -> Result<FollowupOccurrenceRead> {
         let d: Definition = record(&self.db, "followups", id)?;
         let o = occurrence(&self.db, id, occurrence_id)?;
+        let input_history = o.input_id.as_ref().map(|id| {
+            self.db.query_row("SELECT body FROM input_history_content WHERE input_id=?1", [id], |row| row.get::<_, String>(0)).optional()
+        }).transpose()?.flatten().map(|raw| serde_json::from_str(&raw)).transpose()?;
+        let external_input = o.external_delivery.as_ref().map(|delivery| {
+            super::super::external::turn(&self.db, &delivery.conversation_id, &delivery.turn_id)
+                .map(|turn| turn.get("inputRef").filter(|value| value.is_object()).cloned())
+        }).transpose()?.flatten();
         Ok(FollowupOccurrenceRead {
+            input_history,
+            external_input,
             refs: occurrence_fact_refs(&self.db, &d, &o)?,
             occurrence: project_occurrence(&self.db, &d, o)?,
             content: self.content.clone(),

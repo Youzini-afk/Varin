@@ -36,6 +36,8 @@ pub use metrics::*;
 #[path = "catalog_followup_events.rs"]
 pub(crate) mod events;
 pub use events::*;
+#[path = "catalog_followup_event_input.rs"]
+pub(crate) mod event_input;
 #[path = "catalog_followup_event_files.rs"]
 mod event_files;
 pub use event_files::{
@@ -1640,6 +1642,7 @@ impl ContinuationPreparation {
             Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":accepted,"result":result}))
         }).collect::<Result<Vec<_>>>()?;
         let research_facts = self.research_facts.iter().map(|(index,cursor,reference)| Ok(json!({"source_index":index,"accepted_cursor":cursor,"content":self.content.load(reference)?}))).collect::<Result<Vec<Value>>>()?;
+        let prefix_parts = parts.len() + usize::from(!v.user_input);
         let event_facts = self
             .event_facts
             .iter()
@@ -1680,10 +1683,16 @@ impl ContinuationPreparation {
             Content::Output { output } => attachments::output_attachments(output),
             _ => vec![],
         };
-        let history = self.content.save_conversation_with_dependencies(
+        let metadata = matches!(v.evidence, TriggerEvidence::PluginEvents { .. }).then(|| json!({
+            "arrangementEvents": {"instructionRef":d.instruction_ref,"prefixParts": prefix_parts, "events": self.event_facts}
+        }));
+        let mut dependencies = self.event_dependencies.clone();
+        dependencies.extend(self.event_facts.iter().filter_map(|(_, reference)| reference["content_object"].as_str().map(str::to_owned)));
+        let history = self.content.save_conversation_with_metadata(
             &item,
             &None,
-            self.event_dependencies.clone(),
+            metadata,
+            dependencies,
         )?;
         let external_input = if v
             .target
