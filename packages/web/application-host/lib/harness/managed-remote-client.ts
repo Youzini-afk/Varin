@@ -114,7 +114,7 @@ export class ManagedResponseError extends Error {
   constructor(message: string, readonly code: unknown, readonly status?: number, readonly details?: unknown) { super(message); }
 }
 
-class ManagedTargetClient {
+export class ManagedTargetClient {
   constructor(
     readonly target: ManagedTarget,
     private readonly fetchImpl: typeof fetch,

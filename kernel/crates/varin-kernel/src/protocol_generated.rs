@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 82;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 83;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -266,6 +266,139 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+pub(crate) type FollowupEventAttachmentReadParams =
+    varin_runtime::catalog::followups::EventAttachmentReadInput;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EventTransportKey {
+    pub(crate) principal_id: String,
+    pub(crate) client_id: String,
+    pub(crate) coordinator_host_id: String,
+    pub(crate) subscription_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupSourceRoute {
+    pub(crate) external_conversation_id: Option<RequiredNullable<String>>,
+    pub(crate) followup_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) object_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) sender_id: Option<RequiredNullable<String>>,
+    pub(crate) user_input: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupSourceRouteListParams {
+    pub(crate) followup_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupSourceRouteRemove {
+    pub(crate) followup_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) object_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EventTransportBind {
+    pub(crate) key: varin_runtime::catalog::followups::EventTransportKey,
+    pub(crate) source: varin_runtime::catalog::followups::PluginEventSource,
+    pub(crate) state: varin_runtime::catalog::followups::EventTransportState,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EventTransportRead {
+    pub(crate) generation: i64,
+    pub(crate) key: varin_runtime::catalog::followups::EventTransportKey,
+    pub(crate) max_events: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EventTransportAck {
+    pub(crate) generation: i64,
+    pub(crate) key: varin_runtime::catalog::followups::EventTransportKey,
+    pub(crate) through_cursor: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EventTransportAccess {
+    pub(crate) key: varin_runtime::catalog::followups::EventTransportKey,
+    pub(crate) generation: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupEventSourceIdentity {
+    pub(crate) principal_id: RequiredNullable<String>,
+    pub(crate) source: varin_runtime::catalog::followups::PluginEventSource,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupArrangementListParams {
+    pub(crate) bot_id: String,
+    pub(crate) principal_id: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupArrangementPutParams {
+    pub(crate) first_contact:
+        Option<RequiredNullable<varin_runtime::catalog::followups::FirstContactPolicy>>,
+    pub(crate) external_conversation_id: Option<RequiredNullable<String>>,
+    pub(crate) key: String,
+    pub(crate) expected_revision: Option<i64>,
+    pub(crate) bot_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) name: String,
+    pub(crate) instruction: String,
+    pub(crate) source: varin_runtime::catalog::followups::PluginEventSource,
+    pub(crate) filter: Value,
+    pub(crate) timing: varin_runtime::catalog::followups::EventTiming,
+    pub(crate) repeat: Option<varin_runtime::catalog::followups::FollowupRepeat>,
+    pub(crate) source_run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupEventReceiveParams {
+    pub(crate) identity: varin_runtime::catalog::followups::EventSourceIdentity,
+    pub(crate) expected_cursor: RequiredNullable<String>,
+    pub(crate) next_cursor: RequiredNullable<String>,
+    pub(crate) status: RequiredNullable<varin_runtime::catalog::followups::EventSourceStatus>,
+    pub(crate) events: Vec<varin_runtime::catalog::followups::PluginEventInput>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupEventSourceStatusParams {
+    pub(crate) identity: varin_runtime::catalog::followups::EventSourceIdentity,
+    pub(crate) status: varin_runtime::catalog::followups::EventSourceStatus,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupBacklogParams {
+    pub(crate) followup_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: varin_runtime::catalog::followups::EventBacklogAction,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -648,10 +781,6 @@ pub(crate) struct McpInteractionRespondParams {
     pub(crate) expected_revision: i64,
     pub(crate) response: serde_json::Value,
 }
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -4062,6 +4191,101 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.followup.eventAttachment.read" => {
+            serde_json::from_value::<FollowupEventAttachmentReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.get" => {
+            serde_json::from_value::<EventTransportKey>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.sourceRoute.put" => {
+            serde_json::from_value::<FollowupSourceRoute>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.sourceRoute.list" => {
+            serde_json::from_value::<FollowupSourceRouteListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.sourceRoute.remove" => {
+            serde_json::from_value::<FollowupSourceRouteRemove>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.bind" => {
+            serde_json::from_value::<EventTransportBind>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.read" => {
+            serde_json::from_value::<EventTransportRead>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.ack" => {
+            serde_json::from_value::<EventTransportAck>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.release" => {
+            serde_json::from_value::<EventTransportAccess>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.sources" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.imports" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventTransport.importReleased" => {
+            serde_json::from_value::<FollowupEventSourceIdentity>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.arrangements.list" => {
+            serde_json::from_value::<FollowupArrangementListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.arrangement.put" => {
+            serde_json::from_value::<FollowupArrangementPutParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.events.receive" => {
+            serde_json::from_value::<FollowupEventReceiveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventSources.list" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventSources.get" => {
+            serde_json::from_value::<FollowupEventSourceIdentity>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.eventSources.status" => {
+            serde_json::from_value::<FollowupEventSourceStatusParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.followup.backlog" => {
+            serde_json::from_value::<FollowupBacklogParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.context.observations.importSources" => {
             serde_json::from_value::<ContextObservationImportSources>(params.clone())
                 .map(|_| ())

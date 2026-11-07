@@ -6,6 +6,7 @@ import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrenceView, FollowupOccurrencesResult, FollowupRegistrationTrigger, Run } from './protocol.generated.js';
+import { withRequestPrincipal } from './request-principal.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 
@@ -15,7 +16,7 @@ const run: Run = { id: 'run:source', thread_id: identity.threadId, branch_id: id
 const operationId = 'operation:process';
 const trigger = { kind: 'process_stopped' as const, operationId };
 const instruction = '  Read the original process output.\nDo not start it again.  ';
-const definition: Followup = { repeat: 'once', pending_occurrences: 0, exhausted: false, id: 'followup:process', revision: 1, generation: 1,
+const definition: Followup = { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, repeat: 'once', pending_occurrences: 0, exhausted: false, id: 'followup:process', revision: 1, generation: 1,
   thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: run.id,
   actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
   goal_id: null, trigger: { kind: 'process_stopped', operation_id: operationId }, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 4, observed: null, file: null, log: null, metric: null }], state: 'active',
@@ -24,7 +25,7 @@ const definition: Followup = { repeat: 'once', pending_occurrences: 0, exhausted
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
  * Catalog durability, process-stop proof and atomic occurrence consumption are native suite obligations. */
 function fixture() {
-  const facts = { reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
+  const facts = { botId: null as string | null, principalId: null as string | null, botDefinitions: [] as Followup[], routes: [] as import('@varin/protocol').FollowupSourceRoute[], reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
     occurrenceViews: new Map<string, FollowupOccurrenceView>(), occurrenceDetailError: false,
     occurrencePages: new Map<number | undefined, FollowupOccurrencesResult>(), occurrenceError: false,
     source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
@@ -36,12 +37,15 @@ function fixture() {
   const validateLive = vi.fn(async () => { if (facts.liveInvalid) throw new Error('Original live root changed'); });
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, _signal?: AbortSignal): Promise<unknown> => {
     switch (method) {
-      case 'runtime.thread.inspect': return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
+      case 'runtime.thread.inspect': return { thread_id: params.threadId, bot_id: facts.botId, principal_id: facts.principalId, parent_thread_id: null, observer_project_ids: [], branches: [
         { branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null },
         { branch_id: 'branch:other', active_run_id: null, head: null, latest_run: null },
       ] };
       case 'runtime.run.inspect': return facts.source;
       case 'runtime.launch.inspect': return facts.launch;
+      case 'runtime.followup.arrangements.list': return facts.botDefinitions;
+      case 'runtime.followup.sourceRoute.list': return facts.routes;
+      case 'runtime.followup.sourceRoute.put': case 'runtime.followup.sourceRoute.remove': case 'runtime.followup.arrangement.put': case 'runtime.followup.backlog': return facts.reply;
       case 'runtime.followup.register': {
         if (facts.registerError) throw new KernelClientError({ code: 'operation-error', message: 'operation error: operation belongs to another Run' });
         return facts.reply;
@@ -85,7 +89,8 @@ function fixture() {
     if (request.headers.authorization !== 'host-session') { response.status(401).end(); return; }
     next();
   };
-  registerThreadRoutes(app, adapter, requireAuth);
+  const eventSources = { discover: vi.fn(async () => []), validateArrangement: vi.fn(async () => {}) };
+  registerThreadRoutes(app, adapter, requireAuth, undefined, undefined, undefined, undefined, eventSources);
   const request = async (path: string, body: unknown, authenticated = true) => {
     let status = 200; let output: unknown;
     const response = Object.assign(new EventEmitter(), { writableEnded: false,
@@ -107,7 +112,7 @@ function fixture() {
     return Response.json(output ?? {}, { status });
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
-  return { facts, requests, request, models, issueGrant, retireGrant, revokeGrant, validateLive, api: createThreadsHttpAPI() };
+  return { facts, requests, request, eventSources, models, issueGrant, retireGrant, revokeGrant, validateLive, api: createThreadsHttpAPI() };
 }
 afterEach(() => vi.unstubAllGlobals());
 
@@ -134,7 +139,7 @@ it('the public management client preserves registration keys, revisions and orig
   f.facts.reply = { ...accepted, revision: 7, wait: { ...accepted.wait, trigger_cursor: 9, state: 'consumed' }, occurrence: {
     accepted_cursor: 9, id: 'occurrence:process', generation: 1, trigger_cursor: 9,
     evidence: { kind: 'process_stopped', receipt_identity: 'process:receipt', receipt_epoch: 'process-epoch:one' },
-    state: 'admitted', hold_reason: null, delivery: { state: 'delivered', activation_state: 'bound',
+    state: 'admitted', hold_reason: null, delivery: { thread_id: identity.threadId, branch_id: identity.branchId, state: 'delivered', activation_state: 'bound',
       run_id: 'run:continued', input_id: 'environment:process', delivered_cursor: 10, execution_id: null, failure_code: null },
   } };
   for (const action of ['pause', 'resume', 'cancel'] as const) {
@@ -376,7 +381,7 @@ it('pages original occurrence rows by accepted cursor without hydrating instruct
   const rows = Array.from({ length: 130 }, (_, index) => ({ accepted_cursor: index + 10, id: `occurrence:${index}`, generation: 1,
     trigger_cursor: 1_000 - index, state: 'completed' as const, hold_reason: null,
     evidence: { kind: 'process_stopped' as const, receipt_identity: `receipt:${index}`, receipt_epoch: 'original' },
-    delivery: { input_id: `input:${index}`, state: 'delivered' as const, activation_state: 'bound' as const,
+    delivery: { thread_id: identity.threadId, branch_id: identity.branchId, input_id: `input:${index}`, state: 'delivered' as const, activation_state: 'bound' as const,
       run_id: `run:${index}`, execution_id: index % 2 ? `execution:${index}` : null, delivered_cursor: index + 200, failure_code: null } }));
   f.facts.occurrencePages.set(undefined, { occurrences: rows.slice(0, 64), nextCursor: 73 });
   f.facts.occurrencePages.set(73, { occurrences: rows.slice(64, 128), nextCursor: 137 });
@@ -470,4 +475,39 @@ it('public metric and composite registrations reach the original decoder with ex
   expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.register').map(([, params]) => params))
     .toEqual([inputs[0]!, ...inputs].map(({ key, runId, trigger, instruction, repeat }) => ({ key, runId, trigger, instruction, repeat })));
   expect(f.issueGrant).not.toHaveBeenCalled(); expect(f.models.resolveModel).not.toHaveBeenCalled();
+});
+
+it('creates a Bot arrangement without a source Run and preserves its target and stable key', async () => {
+  const f = fixture(); f.facts.botId = 'bot';
+  const arrangement = { key: 'arrangement:stable', botId: 'bot', threadId: identity.threadId, branchId: 'branch:other',
+    name: 'Inbox', instruction: 'Review new mail', source: { extensionId: 'mail', sourceId: 'received', connectionId: 'primary', accountId: 'original-account' },
+    filter: { folder: 'inbox' }, timing: { kind: 'passive' as const } };
+  await f.api.followups.putArrangement({ ...identity, arrangement });
+  await f.api.followups.putArrangement({ ...identity, arrangement });
+  expect(f.eventSources.validateArrangement).toHaveBeenCalledWith(null, arrangement.source, arrangement.filter, expect.any(AbortSignal));
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.followup.arrangement.put').map(([,params]) => params)).toEqual([arrangement, arrangement]);
+  expect(f.requests.mock.calls.some(([method]) => ['runtime.run.inspect', 'runtime.run.start', 'runtime.input.submit'].includes(method))).toBe(false);
+});
+
+it('manages Bot-owned backlog through the Bot entry without retargeting an orphaned receiving Thread', async () => {
+  const f = fixture(); f.facts.botId = 'bot';
+  f.facts.botDefinitions = [{ ...definition, id: 'orphan', owner: { kind: 'bot', bot_id: 'bot' }, thread_id: 'deleted-target', branch_id: 'deleted-branch' }];
+  await f.api.followups.backlog({ ...identity, followupId: 'orphan', expectedRevision: 7, action: 'discard' });
+  expect(f.requests.mock.calls.at(-1)?.slice(0,2)).toEqual(['runtime.followup.backlog', { followupId: 'orphan', expectedRevision: 7, action: 'discard' }]);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.thread.inspect').every(([,params]) => params.threadId === identity.threadId)).toBe(true);
+  await expect(f.api.followups.backlog({ ...identity, followupId: 'foreign', expectedRevision: 1, action: 'process_now' })).rejects.toThrow('400');
+});
+
+it('requires verified personal sender consent while ordinary source routes remain environment input', async () => {
+  const f = fixture();
+  const route = { followupId: definition.id, expectedRevision: 1, objectId: 'chat:original', threadId: identity.threadId,
+    branchId: 'branch:other', senderId: 'provider:me', userInput: true };
+  await expect(f.api.followups.putSourceRoute({ ...identity, route })).rejects.toThrow('400');
+  expect(f.requests.mock.calls.some(([method]) => method === 'runtime.followup.sourceRoute.put')).toBe(false);
+  f.facts.principalId = 'alice';
+  await withRequestPrincipal('alice', () => f.api.followups.putSourceRoute({ ...identity, route }));
+  expect(f.requests.mock.calls.at(-1)?.slice(0,2)).toEqual(['runtime.followup.sourceRoute.put', route]);
+  await withRequestPrincipal('alice', () => f.api.followups.putSourceRoute({ ...identity, route: { ...route, userInput: false } }));
+  await withRequestPrincipal('alice', () => f.api.followups.removeSourceRoute({ ...identity, followupId: definition.id, expectedRevision: 2, objectId: route.objectId }));
+  expect(f.requests.mock.calls.at(-1)?.slice(0,2)).toEqual(['runtime.followup.sourceRoute.remove', { followupId: definition.id, expectedRevision: 2, objectId: route.objectId }]);
 });

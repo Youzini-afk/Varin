@@ -3,6 +3,7 @@ import { registerThreadUserDispatchRoutes } from './lib/kernel/thread-user-dispa
 import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
 import { releaseDeletedAttachmentSources } from './lib/kernel/attachment-retention.js';
 import { createThreadAttachments } from './lib/kernel/thread-attachments.js';
+import { createEventAttachmentCapture } from './lib/kernel/event-attachment-capture.js';
 import { registerThreadAttachmentRoutes } from './lib/kernel/thread-attachment-routes.js';
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -85,6 +86,7 @@ import { createSemanticInference } from './lib/knowledge/semantic/runtime-infere
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createThreadSourceFiles } from './lib/kernel/thread-source-files.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
+import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
 import { registerNativeWorkspaceRoutes } from './lib/workspace/native-workspace-routes.js';
@@ -293,6 +295,8 @@ import { bindPluginInvocationPrincipal } from './lib/extensions/invocation-princ
 import { HostCredentialService, fileSecretStore } from './lib/credentials/service.js';
 import { AuthorizationFlows } from './lib/authorization-flows.js';
 import { PluginCredentialCapability } from './lib/extensions/credentials.js';
+import { PluginEventSources } from './lib/extensions/event-sources.js';
+import { PluginEventTransport, registerPluginEventTransportRoutes } from './lib/extensions/event-transport.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
@@ -1167,7 +1171,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { workspaceId: identity.workspaceId, root: identity.canonicalRoot };
     },
   });
-  registerExternalAgentRoutes(app, externalAgents, uiAuthController.requireAuth);
+  registerExternalAgentRoutes(app, externalAgents, uiAuthController.requireAuth, (req, res) => uiAuthController!.resolveAuthContext(req, res));
   // Installation programs are Host-owned tooling. They receive only this
   // private resource root; editor/agent LSP processes still use their workspace.
   const languageToolProcesses = createKernelProcessService({
@@ -2191,6 +2195,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
   const threadAttachments = createThreadAttachments({ kernel: kernelClient, runtime: agentRuntime, storage: materialStorage,
     materials: webMaterials, resolveLiveSource: liveSources.validate, requestMaintenance: () => contentMaintenance.request() });
+  threadAttachments.bindEventAttachmentCapture(createEventAttachmentCapture(agentRuntime));
   threadAttachments.bindAbsolutePathCapture(createAbsoluteAttachmentCapture({ kernel: kernelClient,
     resolveWorkspace: async (directory, signal) => {
       signal?.throwIfAborted();
@@ -2485,7 +2490,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
   computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user, userIntegrations);
+  const pluginCredentials = new PluginCredentialCapability(extensionRuntime,
+    new HostCredentialService(extensionRuntime.services.hostId, fileSecretStore(path.join(VARIN_DATA_DIR, 'plugin-credentials.json'))),
+    new AuthorizationFlows());
+  pluginCredentialOwner.current = pluginCredentials;
+  pluginCredentials.start();
+  const pluginEventSources = new PluginEventSources(extensionRuntime, agentRuntime, pluginCredentials, 5_000, hostId);
+  const pluginEventTransport = new PluginEventTransport(hostId, agentRuntime, managedRemoteTargets,
+    principalId => principalId ? hostPrincipals().isOwner(principalId) : Promise.resolve(false), egressRuntime.fetch as typeof fetch);
+  pluginEventSources.setRemote(pluginEventTransport);
+  registerPluginEventTransportRoutes(app, { hostId, catalog: agentRuntime, sources: pluginEventSources,
+    requireAuth: uiAuthController.requireAuth, isDraining: () => isShuttingDown });
+  kernelClient.setFollowupEventOwner(createFollowupEventOwner(agentRuntime, pluginEventSources));
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user, userIntegrations, pluginEventSources);
   const agentProfiles = createAgentProfilesAPI({ settings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     contextAgentDefinition: signal => agentRuntime.contextAgentDefinition(signal),
@@ -2825,11 +2842,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
 
-  const pluginCredentials = new PluginCredentialCapability(extensionRuntime,
-    new HostCredentialService(extensionRuntime.services.hostId, fileSecretStore(path.join(VARIN_DATA_DIR, 'plugin-credentials.json'))),
-    new AuthorizationFlows());
-  pluginCredentialOwner.current = pluginCredentials;
-  pluginCredentials.start();
 
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
   const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
@@ -2931,6 +2943,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.warn('[Varin Extensions] Host reconciliation failed:', error?.message || error);
   });
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
+  pluginEventSources.start();
+  pluginEventTransport.start();
   botLifecycleRuntime = createBotLifecycleRuntime({
     hostId, computers: computerService,
     agent: { runtime: agentRuntime, kernel: kernelClient, gate: botId => botService.executionGate(botId),
@@ -3148,6 +3162,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
         await shutdown.run('botPresence.dispose', () => botPresence.dispose());
         await shutdown.run('botService.dispose', () => botService.dispose());
+        await shutdown.run('pluginEventTransport.close', () => pluginEventTransport.close());
+        await shutdown.run('pluginEventSources.close', () => pluginEventSources.close());
         await shutdown.run('pluginCredentials.close', () => pluginCredentials.close());
         await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
         await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());

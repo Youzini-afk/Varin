@@ -324,3 +324,62 @@ its secret to the renderer, a tool result or model context. The Host supplies au
 JSON user IDs and activation-time clients cannot select another user's credentials.
 See the [author guide](../../docs/ops/varin-extension-authoring.md#host-credentials-for-connected-services)
 for adapter responsibilities and deployment boundaries.
+
+## Durable inbound event sources
+
+A service event becomes a durable source only when its existing `contract.events[name]` declares
+`durable`. Declare `sourceId` (unique within the extension), `displayName`, `connectionsMethod`,
+`receiveMethod`, `modes` (`push`, `stream`, `poll`), `recovery` (`history` or `realtime`),
+`credentials` (`required` or `none`), and `filterSchema`. Both named methods belong to the same
+service declaration and implementation. The event's `schema` validates its structured `attributes`;
+filters are validated against `filterSchema` and matched by Catalog as an exact attribute subset.
+Use the same descriptor at manifest and activation time. Ordinary notification events without
+`durable` never trigger model work.
+
+Request the `varin.events` Host capability, plus `varin.credentials` for authenticated sources.
+The connections method receives `{ sourceId }` and returns `VarinEventConnection[]` with connection
+IDs and display names, never tokens. Host replaces `accountId` with the actual saved credential
+`account` identity for credential-backed connections. A credential-free source must provide its own
+stable nonsecret configuration identity. Discovery may inspect metadata and obtain its plugin
+namespace, but cannot resolve or change credentials as a side effect.
+
+The Host calls the receive method with `VarinEventReceiveRequest`: the original source, connection,
+selected account and saved cursor. This is a long-lived, cancellable service invocation, independent
+of any Bot Run or window. Use `credentials(call.capabilities, request.connectionId, request.accountId)`
+for this exact connection; the receiver cannot replace credentials or read another account.
+Use `eventReceiver(call.capabilities)` to assert receiver authority and submit `VarinEventBatch`.
+Do not use activation-time capabilities. Clean up remote subscriptions and network waits in `finally`
+when `call.signal` is aborted, and return only when the real receiver has stopped.
+
+`submit` returns the committed cursor and accepted/duplicate counts only after Catalog acceptance.
+Await it before acknowledging a provider callback or advancing a local sync cursor. Failure or a
+lost response does not mean rejection: retain the same stable event IDs and revision, and resume from
+the Catalog cursor supplied on reconnection. `occurredAtMs` is the actual UTC millisecond timestamp
+of this event or revision, not the time it was synced or received. Backfill preserves that original
+time so an explicit discard-and-continue boundary does not reintroduce old events. If the provider
+cannot supply it, disclose that limitation rather than inventing the current time. Empty incremental results may advance a provider cursor
+without creating model work. The plugin chooses a provider-appropriate polling cadence and retries;
+the Host retries unavailable receiver startup, not individual network requests on the plugin's behalf.
+
+Submit text and inline media bytes in the existing `OutputBody<IncomingMedia>` shape. Submit arbitrary
+original files separately as `files: [{ fileId, filename, mimeType, bytesBase64 }]`. This typed boundary
+supports PDF, CSV, ZIP and empty files; it does not treat file bytes as media or ordinary JSON data.
+File IDs are unique within the stable event. Catalog saves the bytes in ContentStore, assigns immutable
+attachment identity and publishes original target delivery facts. Arbitrary attachment/storage
+references are not accepted, and retrying an existing event with changed file bytes is a conflict. `coverage` reports actual complete history or the earliest covered time; realtime-only
+restarts are exposed as partial coverage, never assumed to include the offline interval. The optional
+`echoOf` includes the original follow-up, occurrence and successful operation identity. Include
+`ownerHostId` when the original operation belongs to another Host. The authenticated transport preserves
+this scope, and only the executing Host checks its own original receipt and consumed source object.
+Catalog, not plugin assertion alone, determines whether it is a confirmed echo.
+
+The adapter owns provider callback authentication, parsing, remote registration/revocation and its
+actual network ingress or relay. A `push` declaration does not create a public callback URL or deploy
+a relay. `poll` and `stream` work without a public endpoint. No provider-specific Gmail/GitHub adapter
+is bundled by this contract.
+
+A saved arrangement can select a source on a configured managed Host. The platform owns authenticated
+ledger paging, destination admission before source acknowledgement, consumer generation fencing and
+release. Plugins still connect only to their local account; they do not forward events to arbitrary
+URLs or retain a second destination queue. New remote consumers expose their actual coverage start,
+while existing consumers preserve unacknowledged events across disconnect and restart.

@@ -47,6 +47,8 @@ pub enum InputOrigin {
         listener_id: String,
     },
     Followup {
+        #[serde(default)]
+        user_input: bool,
         followup_id: String,
         occurrence_id: String,
         generation: u64,
@@ -80,6 +82,7 @@ impl InputOrigin {
     }
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
+            Self::Followup {user_input:true,..}=>HistorySource::User,
             Self::ContextObservation { .. }
             | Self::WorkEvent { .. }
             | Self::McpResource { .. }

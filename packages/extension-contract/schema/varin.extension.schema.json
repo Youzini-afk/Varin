@@ -1117,6 +1117,9 @@
         },
         "source": {
           "$ref": "#/$defs/contractSource"
+        },
+        "durable": {
+          "$ref": "#/$defs/durableEventSource"
         }
       }
     },
@@ -1213,6 +1216,64 @@
               }
             }
           }
+        }
+      }
+    },
+    "durableEventSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceId",
+        "displayName",
+        "connectionsMethod",
+        "receiveMethod",
+        "modes",
+        "recovery",
+        "credentials",
+        "filterSchema"
+      ],
+      "properties": {
+        "sourceId": {
+          "$ref": "#/$defs/text"
+        },
+        "displayName": {
+          "$ref": "#/$defs/text"
+        },
+        "connectionsMethod": {
+          "$ref": "#/$defs/text"
+        },
+        "receiveMethod": {
+          "$ref": "#/$defs/text"
+        },
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "push",
+              "stream",
+              "poll"
+            ]
+          }
+        },
+        "recovery": {
+          "enum": [
+            "history",
+            "realtime"
+          ]
+        },
+        "credentials": {
+          "enum": [
+            "required",
+            "none"
+          ]
+        },
+        "filterSchema": {
+          "type": [
+            "object",
+            "boolean"
+          ]
         }
       }
     }

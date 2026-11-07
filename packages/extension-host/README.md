@@ -326,3 +326,33 @@ Native and brokered callbacks propagate the same opaque invocation scope. Princi
 released when the actual call settles. Long-lived authorization owners explicitly retain a separate
 scoped operation rather than keeping an expired service-call client. Explicit uninstall data deletion
 can delegate additional trusted domains through `deleteExtensionData` after extension retirement.
+
+## Durable source bindings
+
+`declaredEventSources` reads opt-in durable event metadata from the original selected service
+contracts, preserving enablement and reviewed capability grants. `prepareEventSource` prepares the
+explicitly selected extension through the existing supervisor and returns a normal exact-generation
+lease. It does not apply an unrelated global provider choice to a saved source identity.
+
+The Application Host's `PluginEventSources` consumer binds authenticated principal, extension,
+source, connection and actual credential account to a retained invocation. Only that receiver can
+use `varin.events`; neither its JSON arguments nor another dependency may select the principal or
+source. Connection discovery is credential-read-only; receiver credential reads are restricted to
+the selected connection and expected account. Replacement credentials invalidate old listeners.
+
+The transient listener map shares a source across active arrangements of the same user/account;
+users never share credential authority. Bot sleep does not change those source references. The last
+active reference, plugin retirement, capability revocation, kernel disconnect or Host shutdown
+cancels the real receive callback and releases its original pin after completion. Published service
+replacement drains the previous receiver before resuming the same Catalog checkpoint on the new
+generation. Network and content preparation stay outside Catalog transactions; no Host inbox or
+second execution database is introduced. Catalog acceptance is the only cursor acknowledgement.
+
+Remote arrangements reuse authenticated managed Host connections. Source-side consumers live in the
+original Catalog ledger and keep unacknowledged content alive. The receiving Host commits each page
+before acknowledging its original consumer; pauses retain watermarks and cancellation releases the
+consumer. The transport scopes principal/client/Host identities at the authenticated boundary, never
+from plugin JSON, and checks exact saved connection identity on each page. It does not create a fake
+Thread, a transport-owned database, an anonymous forwarder or a relay deployment. Real files remain
+original ContentStore bytes with typed AttachmentDelivery edges and are hydrated into destination
+admission, not copied as source-side attachment references.

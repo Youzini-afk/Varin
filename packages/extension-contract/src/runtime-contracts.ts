@@ -1,3 +1,4 @@
+import { parseVarinDurableEventSource, type VarinDurableEventSource } from './events.js';
 import {
   parseVarinContractSource, parseVarinRuntimeSourceRequest, parseVarinRuntimeSourceResult,
   parseVarinRuntimeSourceArtifact, VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
@@ -20,6 +21,7 @@ export interface VarinServiceMethodContract {
   source?: VarinContractSource;
 }
 export interface VarinServiceEventContract {
+  durable?: VarinDurableEventSource;
   schema: VarinContractSchema;
   description?: string;
   source?: VarinContractSource;
@@ -219,8 +221,9 @@ export function parseVarinExtensionServiceContract(value: unknown): VarinExtensi
   const events = raw.events === undefined ? undefined : Object.fromEntries(Object.entries(record(raw.events, 'Service events')).map(([name, value]) => {
     text(name, 'Event name');
     const event = record(value, 'Service event');
-    fields(event, ['schema', 'description', 'source'], 'Service event');
+    fields(event, ['schema', 'description', 'source', 'durable'], 'Service event');
     return [name, { schema: schema(event.schema),
+      ...(event.durable === undefined ? {} : { durable: parseVarinDurableEventSource(event.durable) }),
       ...(event.description === undefined ? {} : { description: text(event.description, 'Event description') }),
       ...(event.source === undefined ? {} : { source: parseVarinContractSource(event.source) }),
     } satisfies VarinServiceEventContract];

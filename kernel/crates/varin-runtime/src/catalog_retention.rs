@@ -289,13 +289,13 @@ impl Catalog {
         }
         tx.execute("INSERT INTO thread_gc_branches SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads)", [])?;
         tx.execute("INSERT INTO thread_gc_runs SELECT r.id FROM runs r JOIN thread_gc_branches b ON b.id=r.branch_id", [])?;
-        for table in ["history", "goals", "followups", "calendar_occurrences"] {
+        for table in ["history", "goals", "calendar_occurrences"] {
             seed(&tx, table, "thread_id IN (SELECT id FROM thread_gc_threads)")?;
         }
         for table in ["input_queue", "context_checkpoints", "memory_states", "active_contexts", "goals", "thread_title_progress"] {
             seed(&tx, table, "branch_id IN (SELECT id FROM thread_gc_branches)")?;
         }
-        seed(&tx, "followups", "json_extract(body,'$.branch_id') IN (SELECT id FROM thread_gc_branches)")?;
+        seed(&tx, "followups", "json_extract(body,'$.owner.kind')='work' AND (thread_id IN (SELECT id FROM thread_gc_threads) OR json_extract(body,'$.branch_id') IN (SELECT id FROM thread_gc_branches))")?;
         seed(&tx, "calendar_occurrences", "input_id IN (SELECT id FROM input_queue WHERE branch_id IN (SELECT id FROM thread_gc_branches))")?;
         seed(&tx, "runs", "id IN (SELECT id FROM thread_gc_runs)")?;
         for table in ["run_drivers", "driver_checkpoints", "driver_calls", "operations", "model_steps", "model_selections", "policy_checkpoints", "policy_selections", "waits", "bot_run_holds", "context_jobs", "context_job_nodes", "context_job_steps", "resumptions"] {
@@ -318,7 +318,14 @@ impl Catalog {
         // the parent conversation is hidden. Relational protection retains that Run too.
         tx.execute("DELETE FROM thread_gc_rows WHERE table_name='child_tasks' AND row_id IN (SELECT rowid FROM child_tasks WHERE child_thread_id NOT IN (SELECT id FROM thread_gc_threads))", [])?;
         seed(&tx, "input_history_content", "input_id IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue'))")?;
+        seed(&tx, "followup_event_routes", "followup_id IN (SELECT id FROM followups WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='followups'))")?;
+        seed(&tx, "followup_event_matches", "followup_id IN (SELECT id FROM followups WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='followups'))")?;
         seed(&tx, "followup_occurrences", "followup_id IN (SELECT id FROM followups WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='followups'))")?;
+        // Bot definitions outlive the conversation, not the conversation's settled
+        // input/history graph. Matching watermarks and compact source dedup remain.
+        seed(&tx, "followup_occurrences", "input_id IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue'))")?;
+        seed(&tx, "followup_event_matches", "occurrence_id IN (SELECT id FROM followup_occurrences WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='followup_occurrences'))")?;
+
         for table in ["goal_children", "goal_runs"] { seed(&tx, table, "goal_id IN (SELECT id FROM goals WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='goals'))")?; }
         seed(&tx, "goal_usage", "id IN (SELECT id FROM goals WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='goals'))")?;
 

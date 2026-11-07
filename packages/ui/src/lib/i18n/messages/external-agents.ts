@@ -1,4 +1,5 @@
 export const externalAgentEn = {
+  'external.status.awaiting_input': 'Saved for the next conversation',
   'external.reconnectUnsupported': 'This Agent cannot resume an existing session. Reconnecting would close this usable session, so keep it connected or start a new conversation.',
   'external.contextUsage': 'Agent-reported context',
   'external.recordedUsage': 'Reported turn usage',
@@ -124,6 +125,7 @@ export const externalAgentEn = {
   'external.status.interrupted': 'Connection interrupted',
 } as const;
 export const externalAgentZh: Record<keyof typeof externalAgentEn, string> = {
+  'external.status.awaiting_input': '已保存，留待下次会话处理',
   'external.reconnectUnsupported': '此 Agent 不支持恢复已有会话。重连会关闭当前可用会话，请保持连接或新建会话。',
   'external.contextUsage': 'Agent 报告的上下文',
   'external.recordedUsage': '已报告的轮次用量',

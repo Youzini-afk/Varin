@@ -46,3 +46,5 @@ export * from "./surface-contributions.js";
 
 export * from "./releases.js";
 export * from './credentials.js';
+
+export * from './events.js';

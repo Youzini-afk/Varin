@@ -551,6 +551,13 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
   const rawProvides = isRecord(value.provides) ? value.provides : {};
   if (value.provides !== undefined && !isRecord(value.provides)) issues.push("provides must be an object");
   const providedServices = parseServices<VarinExtensionServiceProvision>(rawProvides.services, "provides.services", issues, "provide");
+  const eventSources = new Set<string>();
+  for (const service of providedServices ?? []) for (const event of Object.values(service.contract?.events ?? {})) {
+    if (!event.durable) continue;
+    if (eventSources.has(event.durable.sourceId)) issues.push("Durable event source IDs must be unique within an extension");
+    eventSources.add(event.durable.sourceId);
+    if (!service.contract?.methods[event.durable.connectionsMethod] || !service.contract?.methods[event.durable.receiveMethod]) issues.push("Durable event methods must be declared");
+  }
 
   const rawCapabilities = isRecord(value.capabilities) ? value.capabilities : {};
   if (value.capabilities !== undefined && !isRecord(value.capabilities)) issues.push("capabilities must be an object");

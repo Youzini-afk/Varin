@@ -1,4 +1,7 @@
+import { openThreadFromNavigation, openExternalConversationFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import React from 'react';
+const ExternalConversationView = React.lazy(() => import('./ExternalConversation').then(module => ({ default: module.ExternalConversationView })));
+import { ThreadEventArrangements } from './ThreadEventArrangements';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ThreadsAPI, ThreadFamilyAPI, ThreadFollowupsAPI, ThreadIdentity, ThreadResearchAPI } from '@varin/application-client';
 import type { HostJobSubject, HostJobSource, FollowupPendingRegistration, Followup, FollowupOccurrence, FollowupOccurrencesResult, FollowupLeafEvidence, FollowupRegisterParams, FollowupRegistrationSource, FollowupSource, FollowupSourceState, FollowupView, MetricKind, ResourceMachineView, Operation, Run } from '@varin/protocol';
@@ -7,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { independentFollowup, isPastFollowup, followupStatus, followupTrigger } from '@/lib/followupPresentation';
+import { independentFollowup, isPastFollowup, followupStatus, followupTrigger, externalFollowupHold, externalFollowupState } from '@/lib/followupPresentation';
 import { ThreadRunHistory } from './ThreadFamily';
 import { ThreadFollowupOccurrenceDetails } from './ThreadFollowupOccurrenceDetails';
 
@@ -18,6 +21,7 @@ function jobSubjectLabel(subject: HostJobSubject): string {
 }
 
 const heldReason: Record<NonNullable<NonNullable<Followup['occurrence']>['hold_reason']>, string> = {
+  bot_suspended: 'Bot is resting; events remain pending', target_unavailable: 'Receiving target is unavailable; choose another conversation or task',
   control_paused: 'Follow-up paused', source_run_active: 'Waiting for the original run to finish',
   source_unsettled: 'Waiting for original work and its writers to settle', branch_active: 'Waiting for current work and queued input',
   context_scope_changed: 'Context scope changed; register from the intended work', preparation_failed: 'Preparation failed; resume to retry',
@@ -48,6 +52,7 @@ function sourceLabel(source: FollowupSource) {
   return source.kind === 'at' ? `At ${atLabel(source.at_ms)}` : `After process ${source.operation_id} actually stops`;
 }
 function triggerLabel(item: Followup) {
+  if (item.trigger.kind === 'plugin_event') return `${item.trigger.source.extensionId} · ${item.trigger.source.sourceId} · ${item.trigger.source.connectionId}`;
   if (item.trigger.kind === 'at' || item.trigger.kind === 'process_stopped' || item.trigger.kind === 'file' || item.trigger.kind === 'job_stopped' || item.trigger.kind === 'artifact' || item.trigger.kind === 'collection' || item.trigger.kind === 'log_literal' || item.trigger.kind === 'log_end' || item.trigger.kind === 'metric') return sourceLabel(item.trigger);
   if (item.trigger.kind === 'any') return 'When any condition is observed';
   if (item.trigger.kind === 'all') return 'When every condition is observed';
@@ -272,30 +277,48 @@ function evidenceLabel(evidence: FollowupLeafEvidence): string {
   if (evidence.kind === 'job_stopped') return `${evidence.binding.domain} · ${jobSubjectLabel(evidence.binding.subject)} · ${evidence.outcome} · effect ${evidence.effect} · receipt ${evidence.receipt_identity}`;
   return `Process stop · receipt ${evidence.receipt_identity} · epoch ${evidence.receipt_epoch}`;
 }
-function OccurrenceView({ occurrence, family, mediaRead, identity, api, followupId }: { api: ThreadFollowupsAPI; followupId: string; occurrence: FollowupOccurrence; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity }) {
+function OccurrenceView({ occurrence, family, mediaRead, identity, target = identity, definitionExternalId, api, followupId }: { api: ThreadFollowupsAPI; followupId: string; occurrence: FollowupOccurrence; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; target?: ThreadIdentity; definitionExternalId?: string | null }) {
+  const { t } = useI18n();
+  const [navigationError, setNavigationError] = React.useState('');
   const [readingRun, setReadingRun] = React.useState(false);
   const delivery = occurrence.delivery;
+  const externalDelivery = occurrence.external_delivery;
+  const externalId = externalDelivery?.conversation_id ?? (delivery ? undefined : occurrence.target ? occurrence.target.externalConversationId : definitionExternalId);
+  const externalTurnId = externalDelivery?.consumed_by_turn_id ?? externalDelivery?.turn_id;
   const evidence = occurrence.evidence;
+  const event = evidence.kind === 'plugin_events';
+  const receiving = React.useMemo<ThreadIdentity>(() => delivery ? { runtime: 'agent', threadId: delivery.thread_id, branchId: delivery.branch_id } : occurrence.target ? { runtime: 'agent', threadId: occurrence.target.threadId, branchId: occurrence.target.branchId } : target, [delivery, occurrence.target, target]);
   return <div className="space-y-1" aria-label="Follow-up occurrence">
-    <p>{occurrence.hold_reason ? heldReason[occurrence.hold_reason] : `Occurrence ${occurrence.state}`}</p>
-    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Delivery details</summary>
-    <p className="break-all">{occurrence.id} · accepted at {occurrence.accepted_cursor} · source event {occurrence.trigger_cursor}</p>
+    <p>{occurrence.hold_reason ? event ? t(`followups.hold.${occurrence.hold_reason}`) : heldReason[occurrence.hold_reason] : event ? t('arrangements.triggerState', { state: occurrence.state }) : `Occurrence ${occurrence.state}`}</p>
+    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{event ? t('arrangements.deliveryDetails') : 'Delivery details'}</summary>
+    <p className="break-all">{event ? t('arrangements.triggerIdentity', { id: occurrence.id, accepted: occurrence.accepted_cursor, trigger: occurrence.trigger_cursor }) : `${occurrence.id} · accepted at ${occurrence.accepted_cursor} · source event ${occurrence.trigger_cursor}`}</p>
     <p className="break-all text-xs text-muted-foreground">{'sources' in evidence
       ? evidence.sources.map(source => `Condition ${source.source_index + 1} · accepted ${source.accepted_cursor} · ${evidenceLabel(source.evidence)}`).join('; ')
-      : evidence.kind === 'run_completed' || evidence.kind === 'goal_requested' ? `Original Run revision ${evidence.run_revision}` : evidenceLabel(evidence)}</p>
-    {delivery ? <p className="break-all text-xs text-muted-foreground">Input {delivery.input_id} · {delivery.state} · activation {delivery.activation_state}
+      : evidence.kind === 'plugin_events' ? t('arrangements.received', { count: evidence.event_ids.length, time: atLabel(evidence.received_at_ms) }) : evidence.kind === 'run_completed' || evidence.kind === 'goal_requested' ? `Original Run revision ${evidence.run_revision}` : evidenceLabel(evidence)}</p>
+    {event && <p>{t('arrangements.sourceEvents')}: {evidence.kind === 'plugin_events' ? evidence.event_ids.join(', ') : ''}</p>}
+    {externalId ? <p>{t('arrangements.externalTarget', { conversation: externalId })}</p> : (event || delivery) && <p>{t('arrangements.receivingIdentity', { thread: receiving.threadId, branch: receiving.branchId })}</p>}
+    {externalDelivery && <p>{t('arrangements.externalTurn', { turn: externalTurnId ?? '', state: externalFollowupState(externalDelivery.state, t) })}{externalDelivery.hold_reason ? ` · ${externalFollowupHold(externalDelivery.hold_reason, t)}` : ''}</p>}
+    {delivery ? <p className="break-all text-xs text-muted-foreground">{event ? t('arrangements.delivery', { input: delivery.input_id, state: delivery.state, activation: delivery.activation_state }) : `Input ${delivery.input_id} · ${delivery.state} · activation ${delivery.activation_state}`}
       {delivery.run_id && ` · run ${delivery.run_id}`}{delivery.execution_id && ` · child execution ${delivery.execution_id}`}
       {delivery.delivered_cursor !== null && ` · delivered at ${delivery.delivered_cursor}`}{delivery.failure_code && ` · ${delivery.failure_code}`}</p>
-      : <p className="text-xs text-muted-foreground">No input bound</p>}
+      : !externalDelivery && <p className="text-xs text-muted-foreground">{event ? t('arrangements.noDelivery') : 'No input bound'}</p>}
     </details>
+    {event && <Button size="sm" variant="ghost" onClick={() => { setNavigationError(''); void (externalId ? openExternalConversationFromNavigation(externalId) : openThreadFromNavigation(receiving)).catch(cause => setNavigationError(cause instanceof Error ? cause.message : String(cause))); }}>{t('harness.threads.openConversation')}</Button>}
+    {navigationError && <p role="alert">{navigationError}</p>}
     <ThreadFollowupOccurrenceDetails api={api} identity={identity} followupId={followupId} occurrence={occurrence} />
-    {family && delivery?.run_id && <>
-      <Button size="sm" variant="ghost" aria-expanded={readingRun} onClick={() => setReadingRun(value => !value)}>{readingRun ? 'Hide occurrence Run' : 'Read occurrence Run'}</Button>
-      {readingRun && <ThreadRunHistory api={family} mediaRead={mediaRead} identity={identity} runId={delivery.run_id} />}
+    {externalId && externalTurnId && <>
+      <Button size="sm" variant="ghost" aria-expanded={readingRun} onClick={() => setReadingRun(value => !value)}>{t(readingRun ? 'arrangements.externalHide' : 'arrangements.externalRead')}</Button>
+      {readingRun && <React.Suspense fallback={<p>{t('common.loading')}</p>}><div className="h-96"><ExternalConversationView id={externalId} turnId={externalTurnId} readOnly /></div></React.Suspense>}
+    </>}
+    {!externalId && family && delivery?.run_id && <>
+      <Button size="sm" variant="ghost" aria-expanded={readingRun} onClick={() => setReadingRun(value => !value)}>{event ? t(readingRun ? 'arrangements.hideRun' : 'arrangements.viewRun') : readingRun ? 'Hide occurrence Run' : 'Read occurrence Run'}</Button>
+      {readingRun && <ThreadRunHistory api={family} mediaRead={mediaRead} identity={receiving} runId={delivery.run_id} />}
     </>}
   </div>;
 }
-function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; item: Followup }) {
+export function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; item: Followup }) {
+  const { t } = useI18n();
+  const event = item.trigger.kind === 'plugin_event';
   const [open, setOpen] = React.useState(false);
   const [request, setRequest] = React.useState<{ after?: number; previous: (number | undefined)[]; revision: number }>({ previous: [], revision: 0 });
   const [page, setPage] = React.useState<FollowupOccurrencesResult>();
@@ -312,33 +335,34 @@ function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: 
     return () => controller.abort();
   }, [api, identity, item.id, request, open]);
   return <div className="space-y-2">
-    <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Hide occurrence history' : 'Read occurrence history'}</Button>
+    <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(value => !value)}>{event ? t(open ? 'arrangements.hideHistory' : 'arrangements.history') : open ? 'Hide occurrence history' : 'Read occurrence history'}</Button>
     {open && <div aria-label="Follow-up occurrence history" className="space-y-2 border-t pt-2">
-      <p className="text-xs text-muted-foreground">Oldest first.</p>
-      {loading && <p role="status">Reading occurrence history…</p>}
-      {error && <p role="alert">Occurrence history could not be read.</p>}
+      <p className="text-xs text-muted-foreground">{event ? t('arrangements.historyOrder') : 'Oldest first.'}</p>
+      {loading && <p role="status">{event ? t('arrangements.historyLoading') : 'Reading occurrence history…'}</p>}
+      {error && <p role="alert">{event ? t('arrangements.historyError') : 'Occurrence history could not be read.'}</p>}
       {page && <>
-        <p className="text-xs text-muted-foreground">This is a saved page. Refresh to read current delivery states.</p>
-        {page.occurrences.length === 0 && <p>No occurrences in this page.</p>}
-        {page.occurrences.map(occurrence => <div key={occurrence.id} className="rounded border p-2"><OccurrenceView occurrence={occurrence} identity={identity} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div>)}
-        {page.nextCursor !== null && <Button size="sm" variant="outline" disabled={loading} onClick={() => setRequest(value => ({ after: page.nextCursor!, previous: [...value.previous, value.after], revision: value.revision + 1 }))}>Next occurrence page</Button>}
+        <p className="text-xs text-muted-foreground">{event ? t('arrangements.historySaved') : 'This is a saved page. Refresh to read current delivery states.'}</p>
+        {page.occurrences.length === 0 && <p>{event ? t('arrangements.historyEmpty') : 'No occurrences in this page.'}</p>}
+        {page.occurrences.map(occurrence => <div key={occurrence.id} className="rounded border p-2"><OccurrenceView occurrence={occurrence} identity={identity} target={{ runtime: 'agent', threadId: item.thread_id, branchId: item.branch_id }} definitionExternalId={item.external_conversation_id} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div>)}
+        {page.nextCursor !== null && <Button size="sm" variant="outline" disabled={loading} onClick={() => setRequest(value => ({ after: page.nextCursor!, previous: [...value.previous, value.after], revision: value.revision + 1 }))}>{event ? t('arrangements.historyNext') : 'Next occurrence page'}</Button>}
       </>}
-      {request.previous.length > 0 && <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRequest(value => ({ after: value.previous.at(-1), previous: value.previous.slice(0, -1), revision: value.revision + 1 }))}>Previous occurrence page</Button>}
-      <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRequest(value => ({ ...value, revision: value.revision + 1 }))}>{error ? 'Retry occurrence page' : 'Refresh occurrence page'}</Button>
+      {request.previous.length > 0 && <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRequest(value => ({ after: value.previous.at(-1), previous: value.previous.slice(0, -1), revision: value.revision + 1 }))}>{event ? t('arrangements.historyPrevious') : 'Previous occurrence page'}</Button>}
+      <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRequest(value => ({ ...value, revision: value.revision + 1 }))}>{event ? t('arrangements.historyRefresh') : error ? 'Retry occurrence page' : 'Refresh occurrence page'}</Button>
     </div>}
   </div>;
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange, onContentChange }: {
-  api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
+export function ThreadFollowups({ api, botId, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange, onContentChange, focusId, focusToken, visibleArrangementIds }: {
+  api: ThreadFollowupsAPI; botId?: string | null; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
+  focusId?: string; focusToken?: number; visibleArrangementIds?: Set<string>;
   createOpen?: boolean; onCreateOpenChange?(open: boolean): void;
   onContentChange?(present: boolean): void;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = React.useState(false);
-  React.useEffect(() => { if (createOpen && run) { setEditing(true); onCreateOpenChange?.(false); } }, [createOpen, run, onCreateOpenChange]);
+  React.useEffect(() => { if (createOpen && run && !botId) { setEditing(true); onCreateOpenChange?.(false); } }, [createOpen, run, botId, onCreateOpenChange]);
   const [showPast, setShowPast] = React.useState(false);
   const [kind, setKind] = React.useState<FollowupRegisterParams['trigger']['kind']>('at');
   const [repeat, setRepeat] = React.useState<'once' | 'each'>('once');
@@ -394,8 +418,8 @@ export function ThreadFollowups({ api, family, mediaRead, research, identity, ru
   const live = React.useRef(false); const host = React.useRef(getRuntimeEndpointGeneration());
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const current = () => live.current && host.current === getRuntimeEndpointGeneration();
-  const independent = followups.filter(independentFollowup);
-  const hasContent = Boolean(independent.length || registrations.length || registrationError || editing);
+  const independent = followups.filter(item => independentFollowup(item) && item.trigger.kind !== 'plugin_event');
+  const hasContent = Boolean(botId || followups.some(item => item.trigger.kind === 'plugin_event') || independent.length || registrations.length || registrationError || editing);
   React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const pastCount = independent.filter(isPastFollowup).length;
   const processes = operations.filter(operation => operation.executor === 'process_spawn' && operation.execution_owner?.kind === 'kernel'
@@ -430,11 +454,11 @@ export function ThreadFollowups({ api, family, mediaRead, research, identity, ru
       if (intent.current?.key === item.id) { intent.current = null; setUncertain(false); }
     }
   });
-  if (!run && independent.length === 0 && registrations.length === 0 && !registrationError) return null;
-  return <section className="w-full min-w-0 space-y-3 typography-meta [&_select]:max-w-full [&_select]:rounded-md [&_select]:border [&_select]:bg-background [&_select]:p-1.5 [&_pre]:break-words" aria-label={t('followups.title')}>
+  if (!botId && !followups.some(item => item.trigger.kind === 'plugin_event') && !run && independent.length === 0 && registrations.length === 0 && !registrationError) return null;
+  return <section className="w-full min-w-0 space-y-3 typography-meta [&_select]:max-w-full [&_select]:rounded-md [&_select]:border [&_select]:bg-background [&_select]:p-1.5 [&_pre]:break-words" aria-label={t(botId ? 'arrangements.title' : 'followups.title')}>
     <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-muted-foreground">{t('followups.pendingCount', { count: independent.length - pastCount })}</span>{run && <Button variant="ghost" size="sm" aria-expanded={editing}
       onClick={() => setEditing(value => !value)}><Icon name={editing ? 'arrow-up-s' : 'add'} className="mr-1 size-3.5" />{t(editing ? 'followups.closeForm' : 'followups.create')}</Button>}</div>
-    {!editing && independent.length === pastCount && <p className="py-1 leading-relaxed text-muted-foreground">{t('followups.empty')}</p>}
+    {!editing && (!botId || independent.length > 0) && independent.length === pastCount && <p className="py-1 leading-relaxed text-muted-foreground">{t('followups.empty')}</p>}
     {editing && <div className="space-y-3 rounded-lg bg-muted/20 p-3 [&_label]:space-y-1.5 [&_select]:ml-0 [&_select]:w-full">
       <p className="leading-relaxed text-muted-foreground">{t('followups.description')}</p>
       <label className="block">{t('followups.repetition')}<select aria-label="Follow-up repetition" value={repeat} disabled={pending || uncertain}
@@ -486,10 +510,12 @@ export function ThreadFollowups({ api, family, mediaRead, research, identity, ru
       <p className="break-all text-xs text-muted-foreground">{item.id} · original run {item.sourceRunId} · {item.paths.join(', ')}</p>
       <Button variant="ghost" size="sm" disabled={pending} onClick={() => void discardRegistration(item)}>Cancel unconfirmed registration</Button>
     </div>)}
+    <ThreadEventArrangements focusId={focusId} focusToken={focusToken} visibleArrangementIds={visibleArrangementIds} createOpen={createOpen} onCreateOpenChange={onCreateOpenChange} api={api} identity={identity} botId={botId} followups={followups} pending={pending} act={act}
+      records={item => <FollowupOccurrences api={api} family={family} mediaRead={mediaRead} identity={identity} item={item} />} />
     {pastCount > 0 && <Button variant="ghost" size="sm" aria-expanded={showPast} onClick={() => setShowPast(value => !value)}>
       <Icon name={showPast ? 'arrow-up-s' : 'arrow-down-s'} className="mr-1 size-3.5" />{t(showPast ? 'followups.hideHistory' : 'followups.history', { count: pastCount })}
     </Button>}
-    {independent.filter(item => showPast || !isPastFollowup(item)).map(item => {
+    {independent.filter(item => (!visibleArrangementIds || visibleArrangementIds.has(item.id)) && (showPast || !isPastFollowup(item))).map(item => {
       const ended = isPastFollowup(item);
       const logFailed = item.sources.some(source => source.log?.failure_code);
       const metricFailed = item.sources.some(source => source.metric?.failure_code && source.metric.failure_code !== 'sample_pending');

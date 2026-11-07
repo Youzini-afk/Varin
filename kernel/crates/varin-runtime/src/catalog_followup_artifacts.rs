@@ -139,9 +139,9 @@ pub(super) fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) ->
             ))
         }
     };
-    let run: Run = record(db, "runs", &d.source_run_id)?;
+    let run: Run = record(db, "runs", d.work_run()?)?;
     let binding = require_target(db, &run, operation)?;
-    let observer = host_jobs::scopes(db, &d.thread_id, &d.branch_id, Some(&d.source_run_id))?
+    let observer = host_jobs::scopes(db, &d.thread_id, &d.branch_id, Some(d.work_run()?))?
         .into_iter()
         .find(|scope| Some(&scope.source) == d.source.as_ref())
         .ok_or_else(|| {

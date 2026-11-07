@@ -241,7 +241,7 @@ export class ThreadCollaboration {
     do {
       events = await runtime.events(this.launchCursor, 256, signal);
       signal.throwIfAborted();
-      if (events.some(event => ['bot.matter.updated', 'bot.work_queued', 'child.accepted', 'child.report_ready', 'ingress.run_ready', 'run.changed', 'thread.deleted'].includes(event.kind)
+      if (events.some(event => event.kind.startsWith('followup.') || ['bot.matter.updated', 'bot.work_queued', 'child.accepted', 'child.report_ready', 'ingress.run_ready', 'run.changed', 'thread.deleted'].includes(event.kind)
         || event.kind === 'execution.committed' && (event.data as { kind?: string })?.kind === 'state_changed')) this.owners.onWorkChanged?.();
       for (const event of events) {
         if (event.kind.startsWith('operation.')) {

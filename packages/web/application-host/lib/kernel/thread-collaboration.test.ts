@@ -70,7 +70,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
       child.report = {outcome:'failed',sender_thread_id:child.child_thread_id,run_id:null,history_ids:[],detail:detail ?? code};
       return structuredClone(child);
     }),
-    status: async () => ({ eventCursor: 0 }), events: async () => [],
+    status: async () => ({ eventCursor: 0 }), events: async (): Promise<import('./protocol.generated.js').RuntimeEvent[]> => [],
     managedSource: vi.fn(async () => service), releaseMcpResourceSource: vi.fn(async () => { trace.push('observers-released'); }),
     retireSourceGrants: vi.fn(async (_runId: string) => { trace.push('run-grants-retired'); }),
     releaseChildResources: vi.fn(async (executionId: string) => {
@@ -82,6 +82,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
   const kernel = { reconcileChildToolHandoffs() {}, releaseChildToolHandoff: vi.fn(),
     claimChildSource: vi.fn(async () => ({ grantId: 'original-cleanup-grant' })), scoped: () => scoped,
     revokeGrant: vi.fn(async () => { trace.push('cleanup-authority-retired'); }) };
+  const onWorkChanged = vi.fn();
   const continueRun = vi.fn(async () => {});
   const prepareContext = vi.fn();
   const prepareModel = vi.fn(async (value: DelegatedExecution, _signal: AbortSignal) => value);
@@ -89,7 +90,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: prepareContext as never, prepareModel,
     resolveLiveSource: async () => { throw new Error('Must not reacquire a live source'); }, continueRun,
     ...(reconcileDomainReceipts ? { reconcileDomainReceipts } : {}),
-    recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
+    recoverLaunches: async () => {}, onWorkChanged, onError: (_id, error) => errors.push(error) });
   const complete = () => {
     child.state = 'completed'; child.revision += 1;
     child.report = { outcome: 'succeeded', sender_thread_id: child.child_thread_id, run_id: child.receipt!.run_id, history_ids: [], detail: null };
@@ -97,7 +98,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
       workspace_id: source.workspace_id, branch_id: childSource.branch_id!, result_revision: 4,
       root: 'original-published-result', base_root: pin.root, record_id: 'original-result-record' } };
   };
-  return { child, source, trace, errors, service, runtime, kernel, scoped, continueRun, prepareContext, prepareModel, open, complete };
+  return { onWorkChanged, child, source, trace, errors, service, runtime, kernel, scoped, continueRun, prepareContext, prepareModel, open, complete };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -337,5 +338,23 @@ it.each(['activation-held', 'bot-suspended'])('selector pre-admission %s keeps t
     expect(f.runtime.failChild).not.toHaveBeenCalled(); expect(f.prepareContext).not.toHaveBeenCalled();
     expect(f.kernel.releaseChildToolHandoff).not.toHaveBeenCalled(); expect(f.continueRun).not.toHaveBeenCalled();
     expect(f.child.state).toBe('preparing'); expect(f.child.report).toBeNull(); expect(f.errors).toEqual([]);
+  } finally { collaboration.stop(); }
+});
+
+it('invalidates Bot arrangement views once per durable change page without starting model work', async () => {
+  const f = fixture(); f.runtime.childExecutions = async () => [];
+  const events = vi.fn(async () => [] as import('./protocol.generated.js').RuntimeEvent[]);
+  events.mockResolvedValueOnce([
+    { cursor: 1, subject: 'arrangement', revision: 2, kind: 'followup.changed', data: {} },
+    { cursor: 2, subject: 'arrangement', revision: 2, kind: 'followup.source_status_changed', data: {} },
+  ] as import('./protocol.generated.js').RuntimeEvent[]);
+  f.runtime.events = events;
+  const collaboration = f.open();
+  try {
+    await collaboration.recover();
+    expect(f.onWorkChanged).toHaveBeenCalledTimes(1);
+    expect(f.continueRun).not.toHaveBeenCalled();
+    await collaboration.recover();
+    expect(f.onWorkChanged).toHaveBeenCalledTimes(1);
   } finally { collaboration.stop(); }
 });

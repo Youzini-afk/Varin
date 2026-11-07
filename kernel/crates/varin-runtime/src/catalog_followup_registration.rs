@@ -394,6 +394,37 @@ impl FollowupRegistration {
     deny_unknown_fields
 )]
 pub enum FollowupToolInput {
+    Sources,
+    Arrange {
+        followup_id: Option<String>,
+        expected_revision: Option<u64>,
+        name: String,
+        instruction: String,
+        source: PluginEventSource,
+        #[serde(default = "empty_event_filter")]
+        filter: Value,
+        #[serde(default)]
+        timing: EventTiming,
+        #[serde(default = "repeat_events")]
+        repeat: FollowupRepeat,
+        thread_id: Option<String>,
+        branch_id: Option<String>,
+        external_conversation_id: Option<String>,
+        first_contact: Option<FirstContactPolicy>,
+    },
+    Backlog {
+        followup_id: String,
+        expected_revision: u64,
+        control: EventBacklogAction,
+    },
+    Route {
+        followup_id: String,
+        expected_revision: u64,
+        object_id: String,
+        thread_id: String,
+        branch_id: String,
+        external_conversation_id: Option<String>,
+    },
     Register {
         #[serde(default)]
         repeat: FollowupRepeat,
@@ -420,6 +451,12 @@ pub enum FollowupToolInput {
         expected_revision: u64,
         control: FollowupControlAction,
     },
+}
+fn empty_event_filter() -> Value {
+    json!({})
+}
+fn repeat_events() -> FollowupRepeat {
+    FollowupRepeat::Each
 }
 impl FollowupToolInput {
     pub fn registration(&self) -> Option<FollowupRegistration> {
@@ -710,7 +747,7 @@ impl Catalog {
         })
     }
 }
-fn validate_invocation(
+pub(super) fn validate_invocation(
     read: ToolInvocationRead,
     call: ToolCall,
     schema: ToolSchema,
@@ -794,7 +831,7 @@ impl FollowupRegistrationPreparation {
         })
     }
 }
-fn require_invocation(
+pub(super) fn require_invocation(
     tx: &Transaction<'_>,
     epoch: u64,
     captured: &Operation,
@@ -838,7 +875,7 @@ fn require_invocation(
     }
     Ok(())
 }
-fn finish_tool(
+pub(super) fn finish_tool(
     tx: &Transaction<'_>,
     op: &mut Operation,
     completion: &result_content::ToolCompletionMetadata,
@@ -939,7 +976,12 @@ impl Catalog {
     pub fn get_tool_followup(&self, p: PreparedFollowupToolRead, id: &str) -> Result<FollowupRead> {
         self.validate_tool_invocation(&p.invocation, true)?;
         let value = self.capture_followup(id)?;
-        if value.followup.thread_id != p.thread || value.followup.branch_id != p.branch {
+        if !events::tool_owns(
+            &self.db,
+            &record(&self.db, "followups", id)?,
+            &p.thread,
+            &p.branch,
+        )? {
             return Err(RuntimeError::Conflict(
                 "follow-up belongs to another Thread or branch".into(),
             ));
@@ -964,7 +1006,7 @@ impl Catalog {
     ) -> Result<FollowupOccurrenceRead> {
         self.validate_tool_invocation(&p.invocation, true)?;
         let d: Definition = record(&self.db, "followups", id)?;
-        if d.thread_id != p.thread || d.branch_id != p.branch {
+        if !events::tool_owns(&self.db, &d, &p.thread, &p.branch)? {
             return Err(RuntimeError::Conflict(
                 "follow-up belongs to another Thread or branch".into(),
             ));
@@ -979,7 +1021,7 @@ impl Catalog {
     ) -> Result<FollowupOccurrencesResult> {
         self.validate_tool_invocation(&p.invocation, true)?;
         let d: Definition = record(&self.db, "followups", id)?;
-        if d.thread_id != p.thread || d.branch_id != p.branch {
+        if !events::tool_owns(&self.db, &d, &p.thread, &p.branch)? {
             return Err(RuntimeError::Conflict(
                 "follow-up belongs to another Thread or branch".into(),
             ));
@@ -988,6 +1030,16 @@ impl Catalog {
     }
     pub fn list_tool_followups(&self, p: PreparedFollowupToolRead) -> Result<Vec<Followup>> {
         self.validate_tool_invocation(&p.invocation, true)?;
+        if let Some(bot) = bot::thread_bot(&self.db, &p.thread)? {
+            let mut result =
+                self.bot_arrangements(&bot, principals::thread(&self.db, &p.thread)?.as_deref())?;
+            result.extend(
+                self.followups(&p.thread)?
+                    .into_iter()
+                    .filter(|d| d.owner == FollowupOwner::Work && d.branch_id == p.branch),
+            );
+            return Ok(result);
+        }
         Ok(self
             .followups(&p.thread)?
             .into_iter()
@@ -1033,7 +1085,7 @@ impl Catalog {
     ) -> Result<FollowupControlPreparation> {
         let run = self.run(&c.run_id)?;
         let d: Definition = record(&self.db, "followups", id)?;
-        if d.thread_id != run.thread_id || d.branch_id != run.branch_id {
+        if !events::tool_owns(&self.db, &d, &run.thread_id, &run.branch_id)? {
             return Err(RuntimeError::Conflict(
                 "follow-up control belongs to another Thread or branch".into(),
             ));

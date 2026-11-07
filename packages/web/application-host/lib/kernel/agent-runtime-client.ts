@@ -859,6 +859,63 @@ export class AgentRuntimeClient {
   releaseFileFollowup(input: CalendarProtocol.FollowupFileReleaseParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFileReleaseResult> {
     return this.kernel.agentRuntimeRequest('runtime.followup.file.release', input, signal);
   }
+  botArrangements(input: CalendarProtocol.FollowupArrangementListParams, signal?: AbortSignal): Promise<Followup[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.arrangements.list', input, signal);
+  }
+  putArrangement(input: CalendarProtocol.FollowupArrangementPutParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.arrangement.put', input, signal);
+  }
+  followupBacklog(input: CalendarProtocol.FollowupBacklogParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.backlog', input, signal);
+  }
+  followupSourceRoutes(followupId: string, signal?: AbortSignal): Promise<CalendarProtocol.FollowupSourceRoute[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.sourceRoute.list', { followupId }, signal);
+  }
+  putFollowupSourceRoute(input: CalendarProtocol.FollowupSourceRoute, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.sourceRoute.put', input, signal);
+  }
+  removeFollowupSourceRoute(input: CalendarProtocol.FollowupSourceRouteRemove, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.sourceRoute.remove', input, signal);
+  }
+  readEventAttachment(input: CalendarProtocol.FollowupEventAttachmentReadParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventAttachmentRead> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventAttachment.read', input, signal);
+  }
+  eventTransportGet(input: CalendarProtocol.EventTransportKey, signal?: AbortSignal): Promise<CalendarProtocol.EventTransportConsumer | null> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.get', input, signal);
+  }
+  eventTransportBind(input: CalendarProtocol.EventTransportBind, signal?: AbortSignal): Promise<CalendarProtocol.EventTransportConsumer> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.bind', input, signal);
+  }
+  eventTransportRead(input: CalendarProtocol.EventTransportRead, signal?: AbortSignal): Promise<CalendarProtocol.EventTransportPage> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.read', input, signal);
+  }
+  eventTransportAck(input: CalendarProtocol.EventTransportAck, signal?: AbortSignal): Promise<CalendarProtocol.EventTransportConsumer> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.ack', input, signal);
+  }
+  eventTransportRelease(input: CalendarProtocol.EventTransportAccess, signal?: AbortSignal): Promise<CalendarProtocol.EventTransportConsumer> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.release', input, signal);
+  }
+  eventTransportSources(signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventSourceIdentity[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.sources', {}, signal);
+  }
+  eventTransportImports(signal?: AbortSignal): Promise<CalendarProtocol.EventTransportImport[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.imports', {}, signal);
+  }
+  eventTransportImportReleased(input: CalendarProtocol.FollowupEventSourceIdentity, signal?: AbortSignal): Promise<null> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventTransport.importReleased', input, signal);
+  }
+  eventSourceSubscriptions(signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventSourceSubscription[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventSources.list', {}, signal);
+  }
+  eventSourceCheckpoint(identity: CalendarProtocol.FollowupEventSourceIdentity, signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventSourceCheckpoint> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventSources.get', identity, signal);
+  }
+  updateEventSourceStatus(input: CalendarProtocol.FollowupEventSourceStatusParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventSourceCheckpoint> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.eventSources.status', input, signal);
+  }
+  receivePluginEvents(input: CalendarProtocol.FollowupEventReceiveParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventReceiveReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.events.receive', input, signal);
+  }
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
     return registerUserFollowup(this.kernel, this, input, this.resolveLiveSource, signal);
   }

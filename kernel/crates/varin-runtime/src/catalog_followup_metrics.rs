@@ -152,7 +152,7 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fol
     if !matches!(source, FollowupSource::Metric { .. }) {
         return Err(RuntimeError::Invalid("not a metric source".into()));
     }
-    let run: Run = record(db, "runs", &d.source_run_id)?;
+    let run: Run = record(db, "runs", d.work_run()?)?;
     Ok(FollowupMetricWork {
         key: FollowupResearchKey {
             followup_id: d.id.clone(),

@@ -210,7 +210,7 @@ impl FollowupTrigger {
                 condition: *condition,
             }],
             Self::Any { sources } | Self::All { sources } => sources.clone(),
-            Self::RunCompleted { .. } | Self::GoalRequested { .. } => vec![],
+            Self::PluginEvent { .. } | Self::RunCompleted { .. } | Self::GoalRequested { .. } => vec![],
         }
     }
 }
@@ -309,7 +309,7 @@ fn observe_leaf(
             )
         }
         FollowupSource::JobStopped { operation_id } => {
-            let run: Run = record(tx, "runs", &d.source_run_id)?;
+            let run: Run = record(tx, "runs", d.work_run()?)?;
             let op = host_jobs::require_observation(tx, &run, operation_id)?;
             let Some(receipt) = op.external_receipt.as_ref().filter(|r| r.executor_stopped) else {
                 return Ok(None);

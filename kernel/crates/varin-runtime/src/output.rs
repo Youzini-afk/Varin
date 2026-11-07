@@ -162,15 +162,23 @@ impl crate::content::ContentStore {
         &self,
         output: &OutputBody,
     ) -> Result<Value, crate::catalog::RuntimeError> {
+        self.save_output_with_dependencies(output, Vec::new())
+    }
+    /// Additional byte references are admitted by the owning typed producer, never output JSON.
+    pub(crate) fn save_output_with_dependencies(
+        &self,
+        output: &OutputBody,
+        mut dependencies: Vec<String>,
+    ) -> Result<Value, crate::catalog::RuntimeError> {
         let stored = output.clone().map_media(|media| self.store_media(media))?;
-        let dependencies = stored
+        dependencies.extend(stored
             .parts
             .iter()
             .filter_map(|part| match part {
                 OutputPart::Media { media } => Some(media.content_ref.content_object.clone()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>());
         self.save_with_dependencies(&serde_json::to_value(stored)?, dependencies)
     }
     pub(crate) fn load_stored_output(
@@ -740,7 +748,6 @@ impl crate::content::ContentStore {
 
 #[cfg(test)]
 mod reference_attachment_intent_tests {
-    use super::*;
 
     #[test]
     fn raw_reference_retry_retains_selected_files_and_only_original_images() {

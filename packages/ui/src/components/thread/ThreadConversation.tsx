@@ -529,7 +529,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       context: <button type="button" onClick={() => openThreadContext(identity, initialWorkspacePath, undefined, readOnly)}>{t('harness.overview.contextDetails')}</button>,
       memory: snapshot && (snapshot.thread.bot_id || snapshot.context.checkpoint?.personalization) ? <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} /> : undefined,
       research: <>{!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}</>,
-      followups: <>{!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
+      followups: <>{!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} botId={snapshot.thread.bot_id} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
         cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}</>,
       recovery: <>{!readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}</>,

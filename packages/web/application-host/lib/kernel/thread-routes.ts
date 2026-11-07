@@ -22,7 +22,7 @@ import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter, ThreadPreAdmissionError } from './thread-adapter.js';
 import { WorkspaceBackendUnavailableError } from './native-workspaces.js';
-import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, getThreadFollowupOccurrence, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
+import { listThreadSourceRoutes, putThreadSourceRoute, removeThreadSourceRoute, putThreadArrangement, controlThreadBacklog, listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, getThreadFollowupOccurrence, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -107,7 +107,8 @@ const inputBeforeAdmission = <T>(decode: () => T): T => {
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI,
-  integrations?: Pick<ReturnType<typeof import('./thread-integrations.js').createThreadIntegrations>, 'submit'>): void {
+  integrations?: Pick<ReturnType<typeof import('./thread-integrations.js').createThreadIntegrations>, 'submit'>,
+  eventSources?: Pick<import('../extensions/event-sources.js').PluginEventSources, 'discover' | 'validateArrangement'>): void {
   const fields: Record<string, readonly string[]> = {
     'next-step': ['runtime', 'threadId', 'branchId', 'runId', 'headId'],
     'child/integration': ['runtime', 'threadId', 'branchId', 'key', 'executionId', 'publicationId', 'action', 'sourceOwner', 'expectedBindingFingerprint', 'resolutions', 'operationId', 'sourceRunId'],
@@ -170,6 +171,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'followup/registrations/pending': ['runtime', 'threadId', 'branchId'],
     'followup/registration/cancel': ['runtime', 'threadId', 'branchId', 'key', 'runId'],
     'followup/register': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'trigger', 'instruction', 'repeat'],
+    'followup/arrangements': ['runtime', 'threadId', 'branchId', 'botId'],
+    'followup/event-sources': ['runtime', 'threadId', 'branchId'],
+    'followup/source-routes': ['runtime', 'threadId', 'branchId', 'followupId'],
+    'followup/source-route/put': ['runtime', 'threadId', 'branchId', 'route'],
+    'followup/source-route/remove': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'objectId'],
+    'followup/arrangement/put': ['runtime', 'threadId', 'branchId', 'arrangement'],
+    'followup/backlog': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
     'followup/occurrence': ['runtime', 'threadId', 'branchId', 'followupId', 'occurrenceId'],
     'followup/occurrences': ['runtime', 'threadId', 'branchId', 'followupId', 'after'],
     'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
@@ -468,6 +476,48 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return registerThreadFollowup(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId),
       trigger: followupTrigger(body.trigger), instruction: text(body.instruction),
       ...(body.repeat === undefined ? {} : { repeat: body.repeat }) }, signal);
+  });
+  post('followup/arrangements', async (body, signal) => {
+    const thread = await adapter.requireIdentity(identity(body), signal);
+    const botId = text(body.botId);
+    if (thread.bot_id !== botId) throw new Error('Select an entry conversation for this Bot');
+    return adapter.runtime.botArrangements({ botId, principalId: currentRequestPrincipal() ?? null }, signal);
+  });
+  post('followup/event-sources', async (body, signal) => {
+    await adapter.requireIdentity(identity(body), signal);
+    if (!eventSources) throw new Error('Plugin event sources are unavailable');
+    return eventSources.discover(currentRequestPrincipal() ?? null, signal);
+  });
+  post('followup/source-routes', (body, signal) => listThreadSourceRoutes(adapter, identity(body), text(body.followupId), signal));
+  post('followup/source-route/put', (body, signal) => {
+    const value = object(body.route);
+    if (Object.keys(value).some(key => !['followupId', 'expectedRevision', 'objectId', 'threadId', 'branchId', 'externalConversationId', 'senderId', 'userInput'].includes(key))) throw new Error('Invalid source route field');
+    if (typeof value.userInput !== 'boolean') throw new Error('Explicit user input selection is required');
+    if (value.userInput && !currentRequestPrincipal()) throw new Error('A verified user identity is required for personal chat input');
+    const route: import('@varin/protocol').FollowupSourceRoute = {
+      followupId: text(value.followupId), expectedRevision: revision(value.expectedRevision), objectId: text(value.objectId),
+      threadId: text(value.threadId), branchId: text(value.branchId), userInput: value.userInput,
+      ...(value.externalConversationId === undefined ? {} : { externalConversationId: value.externalConversationId === null ? null : text(value.externalConversationId) }),
+      ...(value.senderId == null ? {} : { senderId: text(value.senderId) }),
+    };
+    if (route.userInput && !route.senderId) throw new Error('Your exact source sender identity is required');
+    return putThreadSourceRoute(adapter, { ...identity(body), route }, signal);
+  });
+  post('followup/source-route/remove', (body, signal) => removeThreadSourceRoute(adapter, { ...identity(body),
+    followupId: text(body.followupId), expectedRevision: revision(body.expectedRevision), objectId: text(body.objectId) }, signal));
+  post('followup/arrangement/put', async (body, signal) => {
+    const target = identity(body);
+    await adapter.requireIdentity(target, signal);
+    if (!eventSources) throw new Error('Plugin event sources are unavailable');
+    const arrangement = object(body.arrangement) as unknown as import('@varin/protocol').FollowupArrangementPutParams;
+    await eventSources.validateArrangement(currentRequestPrincipal() ?? null, arrangement.source,
+      object(arrangement.filter) as import('@varin/extension-contract').JsonObject, signal);
+    return putThreadArrangement(adapter, { ...target, arrangement }, signal);
+  });
+  post('followup/backlog', (body, signal) => {
+    if (body.action !== 'process_now' && body.action !== 'discard') throw new Error('Invalid backlog control');
+    return controlThreadBacklog(adapter, { ...identity(body), followupId: text(body.followupId),
+      expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
   });
   post('followup/occurrence', (body, signal) => getThreadFollowupOccurrence(adapter, identity(body), text(body.followupId), text(body.occurrenceId), signal));
   post('followup/occurrences', (body, signal) => listThreadFollowupOccurrences(adapter, identity(body), text(body.followupId),

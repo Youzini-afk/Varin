@@ -109,7 +109,7 @@ impl Catalog {
         let definition = optional_record::<Definition>(&self.db, "followups", id)?;
         if let Some(d) = &definition {
             if d.actor != FollowupActor::User
-                || d.source_run_id != run_id
+                || d.source_run_id.as_deref() != Some(run_id)
                 || d.thread_id != run.thread_id
                 || d.branch_id != run.branch_id
             {

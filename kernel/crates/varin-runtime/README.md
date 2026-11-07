@@ -28,6 +28,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Protocol adapters, frozen bodies and credential resolution | [providers](src/providers/README.md), [request_body.rs](src/request_body.rs) |
 | Child/family work, current/history directory, messages and continuation | [catalog_collaboration.rs](src/catalog_collaboration.rs), [catalog_delegated.rs](src/catalog_delegated.rs), [catalog_family.rs](src/catalog_family.rs), [catalog_messages.rs](src/catalog_messages.rs), [catalog_activation.rs](src/catalog_activation.rs) |
 | Durable conditions and deliveries | [catalog_observations.rs](src/catalog_observations.rs), [catalog_followups.rs](src/catalog_followups.rs), [catalog_process_wait.rs](src/catalog_process_wait.rs), [catalog_reply_wait.rs](src/catalog_reply_wait.rs) |
+| Bot arrangements, event receipts and matching | [catalog_followup_events.rs](src/catalog_followup_events.rs), [catalog_followup_event_transport.rs](src/catalog_followup_event_transport.rs), [catalog_followup_event_files.rs](src/catalog_followup_event_files.rs), [catalog_followup_external.rs](src/catalog_followup_external.rs) |
 | Goals, Bot suspension and memory work | [catalog_goals.rs](src/catalog_goals.rs), [catalog_bot.rs](src/catalog_bot.rs), [catalog_memory_work.rs](src/catalog_memory_work.rs) |
 | Request usage, retained billing attribution and content-free ledger | [catalog_usage.rs](src/catalog_usage.rs), [catalog_usage_ledger.rs](src/catalog_usage_ledger.rs) |
 | External Harness bindings, admissions and observations (not native execution loops) | [catalog_external.rs](src/catalog_external.rs) |
@@ -43,14 +44,17 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
   Preflight recognizes each actual layout rather than assuming all generations >=81 contain Zone2.
   Original content identities, captures and paid receipts survive. Conversion, marker and upgrade
-  event commit atomically before epoch changes or recovery.
+  event commit atomically before epoch changes or recovery. Format 89 extends the original follow-up
+  owner with Bot-owned arrangements, source receipts, per-arrangement matching watermarks, object routes
+  and remote consumers. Existing work follow-ups retain their source Runs and original receipts;
+  event delivery reuses native ingress or the real external turn ledger without synthetic Runs.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.
