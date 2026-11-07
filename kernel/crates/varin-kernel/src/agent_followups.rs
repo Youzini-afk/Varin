@@ -12,6 +12,237 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     match method {
+        "runtime.followup.eventAttachment.read" => {
+            let input = serde_json::from_value(params)?;
+            let prepared = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .prepare_event_attachment_read(input)
+                .map_err(domain)?;
+            let result = prepared.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.followup.eventTransport.bind" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .bind_event_transport(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.eventTransport.read" => {
+            let input = serde_json::from_value(params)?;
+            let prepared = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .prepare_event_transport_read(input)
+                .map_err(domain)?;
+            let result = prepared.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.followup.eventTransport.ack" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .ack_event_transport(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.eventTransport.release" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .release_event_transport(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.eventTransport.get" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .event_transport_consumer(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.eventTransport.sources" => Ok(serde_json::to_value(
+            runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .event_transport_sources()
+                .map_err(domain)?,
+        )?),
+        "runtime.followup.eventTransport.imports" => Ok(serde_json::to_value(
+            runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .event_transport_imports()
+                .map_err(domain)?,
+        )?),
+        "runtime.followup.eventTransport.importReleased" => {
+            let input = serde_json::from_value(params)?;
+            runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .mark_event_import_released(input)
+                .map_err(domain)?;
+            Ok(Value::Null)
+        }
+        "runtime.followup.sourceRoute.remove" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .remove_event_source_route(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.sourceRoute.put" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .put_event_source_route(input)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.sourceRoute.list" => {
+            let id = params
+                .get("followupId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Protocol("followupId required".into()))?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .event_source_routes(id)
+                    .map_err(domain)?,
+            )?)
+        }
+
+        "runtime.followup.arrangement.put" => {
+            let p = serde_json::from_value(params)?;
+            let capture = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .prepare_arrangement(p)
+                .map_err(domain)?;
+            let prepared = capture.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let result = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .admit_arrangement(prepared)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.followup.arrangements.list" => {
+            let bot = params
+                .get("botId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Protocol("botId required".into()))?;
+            let principal = params.get("principalId").and_then(Value::as_str);
+            let result = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .bot_arrangements(bot, principal)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.followup.events.receive" => {
+            let input = serde_json::from_value(params)?;
+            let capture = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .prepare_event_receive(input)
+                .map_err(domain)?;
+            let prepared = capture.load().map_err(domain)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            let result = runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .admit_event_receive(prepared)
+                .map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.followup.eventSources.list" => Ok(serde_json::to_value(
+            runtime
+                .catalog()
+                .lock()
+                .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                .event_source_subscriptions()
+                .map_err(domain)?,
+        )?),
+        "runtime.followup.eventSources.get" => {
+            let identity = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .event_source_checkpoint(&identity)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.eventSources.status" => {
+            let identity = serde_json::from_value(params["identity"].clone())?;
+            let status = serde_json::from_value(params["status"].clone())?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .update_event_source_status(identity, status)
+                    .map_err(domain)?,
+            )?)
+        }
+        "runtime.followup.backlog" => {
+            let input = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(
+                runtime
+                    .catalog()
+                    .lock()
+                    .map_err(|_| KernelError::Storage("Catalog owner unavailable".into()))?
+                    .control_event_backlog(input)
+                    .map_err(domain)?,
+            )?)
+        }
         "runtime.followup.registration.prepare" => {
             let p: FollowupFilePrepareParams = serde_json::from_value(params)?;
             let capture = runtime

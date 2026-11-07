@@ -680,6 +680,8 @@ pub(crate) fn spawn(
                                 | "runtime.messages.send"
                                 | "runtime.computer.event.accept"
                                 | "runtime.followup.register" | "runtime.followup.registration.prepare"
+                                | "runtime.followup.sourceRoute.remove" | "runtime.followup.sourceRoute.put" | "runtime.followup.sourceRoute.list"
+                                | "runtime.followup.arrangement.put" | "runtime.followup.arrangements.list" | "runtime.followup.events.receive" | "runtime.followup.eventSources.list" | "runtime.followup.eventSources.get" | "runtime.followup.eventSources.status" | "runtime.followup.backlog"
                                 | "runtime.calendar.sync"
                                 | "runtime.calendar.admit"
                                 | "runtime.calendar.prepare"

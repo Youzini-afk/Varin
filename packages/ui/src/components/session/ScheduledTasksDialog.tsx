@@ -84,7 +84,11 @@ export function ScheduledTasksDialog() {
   }, [open, selectedProjectID, dismissRunReplacement]);
   const selectedManually = React.useRef(false);
   React.useEffect(() => { if (!open) selectedManually.current = false; }, [open]);
+  const arrangementFocus = useUIStore(state => state.scheduledTasksFocus);
   const [view, setView] = React.useState<'scheduled' | 'followups'>('scheduled');
+  const [visitedFollowups, setVisitedFollowups] = React.useState(false);
+  React.useEffect(() => { if (open && view === 'followups') setVisitedFollowups(true); }, [open, view]);
+  React.useEffect(() => { if (open && arrangementFocus) setView('followups'); }, [open, arrangementFocus]);
   const [query, setQuery] = React.useState('');
   const [filter, setFilter] = React.useState<'all' | 'enabled' | 'paused' | 'completed'>('all');
   const [createFollowUp, setCreateFollowUp] = React.useState(false);
@@ -482,9 +486,9 @@ export function ScheduledTasksDialog() {
   );
 
   const sectionTabs = (
-    <div className="flex items-center gap-1" role="group" aria-label={t('tasksHub.title')}>
+    <div className="flex items-center gap-1" role="group" aria-label={t(botWorkbench ? 'arrangements.title' : 'tasksHub.title')}>
       <Button size="sm" variant={view === 'scheduled' ? 'secondary' : 'ghost'} aria-pressed={view === 'scheduled'} onClick={() => setView('scheduled')}><Icon name="calendar-schedule" className="mr-1.5 size-4" />{t('tasksHub.scheduled')}</Button>
-      <Button size="sm" variant={view === 'followups' ? 'secondary' : 'ghost'} aria-pressed={view === 'followups'} onClick={() => setView('followups')}><Icon name="timer" className="mr-1.5 size-4" />{t('tasksHub.followUps')}</Button>
+      <Button size="sm" variant={view === 'followups' ? 'secondary' : 'ghost'} aria-pressed={view === 'followups'} onClick={() => setView('followups')}><Icon name="timer" className="mr-1.5 size-4" />{t(botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</Button>
     </div>
   );
 
@@ -493,13 +497,13 @@ export function ScheduledTasksDialog() {
     <DropdownMenuContent align="end">
       <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>Agent calendar</DropdownMenuItem>
       <DropdownMenuItem disabled={projects.length === 0} onSelect={openNewTaskEditor}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t('tasksHub.followUps')}</DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t(botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>;
 
   const tasksContent = <div className="space-y-6">
     <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : 'tasksHub.followUpsDescription')}</p></div>
+      <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : botWorkbench ? 'arrangements.description' : 'tasksHub.followUpsDescription')}</p></div>
       {createButton}
     </div>
     {sectionTabs}
@@ -510,7 +514,8 @@ export function ScheduledTasksDialog() {
         {projectSelector}
       </div>
       {tasksList}
-    </div> : open ? <FollowUpTasksPanel createOpen={createFollowUp} onCreateOpenChange={setCreateFollowUp} /> : null}
+    </div> : null}
+    {open && (view === 'followups' || visitedFollowups) && <div hidden={view !== 'followups'}><FollowUpTasksPanel focus={arrangementFocus ?? undefined} createOpen={createFollowUp} onCreateOpenChange={setCreateFollowUp} /></div>}
   </div>;
 
   return (
@@ -518,13 +523,13 @@ export function ScheduledTasksDialog() {
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title={t('tasksHub.title')}
+          title={t(botWorkbench ? 'arrangements.title' : 'tasksHub.title')}
           onClose={() => setOpen(false)}
           contentMaxHeightClassName="max-h-[min(80vh,640px)]"
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">{t('tasksHub.title')}</h2>
+                <h2 className="typography-ui-label font-semibold text-foreground">{t(botWorkbench ? 'arrangements.title' : 'tasksHub.title')}</h2>
                 {closeButton}
               </div>
             </div>

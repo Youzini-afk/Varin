@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { Express, RequestHandler } from 'express';
+import type { Express, Request, Response, RequestHandler } from 'express';
 import {
   ExternalAgentError,
   type ExternalAgentSettings,
@@ -27,6 +27,7 @@ export function registerExternalAgentRoutes(
   app: Express,
   service: ExternalAgentsService,
   requireAuth: RequestHandler,
+  resolveAuthContext?: (request: Request, response: Response) => Promise<unknown>,
 ) {
   app.post('/api/external-agents/attachments/upload', requireAuth, async (req, res) => {
     const controller = new AbortController();
@@ -134,14 +135,16 @@ export function registerExternalAgentRoutes(
           case 'child-presentation':
             result = await service.childPresentation(string(body.operationId), controller.signal);
             break;
-          case 'create':
+          case 'create': {
+            const auth = await resolveAuthContext?.(req, res) as { principalId?: unknown } | null | undefined;
             result = await service.create({
               key: string(body.key),
               configurationId: string(body.configurationId),
               ...(body.cwd === undefined ? {} : { cwd: string(body.cwd) }),
               ...(body.title === undefined ? {} : { title: string(body.title) }),
-            });
+            }, typeof auth?.principalId === 'string' ? auth.principalId : null);
             break;
+          }
           case 'read':
             result = await service.read(
               string(body.id),

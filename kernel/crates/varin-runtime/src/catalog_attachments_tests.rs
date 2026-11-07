@@ -255,6 +255,7 @@ fn v84_upgrade_keeps_receipts_and_installs_attachment_edges_atomically() {
     let root = Root::new();
     let mut db = open(&root);
     let receipt = submit(&mut db, "original", json!("legacy"));
+    followups::events::restore_pre_arrangement_fixture(&db.db).unwrap();
     db.db
         .execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals;ALTER TABLE threads DROP COLUMN principal_id;DROP TABLE catalog_principal_owner;UPDATE runs SET body=json_remove(body,'$.principal_id');DROP TABLE attachment_deliveries; PRAGMA user_version=84;")
         .unwrap();

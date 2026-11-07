@@ -3,6 +3,7 @@ import type { ScheduledTask } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { formatSchedule } from '@/components/session/scheduleFormat';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { followupStatus } from '@/lib/followupPresentation';
 import { useUIStore } from '@/stores/useUIStore';
 import { useBotPanel } from './botPanelModel';
 import { clockTime, dayLabel } from './botPresentation';
@@ -53,6 +54,37 @@ function ScheduleRow({ task, open, onToggle, locale, rule }: { task: ScheduledTa
   </div>;
 }
 
+/** Compact projection only; management uses the same owner and original receiving location. */
+export function BotArrangements() {
+  const { t } = useI18n();
+  const model = useBotPanel();
+  const { arrangements: read, eventSources, retryArrangements, retryEventSources } = model.facts;
+  if (!model.threads?.followups || !model.bot.entry) return null;
+  const sources = eventSources.value ?? [];
+  const open = (id?: string) => useUIStore.getState().openArrangements(model.bot.entry, id);
+  return <section aria-label={t('arrangements.title')}>
+    <p className="bot-section-label">{t('arrangements.title')}</p>
+    {read.status === 'loading' && !read.value && <p role="status" className="px-3 typography-meta">{t('common.loading')}</p>}
+    {read.status === 'failed' && <p role="alert" className="px-3 typography-meta text-destructive">{read.error} <button onClick={retryArrangements}>{t('settings.harness.retry')}</button></p>}
+    {eventSources.status === 'failed' && <p role="alert" className="px-3 typography-meta text-destructive">{eventSources.error} <button onClick={retryEventSources}>{t('settings.harness.retry')}</button></p>}
+    {(read.value ?? []).filter(item => item.trigger.kind === 'plugin_event').map(item => {
+      const source = item.trigger.kind === 'plugin_event' ? item.trigger.source : null;
+      const descriptor = sources.find(candidate => candidate.extensionId === source?.extensionId && candidate.sourceId === source.sourceId
+        && candidate.host?.hostId === source.host?.hostId && candidate.host?.connectionId === source.host?.connectionId && candidate.host?.endpointIdentity === source.host?.endpointIdentity);
+      const connection = descriptor?.connections.find(candidate => candidate.connectionId === source?.connectionId && candidate.accountId === source.accountId);
+      return <button key={item.id} type="button" className="bot-schedule flex w-full flex-col gap-1 px-3 py-3 text-left" onClick={() => open(item.id)}>
+        <span className="text-[13.5px] font-medium">{item.name || descriptor?.displayName || source?.sourceId || item.id}</span>
+        <span className="text-xs text-muted-foreground">{descriptor?.displayName ?? source?.sourceId} · {connection?.displayName ?? source?.connectionId} · {followupStatus(item, t)}</span>
+        <span className="text-xs text-muted-foreground">{item.next_delivery_at_ms !== null ? t('arrangements.next', { time: new Date(item.next_delivery_at_ms).toLocaleString() }) : t(`arrangements.${item.timing.kind}`)}</span>
+        {item.pending_events > 0 && <span className="text-xs">{t('arrangements.pending', { count: item.pending_events })}</span>}
+        {!item.source_status && <span className="text-xs text-muted-foreground">{t('arrangements.unknownHealth')}</span>}
+        {item.source_status?.code && <span className="text-xs text-destructive">{t('arrangements.unavailable', { code: item.source_status.code })}{item.source_status.message ? ` · ${item.source_status.message}` : ''}</span>}
+      </button>;
+    })}
+    <button type="button" className="mx-3 my-3 text-[13px] hover:underline" onClick={() => open()}>{t('arrangements.manage')}</button>
+  </section>;
+}
+
 /** What comes next and what repeats. Editing stays in the Calendar dialog (§5.6). */
 export function BotSchedulePane() {
   const { t } = useI18n();
@@ -71,6 +103,7 @@ export function BotSchedulePane() {
     return <ScheduleRow key={key} task={task} locale={locale} rule={rule} open={openId === key} onToggle={() => setOpenId(current => current === key ? null : key)} />;
   };
   return <>
+    <BotArrangements />
     {read.status === 'failed' ? <div role="alert" className="mx-2 my-2 flex gap-2 typography-meta text-destructive">
       <span className="min-w-0 flex-1 break-words">{read.error}</span>
       <button type="button" className="shrink-0 text-foreground hover:underline" onClick={model.facts.retryTasks}>{t('settings.harness.retry')}</button>

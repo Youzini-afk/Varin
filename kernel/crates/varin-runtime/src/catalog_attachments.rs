@@ -173,7 +173,25 @@ pub struct AttachmentDelivery {
 }
 
 pub(super) fn initialize(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE attachment_deliveries(holder_kind TEXT NOT NULL CHECK(holder_kind IN ('input','dispatch')),holder_id TEXT NOT NULL,thread_id TEXT NOT NULL REFERENCES threads(id),branch_id TEXT NOT NULL REFERENCES branches(id),body TEXT NOT NULL,PRIMARY KEY(holder_kind,holder_id)); CREATE INDEX attachment_deliveries_thread ON attachment_deliveries(thread_id,branch_id);")?;
+    db.execute_batch("CREATE TABLE attachment_deliveries(holder_kind TEXT NOT NULL CHECK(holder_kind IN ('input','dispatch','external_turn')),holder_id TEXT NOT NULL,thread_id TEXT NOT NULL,branch_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(holder_kind,holder_id)); CREATE INDEX attachment_deliveries_thread ON attachment_deliveries(thread_id,branch_id);")?;
+    Ok(())
+}
+/// The same typed delivery owner now accepts original external turn holders. Runtime
+/// validation keeps each target domain explicit instead of inventing native branch IDs.
+pub(super) fn upgrade_external_targets(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE attachment_deliveries RENAME TO attachment_deliveries_previous; DROP INDEX attachment_deliveries_thread;")?;
+    initialize(tx)?;
+    tx.execute_batch("INSERT INTO attachment_deliveries SELECT * FROM attachment_deliveries_previous; DROP TABLE attachment_deliveries_previous;")?;
+    Ok(())
+}
+fn validate_target(db: &Connection, delivery: &AttachmentDelivery) -> Result<()> {
+    if delivery.holder_kind == "external_turn" {
+        let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM external_turns WHERE id=?1 AND conversation_id=?2)",params![delivery.holder_id,delivery.thread_id],|r|r.get(0))?;
+        if !owned || !delivery.branch_id.is_empty() {return Err(RuntimeError::Conflict("attachment target is not its original external turn".into()));}
+    } else {
+        let owner:String=db.query_row("SELECT thread_id FROM branches WHERE id=?1",[&delivery.branch_id],|r|r.get(0))?;
+        if owner != delivery.thread_id {return Err(RuntimeError::Conflict("attachment target branch belongs to another Thread".into()));}
+    }
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
@@ -201,6 +219,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
                 "attachment delivery identity is malformed; data was preserved".into(),
             ));
         }
+        validate_target(db,&delivery)?;
         for attachment in delivery.attachments {
             attachment.validate()?;
         }
@@ -214,16 +233,7 @@ pub(super) fn publish(db: &Connection, delivery: &AttachmentDelivery) -> Result<
     for attachment in &delivery.attachments {
         attachment.validate()?;
     }
-    let owner: String = db.query_row(
-        "SELECT thread_id FROM branches WHERE id=?1",
-        [&delivery.branch_id],
-        |row| row.get(0),
-    )?;
-    if owner != delivery.thread_id {
-        return Err(RuntimeError::Conflict(
-            "attachment target branch belongs to another Thread".into(),
-        ));
-    }
+    validate_target(db,delivery)?;
     let previous = read(db, &delivery.holder_kind, &delivery.holder_id)?;
     if let Some(previous) = previous {
         if previous != *delivery {
@@ -260,7 +270,7 @@ pub(super) fn descriptors(db: &Connection, kind: &str, holder: &str) -> Result<V
 pub(super) fn retire(db: &Connection) -> Result<()> {
     // A shared historical holder survives its source Thread's tombstone. A forwarded
     // file has its own input edge, so deleting the original cannot release its bytes.
-    db.execute("DELETE FROM attachment_deliveries WHERE (holder_kind='input' AND NOT EXISTS(SELECT 1 FROM input_queue WHERE id=holder_id) AND NOT EXISTS(SELECT 1 FROM history WHERE id=holder_id)) OR (holder_kind='dispatch' AND NOT EXISTS(SELECT 1 FROM child_tasks WHERE id=holder_id))",[])?;
+    db.execute("DELETE FROM attachment_deliveries WHERE (holder_kind='input' AND NOT EXISTS(SELECT 1 FROM input_queue WHERE id=holder_id) AND NOT EXISTS(SELECT 1 FROM history WHERE id=holder_id)) OR (holder_kind='dispatch' AND NOT EXISTS(SELECT 1 FROM child_tasks WHERE id=holder_id)) OR (holder_kind='external_turn' AND NOT EXISTS(SELECT 1 FROM external_turns t JOIN external_conversations c ON c.id=t.conversation_id WHERE t.id=holder_id AND json_extract(c.body,'$.deleted')=0))",[])?;
     Ok(())
 }
 impl Catalog {

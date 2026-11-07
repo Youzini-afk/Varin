@@ -153,7 +153,7 @@ export class ExternalAgentsService {
     this.sources = sources;
     this.removeChildrenListener = this.deps.kernel.onAgentRuntimeEvent((event) => {
       // The native stream carries a durable cursor, not the individual domain event kind.
-      if (event.stream === 'durable') void this.reconcileChildren();
+      if (event.stream === 'durable') { void this.reconcileChildren(); void this.reconcileArrangements(); }
     });
     void this.reconcileChildren();
     void this.cleanupDeleted().catch((error) => this.deps.onError?.('external-cleanup', error));
@@ -163,6 +163,21 @@ export class ExternalAgentsService {
         for (const c of all) this.advance(c.id);
       })
       .catch(() => {});
+  }
+  private reconcilingArrangements = false;
+  private arrangementsDirty = false;
+  private async reconcileArrangements() {
+    this.arrangementsDirty = true;
+    if (this.reconcilingArrangements || this.stopping) return;
+    this.reconcilingArrangements = true;
+    try {
+      while (this.arrangementsDirty && !this.stopping) {
+        this.arrangementsDirty = false;
+        const ids = await this.command<string[]>({ action: 'arrangement_pending' });
+        for (const id of ids) this.advance(id);
+      }
+    } catch (error) { this.deps.onError?.('external-arrangements', error); }
+    finally { this.reconcilingArrangements = false; }
   }
   async children(activeOnly = false) {
     return this.command<ExternalChild[]>({ action: 'child_list', activeOnly });
@@ -583,7 +598,7 @@ export class ExternalAgentsService {
   list(signal?: AbortSignal) {
     return this.command<ExternalConversation[]>({ action: 'list' }, signal);
   }
-  async create(input: { key: string; configurationId: string; cwd?: string; title?: string }) {
+  async create(input: { key: string; configurationId: string; cwd?: string; title?: string }, principalId?: string | null) {
     const config = await this.configuration(input.configurationId);
     if (!config.enabled)
       throw new ExternalAgentError(
@@ -603,6 +618,7 @@ export class ExternalAgentsService {
     const result = await this.command<ExternalConversation>({
       action: 'create',
       ...input,
+      ...(principalId === undefined ? {} : { principalId }),
       id,
       configurationId: config.id,
       harness: config.harness,
@@ -1004,10 +1020,11 @@ export class ExternalAgentsService {
       this.running.delete(id);
       if (!this.stopping) {
         const snapshot = await this.read(id);
+        const next = snapshot.turns.find(t => t.status === 'queued' && !t.arrangementHoldReason && !t.blockedReason);
         if (
           !snapshot.conversation.activeTurn &&
           !snapshot.conversation.needsReview &&
-          snapshot.turns.some((t) => t.status === 'queued')
+          next && !next.arrangementHoldReason && !next.blockedReason
         )
           this.advance(id);
       }
@@ -1019,12 +1036,13 @@ export class ExternalAgentsService {
     while (!this.stopping) {
       const snapshot = await this.read(id);
       if (snapshot.conversation.needsReview || this.authenticating.has(id) || this.retiring.has(id)) return;
-      const turn = snapshot.turns.find((t) => t.status === 'queued');
-      if (!turn || snapshot.conversation.activeTurn) return;
+      const turn = snapshot.turns.find((t) => t.status === 'queued' && !t.arrangementHoldReason && !t.blockedReason);
+      if (!turn || turn.arrangementHoldReason || turn.blockedReason || snapshot.conversation.activeTurn) return;
       await this.command({ action: 'begin', id, turnId: turn.id });
       this.notify(id);
       let live: Live | undefined;
       let dispatched = false;
+      let includesArrangements = Boolean(turn.arrangementOccurrenceId);
       let usage: ExternalTurn['usage'];
       let persistence = Promise.resolve();
       const changed = new Map<string, ExternalItem>();
@@ -1092,22 +1110,26 @@ export class ExternalAgentsService {
         const input = await this.command<
           AcceptedExternalInput & {
             task?: string;
+            _arrangement?: boolean;
+            _eventHistory?: unknown;
+            _userInput?: boolean;
             senderThreadId?: string;
-            messages?: Array<{ task: string; senderThreadId: string; attachments?: import('@varin/protocol').Attachment[] }>;
+            messages?: Array<{ task: string; senderThreadId?: string; _arrangement?: boolean; attachments?: import('@varin/protocol').Attachment[] }>;
             _launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
           }
         >({ action: 'input', id, turnId: turn.id });
+        includesArrangements ||= Boolean(input.messages?.some(message => message._arrangement));
         for (const [index, message] of (input.messages ?? []).entries())
           publish({
             id: `inform:${index}`,
             kind: 'notice',
             text: message.task,
-            senderThreadId: message.senderThreadId,
+            ...(message.senderThreadId === undefined ? {} : { senderThreadId: message.senderThreadId }),
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           });
         publish({
           id: 'user',
-          kind: 'user',
+          kind: turn.arrangementOccurrenceId && !input._userInput ? 'notice' : 'user',
           text: input.task ?? input.text,
           ...(input.senderThreadId ? { senderThreadId: input.senderThreadId } : {}),
           ...(input.images?.length ? { images: input.images } : {}),
@@ -1116,12 +1138,12 @@ export class ExternalAgentsService {
         await flush();
         if ((await this.read(id)).turns.find((t) => t.id === turn.id)?.status === 'stopping')
           throw new Error('External Agent startup cancelled');
-        live = await this.connection(id, input._launch);
+        live = await this.connection(id, turn.arrangementLaunch ?? input._launch);
         if ((await this.read(id)).turns.find((t) => t.id === turn.id)?.status === 'stopping')
           throw new Error('External Agent startup cancelled');
         if (input.images?.length && !live.connection.capabilities.images)
           throw new ExternalAgentError('images_unsupported', 'This Agent does not accept image input');
-        const { _launch: _launch, messages: _messages, task: _task, senderThreadId: _sender, ...admitted } = input;
+        const { _launch: _launch, _arrangement: _arrangement, _eventHistory: _eventHistory, _userInput: _userInput, messages: _messages, task: _task, senderThreadId: _sender, ...admitted } = input;
         const preparation = { turnId: turn.id, controller: new AbortController() };
         this.attachmentPreparations.set(id, preparation);
         let harnessInput: Awaited<ReturnType<typeof prepareHarnessInput>>;
@@ -1198,6 +1220,11 @@ export class ExternalAgentsService {
         const current = (await this.read(id)).turns.find((v) => v.id === turn.id);
         const stoppedPreparation =
           !dispatched && current?.status === 'stopping' && !(error instanceof AggregateError);
+        if (current && ended(current)) return;
+        if (!dispatched && includesArrangements && !stoppedPreparation) {
+          await this.command({ action: 'defer', id, turnId: turn.id, reason: error instanceof Error ? error.message : String(error) });
+          return;
+        }
         await this.command({
           action: 'observe',
           id,
@@ -1219,7 +1246,7 @@ export class ExternalAgentsService {
     const turn = snapshot.turns.find((t) => t.id === turnId);
     if (!turn) throw new ExternalAgentError('turn_missing', 'External turn is unavailable');
     if (ended(turn)) return;
-    if (turn.status === 'queued') {
+    if (turn.status === 'queued' || turn.status === 'awaiting_input') {
       await this.command({ action: 'observe', id, turnId, status: 'cancelled' });
       this.notify(id);
       return;

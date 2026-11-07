@@ -531,6 +531,7 @@ interface UIStore {
   isVarinDiagnosticsDialogOpen: boolean;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
+  scheduledTasksFocus: { identity: ThreadIdentity; followupId?: string; token: number } | null;
   isArchivePageOpen: boolean;
   worktreesPageProjectId: string | null;
   isSettingsDialogOpen: boolean;
@@ -697,6 +698,7 @@ interface UIStore {
   setVarinDiagnosticsDialogOpen: (open: boolean) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
+  openArrangements: (identity: ThreadIdentity, followupId?: string) => void;
   setArchivePageOpen: (open: boolean) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
   /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
@@ -857,6 +859,7 @@ export const useUIStore = create<UIStore>()(
         isVarinDiagnosticsDialogOpen: false,
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
+        scheduledTasksFocus: null,
         isArchivePageOpen: false,
         worktreesPageProjectId: null,
         isSettingsDialogOpen: false,
@@ -1530,10 +1533,15 @@ export const useUIStore = create<UIStore>()(
           set({ isSessionCreateDialogOpen: open });
         },
 
+        openArrangements: (identity, followupId) => {
+          set(state => ({ scheduledTasksFocus: { identity, followupId, token: (state.scheduledTasksFocus?.token ?? 0) + 1 },
+            isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }));
+        },
+
         setScheduledTasksDialogOpen: (open) => {
           set(open
             ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
-            : { isScheduledTasksDialogOpen: false });
+            : { isScheduledTasksDialogOpen: false, scheduledTasksFocus: null });
         },
 
         setArchivePageOpen: (open) => {

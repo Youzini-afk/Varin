@@ -397,6 +397,15 @@ export interface ThreadFollowupsAPI {
   /** Accepted family Jobs; sourceRunId is target attribution, never the registration source. */
   jobSources(identity: ThreadIdentity, runId: string, signal?: AbortSignal): Promise<HostJobSource[]>;
   register(input: ThreadIdentity & FollowupRegisterParams): Promise<Followup>;
+  arrangements(identity: ThreadIdentity, botId: string, signal?: AbortSignal): Promise<Followup[]>;
+  eventSources(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/extension-contract').VarinEventSourceDescriptor[]>;
+  /** The outer identity authorizes the old location on edit; the arrangement records its explicit target. */
+  sourceRoutes(identity: ThreadIdentity, followupId: string, signal?: AbortSignal): Promise<import('@varin/protocol').FollowupSourceRoute[]>;
+  putSourceRoute(input: ThreadIdentity & { route: import('@varin/protocol').FollowupSourceRoute }): Promise<Followup>;
+  removeSourceRoute(input: ThreadIdentity & import('@varin/protocol').FollowupSourceRouteRemove): Promise<Followup>;
+  putArrangement(input: ThreadIdentity & { arrangement: import('@varin/protocol').FollowupArrangementPutParams }): Promise<Followup>;
+  backlog(input: ThreadIdentity & import('@varin/protocol').FollowupBacklogParams): Promise<Followup>;
+
   /** Original accepted file resources awaiting Catalog admission; never another definition ledger. */
   pendingRegistrations(identity: ThreadIdentity, signal?: AbortSignal): Promise<FollowupPendingRegistration[]>;
   cancelRegistration(input: ThreadIdentity & { key: string; runId: string }): Promise<FollowupRegistrationCancelResult>;

@@ -474,6 +474,7 @@ fn capture_roots(db: &Connection, check: &dyn Fn() -> WorkResult<()>, at_root: &
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.inputRef') FROM external_turns UNION ALL SELECT body FROM external_items UNION ALL SELECT json_extract(body,'$.input_ref') FROM external_children UNION ALL SELECT json_extract(body,'$.report') FROM external_children");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.host_job_stop.receipt.result_ref') FROM events WHERE kind='operation.executor_stopped' AND json_extract(data,'$.host_job_stop') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.content_ref') FROM events WHERE kind='followup.source_observed' AND json_extract(data,'$.content_ref') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT content_ref FROM followup_events WHERE content_ref IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM followups WHERE json_extract(body,'$.instruction_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(m.value,'$.body') FROM policy_selections p,json_each(p.body,'$.models') m");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.target.body') FROM policy_selections WHERE json_extract(body,'$.selection.target.kind')='extension'

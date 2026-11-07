@@ -386,8 +386,7 @@ pub(in crate::catalog) fn cancel_row(
     let current = fact(row)?.clone();
     if matches!(
         current,
-        IngressActivationFact::Passive
-            | IngressActivationFact::Cancelled { .. }
+        IngressActivationFact::Cancelled { .. }
             | IngressActivationFact::Failed { .. }
     ) {
         return Ok(());
@@ -793,7 +792,7 @@ impl Catalog {
                     return Ok(());
                 }
                 let Some(run) = latest_run(&self.db, &row.branch_id)? else {
-                    if matches!(row.origin, InputOrigin::WorkEvent { .. }) && super::bot::thread_bot(&self.db, &row.thread_id)?.is_some() {
+                    if matches!(row.origin, InputOrigin::WorkEvent { .. } | InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }) && super::bot::thread_bot(&self.db, &row.thread_id)?.is_some() {
                         // Its first launch needs the actual Host model/source preparation.
                         // Keep the original ingress pending for that owner.
                         return Ok(());

@@ -4574,7 +4574,8 @@ fn legacy_summary_migration_preserves_internal_creation_domain() {
         through_id: source.input_id, expected_revision: 0, effective_system_prompt: "Summarize".into(),
         instruction_sources: vec![], memory_checkpoint: None,
     }, launch, json!({})).unwrap();
-    db.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;PRAGMA user_version=87;").unwrap();
+    followups::events::restore_pre_arrangement_fixture(&db.db).unwrap();
+        db.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;PRAGMA user_version=87;").unwrap();
     drop(db); let mut db = f.open();
     assert_eq!(db.db.query_row("SELECT domain FROM thread_creations WHERE thread_id=?1",[&job.receipt.thread_id],|r|r.get::<_,String>(0)).unwrap(),"summary");
     assert!(matches!(db.create_thread(&job.receipt.thread_id,&job.receipt.branch_id),Err(RuntimeError::Conflict(_))));

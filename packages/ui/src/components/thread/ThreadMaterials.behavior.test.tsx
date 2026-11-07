@@ -412,7 +412,7 @@ function artifactConversationFixture() {
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,
       active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] }), stop: unused, decide: unused },
     goals: { start: unused, update: unused, control: unused, list: async () => [] }, resources: { refresh: unused, skills: unused, draftSkills: unused },
-    followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused,
+    followups: { arrangements: async () => [], eventSources: async () => [], putArrangement: unused, backlog: unused, sourceRoutes: async () => [], putSourceRoute: unused, removeSourceRoute: unused, jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused,
       control: unused, pendingRegistrations: async () => [], cancelRegistration: unused },
     listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model', acceptsImages: true }],
     list: unused, create: unused, update: unused, delete: unused, deleteBranch: unused, markRead: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),

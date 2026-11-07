@@ -298,7 +298,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       : known);
     return items ? sessionViews(items, catalog, []) : null;
   }, [selected, sessionItems, sessionsError, catalog]);
-  const facts = useBotFacts({ botId: selected?.id ?? null, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
+  const facts = useBotFacts({ botId: selected?.id ?? null, identity: selected?.entry, followups: threads?.followups, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
   const activity = facts.activity.value;
   const work = React.useMemo(() => workViews(workItems ?? [], catalog, activity), [workItems, catalog, activity]);
   // The Host's presence for every live Bot drives their figures; the selected Bot falls back to the

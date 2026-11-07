@@ -273,7 +273,7 @@ fn historical_user_job_stops_before_registration_and_continues_current_work_sour
         .load()
         .unwrap();
     let value = f.db.admit_followup_registration(prepared).unwrap().followup;
-    assert_eq!(value.source_run_id, current.run_id);
+    assert_eq!(value.source_run_id.as_deref(), Some(current.run_id.as_str()));
     assert!(value.occurrence.is_some());
     assert_eq!(
         f.db.host_job_sources(&f.run).unwrap()[0].source_run_id,

@@ -91,7 +91,7 @@ pub(super) fn insert_occurrence(
         InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. } => None,
         _ => unreachable!(),
     };
-    let passive = matches!(&origin, InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. } | InputOrigin::WorkEvent { activation: activation::IngressActivationFact::Passive, .. });
+    let passive = matches!(&origin, InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::Followup { activation: activation::IngressActivationFact::Passive, .. } | InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. } | InputOrigin::WorkEvent { activation: activation::IngressActivationFact::Passive, .. });
     let row = QueuedInputMetadata {
         id,
         thread_id: thread,

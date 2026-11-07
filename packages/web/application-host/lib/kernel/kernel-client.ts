@@ -862,6 +862,7 @@ export class KernelClient {
   setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
   setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
   setManagedSourceOwner(owner: ManagedSourceOwner, coordinatorHostId: () => string): void { this.managedSourceBridge.setOwner(owner, coordinatorHostId); }
+  setFollowupEventOwner(owner: import('./followup-event-owner.js').FollowupEventOwner): void { this.managedSourceBridge.setFollowupEvents(owner); }
   setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
   /** Await the actual shared language view retirement before capturing a stopped source. */
   releaseLanguageSource(runId: string): Promise<void> { return this.languageBridge.releaseSource({ runId }); }

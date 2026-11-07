@@ -53,11 +53,26 @@ pub(crate) fn schema() -> ToolSchema {
     ToolSchema {
         requirements: None,
         name: followups::TOOL.into(),
-        version: "9".into(),
-        description: "Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),
+        version: "10".into(),
+        description: "Arrange manages a Bot-owned ongoing plugin event subscription across runs. Updating an arrangement preserves its existing target unless target fields are explicitly provided. Sources discovers the available event schemas and current account identities; select its real source and supported exact attribute filter. Backlog processes now or explicitly discards pending material. Route associates one external object with an existing task using its real Thread and branch. Event input can be handled directly, sent to existing work, or delegated. Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),
         output_schema: None,
         metadata: None,
         schema: json!({"type":"object","oneOf":[
+            {"type":"object","properties":{"action":{"const":"sources"}},"required":["action"],"additionalProperties":false},
+            {"type":"object","properties":{
+                "action":{"const":"arrange"},"followupId":text,"expectedRevision":{"type":"integer","minimum":1},
+                "name":text,"instruction":text,
+                "source":{"type":"object","properties":{"extensionId":text,"sourceId":text,"connectionId":text,"accountId":text,"host":{"type":"object","properties":{"hostId":text,"connectionId":text,"endpointIdentity":text},"required":["hostId","connectionId","endpointIdentity"],"additionalProperties":false}},"required":["extensionId","sourceId","connectionId","accountId"],"additionalProperties":false},
+                "filter":{"type":"object","description":"Exact attribute subset from this source's disclosed filter schema. No undeclared operators."},
+                "timing":{"oneOf":[
+                    {"type":"object","properties":{"kind":{"enum":["immediate","passive"]}},"required":["kind"],"additionalProperties":false},
+                    {"type":"object","properties":{"kind":{"const":"batch"},"windowMs":{"type":"integer","minimum":0}},"required":["kind","windowMs"],"additionalProperties":false},
+                    {"type":"object","properties":{"kind":{"const":"scheduled"},"calendarId":text,"runEmpty":{"type":"boolean"}},"required":["kind","calendarId","runEmpty"],"additionalProperties":false}
+                ]},"repeat":{"enum":["once","each"],"description":"Defaults to each for ongoing arrangements."},
+                "threadId":text,"branchId":text,"externalConversationId":{"anyOf":[text,{"type":"null"}],"description":"Omit to preserve an existing target. Set null explicitly to return to the native Thread target."},"firstContact":{"enum":["create_bot_session"]}
+            },"required":["action","name","instruction","source"],"additionalProperties":false},
+            {"type":"object","properties":{"action":{"const":"route"},"followupId":text,"expectedRevision":{"type":"integer","minimum":1},"objectId":text,"threadId":text,"branchId":text,"externalConversationId":text},"required":["action","followupId","expectedRevision","objectId","threadId","branchId"],"additionalProperties":false},
+            {"type":"object","properties":{"action":{"const":"backlog"},"followupId":text,"expectedRevision":{"type":"integer","minimum":1},"control":{"enum":["process_now","discard"]}},"required":["action","followupId","expectedRevision","control"],"additionalProperties":false},
             {"type":"object","properties":{
                 "action":{"const":"register"},"trigger":trigger,
                 "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on known machine metric crossings, original log matches, observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Retained log bytes are replayable; unobserved file changes or machine crossings are not reconstructed."},
@@ -130,7 +145,8 @@ impl ToolExecutor for FollowupTools {
         let waiting = input.registration().is_some_and(|v| v.wait.is_some());
         let read_only = matches!(
             input,
-            FollowupToolInput::List
+            FollowupToolInput::Sources
+                | FollowupToolInput::List
                 | FollowupToolInput::Jobs
                 | FollowupToolInput::Get { .. }
                 | FollowupToolInput::Occurrences { .. }
@@ -164,6 +180,42 @@ impl ToolExecutor for FollowupTools {
             return Err(error("follow-up cancelled"));
         }
         match input(call)? {
+            FollowupToolInput::Arrange { source, filter, .. } => {
+                let p = self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .prepare_event_tool(c, call.clone(), schema())
+                    .map_err(error)?
+                    .load()
+                    .map_err(error)?;
+                self.catalog
+                    .lock()
+                    .map_err(error)?
+                    .authorize_event_tool(&p)
+                    .map_err(error)?;
+                self.resources.as_ref().ok_or_else(||error("event source owner unavailable"))?.source_query(json!({"kind":"followup_event_source_validate","context":c,"source":source,"filter":filter}),cancel)?;
+                self.catalog
+                    .lock()
+                    .map_err(error)?
+                    .authorize_event_tool(&p)
+                    .map_err(error)
+            }
+            FollowupToolInput::Backlog { .. } | FollowupToolInput::Route { .. } => {
+                let p = self
+                    .catalog
+                    .lock()
+                    .map_err(error)?
+                    .prepare_event_tool(c, call.clone(), schema())
+                    .map_err(error)?
+                    .load()
+                    .map_err(error)?;
+                self.catalog
+                    .lock()
+                    .map_err(error)?
+                    .authorize_event_tool(&p)
+                    .map_err(error)
+            }
             value @ FollowupToolInput::Register { .. } => {
                 let p = self
                     .catalog
@@ -234,6 +286,62 @@ impl ToolExecutor for FollowupTools {
     ) -> ToolCompletion {
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
             match input(call)? {
+                value @ (FollowupToolInput::Arrange { .. }
+                | FollowupToolInput::Backlog { .. }
+                | FollowupToolInput::Route { .. }) => {
+                    let p = self
+                        .catalog
+                        .lock()
+                        .map_err(error)?
+                        .prepare_event_tool(c, call.clone(), schema())
+                        .map_err(error)?
+                        .load()
+                        .map_err(error)?;
+                    self.catalog
+                        .lock()
+                        .map_err(error)?
+                        .authorize_event_tool(&p)
+                        .map_err(error)?;
+                    if let FollowupToolInput::Arrange { source, filter, .. } = value {
+                        self.resources.as_ref().ok_or_else(||error("event source owner unavailable"))?.source_query(json!({"kind":"followup_event_source_validate","context":c,"source":source,"filter":filter}),cancel)?;
+                    }
+                    if cancel.is_cancelled() {
+                        return Err(error("arrangement cancelled before acceptance"));
+                    }
+                    self.catalog
+                        .lock()
+                        .map_err(error)?
+                        .admit_event_tool(p)
+                        .map_err(error)
+                }
+                FollowupToolInput::Sources => {
+                    let p = self
+                        .catalog
+                        .lock()
+                        .map_err(error)?
+                        .capture_tool_followups(c, call.clone(), schema())
+                        .map_err(error)?
+                        .load()
+                        .map_err(error)?;
+                    self.catalog
+                        .lock()
+                        .map_err(error)?
+                        .authorize_followup_read(p)
+                        .map_err(error)?;
+                    let value = self
+                        .resources
+                        .as_ref()
+                        .ok_or_else(|| error("event source owner unavailable"))?
+                        .source_query(
+                            json!({"kind":"followup_event_sources","context":c}),
+                            cancel,
+                        )?;
+                    Ok(ToolCompletion::Result {
+                        outcome: Outcome::Succeeded,
+                        effect: Effect::None,
+                        content: value.into(),
+                    })
+                }
                 value @ FollowupToolInput::Register { .. } => {
                     let p = self
                         .catalog

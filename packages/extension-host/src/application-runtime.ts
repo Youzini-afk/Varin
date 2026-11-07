@@ -727,6 +727,21 @@ export class ApplicationExtensionRuntime {
     return binding!;
   }
 
+  /** An explicitly selected durable source must not follow unrelated global service routing.
+   * The original supervisor still owns grants, dependency preparation and generation retirement. */
+  async prepareEventSource(extensionId: string, serviceId: string, version: number, signal?: AbortSignal): Promise<HostServiceBinding> {
+    if (this.#stopped) throw new Error("Application extension runtime is stopped");
+    const lease = await this.supervisor.prepareExtension(extensionId, undefined, signal);
+    try {
+      const binding = lease.bind(serviceId, version);
+      let released = false;
+      return Object.freeze({ ...binding, release: () => {
+        if (released) return;
+        released = true; binding.release(); lease.release();
+      } });
+    } catch (error) { lease.release(); throw error; }
+  }
+
   /** Explicit ordered-contract consumer. Never changes the ordinary service invocation shape. */
   prepareServiceCollection(request: VarinExtensionServiceInvocationRequest | unknown,
     options?: HostServicePreparationOptions): Promise<PreparedHostServiceCollection> {

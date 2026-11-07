@@ -834,7 +834,7 @@ export interface CalendarDefinition {
 
 export type CalendarOccurrenceReason = { kind: 'scheduled'; at_ms: number } | { kind: 'manual'; key: string };
 
-export type CalendarOccurrenceState = 'observed' | 'preparing' | 'held' | 'queued' | 'delivered' | 'completed' | 'failed' | 'cancelled';
+export type CalendarOccurrenceState = 'skipped' | 'observed' | 'preparing' | 'held' | 'queued' | 'delivered' | 'completed' | 'failed' | 'cancelled';
 
 export interface CalendarOccurrence {
   id: string;
@@ -1254,9 +1254,9 @@ export interface FollowupSourceEvidence {
   evidence: FollowupLeafEvidence;
 }
 
-export type FollowupTrigger = FollowupSource | { kind: 'any' | 'all'; sources: FollowupSource[] } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
+export type FollowupTrigger = FollowupSource | { kind: 'any' | 'all'; sources: FollowupSource[] } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number } | {kind:'plugin_event';source:PluginEventSource;filter:unknown};
 
-export type FollowupEvidence = FollowupLeafEvidence | { kind: 'any' | 'all'; sources: FollowupSourceEvidence[] } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };
+export type FollowupEvidence = FollowupLeafEvidence | { kind: 'any' | 'all'; sources: FollowupSourceEvidence[] } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number } | {kind:'plugin_events';event_ids:string[];received_at_ms:number;calendar_occurrence_id?:string|null};
 
 export type GoalState = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'complete' | 'cancelled';
 
@@ -1778,7 +1778,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 82; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 83; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2510,6 +2510,232 @@ export interface RunContextScope {
   projectId: string | null;
 }
 
+export interface EventTransportAccess {
+  key: EventTransportKey;
+  generation: number;
+}
+
+export interface FollowupSourceRoute {
+  externalConversationId?: string | null;
+  followupId: string;
+  expectedRevision: number;
+  objectId: string;
+  threadId: string;
+  branchId: string;
+  senderId?: string | null;
+  userInput: boolean;
+}
+
+export interface FollowupSourceRouteRemove {
+  followupId: string;
+  expectedRevision: number;
+  objectId: string;
+}
+
+export interface FollowupSourceRouteListParams {
+  followupId: string;
+}
+
+export interface FollowupEventFile {
+  fileId: string;
+  filename: string;
+  mimeType: string;
+  bytesBase64: string;
+}
+
+export interface FollowupEventAttachmentReadParams { threadId: string; ref: string; offset: number; length: number; }
+
+export interface FollowupEventAttachmentRead {
+  attachment: Attachment;
+  contentHash: string;
+  offset: number;
+  nextOffset: number;
+  eof: boolean;
+  bytesBase64: string;
+}
+
+export interface PluginEventSourceHost {
+  hostId: string;
+  connectionId: string;
+  endpointIdentity: string;
+}
+
+export interface EventTransportKey {
+  principalId: string;
+  clientId: string;
+  coordinatorHostId: string;
+  subscriptionId: string;
+}
+
+export type EventTransportState = 'active' | 'paused' | 'released';
+
+export interface EventTransportConsumer {
+  coverageFromMs: number;
+  generation: number;
+  key: EventTransportKey;
+  identity: FollowupEventSourceIdentity;
+  afterCursor: number;
+  offeredThrough: number;
+  state: EventTransportState;
+}
+
+export interface EventTransportBind {
+  key: EventTransportKey;
+  source: PluginEventSource;
+  state: EventTransportState;
+}
+
+export interface EventTransportRead {
+  generation: number;
+  key: EventTransportKey;
+  maxEvents?: number;
+}
+
+export interface EventTransportAck {
+  generation: number;
+  key: EventTransportKey;
+  throughCursor: number;
+}
+
+export interface EventTransportPage {
+  consumer: EventTransportConsumer;
+  events: FollowupPluginEventInput[];
+  throughCursor: number;
+  status: FollowupEventSourceStatus | null;
+}
+
+export interface EventTransportImport {
+  identity: FollowupEventSourceIdentity;
+  state: EventTransportState;
+}
+
+export interface PluginEventSource {
+  host?: PluginEventSourceHost;
+  extensionId: string;
+  sourceId: string;
+  connectionId: string;
+  accountId: string;
+}
+
+export interface FollowupEventDeliveryTarget {
+  externalConversationId?: string | null;
+  threadId: string;
+  branchId: string;
+  userInput: boolean;
+}
+
+export interface FollowupExternalDelivery {
+  conversation_id: string;
+  turn_id: string;
+  state: string;
+  hold_reason: string | null;
+  consumed_by_turn_id: string | null;
+}
+
+export type FollowupFirstContactPolicy = 'create_bot_session';
+
+export type FollowupOwner = {kind:'work'} | {kind:'bot';bot_id:string};
+
+export type FollowupEventTiming = {kind:'immediate'} | {kind:'batch';windowMs:number} | {kind:'scheduled';calendarId:string;runEmpty:boolean} | {kind:'passive'};
+
+export interface FollowupEventCoverage {
+  kind: string;
+  fromMs: number | null;
+}
+
+export interface FollowupEventSourceStatus {
+  code: string | null;
+  message: string | null;
+  coverage: FollowupEventCoverage | null;
+  lastConnectedAtMs: number | null;
+}
+
+export interface FollowupEventSourceIdentity {
+  principalId: string | null;
+  source: PluginEventSource;
+}
+
+export interface FollowupEventSourceCheckpoint {
+  identity: FollowupEventSourceIdentity;
+  cursor: string | null;
+  status: FollowupEventSourceStatus | null;
+}
+
+export interface FollowupEventSourceSubscription {
+  followupId: string;
+  identity: FollowupEventSourceIdentity;
+  filter: unknown;
+  state: 'active' | 'paused' | 'cancelled';
+}
+
+export interface FollowupEventEcho {
+  ownerHostId?: string | null;
+  followupId: string;
+  occurrenceId: string;
+  operationId?: string | null;
+}
+
+export interface FollowupPluginEventInput {
+  files?: FollowupEventFile[];
+  senderId?: string | null;
+  eventId: string;
+  objectId: string | null;
+  revision: string | null;
+  occurredAtMs: number;
+  attributes: unknown;
+  content: OutputBody<IncomingMedia>;
+  echoOf: FollowupEventEcho | null;
+}
+
+export interface FollowupEventReceiveParams {
+  identity: FollowupEventSourceIdentity;
+  expectedCursor: string | null;
+  nextCursor: string | null;
+  status: FollowupEventSourceStatus | null;
+  events: FollowupPluginEventInput[];
+}
+
+export interface FollowupEventReceiveReceipt {
+  accepted: number;
+  duplicates: number;
+  checkpoint: FollowupEventSourceCheckpoint;
+}
+
+export interface FollowupArrangementListParams {
+  botId: string;
+  principalId: string | null;
+}
+
+export interface FollowupArrangementPutParams {
+  firstContact?: FollowupFirstContactPolicy | null;
+  externalConversationId?: string | null;
+  key: string;
+  expectedRevision?: number;
+  botId: string;
+  threadId: string;
+  branchId: string;
+  name: string;
+  instruction: string;
+  source: PluginEventSource;
+  filter: unknown;
+  timing: FollowupEventTiming;
+  repeat?: FollowupRepeat;
+  sourceRunId?: string;
+}
+
+export interface FollowupEventSourceStatusParams {
+  identity: FollowupEventSourceIdentity;
+  status: FollowupEventSourceStatus;
+}
+
+export type FollowupEventBacklogAction = 'process_now' | 'discard';
+
+export interface FollowupBacklogParams {
+  followupId: string;
+  expectedRevision: number;
+  action: FollowupEventBacklogAction;
+}
+
 export type FollowupRepeat = 'once' | 'each';
 
 export interface FollowupOccurrenceGetParams {
@@ -2566,6 +2792,8 @@ export interface FollowupObservation {
 }
 
 export interface FollowupDelivery {
+  thread_id: string;
+  branch_id: string;
   input_id: string;
   state: InputState;
   activation_state: 'pending' | 'bound' | 'cancelled' | 'failed';
@@ -2598,17 +2826,21 @@ export interface FollowupWait {
 }
 
 export interface FollowupOccurrence {
+  external_delivery?: FollowupExternalDelivery | null;
+  target?: FollowupEventDeliveryTarget | null;
   accepted_cursor: number;
   id: string;
   generation: number;
   trigger_cursor: number;
   state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
-  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null | 'manual_pause' | 'question' | 'preparing';
+  hold_reason: 'control_paused' | 'bot_suspended' | 'target_unavailable' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null | 'manual_pause' | 'question' | 'preparing';
   evidence: FollowupEvidence;
   delivery: FollowupDelivery | null;
 }
 
 export interface Followup {
+  first_contact?: FollowupFirstContactPolicy | null;
+  external_conversation_id?: string | null;
   repeat: FollowupRepeat;
   pending_occurrences: number;
   id: string;
@@ -2616,7 +2848,7 @@ export interface Followup {
   generation: number;
   thread_id: string;
   branch_id: string;
-  source_run_id: string;
+  source_run_id: string | null;
   sources: FollowupSourceState[];
   state: 'active' | 'paused' | 'cancelled';
   wait: FollowupWait;
@@ -2628,6 +2860,12 @@ export interface Followup {
   registered_at_ms: number;
   observation: FollowupObservation | null;
   exhausted: boolean;
+  owner: FollowupOwner;
+  name: string | null;
+  timing: FollowupEventTiming;
+  pending_events: number;
+  next_delivery_at_ms: number | null;
+  source_status: FollowupEventSourceStatus | null;
 }
 
 export interface RunParams {

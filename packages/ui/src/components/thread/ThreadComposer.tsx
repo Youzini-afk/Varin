@@ -1,3 +1,5 @@
+import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { externalAttachmentSupported } from './externalAttachments';
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
@@ -64,6 +66,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   backendControls?: React.ReactNode;
 }) {
   const { t } = useI18n();
+  const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const reducedMotion = usePrefersReducedMotion();
   const motionId = React.useId();
   const isMobile = useUIStore(state => state.isMobile);
@@ -182,7 +185,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const commandContext: WorkbenchCommandExecutionContext = { currentDirectory: workspacePath ?? null, isMobile,
     composer: { host: getRuntimeEndpointGeneration(), identity, source, actions } };
   const knownCommands: CommandInfo[] = registrations.filter(item => item.meta.composer)
-    .map(item => { const meta = item.meta.composer!; const builtin = item.contributionId.startsWith('varin.builtin.'); const action = builtin ? actions[meta.name] : undefined; return { id: item.contributionId, name: builtin ? meta.name : `ext:${encodeURIComponent(item.contributionId)}:${meta.name}`, sourceLabel: builtin ? undefined : item.contributionId, label: item.meta.titleKey ? t(item.meta.titleKey) : item.meta.title,
+    .map(item => { const meta = item.meta.composer!; const builtin = item.contributionId.startsWith('varin.builtin.'); const action = builtin ? actions[meta.name] : undefined; return { id: item.contributionId, name: builtin ? meta.name : `ext:${encodeURIComponent(item.contributionId)}:${meta.name}`, sourceLabel: builtin ? undefined : item.contributionId, label: builtin && meta.name === 'schedule' && botWorkbench ? t('arrangements.title') : item.meta.titleKey ? t(item.meta.titleKey) : item.meta.title,
       searchAliases: [meta.name, ...item.meta.keywords], source: item.contributionId.startsWith('varin.builtin.') ? 'varin' : 'extension',
       group: t(`composer.group.${meta.group}`), icon: item.meta.icon, next: Boolean(action?.content), disabled: action?.disabled ?? (item.implementation.isAvailable && !item.implementation.isAvailable(commandContext) ? t('composer.menu.unavailable') : undefined), value: action?.value }; });
   if (external && actions.mode) knownCommands.push({ id: 'varin.external.mode', name: 'mode', label: t('external.mode'), source: 'varin', group: t('composer.group.execution'), next: true, icon: 'shield-user' });
