@@ -555,10 +555,8 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
     let before = db.followup_occurrences("legacy", None).unwrap().occurrences;
     let original = db.capture_followup("legacy").unwrap().load().unwrap();
     // Build the released 88 representation, retaining the actual old work, queue and receipts.
-    f.raw().execute_batch("DROP TABLE followup_event_file_refs; DROP TABLE followup_event_routes; DROP TABLE followup_event_matches; DROP TABLE followup_event_consumers; DROP TABLE followup_event_imports; DROP TABLE followup_events; DROP TABLE followup_event_sources; DROP INDEX followups_bot;
-        UPDATE followups SET body=json_remove(body,'$.owner','$.name','$.timing','$.event_after','$.calendar_after','$.principal_id');
-        UPDATE followup_occurrences SET body=json_remove(body,'$.passive','$.cancelled','$.target','$.user_input');
-        PRAGMA user_version=88;").unwrap();
+    f.raw().execute_batch(include_str!("fixtures/catalog-pre-arrangements.sql")).unwrap();
+    f.raw().pragma_update(None, "user_version", 88).unwrap();
     drop(db);
     let db = f.open();
     let upgraded = db.capture_followup("legacy").unwrap().load().unwrap();

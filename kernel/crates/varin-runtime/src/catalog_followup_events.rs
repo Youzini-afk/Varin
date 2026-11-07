@@ -2250,9 +2250,6 @@ pub(in crate::catalog) fn calendar_batch_projection(
 
 #[cfg(test)]
 pub(in crate::catalog) fn restore_pre_arrangement_fixture(db: &Connection) -> Result<()> {
-    db.execute_batch("DROP TABLE followup_event_file_refs;DROP TABLE followup_event_routes;DROP TABLE followup_event_matches;DROP TABLE followup_event_consumers;DROP TABLE followup_event_imports;DROP TABLE followup_events;DROP TABLE followup_event_sources;DROP INDEX followups_bot;
-        UPDATE followups SET body=json_remove(body,'$.owner','$.name','$.timing','$.event_after','$.calendar_after','$.principal_id','$.external_conversation_id','$.discard_before_ms','$.first_contact');
-        UPDATE followup_occurrences SET body=json_remove(body,'$.passive','$.cancelled','$.target','$.user_input','$.external_delivery');
-        UPDATE input_queue SET body=json_remove(body,'$.origin.user_input') WHERE origin='followup';")?;
+    db.execute_batch(include_str!("../tests/fixtures/catalog-pre-arrangements.sql"))?;
     Ok(())
 }
