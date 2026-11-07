@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       container_benchmark:
-        description: Repeat the complete local-registry container graph to measure warm reuse
+        description: Measure cold, warm and clean-builder registry cache reuse without publication
         default: false
         type: boolean
   schedule:
@@ -529,6 +529,7 @@ jobs:
     uses: ./.github/workflows/container-check.yml
     with:
       source_sha: ${{ inputs.source_sha || github.sha }}
+      tooling_sha: ${{ github.sha }}
       toolbelt: ${{ needs.changes.outputs.toolbelt == 'true' }}
       multi_platform: ${{ needs.changes.outputs.full == 'true' }}
       benchmark: ${{ github.event_name == 'workflow_dispatch' && inputs.container_benchmark == true }}

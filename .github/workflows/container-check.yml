@@ -9,6 +9,9 @@ on:
       source_sha:
         required: true
         type: string
+      tooling_sha:
+        default: ''
+        type: string
       toolbelt:
         default: false
         type: boolean
@@ -26,13 +29,24 @@ jobs:
   verify:
     name: Build and smoke applicable container images
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-container-{0}', github.run_id) }}
       queue: max
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout reviewed validation tooling
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tooling_sha || github.sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Checkout exact product source
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha }}
+          path: source
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -66,35 +80,43 @@ jobs:
         run: node --test scripts/docker-release-registry.test.mjs
 
       - name: Validate container inputs
+        working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
           CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
-          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
+          CONTAINER_SOURCE_DIR: ../source
         run: node scripts/build-container-images.mjs validate
 
       - name: Build the shared candidate graph in the disposable registry
         id: images
+        working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
           CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
-          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
+          CONTAINER_SOURCE_DIR: ../source
           CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
           CONTAINER_MULTI_PLATFORM: ${{ inputs.multi_platform }}
-          CONTAINER_OUTPUT_DIR: artifacts/container-build/cold
+          CONTAINER_LOCAL_CACHE: ${{ inputs.benchmark }}
+          CONTAINER_OUTPUT_DIR: ../artifacts/container-build/cold
         run: node scripts/build-container-images.mjs build
 
       - name: Repeat the exact graph to measure warm reuse
         if: inputs.benchmark
+        working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
           CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
-          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
+          CONTAINER_SOURCE_DIR: ../source
           CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
           CONTAINER_MULTI_PLATFORM: ${{ inputs.multi_platform }}
-          CONTAINER_OUTPUT_DIR: artifacts/container-build/warm
+          CONTAINER_LOCAL_CACHE: true
+          CONTAINER_OUTPUT_DIR: ../artifacts/container-build/warm
         run: |
           node scripts/build-container-images.mjs build
-          node --input-type=module -e "import fs from 'node:fs'; const result=JSON.parse(fs.readFileSync('artifacts/container-build/warm/result.json','utf8')); if(result.phases.some(phase=>phase.rustReleaseCompilations!==0)||!result.phases.some(phase=>phase.cachedVertices>0)) throw new Error('The unchanged warm graph rebuilt Rust or reused no vertices');"
+          node --input-type=module -e "import fs from 'node:fs'; const result=JSON.parse(fs.readFileSync('../artifacts/container-build/warm/result.json','utf8')); if(result.phases.some(phase=>phase.rustReleaseCompilations!==0)||!result.phases.some(phase=>phase.cachedVertices>0)) throw new Error('The unchanged warm graph rebuilt Rust or reused no vertices');"
 
       - name: Smoke the exact slim image
         if: ${{ !cancelled() && steps.images.outcome == 'success' }}
@@ -186,12 +208,85 @@ jobs:
             docker run --rm --platform linux/arm64 --entrypoint node "$image" verify-services.mjs
           done
 
+      - name: Create a source-only cache fixture and discard the original builder
+        if: inputs.benchmark
+        id: fixture
+        working-directory: tooling
+        env:
+          ORIGINAL_BUILDER: ${{ steps.builder.outputs.name }}
+        run: |
+          # A real local commit keeps source identity honest. No remote push or
+          # product tag is involved; the harmless comment changes Rust source.
+          git clone --no-hardlinks ../source ../benchmark-source
+          printf '\n// Disposable CI cache-restoration fixture.\n' >> ../benchmark-source/kernel/crates/varin-kernel/src/main.rs
+          git -C ../benchmark-source add kernel/crates/varin-kernel/src/main.rs
+          git -C ../benchmark-source -c user.name=varin-ci -c user.email=ci@varin.invalid commit -m 'test: source-only container cache fixture'
+          echo "sha=$(git -C ../benchmark-source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          docker buildx du
+          docker buildx rm "$ORIGINAL_BUILDER"
+
+      - name: Set up an empty builder for registry cache restoration
+        if: inputs.benchmark
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      - name: Rebuild changed source using only the exported registry cache
+        if: inputs.benchmark
+        id: restored
+        working-directory: tooling
+        env:
+          CONTAINER_PUBLICATION: check
+          CONTAINER_SOURCE_SHA: ${{ steps.fixture.outputs.sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
+          CONTAINER_SOURCE_DIR: ../benchmark-source
+          CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
+          CONTAINER_MULTI_PLATFORM: ${{ inputs.multi_platform }}
+          CONTAINER_LOCAL_CACHE: true
+          CONTAINER_OUTPUT_DIR: ../artifacts/container-build/restored
+        run: |
+          node scripts/build-container-images.mjs build
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const read = name => JSON.parse(fs.readFileSync(`../artifacts/container-build/${name}/result.json`, 'utf8'));
+          const cold = read('cold'), restored = read('restored');
+          const app = restored.phases.find(phase => phase.name === 'applications');
+          if (restored.sourceSha === cold.sourceSha || restored.sourceSha !== process.env.CONTAINER_SOURCE_SHA
+              || !app || app.dependencyCookExecutions !== 0 || app.dependencyCookCacheHits < restored.platforms.length
+              || app.kernelBuildExecutions < restored.platforms.length) {
+            throw new Error(`Registry cache failed to preserve dependencies across a source-only change: ${JSON.stringify(restored)}`);
+          }
+          NODE
+
+      - name: Verify the restored image has the new source identity
+        if: ${{ !cancelled() && inputs.benchmark && steps.restored.outcome == 'success' }}
+        env:
+          IMAGE_REF: ${{ steps.restored.outputs.standard_app }}
+          EXPECTED_RELEASE_ID: image-${{ steps.fixture.outputs.sha }}
+        run: |
+          trap 'docker logs varin-restored-smoke 2>/dev/null || true; docker rm --force varin-restored-smoke 2>/dev/null || true' EXIT
+          docker run --detach --cpus=0.75 --memory=2g --pids-limit=512 --name varin-restored-smoke \
+            --env VARIN_UI_PASSWORD=varin-ci-smoke-only --publish 127.0.0.1:3000:3000 "$IMAGE_REF"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then break; fi
+            test "$(docker inspect --format '{{.State.Running}}' varin-restored-smoke)" = true
+            test "$attempt" -lt 60
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:3000/health \
+            | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+          docker exec varin-restored-smoke node verify-kernel.mjs packages/web
+          docker exec varin-restored-smoke node verify-services.mjs
+
       - name: Record builder storage use
         if: always()
         run: |
           df -h /
           docker buildx du || true
-      - name: Preserve cold and warm build evidence
+      - name: Preserve cold, warm and restored build evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:

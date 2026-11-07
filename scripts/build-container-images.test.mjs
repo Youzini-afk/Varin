@@ -15,7 +15,7 @@ const bases = { slim_base: `ghcr.io/youzini-afk/varin-runtime-slim@${digest('1')
 test('privileged build input rejects untrusted channels, refs, identities and override paths before building', () => {
   for (const patch of [{ publication: 'push' }, { sourceSha: 'main' }, { toolingSha: 'HEAD' }, { repository: 'outside/Varin' },
     { ref: 'refs/heads/feature' }, { eventName: 'pull_request' }, { githubSha: sha }, { runId: '12\nlatest' },
-    { runAttempt: '0' }, { slimBase: 'arbitrary:latest' }, { version: '0.9.39\nOTHER=x' }]) {
+    { runAttempt: '0' }, { localCache: true }, { slimBase: 'arbitrary:latest' }, { version: '0.9.39\nOTHER=x' }]) {
     assert.throws(() => containerBuildConfig({ ...input, ...patch }), undefined, JSON.stringify(patch));
   }
   const release = { ...input, publication: 'release', sourceSha: tooling, ref: 'refs/tags/v0.9.39' };
@@ -128,6 +128,8 @@ test('successful orchestration passes only observed base digests into the shared
     now: () => (clock += 1000),
     resolveBase(reference, variant) { verified.push([reference, variant]); return reference; },
     async run(args, { logPath }) {
+      assert.ok(args.includes('--allow=fs.read=/source'));
+      assert.ok(!args.some(value => value.includes('fs.read=*')));
       const plan = JSON.parse(fs.readFileSync(args[args.indexOf('--file') + 1], 'utf8'));
       plans.push(plan);
       fs.writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify(Object.fromEntries(
@@ -150,5 +152,39 @@ test('metadata cannot substitute a mutable tag or a missing target for an immuta
     assert.throws(() => builtImageReferences(config, plan, { slim_base: { 'containerimage.digest': digestValue } }));
   }
   assert.deepEqual(buildLogMetrics('#1 CACHED\n#2 12.0 Finished `release` profile [optimized]\n'), {
-    cachedVertices: 1, rustReleaseCompilations: 1, cacheExportSeconds: 0 });
+    cachedVertices: 1, dependencyCookCacheHits: 0, dependencyCookExecutions: 0, kernelBuildExecutions: 0, rustReleaseCompilations: 1, cacheExportSeconds: 0 });
+});
+
+
+test('cache roundtrip exports only fixed loopback refs and never silently ignores failures', () => {
+  const config = containerBuildConfig({ ...input, publication: 'check', localCache: true, toolbelt: true });
+  for (const plan of [containerBakePlan(config, 'bases'), containerBakePlan(config, 'applications', bases)]) {
+    for (const target of Object.values(plan.target)) {
+      for (const cache of [...target['cache-from'], ...(target['cache-to'] || [])]) {
+        assert.ok(cache.includes('ref=localhost:5000/'));
+        assert.ok(!cache.includes('ghcr.io'));
+        assert.ok(!cache.includes('ignore-error=true'));
+      }
+    }
+    assert.equal(Object.values(plan.target).filter(target => target['cache-to']).length, 1);
+  }
+});
+
+test('cache metrics distinguish restored dependency cooks from required source recompilation', () => {
+  const result = buildLogMetrics([
+    '#11 [standard_app linux/amd64 kernel-dependencies 3/3] RUN set -eux; cargo chef cook',
+    '#11 CACHED',
+    '#12 [standard_app linux/arm64 kernel-dependencies 3/3] RUN set -eux; cargo chef cook',
+    '#12 CACHED',
+    '#13 [standard_app linux/amd64 kernel-builder 3/3] RUN set -eux; cargo build',
+    '#13 1.0 Finished `release` profile [optimized]',
+    '#13 DONE 1.1s',
+    '#14 [standard_app linux/arm64 kernel-builder 3/3] RUN set -eux; cargo build',
+    '#14 2.0 Finished `release` profile [optimized]',
+    '#14 DONE 2.1s',
+    '#15 exporting cache to registry',
+    '#15 DONE 2.5s',
+  ].join('\n'));
+  assert.deepEqual(result, { cachedVertices: 2, dependencyCookCacheHits: 2, dependencyCookExecutions: 0,
+    kernelBuildExecutions: 2, rustReleaseCompilations: 2, cacheExportSeconds: 2.5 });
 });

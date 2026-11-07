@@ -29,11 +29,13 @@ export function containerBuildConfig(input) {
         toolingSha: input.toolingSha, sourceSha: input.sourceSha, version: input.version });
     }
   }
+  if (input.localCache && input.publication !== 'check') throw new Error('Disposable cache is only available to validation');
   const overrides = { slim_base: input.slimBase || '', toolbelt_base: input.toolbeltBase || '' };
   if (input.publication !== 'release' && Object.values(overrides).some(Boolean)) throw new Error('Base overrides belong only to explicit releases');
   const toolbelt = input.publication !== 'check' || input.toolbelt === true;
   const platforms = input.publication !== 'check' || input.multiPlatform === true ? ['linux/amd64', 'linux/arm64'] : ['linux/amd64'];
   return { ...input, runId: String(input.runId), runAttempt: String(input.runAttempt), toolbelt, platforms, overrides,
+    localCache: input.localCache === true,
     registry: input.publication === 'check' ? 'localhost:5000' : 'ghcr.io/youzini-afk',
     sourceDirectory: path.resolve(input.sourceDirectory), outputDirectory: path.resolve(input.outputDirectory),
     tag: `candidate-${input.runId}-${input.runAttempt}` };
@@ -49,13 +51,16 @@ function labels(config, base) {
 
 function cache(config, phase) {
   const name = phase === 'bases' ? names.toolbelt_base : names.standard_app;
-  const ref = `ghcr.io/youzini-afk/${name}:buildcache-v2`;
-  // Only admitted release/main workflows may update the shared registry cache.
-  // PRs can read public dependency layers, but never write into that trust domain.
-  // Large max-mode image caches no longer evict the repository's Rust/Bun caches.
+  // The optional benchmark roundtrip is confined to its disposable loopback
+  // registry. It cannot select an arbitrary destination or poison release cache.
+  const registry = config.localCache ? 'localhost:5000' : 'ghcr.io/youzini-afk';
+  const ref = `${registry}/${name}:buildcache-v2`;
+  // Only admitted release/main workflows update the shared registry cache.
+  // Ordinary PR validation reads public layers, with no registry credentials.
+  const writable = config.publication !== 'check' || config.localCache;
   return { from: [`type=registry,ref=${ref}`, ...(phase === 'bases'
-    ? ['type=registry,ref=ghcr.io/youzini-afk/varin-runtime-slim:buildcache-v2'] : [])], to: config.publication === 'check' ? []
-    : [`type=registry,ref=${ref},mode=max,oci-mediatypes=true,image-manifest=true,ignore-error=true`] };
+    ? [`type=registry,ref=${registry}/varin-runtime-slim:buildcache-v2`] : [])], to: !writable ? []
+    : [`type=registry,ref=${ref},mode=max,oci-mediatypes=true,image-manifest=true${config.localCache ? '' : ',ignore-error=true'}`] };
 }
 
 export function containerBakePlan(config, phase, bases = {}) {
@@ -92,7 +97,15 @@ export function builtImageReferences(config, plan, metadata) {
 }
 
 export function buildLogMetrics(log) {
-  return { cachedVertices: (log.match(/^#\d+ CACHED\s*$/gm) ?? []).length,
+  const cached = new Set([...log.matchAll(/^#(\d+) CACHED\s*$/gm)].map(match => match[1]));
+  const vertices = stage => [...log.matchAll(new RegExp(`^#(\\d+) \\[[^\\]]*${stage}[^\\]]*\\] RUN `, 'gm'))]
+    .map(match => match[1]);
+  const cooks = new Set(vertices('kernel-dependencies'));
+  const builds = new Set(vertices('kernel-builder'));
+  return { cachedVertices: cached.size,
+    dependencyCookCacheHits: [...cooks].filter(id => cached.has(id)).length,
+    dependencyCookExecutions: [...cooks].filter(id => !cached.has(id)).length,
+    kernelBuildExecutions: [...builds].filter(id => !cached.has(id)).length,
     rustReleaseCompilations: (log.match(/Finished `release` profile/g) ?? []).length,
     cacheExportSeconds: [...log.matchAll(/#(\d+) DONE ([\d.]+)s/g)].reduce((total, match) =>
       log.includes(`#${match[1]} exporting cache to registry`) ? total + Number(match[2]) : total, 0) };
@@ -115,7 +128,11 @@ export async function buildContainerImages(config, { run, resolveBase, now = () 
     // Stale output from a previous failed invocation must never become evidence.
     fs.rmSync(metadataPath, { force: true });
     const started = now();
-    await run(['buildx', 'bake', '--file', planPath, '--progress=plain', '--metadata-file', metadataPath], { logPath });
+    // Reviewed tooling and historical source are sibling checkouts. Bake's
+    // filesystem entitlement is intentionally limited to that exact context,
+    // rather than disabling its guard or silently reading the tooling checkout.
+    await run(['buildx', 'bake', `--allow=fs.read=${config.sourceDirectory}`,
+      '--file', planPath, '--progress=plain', '--metadata-file', metadataPath], { logPath });
     const images = builtImageReferences(config, plan, JSON.parse(fs.readFileSync(metadataPath, 'utf8')));
     Object.assign(result.images, images);
     result.phases.push({ name: phase, seconds: (now() - started) / 1000,
@@ -143,6 +160,7 @@ function environmentConfig(env) {
     toolingSha: env.CONTAINER_TOOLING_SHA, version, runId: env.GITHUB_RUN_ID || '1', runAttempt: env.GITHUB_RUN_ATTEMPT || '1',
     repository: env.GITHUB_REPOSITORY, githubSha: env.GITHUB_SHA, ref: env.GITHUB_REF, eventName: env.GITHUB_EVENT_NAME,
     sourceDirectory, outputDirectory: env.CONTAINER_OUTPUT_DIR || path.resolve('artifacts/container-build'),
+    localCache: env.CONTAINER_LOCAL_CACHE === 'true',
     toolbelt: env.CONTAINER_TOOLBELT === 'true', multiPlatform: env.CONTAINER_MULTI_PLATFORM === 'true',
     slimBase: env.CONTAINER_SLIM_BASE, toolbeltBase: env.CONTAINER_TOOLBELT_BASE });
 }

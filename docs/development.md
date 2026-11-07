@@ -74,7 +74,9 @@ PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workfl
 基础镜像，再按实测 digest 同时组装 standard/toolbelt，共享 Rust/Web 编译，不把普通 CI 的宿主二进制借给容器。
 发布的中间层缓存写入独立 `buildcache-v2` registry 引用，不占用 Actions 的 Rust/Bun 缓存空间；只读验证仅消费
 这些公开缓存，不写入发布缓存。Cargo 依赖以普通镜像层保存，源码或版本身份变化仍会重新构建真实 kernel。
-手动 CI 的 `container_benchmark` 会在临时 loopback registry 重复双架构构建并保留冷/热计时；它不发布产品镜像。
+手动 CI 的 `container_benchmark` 会在临时 loopback registry 记录双架构冷构建、同 builder 热构建，
+再删除 builder、建立全新 builder，并用一个只改 Rust 注释的本地 fixture commit 验证 registry 缓存恢复。
+它要求依赖 cook 全部命中、最终内核重新编译、镜像报告新的 source identity；三组计时均留作 artifact，不发布产品镜像。
 缓存命中只影响计算复用，不能代替资格、来源、产物身份或启动验证。
 main push 与按提交发布均不更新 `latest`。新命名采用 `varin` 标准环境与 `varin-toolbelt` 工具链环境；
 正式版本必须大于 0.9.38，独立 commit 标签允许源码版本仍为 0.9.38，旧精确版本/SHA 不重写。

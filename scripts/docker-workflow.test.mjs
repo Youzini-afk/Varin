@@ -54,6 +54,28 @@ test('reusable container validation only pushes to its disposable local registry
   }
 });
 
+test('validation exercises sibling checkouts and benchmark restoration has no original builder state', () => {
+  const steps = validation.jobs.verify.steps;
+  const source = steps.find(step => step.with?.path === 'source');
+  const tooling = steps.find(step => step.with?.path === 'tooling');
+  assert.equal(source.with.ref, '${{ inputs.source_sha }}');
+  assert.equal(tooling.with.ref, '${{ inputs.tooling_sha || github.sha }}');
+  for (const step of steps.filter(step => step.run?.startsWith('node scripts/build-container-images.mjs'))) {
+    assert.equal(step['working-directory'], 'tooling');
+    assert.ok(['../source', '../benchmark-source'].includes(step.env.CONTAINER_SOURCE_DIR));
+  }
+  const fixture = steps.findIndex(step => step.id === 'fixture');
+  const restore = steps.findIndex(step => step.id === 'restored');
+  assert.ok(fixture > 0 && restore > fixture);
+  assert.ok(steps[fixture].run.includes('docker buildx rm "$ORIGINAL_BUILDER"'));
+  assert.ok(steps.slice(fixture + 1, restore).some(step => step.uses?.startsWith('docker/setup-buildx-action')));
+  assert.equal(steps[restore].env.CONTAINER_SOURCE_SHA, '${{ steps.fixture.outputs.sha }}');
+  assert.equal(steps[restore].env.CONTAINER_LOCAL_CACHE, true);
+  assert.match(steps[restore].run, /dependencyCookExecutions !== 0/);
+  assert.match(steps[restore].run, /dependencyCookCacheHits < restored.platforms.length/);
+  assert.match(steps[restore].run, /kernelBuildExecutions < restored.platforms.length/);
+});
+
 test('release smokes run candidate-owned scripts with their supported Node runtime', () => {
   for (const id of ['smoke-toolbelt', 'smoke-standard']) {
     const job = release.jobs[id];
