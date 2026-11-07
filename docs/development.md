@@ -139,10 +139,12 @@ Android native/toolchain 变更执行无签名 debug build，release 使用同�
 `Source quality` 始终创建，严格汇总本轮适用的 source、preflight、native、平台、production、
 container 和 Android 结果；失败、取消、缺失或意外 skip 都不能放行。轻量 production-lock
 前置直接调用构建 owner 的 `--check-lock`，不再先重跑 layout fixture；失败阻止 production/image 重复构建，同时不遮蔽独立源码与 native owner 的结果。
-Linux release kernel 一次构建，native 与 production 用现有回执核验输入/选项/摘要后消费；
+Linux release kernel 一次构建，Host/native、Rust workspace 与 production 分别用现有回执核验输入/选项/摘要后消费；
 Cargo release/debug 缓存分开；没有对应编译工作的任务不恢复 Rust 缓存。测试任务保留已成功编译的
 缓存，Windows 在 native 验收前保存，避免真实断言/teardown 失败导致下一轮再次冷编译；缓存不是测试成功证据。
-Rust 编译与执行分开，执行仍有原十分钟预算。
+Host/native 接线与 Rust workspace 是独立并行作业，各自保留依赖准备、FUSE 和真实 kernel 前置，失败互不遮蔽。
+同一 SHA 的重试可使用 GitHub 的失败作业重跑，保留已经通过的另一项；新提交仍按完整适用范围实际验证，
+不复用其他 SHA 的测试结果。Rust 编译与执行分开，执行仍有原十分钟预算。
 日常代码保留本地安全 patch 消费者回归；实时 Bun/Cargo advisory 查询由依赖改动、完整资格和发行承担。
 
 失败归属跟随检查而不是另建重试流程：preflight 由生产依赖/锁文件 owner 修复；portable 由失败的

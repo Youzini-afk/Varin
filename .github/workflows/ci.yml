@@ -209,6 +209,57 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/download-artifact@v8
+        with:
+          name: varin-ci-kernel-linux-x64
+          path: .build-input/kernel
+      - id: native-restore
+        run: node scripts/build-products.mjs kernel
+      - id: dependencies
+        run: bun install --frozen-lockfile
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        id: prepare
+        run: bun run build:type-dependencies
+      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
+        name: Prepare FUSE for native workspace acceptance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fuse3
+          sudo modprobe fuse
+          test -c /dev/fuse
+      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
+        name: Verify native kernel authority
+        run: node scripts/test-kernel-authority.mjs
+
+  rust-workspace:
+    name: Rust workspace verification
+    runs-on: ubuntu-latest
+    needs: [changes, native-build]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.native-build.result == 'success' }}
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-rust-{0}', github.run_id) }}
+      queue: max
+    env:
+      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
+      VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
+      VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/cache/restore@v6
         id: rust-cache
         if: needs.changes.outputs.rust == 'true'
@@ -231,19 +282,14 @@ jobs:
         id: prepare
         run: bun run build:type-dependencies
       - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
-        name: Prepare FUSE for native workspace acceptance
+        name: Prepare FUSE for Rust workspace tests
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fuse3
           sudo modprobe fuse
           test -c /dev/fuse
-      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
-        name: Verify native kernel authority
-        run: node scripts/test-kernel-authority.mjs
-      # Rust state-machine/unit tests have one Linux owner. The release-binary
-      # acceptance above and on Windows exercises the Host/native boundary.
-      # An acceptance failure stays red but must not hide independent Rust
-      # results when their required native artifact was successfully built.
+      # Rust tests use the same verified release kernel and built Host helpers,
+      # but do not wait for the independent Host/native acceptance job.
       - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
         id: rust-build
         name: Build Rust workspace tests
@@ -555,7 +601,7 @@ jobs:
   source-quality:
     name: Source quality
     runs-on: ubuntu-latest
-    needs: [changes, production-preflight, portable-source, native-build, linux-native, windows-runtime, macos-storage, production-build, container-check, android-build]
+    needs: [changes, production-preflight, portable-source, native-build, linux-native, rust-workspace, windows-runtime, macos-storage, production-build, container-check, android-build]
     if: ${{ always() }}
     steps:
       - uses: actions/checkout@v7

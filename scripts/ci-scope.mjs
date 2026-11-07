@@ -102,6 +102,7 @@ export function requiredJobs(scope) {
     'production-preflight': scope.code,
     'native-build': scope.native || scope.production,
     'linux-native': scope.native,
+    'rust-workspace': scope.rust,
     'windows-runtime': scope.windows,
     'macos-storage': scope.macos,
     'production-build': scope.production,
