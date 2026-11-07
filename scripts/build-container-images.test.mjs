@@ -152,7 +152,7 @@ test('metadata cannot substitute a mutable tag or a missing target for an immuta
     assert.throws(() => builtImageReferences(config, plan, { slim_base: { 'containerimage.digest': digestValue } }));
   }
   assert.deepEqual(buildLogMetrics('#1 CACHED\n#2 12.0 Finished `release` profile [optimized]\n'), {
-    cachedVertices: 1, dependencyCookCacheHits: 0, dependencyCookExecutions: 0, kernelBuildExecutions: 0, rustReleaseCompilations: 1, cacheExportSeconds: 0 });
+    cachedVertices: 1, dependencyCookCacheHits: 0, dependencyCookExecutions: 0, dependencyCookUnknown: 0, kernelBuildExecutions: 0, rustReleaseCompilations: 1, cacheExportSeconds: 0 });
 });
 
 
@@ -186,6 +186,39 @@ test('cache metrics distinguish restored dependency cooks from required source r
     '#15 [standard_app] exporting cache to registry',
     '#15 DONE 2.5s',
   ].join('\n'));
-  assert.deepEqual(result, { cachedVertices: 2, dependencyCookCacheHits: 2, dependencyCookExecutions: 0,
+  assert.deepEqual(result, { cachedVertices: 2, dependencyCookCacheHits: 2, dependencyCookExecutions: 0, dependencyCookUnknown: 0,
     kernelBuildExecutions: 2, rustReleaseCompilations: 2, cacheExportSeconds: 2.5 });
+});
+
+
+test('lazy remote cache extraction is not a cook execution, and ambiguous progress fails closed', () => {
+  const sha = 'f'.repeat(64);
+  const result = buildLogMetrics([
+    '#56 [toolbelt_app linux/amd64->arm64 kernel-dependencies 3/3] RUN set -eux; cargo chef cook',
+    `#56 sha256:${sha} 446.82MB / 446.82MB 4.3s done`,
+    `#56 extracting sha256:${sha} 13.3s done`,
+    '#56 DONE 17.8s',
+    '#57 [toolbelt_app linux/amd64 kernel-dependencies 3/3] RUN set -eux; cargo chef cook',
+    `#57 extracting sha256:${sha} 14.0s done`,
+    '#57 DONE 18.4s',
+    '#62 [toolbelt_app linux/amd64->arm64 kernel-builder 3/3] RUN set -eux; cargo build',
+    '#62 0.066 + kernel_arch=arm64',
+    '#62 582.1 Finished `release` profile [optimized] target(s) in 9m 41s',
+    '#62 DONE 583.0s',
+    '#64 [toolbelt_app linux/amd64 kernel-builder 3/3] RUN set -eux; cargo build',
+    '#64 0.066 + kernel_arch=x64',
+    '#64 545.7 Finished `release` profile [optimized] target(s) in 9m 04s',
+    '#64 DONE 546.0s',
+  ].join('\n'));
+  assert.equal(result.dependencyCookCacheHits, 2);
+  assert.equal(result.dependencyCookExecutions, 0);
+  assert.equal(result.dependencyCookUnknown, 0);
+  assert.equal(result.kernelBuildExecutions, 2);
+  assert.equal(result.rustReleaseCompilations, 2);
+  const ambiguous = buildLogMetrics('#1 [standard_app kernel-dependencies 3/3] RUN set -eux; cargo chef cook\n#1 DONE 1.0s');
+  assert.equal(ambiguous.dependencyCookCacheHits, 0);
+  assert.equal(ambiguous.dependencyCookUnknown, 1);
+  const executed = buildLogMetrics(`#1 [standard_app kernel-dependencies 3/3] RUN set -eux; cargo chef cook\n#1 extracting sha256:${sha} done\n#1 0.1 + cargo chef cook\n#1 DONE 1.0s`);
+  assert.equal(executed.dependencyCookCacheHits, 0);
+  assert.equal(executed.dependencyCookExecutions, 1);
 });

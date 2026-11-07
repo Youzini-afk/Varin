@@ -97,16 +97,26 @@ export function builtImageReferences(config, plan, metadata) {
 }
 
 export function buildLogMetrics(log) {
-  const exports = new Set([...log.matchAll(/^#(\d+) (?:\[[^\]]+\] )?exporting cache to registry$/gm)].map(match => match[1]));
-  const cached = new Set([...log.matchAll(/^#(\d+) CACHED\s*$/gm)].map(match => match[1]));
-  const vertices = stage => [...log.matchAll(new RegExp(`^#(\\d+) \\[[^\\]]*${stage}[^\\]]*\\] RUN `, 'gm'))]
-    .map(match => match[1]);
-  const cooks = new Set(vertices('kernel-dependencies'));
-  const builds = new Set(vertices('kernel-builder'));
+  const ids = expression => new Set([...log.matchAll(expression)].map(match => match[1]));
+  const exports = ids(/^#(\d+) (?:\[[^\]]+\] )?exporting cache to registry$/gm);
+  const cached = ids(/^#(\d+) CACHED\s*$/gm);
+  const completed = ids(/^#(\d+) DONE(?: [\d.]+s)?\s*$/gm);
+  // Plain progress reports a lazy remote cache hit as layer extraction followed
+  // by DONE, not CACHED. Timestamped process output proves that RUN executed;
+  // downloads/extraction are un-timestamped BuildKit status messages instead.
+  // These Rust RUNs use `set -eux`, so a real cook/build cannot be silent.
+  const executed = ids(/^#(\d+) [\d.]+ .+$/gm);
+  const runVertices = ids(/^#(\d+) \[[^\]]+\] RUN /gm);
+  const restored = ids(/^#(\d+) extracting sha256:[a-f0-9]{64}.*\bdone$/gm);
+  for (const id of restored) if (runVertices.has(id) && completed.has(id) && !executed.has(id)) cached.add(id);
+  for (const id of executed) cached.delete(id);
+  const vertices = stage => ids(new RegExp(`^#(\\d+) \\[[^\\]]*${stage}[^\\]]*\\] RUN `, 'gm'));
+  const cooks = vertices('kernel-dependencies'), builds = vertices('kernel-builder');
   return { cachedVertices: cached.size,
     dependencyCookCacheHits: [...cooks].filter(id => cached.has(id)).length,
-    dependencyCookExecutions: [...cooks].filter(id => !cached.has(id)).length,
-    kernelBuildExecutions: [...builds].filter(id => !cached.has(id)).length,
+    dependencyCookExecutions: [...cooks].filter(id => executed.has(id)).length,
+    dependencyCookUnknown: [...cooks].filter(id => !cached.has(id) && !executed.has(id)).length,
+    kernelBuildExecutions: [...builds].filter(id => executed.has(id)).length,
     rustReleaseCompilations: (log.match(/Finished `release` profile/g) ?? []).length,
     cacheExportSeconds: [...log.matchAll(/#(\d+) DONE ([\d.]+)s/g)].reduce((total, match) =>
       exports.has(match[1]) ? total + Number(match[2]) : total, 0) };

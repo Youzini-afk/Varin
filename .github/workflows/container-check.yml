@@ -4,6 +4,24 @@ name: Container validation
 # registry credentials/publication: its only pushes go to an ephemeral loopback
 # registry, including when the caller is an untrusted pull request.
 on:
+  # Re-run the expensive cache experiment without duplicating unrelated CI.
+  # Like reusable validation, this entry has no publishing credentials.
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA (empty selects the dispatch commit)
+        default: ''
+        type: string
+      toolbelt:
+        default: true
+        type: boolean
+      multi_platform:
+        default: true
+        type: boolean
+      benchmark:
+        description: Exercise cold, warm and clean-builder caches in a disposable localhost registry
+        default: true
+        type: boolean
   workflow_call:
     inputs:
       source_sha:
@@ -45,7 +63,7 @@ jobs:
       - name: Checkout exact product source
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           path: source
           persist-credentials: false
       - uses: actions/setup-node@v7
@@ -53,7 +71,7 @@ jobs:
           node-version: 24
       - name: Require the selected source
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
       - uses: docker/setup-qemu-action@v4
@@ -83,7 +101,7 @@ jobs:
         working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
-          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
           CONTAINER_SOURCE_DIR: ../source
         run: node scripts/build-container-images.mjs validate
@@ -93,7 +111,7 @@ jobs:
         working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
-          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
           CONTAINER_SOURCE_DIR: ../source
           CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
@@ -108,7 +126,7 @@ jobs:
         working-directory: tooling
         env:
           CONTAINER_PUBLICATION: check
-          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha || github.sha }}
           CONTAINER_SOURCE_DIR: ../source
           CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
@@ -124,7 +142,7 @@ jobs:
         shell: bash
         env:
           IMAGE_REF: ${{ steps.images.outputs.standard_app }}
-          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha || github.sha }}
         run: |
           cleanup() {
             docker logs varin-check-smoke 2>/dev/null || true
@@ -163,7 +181,7 @@ jobs:
         shell: bash
         env:
           IMAGE_REF: ${{ steps.images.outputs.toolbelt_app }}
-          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha || github.sha }}
         run: |
           cleanup() {
             docker logs varin-check-smoke 2>/dev/null || true
@@ -202,7 +220,7 @@ jobs:
         env:
           STANDARD_IMAGE: ${{ steps.images.outputs.standard_app }}
           TOOLBELT_IMAGE: ${{ steps.images.outputs.toolbelt_app }}
-          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha || github.sha }}
         run: |
           cleanup() {
             docker logs varin-arm64-smoke 2>/dev/null || true
@@ -277,14 +295,15 @@ jobs:
           const cold = read('cold'), restored = read('restored');
           const app = restored.phases.find(phase => phase.name === 'applications');
           if (restored.sourceSha === cold.sourceSha || restored.sourceSha !== process.env.CONTAINER_SOURCE_SHA
-              || !app || app.dependencyCookExecutions !== 0 || app.dependencyCookCacheHits < restored.platforms.length
+              || !app || app.dependencyCookExecutions !== 0 || app.dependencyCookUnknown !== 0
+              || app.dependencyCookCacheHits < restored.platforms.length
               || app.kernelBuildExecutions < restored.platforms.length) {
             throw new Error(`Registry cache failed to preserve dependencies across a source-only change: ${JSON.stringify(restored)}`);
           }
           NODE
 
       - name: Verify the restored image has the new source identity
-        if: ${{ !cancelled() && inputs.benchmark && steps.restored.outcome == 'success' }}
+        if: ${{ !cancelled() && inputs.benchmark && steps.restored.outputs.standard_app != '' }}
         env:
           IMAGE_REF: ${{ steps.restored.outputs.standard_app }}
           EXPECTED_RELEASE_ID: image-${{ steps.fixture.outputs.sha }}

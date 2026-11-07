@@ -40,7 +40,8 @@ test('candidate computation overlaps quality but final release promotion require
 });
 
 test('reusable container validation only pushes to its disposable local registry', () => {
-  assert.deepEqual(Object.keys(validation.on), ['workflow_call']);
+  assert.deepEqual(Object.keys(validation.on).sort(), ['workflow_call', 'workflow_dispatch']);
+  assert.equal(validation.on.workflow_dispatch.inputs.benchmark.default, true);
   assert.deepEqual(validation.permissions, { contents: 'read' });
   assert.equal(validation.on.workflow_call.inputs.source_sha.required, true);
   for (const job of Object.values(validation.jobs)) {
@@ -58,7 +59,7 @@ test('validation exercises sibling checkouts and benchmark restoration has no or
   const steps = validation.jobs.verify.steps;
   const source = steps.find(step => step.with?.path === 'source');
   const tooling = steps.find(step => step.with?.path === 'tooling');
-  assert.equal(source.with.ref, '${{ inputs.source_sha }}');
+  assert.equal(source.with.ref, '${{ inputs.source_sha || github.sha }}');
   assert.equal(tooling.with.ref, '${{ inputs.tooling_sha || github.sha }}');
   for (const step of steps.filter(step => step.run?.startsWith('node scripts/build-container-images.mjs'))) {
     assert.equal(step['working-directory'], 'tooling');
@@ -72,6 +73,9 @@ test('validation exercises sibling checkouts and benchmark restoration has no or
   assert.equal(steps[restore].env.CONTAINER_SOURCE_SHA, '${{ steps.fixture.outputs.sha }}');
   assert.equal(steps[restore].env.CONTAINER_LOCAL_CACHE, true);
   assert.match(steps[restore].run, /dependencyCookExecutions !== 0/);
+  assert.match(steps[restore].run, /dependencyCookUnknown !== 0/);
+  const smoke = steps.find(step => step.name === 'Verify the restored image has the new source identity');
+  assert.match(smoke.if, /steps.restored.outputs.standard_app != ''/);
   assert.match(steps[restore].run, /dependencyCookCacheHits < restored.platforms.length/);
   assert.match(steps[restore].run, /kernelBuildExecutions < restored.platforms.length/);
 });
