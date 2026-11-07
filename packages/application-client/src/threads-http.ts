@@ -157,6 +157,13 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     followups: {
       jobSources: (identity, runId, signal) => post('followup/jobs', { ...identity, runId }, signal),
       register: input => post('followup/register', input),
+      arrangements: (identity, botId, signal) => post('followup/arrangements', { ...identity, botId }, signal),
+      eventSources: (identity, signal) => post('followup/event-sources', identity, signal),
+      sourceRoutes: (identity, followupId, signal) => post('followup/source-routes', { ...identity, followupId }, signal),
+      putSourceRoute: input => post('followup/source-route/put', input),
+      removeSourceRoute: input => post('followup/source-route/remove', input),
+      putArrangement: input => post('followup/arrangement/put', input),
+      backlog: input => post('followup/backlog', input),
       pendingRegistrations: (identity, signal) => post('followup/registrations/pending', identity, signal),
       cancelRegistration: input => post('followup/registration/cancel', input),
       list: (identity, signal) => post('followup/list', identity, signal),

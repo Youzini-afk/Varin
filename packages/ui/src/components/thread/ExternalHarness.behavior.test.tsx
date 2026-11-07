@@ -631,3 +631,13 @@ it('uses the Host error for an already-disconnected bound non-resumable session'
   expect(container.textContent).toContain('The original session cannot be resumed. Start a new conversation.');
   expect(api.send).not.toHaveBeenCalled();
 });
+
+it('opens an original external turn in the existing read-only view and reads older history without sending or connecting', async () => {
+  const { api, views } = fixture(); const view = views.get('prepared')!;
+  view.turns = [{ id: 'old-turn', conversationId: 'prepared', key: 'old', status: 'completed', createdAt: 1, updatedAt: 2 }, { id: 'new-turn', conversationId: 'prepared', key: 'new', status: 'completed', createdAt: 3, updatedAt: 4 }];
+  view.items = [{ id: 'new-answer', turnId: 'new-turn', kind: 'assistant', text: 'Unrelated latest answer' }]; view.previous = 10;
+  api.read.mockImplementation(async (_id, before) => before === 10 ? { ...view, previous: undefined, items: [{ id: 'old-answer', turnId: 'old-turn', kind: 'assistant', text: 'Original event result' }] } : structuredClone(view));
+  await act(async () => root.render(<ExternalConversationView id="prepared" turnId="old-turn" readOnly />));
+  expect(api.read).toHaveBeenCalledWith('prepared', 10, expect.any(AbortSignal)); expect(container.textContent).toContain('Original event result'); expect(container.textContent).not.toContain('Unrelated latest answer');
+  expect(api.connect).not.toHaveBeenCalled(); expect(api.send).not.toHaveBeenCalled();
+});

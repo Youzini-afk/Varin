@@ -21,7 +21,8 @@ async function fixture(options: { connect?: boolean; probeUnconfirmed?: boolean 
   const settings: ExternalAgentSettings = { revision: 0, defaultAgent: null, agents: [config], capabilityCache: {} };
   let cacheGeneration = 0;
   const commands: Array<Record<string, unknown>> = [];
-  const kernel = { agentRuntimeRequest: vi.fn(async (_method: string, params: { command: Record<string, unknown> }): Promise<unknown> => {
+  let runtimeEvent: ((event: { stream: string }) => void) | undefined;
+  const kernel = { onAgentRuntimeEvent: vi.fn((listener: typeof runtimeEvent) => { runtimeEvent = listener; return () => {}; }), agentRuntimeRequest: vi.fn(async (_method: string, params: { command: Record<string, unknown> }): Promise<unknown> => {
     commands.push(params.command);
     if (params.command.action === 'settings') return settings;
     if (params.command.action === 'claim_capabilities') return ++cacheGeneration;
@@ -37,7 +38,7 @@ async function fixture(options: { connect?: boolean; probeUnconfirmed?: boolean 
       else delete settings.capabilityCache![String(params.command.configurationId)];
     }
     if (params.command.action === 'bind') snapshot.conversation.sessionId = String(params.command.sessionId);
-    if (params.command.action === 'child_list') return [];
+    if (params.command.action === 'child_list' || params.command.action === 'arrangement_pending') return [];
     if (params.command.action === 'read') return snapshot;
     if (params.command.action === 'cleanup_list') return [];
     if (params.command.action === 'update') return { ...snapshot.conversation, deleted: params.command.deleted === true };
@@ -94,6 +95,7 @@ async function fixture(options: { connect?: boolean; probeUnconfirmed?: boolean 
     setProbe(value: () => Promise<string>) { probe = value; },
     setSnapshot(value: Partial<ExternalConversationSnapshot>) { snapshot = { ...snapshot, ...value }; },
     get snapshot() { return snapshot; },
+    durableEvent() { runtimeEvent?.({ stream: 'durable' }); },
   };
 }
 
@@ -584,4 +586,63 @@ it.each([false, true])('does not let an older detection invalidate a newer live 
   f.change();
   await Promise.resolve();
   expect(f.settings.capabilityCache!.fixture?.capabilities.models).toEqual([{ id: 'new-model', name: 'New model' }]);
+});
+
+
+it('a durable arrangement advances the original live connection even when it cannot resume', async () => {
+  const f = await fixture();
+  const connection = await vi.mocked(connectCodex).mock.results[0]!.value as HarnessConnection;
+  connection.capabilities.resume = false;
+  const turn = { id: 'event-turn', conversationId: 'external:test', key: 'followup:occurrence', status: 'queued', createdAt: 1, updatedAt: 1,
+    arrangementOccurrenceId: 'occurrence', arrangementLaunch: { command: f.config.command, args: f.config.args } } as ExternalConversationSnapshot['turns'][number];
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false }, turns: [turn] });
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    const c = params.command;
+    if (c.action === 'arrangement_pending') return turn.status === 'queued' ? ['external:test'] : [];
+    if (c.action === 'begin') { turn.status = 'preparing'; f.snapshot.conversation.activeTurn = turn.id; return turn; }
+    if (c.action === 'input') return { text: 'Original arrangement. Quoted new customer evidence.', task: 'Quoted new customer evidence.', _arrangement: true, _userInput: false };
+    if (c.action === 'observe') { turn.status = c.status as typeof turn.status; if (turn.status === 'completed') delete f.snapshot.conversation.activeTurn; return turn; }
+    return original(method, params);
+  });
+  vi.mocked(connection.prompt).mockImplementation(async (input, callbacks) => {
+    expect(input.text).toContain('Quoted new customer evidence');
+    expect(input).not.toHaveProperty('_arrangement');
+    await callbacks.beforeDispatch!();
+    return { status: 'completed' };
+  });
+  f.service.startChildren({} as never);
+  f.durableEvent();
+  await vi.waitFor(() => expect(turn.status).toBe('completed'));
+  expect(connection.prompt).toHaveBeenCalledOnce();
+  expect(f.spawn).toHaveBeenCalledOnce();
+  expect(f.commands.some(c => c.action === 'create' || c.action === 'admit')).toBe(false);
+});
+
+it('an unsent arrangement keeps its original turn when the harness preparation fails', async () => {
+  const f = await fixture();
+  const connection = await vi.mocked(connectCodex).mock.results[0]!.value as HarnessConnection;
+  const turn = { id: 'event-turn', conversationId: 'external:test', key: 'followup:occurrence', status: 'queued', createdAt: 1, updatedAt: 1,
+    arrangementOccurrenceId: 'occurrence' } as ExternalConversationSnapshot['turns'][number];
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false }, turns: [turn] });
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  let deferred = 0;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    const c = params.command;
+    if (c.action === 'arrangement_pending') return turn.status === 'queued' && !turn.blockedReason ? ['external:test'] : [];
+    if (c.action === 'begin') { turn.status = 'preparing'; f.snapshot.conversation.activeTurn = turn.id; return turn; }
+    if (c.action === 'input') return { text: 'Original arrangement with source evidence', _arrangement: true };
+    if (c.action === 'defer') { deferred++; turn.status = 'queued'; turn.blockedReason = String(c.reason); delete f.snapshot.conversation.activeTurn; return turn; }
+    return original(method, params);
+  });
+  vi.mocked(connection.prompt).mockRejectedValue(new Error('Sign in to the original harness account'));
+  f.service.startChildren({} as never);
+  f.durableEvent();
+  await vi.waitFor(() => expect(deferred).toBe(1));
+  f.durableEvent();
+  await Promise.resolve(); await Promise.resolve();
+  expect(turn.status).toBe('queued');
+  expect(turn.blockedReason).toBe('Sign in to the original harness account');
+  expect(connection.prompt).toHaveBeenCalledOnce();
+  expect(f.commands.some(c => c.action === 'observe' && c.status === 'failed')).toBe(false);
 });

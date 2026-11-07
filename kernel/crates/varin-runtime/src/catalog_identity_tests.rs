@@ -35,6 +35,7 @@ fn delete(c: &mut Catalog, thread: &str) -> Value {
     .unwrap()
 }
 fn downgrade(c: &Catalog) {
+    followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
     c.db.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations; DROP TABLE calendar_legacy_manual_boundaries; PRAGMA user_version=87;").unwrap();
 }
 #[test]

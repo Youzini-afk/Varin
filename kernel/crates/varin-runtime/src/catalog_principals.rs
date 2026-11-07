@@ -91,6 +91,8 @@ const SUBJECTS: &str = "SELECT id AS subject,id AS thread_id FROM threads
  UNION ALL SELECT o.id,b.thread_id FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id
  UNION ALL SELECT i.id,b.thread_id FROM input_queue i JOIN branches b ON b.id=i.branch_id
  UNION ALL SELECT m.id,b.thread_id FROM model_steps m JOIN runs r ON r.id=m.run_id JOIN branches b ON b.id=r.branch_id
+ UNION ALL SELECT f.id,f.thread_id FROM followups f
+ UNION ALL SELECT o.id,f.thread_id FROM followup_occurrences o JOIN followups f ON f.id=o.followup_id
  UNION ALL SELECT d.id,c.child_thread_id FROM delegated_executions d JOIN child_tasks c ON c.id=d.child_operation_id";
 impl Catalog {
     /// Called at Host authentication startup, not from user-selected request parameters.
@@ -119,6 +121,8 @@ impl Catalog {
                 "UPDATE threads SET principal_id=?1 WHERE principal_id IS NULL",
                 [owner],
             )?;
+            followups::events::claim_legacy(&tx, owner)?;
+            external::claim_public_principals(&tx, owner)?;
         }
         tx.execute("UPDATE runs SET body=json_set(body,'$.principal_id',(SELECT t.principal_id FROM branches b JOIN threads t ON t.id=b.thread_id WHERE b.id=runs.branch_id)) WHERE json_type(body,'$.thread_id')='text'", [])?;
         tx.commit()?;
@@ -152,7 +156,9 @@ impl Catalog {
         if let Some(principal) = principal {
             validate(principal)?;
         }
-        let sql = format!("SELECT e.cursor,e.subject,e.revision,e.kind,e.data FROM events e WHERE e.cursor>?1 AND EXISTS(SELECT 1 FROM threads t WHERE (t.principal_id IS NULL OR t.principal_id=?3) AND t.id=(SELECT min(thread_id) FROM ({SUBJECTS}) subjects WHERE subjects.subject=e.subject HAVING count(DISTINCT thread_id)=1)) ORDER BY e.cursor LIMIT ?2");
+        let sql = format!(
+            "SELECT e.cursor,e.subject,e.revision,e.kind,e.data FROM events e WHERE e.cursor>?1 AND EXISTS(SELECT 1 FROM threads t WHERE (t.principal_id IS NULL OR t.principal_id=?3) AND t.id=(SELECT min(thread_id) FROM ({SUBJECTS}) subjects WHERE subjects.subject=e.subject HAVING count(DISTINCT thread_id)=1)) ORDER BY e.cursor LIMIT ?2"
+        );
         let mut query = self.db.prepare(&sql)?;
         let mut result = Vec::new();
         for row in query.query_map(params![sql_number(cursor)?, limit, principal], |r| {
@@ -322,6 +328,7 @@ mod tests {
         let mut c = f.open();
         create(&mut c, "legacy", None);
         let receipt = submit(&mut c, "legacy");
+        followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
         c.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id; DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id'); PRAGMA user_version=86;").unwrap();
         drop(c);
         let mut c = f.open();
@@ -364,14 +371,37 @@ mod tests {
         create(&mut c, "private", Some("alice"));
         let receipt = submit(&mut c, "private");
         c.db.pragma_update(None, "user_version", 86).unwrap();
-        let before: String = c.db.query_row("SELECT body FROM runs WHERE id=?1", [&receipt.run_id], |row| row.get(0)).unwrap();
+        let before: String =
+            c.db.query_row(
+                "SELECT body FROM runs WHERE id=?1",
+                [&receipt.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         drop(c);
-        let error = match Catalog::open(&f.0) { Ok(_) => panic!("mislabeled schema was accepted"), Err(error) => error };
-        assert!(error.to_string().contains("newer principal attribution schema"));
+        let error = match Catalog::open(&f.0) {
+            Ok(_) => panic!("mislabeled schema was accepted"),
+            Err(error) => error,
+        };
+        assert!(error
+            .to_string()
+            .contains("newer principal attribution schema"));
         let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
-        assert_eq!(raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 86);
+        assert_eq!(
+            raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            86
+        );
         assert_eq!(thread(&raw, "private").unwrap().as_deref(), Some("alice"));
-        assert_eq!(raw.query_row("SELECT body FROM runs WHERE id=?1", [&receipt.run_id], |row| row.get::<_, String>(0)).unwrap(), before);
+        assert_eq!(
+            raw.query_row(
+                "SELECT body FROM runs WHERE id=?1",
+                [&receipt.run_id],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            before
+        );
     }
     #[test]
     fn explicit_null_is_not_internal_unfiltered_authority() {

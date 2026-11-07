@@ -8,6 +8,7 @@ import { releaseManagedPackageSource, type ManagedPackageCleanup } from './manag
 import { recallManagedScheduleReceipt, type ManagedScheduleReceiptQuery } from './managed-schedule-receipt.js';
 import { ManagedResponseError } from '../harness/managed-remote-client.js';
 import { KernelClientError } from './kernel-error.js';
+import type { FollowupEventOwner } from './followup-event-owner.js';
 
 export type ManagedSourceOwner = (owner: ManagedHostSourceOwner) => Promise<ManagedSourceClient>;
 export type PrivateManagedSourceFrame = { v: 1; kind: 'source-resource-response'; id: string; kernelEpoch: string; result: { ok: boolean; value?: unknown; message?: string; error?: {code:string;message:string;details?:unknown} } }
@@ -30,12 +31,14 @@ function source(binding: SourceToolBinding): LaunchSource {
 /** Only the original private Rust transport can call this bridge. It never owns effects. */
 export class ManagedSourceBridge {
   private owner?: ManagedSourceOwner;
+  private followupEvents?: FollowupEventOwner;
   private coordinator?: () => string;
-  private readonly active = new Map<string, { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean }>();
+  private readonly active = new Map<string, { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean; abortOnClose?: () => void }>();
   private readonly observations = new Map<string, { control: AbortController; stopRequested: boolean }>();
   constructor(private readonly epoch: () => string | null, private readonly send: (frame: PrivateManagedSourceFrame) => Promise<void>, private readonly failed: () => void) {}
   setOwner(owner: ManagedSourceOwner, coordinator: () => string): void { if (this.owner && this.owner !== owner) throw new Error('Managed source bridge already bound'); this.owner = owner; this.coordinator = coordinator; }
-  close(): void { this.active.clear(); for (const observation of this.observations.values()) observation.control.abort(); this.observations.clear(); }
+  setFollowupEvents(owner: FollowupEventOwner): void { this.followupEvents = owner; }
+  close(): void { for (const pending of this.active.values()) pending.abortOnClose?.(); this.active.clear(); for (const observation of this.observations.values()) observation.control.abort(); this.observations.clear(); }
   private async observeProcess(client: ManagedSourceClient, query: Query, epoch: string, initial?: ManagedSourceReceipt): Promise<void> {
     const authority = query.binding.remoteAuthority!;
     const key = `${authority.authorityId}:${query.context.operation_id}`;
@@ -72,11 +75,18 @@ export class ManagedSourceBridge {
     const id = value.id, epoch = value.kernelEpoch;
     if (value.kind === 'source-resource-cancel') { const pending = this.active.get(id); if (pending?.epoch === epoch) { pending.cancelled = true; void pending.cancel?.().catch(() => undefined); } return true; }
     if (this.active.has(id)) return true;
-    const pending: { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean } = { epoch, cancelled: false }; this.active.set(id, pending);
+    const pending: { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean; abortOnClose?: () => void } = { epoch, cancelled: false }; this.active.set(id, pending);
     void (async () => {
       let result: Extract<PrivateManagedSourceFrame, { kind: 'source-resource-response' }>['result'];
       try {
-        if (record(value.query) && value.query.kind === 'script_control') {
+        if (record(value.query) && ['followup_event_sources', 'followup_event_source_validate'].includes(String(value.query.kind))) {
+          if (!this.followupEvents) throw new Error('Plugin event source owner is unavailable');
+          const controller = new AbortController();
+          pending.cancel = async () => controller.abort();
+          pending.abortOnClose = () => controller.abort();
+          if (pending.cancelled) controller.abort();
+          result = { ok: true, value: await this.followupEvents(value.query, controller.signal) };
+        } else if (record(value.query) && value.query.kind === 'script_control') {
           const query = value.query;
           if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind !== 'managed_host'
             || !text(query.processId) || !text(query.runId) || !text(query.threadId) || typeof query.stop !== 'boolean' || !this.owner || !this.coordinator)

@@ -307,3 +307,53 @@ it('lazily admits only Catalog-proven final source report references', async () 
   expect((await f.materials.read(scope, snapshot.snapshotId, { ...authority, threadId: root.threadId }))?.body.toString()).toBe('report evidence');
   await expect(f.owner.retainMaterial(peer, snapshot.snapshotId)).rejects.toThrow('has not received');
 });
+
+it('imports original event files through Catalog authorization and the existing Storage attachment owner', async () => {
+  const f = fixture();
+  const { createEventAttachmentCapture } = await import('./event-attachment-capture.js');
+  const original = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(600_000, 0x5a)]);
+  const attachment = { ref: 'attachment:event_original', filename: 'Customer report.pdf', mimeType: 'application/pdf', byteLength: original.length };
+  const contentHash = `sha256-${createHash('sha256').update(original).digest('hex')}`;
+  const allowed = new Set([root.threadId, child.threadId]);
+  const readEventAttachment = vi.fn(async (input: { threadId: string; ref: string; offset: number; length: number }) => {
+    if (!allowed.has(input.threadId) || input.ref !== attachment.ref) throw new Error('Catalog denied original attachment');
+    const nextOffset = Math.min(original.length, input.offset + input.length);
+    return { attachment, contentHash, offset: input.offset, nextOffset, eof: nextOffset === original.length,
+      bytesBase64: original.subarray(input.offset, nextOffset).toString('base64') };
+  });
+  f.owner.bindEventAttachmentCapture(createEventAttachmentCapture({ readEventAttachment }));
+  const read = await f.owner.read(root, attachment.ref);
+  expect(read.attachment).toEqual(attachment); expect(await collected(read.stream)).toEqual(original);
+  expect(readEventAttachment.mock.calls.map(([input]) => input.offset)).toEqual([0, 256 * 1024, 512 * 1024]);
+  const reads = readEventAttachment.mock.calls.length;
+  expect(await collected((await f.owner.read(root, attachment.ref)).stream)).toEqual(original);
+  expect(readEventAttachment).toHaveBeenCalledTimes(reads);
+  expect(await collected((await f.owner.read(child, attachment.ref)).stream)).toEqual(original);
+  expect(readEventAttachment.mock.calls.at(-1)?.[0].threadId).toBe(child.threadId);
+  await expect(f.owner.read(peer, attachment.ref)).rejects.toThrow('Catalog denied');
+  expect(f.records.get(attachment.ref)?.recordType).toBe('attachment.file');
+  expect([...f.records.values()].some(record => record.recordType === 'attachment.delivery' && record.threadId === child.threadId)).toBe(true);
+  allowed.delete(root.threadId);
+  await f.lifecycle.releaseThreadMaterials(threadMaterialScope(root.threadId), root.threadId);
+  expect(await collected((await f.owner.read(child, attachment.ref)).stream)).toEqual(original);
+  allowed.delete(child.threadId);
+  await f.lifecycle.releaseThreadMaterials(threadMaterialScope(root.threadId), child.threadId);
+  await expect(f.owner.read(child, attachment.ref)).rejects.toThrow('Catalog denied');
+});
+
+it('does not publish an event attachment or delivery when original byte transfer fails', async () => {
+  const f = fixture();
+  const { createEventAttachmentCapture } = await import('./event-attachment-capture.js');
+  const original = Buffer.alloc(300_000, 0x41);
+  const attachment = { ref: 'attachment:event_incomplete', filename: 'dataset.csv', mimeType: 'text/csv', byteLength: original.length };
+  const contentHash = `sha256-${createHash('sha256').update(original).digest('hex')}`;
+  const readEventAttachment = vi.fn(async ({ offset, length }: { threadId: string; ref: string; offset: number; length: number }) => {
+    const nextOffset = Math.min(original.length, offset + length);
+    return { attachment, contentHash, offset: offset === 0 ? 0 : offset + 1, nextOffset, eof: nextOffset === original.length,
+      bytesBase64: original.subarray(offset, nextOffset).toString('base64') };
+  });
+  f.owner.bindEventAttachmentCapture(createEventAttachmentCapture({ readEventAttachment }));
+  await expect(f.owner.read(root, attachment.ref)).rejects.toThrow('transfer was incomplete');
+  expect(f.records.has(attachment.ref)).toBe(false);
+  expect([...f.records.values()].some(record => record.recordType === 'attachment.delivery')).toBe(false);
+});

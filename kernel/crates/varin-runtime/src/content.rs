@@ -321,6 +321,10 @@ impl ContentStore {
     ) -> Result<Value> {
         self.save_payload(&serde_json::to_vec(value)?, dependencies)
     }
+    /// Owning writers may persist this original layout for bounded byte-range reads.
+    pub(crate) fn byte_chunk_lengths(bytes: &[u8]) -> Vec<u64> {
+        content_chunks(bytes).iter().map(|chunk|chunk.len() as u64).collect()
+    }
     pub(crate) fn save_bytes(&self, bytes: &[u8]) -> Result<Value> {
         self.save_payload(bytes, Vec::new())
     }
@@ -432,7 +436,14 @@ impl ContentStore {
         item: &crate::execution::ConversationItem,
         provider: &Option<crate::types::ProviderOriginal>,
     ) -> Result<Value> {
-        let mut dependencies = Vec::new();
+        self.save_conversation_with_dependencies(item,provider,Vec::new())
+    }
+    pub(crate) fn save_conversation_with_dependencies(
+        &self,
+        item: &crate::execution::ConversationItem,
+        provider: &Option<crate::types::ProviderOriginal>,
+        mut dependencies: Vec<String>,
+    ) -> Result<Value> {
         let stored = item.clone().map_media(|media| {
             let stored = self.store_media(media)?;
             dependencies.push(stored.content_ref.content_object.clone());

@@ -401,7 +401,7 @@ fn work(db: &Connection, d: &Definition, index: usize, epoch: u64) -> Result<Fil
             registration_scope: None,
             followup_id: d.id.clone(),
             source_index: index,
-            source_run_id: d.source_run_id.clone(),
+            source_run_id: d.work_run()?.to_owned(),
             thread_id: d.thread_id.clone(),
             actor: d.actor.clone(),
             source,

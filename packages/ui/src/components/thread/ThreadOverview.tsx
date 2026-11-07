@@ -1,3 +1,5 @@
+import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import React from 'react';
 import { ExternalDelegateList } from './ExternalDelegates';
 import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
@@ -56,6 +58,7 @@ const emptyPlan: PlanSummary = { items: [], total: 0, done: 0, blocked: 0 };
 export function ThreadOverview({ api, identity, sessionKey, snapshot, request, details, pending, readOnly, workspacePath,
   hasComputer, error, recoveryAttention, onAttention, refresh, act, openProcess }: Props) {
   const { t } = useI18n();
+  const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const externalChildren = useExternalAgentStore(state => state.children);
   const open = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
   const compact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
@@ -137,7 +140,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     {products.history.error && <button type="button" className="thread-overview-action typography-meta text-status-warning" onClick={() => void products.loadEarlier(true)}>{t('chat.context.retry')}</button>}
   </>;
   const menuSections: Section[] = ['plan', 'goals', ...(api.collaboration || snapshot?.delegatedExecutions?.length ? ['threads' as const] : []), 'sources', 'context', 'memory', 'followups', 'recovery', ...(api.research ? ['research' as const] : []), ...(hasComputer ? ['computer' as const] : []), 'operations'];
-  const more = <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={t('harness.overview.more')} className="rounded-md p-1.5 text-muted-foreground hover:bg-interactive-hover"><Icon name="more" className="size-4" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">{menuSections.filter(section => section === 'plan' ? Boolean(api.plan) : section === 'operations' || Boolean(details[section])).map(section => <DropdownMenuItem key={section} onSelect={() => show(section)}>{t(titles[section]!)}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
+  const more = <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={t('harness.overview.more')} className="rounded-md p-1.5 text-muted-foreground hover:bg-interactive-hover"><Icon name="more" className="size-4" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">{menuSections.filter(section => section === 'plan' ? Boolean(api.plan) : section === 'operations' || Boolean(details[section])).map(section => <DropdownMenuItem key={section} onSelect={() => show(section)}>{t(section === 'followups' && botWorkbench ? 'arrangements.title' : titles[section]!)}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
   const selectedOperation = operations.find(operation => operation.id === operationId);
   const back = () => { if (product || operationId) { setProduct(undefined); setOperationId(undefined); } else { setDetail(undefined); setChildId(undefined); } };
   const childTasks = snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []} executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending} readOnly={readOnly} onChanged={refresh} selectedId={childId}
@@ -151,7 +154,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   }, [open, detail, product, productHistory, loadEarlier]);
   return <WorkOverviewControl open={open} compactOpen={compact} attention={attention} rows={[]} onSelect={show} status={status}
     onOpenChange={value => { disclosure(sessionKey, 'overview', value); if (value) { setDetail(undefined); setChildId(undefined); } }} onCompactChange={value => disclosure(sessionKey, 'compact', value)}
-    detailTitle={detail ? t(titles[detail] ?? 'harness.overview.title') : undefined} onBack={back} headerActions={more}
+    detailTitle={detail ? t(detail === 'followups' && botWorkbench ? 'arrangements.title' : titles[detail] ?? 'harness.overview.title') : undefined} onBack={back} headerActions={more}
     compactContent={<>{hasPlan && action('plan', 'task', plan.items.find(item => item.status === 'in_progress')?.text ?? t('harness.overview.plan'), plan.total ? <span className="shrink-0 typography-micro text-muted-foreground">{plan.done}/{plan.total}</span> : undefined)}
       {runningChildren.map(row => <button type="button" key={row.child.operation_id} className="thread-overview-action typography-meta" onClick={() => show('threads')}><AgentAvatar identity={row.child.child_thread_id} avatar={row.child.avatar} size={22} /><span className="min-w-0 flex-1 truncate">{row.child.name || row.child.input.name || row.task}</span><ChildState state={row.state} /></button>)}{outputSummary}</>}>
     <div hidden={Boolean(detail)}>{status}</div>

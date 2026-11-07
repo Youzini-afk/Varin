@@ -45,8 +45,12 @@ pub enum ExternalCommand {
         native_workspace: Option<super::launches::SourceSelection>,
         parent: Option<Value>,
         private_workspace: Option<bool>,
+        #[serde(default, deserialize_with = "principals::optional_principal", skip_serializing_if = "Option::is_none")]
+        principal_id: Option<Option<String>>,
     },
     List,
+    ArrangementPending,
+    Defer { id: String, turn_id: String, reason: String },
     CleanupList,
     Cleaned {
         id: String,
@@ -385,7 +389,7 @@ fn now() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
-fn terminal(s: &str) -> bool {
+pub(super) fn terminal(s: &str) -> bool {
     matches!(s, "completed" | "failed" | "cancelled" | "interrupted")
 }
 fn required(s: &str) -> Result<()> {
@@ -479,6 +483,7 @@ impl ExternalRead {
             let mut input = self.content.load(reference)?;
             let mut texts = Vec::new();
             let mut messages = Vec::new();
+            let mut images = Vec::new();
             for reference in self.result["externalInforms"]
                 .as_array()
                 .into_iter()
@@ -488,6 +493,7 @@ impl ExternalRead {
                 if let Some(text) = message["text"].as_str() {
                     texts.push(text.to_owned());
                 }
+                if let Some(media)=message["images"].as_array() {images.extend(media.iter().cloned());}
                 messages.push(message);
             }
             if !messages.is_empty() {
@@ -498,6 +504,10 @@ impl ExternalRead {
                     .unwrap_or_else(|| input["text"].clone());
                 input["text"] = json!(texts.join("\n\n"));
                 input["messages"] = json!(messages);
+                if !images.is_empty() {
+                    if let Some(media)=input["images"].as_array() {images.extend(media.iter().cloned());}
+                    input["images"]=json!(images);
+                }
             }
             return Ok(input);
         }
@@ -547,7 +557,7 @@ fn external_settings(db: &Connection) -> Result<Value> {
     settings["capabilityCache"] = Value::Object(visible);
     Ok(settings)
 }
-fn conversation(db: &Connection, id: &str) -> Result<Value> {
+pub(super) fn conversation(db: &Connection, id: &str) -> Result<Value> {
     let v: Value = record(db, "external_conversations", id)?;
     if v["deleted"] == true {
         return Err(RuntimeError::NotFound(
@@ -556,7 +566,7 @@ fn conversation(db: &Connection, id: &str) -> Result<Value> {
     }
     Ok(v)
 }
-fn turn(db: &Connection, id: &str, turn_id: &str) -> Result<Value> {
+pub(super) fn turn(db: &Connection, id: &str, turn_id: &str) -> Result<Value> {
     let v: Value = record(db, "external_turns", turn_id)?;
     if v["conversationId"] != id {
         return Err(RuntimeError::Invalid(
@@ -564,6 +574,33 @@ fn turn(db: &Connection, id: &str, turn_id: &str) -> Result<Value> {
         ));
     }
     Ok(v)
+}
+/// Shared short admission used by direct sends and durable arrangements. Content is already stored.
+pub(super) fn admit_turn(tx: &Transaction<'_>, id: &str, key: &str, input_ref: &Value, epoch: u64) -> Result<Value> {
+    required(key)?;
+    let old: Option<String> = tx.query_row("SELECT body FROM external_turns WHERE conversation_id=?1 AND request_key=?2",params![id,key],|r|r.get(0)).optional()?;
+    if let Some(raw)=old {
+        let turn:Value=serde_json::from_str(&raw)?;
+        if turn["inputRef"] != *input_ref {return Err(RuntimeError::Conflict("external input key changed".into()));}
+        return Ok(turn);
+    }
+    let mut c=conversation(tx,id)?;
+    let turn_id=format!("external-turn:{}",Uuid::new_v4());
+    let turn=json!({"id":turn_id,"conversationId":id,"key":key,"status":"queued","inputRef":input_ref,"createdAt":now(),"updatedAt":now(),"epoch":epoch});
+    tx.execute("INSERT INTO external_turns VALUES(?1,?2,?3,?4)",params![turn_id,id,key,encode(&turn)?])?;
+    touch(tx,&mut c)?;
+    Ok(turn)
+}
+pub(super) fn assign_legacy_principals(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId',(SELECT principal_id FROM threads WHERE id=json_extract(external_conversations.body,'$.parent.threadId'))) WHERE json_type(body,'$.principalId') IS NULL AND json_type(body,'$.parent.threadId')='text'",[])?;
+    tx.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId',(SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1 AND claim_legacy=1)) WHERE json_type(body,'$.principalId') IS NULL",[])?;
+    Ok(())
+}
+/// Called only by the first authenticated-owner legacy-claim transaction, never by
+/// ordinary startup. Explicitly public work created after that claim stays public.
+pub(super) fn claim_public_principals(tx: &Transaction<'_>, owner: &str) -> Result<()> {
+    tx.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId',coalesce((SELECT principal_id FROM threads WHERE id=json_extract(external_conversations.body,'$.parent.threadId')),?1)) WHERE json_extract(body,'$.principalId') IS NULL",[owner])?;
+    Ok(())
 }
 pub(super) fn touch(tx: &Transaction<'_>, v: &mut Value) -> Result<()> {
     v["revision"] = json!(v["revision"].as_u64().unwrap_or(0) + 1);
@@ -618,6 +655,8 @@ impl Catalog {
         }
         let result = match p.command {
             ExternalCommand::Settings => external_settings(&tx)?,
+            ExternalCommand::ArrangementPending => json!(followups::external::pending(&tx)?),
+            ExternalCommand::Defer { id,turn_id,reason } => followups::external::deferred(&tx,&id,&turn_id,&reason)?,
             ExternalCommand::InspectCapabilities { configuration_id, configuration } => {
                 let cache = capability_cache(&tx)?;
                 let entry = &cache[&configuration_id];
@@ -720,6 +759,7 @@ impl Catalog {
                 native_workspace,
                 parent,
                 private_workspace,
+                principal_id,
                 ..
             } => {
                 for s in [&id, &configuration_id, &title, &cwd] {
@@ -738,9 +778,12 @@ impl Catalog {
                     if source.mode!=crate::SourceMode::NativeWorkspace||!source.resource_owner.is_local(){return Err(RuntimeError::Invalid("External workspace must be a native source on its execution Host".into()));}
                     v["nativeWorkspace"]=serde_json::to_value(source)?;
                 }
-                if let Some(parent) = parent {
-                    v["parent"] = parent;
-                }
+                let owner = if let Some(parent_thread)=parent.as_ref().and_then(|p|p["threadId"].as_str()) {
+                    principals::thread(&tx,parent_thread)?
+                } else if let Some(principal)=principal_id { if let Some(value)=&principal {principals::validate(value)?;} principal }
+                else { tx.query_row("SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1",[],|r|r.get::<_,String>(0)).optional()? };
+                v["principalId"]=json!(owner);
+                if let Some(parent) = parent { v["parent"] = parent; }
                 if private_workspace == Some(true) {
                     v["privateWorkspace"] = json!(true);
                 }
@@ -796,6 +839,9 @@ impl Catalog {
                         let mut v: Value = serde_json::from_str(&row?)?;
                         v.as_object_mut().unwrap().remove("inputRef");
                         v.as_object_mut().unwrap().remove("epoch");
+                        if matches!(v["status"].as_str(),Some("queued"|"preparing"|"awaiting_input")) {
+                            if let Some(reason)=followups::external::turn_hold(&tx,&v)? { v["arrangementHoldReason"]=json!(reason); }
+                        }
                         Ok(v)
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -889,7 +935,11 @@ impl Catalog {
                     if deleted {
                         v["cleanupPending"] = json!(true);
                         tx.execute("DELETE FROM external_items WHERE conversation_id=?1", [&id])?;
-                        tx.execute("DELETE FROM external_turns WHERE conversation_id=?1", [&id])?;
+                        // Keep compact original arrangement receipts after target deletion. Unsent
+                        // input stays attributable until the arrangement is rerouted or discarded.
+                        tx.execute("DELETE FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.arrangementOccurrenceId') IS NULL AND id NOT IN (SELECT json_extract(body,'$.consumedByTurnId') FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId') IS NOT NULL)", [&id])?;
+                        tx.execute("UPDATE external_turns SET body=json_set(body,'$.inputRef',NULL) WHERE conversation_id=?1 AND json_extract(body,'$.status') IN ('completed','failed','cancelled','interrupted')",[&id])?;
+                        attachments::retire(&tx)?;
                         tx.execute("DELETE FROM external_commands WHERE json_extract(receipt,'$.conversationId')=?1 OR json_extract(receipt,'$.id')=?1",[&id])?;
                     }
                 }
@@ -916,6 +966,7 @@ impl Catalog {
                     ));
                 }
                 v.as_object_mut().unwrap().remove("needsReview");
+                tx.execute("UPDATE external_turns SET body=json_remove(body,'$.blockedReason') WHERE conversation_id=?1 AND json_extract(body,'$.status')='queued'",[&id])?;
                 touch(&tx, &mut v)?;
                 v
             }
@@ -939,18 +990,7 @@ impl Catalog {
                 put(&tx, "external_turns", &turn_id, &t)?;
                 t
             }
-            ExternalCommand::Admit { id, key, .. } => {
-                required(&key)?;
-                let mut v = conversation(&tx, &id)?;
-                let turn_id = format!("external-turn:{}", Uuid::new_v4());
-                let turn = json!({"id":turn_id,"conversationId":id,"key":key,"status":"queued","inputRef":p.body.unwrap(),"createdAt":now(),"updatedAt":now(),"epoch":self.epoch});
-                tx.execute(
-                    "INSERT INTO external_turns VALUES(?1,?2,?3,?4)",
-                    params![turn_id, id, key, encode(&turn)?],
-                )?;
-                touch(&tx, &mut v)?;
-                turn
-            }
+            ExternalCommand::Admit { id, key, .. } => admit_turn(&tx,&id,&key,&p.body.unwrap(),self.epoch)?,
             ExternalCommand::Begin { id, turn_id } => {
                 let mut v = conversation(&tx, &id)?;
                 let mut t = turn(&tx, &id, &turn_id)?;
@@ -959,12 +999,23 @@ impl Catalog {
                         "external turn is already active or no longer queued".into(),
                     ));
                 }
-                let first:String=tx.query_row("SELECT id FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.status')='queued' ORDER BY rowid LIMIT 1",[&id],|r|r.get(0))?;
-                if first != turn_id {
+                let mut q=tx.prepare("SELECT body FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.status')='queued' ORDER BY rowid")?;
+                let queued=q.query_map([&id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+                let mut first=None;
+                for raw in queued {
+                    let candidate:Value=serde_json::from_str(&raw)?;
+                    if candidate["blockedReason"].is_null() && followups::external::turn_hold(&tx,&candidate)?.is_none() {first=candidate["id"].as_str().map(str::to_owned);break;}
+                }
+                if first.as_deref() != Some(turn_id.as_str()) {
                     return Err(RuntimeError::Conflict(
                         "an earlier external input is queued".into(),
                     ));
                 }
+                if let Some(reason)=followups::external::turn_hold(&tx,&t)? {
+                    // No state changes and no synthetic execution while its original control is held.
+                    return Err(RuntimeError::Conflict(reason));
+                }
+                t["arrangementInforms"]=json!(followups::external::bind_passive(&tx,&id,&turn_id)?);
                 t["status"] = json!("preparing");
                 t["epoch"] = json!(self.epoch);
                 t["updatedAt"] = json!(now());
@@ -984,22 +1035,25 @@ impl Catalog {
             } => {
                 let mut v = conversation(&tx, &id)?;
                 let mut t = turn(&tx, &id, &turn_id)?;
-                let old = t["status"].as_str().unwrap_or("");
+                let old = t["status"].as_str().unwrap_or("").to_owned();
                 if !terminal(&status)
                     && !matches!(status.as_str(), "running" | "waiting_user" | "stopping")
                 {
                     return Err(RuntimeError::Invalid("invalid external observation".into()));
                 }
-                if terminal(old) || t["epoch"].as_u64() != Some(self.epoch) {
+                if terminal(&old) || t["epoch"].as_u64() != Some(self.epoch) {
                     return Err(RuntimeError::Conflict(
                         "external observation belongs to a settled or stale turn".into(),
                     ));
                 }
-                if old == "queued" && status != "cancelled" {
+                if matches!(old.as_str(),"queued"|"awaiting_input") && status != "cancelled" {
                     return Err(RuntimeError::Conflict("external turn was not begun".into()));
                 }
                 if old == "stopping" && !terminal(&status) && status != "stopping" {
                     return Err(RuntimeError::Conflict("external turn is stopping".into()));
+                }
+                if old == "preparing" && status == "running" {
+                    if let Some(reason)=followups::external::dispatch_hold(&tx,&t)? { return Err(RuntimeError::Conflict(reason)); }
                 }
                 t["status"] = json!(status);
                 t["updatedAt"] = json!(now());
@@ -1023,7 +1077,14 @@ impl Catalog {
                     v["needsReview"] = json!(true);
                 }
                 put(&tx, "external_turns", &turn_id, &t)?;
-                if terminal(&status) { event(&tx, &turn_id, 0, "usage.updated", json!({}))?; }
+                if status == "running" || terminal(&status) {
+                    tx.execute("UPDATE external_turns SET body=json_set(body,'$.status',?3,'$.updatedAt',?4) WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId')=?2",params![id,turn_id,status,sql_number(now())?])?;
+                }
+                if old == "preparing" && status == "running" {followups::external::delivered(&tx,&t)?;}
+                if terminal(&status) {
+                    event(&tx, &turn_id, 0, "usage.updated", json!({}))?;
+                    followups::external::publish_reports(&tx,&t)?;
+                }
                 touch(&tx, &mut v)?;
                 t
             }
@@ -1054,13 +1115,17 @@ impl Catalog {
             } => {
                 conversation(&tx, &id)?;
                 let mut s=tx.prepare("SELECT json_extract(body,'$.input_ref') FROM external_children WHERE json_extract(body,'$.conversation_id')=?1 AND json_extract(body,'$.turn_id')=?2 AND json_extract(body,'$.message_kind')='inform' ORDER BY rowid")?;
-                let informs = if original == Some(true) {
+                let mut informs = if original == Some(true) {
                     vec![]
                 } else {
                     s.query_map(params![id, turn_id], |r| r.get::<_, String>(0))?
                         .map(|v| Ok(serde_json::from_str::<Value>(&v?)?))
                         .collect::<Result<Vec<_>>>()?
                 };
+                if original != Some(true) {
+                    let mut q=tx.prepare("SELECT json_extract(body,'$.inputRef') FROM external_turns WHERE conversation_id=?1 AND json_extract(body,'$.consumedByTurnId')=?2 ORDER BY rowid")?;
+                    informs.extend(q.query_map(params![id,turn_id],|r|r.get::<_,String>(0))?.map(|r|Ok(serde_json::from_str::<Value>(&r?)?)).collect::<Result<Vec<_>>>()?);
+                }
                 json!({"externalInputRef":turn(&tx,&id,&turn_id)?["inputRef"],"externalInforms":informs})
             }
         };
@@ -1079,7 +1144,13 @@ impl Catalog {
     }
     pub(super) fn recover_external(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
+        let interrupted={let mut q=tx.prepare("SELECT id FROM external_turns WHERE json_extract(body,'$.status') IN ('preparing','running','waiting_user','stopping') AND json_extract(body,'$.consumedByTurnId') IS NULL")?;
+            let ids=q.query_map([],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?; ids};
         tx.execute("UPDATE external_turns SET body=json_set(body,'$.status','interrupted','$.error','The Host connection ended before this turn was confirmed complete. Reconnect to inspect the original session.') WHERE json_extract(body,'$.status') IN ('preparing','running','waiting_user','stopping')",[])?;
+        for id in interrupted {
+            let turn:Value=record(&tx,"external_turns",&id)?;
+            followups::external::publish_reports(&tx,&turn)?;
+        }
         tx.execute("UPDATE external_conversations SET body=json_set(json_remove(body,'$.activeTurn'),'$.needsReview',json('true')) WHERE json_type(body,'$.activeTurn') IS NOT NULL",[])?;
         tx.commit()?;
         Ok(())

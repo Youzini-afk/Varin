@@ -1,0 +1,40 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { parseHTML } from 'linkedom';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { Followup } from '@varin/protocol';
+import type { ThreadIdentity } from '@varin/application-client';
+import { FollowUpTasksPanel } from './FollowUpTasksPanel';
+
+const state = vi.hoisted(() => ({ identity: { runtime: 'agent', threadId: 'entry', branchId: 'main' } as ThreadIdentity, arrangements: vi.fn(), selected: { runtime: 'agent', threadId: 'unrelated-task', branchId: 'main' } as ThreadIdentity, projections: [] as unknown[] }));
+vi.mock('@varin/application-client', () => ({ getRuntimeEndpointGeneration: () => 1 }));
+vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => 'varin.bot' }));
+vi.mock('@varin/extension-contract', () => ({ VARIN_WORKBENCH_BOT_PROFILE_ID: 'varin.bot' }));
+vi.mock('@/lib/bots', () => ({ useBotNavigation: (select: (value: unknown) => unknown) => select({ entry: state.identity }) }));
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/session/TaskListPrimitives', () => ({ TaskSearch: ({ value, onChange }: { value: string; onChange(value: string): void }) => <input aria-label="Search" value={value} onInput={event => onChange(event.currentTarget.value)} /> }));
+vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: (select: (value: unknown) => unknown) => select({ hostKey: 'host', selectedIdentity: state.selected, threads: [{ thread_id: 'entry', bot_id: 'bot', branches: [{ branch_id: 'main' }] }, { thread_id: 'other-entry', bot_id: 'bot', branches: [{ branch_id: 'main' }] }] }) }));
+const api = { followups: { arrangements: state.arrangements } };
+vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: api }) }));
+const current = { id: 'current', name: 'Current inbox', thread_id: 'entry', branch_id: 'main', trigger: { kind: 'plugin_event', source: {} } } as Followup;
+const other = { ...current, id: 'other', name: 'Release comments', thread_id: 'other-entry' };
+const snapshot = { thread: { bot_id: 'bot', branches: [] }, followups: [current], operations: [] };
+vi.mock('@/hooks/useSelectedThreadSnapshot', () => ({ useSelectedThreadSnapshot: (_active: boolean, identity: ThreadIdentity) => ({ identity, snapshot, refresh: async () => {} }) }));
+vi.mock('@/components/thread/ThreadFollowups', () => ({ ThreadFollowups: (props: { identity: ThreadIdentity; followups: Followup[]; visibleArrangementIds: Set<string>; focusId?: string }) => { state.projections.push(props); return <div>{props.followups.filter(item => props.visibleArrangementIds.has(item.id)).map(item => <span key={item.id}>{item.name}</span>)}</div>; } }));
+let root: Root, container: HTMLElement;
+beforeEach(() => { const { window } = parseHTML('<html><body></body></html>'); vi.stubGlobal('window', window); vi.stubGlobal('document', window.document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); state.projections = []; state.arrangements.mockReset().mockResolvedValue([current, other]); });
+afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
+const click = async (text: string) => { await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!.click()); };
+it('changes only visible scope and search, preserving the Bot management identity and full row instances', async () => {
+  await act(async () => root.render(<FollowUpTasksPanel />)); expect(container.textContent).toContain('Current inbox'); expect(container.textContent).not.toContain('Release comments');
+  await click('arrangements.scopeBot'); expect(container.textContent).toContain('Release comments');
+  const input = container.querySelector<HTMLInputElement>('input')!; await act(async () => { input.value = 'release'; input.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(container.textContent).not.toContain('Current inbox'); expect(container.textContent).toContain('Release comments');
+  for (const projection of state.projections as { identity: ThreadIdentity; followups: Followup[] }[]) expect(projection.identity).toEqual(state.identity);
+  expect((state.projections.at(-1) as { followups: Followup[] }).followups).toEqual([current, other]); expect(state.selected.threadId).toBe('unrelated-task');
+});
+it('opens a focused existing arrangement in Bot scope, without selecting or rewriting its receiving target', async () => {
+  await act(async () => root.render(<FollowUpTasksPanel focus={{ identity: state.identity, followupId: 'other', token: 1 }} />));
+  expect(container.textContent).toContain('Release comments'); expect(state.projections.at(-1)).toMatchObject({ identity: state.identity, focusId: 'other' });
+  expect(state.arrangements).toHaveBeenCalledWith(state.identity, 'bot', expect.any(AbortSignal)); expect(other.thread_id).toBe('other-entry');
+});

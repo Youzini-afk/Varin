@@ -37,6 +37,9 @@ interface StoredAttachment { attachment: Attachment; contentHash: string; select
 type RecordValue = Awaited<ReturnType<KernelStorageContext['records']['get']>>;
 export interface AttachmentUpload { key: string; filename: string; mimeType: string; byteLength: number }
 export interface AttachmentRead { attachment: Attachment; stream: AsyncIterable<Uint8Array> }
+export interface EventAttachmentCapture {
+  attachment: Attachment; contentHash: string; readPage(offset: number, length: number): Promise<KernelObjectSlice>;
+}
 export interface ExternalAttachmentCapture {
   filename: string; mimeType: string; byteLength: number; contentHash: string; chunks: AsyncIterable<Uint8Array>; readPage(offset: number, length: number, view?: FileContentReadOptions): Promise<KernelObjectSlice>; release(committed?: boolean): Promise<void>;
 }
@@ -50,6 +53,7 @@ export function createThreadAttachments(options: {
   kernel: KernelClient; runtime: AgentRuntimeClient; storage: WorkspaceWorkingStateRootAccess;
   materials: WebMaterialStore; resolveLiveSource: LiveSourceResolver; requestMaintenance?(): void;
 }) {
+  let eventCapture: ((threadId: string, ref: string, signal?: AbortSignal) => Promise<EventAttachmentCapture>) | undefined;
   let absoluteCapture: ((identity: { threadId: string; operationId: string; ref: string; selectedPath: string }, signal?: AbortSignal) => Promise<ExternalAttachmentCapture>) | undefined;
   let externalCapture: ((conversation: ExternalIdentity, key: string, path: string, signal?: AbortSignal) => Promise<ExternalAttachmentCapture>) | undefined;
   const inScope = <T>(scope: Scope, purpose: string, action: (context: KernelStorageContext) => Promise<T>) =>
@@ -162,6 +166,35 @@ export function createThreadAttachments(options: {
       return write(context, scope, { attachment, contentHash: object.hash }, [object.ownerId]);
     });
   };
+  const captureEvent = async (scope: Scope, ref: string, signal?: AbortSignal): Promise<Attachment> => {
+    if (!eventCapture) throw new HarnessServiceError('unavailable', 'Original event attachment storage is unavailable');
+    // The callback is a trusted Catalog reader, never a plugin-provided reference or hash.
+    const original = await eventCapture(scope.threadId, ref, signal);
+    if (original.attachment.ref !== ref) throw new HarnessServiceError('unavailable', 'The original event attachment changed identity');
+    filename(original.attachment.filename);
+    return inScope(scope, 'attachment-write', async context => {
+      const existing = await context.records.get(ref);
+      if (existing && existing.state !== 'released') {
+        const value = stored(existing);
+        if (value.contentHash !== original.contentHash || JSON.stringify(value.attachment) !== JSON.stringify(original.attachment))
+          throw new HarnessServiceError('conflict', 'The event attachment changed its original content');
+      } else {
+        const object = await transferPages(context.client, original.contentHash, original.attachment.byteLength,
+          original.readPage, `event-attachment:${digest([scope.workspaceId, ref])}`, signal);
+        await write(context, scope, { attachment: original.attachment, contentHash: object.hash }, [object.ownerId]);
+      }
+      // A shared family store may already hold this file for another recipient. Only the
+      // Catalog-authorized reader above can grant this Thread its independent delivery.
+      const id = `attachment-delivery:${digest(['event', scope.threadId, ref])}`;
+      const grant = await context.records.get(id);
+      if (!grant || grant.state === 'released') await context.records.put({ operationId: grant ? `retain:${id}:${grant.recordRevision}` : `retain:${id}`,
+        recordId: id, recordType: ATTACHMENT_DELIVERY, ...(grant ? { expectedRecordRevision: grant.recordRevision } : {}),
+        state: 'temporary', threadId: scope.threadId,
+        payloadJson: JSON.stringify({ fromThreadId: scope.threadId, toThreadId: scope.threadId, attachmentRefs: [ref], operationId: `event:${ref}` }),
+        references: [{ slot: 'attachment:0', objectHash: original.contentHash }] });
+      return original.attachment;
+    });
+  };
   const capture = async (scope: Scope, selection: AttachmentSelection, operationId: string, index: number, runId: string | undefined, signal?: AbortSignal, frozenSource?: LaunchSource | null): Promise<Attachment> => {
     if (typeof selection.ref === 'string') {
       const selectedRef = selection.ref;
@@ -169,8 +202,9 @@ export function createThreadAttachments(options: {
         const existing = await inScope(scope, 'attachment-read', async context => context.records.get(recordId(selectedRef)));
         if (existing) {
           try { return await inScope(scope, 'attachment-read', async context => (await accessible(context, scope, selectedRef)).attachment); }
-          catch (error) { if (!await retainReportReference(scope, selectedRef, signal)) throw error; return inScope(scope, 'attachment-read', async context => (await accessible(context, scope, selectedRef)).attachment); }
+          catch (error) { if (selectedRef.startsWith('attachment:event_')) return captureEvent(scope, selectedRef, signal); if (!await retainReportReference(scope, selectedRef, signal)) throw error; return inScope(scope, 'attachment-read', async context => (await accessible(context, scope, selectedRef)).attachment); }
         }
+        if (selectedRef.startsWith('attachment:event_')) return captureEvent(scope, selectedRef, signal);
         if (!selectedRef.startsWith('attachment:operation_')) throw new HarnessServiceError('not-found', 'The original attachment is not available');
         const operationId = Buffer.from(selectedRef.slice('attachment:operation_'.length), 'base64url').toString('utf8');
         if (`attachment:operation_${Buffer.from(operationId).toString('base64url')}` !== selectedRef) throw new HarnessServiceError('invalid-params', 'The original attachment receipt is invalid');
@@ -463,6 +497,7 @@ export function createThreadAttachments(options: {
   };
   return {
     scope: scopeFor,
+    bindEventAttachmentCapture(capture: NonNullable<typeof eventCapture>) { eventCapture = capture; },
     bindAbsolutePathCapture(capture: NonNullable<typeof absoluteCapture>) { absoluteCapture = capture; },
     bindExternalPathCapture(capture: NonNullable<typeof externalCapture>) { externalCapture = capture; },
     async releaseUnpublished(identity: ThreadIdentity, operationId: string, targetThreadId: string, refs: readonly string[]) {

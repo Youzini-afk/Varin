@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 82 as const;
+export const KERNEL_PROTOCOL_VERSION = 83 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.entry.resolve","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,28 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.driver.finish","runtime
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["runtime.driver.model","runtime.driver.tool","runtime.driver.wait","process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.child.user.receipt":"branchId","runtime.child.user.accept":"branchId","runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.finish","runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v82" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v83" as const;
 
 export type KernelMethod =
+  | "runtime.followup.eventAttachment.read"
+  | "runtime.followup.eventTransport.get"
+  | "runtime.followup.sourceRoute.put"
+  | "runtime.followup.sourceRoute.list"
+  | "runtime.followup.sourceRoute.remove"
+  | "runtime.followup.eventTransport.bind"
+  | "runtime.followup.eventTransport.read"
+  | "runtime.followup.eventTransport.ack"
+  | "runtime.followup.eventTransport.release"
+  | "runtime.followup.eventTransport.sources"
+  | "runtime.followup.eventTransport.imports"
+  | "runtime.followup.eventTransport.importReleased"
+  | "runtime.followup.arrangements.list"
+  | "runtime.followup.arrangement.put"
+  | "runtime.followup.events.receive"
+  | "runtime.followup.eventSources.list"
+  | "runtime.followup.eventSources.get"
+  | "runtime.followup.eventSources.status"
+  | "runtime.followup.backlog"
   | "runtime.principals.initialize"
   | "runtime.driver.finish"
   | "runtime.driver.wait"
@@ -1801,7 +1820,7 @@ export interface CalendarDefinition {
 
 export type CalendarOccurrenceReason = { kind: 'scheduled'; at_ms: number } | { kind: 'manual'; key: string };
 
-export type CalendarOccurrenceState = 'observed' | 'preparing' | 'held' | 'queued' | 'delivered' | 'completed' | 'failed' | 'cancelled';
+export type CalendarOccurrenceState = 'skipped' | 'observed' | 'preparing' | 'held' | 'queued' | 'delivered' | 'completed' | 'failed' | 'cancelled';
 
 export interface CalendarOccurrence {
   id: string;
@@ -2414,9 +2433,9 @@ export interface FollowupSourceEvidence {
   evidence: FollowupLeafEvidence;
 }
 
-export type FollowupTrigger = FollowupSource | { kind: 'any' | 'all'; sources: FollowupSource[] } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number };
+export type FollowupTrigger = FollowupSource | { kind: 'any' | 'all'; sources: FollowupSource[] } | { kind: 'run_completed'; cursor: number } | { kind: 'goal_requested'; cursor: number } | {kind:'plugin_event';source:PluginEventSource;filter:unknown};
 
-export type FollowupEvidence = FollowupLeafEvidence | { kind: 'any' | 'all'; sources: FollowupSourceEvidence[] } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number };
+export type FollowupEvidence = FollowupLeafEvidence | { kind: 'any' | 'all'; sources: FollowupSourceEvidence[] } | { kind: 'run_completed'; run_revision: number } | { kind: 'goal_requested'; run_revision: number } | {kind:'plugin_events';event_ids:string[];received_at_ms:number;calendar_occurrence_id?:string|null};
 
 export type GoalState = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'complete' | 'cancelled';
 
@@ -2987,7 +3006,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 82; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 83; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3779,6 +3798,232 @@ export interface RunContextScope {
   projectId: string | null;
 }
 
+export interface EventTransportAccess {
+  key: EventTransportKey;
+  generation: number;
+}
+
+export interface FollowupSourceRoute {
+  externalConversationId?: string | null;
+  followupId: string;
+  expectedRevision: number;
+  objectId: string;
+  threadId: string;
+  branchId: string;
+  senderId?: string | null;
+  userInput: boolean;
+}
+
+export interface FollowupSourceRouteRemove {
+  followupId: string;
+  expectedRevision: number;
+  objectId: string;
+}
+
+export interface FollowupSourceRouteListParams {
+  followupId: string;
+}
+
+export interface FollowupEventFile {
+  fileId: string;
+  filename: string;
+  mimeType: string;
+  bytesBase64: string;
+}
+
+export interface FollowupEventAttachmentReadParams { threadId: string; ref: string; offset: number; length: number; }
+
+export interface FollowupEventAttachmentRead {
+  attachment: Attachment;
+  contentHash: string;
+  offset: number;
+  nextOffset: number;
+  eof: boolean;
+  bytesBase64: string;
+}
+
+export interface PluginEventSourceHost {
+  hostId: string;
+  connectionId: string;
+  endpointIdentity: string;
+}
+
+export interface EventTransportKey {
+  principalId: string;
+  clientId: string;
+  coordinatorHostId: string;
+  subscriptionId: string;
+}
+
+export type EventTransportState = 'active' | 'paused' | 'released';
+
+export interface EventTransportConsumer {
+  coverageFromMs: number;
+  generation: number;
+  key: EventTransportKey;
+  identity: FollowupEventSourceIdentity;
+  afterCursor: number;
+  offeredThrough: number;
+  state: EventTransportState;
+}
+
+export interface EventTransportBind {
+  key: EventTransportKey;
+  source: PluginEventSource;
+  state: EventTransportState;
+}
+
+export interface EventTransportRead {
+  generation: number;
+  key: EventTransportKey;
+  maxEvents?: number;
+}
+
+export interface EventTransportAck {
+  generation: number;
+  key: EventTransportKey;
+  throughCursor: number;
+}
+
+export interface EventTransportPage {
+  consumer: EventTransportConsumer;
+  events: FollowupPluginEventInput[];
+  throughCursor: number;
+  status: FollowupEventSourceStatus | null;
+}
+
+export interface EventTransportImport {
+  identity: FollowupEventSourceIdentity;
+  state: EventTransportState;
+}
+
+export interface PluginEventSource {
+  host?: PluginEventSourceHost;
+  extensionId: string;
+  sourceId: string;
+  connectionId: string;
+  accountId: string;
+}
+
+export interface FollowupEventDeliveryTarget {
+  externalConversationId?: string | null;
+  threadId: string;
+  branchId: string;
+  userInput: boolean;
+}
+
+export interface FollowupExternalDelivery {
+  conversation_id: string;
+  turn_id: string;
+  state: string;
+  hold_reason: string | null;
+  consumed_by_turn_id: string | null;
+}
+
+export type FollowupFirstContactPolicy = 'create_bot_session';
+
+export type FollowupOwner = {kind:'work'} | {kind:'bot';bot_id:string};
+
+export type FollowupEventTiming = {kind:'immediate'} | {kind:'batch';windowMs:number} | {kind:'scheduled';calendarId:string;runEmpty:boolean} | {kind:'passive'};
+
+export interface FollowupEventCoverage {
+  kind: string;
+  fromMs: number | null;
+}
+
+export interface FollowupEventSourceStatus {
+  code: string | null;
+  message: string | null;
+  coverage: FollowupEventCoverage | null;
+  lastConnectedAtMs: number | null;
+}
+
+export interface FollowupEventSourceIdentity {
+  principalId: string | null;
+  source: PluginEventSource;
+}
+
+export interface FollowupEventSourceCheckpoint {
+  identity: FollowupEventSourceIdentity;
+  cursor: string | null;
+  status: FollowupEventSourceStatus | null;
+}
+
+export interface FollowupEventSourceSubscription {
+  followupId: string;
+  identity: FollowupEventSourceIdentity;
+  filter: unknown;
+  state: 'active' | 'paused' | 'cancelled';
+}
+
+export interface FollowupEventEcho {
+  ownerHostId?: string | null;
+  followupId: string;
+  occurrenceId: string;
+  operationId?: string | null;
+}
+
+export interface FollowupPluginEventInput {
+  files?: FollowupEventFile[];
+  senderId?: string | null;
+  eventId: string;
+  objectId: string | null;
+  revision: string | null;
+  occurredAtMs: number;
+  attributes: unknown;
+  content: OutputBody<IncomingMedia>;
+  echoOf: FollowupEventEcho | null;
+}
+
+export interface FollowupEventReceiveParams {
+  identity: FollowupEventSourceIdentity;
+  expectedCursor: string | null;
+  nextCursor: string | null;
+  status: FollowupEventSourceStatus | null;
+  events: FollowupPluginEventInput[];
+}
+
+export interface FollowupEventReceiveReceipt {
+  accepted: number;
+  duplicates: number;
+  checkpoint: FollowupEventSourceCheckpoint;
+}
+
+export interface FollowupArrangementListParams {
+  botId: string;
+  principalId: string | null;
+}
+
+export interface FollowupArrangementPutParams {
+  firstContact?: FollowupFirstContactPolicy | null;
+  externalConversationId?: string | null;
+  key: string;
+  expectedRevision?: number;
+  botId: string;
+  threadId: string;
+  branchId: string;
+  name: string;
+  instruction: string;
+  source: PluginEventSource;
+  filter: unknown;
+  timing: FollowupEventTiming;
+  repeat?: FollowupRepeat;
+  sourceRunId?: string;
+}
+
+export interface FollowupEventSourceStatusParams {
+  identity: FollowupEventSourceIdentity;
+  status: FollowupEventSourceStatus;
+}
+
+export type FollowupEventBacklogAction = 'process_now' | 'discard';
+
+export interface FollowupBacklogParams {
+  followupId: string;
+  expectedRevision: number;
+  action: FollowupEventBacklogAction;
+}
+
 export type FollowupRepeat = 'once' | 'each';
 
 export interface FollowupOccurrenceGetParams {
@@ -3835,6 +4080,8 @@ export interface FollowupObservation {
 }
 
 export interface FollowupDelivery {
+  thread_id: string;
+  branch_id: string;
   input_id: string;
   state: InputState;
   activation_state: 'pending' | 'bound' | 'cancelled' | 'failed';
@@ -3867,17 +4114,21 @@ export interface FollowupWait {
 }
 
 export interface FollowupOccurrence {
+  external_delivery?: FollowupExternalDelivery | null;
+  target?: FollowupEventDeliveryTarget | null;
   accepted_cursor: number;
   id: string;
   generation: number;
   trigger_cursor: number;
   state: 'observed' | 'held' | 'admitted' | 'completed' | 'failed' | 'cancelled';
-  hold_reason: 'control_paused' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null | 'manual_pause' | 'question' | 'preparing';
+  hold_reason: 'control_paused' | 'bot_suspended' | 'target_unavailable' | 'source_run_active' | 'source_unsettled' | 'branch_active' | 'context_scope_changed' | 'preparation_failed' | 'goal_paused' | 'goal_budget' | 'goal_blocked' | 'goal_ended' | 'goal_superseded' | null | 'manual_pause' | 'question' | 'preparing';
   evidence: FollowupEvidence;
   delivery: FollowupDelivery | null;
 }
 
 export interface Followup {
+  first_contact?: FollowupFirstContactPolicy | null;
+  external_conversation_id?: string | null;
   repeat: FollowupRepeat;
   pending_occurrences: number;
   id: string;
@@ -3885,7 +4136,7 @@ export interface Followup {
   generation: number;
   thread_id: string;
   branch_id: string;
-  source_run_id: string;
+  source_run_id: string | null;
   sources: FollowupSourceState[];
   state: 'active' | 'paused' | 'cancelled';
   wait: FollowupWait;
@@ -3897,6 +4148,12 @@ export interface Followup {
   registered_at_ms: number;
   observation: FollowupObservation | null;
   exhausted: boolean;
+  owner: FollowupOwner;
+  name: string | null;
+  timing: FollowupEventTiming;
+  pending_events: number;
+  next_delivery_at_ms: number | null;
+  source_status: FollowupEventSourceStatus | null;
 }
 
 export interface RunParams {
@@ -6902,6 +7159,25 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "runtime.followup.eventAttachment.read": FollowupEventAttachmentReadParams;
+  "runtime.followup.eventTransport.get": EventTransportKey;
+  "runtime.followup.sourceRoute.put": FollowupSourceRoute;
+  "runtime.followup.sourceRoute.list": FollowupSourceRouteListParams;
+  "runtime.followup.sourceRoute.remove": FollowupSourceRouteRemove;
+  "runtime.followup.eventTransport.bind": EventTransportBind;
+  "runtime.followup.eventTransport.read": EventTransportRead;
+  "runtime.followup.eventTransport.ack": EventTransportAck;
+  "runtime.followup.eventTransport.release": EventTransportAccess;
+  "runtime.followup.eventTransport.sources": KernelEmptyParams;
+  "runtime.followup.eventTransport.imports": KernelEmptyParams;
+  "runtime.followup.eventTransport.importReleased": FollowupEventSourceIdentity;
+  "runtime.followup.arrangements.list": FollowupArrangementListParams;
+  "runtime.followup.arrangement.put": FollowupArrangementPutParams;
+  "runtime.followup.events.receive": FollowupEventReceiveParams;
+  "runtime.followup.eventSources.list": KernelEmptyParams;
+  "runtime.followup.eventSources.get": FollowupEventSourceIdentity;
+  "runtime.followup.eventSources.status": FollowupEventSourceStatusParams;
+  "runtime.followup.backlog": FollowupBacklogParams;
   "runtime.context.observations.importSources": ContextObservationImportSources;
   "runtime.context.observations.capture": ContextObservationCaptureBatch;
   "runtime.context.observations.receipt": ContextObservationReceiptLookup;
@@ -7362,6 +7638,177 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventAttachment.read";
+      params: FollowupEventAttachmentReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.get";
+      params: EventTransportKey;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.sourceRoute.put";
+      params: FollowupSourceRoute;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.sourceRoute.list";
+      params: FollowupSourceRouteListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.sourceRoute.remove";
+      params: FollowupSourceRouteRemove;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.bind";
+      params: EventTransportBind;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.read";
+      params: EventTransportRead;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.ack";
+      params: EventTransportAck;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.release";
+      params: EventTransportAccess;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.sources";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.imports";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventTransport.importReleased";
+      params: FollowupEventSourceIdentity;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.arrangements.list";
+      params: FollowupArrangementListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.arrangement.put";
+      params: FollowupArrangementPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.events.receive";
+      params: FollowupEventReceiveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventSources.list";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventSources.get";
+      params: FollowupEventSourceIdentity;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.eventSources.status";
+      params: FollowupEventSourceStatusParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.followup.backlog";
+      params: FollowupBacklogParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

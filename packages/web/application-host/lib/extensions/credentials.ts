@@ -9,7 +9,26 @@ import { bindPluginInvocationPrincipal, requirePluginPrincipal } from './invocat
 const invalid = () => new Error('Plugin credential request is unavailable or invalid');
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export class PluginCredentialCapability {
+  readonly #listeners = new Set<(identity: { principalId: string; extensionId: string; connectionId: string }) => void>();
+  subscribe(listener: (identity: { principalId: string; extensionId: string; connectionId: string }) => void): () => void {
+    this.#listeners.add(listener); return () => { this.#listeners.delete(listener); };
+  }
+  #changed(principalId: string, extensionId: string, connectionId: string): void {
+    for (const listener of this.#listeners) listener({ principalId, extensionId, connectionId });
+  }
   readonly #authentication = new WeakMap<HostInvocationScope, { owner: HostServiceOwnerIdentity; assertAvailable(): void }>();
+  readonly #discovery = new WeakSet<HostInvocationScope>();
+  /** Listing connections cannot resolve secrets or mutate credentials as a side effect. */
+  bindConnectionDiscovery(scope: HostInvocationScope): () => void {
+    this.#discovery.add(scope); return () => { this.#discovery.delete(scope); };
+  }
+  readonly #receivers = new WeakMap<HostInvocationScope, { connectionId: string; accountId: string }>();
+  /** Restrict a background receiver to reading its exact selected credential, never replacing it. */
+  bindEventReceiver(scope: HostInvocationScope, connectionId: string, accountId: string): () => void {
+    if (this.#receivers.has(scope)) throw invalid();
+    this.#receivers.set(scope, { connectionId, accountId });
+    return () => { this.#receivers.delete(scope); };
+  }
   readonly #stop = new AbortController();
   readonly #attempts = new Map<string, { scope: string; extensionId: string; cancel(): void }>();
   #unregister: (() => void) | undefined;
@@ -87,9 +106,14 @@ export class PluginCredentialCapability {
       // a Host-wide subject ID or introducing a second platform account directory.
       return createHash('sha256').update(JSON.stringify([requirePluginPrincipal(context), context.owner.extensionId])).digest('hex');
     }
+    if (context.invocation && this.#discovery.has(context.invocation) && method !== 'inspect') throw invalid();
+    const receiver = context.invocation && this.#receivers.get(context.invocation);
+    if (receiver && (!object(raw) || !['inspect', 'resolve'].includes(method)
+      || raw.connectionId !== receiver.connectionId || raw.expectedAccount !== receiver.accountId)) throw invalid();
     const fields: Record<string, string[]> = { put: ['key'], inspect: [], resolve: ['adapter'], remove: [], start: ['adapter'], read: ['id'], reply: ['id', 'redirect'], cancel: ['id'] };
     if (!object(raw) || !Object.hasOwn(fields, method) || Object.keys(raw).some(key => key !== 'connectionId' && key !== 'expectedAccount' && !fields[method]!.includes(key))
       || typeof raw.connectionId !== 'string' || !raw.connectionId) throw invalid();
+    const principalId = requirePluginPrincipal(context);
     const connectionId = raw.connectionId, scope = this.#scope(context, connectionId), reference = `plugin:${createHash('sha256').update(context.owner.extensionId).digest('hex')}:${scope}`;
     const assertCurrent = () => { if (this.#scope(context, connectionId) !== scope) throw invalid(); };
     if (['read', 'reply', 'cancel'].includes(method)) {
@@ -104,9 +128,10 @@ export class PluginCredentialCapability {
     if (method === 'put') {
       if (typeof raw.key !== 'string' || !raw.key.trim()) throw invalid();
       const record = await this.credentials.replace({ kind: 'api-key', key: raw.key }, reference, expected, assertCurrent); assertCurrent();
+      this.#changed(principalId, context.owner.extensionId, connectionId);
       return { connected: true, kind: 'api-key', account: record.account, generation: record.generation };
     }
-    if (method === 'remove') { for (const attempt of this.#attempts.values()) if (attempt.scope === scope) attempt.cancel(); await this.credentials.removeIfCurrent(reference, expected); assertCurrent(); return { connected: false }; }
+    if (method === 'remove') { for (const attempt of this.#attempts.values()) if (attempt.scope === scope) attempt.cancel(); await this.credentials.removeIfCurrent(reference, expected); assertCurrent(); this.#changed(principalId, context.owner.extensionId, connectionId); return { connected: false }; }
     if (method === 'inspect') {
       if (!expected) return { connected: false };
       const record = await this.credentials.read(reference); assertCurrent();
@@ -139,6 +164,7 @@ export class PluginCredentialCapability {
         const result = await held.invoke({ kind: 'complete', provider: adapter.provider, connectionId, state: begin.state, redirect }, signal);
         signal.throwIfAborted(); held.assertAvailable(); if (result.kind !== 'token') throw invalid();
         await this.credentials.replace(result.token, reference, expected, () => { signal.throwIfAborted(); held.assertAvailable(); committing = true; });
+        this.#changed(principalId, context.owner.extensionId, connectionId);
       } finally { signal.removeEventListener('abort', abort); held.release(); }
     });
     flowId = state.id;
@@ -150,5 +176,5 @@ export class PluginCredentialCapability {
     for (const attempt of this.#attempts.values()) if (attempt.extensionId === extensionId) attempt.cancel();
     await this.credentials.removePrefix(`plugin:${createHash('sha256').update(extensionId).digest('hex')}:`);
   }
-  close() { this.#stop.abort(); this.#unregister?.(); this.#unregister = undefined; for (const attempt of this.#attempts.values()) attempt.cancel(); this.#attempts.clear(); this.flows.close(); }
+  close() { this.#stop.abort(); this.#unregister?.(); this.#unregister = undefined; for (const attempt of this.#attempts.values()) attempt.cancel(); this.#attempts.clear(); this.#listeners.clear(); this.flows.close(); }
 }

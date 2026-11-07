@@ -201,7 +201,7 @@ function fixture(active = false) {
   });
   const listeners = new Set<Parameters<ThreadsAPI['observe']>[1]>();
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { conversationTree: unused, treePreview: unused, attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, deleteBranch: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { conversationTree: unused, treePreview: unused, attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, deleteBranch: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { arrangements: async () => [], eventSources: async () => [], putArrangement: unused, backlog: unused, sourceRoutes: async () => [], putSourceRoute: unused, removeSourceRoute: unused, jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -819,7 +819,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
     intent: {}, result: null, external_receipt: null, call_completion: {
       kind: 'job_accepted', operation_id: 'process:original', phase: 'running', effect: 'dispatched', lifetime: 'environment',
     }, execution_owner: { kind: 'kernel' } }];
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:one', revision: 1, generation: 1,
+  const followup: ThreadSnapshot['followups'][number] = { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:one', revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 1, observed: null, file: null, log: null, metric: null }], state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'process_stopped', operation_id: 'process:original' },
@@ -854,7 +854,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
   expect(control.mock.calls.map(([input]) => [input.action, input.expectedRevision])).toEqual([['pause', 1], ['resume', 2]]);
   expect(resumeRun).not.toHaveBeenCalled();
   followup.occurrence = { accepted_cursor: 4, id: 'occurrence:one', generation: 1, trigger_cursor: 4, evidence: { kind: 'process_stopped', receipt_identity: 'receipt:process', receipt_epoch: 'kernel:original' },
-    state: 'admitted', hold_reason: 'question', delivery: { input_id: 'input:original', run_id: 'continuation:run', execution_id: null,
+    state: 'admitted', hold_reason: 'question', delivery: { thread_id: identity.threadId, branch_id: identity.branchId, input_id: 'input:original', run_id: 'continuation:run', execution_id: null,
       state: 'queued', activation_state: 'bound', delivered_cursor: null, failure_code: null } };
   await act(async () => f.emit({ cursor: 5, subject: followup.id, revision: 4, kind: 'ingress.run_ready', data: { run_id: 'continuation:run' } }));
   expect(container.textContent).toContain('Waiting for a user answer'); expect(button('Cancel follow-up')).toBeDefined();
@@ -924,7 +924,7 @@ it('shows failed follow-up cancellation beside the composer and leaves the task 
 it('retains an exact absolute time across an uncertain retry and exposes explicit Goal follow-ups without reviving the stopped Run', async () => {
   const f = fixture(true); const source = { ...f.view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = source;
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
+  const followup: ThreadSnapshot['followups'][number] = { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:time', revision: 1, generation: 1, thread_id: identity.threadId,
     branch_id: identity.branchId, source_run_id: source.id, sources: [{ consumed_cursor: 0, source_index: 0, after_cursor: 0, observed: null, file: null, log: null, metric: null }], state: 'active', goal_id: 'goal:original',
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind: 'at', at_ms: 0 }, wait: { id: 'time-wait', kind: 'at', after_cursor: 0, trigger_cursor: null, state: 'waiting' }, occurrence: null };
@@ -953,7 +953,7 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
     intent: {}, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: 'process:original',
       phase: 'running', effect: 'dispatched', lifetime: 'environment' }, execution_owner: { kind: 'kernel' } }];
   const chosen = '2030-02-03T04:05:06'; const atMs = new Date(chosen).getTime();
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: `followup:${kind}`, revision: 1, generation: 1,
+  const followup: ThreadSnapshot['followups'][number] = { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, repeat: 'once', exhausted: false, pending_occurrences: 0, id: `followup:${kind}`, revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1_700_000_000_000, observation: null,
     trigger: { kind, sources: [{ kind: 'at', at_ms: atMs }, { kind: 'process_stopped', operation_id: 'process:original' }] },
@@ -2157,7 +2157,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
 
 it('retains an original file condition after a lost reply and displays unavailable and immutable evidence without evaluating it', async () => {
   const f = fixture(true);
-  const followup: ThreadSnapshot['followups'][number] = { repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:file', revision: 1, generation: 1,
+  const followup: ThreadSnapshot['followups'][number] = { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, repeat: 'once', exhausted: false, pending_occurrences: 0, id: 'followup:file', revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
@@ -2272,7 +2272,7 @@ it('discards a late accepted-job query from the previous work Run and keeps a fa
 });
 
 function repeatedFollowup(): ThreadSnapshot['followups'][number] {
-  return { id: 'followup:each', repeat: 'each', exhausted: false, pending_occurrences: 0, revision: 1, generation: 1,
+  return { owner: { kind: 'work' }, name: null, timing: { kind: 'immediate' }, pending_events: 0, next_delivery_at_ms: null, source_status: null, id: 'followup:each', repeat: 'each', exhausted: false, pending_occurrences: 0, revision: 1, generation: 1,
     thread_id: identity.threadId, branch_id: identity.branchId, source_run_id: 'ui-run', state: 'active', goal_id: null,
     actor: { kind: 'user' }, has_instruction: true, registered_at_ms: 1, observation: null,
     trigger: { kind: 'file', path: 'results/output.txt', condition: 'changed' },
@@ -2284,7 +2284,7 @@ function repeatedOccurrence(id: string, accepted: number, delivered: boolean): N
     state: delivered ? 'completed' : 'held', hold_reason: delivered ? null : 'question',
     evidence: { kind: 'file', receipt_id: 'receipt:file', path: 'results/output.txt', condition: 'changed',
       state: { kind: 'regular-file', objectHash: `object:${id}`, byteLength: 10, mode: null }, proof: 'snapshot_difference', position: null, gap: false, observed_at_ms: accepted },
-    delivery: { input_id: `input:${id}`, run_id: `run:${id}`, execution_id: `execution:${id}`, state: delivered ? 'delivered' : 'queued',
+    delivery: { thread_id: identity.threadId, branch_id: identity.branchId, input_id: `input:${id}`, run_id: `run:${id}`, execution_id: `execution:${id}`, state: delivered ? 'delivered' : 'queued',
       activation_state: 'bound', delivered_cursor: delivered ? accepted + 1 : null, failure_code: null } };
 }
 

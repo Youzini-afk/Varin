@@ -1,3 +1,4 @@
+import { externalFollowupState } from '@/lib/followupPresentation';
 import { draftImageReferences } from '@/lib/images/references';
 import { externalAttachmentSupported } from './externalAttachments';
 import React from 'react';
@@ -366,11 +367,11 @@ function Messages({
     </>
   );
 }
-export function ExternalConversationView({ id, readOnly = false }: { id: string; readOnly?: boolean }) {
+export function ExternalConversationView({ id, readOnly = false, turnId }: { id: string; readOnly?: boolean; turnId?: string }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  return <ExternalConversationSession key={`${host}:${id}`} id={id} host={host} readOnly={readOnly} />;
+  return <ExternalConversationSession key={`${host}:${id}:${turnId ?? ''}`} id={id} host={host} readOnly={readOnly || !!turnId} turnId={turnId} />;
 }
-function ExternalConversationSession({ id, host, readOnly }: { id: string; host: number; readOnly: boolean }) {
+function ExternalConversationSession({ id, host, readOnly, turnId }: { id: string; host: number; readOnly: boolean; turnId?: string }) {
   const { t } = useI18n();
   const snapshotPublisher = React.useRef({}).current;
   const api = React.useMemo(() => createExternalAgentsHttpAPI(host), [host]);
@@ -541,6 +542,17 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
       refreshView.current = async () => {};
     };
   }, [api, id, host]);
+  React.useEffect(() => {
+    if (!turnId || !snapshot || !previous || earlier.some(item => item.turnId === turnId) || snapshot.items.some(item => item.turnId === turnId)
+      || snapshot.turns.at(-1)?.id === turnId) return;
+    const controller = new AbortController();
+    void api.read(id, previous, controller.signal).then(page => {
+      if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
+      setEarlier(old => [...page.items, ...old]);
+      setPrevious(page.previous === previous ? null : page.previous ?? null);
+    }, cause => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => controller.abort();
+  }, [api, id, host, turnId, snapshot, earlier, previous]);
   React.useLayoutEffect(() => {
     if (follow.current && viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [snapshot]);
@@ -606,7 +618,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
     externalOptions: { ...draft.externalOptions, [c.configurationId]: { thinking: value.thinking, mode: value.mode, config: value.config } },
   });
   const errorText = failure instanceof Error ? failure.message : failure ? String(failure) : error;
-  const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()];
+  const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()].filter(item => !turnId || item.turnId === turnId);
   const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} /></button>;
   return (
     <section className="regular-chat-view relative flex h-full min-h-0 min-w-0 flex-col">
@@ -622,6 +634,8 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
           >
             <div className="chat-input-column space-y-4 py-6">
               <ToolDisclosureScope sessionId={id}>
+                {turnId && <p role="status">{t('arrangements.externalTurn', { turn: turnId, state: externalFollowupState(snapshot.turns.find(turn => turn.id === turnId)?.status ?? '', t) })}</p>}
+                {turnId && !messages.length && <p>{t('arrangements.externalTurnEmpty', { turn: turnId })}</p>}
                 {previous && (
                   <Button
                     variant="ghost"

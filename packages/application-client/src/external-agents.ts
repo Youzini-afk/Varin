@@ -90,6 +90,7 @@ export interface ExternalAgentCapabilities {
   modes?: Array<{ id: string; name: string }>;
 }
 export interface ExternalConversation {
+  principalId?: string | null;
   id: string;
   configurationId: string;
   harness: ExternalHarness;
@@ -111,6 +112,7 @@ export interface ExternalConversation {
   privateWorkspace?: boolean;
 }
 export type ExternalTurnStatus =
+  | 'awaiting_input'
   | 'queued'
   | 'preparing'
   | 'running'
@@ -131,6 +133,11 @@ export interface ExternalInput {
   mode?: string;
 }
 export interface ExternalTurn {
+  arrangementOccurrenceId?: string;
+  arrangementLaunch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
+  arrangementHoldReason?: string;
+  blockedReason?: string;
+  consumedByTurnId?: string;
   id: string;
   conversationId: string;
   key: string;

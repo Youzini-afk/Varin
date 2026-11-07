@@ -352,6 +352,8 @@ pub fn admit_call(
                     },
                     lifetime: if job {
                         Lifetime::Thread
+                    } else if name == "follow_up" {
+                        Lifetime::Run
                     } else {
                         Lifetime::Call
                     },
@@ -366,9 +368,13 @@ pub fn admit_call(
         epoch,
         &ExecutionRecord::ToolDispatched {
             context: context.clone(),
-            executor_owner: ExecutorOwner::External {
-                identity: "original-computer-tool".into(),
-                epoch: "tool-epoch".into(),
+            executor_owner: if name == "follow_up" {
+                ExecutorOwner::Kernel
+            } else {
+                ExecutorOwner::External {
+                    identity: "original-computer-tool".into(),
+                    epoch: "tool-epoch".into(),
+                }
             },
         },
     )

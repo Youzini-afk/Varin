@@ -449,7 +449,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
                     db.host_job_sources(&f.run.id).unwrap()[0].source_run_id,
                     f.run.id
                 );
-                assert_eq!(value.source_run_id, f.run.id);
+                assert_eq!(value.source_run_id.as_deref(), Some(f.run.id.as_str()));
                 assert!(!db.operation(&job.operation_id).unwrap().cancel_requested);
             }
             let FollowupActor::Agent {
@@ -956,7 +956,7 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
             .find(|v| matches!(v.trigger, DelegatedTrigger::Followup { .. }))
             .expect("real follow-up child execution");
         assert_ne!(child.execution_id, f.child.operation_id);
-        assert_eq!(value.source_run_id, f.run.id);
+        assert_eq!(value.source_run_id.as_deref(), Some(f.run.id.as_str()));
         assert_eq!(
             value
                 .occurrence

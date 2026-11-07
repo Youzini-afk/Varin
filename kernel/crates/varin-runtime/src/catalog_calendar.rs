@@ -178,6 +178,7 @@ pub enum OccurrenceReason {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OccurrenceState {
+    Skipped,
     Observed,
     Preparing,
     Held,
@@ -291,6 +292,8 @@ struct Definition {
 struct Occurrence {
     id: String,
     definition_id: String,
+    #[serde(default)]
+    arrangement_owned: bool,
     generation: u64,
     revision: u64,
     reason: OccurrenceReason,
@@ -335,20 +338,44 @@ pub(super) fn check_invocations_format(db: &Connection) -> Result<()> {
         OR length(definition_id)=0 OR length(reason_digest)!=64 OR reason_digest GLOB '*[^0-9a-f]*'
         OR (manual_key_digest IS NOT NULL AND (length(manual_key_digest)!=64 OR manual_key_digest GLOB '*[^0-9a-f]*'))
         OR id != definition_id||':'||generation||':'||reason_digest)", [], |r| r.get(0))?;
-    if invalid { return Err(RuntimeError::Invalid("Calendar acceptance identity is malformed; data was preserved".into())); }
-    let mut boundaries = db.prepare("SELECT definition_id,key_prefix FROM calendar_legacy_manual_boundaries")?;
-    for row in boundaries.query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
+    if invalid {
+        return Err(RuntimeError::Invalid(
+            "Calendar acceptance identity is malformed; data was preserved".into(),
+        ));
+    }
+    let mut boundaries =
+        db.prepare("SELECT definition_id,key_prefix FROM calendar_legacy_manual_boundaries")?;
+    for row in boundaries.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (definition, prefix) = row?;
-        let token = prefix.strip_prefix("calendar-manual:").and_then(|v| v.strip_suffix(':'));
-        if definition.is_empty() || !token.is_some_and(|v| Uuid::parse_str(v).is_ok_and(|id| id.to_string() == v)) {
-            return Err(RuntimeError::Invalid("Calendar manual admission generation is malformed; data was preserved".into()));
+        let token = prefix
+            .strip_prefix("calendar-manual:")
+            .and_then(|v| v.strip_suffix(':'));
+        if definition.is_empty()
+            || !token.is_some_and(|v| Uuid::parse_str(v).is_ok_and(|id| id.to_string() == v))
+        {
+            return Err(RuntimeError::Invalid(
+                "Calendar manual admission generation is malformed; data was preserved".into(),
+            ));
         }
     }
     for o in occurrences(db, None)? {
         let receipt: Option<(String,u64,String,Option<String>)> = db.query_row("SELECT definition_id,generation,reason_digest,manual_key_digest FROM calendar_invocations WHERE id=?1", [&o.id], |r| Ok((r.get(0)?,read_number(r,1)?,r.get(2)?,r.get(3)?))).optional()?;
-        let manual = match &o.reason { OccurrenceReason::Manual{key}=>Some(digest(key)?),_=>None };
-        if receipt != Some((o.definition_id.clone(),o.generation,digest(&o.reason)?,manual)) {
-            return Err(RuntimeError::Invalid("Calendar acceptance receipt disagrees with retained work; data was preserved".into()));
+        let manual = match &o.reason {
+            OccurrenceReason::Manual { key } => Some(digest(key)?),
+            _ => None,
+        };
+        if receipt
+            != Some((
+                o.definition_id.clone(),
+                o.generation,
+                digest(&o.reason)?,
+                manual,
+            ))
+        {
+            return Err(RuntimeError::Invalid(
+                "Calendar acceptance receipt disagrees with retained work; data was preserved"
+                    .into(),
+            ));
         }
     }
     Ok(())
@@ -356,7 +383,9 @@ pub(super) fn check_invocations_format(db: &Connection) -> Result<()> {
 fn retain_invocation(tx: &Transaction<'_>, o: &Occurrence) -> Result<()> {
     let reason_digest = digest(&o.reason)?;
     if o.id != format!("{}:{}:{}", o.definition_id, o.generation, reason_digest) {
-        return Err(RuntimeError::Conflict("calendar occurrence identity is malformed".into()));
+        return Err(RuntimeError::Conflict(
+            "calendar occurrence identity is malformed".into(),
+        ));
     }
     let manual_key_digest = match &o.reason {
         OccurrenceReason::Manual { key } => Some(digest(key)?),
@@ -374,10 +403,13 @@ pub(super) fn upgrade_invocations(tx: &Transaction<'_>) -> Result<()> {
     // newly chosen after migration from ambiguous historical retries. Preserve
     // this boundary across edits; never rewrite an existing key on the caller's behalf.
     for d in definitions(tx, None)? {
-        tx.execute("INSERT INTO calendar_legacy_manual_boundaries(definition_id,key_prefix) VALUES(?1,?2)",
-            params![d.view.id, format!("calendar-manual:{}:", Uuid::new_v4())])?;
+        tx.execute(
+            "INSERT INTO calendar_legacy_manual_boundaries(definition_id,key_prefix) VALUES(?1,?2)",
+            params![d.view.id, format!("calendar-manual:{}:", Uuid::new_v4())],
+        )?;
     }
-    let mut query = tx.prepare("SELECT id,definition_id,thread_id,input_id,body FROM calendar_occurrences")?;
+    let mut query =
+        tx.prepare("SELECT id,definition_id,thread_id,input_id,body FROM calendar_occurrences")?;
     let mut rows = query.query([])?;
     while let Some(row) = rows.next()? {
         let o: Occurrence = serde_json::from_str(&row.get::<_, String>(4)?)?;
@@ -386,14 +418,18 @@ pub(super) fn upgrade_invocations(tx: &Transaction<'_>) -> Result<()> {
             || row.get::<_, String>(2)? != o.thread_id
             || row.get::<_, Option<String>>(3)? != o.input_id
         {
-            return Err(RuntimeError::Conflict("calendar occurrence columns disagree with acceptance".into()));
+            return Err(RuntimeError::Conflict(
+                "calendar occurrence columns disagree with acceptance".into(),
+            ));
         }
         retain_invocation(tx, &o)?;
     }
     Ok(())
 }
 fn retired_invocation(id: &str) -> RuntimeError {
-    RuntimeError::IdentityUnavailable(format!("calendar invocation {id} was accepted but its work is retired"))
+    RuntimeError::IdentityUnavailable(format!(
+        "calendar invocation {id} was accepted but its work is retired"
+    ))
 }
 fn digest(value: &impl Serialize) -> Result<String> {
     use sha2::{Digest, Sha256};
@@ -425,10 +461,13 @@ fn synchronized(db: &Connection, d: &Definition) -> Result<bool> {
 }
 fn project_definition(db: &Connection, d: &Definition) -> Result<DefinitionView> {
     let mut v = d.view.clone();
-    v.manual_key_prefix = db.query_row(
-        "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
-        [&d.view.id], |r| r.get(0),
-    ).optional()?;
+    v.manual_key_prefix = db
+        .query_row(
+            "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
+            [&d.view.id],
+            |r| r.get(0),
+        )
+        .optional()?;
     v.synchronized = synchronized(db, d)?;
     v.next_at_ms = d.cursor.slot.as_ref().map(|s| s.at_ms);
     v.calculation_pending = d.cursor.pending;
@@ -447,6 +486,12 @@ fn write_occurrence(tx: &Transaction<'_>, o: &Occurrence) -> Result<()> {
 }
 fn ended(db: &Connection, o: &Occurrence) -> Result<bool> {
     if o.cancelled {
+        return Ok(true);
+    }
+    if o.arrangement_owned {
+        return followups::events::calendar_batches_ended(db, &o.id);
+    }
+    if o.cancelled || (o.arrangement_owned && db.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='calendar.event_empty')",[&o.id],|r|r.get::<_,bool>(0))?) {
         return Ok(true);
     }
     if let Some(id) = &o.input_id {
@@ -531,6 +576,12 @@ fn target_hold(
     {
         if threads::branch_deleted(db, branch_id)? {
             return Ok(Some("source_unavailable".into()));
+        }
+        if let Some(id) = bot::thread_bot(db, thread_id)? {
+            if d.view.project_id == format!("bot:{id}") && d.source_run_id.is_none() {
+                return Ok((!bot::permitted(db, &id, bot::current_epoch(db)?)?)
+                    .then(|| "bot_suspended".into()));
+            }
         }
         let run = target
             .cloned()
@@ -627,6 +678,29 @@ fn project_occurrence(db: &Connection, d: &Definition, o: &Occurrence) -> Result
         hold_reason: None,
         failure_code: o.failure.clone(),
     };
+    if o.arrangement_owned {
+        if let Some((state, hold)) = followups::events::calendar_batch_projection(db, &o.id)? {
+            v.state = state;
+            v.hold_reason = hold;
+            if let Some(input) = &o.input_id {
+                let row: QueuedInputMetadata = record(db, "input_queue", input)?;
+                v.run_id = activation::fact(&row)?.run_id().map(str::to_owned);
+                v.execution_id = activation::fact(&row)?.execution_id().map(str::to_owned);
+            }
+            return Ok(v);
+        }
+    }
+    if o.arrangement_owned
+        && o.input_id.is_none()
+        && db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='calendar.event_empty')",
+            [&o.id],
+            |r| r.get::<_, bool>(0),
+        )?
+    {
+        v.state = OccurrenceState::Skipped;
+        return Ok(v);
+    }
     if let Some(id) = &o.input_id {
         let row: QueuedInputMetadata = record(db, "input_queue", id)?;
         v.run_id = activation::fact(&row)?.run_id().map(str::to_owned);
@@ -712,6 +786,9 @@ fn activation_hold_code(hold: activation::MessageActivationHold) -> String {
     .into()
 }
 fn cancel_occurrence(tx: &Transaction<'_>, o: &mut Occurrence) -> Result<()> {
+    if o.arrangement_owned {
+        followups::events::cancel_calendar_batches(tx, &o.id)?;
+    }
     if let Some(id) = &o.input_id {
         let mut row: QueuedInputMetadata = record(tx, "input_queue", id)?;
         if row.state == InputState::Delivered {
@@ -847,12 +924,12 @@ impl SyncPreparation {
                 {
                     return Err(RuntimeError::Invalid(
                         "calendar model selection is invalid".into(),
-                    ))
+                    ));
                 }
                 Target::NewWork { source, .. } if !source.validate() => {
                     return Err(RuntimeError::Invalid(
                         "calendar source selection is invalid".into(),
-                    ))
+                    ));
                 }
                 Target::ExistingWork {
                     thread_id,
@@ -860,7 +937,7 @@ impl SyncPreparation {
                 } if thread_id.trim().is_empty() || branch_id.trim().is_empty() => {
                     return Err(RuntimeError::Invalid(
                         "calendar target identity is required".into(),
-                    ))
+                    ));
                 }
                 _ => (),
             }
@@ -953,29 +1030,46 @@ impl Catalog {
                         branch_id,
                     } => {
                         context_jobs::require_regular_branch(&tx, branch_id)?;
-                        threads::require_public(&tx,thread_id)?;
-                        let run = latest_run(&tx, branch_id)?.ok_or_else(|| {
-                            RuntimeError::Conflict(
-                                "existing calendar work has no original Run configuration".into(),
+                        threads::require_public(&tx, thread_id)?;
+                        let bot_owned = bot::thread_bot(&tx, thread_id)?
+                            .is_some_and(|id| capture.project == format!("bot:{id}"));
+                        if bot_owned {
+                            let actual: String = tx.query_row(
+                                "SELECT thread_id FROM branches WHERE id=?1",
+                                [branch_id],
+                                |r| r.get(0),
+                            )?;
+                            if actual != *thread_id {
+                                return Err(RuntimeError::Conflict(
+                                    "Calendar branch belongs to another Thread".into(),
+                                ));
+                            }
+                            (None, None, None)
+                        } else {
+                            let run = latest_run(&tx, branch_id)?.ok_or_else(|| {
+                                RuntimeError::Conflict(
+                                    "existing calendar work has no original Run configuration"
+                                        .into(),
+                                )
+                            })?;
+                            let scope = admitted_scope(&tx, &run.id)?;
+                            if &run.thread_id != thread_id
+                                || current_scope(&tx, branch_id)? != scope
+                                || scope.as_ref().and_then(|s| s.project_id.as_deref())
+                                    != Some(capture.project.as_str())
+                            {
+                                return Err(RuntimeError::Conflict(
+                                    "calendar target is outside its actual project scope".into(),
+                                ));
+                            }
+                            let launch: launch_content::LaunchMetadata =
+                                record(&tx, "run_launches", &run.id)?;
+                            (
+                                Some(run.id.clone()),
+                                followups::normalized_source(launch.selection.source, &run.id),
+                                scope,
                             )
-                        })?;
-                        let scope = admitted_scope(&tx, &run.id)?;
-                        if &run.thread_id != thread_id
-                            || current_scope(&tx, branch_id)? != scope
-                            || scope.as_ref().and_then(|s| s.project_id.as_deref())
-                                != Some(capture.project.as_str())
-                        {
-                            return Err(RuntimeError::Conflict(
-                                "calendar target is outside its actual project scope".into(),
-                            ));
                         }
-                        let launch: launch_content::LaunchMetadata =
-                            record(&tx, "run_launches", &run.id)?;
-                        (
-                            Some(run.id.clone()),
-                            followups::normalized_source(launch.selection.source, &run.id),
-                            scope,
-                        )
                     }
                 }
             } else {
@@ -1340,7 +1434,11 @@ fn observe(
     if let Some(existing) = optional_record(tx, "calendar_occurrences", &id)? {
         return Ok(existing);
     }
-    if tx.query_row("SELECT EXISTS(SELECT 1 FROM calendar_invocations WHERE id=?1)", [&id], |r| r.get::<_, bool>(0))? {
+    if tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM calendar_invocations WHERE id=?1)",
+        [&id],
+        |r| r.get::<_, bool>(0),
+    )? {
         return Err(retired_invocation(&id));
     }
     let (thread_id, branch_id) = match &d.view.target {
@@ -1349,7 +1447,11 @@ fn observe(
             let branch = format!("branch:{id}");
             // Older stores may already have collected the acceptance body. Never
             // recreate work from a surviving reserved identity or leak a SQLite error.
-            if tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)", [&thread], |r| r.get::<_, bool>(0))? {
+            if tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
+                [&thread],
+                |r| r.get::<_, bool>(0),
+            )? {
                 return Err(retired_invocation(&id));
             }
             super::threads::insert(tx, &thread, &branch, "calendar", None)?;
@@ -1374,6 +1476,7 @@ fn observe(
     let o = Occurrence {
         id,
         definition_id: d.view.id.clone(),
+        arrangement_owned: followups::events::calendar_owned(tx, &d.view.id)?,
         generation: d.view.generation,
         revision: 1,
         reason,
@@ -1499,12 +1602,18 @@ impl Catalog {
                 None => Err(retired_invocation(&id)),
             };
         }
-        let prefix: Option<String> = tx.query_row(
-            "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
-            [definition], |r| r.get(0),
-        ).optional()?;
+        let prefix: Option<String> = tx
+            .query_row(
+                "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
+                [definition],
+                |r| r.get(0),
+            )
+            .optional()?;
         if let Some(prefix) = prefix {
-            if key.strip_prefix(&prefix).is_none_or(|suffix| suffix.trim().is_empty()) {
+            if key
+                .strip_prefix(&prefix)
+                .is_none_or(|suffix| suffix.trim().is_empty())
+            {
                 return Err(RuntimeError::IdentityUnavailable(
                     "legacy calendar manual invocation history is incomplete; new manual work requires the current admission key prefix".into(),
                 ));
@@ -1513,7 +1622,10 @@ impl Catalog {
         // Pre-receipt GC left only deterministic Thread tombstones. Check all
         // generations so a definition edit cannot turn an old key into new work.
         let prefix = format!("thread:{}:", definition);
-        let suffix = format!(":{}", digest(&OccurrenceReason::Manual { key: key.into() })?);
+        let suffix = format!(
+            ":{}",
+            digest(&OccurrenceReason::Manual { key: key.into() })?
+        );
         let reserved: Option<String> = tx.query_row(
             "SELECT id FROM threads WHERE substr(id,1,length(?1))=?1 AND substr(id,-length(?2))=?2 LIMIT 1",
             params![prefix, suffix], |r| r.get(0),
@@ -1680,7 +1792,10 @@ impl Catalog {
             return Ok(out);
         }
         for o in occurrences(&self.db, None)? {
-            if o.input_id.is_some() || !matches!(o.target, Target::ExistingWork { .. }) {
+            if o.input_id.is_some()
+                || o.arrangement_owned
+                || !matches!(o.target, Target::ExistingWork { .. })
+            {
                 continue;
             }
             let d: Definition = record(&self.db, "calendar_definitions", &o.definition_id)?;
@@ -1711,7 +1826,7 @@ impl Catalog {
         if d != p.definition || o != p.occurrence || occurrence_hold(&tx, &d, &o, None)?.is_some() {
             return Ok(());
         }
-        threads::require_public(&tx,&o.thread_id)?;
+        threads::require_public(&tx, &o.thread_id)?;
         let activation = activation::accept_target(&tx, &o.thread_id, &o.branch_id)?;
         let id = format!("calendar-input:{}", o.id);
         let cursor = event(
@@ -1838,7 +1953,10 @@ struct CalendarHistory {
     observed_at_ms: u64,
     input: Value,
 }
-pub(super) fn history_items(id: &str, value: &Value) -> Result<Option<crate::execution::ConversationHistory>> {
+pub(super) fn history_items(
+    id: &str,
+    value: &Value,
+) -> Result<Option<crate::execution::ConversationHistory>> {
     if value.get("kind").and_then(Value::as_str) != Some("calendar_input") {
         return Ok(None);
     }
@@ -2060,10 +2178,9 @@ impl ColdPreparation {
                     .and_then(Value::as_f64)
                     != Some(requested)
             })
-            || launch
-                .source
-                .as_ref()
-                .is_none_or(|candidate| candidate.mode != *source_mode || !source.matches(candidate))
+            || launch.source.as_ref().is_none_or(|candidate| {
+                candidate.mode != *source_mode || !source.matches(candidate)
+            })
         {
             return Err(RuntimeError::Conflict(
                 "calendar candidate does not match its selected model/source".into(),
@@ -2143,3 +2260,43 @@ mod tests;
 #[cfg(test)]
 #[path = "catalog_calendar_retention_tests.rs"]
 mod retention_tests;
+
+pub(super) fn bind_arrangement_input(tx: &Transaction<'_>, id: &str, input: &str) -> Result<()> {
+    let mut o: Occurrence = record(tx, "calendar_occurrences", id)?;
+    if !o.arrangement_owned {
+        return Err(RuntimeError::Conflict(
+            "Calendar slot is not event-driven".into(),
+        ));
+    }
+    if o.input_id.is_none() {
+        o.input_id = Some(input.into());
+        o.revision += 1;
+        tx.execute(
+            "UPDATE calendar_occurrences SET input_id=?2,body=?3 WHERE id=?1",
+            params![id, input, encode(&o)?],
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn unbind_arrangement_input(tx: &Transaction<'_>, input: &str) -> Result<()> {
+    let raw: Option<String> = tx
+        .query_row(
+            "SELECT body FROM calendar_occurrences WHERE input_id=?1",
+            [input],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(raw) = raw {
+        let mut o: Occurrence = serde_json::from_str(&raw)?;
+        if o.arrangement_owned {
+            o.input_id = None;
+            o.revision += 1;
+            tx.execute(
+                "UPDATE calendar_occurrences SET input_id=NULL,body=?2 WHERE id=?1",
+                params![o.id, encode(&o)?],
+            )?;
+        }
+    }
+    Ok(())
+}

@@ -105,7 +105,7 @@ impl Catalog {
             .transpose()
     }
     pub fn pending_cold_bot_work(&self) -> Result<Vec<ColdBotWork>> {
-        let mut query = self.db.prepare("SELECT q.body,b.bot_id FROM input_queue q JOIN branches branch ON branch.id=q.branch_id JOIN bot_thread_bindings b ON b.thread_id=branch.thread_id WHERE q.origin='work_event' AND q.state='queued' AND q.activation='activating' AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.branch_id=q.branch_id) ORDER BY q.cursor")?;
+        let mut query = self.db.prepare("SELECT q.body,b.bot_id FROM input_queue q JOIN branches branch ON branch.id=q.branch_id JOIN bot_thread_bindings b ON b.thread_id=branch.thread_id WHERE q.origin IN ('work_event','followup','calendar') AND q.state='queued' AND q.activation='activating' AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.branch_id=q.branch_id) ORDER BY q.cursor")?;
         let rows = query.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;

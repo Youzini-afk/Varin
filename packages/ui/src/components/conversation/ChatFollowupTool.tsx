@@ -1,3 +1,4 @@
+import { useUIStore } from '@/stores/useUIStore';
 import React from 'react';
 import type { Followup, FollowupView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
@@ -19,12 +20,12 @@ function Condition({ source, observed, inactive }: { source: Record<string, unkn
   const kind = toolText(source.kind);
   const labels = { at: 'atTime', process_stopped: 'processStopped', job_stopped: 'jobStopped', file: 'fileCondition', artifact: 'artifactReady', collection: 'collectionReady', log_literal: 'logMatch', log_end: 'logEnded', metric: 'metricCondition', run_completed: 'runCompleted', goal_requested: 'goalContinues' } as const;
   const label = labels[kind as keyof typeof labels];
-  const subject = kind === 'at' ? new Date(Number(source.at_ms ?? source.atMs)).toLocaleString()
+  const subject = kind === 'plugin_event' ? [toolRecord(source.source).sourceId, toolRecord(source.source).connectionId].filter(Boolean).join(' · ') : kind === 'at' ? new Date(Number(source.at_ms ?? source.atMs)).toLocaleString()
     : kind === 'file' ? toolText(source.path) + ' · ' + toolValueLabel(source.condition, t)
       : kind === 'metric' ? [source.machine_id ?? source.machineId, source.metric, source.predicate, source.threshold].join(' · ')
         : toolText(source.name) || toolText(source.literal) || toolText(source.operation_id) || toolText(source.operationId);
   return <li className="tool-follow-condition" data-observed={observed}><Icon name={observed ? 'checkbox-circle' : 'checkbox-blank-circle'} className="size-3.5" />
-    <div><p>{label ? t(('chat.tools.condition.' + label) as Parameters<typeof t>[0]) : kind}</p>{subject && <small>{subject}</small>}</div><span>{t(observed ? 'chat.tools.conditionMet' : inactive === 'cancelled' ? 'chat.followup.cancelledCondition' : inactive === 'paused' ? 'chat.tools.pausedConditions' : 'chat.tools.conditionWaiting')}</span></li>;
+    <div><p>{kind === 'plugin_event' ? t('arrangements.source') : label ? t(('chat.tools.condition.' + label) as Parameters<typeof t>[0]) : kind}</p>{subject && <small>{subject}</small>}</div><span>{t(observed ? 'chat.tools.conditionMet' : inactive === 'cancelled' ? 'chat.followup.cancelledCondition' : inactive === 'paused' ? 'chat.tools.pausedConditions' : 'chat.tools.conditionWaiting')}</span></li>;
 }
 
 function FollowupRecord({ id, data, args }: { id: string; data: Record<string, unknown>; args: Record<string, unknown> }) {
@@ -45,11 +46,13 @@ function FollowupRecord({ id, data, args }: { id: string; data: Record<string, u
   const control = (mode: 'pause' | 'resume') => { if (conversation && item) void action.run(() => conversation.api.followups.control({ ...conversation.identity, followupId: id, expectedRevision: item.revision, action: mode }), value => setLoaded(previous => ({ followup: value, instruction: previous?.instruction ?? instruction, registration_trigger: previous?.registration_trigger ?? null }))); };
   return <div className="tool-followup-record">
     {recorded && item && item.revision > recorded.revision && <p className="typography-micro text-muted-foreground">{t('chat.followup.currentState')}</p>}
+    {item?.trigger.kind === 'plugin_event' && item.name && <p className="font-medium">{item.name}</p>}
     {instruction && <p className="tool-follow-instruction">{instruction}</p>}
     {sources.length > 1 && <p className="typography-micro text-muted-foreground">{t(trigger.kind === 'any' ? 'chat.tools.anyCondition' : 'chat.tools.allConditions')}</p>}
     <ol className="tool-follow-conditions">{sources.map((source, index) => <Condition key={index} source={source} observed={Boolean(item?.sources.find(value => value.source_index === index)?.observed)}
       inactive={item?.state === 'cancelled' || item?.state === 'paused' ? item.state : undefined} />)}</ol>
     <div className="tool-inline-actions"><span className="typography-micro" role="status">{item ? followupStatus(item, t) : t('chat.dialogue.unconfirmed', { action: t('chat.tools.followup') })}</span>
+      {conversation && item?.trigger.kind === 'plugin_event' && <button type="button" onClick={() => useUIStore.getState().openArrangements(conversation.identity, item.id)}>{t('arrangements.edit')}</button>}
       {conversation && id && <button type="button" disabled={action.busy} onClick={refresh}>{t('chat.tools.refresh')}</button>}
       {conversation && !conversation.readOnly && item && pendingFollowup(item) && <button type="button" disabled={action.busy} onClick={() => control(item.state === 'paused' ? 'resume' : 'pause')}>{t(item.state === 'paused' ? 'chat.tools.resumeFollowup' : 'chat.tools.pauseFollowup')}</button>}
       {conversation && id && <button type="button" aria-expanded={open} disabled={action.busy} onClick={() => { setOpen(!open); if (!open) void action.run(async signal => ({ view: await conversation.api.followups.get(conversation.identity, id, signal), history: await conversation.api.followups.occurrences(conversation.identity, id) }), value => { setLoaded(value.view); setHistory(value.history); }); }}>{t('chat.tools.triggerHistory')}</button>}</div>

@@ -15,3 +15,5 @@ export * from "./storage-store.js";
 export * from "./workbench-profile-store.js";
 
 export * from "./release-manager.js";
+
+export * from './event-sources.js';
