@@ -73,6 +73,8 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
 > & { projection: ChatTimelineProjection; children: React.ReactNode; onRevealEntry(entryId: string): void | Promise<void> }> = (props) => {
   const { t } = useI18n();
   const presentation = useConversationPresentation();
+  const canFollow = presentation.identity.runtime === 'agent' && !presentation.readOnly
+    && Boolean(presentation.snapshot && !presentation.snapshot.thread.bot_id);
   const navigation = React.useContext(ReferenceNavigationContext);
   React.useEffect(() => {
     if (!navigation) return;
@@ -259,7 +261,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
         </> : target ? <>
           <ContextMenuItem onClick={() => perform((value) => copy(value.copyText ?? value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(quote)}>{t('chat.context.quote')}</ContextMenuItem>
-          {presentation.identity?.runtime === 'agent' && <ContextMenuItem onClick={() => setFollowing(true)}>{t('bot.follow.title')}</ContextMenuItem>}
+          {canFollow && <ContextMenuItem onClick={() => setFollowing(true)}>{t('bot.follow.title')}</ContextMenuItem>}
           {target.kind === 'selection' && presentation.memory && presentation.head ? <>
             <ContextMenuSeparator />
             <ContextMenuItem disabled={!presentation.memory || !presentation.head || !target.complete} title={target.complete ? undefined : t('chat.context.sourceUnavailable')}
@@ -277,7 +279,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       </ContextMenuContent>
     </ContextMenu>
     {memorySources ? <ChatMemoryDialog sessionId={props.sessionId} sources={memorySources} onClose={closeMemory} /> : null}
-    {following && presentation.identity && <React.Suspense fallback={null}><BotFollowDialog identity={presentation.identity} onClose={() => setFollowing(false)} /></React.Suspense>}
+    {following && canFollow && <React.Suspense fallback={null}><BotFollowDialog identity={presentation.identity} onClose={() => setFollowing(false)} /></React.Suspense>}
     {imagePreview ? <Dialog open onOpenChange={(open) => { if (!open) setImagePreview(null); }}>
       <DialogContent className="sm:max-w-4xl">
         <DialogHeader><DialogTitle>{t('chat.context.openImage')}</DialogTitle></DialogHeader>

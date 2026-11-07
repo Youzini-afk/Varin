@@ -101,6 +101,25 @@ it('keeps one marker per Run and supports keyboard navigation and a preview with
   expect(readPreview).toHaveBeenCalledWith('run:1', expect.any(AbortSignal));
 });
 
+it.each([
+  { name: 'ordinary task', botId: null, readOnly: false, loaded: true, available: true },
+  { name: 'Bot session', botId: 'varin', readOnly: false, loaded: true, available: false },
+  { name: 'read-only task', botId: null, readOnly: true, loaded: true, available: false },
+  { name: 'loading conversation', botId: null, readOnly: false, loaded: false, available: false },
+])('offers Bot follow-up only for a writable ordinary task: $name', async ({ botId, readOnly, loaded, available }) => {
+  const presentation = { identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, head: answer.id,
+    toolExecutions: {}, readOnly, snapshot: loaded ? { thread: { bot_id: botId } } : undefined } as unknown as ConversationPresentation;
+  const turn = projection.items.find(item => item.kind === 'turn')!;
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}>
+    <ChatContextMenu sessionId="conversation" entries={entries} projection={projection} onRevealEntry={() => {}}>
+      <article data-turn-id={turn.id}><p>Original answer</p></article>
+    </ChatContextMenu>
+  </ConversationContext.Provider>));
+  await act(async () => container.querySelector('p')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  expect(container.querySelector('[role="menu"]')?.textContent).toContain('chat.context.copyTurn');
+  expect(container.querySelector('[role="menu"]')?.textContent.includes('bot.follow.title')).toBe(available);
+});
+
 it('copies an assistant turn with readable options while preserving raw source for quoting', async () => {
   const raw = 'Before\n\n```varin-ui\n{"type":"choice","label":"Hair","options":["Short","Long"],"action":"Continue"}\n```\n\nAfter';
   const assistant: ChatSessionMessageEntry = { ...answer, message: { ...answer.message, role: 'assistant', content: [{ type: 'text', text: raw }] } } as ChatSessionMessageEntry;
