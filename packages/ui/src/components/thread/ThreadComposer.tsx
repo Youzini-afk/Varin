@@ -37,7 +37,7 @@ import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, onOpenRecovery, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, imageReferences, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, onOpenRecovery, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
@@ -59,7 +59,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   goalArmed?: boolean;
   workspacePath?: string;
   permissionWorkspacePath?: string;
-  children?: React.ReactNode; attachmentNames: string[]; skills: string[];
+  children?: React.ReactNode; attachmentNames: string[]; imageReferences?: readonly number[]; skills: string[];
   agentControls?: React.ReactNode;
   backendControls?: React.ReactNode;
 }) {
@@ -213,7 +213,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     finally { commandPending.current = false; setCommandBusy(false); }
   }
   const languageContext = React.useMemo(() => ({ inputMode: 'normal' as const, knownAgentNames, confirmedMentions,
-    knownSlashNames: new Set([...skills.map(name => `skill:${name}`), ...varinCommands.map(command => command.name)]), attachmentFilenames: attachmentNames }), [knownAgentNames, confirmedMentions, skills, varinCommands, attachmentNames]);
+    knownSlashNames: new Set([...skills.map(name => `skill:${name}`), ...varinCommands.map(command => command.name)]), attachmentFilenames: attachmentNames, imageReferences }), [knownAgentNames, confirmedMentions, skills, varinCommands, attachmentNames, imageReferences]);
   const modelControls = <div className="conversation-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
         {external && <ExternalModelControls key={backendIdentity} options={external} />}
         {backendControls ?? <>

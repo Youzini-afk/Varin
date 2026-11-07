@@ -45,6 +45,7 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
         borderLeftColor: 'var(--surface-foreground)',
     },
     '.cm-line': { padding: '0' },
+    '.cm-image-reference': { color: 'var(--primary)', whiteSpace: 'nowrap' },
     '.cm-scroller': {
         fontFamily: 'inherit',
         fontSize: 'inherit',

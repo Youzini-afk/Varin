@@ -93,8 +93,6 @@ export interface ThreadDraft {
   externalOptions?: Record<string, { thinking?: string; mode?: string; config?: Record<string, string> }>;
   text: string;
   images: import('@/lib/images/annotations').EditableImageAttachment[];
-  /** High-water mark retained after removing an image, reset after sending the draft. */
-  imageReferenceSequence?: number;
   materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
   workFocus?: import('@varin/protocol').WorkFocusId;
@@ -136,9 +134,8 @@ export const useThreadDraftStore = create<{
       next.interactions = mapInteractionRanges(draft.interactions, ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length));
     }
     if (change.images) {
-      let reference = Math.max(next.imageReferenceSequence ?? 0, ...(next.files ?? []).map(file => file.imageReference ?? 0), ...change.images.map(image => image.reference ?? 0));
+      let reference = Math.max(0, ...(next.files ?? []).map(file => file.imageReference ?? 0), ...change.images.map(image => image.reference ?? 0));
       next.images = change.images.map(image => image.reference === undefined ? { ...image, reference: ++reference } : image);
-      next.imageReferenceSequence = reference;
     }
     return { drafts: { ...state.drafts, [key]: next } };
   }),

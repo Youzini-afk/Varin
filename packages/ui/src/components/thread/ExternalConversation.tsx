@@ -1,3 +1,4 @@
+import { draftImageReferences } from '@/lib/images/references';
 import { externalAttachmentSupported } from './externalAttachments';
 import React from 'react';
 import { ComposerActionForm } from './ComposerActionForm';
@@ -809,7 +810,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   onWorkspace={() => setDetails(true)}
                   workspaceLabel={c.cwd.split(/[\\/]/).at(-1) ?? c.cwd}
                   workspacePath={c.cwd}
-                  attachmentNames={draft.files?.map(file => file.filename) ?? []}
+                  imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(file => file.filename) ?? []}
                   skills={[]}
                 >
                   <ThreadFileDrafts draftKey={key} onReference={insertImageReference} files={draft.files} locked={pending || unresolvedInput} onRemove={id => removeDraftFile(key, id)} />

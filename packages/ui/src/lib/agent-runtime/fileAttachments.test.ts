@@ -8,14 +8,14 @@ vi.mock('@varin/application-client', async original => ({ ...await original<type
 vi.mock('@/lib/images/annotations', async original => ({ ...await original<typeof import('@/lib/images/annotations')>(), flattenAnnotations: vi.fn() }));
 beforeEach(() => { endpoint.generation = 1; useThreadDraftStore.setState({ drafts: {} }); });
 const descriptor = (ref: string): Attachment => ({ ref: `attachment:${ref}`, filename: 'same.bin', mimeType: 'application/octet-stream', byteLength: 3 });
-it('shares stable image numbering with inline images and removes only the deleted image reference', () => {
+it('renumbers file and inline images together after removing an attachment', () => {
   useThreadDraftStore.getState().patch('draft', { text: 'Keep [Image 1]', images: [{ data: 'YQ==', mimeType: 'image/png', reference: 1 }] });
   const insert = (number: number) => useThreadDraftStore.getState().patch('draft', draft => ({ text: `${draft.text}[Image ${number}]` }));
   const selected = selectThreadFiles('draft', [new File(['a'], 'one.PNG'), new File(['pdf'], 'report.pdf'), new File(['b'], 'two.png')], insert);
   expect(selected.map(file => file.imageReference)).toEqual([2, undefined, 3]);
   removeDraftFile('draft', selected[0]!.id);
-  expect(useThreadDraftStore.getState().drafts.draft.text).toBe('Keep [Image 1][Image 3]');
-  expect(selectThreadFiles('draft', [new File(['c'], 'three.png')], insert)[0]!.imageReference).toBe(4);
+  expect(useThreadDraftStore.getState().drafts.draft.text).toBe('Keep [Image 1][Image 2]');
+  expect(selectThreadFiles('draft', [new File(['c'], 'three.png')], insert)[0]!.imageReference).toBe(3);
 });
 it('uploads flattened edited pixels under a fresh upload key and reuses that exact upload on retry', async () => {
   const [original] = selectThreadFiles('draft', [new File(['private original'], 'photo.jpg', { type: 'image/jpeg' })]);

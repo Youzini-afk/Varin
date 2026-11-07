@@ -1,4 +1,5 @@
 import React from 'react';
+import { nextImageReference } from '@/lib/images/references';
 import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
 import { ConversationPreviewContext, useOptionalConversationPresentation } from '@/components/conversation/ConversationContext';
 import { useThreadStore, threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
@@ -23,7 +24,7 @@ export function useImageReply(identity?: ThreadIdentity, sourcePrefix='image'): 
     apply:(_source,image,doc)=>{
       if(host!==getRuntimeEndpointGeneration())throw new Error('Host changed');
       useThreadDraftStore.getState().patch(key,draft=>{
-        const reference=Math.max(draft.imageReferenceSequence??0,...draft.images.map(image=>image.reference??0))+1;
+        const reference=nextImageReference(draft);
         return {images:[...draft.images,{...image,reference,annotation:doc}],text:[draft.text,t('chat.imageReference.token',{number:reference})].filter(Boolean).join(' ')};
       });
     },

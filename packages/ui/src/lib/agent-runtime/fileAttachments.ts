@@ -3,16 +3,16 @@ import { attachmentMimeType, type Attachment } from '@varin/protocol';
 import { isAttachment } from './thread-content';
 import { useThreadDraftStore, type DraftFileAttachment } from '@/stores/useThreadDraftStore';
 import { flattenAnnotations, type ImageAnnotationDocument } from '@/lib/images/annotations';
-import { removeImageReference } from '@/components/chat/composer/imageAttachments';
+import { nextImageReference, renumberDraftImages } from '@/lib/images/references';
 
 /** Picking is not uploading or delivering. Keep the exact original Blob and an idempotent upload key. */
 export function selectThreadFiles(draftKey: string, files: readonly File[], insertReference?: (number: number) => void): DraftFileAttachment[] {
   const selected: DraftFileAttachment[] = files.map(file => ({ id: crypto.randomUUID(), filename: file.name,
     mimeType: attachmentMimeType(file.name, file.type === 'application/octet-stream' ? '' : file.type), data: file, status: 'selected' as const }));
   useThreadDraftStore.getState().patch(draftKey, draft => {
-    let reference = Math.max(draft.imageReferenceSequence ?? 0, ...draft.images.map(image => image.reference ?? 0), ...(draft.files ?? []).map(file => file.imageReference ?? 0));
+    let reference = nextImageReference(draft) - 1;
     for (const file of selected) if (file.mimeType.startsWith('image/')) file.imageReference = ++reference;
-    return { files: [...(draft.files ?? []), ...selected], imageReferenceSequence: reference };
+    return { files: [...(draft.files ?? []), ...selected] };
   });
   for (const file of selected) if (file.imageReference !== undefined) insertReference?.(file.imageReference);
   return selected;
@@ -20,9 +20,7 @@ export function selectThreadFiles(draftKey: string, files: readonly File[], inse
 
 export function removeDraftFile(key: string, id: string) {
   useThreadDraftStore.getState().patch(key, draft => {
-    const file = draft.files?.find(file => file.id === id);
-    return { files: draft.files?.filter(file => file.id !== id),
-      ...(file?.imageReference === undefined ? {} : { text: removeImageReference(draft.text, file.imageReference) }) };
+    return renumberDraftImages(draft, { images: draft.images, files: draft.files?.filter(file => file.id !== id) });
   });
 }
 
@@ -41,7 +39,7 @@ export function updateDraftFileAnnotation(key: string, id: string, annotation: I
   });
 }
 
-/** Numbers identify the retained originals, including gaps left by removed images. */
+/** Current draft numbers identify their retained originals at the send boundary. */
 export function attachmentImageReferences(files: readonly DraftFileAttachment[], attachments: readonly Attachment[]) {
   const entries = files.flatMap((file, index) => file.imageReference === undefined || !attachments[index] ? [] : [[attachments[index]!.ref, file.imageReference] as const]);
   return entries.length ? { attachmentImageReferences: Object.fromEntries(entries) } : {};

@@ -85,7 +85,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, files: read().files?.filter(file => request.files.some(selected => selected.id === file.id)) ?? request.files, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
-        ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
+        ...(current.text === original.editorText ? { references: [] } : {}),
         images: current.images.filter(image => !request.images.includes(image)),
         files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
         selectedAttachments: current.selectedAttachments?.filter(file => !original.selectedAttachmentIds?.includes(file.id)),

@@ -30,6 +30,8 @@ export interface ComposerLanguageContext {
     knownSlashNames: ReadonlySet<string>;
     /** Filenames of the currently attached files, cited inline as `[name]`. */
     attachmentFilenames: readonly string[];
+    /** Numbered images currently attached to this draft. */
+    imageReferences?: readonly number[];
 }
 
 /** Mention ranges alone — the composer also needs these to resolve references. */

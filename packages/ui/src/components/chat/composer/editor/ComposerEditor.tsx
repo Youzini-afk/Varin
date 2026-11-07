@@ -12,7 +12,8 @@ import {
 } from '@codemirror/view';
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
-import { composerLanguage, setLanguageContext } from './composerLanguage';
+import { composerLanguage, setLanguageContext, readLanguageContext } from './composerLanguage';
+import { imageReferenceTextChanges } from '@/lib/images/references';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { composerEditorTheme, composerNativeSelectionExtension } from './theme';
 
@@ -237,7 +238,10 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       while (from < current.length && from < value.length && current[from] === value[from]) from++;
       let to = current.length, end = value.length;
       while (to > from && end > from && current[to - 1] === value[end - 1]) { to--; end--; }
-      view.dispatch({ changes: { from, to, insert: value.slice(from, end) } });
+      const imageChanges = imageReferenceTextChanges(current, value);
+      const relabeled = imageChanges && JSON.stringify(readLanguageContext(view).imageReferences) !== JSON.stringify(handlersRef.current.languageContext.imageReferences);
+      view.dispatch({ changes: imageChanges ?? { from, to, insert: value.slice(from, end) },
+        ...(relabeled ? { annotations: Transaction.addToHistory.of(false) } : {}) });
       requestAnimationFrame(() => {
         if (viewRef.current === view) view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
       });
@@ -249,7 +253,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       view.dispatch({ effects: setComposerReferences.of(props.references), annotations: Transaction.addToHistory.of(false) });
     }, [props.references, value]);
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });
     }, [languageContext]);
 

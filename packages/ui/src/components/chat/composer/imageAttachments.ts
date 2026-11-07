@@ -1,3 +1,4 @@
+import { nextImageReference, renumberDraftImages } from '@/lib/images/references';
 import type { ImageAttachment } from '@varin/protocol';
 import { fileToBase64 } from './fileAttachments';
 import type { ComposerEditorHandle } from './editor/ComposerEditor';
@@ -21,7 +22,7 @@ export function beginImageInsertion(key: string, editor: ComposerEditorHandle | 
       if (!active) return;
       const store = useThreadDraftStore.getState();
       const draft = store.drafts[key] ?? EMPTY_THREAD_DRAFT;
-      const reference = Math.max(draft.imageReferenceSequence ?? 0, ...draft.images.map(item => item.reference ?? 0)) + 1;
+      const reference = nextImageReference(draft);
       store.patch(key, { images: [...draft.images, { ...image, reference }] });
       const text = label(reference);
       if (anchor) anchor.insertText(text);
@@ -34,8 +35,7 @@ export function removeDraftImage(key: string, index: number) {
   useThreadDraftStore.getState().patch(key, draft => {
     const image = draft.images[index];
     if (!image) return {};
-    return { images: draft.images.filter((_, candidate) => candidate !== index),
-      text: image.reference === undefined ? draft.text : removeImageReference(draft.text, image.reference) };
+    return renumberDraftImages(draft, { images: draft.images.filter((_, candidate) => candidate !== index), files: draft.files });
   });
 }
 

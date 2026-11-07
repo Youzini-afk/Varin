@@ -1,3 +1,4 @@
+import { draftImageReferences } from '@/lib/images/references';
 import { externalAttachmentSupported } from './externalAttachments';
 import { selectComposerFile, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
@@ -283,7 +284,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}
           onWorkspace={() => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}
           workspacePath={!draft.sourceSelection || draft.sourceSelection.resourceOwner.kind === 'local' ? sourcePath : undefined}
-          attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
+          imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
           <div className="space-y-2 px-3 empty:hidden">
             {sourcePath && <ActiveEditorSuggestion threadKey={draftKey} />}
             <EditorContextAttachmentChips threadKey={draftKey} />

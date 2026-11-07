@@ -1,3 +1,4 @@
+import { draftImageReferences } from '@/lib/images/references';
 import { flushUiSessions } from '@/lib/interactive-ui/sessions';
 import { registerUiSender } from '@/lib/interactive-ui/compose';
 import { projectContentReference } from '@/lib/agent-editor/projection';
@@ -672,7 +673,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           pendingInput: undefined, preparedSource: current.preparedSource === original.preparedSource ? null : current.preparedSource,
           ...(original.goalObjective ? { goalArmed: false } : {}),
           text: current.text === original.editorText ? '' : current.text,
-          ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
+          ...(current.text === original.editorText ? { references: [] } : {}),
           images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
           files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
           selectedAttachments: current.selectedAttachments?.filter(file => !original.selectedAttachmentIds?.includes(file.id)),
@@ -727,7 +728,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('goals');
           else if (!draft.pendingInput) useThreadDraftStore.getState().patch(draftKey, { goalArmed: !draft.goalArmed });
         }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
-        attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
+        imageReferences={draftImageReferences(draft)} attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}
         onWorkspace={botSurface ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}

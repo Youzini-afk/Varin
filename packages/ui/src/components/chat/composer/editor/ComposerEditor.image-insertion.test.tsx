@@ -3,6 +3,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor';
+import { EditorView } from '@codemirror/view';
+import { undo, redo, deleteCharBackward, deleteCharForward } from '@codemirror/commands';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { draftImageReferences } from '@/lib/images/references';
+import { removeDraftImage } from '../imageAttachments';
 
 let root: Root;
 const editor = React.createRef<ComposerEditorHandle>();
@@ -25,6 +30,49 @@ function Harness() {
     inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(), knownSlashNames: new Set(), attachmentFilenames: [],
   }} />;
 }
+
+it('treats an attached image label as one deletion and restores it with editor undo', async () => {
+  function ImageHarness() {
+    const [value, setValue] = React.useState('前[图片1]后');
+    return <ComposerEditor ref={editor} value={value} onChange={change => setValue(change.value)} languageContext={{
+      inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(), knownSlashNames: new Set(), attachmentFilenames: [], imageReferences: [1],
+    }} />;
+  }
+  await act(async () => root.render(<ImageHarness />));
+  const view = EditorView.findFromDOM(document.querySelector('.cm-content')!)!;
+  act(() => editor.current!.setSelection(6));
+  act(() => { deleteCharBackward(view); });
+  expect(editor.current!.getValue()).toBe('前后');
+  act(() => { undo(view); });
+  expect(editor.current!.getValue()).toBe('前[图片1]后');
+  act(() => { redo(view); });
+  expect(editor.current!.getValue()).toBe('前后');
+  act(() => { undo(view); editor.current!.setSelection(1); deleteCharForward(view); });
+  expect(editor.current!.getValue()).toBe('前后');
+  act(() => { undo(view); editor.current!.setSelection(3, 4); deleteCharBackward(view); });
+  expect(editor.current!.getValue()).toBe('前后');
+});
+
+it('renumbers multiple labels without losing an intervening object reference or moving its caret', async () => {
+  const text = '[图片1] @task [图片10] [图片12]', from = text.indexOf('@task');
+  useThreadDraftStore.getState().patch('renumber', { text, images: Array.from({ length: 12 }, (_, i) => ({ data: 'YQ==', mimeType: 'image/png', reference: i + 1 })),
+    references: [{ id: 'task', from, to: from + 5, text: '@task', host: 0, target: { kind: 'thread', identity: { runtime: 'agent', threadId: 'task', branchId: 'main' } } }] });
+  function DraftHarness() {
+    const draft = useThreadDraftStore(state => state.drafts.renumber);
+    return <ComposerEditor ref={editor} value={draft.text} references={draft.references}
+      onChange={change => useThreadDraftStore.getState().patch('renumber', { text: change.value, references: change.references })}
+      languageContext={{ inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(), knownSlashNames: new Set(), attachmentFilenames: [], imageReferences: draftImageReferences(draft) }} />;
+  }
+  try {
+    await act(async () => root.render(<DraftHarness />));
+    act(() => editor.current!.setSelection(from + 5));
+    act(() => removeDraftImage('renumber', 0));
+    expect(editor.current!.getValue()).toBe(' @task [图片9] [图片11]');
+    expect(editor.current!.getSelection()).toEqual({ start: 6, end: 6 });
+    expect(useThreadDraftStore.getState().drafts.renumber.references?.[0]).toMatchObject({ id: 'task', from: 1, to: 6, text: '@task' });
+    expect(useThreadDraftStore.getState().drafts.renumber.images.map(image => image.reference)).toEqual(Array.from({ length: 11 }, (_, i) => i + 1));
+  } finally { await act(async () => root.render(null)); useThreadDraftStore.getState().remove('renumber'); }
+});
 
 it('keeps a delayed image at the original paste position while later typing and cursor movement continue', async () => {
   await act(async () => root.render(<Harness />));
