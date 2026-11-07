@@ -104,7 +104,7 @@
     "luxon": "^3.5.0",
     "multer": "^2.5.0",
     "openai": "^7.47.0",
-    "pdfjs-dist": "6.4.299",
+    "pdfjs-dist": "6.5.438",
     "picomatch": "4.0.7",
     "pptxgenjs": "^4.0.1",
     "proper-lockfile": "4.1.2",
