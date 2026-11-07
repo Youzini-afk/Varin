@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      container_benchmark:
+        description: Repeat the complete local-registry container graph to measure warm reuse
+        default: false
+        type: boolean
   schedule:
     # Complete qualification is owned here, not silently deferred forever.
     - cron: '17 3 * * *'
@@ -525,6 +530,8 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha || github.sha }}
       toolbelt: ${{ needs.changes.outputs.toolbelt == 'true' }}
+      multi_platform: ${{ needs.changes.outputs.full == 'true' }}
+      benchmark: ${{ github.event_name == 'workflow_dispatch' && inputs.container_benchmark == true }}
 
   android-build:
     name: Android unsigned build

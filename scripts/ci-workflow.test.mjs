@@ -104,7 +104,9 @@ test('owner/dependency/build input decisions include the actual downstream bound
     ['.github/actions/android-setup/action.yml', ['android'], ['native']],
     ['packages/electron/main.ts', ['windows', 'macos', 'frontend'], ['native', 'container']],
     ['Dockerfile.base', ['container', 'toolbelt'], ['windows', 'rust']],
-    ['.github/workflows/container-check.yml', ['container', 'toolbelt'], ['windows']],
+    ...['container-check', 'container-images', 'docker-commit'].map(name =>
+      [`.github/workflows/${name}.yml`, ['container', 'toolbelt'], ['windows']]),
+    ['scripts/build-container-images.mjs', ['container', 'toolbelt'], ['windows', 'rust']],
     ...['smoke-container-budget.mjs', 'smoke-container-stop.mjs'].map(helper =>
       [`scripts/${helper}`, ['container', 'toolbelt'], ['frontend', 'native', 'rust', 'production', 'windows', 'macos', 'android', 'full']]),
     ['packages/web/application-host/lib/harness/resources-system.ts', ['native', 'production', 'container'], ['frontend', 'rust', 'windows', 'macos', 'toolbelt', 'android', 'full']],

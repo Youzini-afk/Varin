@@ -1,47 +1,61 @@
 # syntax=docker/dockerfile:1
 ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-slim:latest
 
-FROM --platform=$BUILDPLATFORM rust:1.97.1-bookworm AS kernel-builder
-WORKDIR /src
-ARG BUILDARCH
-ARG TARGETARCH
+# Keep Rust build products in ordinary layers: remote BuildKit caches export
+# layers, not the contents of RUN cache mounts on an ephemeral CI runner.
+FROM --platform=$BUILDPLATFORM rust:1.97.1-bookworm AS kernel-toolchain
+WORKDIR /src/kernel
 RUN apt-get update \
   && apt-get install -y --no-install-recommends cmake gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
   && rm -rf /var/lib/apt/lists/*
-COPY package.json ./
-COPY kernel ./kernel
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=private \
-  --mount=type=cache,target=/src/kernel/target,sharing=private \
-  set -eux; \
+RUN cargo install cargo-chef --version 0.1.71 --locked \
+  && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+  CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+  CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+  AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+
+FROM kernel-toolchain AS kernel-planner
+COPY kernel ./
+RUN cargo chef prepare --recipe-path /tmp/kernel-recipe.json
+
+FROM kernel-toolchain AS kernel-dependencies
+COPY --from=kernel-planner /tmp/kernel-recipe.json /tmp/kernel-recipe.json
+# fuser is an excluded, patched path dependency, not a workspace member. Chef
+# does not include its sources in the recipe; compile the real vendored crate.
+COPY kernel/vendor ./vendor
+ARG BUILDARCH
+ARG TARGETARCH
+RUN set -eux; \
+  if [ "$BUILDARCH" != "amd64" ]; then \
+    echo "Varin's Linux cross-build stage requires an amd64 build runner, found $BUILDARCH" >&2; exit 1; \
+  fi; \
   case "$TARGETARCH" in \
-    amd64) kernel_arch="x64"; kernel_target="x86_64-unknown-linux-gnu" ;; \
-    arm64) \
-      kernel_arch="arm64"; \
-      kernel_target="aarch64-unknown-linux-gnu"; \
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"; \
-      export CC_aarch64_unknown_linux_gnu="aarch64-linux-gnu-gcc"; \
-      export CXX_aarch64_unknown_linux_gnu="aarch64-linux-gnu-g++"; \
-      export AR_aarch64_unknown_linux_gnu="aarch64-linux-gnu-ar"; \
-      ;; \
+    amd64) kernel_target="x86_64-unknown-linux-gnu" ;; \
+    arm64) kernel_target="aarch64-unknown-linux-gnu" ;; \
     *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; \
   esac; \
-  if [ "$BUILDARCH" != "amd64" ]; then \
-    echo "Varin's Linux cross-build stage requires an amd64 build runner, found $BUILDARCH" >&2; \
-    exit 1; \
-  fi; \
-  build_identity="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1)"; \
+  cargo chef cook --recipe-path /tmp/kernel-recipe.json --release --bin varin-kernel --locked --target "$kernel_target"
+
+FROM kernel-dependencies AS kernel-builder
+COPY kernel ./
+COPY package.json /src/package.json
+RUN set -eux; \
+  case "$TARGETARCH" in \
+    amd64) kernel_arch="x64"; kernel_target="x86_64-unknown-linux-gnu" ;; \
+    arm64) kernel_arch="arm64"; kernel_target="aarch64-unknown-linux-gnu" ;; \
+    *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; \
+  esac; \
+  build_identity="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /src/package.json | head -n 1)"; \
   test -n "$build_identity"; \
-  rustup target add "$kernel_target"; \
   VARIN_KERNEL_BUILD_IDENTITY="$build_identity" \
   VARIN_KERNEL_TARGET="$kernel_target" \
   VARIN_KERNEL_ARCH="$kernel_arch" \
-  cargo build --manifest-path kernel/Cargo.toml --release --bin varin-kernel --locked --target "$kernel_target"; \
-  install -D -m 0755 "kernel/target/$kernel_target/release/varin-kernel" /out/varin-kernel
+  cargo build --release --bin varin-kernel --locked --target "$kernel_target"; \
+  install -D -m 0755 "target/$kernel_target/release/varin-kernel" /out/varin-kernel
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app
-ARG VARIN_SOURCE_REVISION
-ARG TARGETARCH
 
 # Keep dependency installation cacheable while still presenting every Bun
 # workspace manifest required by the frozen monorepo lockfile.
@@ -69,6 +83,9 @@ RUN bun install --frozen-lockfile --ignore-scripts \
 
 COPY . .
 COPY --from=kernel-builder /out/varin-kernel /tmp/varin-kernel
+# Revision and target affect packaging, not the shared workspace install.
+ARG VARIN_SOURCE_REVISION
+ARG TARGETARCH
 RUN VARIN_SOURCE_REVISION="${VARIN_SOURCE_REVISION}" \
   VARIN_KERNEL_PREBUILT=/tmp/varin-kernel \
   VARIN_TARGET_PLATFORM=linux \

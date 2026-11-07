@@ -1,0 +1,103 @@
+name: Build container candidates
+
+# Publication callers admit an exact source first. This workflow only writes
+# candidate/cache references; qualification and tag promotion stay in callers.
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      tooling_sha:
+        required: true
+        type: string
+      version:
+        default: ''
+        type: string
+      publication:
+        required: true
+        type: string
+      runtime_slim_image:
+        default: ''
+        type: string
+      runtime_base_image:
+        default: ''
+        type: string
+    outputs:
+      standard_app:
+        value: ${{ jobs.build.outputs.standard_app }}
+      toolbelt_app:
+        value: ${{ jobs.build.outputs.toolbelt_app }}
+      slim_base:
+        value: ${{ jobs.build.outputs.slim_base }}
+      toolbelt_base:
+        value: ${{ jobs.build.outputs.toolbelt_base }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build shared immutable image graph
+    runs-on: ubuntu-latest
+    outputs:
+      standard_app: ${{ steps.build.outputs.standard_app }}
+      toolbelt_app: ${{ steps.build.outputs.toolbelt_app }}
+      slim_base: ${{ steps.build.outputs.slim_base }}
+      toolbelt_base: ${{ steps.build.outputs.toolbelt_base }}
+    defaults:
+      run:
+        working-directory: tooling
+    env:
+      CONTAINER_PUBLICATION: ${{ inputs.publication }}
+      CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+      CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha }}
+      CONTAINER_SOURCE_VERSION: ${{ inputs.version }}
+      CONTAINER_SOURCE_DIR: ../source
+      CONTAINER_OUTPUT_DIR: ../artifacts/container-build
+      CONTAINER_SLIM_BASE: ${{ inputs.runtime_slim_image }}
+      CONTAINER_TOOLBELT_BASE: ${{ inputs.runtime_base_image }}
+    steps:
+      - name: Checkout reviewed build tooling
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tooling_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Checkout exact product source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Validate admitted source and production lock
+        run: node scripts/build-container-images.mjs validate
+      - name: Record available build storage
+        run: df -h /
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build both bases and applications with one shared builder
+        id: build
+        run: node scripts/build-container-images.mjs build
+      - name: Record builder storage use
+        if: always()
+        run: |
+          df -h /
+          docker buildx du || true
+      - name: Preserve build timing and immutable outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: varin-container-build-${{ github.run_attempt }}
+          path: artifacts/container-build/*.json
+          if-no-files-found: warn
+          overwrite: false

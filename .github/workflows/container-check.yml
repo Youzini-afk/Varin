@@ -12,6 +12,12 @@ on:
       toolbelt:
         default: false
         type: boolean
+      multi_platform:
+        default: false
+        type: boolean
+      benchmark:
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -27,6 +33,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -34,6 +41,9 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - uses: docker/setup-qemu-action@v4
+        if: inputs.multi_platform
 
       - name: Start an isolated local registry
         id: registry
@@ -48,47 +58,49 @@ jobs:
             [registry."localhost:5000"]
               http = true
 
+      - name: Record available build storage
+        run: df -h /
       - name: Verify release promotion against the disposable registry
         env:
           VARIN_TEST_IMAGE_REGISTRY: localhost:5000
         run: node --test scripts/docker-release-registry.test.mjs
 
-      - name: Build slim runtime base
-        id: slim-base
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile.base
-          target: slim
-          platforms: linux/amd64
-          pull: true
-          push: true
-          tags: localhost:5000/varin-runtime-slim:check-${{ inputs.source_sha }}
-          cache-from: type=gha,scope=varin-check-runtime-slim
-          cache-to: type=gha,scope=varin-check-runtime-slim,mode=max
+      - name: Validate container inputs
+        env:
+          CONTAINER_PUBLICATION: check
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+        run: node scripts/build-container-images.mjs validate
 
-      - name: Build coupled slim app image
-        id: slim-app
-        if: ${{ !cancelled() && steps.slim-base.outcome == 'success' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          pull: true
-          load: true
-          tags: varin:check-${{ inputs.source_sha }}
-          build-args: |
-            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-slim:check-${{ inputs.source_sha }}
-            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
-          cache-from: type=gha,scope=varin-check-app
-          cache-to: type=gha,scope=varin-check-app,mode=max
+      - name: Build the shared candidate graph in the disposable registry
+        id: images
+        env:
+          CONTAINER_PUBLICATION: check
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
+          CONTAINER_MULTI_PLATFORM: ${{ inputs.multi_platform }}
+          CONTAINER_OUTPUT_DIR: artifacts/container-build/cold
+        run: node scripts/build-container-images.mjs build
+
+      - name: Repeat the exact graph to measure warm reuse
+        if: inputs.benchmark
+        env:
+          CONTAINER_PUBLICATION: check
+          CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLING_SHA: ${{ inputs.source_sha }}
+          CONTAINER_TOOLBELT: ${{ inputs.toolbelt }}
+          CONTAINER_MULTI_PLATFORM: ${{ inputs.multi_platform }}
+          CONTAINER_OUTPUT_DIR: artifacts/container-build/warm
+        run: |
+          node scripts/build-container-images.mjs build
+          node --input-type=module -e "import fs from 'node:fs'; const result=JSON.parse(fs.readFileSync('artifacts/container-build/warm/result.json','utf8')); if(result.phases.some(phase=>phase.rustReleaseCompilations!==0)||!result.phases.some(phase=>phase.cachedVertices>0)) throw new Error('The unchanged warm graph rebuilt Rust or reused no vertices');"
 
       - name: Smoke the exact slim image
-        if: ${{ !cancelled() && steps.slim-app.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.images.outcome == 'success' }}
         shell: bash
         env:
-          IMAGE_REF: varin:check-${{ inputs.source_sha }}
+          IMAGE_REF: ${{ steps.images.outputs.standard_app }}
           EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
         run: |
           cleanup() {
@@ -123,46 +135,11 @@ jobs:
           node scripts/smoke-container-budget.mjs varin-check-smoke
           node scripts/smoke-container-stop.mjs varin-check-smoke slim
 
-      # Both final variants use this same BuildKit instance and source, so its
-      # common Rust/Web/browser builder stages are reused, not built on a second
-      # matrix runner. All compilation stays inside the Dockerfile's target ABI.
-      - name: Build toolbelt runtime base when applicable
-        id: toolbelt-base
-        if: ${{ !cancelled() && inputs.toolbelt && steps.builder.outcome == 'success' && steps.registry.outcome == 'success' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile.base
-          target: toolbelt
-          platforms: linux/amd64
-          pull: true
-          push: true
-          tags: localhost:5000/varin-runtime-toolbelt:check-${{ inputs.source_sha }}
-          cache-from: type=gha,scope=varin-check-runtime-base
-          cache-to: type=gha,scope=varin-check-runtime-base,mode=max
-
-      - name: Build coupled toolbelt app image when applicable
-        id: toolbelt-app
-        if: ${{ !cancelled() && inputs.toolbelt && steps.toolbelt-base.outcome == 'success' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          pull: true
-          load: true
-          tags: varin-toolbelt:check-${{ inputs.source_sha }}
-          build-args: |
-            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-toolbelt:check-${{ inputs.source_sha }}
-            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
-          cache-from: type=gha,scope=varin-check-app
-          cache-to: type=gha,scope=varin-check-app,mode=max
-
       - name: Smoke the exact toolbelt image
-        if: ${{ !cancelled() && steps.toolbelt-app.outcome == 'success' }}
+        if: ${{ !cancelled() && inputs.toolbelt && steps.images.outcome == 'success' }}
         shell: bash
         env:
-          IMAGE_REF: varin-toolbelt:check-${{ inputs.source_sha }}
+          IMAGE_REF: ${{ steps.images.outputs.toolbelt_app }}
           EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
         run: |
           cleanup() {
@@ -196,6 +173,32 @@ jobs:
           docker exec varin-check-smoke node verify-services.mjs
           node scripts/smoke-container-budget.mjs varin-check-smoke
           node scripts/smoke-container-stop.mjs varin-check-smoke toolbelt
+
+      - name: Smoke target-architecture native dependencies
+        if: ${{ !cancelled() && inputs.multi_platform && steps.images.outcome == 'success' }}
+        env:
+          STANDARD_IMAGE: ${{ steps.images.outputs.standard_app }}
+          TOOLBELT_IMAGE: ${{ steps.images.outputs.toolbelt_app }}
+        run: |
+          for image in "$STANDARD_IMAGE" "$TOOLBELT_IMAGE"; do
+            if [ -z "$image" ]; then continue; fi
+            docker run --rm --platform linux/arm64 --entrypoint node "$image" verify-kernel.mjs packages/web
+            docker run --rm --platform linux/arm64 --entrypoint node "$image" verify-services.mjs
+          done
+
+      - name: Record builder storage use
+        if: always()
+        run: |
+          df -h /
+          docker buildx du || true
+      - name: Preserve cold and warm build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: varin-container-validation-${{ github.run_attempt }}
+          path: artifacts/container-build/**/*.json
+          if-no-files-found: warn
+          overwrite: false
 
       - name: Remove the local registry
         if: always()
