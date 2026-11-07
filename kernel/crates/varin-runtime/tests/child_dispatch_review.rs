@@ -2255,8 +2255,10 @@ fn legacy_material_inheritance_is_converted_once_without_reinterpreting_new_pros
     assert!(f.db.capture_material_retention(Some(&child.child_thread_id),&[], false).unwrap().load().unwrap().inheritances.is_empty());
     let root=f.root.clone();drop(f.db);
     let raw=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
-    // Reconstruct the v84 layout, not a current principal-aware Catalog with an old label.
-    raw.execute_batch("DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id;
+    // Reconstruct v84 without newer ownership/creation tables, not a current Catalog with an old label.
+    raw.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations;
+        DROP TABLE calendar_legacy_manual_boundaries;
+        DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id;
         DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id');
         DROP TABLE attachment_deliveries; PRAGMA user_version=84;").unwrap();drop(raw);
     f.db=Catalog::open(&root).unwrap();
