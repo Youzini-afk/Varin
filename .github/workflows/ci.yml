@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      container_benchmark:
+        description: Measure cold, warm and clean-builder registry cache reuse without publication
+        default: false
+        type: boolean
   schedule:
     # Complete qualification is owned here, not silently deferred forever.
     - cron: '17 3 * * *'
@@ -524,7 +529,10 @@ jobs:
     uses: ./.github/workflows/container-check.yml
     with:
       source_sha: ${{ inputs.source_sha || github.sha }}
+      tooling_sha: ${{ github.sha }}
       toolbelt: ${{ needs.changes.outputs.toolbelt == 'true' }}
+      multi_platform: ${{ needs.changes.outputs.full == 'true' }}
+      benchmark: ${{ github.event_name == 'workflow_dispatch' && inputs.container_benchmark == true }}
 
   android-build:
     name: Android unsigned build

@@ -24,7 +24,7 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
     if (/(?:^|\/)package\.json$/u.test(file) || /^(?:bun\.lock|bun-patches\/|patches\/)/u.test(file)) {
       Object.assign(result, all()); continue;
     }
-    if (/^(?:Dockerfile(?:\.base)?$|\.dockerignore$|docker-compose(?:\.toolbelt)?\.yml$|\.github\/workflows\/(?:docker|container-check)\.yml$|scripts\/docker-)/u.test(file)) {
+    if (/^(?:Dockerfile(?:\.base)?$|\.dockerignore$|docker-compose(?:\.toolbelt)?\.yml$|\.github\/workflows\/(?:docker(?:-commit)?|container-(?:check|images))\.yml$|scripts\/(?:docker-|build-container-images))/u.test(file)) {
       enable('container', 'toolbelt'); continue;
     }
     if (file === 'scripts/smoke-container-budget.mjs' || file === 'scripts/smoke-container-stop.mjs') {

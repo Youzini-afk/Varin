@@ -57,253 +57,29 @@ jobs:
       source_sha: ${{ github.sha }}
       full: true
 
-  build-runtime-slim:
-    name: Build runtime slim candidate
-    runs-on: ubuntu-latest
-    needs: [source-quality]
-    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.runtime_slim_image == '') }}
+  build-images:
+    name: Build release image candidates
+    needs: candidate
+    uses: ./.github/workflows/container-images.yml
     permissions:
       contents: read
       packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout exact candidate
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract runtime slim labels
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.SLIM_BASE_IMAGE_NAME }}
-
-      - name: Build and push immutable runtime slim candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile.base
-          target: slim
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          tags: ${{ env.REGISTRY }}/${{ env.SLIM_BASE_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=varin-runtime-slim
-          cache-to: type=gha,scope=varin-runtime-slim,mode=max
-
-  build-runtime-toolbelt:
-    name: Build runtime toolbelt candidate
-    runs-on: ubuntu-latest
-    needs: [source-quality]
-    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.runtime_base_image == '') }}
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout exact candidate
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract runtime base labels
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.TOOLBELT_BASE_IMAGE_NAME }}
-
-      - name: Build and push immutable runtime base candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile.base
-          target: toolbelt
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          tags: ${{ env.REGISTRY }}/${{ env.TOOLBELT_BASE_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=varin-runtime-base
-          cache-to: type=gha,scope=varin-runtime-base,mode=max
-
-  build-app-standard:
-    name: Build Varin standard app candidate
-    runs-on: ubuntu-latest
-    needs: [source-quality, build-runtime-slim]
-    if: ${{ !cancelled() && needs.source-quality.result == 'success' && (needs.build-runtime-slim.result == 'success' || needs.build-runtime-slim.result == 'skipped') }}
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      base-image: ${{ steps.runtime-slim.outputs.image }}
-    steps:
-      - name: Checkout exact candidate
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract slim app labels
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.STANDARD_APP_IMAGE_NAME }}
-
-      - name: Resolve immutable runtime slim
-        id: runtime-slim
-        shell: bash
-        env:
-          BASE_OVERRIDE: ${{ inputs.runtime_slim_image || '' }}
-          BASE_DIGEST: ${{ needs.build-runtime-slim.outputs.digest }}
-          BASE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.SLIM_BASE_IMAGE_NAME }}
-        run: node scripts/docker-release.mjs resolve-base slim
-
-      - name: Build and push immutable Varin slim app candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            RUNTIME_BASE_IMAGE=${{ steps.runtime-slim.outputs.image }}
-            VARIN_SOURCE_REVISION=${{ github.sha }}
-          tags: ${{ env.REGISTRY }}/${{ env.STANDARD_APP_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=varin-app-slim
-          cache-to: type=gha,scope=varin-app-slim,mode=max
-
-  build-app-toolbelt:
-    name: Build Varin toolbelt app candidate
-    runs-on: ubuntu-latest
-    needs: [source-quality, build-runtime-toolbelt]
-    if: ${{ !cancelled() && needs.source-quality.result == 'success' && (needs.build-runtime-toolbelt.result == 'success' || needs.build-runtime-toolbelt.result == 'skipped') }}
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      base-image: ${{ steps.runtime-base.outputs.image }}
-    steps:
-      - name: Checkout exact candidate
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract app labels
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.TOOLBELT_APP_IMAGE_NAME }}
-
-      - name: Resolve immutable runtime base
-        id: runtime-base
-        shell: bash
-        env:
-          BASE_OVERRIDE: ${{ inputs.runtime_base_image || '' }}
-          BASE_DIGEST: ${{ needs.build-runtime-toolbelt.outputs.digest }}
-          BASE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.TOOLBELT_BASE_IMAGE_NAME }}
-        run: node scripts/docker-release.mjs resolve-base toolbelt
-
-      - name: Build and push immutable Varin app candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            RUNTIME_BASE_IMAGE=${{ steps.runtime-base.outputs.image }}
-            VARIN_SOURCE_REVISION=${{ github.sha }}
-          tags: ${{ env.REGISTRY }}/${{ env.TOOLBELT_APP_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=varin-app
-          cache-to: type=gha,scope=varin-app,mode=max
+    with:
+      source_sha: ${{ github.sha }}
+      tooling_sha: ${{ github.sha }}
+      publication: release
+      runtime_slim_image: ${{ inputs.runtime_slim_image || '' }}
+      runtime_base_image: ${{ inputs.runtime_base_image || '' }}
 
   smoke-toolbelt:
     name: Smoke immutable amd64 toolbelt candidate
     runs-on: ubuntu-latest
-    needs: [build-app-toolbelt]
+    needs: [build-images]
     permissions:
       contents: read
       packages: read
     env:
-      IMAGE_REF: ghcr.io/youzini-afk/varin-toolbelt@${{ needs.build-app-toolbelt.outputs.digest }}
+      IMAGE_REF: ${{ needs.build-images.outputs.toolbelt_app }}
       EXPECTED_RELEASE_ID: image-${{ github.sha }}
     steps:
       - uses: actions/checkout@v7
@@ -363,12 +139,12 @@ jobs:
   smoke-standard:
     name: Smoke immutable amd64 standard candidate
     runs-on: ubuntu-latest
-    needs: [build-app-standard]
+    needs: [build-images]
     permissions:
       contents: read
       packages: read
     env:
-      IMAGE_REF: ghcr.io/youzini-afk/varin@${{ needs.build-app-standard.outputs.digest }}
+      IMAGE_REF: ${{ needs.build-images.outputs.standard_app }}
       EXPECTED_RELEASE_ID: image-${{ github.sha }}
     steps:
       - uses: actions/checkout@v7
@@ -428,8 +204,8 @@ jobs:
   promote:
     name: Promote verified release image tags
     runs-on: ubuntu-latest
-    needs: [source-quality, build-runtime-toolbelt, build-runtime-slim, build-app-toolbelt, build-app-standard, smoke-toolbelt, smoke-standard]
-    if: ${{ !cancelled() && needs.source-quality.result == 'success' && needs.build-app-toolbelt.result == 'success' && needs.build-app-standard.result == 'success' && needs.smoke-toolbelt.result == 'success' && needs.smoke-standard.result == 'success' && (needs.build-runtime-toolbelt.result == 'success' || needs.build-runtime-toolbelt.result == 'skipped') && (needs.build-runtime-slim.result == 'success' || needs.build-runtime-slim.result == 'skipped') }}
+    needs: [source-quality, build-images, smoke-toolbelt, smoke-standard]
+    if: ${{ !cancelled() && needs.source-quality.result == 'success' && needs.build-images.result == 'success' && needs.smoke-toolbelt.result == 'success' && needs.smoke-standard.result == 'success' }}
     # Other release tags may build in parallel, but public alias updates cannot
     # interleave or be cancelled by a newer push halfway through the set.
     concurrency:
@@ -456,8 +232,8 @@ jobs:
       - name: Recheck, stage publicly readable candidates and promote tested digests
         env:
           VARIN_REPLACE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_version || false }}
-          VARIN_STANDARD_APP_IMAGE: ghcr.io/youzini-afk/varin@${{ needs.build-app-standard.outputs.digest }}
-          VARIN_TOOLBELT_APP_IMAGE: ghcr.io/youzini-afk/varin-toolbelt@${{ needs.build-app-toolbelt.outputs.digest }}
-          VARIN_SLIM_BASE_IMAGE: ${{ needs.build-app-standard.outputs.base-image }}
-          VARIN_TOOLBELT_BASE_IMAGE: ${{ needs.build-app-toolbelt.outputs.base-image }}
+          VARIN_STANDARD_APP_IMAGE: ${{ needs.build-images.outputs.standard_app }}
+          VARIN_TOOLBELT_APP_IMAGE: ${{ needs.build-images.outputs.toolbelt_app }}
+          VARIN_SLIM_BASE_IMAGE: ${{ needs.build-images.outputs.slim_base }}
+          VARIN_TOOLBELT_BASE_IMAGE: ${{ needs.build-images.outputs.toolbelt_base }}
         run: node scripts/docker-release.mjs promote

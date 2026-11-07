@@ -72,262 +72,30 @@ jobs:
       source_sha: ${{ needs.accept.outputs.source_sha }}
       full: true
 
-  build-runtime-slim:
-    name: Build commit slim runtime
-    runs-on: ubuntu-latest
-    needs: [accept, source-quality]
+  build-images:
+    name: Build commit image candidates
+    needs: accept
     if: needs.accept.outputs.mode == 'build'
+    uses: ./.github/workflows/container-images.yml
     permissions:
       contents: read
       packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout exact build source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.accept.outputs.source_sha }}
-          path: source
-          persist-credentials: false
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build immutable multi-platform runtime candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: source
-          file: source/Dockerfile.base
-          target: slim
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          tags: ghcr.io/youzini-afk/varin-runtime-slim:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/Youzini-afk/Varin
-            org.opencontainers.image.revision=${{ needs.accept.outputs.source_sha }}
-            org.opencontainers.image.version=${{ needs.accept.outputs.version }}
-            io.varin.publication.kind=commit
-            io.varin.build.run_id=${{ github.run_id }}
-            io.varin.build.run_attempt=${{ github.run_attempt }}
-            io.varin.build.tooling_sha=${{ github.sha }}
-          cache-from: type=gha,scope=varin-runtime-slim
-          cache-to: type=gha,scope=varin-runtime-slim,mode=max
-
-  build-runtime-toolbelt:
-    name: Build commit toolbelt runtime
-    runs-on: ubuntu-latest
-    needs: [accept, source-quality]
-    if: needs.accept.outputs.mode == 'build'
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout exact build source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.accept.outputs.source_sha }}
-          path: source
-          persist-credentials: false
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build immutable multi-platform runtime candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: source
-          file: source/Dockerfile.base
-          target: toolbelt
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          tags: ghcr.io/youzini-afk/varin-runtime-toolbelt:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/Youzini-afk/Varin
-            org.opencontainers.image.revision=${{ needs.accept.outputs.source_sha }}
-            org.opencontainers.image.version=${{ needs.accept.outputs.version }}
-            io.varin.publication.kind=commit
-            io.varin.build.run_id=${{ github.run_id }}
-            io.varin.build.run_attempt=${{ github.run_attempt }}
-            io.varin.build.tooling_sha=${{ github.sha }}
-          cache-from: type=gha,scope=varin-runtime-base
-          cache-to: type=gha,scope=varin-runtime-base,mode=max
-
-  build-app-standard:
-    name: Build commit standard application
-    runs-on: ubuntu-latest
-    needs: [accept, source-quality, build-runtime-slim]
-    if: needs.accept.outputs.mode == 'build'
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      base-image: ${{ steps.base.outputs.image }}
-    steps:
-      - name: Checkout dispatch tooling
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: tooling
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Checkout exact build source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.accept.outputs.source_sha }}
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify and freeze the runtime consumed by this application
-        id: base
-        working-directory: tooling
-        env:
-          SOURCE_SHA: ${{ needs.accept.outputs.source_sha }}
-          SOURCE_VERSION: ${{ needs.accept.outputs.version }}
-          BUILD_RUN_ID: ${{ github.run_id }}
-          BUILD_TOOLING_SHA: ${{ github.sha }}
-          BUILD_RUN_ATTEMPT: ${{ github.run_attempt }}
-          BASE_IMAGE: ghcr.io/youzini-afk/varin-runtime-slim@${{ needs.build-runtime-slim.outputs.digest }}
-        run: node scripts/docker-commit.mjs resolve-base slim
-      - name: Build immutable multi-platform application candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: source
-          file: source/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            RUNTIME_BASE_IMAGE=${{ steps.base.outputs.image }}
-            VARIN_SOURCE_REVISION=${{ needs.accept.outputs.source_sha }}
-          tags: ghcr.io/youzini-afk/varin:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/Youzini-afk/Varin
-            org.opencontainers.image.revision=${{ needs.accept.outputs.source_sha }}
-            org.opencontainers.image.version=${{ needs.accept.outputs.version }}
-            io.varin.publication.kind=commit
-            io.varin.build.run_id=${{ github.run_id }}
-            io.varin.build.run_attempt=${{ github.run_attempt }}
-            io.varin.build.tooling_sha=${{ github.sha }}
-            io.varin.image.base=${{ steps.base.outputs.image }}
-          cache-from: type=gha,scope=varin-app-slim
-          cache-to: type=gha,scope=varin-app-slim,mode=max
-
-  build-app-toolbelt:
-    name: Build commit toolbelt application
-    runs-on: ubuntu-latest
-    needs: [accept, source-quality, build-runtime-toolbelt]
-    if: needs.accept.outputs.mode == 'build'
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      base-image: ${{ steps.base.outputs.image }}
-    steps:
-      - name: Checkout dispatch tooling
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: tooling
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Checkout exact build source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.accept.outputs.source_sha }}
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify and freeze the runtime consumed by this application
-        id: base
-        working-directory: tooling
-        env:
-          SOURCE_SHA: ${{ needs.accept.outputs.source_sha }}
-          SOURCE_VERSION: ${{ needs.accept.outputs.version }}
-          BUILD_RUN_ID: ${{ github.run_id }}
-          BUILD_TOOLING_SHA: ${{ github.sha }}
-          BUILD_RUN_ATTEMPT: ${{ github.run_attempt }}
-          BASE_IMAGE: ghcr.io/youzini-afk/varin-runtime-toolbelt@${{ needs.build-runtime-toolbelt.outputs.digest }}
-        run: node scripts/docker-commit.mjs resolve-base toolbelt
-      - name: Build immutable multi-platform application candidate
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: source
-          file: source/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          push: true
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            RUNTIME_BASE_IMAGE=${{ steps.base.outputs.image }}
-            VARIN_SOURCE_REVISION=${{ needs.accept.outputs.source_sha }}
-          tags: ghcr.io/youzini-afk/varin-toolbelt:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/Youzini-afk/Varin
-            org.opencontainers.image.revision=${{ needs.accept.outputs.source_sha }}
-            org.opencontainers.image.version=${{ needs.accept.outputs.version }}
-            io.varin.publication.kind=commit
-            io.varin.build.run_id=${{ github.run_id }}
-            io.varin.build.run_attempt=${{ github.run_attempt }}
-            io.varin.build.tooling_sha=${{ github.sha }}
-            io.varin.image.base=${{ steps.base.outputs.image }}
-          cache-from: type=gha,scope=varin-app
-          cache-to: type=gha,scope=varin-app,mode=max
+    with:
+      source_sha: ${{ needs.accept.outputs.source_sha }}
+      tooling_sha: ${{ github.sha }}
+      version: ${{ needs.accept.outputs.version }}
+      publication: commit
 
   smoke-standard:
     name: Smoke exact commit standard application
     runs-on: ubuntu-latest
-    needs: [accept, source-quality, build-app-standard]
-    if: ${{ !cancelled() && needs.accept.result == 'success' && needs.source-quality.result == 'success' && (needs.accept.outputs.mode == 'resume' || needs.build-app-standard.result == 'success') }}
+    needs: [accept, build-images]
+    if: ${{ !cancelled() && needs.accept.result == 'success' && (needs.accept.outputs.mode == 'resume' || needs.build-images.result == 'success') }}
     permissions:
       contents: read
       packages: read
     env:
-      IMAGE_REF: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.standard_app || format('ghcr.io/youzini-afk/varin@{0}', needs.build-app-standard.outputs.digest) }}
+      IMAGE_REF: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.standard_app || needs.build-images.outputs.standard_app }}
       EXPECTED_RELEASE_ID: image-${{ needs.accept.outputs.source_sha }}
       EXPECTED_VERSION: ${{ needs.accept.outputs.version }}
     steps:
@@ -336,7 +104,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           path: tooling
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -384,13 +151,13 @@ jobs:
   smoke-toolbelt:
     name: Smoke exact commit toolbelt application
     runs-on: ubuntu-latest
-    needs: [accept, source-quality, build-app-toolbelt]
-    if: ${{ !cancelled() && needs.accept.result == 'success' && needs.source-quality.result == 'success' && (needs.accept.outputs.mode == 'resume' || needs.build-app-toolbelt.result == 'success') }}
+    needs: [accept, build-images]
+    if: ${{ !cancelled() && needs.accept.result == 'success' && (needs.accept.outputs.mode == 'resume' || needs.build-images.result == 'success') }}
     permissions:
       contents: read
       packages: read
     env:
-      IMAGE_REF: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_app || format('ghcr.io/youzini-afk/varin-toolbelt@{0}', needs.build-app-toolbelt.outputs.digest) }}
+      IMAGE_REF: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_app || needs.build-images.outputs.toolbelt_app }}
       EXPECTED_RELEASE_ID: image-${{ needs.accept.outputs.source_sha }}
       EXPECTED_VERSION: ${{ needs.accept.outputs.version }}
     steps:
@@ -399,7 +166,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           path: tooling
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -448,8 +214,8 @@ jobs:
     # The recovery admission verifies this exact successful producer job.
     name: Record verified candidate
     runs-on: ubuntu-latest
-    needs: [accept, source-quality, build-runtime-slim, build-runtime-toolbelt, build-app-standard, build-app-toolbelt, smoke-standard, smoke-toolbelt]
-    if: ${{ !cancelled() && needs.accept.result == 'success' && needs.source-quality.result == 'success' && needs.smoke-standard.result == 'success' && needs.smoke-toolbelt.result == 'success' && (needs.accept.outputs.mode == 'resume' || (needs.build-runtime-slim.result == 'success' && needs.build-runtime-toolbelt.result == 'success' && needs.build-app-standard.result == 'success' && needs.build-app-toolbelt.result == 'success')) }}
+    needs: [accept, source-quality, build-images, smoke-standard, smoke-toolbelt]
+    if: ${{ !cancelled() && needs.accept.result == 'success' && needs.source-quality.result == 'success' && needs.smoke-standard.result == 'success' && needs.smoke-toolbelt.result == 'success' && (needs.accept.outputs.mode == 'resume' || needs.build-images.result == 'success') }}
     permissions:
       contents: read
       packages: read
@@ -484,10 +250,10 @@ jobs:
           BUILD_RUN_ID: ${{ needs.accept.outputs.build_run_id }}
           BUILD_TOOLING_SHA: ${{ needs.accept.outputs.build_tooling_sha }}
           BUILD_RUN_ATTEMPT: ${{ needs.accept.outputs.build_run_attempt }}
-          STANDARD_APP_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.standard_app || format('ghcr.io/youzini-afk/varin@{0}', needs.build-app-standard.outputs.digest) }}
-          TOOLBELT_APP_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_app || format('ghcr.io/youzini-afk/varin-toolbelt@{0}', needs.build-app-toolbelt.outputs.digest) }}
-          SLIM_BASE_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.slim_base || needs.build-app-standard.outputs.base-image }}
-          TOOLBELT_BASE_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_base || needs.build-app-toolbelt.outputs.base-image }}
+          STANDARD_APP_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.standard_app || needs.build-images.outputs.standard_app }}
+          TOOLBELT_APP_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_app || needs.build-images.outputs.toolbelt_app }}
+          SLIM_BASE_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.slim_base || needs.build-images.outputs.slim_base }}
+          TOOLBELT_BASE_IMAGE: ${{ needs.accept.outputs.mode == 'resume' && needs.accept.outputs.toolbelt_base || needs.build-images.outputs.toolbelt_base }}
         run: node scripts/docker-commit.mjs record
       - name: Retain the immutable recovery receipt
         uses: actions/upload-artifact@v7

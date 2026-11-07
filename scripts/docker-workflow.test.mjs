@@ -18,7 +18,7 @@ test('only release-tag pushes or deliberate manual releases enter the publisher'
   assert.equal(release.jobs.promote.concurrency['cancel-in-progress'], false);
 });
 
-test('every registry writer depends on accepted exact-source qualification', () => {
+test('candidate computation overlaps quality but final release promotion requires all qualified evidence', () => {
   const quality = release.jobs['source-quality'];
   assert.equal(quality.uses, './.github/workflows/ci.yml');
   assert.deepEqual(quality.with, { source_sha: '${{ github.sha }}', full: true });
@@ -31,15 +31,17 @@ test('every registry writer depends on accepted exact-source qualification', () 
     if (job.permissions?.packages !== 'write') continue;
     const dependencies = ancestors(id);
     assert.ok(dependencies.includes('candidate'), `${id} can publish without an accepted release tag`);
-    assert.ok(dependencies.includes('source-quality'), `${id} can publish without exact-source qualification`);
+    if (id === 'promote') assert.ok(dependencies.includes('source-quality'), 'Final tags require qualification');
+    else assert.ok(!dependencies.includes('source-quality'), 'Candidate computation must overlap qualification');
   }
-  for (const name of ['build-app-toolbelt', 'build-app-standard', 'smoke-toolbelt', 'smoke-standard']) {
+  for (const name of ['build-images', 'source-quality', 'smoke-toolbelt', 'smoke-standard']) {
     assert.ok(release.jobs.promote.needs.includes(name), `Promotion lacks ${name} evidence`);
   }
 });
 
 test('reusable container validation only pushes to its disposable local registry', () => {
-  assert.deepEqual(Object.keys(validation.on), ['workflow_call']);
+  assert.deepEqual(Object.keys(validation.on).sort(), ['workflow_call', 'workflow_dispatch']);
+  assert.equal(validation.on.workflow_dispatch.inputs.benchmark.default, true);
   assert.deepEqual(validation.permissions, { contents: 'read' });
   assert.equal(validation.on.workflow_call.inputs.source_sha.required, true);
   for (const job of Object.values(validation.jobs)) {
@@ -51,6 +53,43 @@ test('reusable container validation only pushes to its disposable local registry
       }
     }
   }
+});
+
+test('validation exercises sibling checkouts and benchmark restoration has no original builder state', () => {
+  const steps = validation.jobs.verify.steps;
+  const source = steps.find(step => step.with?.path === 'source');
+  const tooling = steps.find(step => step.with?.path === 'tooling');
+  assert.equal(source.with.ref, '${{ inputs.source_sha || github.sha }}');
+  assert.equal(tooling.with.ref, '${{ inputs.tooling_sha || github.sha }}');
+  for (const step of steps.filter(step => step.run?.startsWith('node scripts/build-container-images.mjs'))) {
+    assert.equal(step['working-directory'], 'tooling');
+    assert.ok(['../source', '../benchmark-source'].includes(step.env.CONTAINER_SOURCE_DIR));
+  }
+  const fixture = steps.findIndex(step => step.id === 'fixture');
+  const restore = steps.findIndex(step => step.id === 'restored');
+  assert.ok(fixture > 0 && restore > fixture);
+  assert.ok(steps[fixture].run.includes('docker buildx rm "$ORIGINAL_BUILDER"'));
+  assert.ok(steps.slice(fixture + 1, restore).some(step => step.uses?.startsWith('docker/setup-buildx-action')));
+  assert.equal(steps[restore].env.CONTAINER_SOURCE_SHA, '${{ steps.fixture.outputs.sha }}');
+  assert.equal(steps[restore].env.CONTAINER_LOCAL_CACHE, true);
+  assert.match(steps[restore].run, /dependencyCookExecutions !== 0/);
+  assert.match(steps[restore].run, /dependencyCookUnknown !== 0/);
+  const smoke = steps.find(step => step.name === 'Verify the restored image has the new source identity');
+  assert.match(smoke.if, /steps.restored.outputs.standard_app != ''/);
+  assert.match(steps[restore].run, /dependencyCookCacheHits < restored.platforms.length/);
+  assert.match(steps[restore].run, /kernelBuildExecutions < restored.platforms.length/);
+});
+
+test('ARM service smoke starts the real Host before invoking authenticated services', () => {
+  const step = validation.jobs.verify.steps.find(step => step.name === 'Smoke target-architecture native dependencies');
+  assert.match(step.run, /docker run --detach --platform linux\/arm64/);
+  assert.ok(!step.run.includes('--entrypoint'));
+  assert.match(step.run, /http:\/\/127\.0\.0\.1:3000\/health/);
+  assert.match(step.run, /docker exec varin-arm64-smoke node verify-kernel.mjs packages\/web/);
+  assert.match(step.run, /docker exec varin-arm64-smoke node verify-services.mjs/);
+  assert.ok(step.run.indexOf('docker run --detach') < step.run.indexOf('node verify-services.mjs'));
+  const fixture = validation.jobs.verify.steps.find(step => step.id === 'fixture');
+  assert.match(fixture.if, /!cancelled\(\).*steps.warm.outcome == 'success'/);
 });
 
 test('release smokes run candidate-owned scripts with their supported Node runtime', () => {
@@ -80,32 +119,36 @@ test('default local builds follow a published release base, not a retired main a
 });
 
 
-test('release builders, smoke consumers and promotion retain each explicit variant and consumed base', () => {
+test('release callers preserve exact build identities, explicit overrides and immutable output routing', () => {
+  const build = release.jobs['build-images'];
+  assert.equal(build.uses, './.github/workflows/container-images.yml');
+  assert.equal(build.with.source_sha, '${{ github.sha }}');
+  assert.equal(build.with.tooling_sha, '${{ github.sha }}');
+  assert.equal(build.with.publication, 'release');
+  assert.equal(build.with.runtime_slim_image, "${{ inputs.runtime_slim_image || '' }}");
+  assert.equal(build.with.runtime_base_image, "${{ inputs.runtime_base_image || '' }}");
   const promotion = release.jobs.promote.steps.find(step => step.run === 'node scripts/docker-release.mjs promote');
-  for (const [variant, appJob, baseJob, baseStep, imageVariable, baseVariable, appImage, target] of [
-    ['slim', 'build-app-standard', 'build-runtime-slim', 'runtime-slim', 'STANDARD_APP_IMAGE_NAME', 'SLIM_BASE_IMAGE_NAME', 'varin', 'slim'],
-    ['toolbelt', 'build-app-toolbelt', 'build-runtime-toolbelt', 'runtime-base', 'TOOLBELT_APP_IMAGE_NAME', 'TOOLBELT_BASE_IMAGE_NAME', 'varin-toolbelt', 'toolbelt'],
-  ]) {
-    const job = release.jobs[appJob];
-    assert.ok(job.needs.includes(baseJob));
-    assert.equal(release.env[imageVariable], 'youzini-afk/' + appImage);
-    const baseBuild = release.jobs[baseJob].steps.find(step => step.uses?.startsWith('docker/build-push-action@'));
-    assert.equal(baseBuild.with.target, target);
-    const resolver = job.steps.find(step => step.id === baseStep);
-    assert.equal(resolver.run, 'node scripts/docker-release.mjs resolve-base ' + variant);
-    assert.equal(resolver.env.BASE_REPOSITORY, '${{ env.REGISTRY }}/${{ env.' + baseVariable + ' }}');
-    assert.equal(job.outputs['base-image'], '${{ steps.' + baseStep + '.outputs.image }}');
-    const build = job.steps.find(step => step.uses?.startsWith('docker/build-push-action@'));
-    const args = Object.fromEntries(build.with['build-args'].trim().split('\n').map(line => {
-      const split = line.indexOf('='); return [line.slice(0, split), line.slice(split + 1)];
-    }));
-    assert.equal(args.RUNTIME_BASE_IMAGE, job.outputs['base-image']);
-    const smoke = release.jobs[variant === 'slim' ? 'smoke-standard' : 'smoke-toolbelt'];
-    assert.equal(smoke.env.IMAGE_REF, 'ghcr.io/youzini-afk/' + appImage + '@${{ needs.' + appJob + '.outputs.digest }}');
-    const key = variant === 'slim' ? 'VARIN_SLIM_BASE_IMAGE' : 'VARIN_TOOLBELT_BASE_IMAGE';
-    assert.equal(promotion.env[key], '${{ needs.' + appJob + '.outputs.base-image }}');
+  for (const variant of ['standard', 'toolbelt']) {
+    const smoke = release.jobs[`smoke-${variant}`];
+    assert.deepEqual(smoke.needs, ['build-images']);
+    assert.equal(smoke.env.IMAGE_REF, '${{ needs.build-images.outputs.' + variant + '_app }}');
+    assert.equal(promotion.env['VARIN_' + variant.toUpperCase() + '_APP_IMAGE'], smoke.env.IMAGE_REF);
+  }
+  assert.equal(promotion.env.VARIN_SLIM_BASE_IMAGE, '${{ needs.build-images.outputs.slim_base }}');
+  assert.equal(promotion.env.VARIN_TOOLBELT_BASE_IMAGE, '${{ needs.build-images.outputs.toolbelt_base }}');
+});
+
+test('failed, cancelled or skipped qualification cannot promote already-built release candidates', () => {
+  // Evaluate the actual gate with only the supported Actions boolean operators.
+  const expression = release.jobs.promote.if.slice(3, -2).replace(/needs\.([\w-]+)/g, 'results["$1"]').replace('!cancelled()', 'true');
+  const evaluate = results => Function('results', `return (${expression});`)(results);
+  const success = Object.fromEntries(release.jobs.promote.needs.map(name => [name, { result: 'success' }]));
+  assert.equal(evaluate(success), true);
+  for (const name of release.jobs.promote.needs) for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
+    assert.equal(evaluate({ ...success, [name]: { result } }), false, `${name}: ${result}`);
   }
 });
+
 
 const composeAvailable = spawnSync('docker', ['compose', 'version'], { stdio: 'ignore', windowsHide: true }).status === 0;
 test('real Compose merge selects standard or toolbelt while retaining deployment mounts and budgets', {
