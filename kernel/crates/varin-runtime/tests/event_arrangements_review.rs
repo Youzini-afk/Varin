@@ -374,6 +374,69 @@ fn sleeping_bot_still_receives_and_cancelled_batch_does_not_reopen() {
     receive(&mut db, vec![recent], Some("a"), Some("b")).unwrap();
     assert_eq!(deliver(&mut db).len(), 1);
 }
+
+#[test]
+fn changing_timing_replans_unconsumed_events_before_the_next_delivery() {
+    for (original, updated, passive) in [
+        (EventTiming::Passive, EventTiming::Immediate, false),
+        (EventTiming::Immediate, EventTiming::Passive, true),
+    ] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        setup(&mut db);
+        arrange(&mut db, "inbox", original);
+        receive(&mut db, vec![incoming("one", None)], None, Some("a")).unwrap();
+        let old = deliver(&mut db);
+        let mut edited = input("inbox", updated);
+        edited.expected_revision = Some(db.followup("inbox").unwrap().revision);
+        let prepared = db.prepare_arrangement(edited).unwrap().load().unwrap();
+        db.admit_arrangement(prepared).unwrap();
+        let ids = deliver(&mut db);
+        assert_eq!(ids.len(), 1);
+        let row: QueuedInputMetadata = record(&f.raw(), "input_queue", &ids[0]).unwrap();
+        assert_eq!(row.activation == inputs::InputActivation::Passive, passive);
+        assert_ne!(ids, old);
+        assert_eq!(db.pending_cold_bot_work().unwrap().len(), usize::from(!passive));
+    }
+}
+
+#[test]
+fn switching_queued_events_to_batch_honors_the_new_deadline() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    setup(&mut db);
+    arrange(&mut db, "inbox", EventTiming::Immediate);
+    receive(&mut db, vec![incoming("one", None)], None, Some("a")).unwrap();
+    deliver(&mut db);
+    let mut edited = input("inbox", EventTiming::Batch { window_ms: 60_000 });
+    edited.expected_revision = Some(db.followup("inbox").unwrap().revision);
+    let prepared = db.prepare_arrangement(edited).unwrap().load().unwrap();
+    db.admit_arrangement(prepared).unwrap();
+    assert!(deliver(&mut db).is_empty());
+    assert!(db.pending_cold_bot_work().unwrap().is_empty());
+    let now = varin_runtime::catalog::observations::wall_time_ms().unwrap();
+    db.reconcile_followup_facts_at(now + 60_000).unwrap();
+    assert_eq!(deliver(&mut db).len(), 1);
+}
+
+#[test]
+fn process_now_remembers_held_passive_batches_until_the_bot_wakes() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    setup(&mut db);
+    arrange(&mut db, "inbox", EventTiming::Passive);
+    gate(&mut db, false, 2);
+    receive(&mut db, vec![incoming("one", None)], None, Some("a")).unwrap();
+    assert!(deliver(&mut db).is_empty());
+    let d = db.followup("inbox").unwrap();
+    db.control_event_backlog(EventBacklogInput { followup_id: d.id,
+        expected_revision: d.revision, action: EventBacklogAction::ProcessNow }).unwrap();
+    assert!(deliver(&mut db).is_empty());
+    gate(&mut db, true, 3);
+    let ids = deliver(&mut db);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(db.pending_cold_bot_work().unwrap()[0].input_id, ids[0]);
+}
 #[test]
 fn discard_releases_payload_but_preserves_dedup_identity() {
     let f = Fixture::new();

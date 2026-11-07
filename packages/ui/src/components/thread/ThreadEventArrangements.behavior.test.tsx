@@ -20,7 +20,13 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: 
 const Disclosure = React.createContext({ open: false, toggle: () => {} });
 vi.mock('@/components/ui/collapsible', () => ({
   Collapsible: ({ open, onOpenChange, children }: React.PropsWithChildren<{ open: boolean; onOpenChange(open: boolean): void }>) => <Disclosure.Provider value={{ open, toggle: () => onOpenChange(!open) }}>{children}</Disclosure.Provider>,
-  CollapsibleTrigger: ({ children }: React.PropsWithChildren) => { const value = React.useContext(Disclosure); return <button aria-expanded={value.open} onClick={value.toggle}>{children}</button>; },
+  CollapsibleTrigger: ({ children, asChild }: React.PropsWithChildren<{ asChild?: boolean }>) => {
+    const value = React.useContext(Disclosure);
+    const props = { 'aria-expanded': value.open, onClick: value.toggle };
+    return asChild && React.isValidElement(children)
+      ? React.cloneElement(children as React.ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>, props)
+      : <button {...props}>{children}</button>;
+  },
   CollapsibleContent: ({ children }: React.PropsWithChildren) => { const { open } = React.useContext(Disclosure); return <div hidden={!open}>{children}</div>; },
 }));
 const identity = { runtime: 'agent' as const, threadId: 'bot-entry', branchId: 'main' };
@@ -39,9 +45,9 @@ const get = vi.fn<ThreadFollowupsAPI['get']>();
 const control = vi.fn<ThreadFollowupsAPI['control']>();
 const backlog = vi.fn<ThreadFollowupsAPI['backlog']>();
 const render = async (next: Partial<typeof props> = {}) => { props = { ...props, ...next }; await act(async () => root.render(<ThreadEventArrangements {...props} />)); };
-const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(element => element.textContent === text)!;
+const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(element => !element.closest('[hidden]') && element.textContent === text)!;
 const click = async (text: string) => { const element = button(text); expect(element, text).toBeTruthy(); await act(async () => element.click()); };
-const field = (label: string) => container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+const field = (label: string) => [...container.querySelectorAll<HTMLInputElement>(`[aria-label="${label}"]`)].find(element => !element.closest('[hidden]')) ?? null!;
 const edit = async (label: string, value: string) => { const element = field(label); expect(element, label).toBeTruthy(); await act(async () => {
   Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
 }); };

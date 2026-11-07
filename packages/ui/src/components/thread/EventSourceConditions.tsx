@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 
-import { eventConditionsValid, type EventConditionSchema as Schema } from './eventSourceConditions';
+import { eventConditionsValid, type EventConditionSchema as Schema } from './eventConditionSchema';
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const schemaObject = (schema: unknown): JsonObject => object(schema) ? schema as JsonObject : {};
 

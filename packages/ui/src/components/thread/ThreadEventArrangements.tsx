@@ -13,7 +13,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { arrangementTargetKey as targetKey, externalTargetId, useArrangementExternalTargets } from './arrangementTargets';
 import { ArrangementSourceRoutes } from './ArrangementSourceRoutes';
 import { EventSourceConditions } from './EventSourceConditions';
-import { eventConditionsValid } from './eventSourceConditions';
+import { eventConditionsValid } from './eventConditionSchema';
 import { formatSchedule } from '@/components/session/scheduleFormat';
 import { followupStatus } from '@/lib/followupPresentation';
 
@@ -46,8 +46,17 @@ export function ThreadEventArrangements(props: Props) {
 function EventArrangements({ api, identity, botId, followups, pending, act, records, focusId, focusToken, createOpen, onCreateOpenChange, visibleArrangementIds }: Props) {
   const { t } = useI18n();
   const [creating, setCreating] = React.useState(false);
-  React.useEffect(() => { if (createOpen && botId) { setCreated(true); setCreating(true); onCreateOpenChange?.(false); } }, [createOpen, botId, onCreateOpenChange]);
   const [created, setCreated] = React.useState(false);
+  const [creationKey, setCreationKey] = React.useState(0);
+  const resetCreation = React.useRef(false);
+  const openCreation = React.useCallback((open: boolean) => {
+    if (open) {
+      setCreated(true);
+      if (resetCreation.current) { resetCreation.current = false; setCreationKey(value => value + 1); }
+    }
+    setCreating(open);
+  }, []);
+  React.useEffect(() => { if (createOpen && botId) { openCreation(true); onCreateOpenChange?.(false); } }, [createOpen, botId, onCreateOpenChange, openCreation]);
   const hasEvents = followups.some(item => item.trigger.kind === 'plugin_event');
   const [directory, setDirectory] = React.useState<VarinEventSourceDescriptor[]>([]);
   React.useEffect(() => { if (!botId && !hasEvents) return; const controller = new AbortController(); const host = getRuntimeEndpointGeneration();
@@ -56,11 +65,13 @@ function EventArrangements({ api, identity, botId, followups, pending, act, reco
   }, [api, identity, botId, hasEvents]);
   const items = followups.filter(item => item.trigger.kind === 'plugin_event');
   return <section className="space-y-3" aria-label={t('arrangements.title')}>
-    {botId && <Button size="sm" variant="outline" aria-expanded={creating} onClick={() => { setCreated(true); setCreating(value => !value); }}>
+    {botId && <Collapsible open={creating} onOpenChange={openCreation}>
+    <CollapsibleTrigger asChild className="w-auto"><Button size="sm" variant="outline">
       <Icon name="add" className="mr-1 size-3.5" />{t(creating ? 'arrangements.cancelEdit' : 'arrangements.create')}
-    </Button>}
-    {(creating || created) && botId && <div hidden={!creating}><ArrangementEditor api={api} identity={identity} botId={botId} pending={pending}
-      act={act} onSaved={() => { setCreating(false); setCreated(false); }} /></div>}
+    </Button></CollapsibleTrigger>
+    <CollapsibleContent keepMounted>{created && <div className="pt-3"><ArrangementEditor key={creationKey} api={api} identity={identity} botId={botId} pending={pending}
+      act={act} onSaved={() => { resetCreation.current = true; setCreating(false); }} /></div>}</CollapsibleContent>
+    </Collapsible>}
     {items.map(item => <div key={item.id} hidden={visibleArrangementIds ? !visibleArrangementIds.has(item.id) : undefined}><ArrangementRow api={api} identity={identity}
       focusId={focusId} focusToken={focusToken} descriptor={item.trigger.kind === 'plugin_event' ? directory.find(source => sourceKey(source) === sourceKey(item.trigger.kind === 'plugin_event' ? item.trigger.source : { extensionId: '', sourceId: '' })) : undefined} item={item} pending={pending} act={act} records={records} /></div>)}
   </section>;
@@ -76,6 +87,8 @@ function ArrangementRow({ api, identity, item, pending, act, records, focusId, f
   const [discarding, setDiscarding] = React.useState(false);
   const [instruction, setInstruction] = React.useState<string>();
   const [basis, setBasis] = React.useState<Followup>();
+  const [editKey, setEditKey] = React.useState(0);
+  const refreshEdit = React.useRef(false);
   const [error, setError] = React.useState('');
   const [reading, setReading] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
@@ -84,12 +97,13 @@ function ArrangementRow({ api, identity, item, pending, act, records, focusId, f
   const source = item.trigger.kind === 'plugin_event' ? item.trigger.source : null;
   const botId = item.owner.kind === 'bot' ? item.owner.bot_id : null;
   const beginEdit = async () => {
-    if (instruction !== undefined) { setEditing(true); return; }
+    if (instruction !== undefined && !refreshEdit.current) { setEditing(true); return; }
     setError(''); setReading(true); setSaved(false);
     const host = getRuntimeEndpointGeneration();
     try {
       const original = await api.get(identity, item.id);
       if (!live.current || host !== getRuntimeEndpointGeneration()) return;
+      refreshEdit.current = false; setEditKey(value => value + 1);
       setInstruction(original.instruction ?? ''); setBasis(original.followup); setEditing(true);
     } catch (cause) { if (live.current && host === getRuntimeEndpointGeneration()) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (live.current && host === getRuntimeEndpointGeneration()) setReading(false); }
@@ -122,8 +136,8 @@ function ArrangementRow({ api, identity, item, pending, act, records, focusId, f
         <Button size="sm" variant="outline" disabled={pending} onClick={() => void act(async () => { await api.backlog({ ...identity, followupId: item.id, expectedRevision: item.revision, action: 'discard' }); setDiscarding(false); })}>{t('arrangements.confirmDiscard')}</Button>
         <Button size="sm" variant="ghost" onClick={() => setDiscarding(false)}>{t('arrangements.keep')}</Button>
       </div>}
-      {botId && instruction !== undefined && <div hidden={!editing}><ArrangementEditor key={item.id} api={api} identity={identity} botId={botId}
-        original={basis ?? item} instruction={instruction} pending={pending} act={act} onSaved={() => { setEditing(false); setInstruction(undefined); setSaved(true); }} /></div>}
+      {botId && <Collapsible open={editing}><CollapsibleContent keepMounted>{instruction !== undefined && <ArrangementEditor key={editKey} api={api} identity={identity} botId={botId}
+        original={basis ?? item} instruction={instruction} pending={pending} act={act} onSaved={() => { refreshEdit.current = true; setEditing(false); setSaved(true); }} />}</CollapsibleContent></Collapsible>}
       {botId && <Collapsible open={routesOpen} onOpenChange={value => { setRoutesOpen(value); setRoutesVisited(true); }}>
         <CollapsibleTrigger>{t('arrangements.routes.title')}</CollapsibleTrigger><CollapsibleContent keepMounted>{routesVisited && <ArrangementSourceRoutes api={api} identity={identity} item={item} pending={pending} act={act} />}</CollapsibleContent>
       </Collapsible>}

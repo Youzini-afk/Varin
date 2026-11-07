@@ -934,6 +934,53 @@ fn save_batch(tx: &Transaction<'_>, d: &Definition, v: &Occurrence) -> Result<()
     }
     Ok(())
 }
+/// Withdraw only a batch that has not reached its receiving execution. Both timing
+/// edits and target edits use the same original input/turn cancellation boundary.
+fn withdraw_unconsumed_batch(tx: &Transaction<'_>, v: &Occurrence) -> Result<bool> {
+    if v.cancelled { return Ok(false); }
+    if let Some(id) = &v.input_id {
+        let mut row: QueuedInputMetadata = record(tx, "input_queue", id)?;
+        if row.state != InputState::Queued || matches!(activation::fact(&row)?,
+            IngressActivationFact::Cancelled { .. } | IngressActivationFact::Failed { .. }) {
+            return Ok(false);
+        }
+        activation::cancel_row(tx, &mut row)?;
+        calendar::unbind_arrangement_input(tx, id)?;
+        tx.execute("UPDATE followup_occurrences SET input_id=NULL WHERE id=?1", [&v.id])?;
+        tx.execute("DELETE FROM attachment_deliveries WHERE holder_kind='input' AND holder_id=?1", [id])?;
+        tx.execute("DELETE FROM input_history_content WHERE input_id=?1", [id])?;
+        tx.execute("DELETE FROM input_queue WHERE id=?1", [id])?;
+    }
+    if let Some(receipt) = &v.external_delivery {
+        if !super::external::cancel(tx, receipt)? { return Ok(false); }
+    }
+    Ok(true)
+}
+
+fn reschedule_uncommitted_batches(tx: &Transaction<'_>, d: &mut Definition) -> Result<()> {
+    let rows = tx.prepare("SELECT body FROM followup_occurrences WHERE followup_id=?1 ORDER BY accepted_cursor")?
+        .query_map([&d.id], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut rescheduled = false;
+    for raw in rows {
+        let mut v: Occurrence = serde_json::from_str(&raw)?;
+        if !withdraw_unconsumed_batch(tx, &v)? { continue; }
+        v.cancelled = true;
+        v.input_id = None;
+        put(tx, "followup_occurrences", &v.id, &v)?;
+        // Preserve the original receipt while returning its events to the pending
+        // set. The new timing selects a fresh fixed batch from their original times.
+        tx.execute("UPDATE followup_event_matches SET occurrence_id=NULL WHERE followup_id=?1 AND occurrence_id=?2 AND discarded=0",
+            params![d.id, v.id])?;
+        rescheduled = true;
+    }
+    if rescheduled && d.wait.state == NextRunWaitState::Observed {
+        d.wait.state = NextRunWaitState::Waiting;
+        d.wait.trigger_cursor = None;
+    }
+    Ok(())
+}
+
 /// Edits may revise unconsumed input, but never rewrite a delivered
 /// instruction. Reprepare through the original ContentStore owner so revoked sender
 /// trust is removed from both the queue origin and its immutable conversation content.
@@ -946,44 +993,16 @@ fn refresh_uncommitted_batches(tx: &Transaction<'_>, d: &Definition) -> Result<(
         .collect::<std::result::Result<Vec<_>, _>>()?;
     for raw in rows {
         let mut v: Occurrence = serde_json::from_str(&raw)?;
-        if v.cancelled {
-            continue;
-        }
+        if !withdraw_unconsumed_batch(tx, &v)? { continue; }
         let mut replace = false;
-        if let Some(receipt) = &v.external_delivery {
-            if !super::external::cancel(tx, receipt)? {
-                continue;
-            }
+        if v.external_delivery.is_some() {
             let mut old = v.clone();
             old.cancelled = true;
             put(tx, "followup_occurrences", &old.id, &old)?;
             v.external_delivery = None;
             replace = true;
         }
-        if let Some(id) = &v.input_id {
-            let mut row: QueuedInputMetadata = record(tx, "input_queue", id)?;
-            if row.state != InputState::Queued
-                || matches!(
-                    activation::fact(&row)?,
-                    IngressActivationFact::Cancelled { .. } | IngressActivationFact::Failed { .. }
-                )
-            {
-                continue;
-            }
-            activation::cancel_row(tx, &mut row)?;
-            calendar::unbind_arrangement_input(tx, id)?;
-            tx.execute(
-                "UPDATE followup_occurrences SET input_id=NULL WHERE id=?1",
-                [&v.id],
-            )?;
-            tx.execute(
-                "DELETE FROM attachment_deliveries WHERE holder_kind='input' AND holder_id=?1",
-                [id],
-            )?;
-            tx.execute("DELETE FROM input_history_content WHERE input_id=?1", [id])?;
-            tx.execute("DELETE FROM input_queue WHERE id=?1", [id])?;
-            v.input_id = None;
-        }
+        v.input_id = None;
         let TriggerEvidence::PluginEvents {
             event_ids,
             received_at_ms,
@@ -1229,6 +1248,7 @@ fn put_arrangement_tx(
             )?;
         }
     }
+    let timing_changed = d.timing != input.timing;
     d.revision += 1;
     d.name = Some(input.name);
     d.instruction_ref = Some(instruction);
@@ -1245,6 +1265,7 @@ fn put_arrangement_tx(
     if d.revision == 1 {
         insert(tx, &d)?;
     } else {
+        if timing_changed { reschedule_uncommitted_batches(tx, &mut d)?; }
         put(tx, "followups", &d.id, &d)?;
         tx.execute(
             "UPDATE followups SET thread_id=?2 WHERE id=?1",
@@ -1288,9 +1309,25 @@ fn backlog_tx(tx: &Transaction<'_>, input: EventBacklogInput) -> Result<Followup
                     "resume the arrangement before processing".into(),
                 ));
             }
+            // Held batches have already left `pending`, even when no input can
+            // yet be admitted (for example while the Bot sleeps). Retain this
+            // explicit request on the original batch until admission is possible.
+            let held = tx.prepare("SELECT body FROM followup_occurrences WHERE followup_id=?1 AND input_id IS NULL AND json_extract(body,'$.external_delivery') IS NULL AND json_extract(body,'$.cancelled')=0")?
+                .query_map([&d.id], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            for raw in held {
+                let mut v: Occurrence = serde_json::from_str(&raw)?;
+                v.passive = false;
+                v.preparation_failed = false;
+                put(tx, "followup_occurrences", &v.id, &v)?;
+            }
             let queued=tx.prepare("SELECT body FROM input_queue WHERE origin='followup' AND state='queued' AND activation='passive' AND json_extract(body,'$.origin.activation.state')='passive' AND json_extract(body,'$.origin.followup_id')=?1")?.query_map([&d.id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
             for raw in queued {
                 let mut row: QueuedInputMetadata = serde_json::from_str(&raw)?;
+                if let InputOrigin::Followup { occurrence_id, .. } = &row.origin {
+                    let mut v = occurrence(tx, &d.id, occurrence_id)?;
+                    v.passive = false;
+                    put(tx, "followup_occurrences", &v.id, &v)?;
+                }
                 let fact = activation::accept_target(tx, &row.thread_id, &row.branch_id)?;
                 row.run_id = fact.run_id().map(str::to_owned);
                 activation::write_changed(tx, &mut row, fact)?;
