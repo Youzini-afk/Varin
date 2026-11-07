@@ -28,7 +28,7 @@ const bun = (args, env = {}) => execFileSync(resolveBunExecutable(), args, {
 });
 const sharedInputs = ['bun.lock', 'package.json', 'tsconfig.json', 'tsconfig.base.json', 'scripts/build-cache.mjs', 'scripts/build-products.mjs'];
 const runtimeInputs = [...sharedInputs, 'bun-patches', ...runtimePackages.map(name => `packages/${name}`)];
-const frontendInputs = [...sharedInputs, 'packages/ui', 'packages/web/src', 'packages/web/public',
+const frontendInputs = [...sharedInputs, 'bun-patches', 'packages/ui', 'packages/web/src', 'packages/web/public',
   'packages/web/vite.config.ts', 'packages/web/package.json', 'packages/web/tsconfig.json', 'packages/web/index.html', 'packages/web/mobile.html',
   'packages/web/mini-chat.html', 'packages/web/companion.html', 'packages/web/postcss.config.js',
   ...runtimePackages.map(name => `packages/${name}`),

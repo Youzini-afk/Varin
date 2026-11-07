@@ -107,6 +107,51 @@ fn bot_service_publishes_original_lifecycle_and_refreshes_same_instance_grant_af
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// Real BotService -> Host sessions -> AgentRuntimeClient -> private dispatch -> Catalog.
+/// Only the transport rendezvous is substituted; this does not cover Unix sockets.
+#[test]
+fn bot_service_resolves_one_replacement_after_original_thread_retirement() {
+    let root = std::env::temp_dir().join(format!("varin-bot-entry-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let storage_root = root.join("storage");
+    let runtime = Arc::new(RunSupervisor::new(Catalog::open(root.join("catalog")).unwrap()));
+    let (send, outgoing) = mpsc::sync_channel(64);
+    let bridge = ToolBridge::new(send.into());
+    bridge.initialize(EPOCH);
+    let mut f = Fixture {
+        host: Host::with_script("packages/web/application-host/lib/kernel/bot-gate-host.test-helper.ts"),
+        runtime,
+        storage: Mutex::new(Storage::open(&storage_root, HOST).unwrap()),
+        storage_root: storage_root.clone(), bridge, outgoing,
+    };
+    f.host.send(json!({"kind":"fixture-initialize","epoch":EPOCH,"root":root,"storageRoot":storage_root}));
+    let first = receive(&mut f, EPOCH, "fixture-prepared");
+    let original = first["bot"]["entry"].clone();
+    f.host.send(json!({"kind":"fixture-resolve-entry"}));
+    assert_eq!(receive(&mut f, EPOCH, "fixture-entry")["result"]["entry"], original);
+    {
+        let owner = f.runtime.catalog();
+        let mut catalog = owner.lock().unwrap();
+        let thread_id = original["threadId"].as_str().unwrap();
+        let revision = catalog.inspect_thread(thread_id).unwrap()["revision"].as_u64().unwrap();
+        catalog.delete_thread(&serde_json::from_value(json!({
+            "threadId":thread_id,"key":"delete-original","expectedRevision":revision
+        })).unwrap()).unwrap();
+    }
+    f.runtime.retire_deleted_threads().unwrap();
+    f.host.send(json!({"kind":"fixture-resolve-entry"}));
+    let recovered = receive(&mut f, EPOCH, "fixture-entry")["result"]["entry"].clone();
+    assert_ne!(recovered["threadId"], original["threadId"]);
+    assert!(recovered["branchId"].is_string());
+    f.host.send(json!({"kind":"fixture-resolve-entry"}));
+    assert_eq!(receive(&mut f, EPOCH, "fixture-entry")["result"]["entry"], recovered);
+    f.host.send(json!({"kind":"fixture-close"}));
+    receive(&mut f, EPOCH, "fixture-closed");
+    f.runtime.shutdown().unwrap();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// The unchanged stdio fixture delegates only these additional original production owners.
 fn receive_native_lifecycle(f: &mut Fixture, kind: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -123,7 +168,7 @@ fn receive_native_lifecycle(f: &mut Fixture, kind: &str) -> Value {
                 let params = frame["params"].clone();
                 let owner = runtime.catalog();
                 match method {
-                    "runtime.bot.scope.inspect" | "runtime.bot.thread.create" => {
+                    "runtime.bot.scope.inspect" | "runtime.bot.thread.create" | "runtime.bot.entry.resolve" => {
                         Some(dispatch(&mut owner.lock().unwrap(), method, params))
                     }
                     "runtime.bot.scope.suspend" => Some((|| {

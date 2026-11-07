@@ -30,6 +30,8 @@ pub enum RuntimeError {
     Json(#[from] serde_json::Error),
     #[error("conflict: {0}")]
     Conflict(String),
+    #[error("creation identity is retired or unavailable: {0}")]
+    IdentityUnavailable(String),
     #[error("context work already admitted for this owner checkpoint and model")]
     ContextJobAlreadyAdmitted,
     #[error("request source is still settling")]
@@ -51,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 87;
+pub(crate) const FORMAT: i64 = 88;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -151,6 +153,10 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     inputs::check_format(db)?;
     followups::check_format(db)?;
     calendar::check_format(db)?;
+    if version >= 88 {
+        identity::check_format(db)?;
+        calendar::check_invocations_format(db)?;
+    } else { identity::check_legacy_format(db)?; }
     upgrades::check_external_schema(db, version)?;
     if version >= 80 {
         usage_ledger::check_format(db)?;
@@ -224,6 +230,7 @@ fn initialize_metadata(
         goals::initialize_new(&tx)?;
         mcp_interactions::initialize_new(&tx)?;
         bot::initialize_new(&tx)?;
+        identity::initialize(&tx)?;
         usage_ledger::initialize(&tx)?;
         context_observations::initialize(&tx)?;
         driver::initialize(&tx)?;
@@ -354,37 +361,7 @@ impl Catalog {
     }
     fn create_thread_owned(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>, principal: Option<&str>) -> Result<()> {
         let tx = self.db.transaction()?;
-        if let Some(value) = principal { principals::validate(value)?; }
-        let initial:Option<String>=tx.query_row("SELECT json_extract(data,'$.branch_id') FROM events WHERE subject=?1 AND kind='thread.created' ORDER BY cursor LIMIT 1",[thread_id],|r|r.get(0)).optional()?;
-        if let Some(initial) = initial {
-            if principals::thread(&tx, thread_id)?.as_deref() != principal { return Err(RuntimeError::Conflict("Thread principal changed".into())); }
-            let bound: Option<String> = tx.query_row("SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1", [thread_id], |r| r.get(0)).optional()?;
-            if bound.as_deref() != bot_id { return Err(RuntimeError::Conflict("Thread Bot binding changed".into())); }
-            if initial == branch_id {
-                return Ok(());
-            }
-            return Err(RuntimeError::Conflict(
-                "thread was created with another initial branch".into(),
-            ));
-        }
-
-        threads::insert(&tx, thread_id)?;
-        principals::assign_new(&tx, thread_id, principal)?;
-        if let Some(bot_id) = bot_id {
-            if !bot::permitted(&tx, bot_id, self.epoch)? { return Err(RuntimeError::RequestActivationHeld); }
-            tx.execute("INSERT INTO bot_thread_bindings(thread_id,bot_id) VALUES(?1,?2)", params![thread_id, bot_id])?;
-        }
-        tx.execute(
-            "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
-            params![branch_id, thread_id],
-        )?;
-        event(
-            &tx,
-            thread_id,
-            1,
-            "thread.created",
-            json!({"branch_id":branch_id}),
-        )?;
+        identity::create_public(&tx, thread_id, branch_id, bot_id, principal, self.epoch)?;
         tx.commit()?;
         Ok(())
     }
@@ -498,7 +475,7 @@ impl Catalog {
             }
         }
         if create_thread {
-            threads::insert(&tx, &command.thread_id)?;
+            threads::insert(&tx, &command.thread_id, &command.branch_id, "summary", None)?;
             if let submissions::SubmissionOrigin::Summary { source_branch_id } = origin {
                 let principal = principals::branch(&tx, source_branch_id)?;
                 principals::assign_new(&tx, &command.thread_id, principal.as_deref())?;
@@ -1859,6 +1836,8 @@ pub mod usage;
 pub mod usage_ledger;
 #[path = "catalog_threads.rs"]
 pub mod threads;
+#[path = "catalog_identity.rs"]
+mod identity;
 #[path = "catalog_titles.rs"]
 pub mod titles;
 #[path = "catalog_retention.rs"]

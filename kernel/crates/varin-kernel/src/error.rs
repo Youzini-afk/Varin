@@ -53,6 +53,8 @@ pub(crate) enum KernelError {
     RecordRevisionConflict,
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("identity unavailable: {0}")]
+    IdentityUnavailable(String),
     #[error("file observation source failed: {0}")]
     FileObservationSource(FileObservationSourceCode),
     #[error("file observation is busy under an existing writer or capture lease")]
@@ -104,6 +106,7 @@ pub(crate) fn error_code(error: &KernelError) -> &str {
         KernelError::Storage(_) => "storage-error",
         KernelError::Authorization(_) => "unauthorized",
         KernelError::NotFound(_) => "not-found",
+        KernelError::IdentityUnavailable(_) => "identity-unavailable",
         KernelError::Operation(_)
         | KernelError::FileObservationSource(_)
         | KernelError::FileObservationBusy
@@ -122,6 +125,14 @@ pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unavailable_identity_is_distinct_and_not_retryable() {
+        let error = crate::agent_runtime::domain(varin_runtime::RuntimeError::IdentityUnavailable("retired identity".into()));
+        let value = super::response_error("original-create", &error);
+        assert_eq!(value["error"]["code"], "identity-unavailable");
+        assert_eq!(value["error"]["retryable"], false);
+        assert_eq!(value["error"]["message"], "identity unavailable: retired identity");
+    }
     #[test]
     fn original_ingress_hold_has_its_own_retryable_wire_code() {
         let held = crate::agent_runtime::domain(varin_runtime::RuntimeError::RequestActivationHeld);

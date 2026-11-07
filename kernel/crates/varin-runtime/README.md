@@ -43,8 +43,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85
-  and standalone 82 → 83 → 84 → 85. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -87,7 +87,15 @@ its original execution and settlement duties. Internal owner discovery includes 
 Threads; the separate product Catalog query omits tombstones and auxiliary inference Threads.
 Maintenance waits for terminal Runs and original executor/model settlement before retiring owned
 history, requests and receipts. Surviving branch ancestry and relational consumers keep shared data
-reachable. Small Thread/branch identities and deletion receipts remain for stable identity and replay;
+reachable. Small Thread/branch identities, content-free creation receipts, direct Bot bindings and deletion
+receipts remain for stable identity and replay. Principal attribution stays solely on Threads.
+Explicit Bot deletion also retains reserved identities but clears titles, pins, title progress and history
+heads. Legacy missing creation facts stay unknown; reads/maintenance remain possible without treating
+unknown ownership as ordinary-thread execution permission. Bot entry resolution and fallback creation
+are one Catalog transaction, not a Host read/create race. Calendar invocation identities have no body
+or input FKs. Format 88 gives legacy definitions an atomic random manual-key prefix: new UI requests
+freeze it with their key, retries never retrofit it, and old unknown requests fail closed without blocking
+new manual work or changing scheduled cursors.
 ContentStore then collects unreferenced immutable bodies through its existing reader/publication fences.
 Inline metadata commands are not ContentStore roots. Active deleted conversations are reconsidered on
 durable execution events and Host restart; deletion does not cancel their original execution duties.

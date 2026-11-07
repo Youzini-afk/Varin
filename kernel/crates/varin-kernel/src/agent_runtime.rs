@@ -262,6 +262,7 @@ pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
         varin_runtime::RuntimeError::NotFound(message) => {
             KernelError::NotFound(message)
         }
+        varin_runtime::RuntimeError::IdentityUnavailable(message) => KernelError::IdentityUnavailable(message),
         varin_runtime::RuntimeError::Invalid(message) => KernelError::Protocol(message),
         other => KernelError::Storage(other.to_string()),
     }
@@ -2816,6 +2817,12 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let p: varin_runtime::catalog::bot::BotGate = serde_json::from_value(params)?;
         catalog.publish_bot_gate(p).map_err(domain)?;
         return Ok(Value::Null);
+    }
+    if method == "runtime.bot.entry.resolve" {
+        let p: BotThreadCreateParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(
+            catalog.resolve_bot_entry(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?,
+        )?);
     }
     if method == "runtime.bot.thread.create" {
         let p: BotThreadCreateParams = serde_json::from_value(params)?;

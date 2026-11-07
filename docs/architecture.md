@@ -52,7 +52,7 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 87；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 88；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
 Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
 
@@ -92,10 +92,11 @@ Thread/worktree 保留，供核对和后续处理。
 ## 数据与交付
 
 内部结构可以继续演进，由原存储 owner 在打开时自动升级已支持的旧版本，业务读取与执行随后使用当前结构。
-Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87，以及独立格式 82 → 83 → 84 → 85 → 86 → 87；可从任一已支持的旧格式打开。
+Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88，以及独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88；可从任一已支持的旧格式打开。
 84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
 85 → 86 允许明确 User 派发保留空工具来源，并增加原子任务报告身份；旧工具派发正文和回执保持不变，不回放执行效果。
 86 → 87 为原 Thread/Run 及派生执行保存可信认证主体。Host 首次初始化时固定旧记录归属策略，之后启用认证不会自动认领原公开工作；该升级不重放执行。
+87 → 88 保存小型 Thread 创建证据与日程受理身份，保留原 principal、Bot 绑定、初始 branch 和回执，不因正文回收重建已受理工作。旧库已丢失的身份明确未知，不从 profile 或 ID 前缀补造；日程旧定义的新手动请求使用升级事务生成的 admission key 前缀，旧未知请求不能借刷新配置重新执行。
 78 → 79 初始化外部 Agent 记录，79 → 80 初始化用量账本及开始记账时间；旧回执缺少可靠结算时间与归属，不补造账本。
 80 → 81 初始化 Zone2 环境捕获表；81 → 83 为原历史引用建立稀疏文本范围索引，支持派发选择读取。
 独立格式 82 已有这些索引但没有 Zone2 表，82 → 83 只初始化缺少的捕获结构。预检查按真实版本区分两种布局，不以 `>=81` 猜测结构存在。
