@@ -4558,3 +4558,25 @@ fn attention_executor_stop_requires_exact_receipt_not_cancellation_or_outcome() 
     db.record_external_receipt_with_stop("stopping-job", original, true).unwrap();
     assert_eq!(db.capture_attention_read().load(&|| false).unwrap().stopped_executors[0].stopped_cursor, cursor);
 }
+
+#[test]
+fn legacy_summary_migration_preserves_internal_creation_domain() {
+    use crate::context_job::*;
+    use crate::execution::{AgentPolicy, DefaultAgentPolicy};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let source = submit(&mut db);
+    let launch = launches::LaunchSelection::from_binding(
+        &request_snapshot(&source).view.binding, DefaultAgentPolicy.identity(), None);
+    let job = db.create_context_job(ContextJobRequest {
+        compaction: None, summary_recipe: ContextSummaryRecipe::manual(), owner_run_id: None,
+        personalization: None, key: "migration-summary".into(), branch_id: source.branch_id,
+        through_id: source.input_id, expected_revision: 0, effective_system_prompt: "Summarize".into(),
+        instruction_sources: vec![], memory_checkpoint: None,
+    }, launch, json!({})).unwrap();
+    db.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;PRAGMA user_version=87;").unwrap();
+    drop(db); let mut db = f.open();
+    assert_eq!(db.db.query_row("SELECT domain FROM thread_creations WHERE thread_id=?1",[&job.receipt.thread_id],|r|r.get::<_,String>(0)).unwrap(),"summary");
+    assert!(matches!(db.create_thread(&job.receipt.thread_id,&job.receipt.branch_id),Err(RuntimeError::Conflict(_))));
+    assert!(db.run(&job.receipt.run_id).is_ok());
+}

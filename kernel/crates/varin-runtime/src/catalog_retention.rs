@@ -289,7 +289,7 @@ impl Catalog {
         }
         tx.execute("INSERT INTO thread_gc_branches SELECT id FROM branches WHERE thread_id IN (SELECT id FROM thread_gc_threads)", [])?;
         tx.execute("INSERT INTO thread_gc_runs SELECT r.id FROM runs r JOIN thread_gc_branches b ON b.id=r.branch_id", [])?;
-        for table in ["history", "goals", "followups", "calendar_occurrences", "bot_thread_bindings"] {
+        for table in ["history", "goals", "followups", "calendar_occurrences"] {
             seed(&tx, table, "thread_id IN (SELECT id FROM thread_gc_threads)")?;
         }
         for table in ["input_queue", "context_checkpoints", "memory_states", "active_contexts", "goals", "thread_title_progress"] {
@@ -332,7 +332,7 @@ impl Catalog {
             OR json_extract(receipt,'$.branchId') IN (SELECT id FROM thread_gc_branches)
             OR json_extract(receipt,'$.input_id') IN (SELECT id FROM input_queue WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name='input_queue'))
             OR json_extract(receipt,'$.id') IN (SELECT id FROM operations WHERE run_id IN (SELECT id FROM thread_gc_runs)))")?;
-        seed(&tx, "events", "kind NOT IN ('thread.deleted','branch.deleted') AND (subject IN (SELECT id FROM thread_gc_threads)
+        seed(&tx, "events", "kind NOT IN ('thread.deleted','branch.deleted','branch.created') AND (subject IN (SELECT id FROM thread_gc_threads)
             OR subject IN (SELECT id FROM thread_gc_branches)
             OR subject IN (SELECT id FROM thread_gc_runs)
             OR subject IN (SELECT id FROM operations WHERE run_id IN (SELECT id FROM thread_gc_runs))

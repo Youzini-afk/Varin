@@ -322,13 +322,13 @@ mod tests {
         let mut c = f.open();
         create(&mut c, "legacy", None);
         let receipt = submit(&mut c, "legacy");
-        c.db.execute_batch("DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id; DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id'); PRAGMA user_version=86;").unwrap();
+        c.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id; DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id'); PRAGMA user_version=86;").unwrap();
         drop(c);
         let mut c = f.open();
         assert_eq!(
             c.db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            87
+            FORMAT
         );
         c.initialize_principals("owner", true).unwrap();
         assert_eq!(

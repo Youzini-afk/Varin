@@ -976,6 +976,9 @@ export class AgentRuntimeClient {
   createBotThread(botId: string, threadId: string, branchId: string, signal?: AbortSignal): Promise<{threadId:string;branchId:string}> {
     return this.kernel.agentRuntimeRequest('runtime.bot.thread.create', {botId,threadId,branchId}, signal);
   }
+  resolveBotEntry(botId: string, threadId: string, branchId: string, signal?: AbortSignal): Promise<{threadId:string;branchId:string}> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.entry.resolve', {botId,threadId,branchId}, signal);
+  }
   botHistory(input: import('./protocol.generated.js').BotHistoryReadParams, signal?: AbortSignal): Promise<HistoryItem> {
     return this.kernel.agentRuntimeRequest('runtime.bot.history.read', input, signal);
   }

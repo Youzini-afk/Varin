@@ -816,6 +816,7 @@ export interface CalendarDefinition {
   asset_kind: 'gui' | 'loop';
   revision: number;
   generation: number;
+  manual_key_prefix?: string;
   name: string;
   enabled: boolean;
   deleted: boolean;
@@ -1754,6 +1755,7 @@ export interface BranchDeleteParams { threadId: string; branchId: string; key: s
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {
+  creation_identity_known?: boolean;
   principal_id?: string | null;
   agent_code?: string;
   parent_thread_id: string | null;

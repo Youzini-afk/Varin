@@ -410,7 +410,7 @@ impl Catalog {
             serde_json::to_value(State::default())?,
         );
         let tx = self.db.transaction()?;
-        super::threads::insert(&tx, &thread_id)?;
+        super::threads::insert(&tx, &thread_id, &branch_id, "memory", None)?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head,active_run) VALUES(?1,?2,NULL,?3)",
             params![branch_id, thread_id, run_id],

@@ -376,6 +376,9 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     } catch (error) {
       const failure = errorRecord(error);
       if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message, ...(failure.task ? { task: failure.task } : {}) });
+      if (error instanceof KernelClientError && error.code === 'identity-unavailable') {
+        return res.status(409).json({ code: 'identity-unavailable', error: 'This earlier calendar request cannot be replayed safely. Its work may already have run. Refresh the task before explicitly starting a new request.' });
+      }
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(calendarErrorStatus(error)).json({ error: 'Failed to run scheduled task' });
     }

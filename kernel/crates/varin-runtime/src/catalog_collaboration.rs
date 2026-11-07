@@ -515,7 +515,7 @@ impl Catalog {
         }
         let child_thread_id = format!("thread:child:{}", op.id);
         let child_branch_id = format!("branch:child:{}", op.id);
-        super::threads::insert(&tx, &child_thread_id)?;
+        super::threads::insert(&tx, &child_thread_id, &child_branch_id, "child", None)?;
         super::principals::assign_new(&tx, &child_thread_id, run.principal_id.as_deref())?;
         let agent_id: String = tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?;
         let name = prepared.title.clone().unwrap_or_else(|| format!("Agent {agent_id}"));

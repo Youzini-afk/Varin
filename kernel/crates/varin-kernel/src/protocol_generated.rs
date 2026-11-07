@@ -41,6 +41,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
+    "runtime.bot.entry.resolve",
     "runtime.bot.scope.suspend",
     "runtime.bot.scope.status",
     "runtime.bot.scope.resume",
@@ -135,6 +136,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
+    "runtime.bot.entry.resolve",
     "runtime.bot.scope.suspend",
     "runtime.bot.scope.status",
     "runtime.bot.scope.resume",
@@ -4177,6 +4179,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.bot.thread.create" => {
+            serde_json::from_value::<BotThreadCreateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.bot.entry.resolve" => {
             serde_json::from_value::<BotThreadCreateParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
