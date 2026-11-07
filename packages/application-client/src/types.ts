@@ -701,6 +701,7 @@ export interface ProjectEntry {
 }
 
 export interface SettingsPayload {
+  themeLibrary?: import('./theme-library.js').ThemeLibrary;
   themeId?: string;
   useSystemTheme?: boolean;
   themeVariant?: 'light' | 'dark';

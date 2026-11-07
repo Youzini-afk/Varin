@@ -7,7 +7,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 export function useAppFontEffects() {
   const { uiFont, monoFont } = useFontPreferences();
   const { currentTheme } = useThemeSystem();
-  const themeFonts = currentTheme.metadata.tags?.includes('codex-import') ? currentTheme.config?.fonts : undefined;
+  const themeFonts = currentTheme.metadata.id.startsWith('imported-') ? currentTheme.config?.fonts : undefined;
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {

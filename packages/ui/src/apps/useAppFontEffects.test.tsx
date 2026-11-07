@@ -6,7 +6,7 @@ import { useAppFontEffects } from './useAppFontEffects';
 
 const mock = vi.hoisted(() => ({
   fonts: { uiFont: 'system', monoFont: 'system-mono' },
-  theme: { metadata: { tags: ['codex-import'] }, config: { fonts: { sans: 'Figtree, "Noto Sans CJK SC"', mono: 'JetBrains Mono' } } },
+  theme: { metadata: { id: 'imported-codex', tags: ['codex-import'] }, config: { fonts: { sans: 'Figtree, "Noto Sans CJK SC"', mono: 'JetBrains Mono' } } },
 }));
 vi.mock('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => mock.fonts }));
 vi.mock('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: mock.theme }) }));

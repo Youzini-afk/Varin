@@ -13,8 +13,9 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
-import { IMPORTED_THEMES_STORAGE_KEY, parseImportedTheme, readImportedThemes, writeImportedThemes } from '@/lib/theme/importedThemes';
-import { applyCustomColors, CUSTOM_COLORS_STORAGE_KEY, normalizeCustomColor, readCustomColors, writeCustomColors, type CustomColorField } from '@/lib/theme/customColors';
+import { parseImportedTheme } from '@/lib/theme/importedThemes';
+import { applyCustomColors, normalizeCustomColor, type CustomColorField } from '@/lib/theme/customColors';
+import { readThemeLibraryCache, resolveThemeLibrary, themeLibraryCacheKey, writeThemeLibraryCache } from '@/lib/theme/themeLibrary';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
   themes,
@@ -148,9 +149,13 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
   const [preferences, setPreferences] = useState<ThemePreferences>(() => buildInitialPreferences(defaultThemeId));
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getInitialSystemPreference());
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
-  const [customColors, setCustomColors] = useState(readCustomColors);
-  const [importedThemes, setImportedThemes] = useState<Theme[]>(readImportedThemes);
-  const [pendingImportedTheme, setPendingImportedTheme] = useState<string | null>(null);
+  const [themeLibrary, setThemeLibrary] = useState(readThemeLibraryCache);
+  const themeLibraryRef = useRef(themeLibrary);
+  const { colors: customColors, themes: importedThemes } = themeLibrary;
+  const applyThemeLibrary = useCallback((library: typeof themeLibrary) => {
+    themeLibraryRef.current = library;
+    setThemeLibrary(library);
+  }, []);
   const [developmentThemes, setDevelopmentThemes] = useState<Theme[]>([]);
   const [embeddedBootstrapTheme] = useState<Theme | null>(() => readEmbeddedCurrentTheme());
   const [embeddedSyncedTheme, setEmbeddedSyncedTheme] = useState<Theme | null>(null);
@@ -192,7 +197,9 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
     developmentThemes.forEach(add);
     themes.forEach(add);
 
-    return merged.map((theme) => applyCustomColors(theme, customColors[theme.metadata.id]));
+    // Parent payloads already contain the resolved palette. Never tint them twice.
+    return merged.map((theme) => theme === embeddedSyncedTheme || theme === embeddedBootstrapTheme
+      ? theme : applyCustomColors(theme, customColors[theme.metadata.id]));
   }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, customColors, importedThemes]);
 
   useEffect(() => {
@@ -292,9 +299,10 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     customThemesRequestRef.current += 1;
     setCustomThemes([]);
+    applyThemeLibrary(readThemeLibraryCache());
     setCustomThemesLoading(false);
     void reloadCustomThemes();
-  }), [reloadCustomThemes]);
+  }), [reloadCustomThemes, applyThemeLibrary]);
 
   const updateBrowserChrome = useCallback((theme: Theme) => {
     if (typeof document === 'undefined') {
@@ -531,11 +539,16 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
     return () => window.removeEventListener('message', handleMessage);
   }, [applyIncomingThemeSync]);
 
-  const persistThemePreferences = useCallback((next: ThemePreferences) => {
-    if (passiveTransparent || receivesParentThemeSync) return;
+  const persistThemePreferences = useCallback(async (next: ThemePreferences, library = themeLibraryRef.current) => {
+    if (passiveTransparent || receivesParentThemeSync) return false;
 
-    const lightTheme = ensureThemeById(next.lightThemeId, 'light');
-    const darkTheme = ensureThemeById(next.darkThemeId, 'dark');
+    const resolve = (id: string, variant: 'light' | 'dark') => {
+      const theme = [...library.themes, ...customThemes, ...developmentThemes, ...themes]
+        .find((candidate) => candidate.metadata.id === id && candidate.metadata.variant === variant) ?? fallbackThemeForVariant(variant);
+      return applyCustomColors(theme, library.colors[theme.metadata.id]);
+    };
+    const lightTheme = resolve(next.lightThemeId, 'light');
+    const darkTheme = resolve(next.darkThemeId, 'dark');
     const resolvedTheme = next.themeMode === 'light'
       ? lightTheme
       : next.themeMode === 'dark'
@@ -544,7 +557,8 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
           ? darkTheme
           : lightTheme;
 
-    void updateDesktopSettings({
+    return updateDesktopSettings({
+      themeLibrary: library,
       themeId: resolvedTheme.metadata.id,
       themeVariant: resolvedTheme.metadata.variant,
       useSystemTheme: next.themeMode === 'system',
@@ -555,7 +569,7 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
       splashBgDark: darkTheme.colors.surface.background,
       splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [ensureThemeById, receivesParentThemeSync, systemPrefersDark, passiveTransparent]);
+  }, [customThemes, developmentThemes, receivesParentThemeSync, systemPrefersDark, passiveTransparent]);
 
   useEffect(() => {
     if (passiveTransparent || receivesParentThemeSync || !isDesktopShell) {
@@ -576,6 +590,8 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
       if (!detail) {
         return;
       }
+
+      applyThemeLibrary(resolveThemeLibrary(detail.themeLibrary));
 
       setPreferences((prev) => {
         let nextMode = prev.themeMode;
@@ -616,7 +632,7 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
 
     window.addEventListener('varin:settings-synced', handleSettingsSynced);
     return () => window.removeEventListener('varin:settings-synced', handleSettingsSynced);
-  }, [receivesParentThemeSync]);
+  }, [receivesParentThemeSync, applyThemeLibrary]);
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {
     if (passiveTransparent || preferences.themeMode === mode) {
@@ -672,63 +688,78 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
   const setCustomColor = useCallback((themeId: string, field: CustomColorField, value: string) => {
     const color = normalizeCustomColor(value);
     if (!color || passiveTransparent || receivesParentThemeSync) return;
-    setCustomColors((previous) => {
-      const next = { ...previous, [themeId]: { ...previous[themeId], [field]: color } };
-      writeCustomColors(next);
-      return next;
-    });
-  }, [passiveTransparent, receivesParentThemeSync]);
+    const previous = themeLibraryRef.current;
+    const next = { ...previous, colors: { ...previous.colors, [themeId]: { ...previous.colors[themeId], [field]: color } } };
+    applyThemeLibrary(next);
+    void persistThemePreferences(preferences, next);
+  }, [applyThemeLibrary, persistThemePreferences, preferences, passiveTransparent, receivesParentThemeSync]);
 
   const resetCustomColors = useCallback((themeId: string) => {
     if (passiveTransparent || receivesParentThemeSync) return;
-    setCustomColors((previous) => {
-      const next = { ...previous };
-      delete next[themeId];
-      writeCustomColors(next);
-      return next;
-    });
-  }, [passiveTransparent, receivesParentThemeSync]);
+    const previous = themeLibraryRef.current;
+    const colors = { ...previous.colors };
+    delete colors[themeId];
+    const next = { ...previous, colors };
+    applyThemeLibrary(next);
+    void persistThemePreferences(preferences, next);
+  }, [applyThemeLibrary, persistThemePreferences, preferences, passiveTransparent, receivesParentThemeSync]);
+
+  useEffect(() => {
+    if (!passiveTransparent && !receivesParentThemeSync) writeThemeLibraryCache(themeLibrary);
+  }, [themeLibrary, passiveTransparent, receivesParentThemeSync]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === CUSTOM_COLORS_STORAGE_KEY) setCustomColors(readCustomColors());
-      if (event.key === IMPORTED_THEMES_STORAGE_KEY) setImportedThemes(readImportedThemes());
+      if (event.key === themeLibraryCacheKey()) applyThemeLibrary(readThemeLibraryCache());
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  }, [applyThemeLibrary]);
 
-  const importTheme = useCallback((raw: string) => {
+  const importTheme = useCallback(async (raw: string) => {
     if (passiveTransparent || receivesParentThemeSync) throw new Error('unavailable');
+    const runtimeKey = getRuntimeKey();
     const theme = parseImportedTheme(raw);
-    const next = [...importedThemes.filter((item) => item.metadata.id !== theme.metadata.id), theme];
-    writeImportedThemes(next);
-    setImportedThemes(next);
-    setPendingImportedTheme(theme.metadata.id);
-  }, [importedThemes, passiveTransparent, receivesParentThemeSync]);
-
-  useEffect(() => {
-    if (!pendingImportedTheme) return;
-    const theme = availableThemes.find((item) => item.metadata.id === pendingImportedTheme);
-    if (!theme) return;
+    const library = themeLibraryRef.current;
+    // Reimport replaces the definition, including any previously applied color overrides.
+    const colors = { ...library.colors };
+    delete colors[theme.metadata.id];
+    const nextLibrary = { themes: [...library.themes.filter((item) => item.metadata.id !== theme.metadata.id), theme], colors };
     const next = { ...preferences, themeMode: theme.metadata.variant,
       ...(theme.metadata.variant === 'light' ? { lightThemeId: theme.metadata.id } : { darkThemeId: theme.metadata.id }) };
+    applyThemeLibrary(nextLibrary);
     setPreferences(next);
-    persistThemePreferences(next);
-    setPendingImportedTheme(null);
-  }, [availableThemes, pendingImportedTheme, persistThemePreferences, preferences]);
+    if (!await persistThemePreferences(next, nextLibrary)) {
+      if (runtimeKey === getRuntimeKey() && themeLibraryRef.current === nextLibrary) {
+        applyThemeLibrary(library);
+        setPreferences((current) => current === next ? preferences : current);
+      }
+      throw new Error('storage');
+    }
+    if (runtimeKey !== getRuntimeKey()) throw new Error('storage');
+  }, [applyThemeLibrary, persistThemePreferences, preferences, passiveTransparent, receivesParentThemeSync]);
 
-  const removeImportedTheme = useCallback((themeId: string) => {
+  const removeImportedTheme = useCallback(async (themeId: string) => {
     if (passiveTransparent || receivesParentThemeSync) return;
-    const nextThemes = importedThemes.filter((item) => item.metadata.id !== themeId);
-    writeImportedThemes(nextThemes);
-    setImportedThemes(nextThemes);
+    const runtimeKey = getRuntimeKey();
+    const library = themeLibraryRef.current;
+    const colors = { ...library.colors };
+    delete colors[themeId];
+    const nextLibrary = { themes: library.themes.filter((item) => item.metadata.id !== themeId), colors };
     const next = { ...preferences,
       lightThemeId: preferences.lightThemeId === themeId ? DEFAULT_LIGHT_ID : preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId === themeId ? DEFAULT_DARK_ID : preferences.darkThemeId };
+    applyThemeLibrary(nextLibrary);
     setPreferences(next);
-    persistThemePreferences(next);
-  }, [importedThemes, passiveTransparent, receivesParentThemeSync, preferences, persistThemePreferences]);
+    if (!await persistThemePreferences(next, nextLibrary)) {
+      if (runtimeKey === getRuntimeKey() && themeLibraryRef.current === nextLibrary) {
+        applyThemeLibrary(library);
+        setPreferences((current) => current === next ? preferences : current);
+      }
+      throw new Error('storage');
+    }
+    if (runtimeKey !== getRuntimeKey()) throw new Error('storage');
+  }, [applyThemeLibrary, persistThemePreferences, preferences, passiveTransparent, receivesParentThemeSync]);
 
   const value: ThemeContextValue = {
     currentTheme,

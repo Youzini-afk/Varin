@@ -11,8 +11,8 @@ export interface ThemeContextValue {
   setCustomColor: (themeId: string, field: CustomColorField, value: string) => void;
   resetCustomColors: (themeId: string) => void;
   importedThemes: Theme[];
-  importTheme: (raw: string) => void;
-  removeImportedTheme: (themeId: string) => void;
+  importTheme: (raw: string) => Promise<void>;
+  removeImportedTheme: (themeId: string) => Promise<void>;
   reloadCustomThemes: () => Promise<void>;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;

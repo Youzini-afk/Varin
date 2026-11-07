@@ -1,3 +1,5 @@
+import { createVarinMonacoTheme } from '@/lib/monaco/theme';
+import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { describe, expect, test } from 'vitest';
 import { getDefaultTheme } from './themes';
 import { parseImportedTheme } from './importedThemes';
@@ -71,4 +73,16 @@ describe('Codex theme compatibility', () => {
       surface: '#fff;}body{display:none', ink: '#000000', accent: '#ff0000',
     } }))).toThrow('format');
   });
+});
+
+test('carries a separate dark code palette through editors and prose in a light Codex theme', () => {
+  const theme = parseImportedTheme(JSON.stringify({ name: 'Mixed', chromeTheme: { surface: '#ffffff', ink: '#222222' },
+    colors: { 'editor.background': '#111111', 'editor.foreground': '#eeeeee' },
+    settings: [{ scope: 'keyword', settings: { foreground: '#cc88aa' } }] }));
+  const editor = createVarinMonacoTheme(theme);
+  expect(theme.metadata.variant).toBe('light');
+  expect(editor.colors['editor.background']).toBe('#111111');
+  expect(editor.colors['editor.foreground']).toBe('#eeeeee');
+  expect(theme.colors.markdown?.codeBackground).toBe('#111111');
+  expect(getMarkdownSyntaxVars(theme, 'prose')['--md-syntax-keyword']).toBe('#cc88aa');
 });

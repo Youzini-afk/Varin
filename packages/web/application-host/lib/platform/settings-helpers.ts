@@ -1,4 +1,4 @@
-import { isChatContentWidth } from '@varin/application-client';
+import { normalizeThemeLibrary, isChatContentWidth } from '@varin/application-client';
 import { normalizeOutboundNetwork } from '../harness/egress-settings.js';
 
 export type SettingsRecord = Record<string, unknown>;
@@ -166,6 +166,12 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
             typeof provider[key] === 'string' && provider[key].trim() ? [[key, provider[key].trim()]] : [])),
         };
       });
+    }
+
+    if (candidate.themeLibrary !== undefined) {
+      const library = normalizeThemeLibrary(candidate.themeLibrary);
+      if (!library) throw new Error('Invalid theme library');
+      result.themeLibrary = library;
     }
 
     if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {

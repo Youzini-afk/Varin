@@ -103,3 +103,13 @@ it('retains previously dropped model-picker preferences together and supports cl
   expect(helpers.sanitizeSettingsUpdate({ hiddenModels: [{ providerID: 'anthropic' }, { modelID: 'gpt-5' }, null, { providerID: ' ', modelID: 'x' }] }))
     .toEqual({ hiddenModels: [] });
 });
+
+it('persists imported definitions and colors with the selected theme in one settings update', () => {
+  const appearance = { lightThemeId: 'imported-Paper', themeLibrary: {
+    themes: [{ metadata: { id: 'imported-Paper' }, colors: { primary: { base: '#aa5533' } } }],
+    colors: { 'imported-Paper': { accent: '#AABBCC' } },
+  } };
+  expect(roundTrip(appearance)).toMatchObject({ ...appearance, themeLibrary: {
+    ...appearance.themeLibrary, colors: { 'imported-Paper': { accent: '#aabbcc' } },
+  } });
+});

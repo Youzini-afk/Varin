@@ -7,10 +7,11 @@ folder and reload it without restarting the application.
 
 In **Settings → Appearance → Import a theme**, copy the active theme as JSON, paste a
 shared JSON theme and choose **Import and apply**, or choose a JSON file. Imported themes
-are stored in this browser or desktop profile, can be selected like other themes, and can
-be removed from the same panel. This device-local library is separate from the Host
-`themes` directory described below. The color controls save per-theme overrides locally;
-copying the active theme includes the currently applied colors.
+are saved with the selected theme and per-theme color overrides in the current Host's
+shared appearance settings. Other clients connected to that Host receive the definitions
+along with the selection. A Host-scoped local cache speeds up first paint; it is not the
+source of truth. The Host's `themes` directory below remains available for themes managed
+as files. Copying the active theme includes its currently applied colors.
 
 The importer accepts Codex exported theme JSON, complete Varin theme JSON, or this compact palette format:
 

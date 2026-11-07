@@ -55,6 +55,7 @@ export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 
 export type DesktopSettings = {
+  themeLibrary?: import('@varin/application-client').ThemeLibrary;
   themeId?: string;
   useSystemTheme?: boolean;
   themeVariant?: 'light' | 'dark';

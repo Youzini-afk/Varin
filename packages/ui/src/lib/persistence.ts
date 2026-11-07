@@ -1,3 +1,4 @@
+import { normalizeThemeLibrary } from '@varin/application-client';
 import { DEFAULT_LOCAL_STT_MODEL, isChatContentWidth } from '@varin/application-client';
 import { isWorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
@@ -912,6 +913,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   const candidate = payload as Record<string, unknown>;
   const result: DesktopSettings = {};
+
+  const themeLibrary = normalizeThemeLibrary(candidate.themeLibrary);
+  if (themeLibrary) result.themeLibrary = themeLibrary;
 
   if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
     result.themeId = candidate.themeId;

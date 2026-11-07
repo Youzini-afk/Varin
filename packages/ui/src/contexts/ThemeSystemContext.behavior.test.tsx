@@ -10,7 +10,7 @@ import { VARIN_THEME_STORAGE_KEY } from '@/lib/theme/themeStorage';
 import { resetEmbeddedSessionChatCache } from '@/components/layout/contextPanelEmbeddedChat';
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), native: vi.fn(), persist: vi.fn(), pointer: vi.fn(), ink: vi.fn(), runtimeKey: 'a', endpoint: undefined as undefined | ((detail: { runtimeKey: string; previousRuntimeKey: string }) => void) }));
-vi.mock('@varin/application-client', () => ({ runtimeFetch: mocks.fetch, getRuntimeKey: () => mocks.runtimeKey, subscribeRuntimeEndpointChanged: (callback: typeof mocks.endpoint) => { mocks.endpoint = callback; return () => { mocks.endpoint = undefined; }; } }));
+vi.mock('@varin/application-client', async (importOriginal) => ({ ...await importOriginal<typeof import('@varin/application-client')>(), runtimeFetch: mocks.fetch, getRuntimeKey: () => mocks.runtimeKey, subscribeRuntimeEndpointChanged: (callback: typeof mocks.endpoint) => { mocks.endpoint = callback; return () => { mocks.endpoint = undefined; }; } }));
 vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => true, isDesktopLocalOriginActive: () => true }));
 vi.mock('@/lib/desktopNative', () => ({ setDesktopWindowTheme: mocks.native }));
 vi.mock('@/lib/persistence', () => ({ updateDesktopSettings: mocks.persist }));
@@ -26,11 +26,14 @@ function Consumer() { current = useThemeSystem(); return <p>{current.currentThem
 const mount = async (passive = true) => { await act(async () => root.render(<ThemeSystemProvider passiveTransparent={passive}><Consumer /></ThemeSystemProvider>)); };
 const settings = async (detail: object) => { await act(async () => window.dispatchEvent(new window.CustomEvent('varin:settings-synced', { detail }))); };
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.runtimeKey = 'a'; mocks.fetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ themes: [] }) });
+  vi.clearAllMocks(); mocks.persist.mockResolvedValue(true); mocks.runtimeKey = 'a'; mocks.fetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ themes: [] }) });
   mocks.ink.mockImplementation((apply: () => void) => apply());
   const { document, window } = parseHTML('<html><head></head><body style="background-color:transparent"><div id="root"></div></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  stored = state(); storage = { getItem: vi.fn(() => stored), setItem: vi.fn() };
+  stored = state();
+  const cache = new Map<string, string>();
+  storage = { getItem: vi.fn((key: string) => key === VARIN_THEME_STORAGE_KEY ? stored : cache.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => { cache.set(key, value); }) };
   Object.defineProperties(window, {
     location: { configurable: true, value: { search: '', origin: 'http://localhost' } },
     localStorage: { configurable: true, value: storage },
@@ -114,10 +117,10 @@ it('applies, saves and resets custom colors for the selected theme', async () =>
   await act(async () => current.setCustomColor(themeId, 'background', '#f5f3ee'));
   expect(current.currentTheme.colors.surface.background).toBe('#f5f3ee');
   expect(document.getElementById('opencode-theme-variables')?.textContent).toContain('--surface-background: #f5f3ee');
-  expect(storage.setItem).toHaveBeenCalledWith('varin.custom-colors.v1', JSON.stringify({ [themeId]: { background: '#f5f3ee' } }));
+  expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ themeLibrary: { themes: [], colors: { [themeId]: { background: '#f5f3ee' } } } }));
   await act(async () => current.resetCustomColors(themeId));
   expect(current.currentTheme.colors.surface.background).toBe(initial);
-  expect(storage.setItem).toHaveBeenCalledWith('varin.custom-colors.v1', '{}');
+  expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ themeLibrary: { themes: [], colors: {} } }));
 });
 
 it('imports a copied palette, applies it and can remove it', async () => {
@@ -128,8 +131,48 @@ it('imports a copied palette, applies it and can remove it', async () => {
   await act(async () => current.importTheme(palette));
   expect(current.currentTheme.metadata.id).toBe('imported-Paper');
   expect(current.currentTheme.colors.surface.background).toBe('#f5f3ee');
-  expect(storage.setItem).toHaveBeenCalledWith('varin.imported-themes.v1', expect.any(String));
+  expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ lightThemeId: 'imported-Paper',
+    themeLibrary: { themes: [expect.objectContaining({ metadata: expect.objectContaining({ id: 'imported-Paper' }) })], colors: {} } }));
   await act(async () => current.removeImportedTheme('imported-Paper'));
   expect(current.currentTheme.metadata.id).not.toBe('imported-Paper');
-  expect(storage.setItem).toHaveBeenCalledWith('varin.imported-themes.v1', '[]');
+  expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ themeLibrary: { themes: [], colors: {} } }));
+});
+
+it('restores an imported definition and overrides from shared settings, scoped to the Host', async () => {
+  await mount(false);
+  const theme = { ...getDefaultTheme(false), metadata: { ...getDefaultTheme(false).metadata, id: 'imported-Shared' } };
+  await settings({ useSystemTheme: false, themeVariant: 'light', lightThemeId: theme.metadata.id,
+    themeLibrary: { themes: [theme], colors: { [theme.metadata.id]: { accent: '#aa5533' } } } });
+  expect(current.currentTheme.colors.primary.base).toBe('#aa5533');
+  expect(current.importedThemes).toHaveLength(1);
+  await act(async () => { mocks.runtimeKey = 'b'; mocks.endpoint?.({ runtimeKey: 'b', previousRuntimeKey: 'a' }); });
+  expect(current.importedThemes).toEqual([]);
+  expect(current.customColors).toEqual({});
+});
+
+it('keeps the current theme when saving an import fails', async () => {
+  await mount(false);
+  const original = current.currentTheme;
+  mocks.persist.mockResolvedValue(false);
+  await act(async () => {
+    await expect(current.importTheme(JSON.stringify(original))).rejects.toThrow('storage');
+  });
+  expect(current.currentTheme).toEqual(original);
+  expect(current.importedThemes).toEqual([]);
+});
+
+it('does not restore the imported selection over a choice made while its save is pending', async () => {
+  await mount(false);
+  let finish!: (value: boolean) => void;
+  mocks.persist.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+  let importing!: Promise<void>;
+  await act(async () => {
+    importing = current.importTheme(JSON.stringify({ name: 'Pending', variant: 'light',
+      colors: { accent: '#336699', background: '#f5f3ee', foreground: '#222222' } }));
+  });
+  await act(async () => current.setLightThemePreference('varin-light'));
+  expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ lightThemeId: 'varin-light',
+    themeLibrary: expect.objectContaining({ themes: [expect.objectContaining({ metadata: expect.objectContaining({ id: 'imported-Pending' }) })] }) }));
+  await act(async () => { finish(true); await importing; });
+  expect(current.lightThemeId).toBe('varin-light');
 });

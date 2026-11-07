@@ -9,7 +9,7 @@ describe('Varin Monaco theme projection', () => {
     const projected = createVarinMonacoTheme(theme);
 
     expect(projected.base).toBe(prefersDark ? 'vs-dark' : 'vs');
-    expect(projected.colors['editor.background']).toBe(theme.colors.surface.background);
+    expect(projected.colors['editor.background']).toBe(theme.colors.syntax.base.background);
     expect(projected.colors['editor.foreground']).toBe(theme.colors.syntax.base.foreground);
     expect(projected.colors['editor.selectionBackground']).toBe(theme.colors.interactive.selection);
     expect(projected.colors['editorError.foreground']).toBe(theme.colors.status.error);

@@ -318,8 +318,8 @@ const buildColors = (theme: Theme): Record<string, string> => {
   const diffRemovedBg = pick(hl.diffRemovedBackground, st.errorBackground);
 
   return {
-    'editor.background': s.background,
-    'editor.foreground': s.foreground,
+    'editor.background': base.background,
+    'editor.foreground': base.foreground,
     'editor.hoverHighlightBackground': pick(i.hover, s.subtle),
     'editor.lineHighlightBackground': s.muted,
     'editor.selectionBackground': i.selection,

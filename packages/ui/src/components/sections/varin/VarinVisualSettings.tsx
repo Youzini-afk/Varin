@@ -5,6 +5,8 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { normalizeCustomColor, type CustomColorField } from '@/lib/theme/customColors';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
+import { SettingsDisclosure } from '@/components/sections/shared/SettingsDisclosure';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Input } from '@/components/ui/input';
@@ -254,14 +256,16 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const [themesReloading, setThemesReloading] = React.useState(false);
     const [themeJson, setThemeJson] = React.useState('');
     const [themeTransferMessage, setThemeTransferMessage] = React.useState('');
-    const handleThemeImport = (raw: string) => {
+    const [themeImporting, setThemeImporting] = React.useState(false);
+    const handleThemeImport = async (raw: string) => {
+        setThemeImporting(true);
         try {
-            importTheme(raw);
+            await importTheme(raw);
             setThemeTransferMessage(t('settings.varin.visual.field.themeImported'));
         } catch (error) {
-            setThemeTransferMessage(error instanceof Error && ['json', 'format', 'unsafe', 'size'].includes(error.message)
+            setThemeTransferMessage(error instanceof Error && ['json', 'format', 'unsafe'].includes(error.message)
                 ? t('settings.varin.visual.field.themeInvalid') : t('settings.varin.visual.field.themeStorageError'));
-        }
+        } finally { setThemeImporting(false); }
     };
     const handleCopyTheme = async () => {
         const json = JSON.stringify(currentTheme, null, 2);
@@ -557,39 +561,37 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 label={t('settings.varin.visual.field.selectDarkThemeAria')} />
                                         </SettingsFieldRow>
 
-                                        <details className="rounded-lg border border-border/60 p-3">
-                                            <summary className="cursor-pointer font-medium">{t('settings.varin.visual.field.themeTransfer')}</summary>
+                                        <SettingsDisclosure title={t('settings.varin.visual.field.themeTransfer')}>
                                             <div className="mt-3 flex flex-wrap gap-2">
-                                                <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
-                                                    onClick={() => void handleCopyTheme()}>{t('settings.varin.visual.field.copyTheme')}</button>
+                                                <Button type="button" variant="outline" size="sm"
+                                                    onClick={() => void handleCopyTheme()}>{t('settings.varin.visual.field.copyTheme')}</Button>
                                                 <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm">
                                                     {t('settings.varin.visual.field.importThemeFile')}
-                                                    <input type="file" accept="application/json,.json" className="sr-only"
+                                                    <input type="file" accept="application/json,.json" className="sr-only" disabled={themeImporting}
                                                         onChange={(event) => {
                                                             const file = event.currentTarget.files?.[0];
                                                             event.currentTarget.value = '';
                                                             if (!file) return;
-                                                            if (file.size > 1024 * 1024) { setThemeTransferMessage(t('settings.varin.visual.field.themeInvalid')); return; }
                                                             void file.text().then(handleThemeImport).catch(() => setThemeTransferMessage(t('settings.varin.visual.field.themeInvalid')));
                                                         }} />
                                                 </label>
                                             </div>
-                                            <textarea value={themeJson} onChange={(event) => setThemeJson(event.target.value)} rows={5}
+                                            <Textarea value={themeJson} onChange={(event) => setThemeJson(event.target.value)} rows={5}
                                                 aria-label={t('settings.varin.visual.field.pasteTheme')}
                                                 placeholder={t('settings.varin.visual.field.pasteTheme')}
                                                 className="mt-3 w-full rounded-md border border-border bg-background p-2 font-mono text-sm" />
                                             <div className="mt-2 flex flex-wrap gap-2">
-                                                <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
-                                                    onClick={() => handleThemeImport(themeJson)}>{t('settings.varin.visual.field.importTheme')}</button>
+                                                <Button type="button" variant="outline" size="sm"
+                                                    disabled={themeImporting || !themeJson.trim()} onClick={() => void handleThemeImport(themeJson)}>{t('settings.varin.visual.field.importTheme')}</Button>
                                                 {importedThemes.some((item) => item.metadata.id === currentTheme.metadata.id) &&
-                                                    <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm"
-                                                        onClick={() => {
-                                                            try { removeImportedTheme(currentTheme.metadata.id); setThemeTransferMessage(t('settings.varin.visual.field.themeRemoved')); }
+                                                    <Button type="button" variant="outline" size="sm"
+                                                        disabled={themeImporting} onClick={async () => {
+                                                            try { await removeImportedTheme(currentTheme.metadata.id); setThemeTransferMessage(t('settings.varin.visual.field.themeRemoved')); }
                                                             catch { setThemeTransferMessage(t('settings.varin.visual.field.themeStorageError')); }
-                                                        }}>{t('settings.varin.visual.field.removeImportedTheme')}</button>}
+                                                        }}>{t('settings.varin.visual.field.removeImportedTheme')}</Button>}
                                             </div>
                                             {themeTransferMessage && <p role="status" className="mt-2 typography-meta text-muted-foreground">{themeTransferMessage}</p>}
-                                        </details>
+                                        </SettingsDisclosure>
 
                                         <div className="pt-3">
                                             <p className="typography-settings-link font-medium">{t('settings.varin.visual.field.customColors')}</p>

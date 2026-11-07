@@ -24,3 +24,14 @@ describe('custom theme colors', () => {
     expect(normalizeCustomColor('red')).toBeUndefined();
   });
 });
+
+test('keeps base, hover and active roles distinct when the source palette repeats a color', () => {
+  const theme = structuredClone(getDefaultTheme(true));
+  theme.colors.primary.hover = theme.colors.primary.base;
+  theme.colors.primary.active = theme.colors.primary.base;
+  const result = applyCustomColors(theme, { accent: '#336699' });
+  expect(result.colors.primary.base).toBe('#336699');
+  expect(result.colors.primary.hover).not.toBe(result.colors.primary.base);
+  expect(result.colors.primary.active).not.toBe(result.colors.primary.hover);
+  expect(result.colors.status).toEqual(theme.colors.status);
+});

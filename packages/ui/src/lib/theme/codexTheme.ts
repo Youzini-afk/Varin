@@ -66,29 +66,36 @@ export function parseCodexTheme(input: Record<string, unknown>): Theme | undefin
   const fallback = getDefaultTheme(variant === 'dark');
   const accent = colorFrom(chrome.accent, editor['button.background'], editor['focusBorder']) ?? fallback.colors.primary.base;
   const theme = applyCustomColors(fallback, { accent, background, foreground });
+  const editorBackground = colorFrom(editor['editor.background']) ?? background;
+  const codePalette = getDefaultTheme(variantFromBackground(editorBackground) === 'dark').colors.syntax;
   const semantic = record(chrome.semanticColors) ?? {};
   const added = hex(semantic.diffAdded); const removed = hex(semantic.diffRemoved);
-  const highlights = { ...theme.colors.syntax.highlights,
+  const highlights = { ...codePalette.highlights,
     ...(added ? { diffAdded: added, diffAddedBackground: `${added}26` } : {}),
     ...(removed ? { diffRemoved: removed, diffRemovedBackground: `${removed}26` } : {}),
     ...(hex(editor['editorLineNumber.foreground']) ? { lineNumber: hex(editor['editorLineNumber.foreground'])! } : {}),
     ...(hex(editor['editorLineNumber.activeForeground']) ? { lineNumberActive: hex(editor['editorLineNumber.activeForeground'])! } : {}),
   };
-  const syntaxBase = syntaxColors(input.settings, { ...theme.colors.syntax.base,
-    background: colorFrom(editor['editor.background']) ?? background,
+  const syntaxBase = syntaxColors(input.settings, { ...codePalette.base,
+    background: editorBackground,
     foreground: colorFrom(editor['editor.foreground']) ?? foreground });
   const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : 'Codex theme';
   const fonts = record(chrome.fonts) ?? {};
   const safeFont = (value: unknown): string | undefined =>
-    typeof value === 'string' && value.length <= 256 && !/[{};<>\\\r\n]/.test(value) && !/url\s*\(|@import/i.test(value) ? value : undefined;
+    typeof value === 'string' && !/[{};<>\\\r\n]/.test(value) && !/url\s*\(|@import/i.test(value) ? value : undefined;
   const uiFont = safeFont(fonts.ui); const codeFont = safeFont(fonts.code);
   return { ...theme,
     config: { ...theme.config, fonts: { ...theme.config?.fonts,
       ...(uiFont ? { sans: uiFont } : {}), ...(codeFont ? { mono: codeFont } : {}) } },
     metadata: { ...theme.metadata, id: name, name, variant, description: 'Imported from a Codex theme', tags: [variant, 'codex-import'] },
     colors: { ...theme.colors,
+      markdown: { ...theme.colors.markdown, codeBackground: syntaxBase.background,
+        codeForeground: syntaxBase.foreground, codeComment: syntaxBase.comment, codeString: syntaxBase.string,
+        codeKeyword: syntaxBase.keyword, codeNumber: syntaxBase.number, codeFunction: syntaxBase.function,
+        codeVariable: syntaxBase.variable, codeProperty: syntaxBase.variable, codeType: syntaxBase.type,
+        codeOperator: syntaxBase.operator },
       syntax: { ...theme.colors.syntax, base: syntaxBase, highlights,
-        tokens: { ...theme.colors.syntax.tokens, commentDoc: syntaxBase.comment, stringEscape: syntaxBase.string,
+        tokens: { ...codePalette.tokens, commentDoc: syntaxBase.comment, stringEscape: syntaxBase.string,
           functionCall: syntaxBase.function, method: syntaxBase.function, className: syntaxBase.type,
           variableLocal: syntaxBase.variable, variableProperty: syntaxBase.variable } },
       interactive: { ...theme.colors.interactive,
