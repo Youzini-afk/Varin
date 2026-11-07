@@ -274,7 +274,7 @@ import { EMPTY_GRAMMAR_PACK_MANIFEST, loadCommittedGrammarPackManifest } from '.
 import { createGrammarStore } from './lib/structure/grammar-store.js';
 import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
-import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
+import { createWebFetch } from './lib/harness/web-fetch.js';
 import { createDocumentReader } from './lib/harness/document-reading.js';
 import { createPdfEngine } from './lib/harness/pdf-engine.js';
 
@@ -282,7 +282,6 @@ import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { createSearchConnectionSettings } from './lib/harness/search-connection-settings.js';
 
-import { checkDesktopHttpUrl, checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { createEgressRuntime } from './lib/harness/egress.js';
 import { readEgressHostConfiguration } from './lib/harness/egress-settings.js';
 import { registerEgressRoutes } from './lib/harness/egress-routes.js';
@@ -1375,13 +1374,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // and wired into the broker event stream alongside the recovery turn
   // coordinator.
 
-  // Web fetch service — SSRF-guarded, domain policy from workspace config
+  // Web fetch service — HTTP(S), with explicit domain policy from workspace config.
   const serviceCredentials = createServiceCredentialStore(VARIN_DATA_DIR);
-  const ssrfPolicy: SsrfPolicy = { check: options.desktopNetworkFetch ? checkDesktopHttpUrl : checkSsrf, isSameHost };
-  // Single outbound egress authority: proxy/NO_PROXY policy + connect-path
-  // SSRF classification shared by web.fetch and web.search providers.
+  // All HTTP(S) consumers use the executing Host's network, including local
+  // and Docker services. Proxy/NO_PROXY routing is shared across deployments.
   const egressRuntime = createEgressRuntime({
-    allowLocalTargets: Boolean(options.desktopNetworkFetch),
     ...(options.desktopNetworkFetch ? { systemFetch: options.desktopNetworkFetch } : {}),
     getHostConfiguration: async () => {
       const document = await readSettingsFromDisk();
@@ -1419,14 +1416,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     command: () => process.env.VARIN_LIBREOFFICE_COMMAND });
   const officeReader = createOfficeReader({ materials: materialStore, pdf: documentReader, renderer: officeRenderer });
   const webFetchService = createWebFetch({
-    ssrf: ssrfPolicy,
     egress: egressRuntime,
     documentReader,
     ...(options.browser?.renderPage ? { renderer: request => options.browser!.renderPage!(request), rendererId: options.browser.browserId } : {}),
     materials: materialStore,
   });
-  // Scholarly APIs share the same egress authority — proxies and SSRF
-  // classification apply identically to every outbound consumer.
+  // Scholarly APIs share the same Host network and proxy routing.
   const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch });
   // ── Phase 2: Knowledge store, memory agent, observers ────────────
   // Knowledge stores are opened lazily per workspace and cached.

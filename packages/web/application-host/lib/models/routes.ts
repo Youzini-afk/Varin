@@ -11,8 +11,6 @@ import type { ModelRetryFailure } from '@varin/protocol';
 const networkMessages: Record<EgressErrorKind, string> = {
   dns: 'Model endpoint DNS lookup failed.',
   'scheme-denied': 'The Application Host only allows HTTP(S) model endpoints.',
-  'private-network': 'This Application Host blocks model connections to local or private network addresses.',
-  'special-purpose': 'This Application Host blocks model connections to special-purpose network addresses.',
   'proxy-unavailable': 'The Application Host could not connect to its configured proxy.',
   'proxy-auth': 'The Application Host proxy authentication failed.',
   'proxy-config-invalid': 'The Application Host proxy configuration is invalid.',
@@ -75,7 +73,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     } catch (error) {
       if (error instanceof ModelConfigurationError) response.status(error.status).json({ code: error.code, message: error.message });
       else if (error instanceof EgressError) {
-        const blocked = ['scheme-denied', 'private-network', 'special-purpose'].includes(error.kind);
+        const blocked = error.kind === 'scheme-denied';
         response.status(blocked ? 403 : 503).json({ code: `model-egress-${error.kind}`, message: networkMessages[error.kind] });
       } else response.status(503).json({ code: 'model-settings-unavailable', message: 'The model settings request could not be completed.' });
     } finally { response.removeListener('close', close); }

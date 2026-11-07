@@ -16,7 +16,6 @@ import { createExtensionTools, type ExtensionToolScope } from './extension-tool-
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { createEgressRuntime } from '../harness/egress.js';
-import { checkSsrf, isSameHost } from '../harness/ssrf-policy.js';
 import { createWebFetch } from '../harness/web-fetch.js';
 import { createWebMaterialStore } from '../harness/web-materials.js';
 import { createDocumentReader } from '../harness/document-reading.js';
@@ -61,7 +60,7 @@ async function initialize(frame: Record<string, unknown>) {
   const access = createMaterialStorageAccess({ kernel, storage });
   materials = createWebMaterialStore(access);
   const documentReader = createDocumentReader({ materials });
-  const webFetch = createWebFetch({ ssrf: { check: checkSsrf, isSameHost }, egress, materials, documentReader });
+  const webFetch = createWebFetch({ egress, materials, documentReader });
   web = createWebRuntime({ runtime, webFetch, documentReader, materials, fetch: egress.fetch as typeof globalThis.fetch,
     readAuth: () => { throw new Error('Unrelated malformed auth.json must not block the default public search'); }, settings: async source => {
       assert.equal(source, null);

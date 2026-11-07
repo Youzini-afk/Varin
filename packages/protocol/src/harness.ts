@@ -199,7 +199,7 @@ export type FetchResult =
   | { status: "structure-unsupported"; snapshotId: string; kind: string }
   | { status: "position-not-found"; snapshotId: string; detail: string }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
-  | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" | "special-purpose" }
+  | { status: "blocked"; url: string; reason: "domain-blocked" | "scheme" }
   | { status: "empty-shell"; url: string; hint: string }
   | { status: "renderer-unavailable"; url: string; reason: "disabled" | "unsupported" }
   | { status: "page-image-unavailable"; snapshotId: string; page?: number; reason: string }
@@ -214,8 +214,6 @@ export type FetchResult =
 export type FetchErrorClass =
   | "dns"
   | "scheme-denied"
-  | "private-network"
-  | "special-purpose"
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"

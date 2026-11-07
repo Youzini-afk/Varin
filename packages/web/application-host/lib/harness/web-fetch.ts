@@ -1,16 +1,11 @@
 import { TextDecoder } from "node:util";
 import { selectWebPageText, rankWebPagePassages, validateWebPassageRanges, webPageBlocks, webPageEndLine } from "@varin/protocol";
 import type { FetchResult, HarnessWebDomainPolicy, WebFetchRequest, WebReadPosition, WebSnapshotStructure, WebAcquisition, WebTextRange, WebPageSelection, WebPassageCandidate, WebPassageRange, WebSnapshotRef, BrowserRenderRequest, BrowserRenderResult } from "@varin/protocol";
-import { isSameHost } from "./ssrf-policy.js";
+import { checkHttpUrl, isSameHost } from "./http-target.js";
 import { EGRESS_TIMEOUT, EgressError, type EgressRuntime } from "./egress.js";
 import type { WebMaterialStore, WebMaterialAuthority } from "./web-materials.js";
 import type { AlternateDocumentReader } from "./document-material.js";
 import { createDocumentReader, type DocumentReader, type DocumentReaderContext } from "./document-reading.js";
-
-export interface SsrfPolicy {
-  check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" | "special-purpose" }>;
-  isSameHost(url1: string, url2: string): boolean;
-}
 
 export type DomainPolicy = HarnessWebDomainPolicy;
 
@@ -29,7 +24,6 @@ export type WebPassageSelector = (input: {
 }) => Promise<WebPassageSelectionResult>;
 
 export interface WebFetchDeps {
-  ssrf: SsrfPolicy;
   /** Outbound egress authority; absent keeps the legacy bare-fetch path. */
   egress?: EgressRuntime;
   domainPolicy?: (workspaceId: string) => DomainPolicy;
@@ -639,10 +633,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     while (redirectCount < MAX_REDIRECTS) {
       const redirectDomainCheck = checkDomainPolicy(currentUrl, ctx.workspaceId, ctx.domainPolicy);
       if (redirectDomainCheck.blocked) return { status: "blocked", url: currentUrl, reason: "domain-blocked" };
-      const redirectSsrfCheck = await deps.ssrf.check(currentUrl);
-      if (redirectSsrfCheck.blocked) {
-        return { status: "blocked", url: currentUrl, reason: redirectSsrfCheck.reason ?? "private-network" };
-      }
+      if (checkHttpUrl(currentUrl).blocked) return { status: "blocked", url: currentUrl, reason: "scheme" };
       let response: Response;
       const controller = new AbortController();
       const abortFromCaller = (): void => controller.abort(ctx.signal?.reason);
@@ -679,9 +670,6 @@ export function createWebFetch(deps: WebFetchDeps) {
         }
         if (error instanceof EgressError) {
           finishRequest();
-          if (error.kind === "private-network" || error.kind === "special-purpose") {
-            return { status: "blocked", url, reason: error.kind };
-          }
           if (error.kind === "scheme-denied") {
             return { status: "blocked", url, reason: "scheme" };
           }
@@ -752,8 +740,7 @@ export function createWebFetch(deps: WebFetchDeps) {
             if (budget.remaining === 0 && request.method !== "HEAD") { incomplete = true; throw new Error("Rendered page reached its aggregate download budget"); }
             const target = request.url;
             if (checkDomainPolicy(target, ctx.workspaceId, ctx.domainPolicy).blocked) throw new Error("Rendered request denied by the domain policy");
-            const check = await deps.ssrf.check(target);
-            if (check.blocked) throw new Error(`Rendered request blocked: ${check.reason ?? "private-network"}`);
+            if (checkHttpUrl(target).blocked) throw new Error("Rendered request requires an HTTP(S) URL");
             const signal = AbortSignal.any([controller.signal, ownerSignal]);
             signal.throwIfAborted();
             // The original route is frozen for every resource and redirect.
@@ -772,8 +759,7 @@ export function createWebFetch(deps: WebFetchDeps) {
             return { status: fetched.status, headers, body: body.bytes };
           },
         }), controller.signal);
-        const finalCheck = await deps.ssrf.check(rendered.finalUrl);
-        if (finalCheck.blocked) return { status: "blocked", url: rendered.finalUrl, reason: finalCheck.reason ?? "private-network" };
+        if (checkHttpUrl(rendered.finalUrl).blocked) return { status: "blocked", url: rendered.finalUrl, reason: "scheme" };
         if (checkDomainPolicy(rendered.finalUrl, ctx.workspaceId, ctx.domainPolicy).blocked) return { status: "blocked", url: rendered.finalUrl, reason: "domain-blocked" };
         const htmlBytes = Buffer.from(rendered.html, "utf8");
         const truncated = rendered.truncated || htmlBytes.length > maxBytes;
@@ -911,11 +897,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       return { status: "blocked", url, reason: "domain-blocked" };
     }
 
-    // Check SSRF
-    const ssrfCheck = await deps.ssrf.check(url);
-    if (ssrfCheck.blocked) {
-      return { status: "blocked", url, reason: ssrfCheck.reason ?? "private-network" };
-    }
+    if (checkHttpUrl(url).blocked) return { status: "blocked", url, reason: "scheme" };
 
     const positionSlice = async (result: FetchResult): Promise<FetchResult> => {
       if (result.status !== "ok") return result;

@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Allow local, LAN and Docker-network HTTP(S) targets across Web, Docker and desktop deployments, including model discovery, web acquisition and image reads. Keep proxy routing and explicit domain rules. Fixes the private-network rejection reported in #300.
+- Web、Docker 与桌面端的 HTTP(S) 请求统一支持本机、局域网和 Docker 内网，覆盖模型发现、网页读取与图片获取；保留代理路由及用户明确配置的域名规则，修复 #300 反馈的内网地址拦截。
+
 ## 0.9.39 - 2026-11-07
 
 ### English

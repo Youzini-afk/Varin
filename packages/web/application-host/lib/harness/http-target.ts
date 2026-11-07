@@ -1,26 +1,11 @@
-/**
- * SSRF policy for web fetch — blocks private, loopback, and reserved network ranges.
- *
- * Reuses the same IP classification logic as the preview proxy runtime
- * (lib/preview/proxy-runtime.ts `isBlockedExternalHost`) and tunnel auth
- * (lib/platform/tunnel-auth.ts `isPrivateOrLoopbackIp`), extracted here
- * for use by the harness web fetch service.
- *
- * The URL check is intentionally static: scheme rules and hostname/literal
- * classification only. DNS answers are classified on the actual connection
- * path (see lib/harness/egress.ts `secureLookup`) so the checked result is
- * the same address the socket dials — no check-then-fetch gap. `checkSsrf`
- * therefore never reports a DNS failure as "private-network".
- */
-
-import { lookup } from "node:dns/promises";
+/** HTTP(S) target validation and diagnostic address classification.
+ * Local, private and synthetic addresses use the executing Host's network.
+ * Address classes describe that network; they do not grant or deny access. */
 import { isIP } from "node:net";
 
-export type SsrfBlockReason = "private-network" | "scheme" | "special-purpose";
-
-export interface SsrfCheckResult {
+export interface HttpUrlCheck {
   blocked: boolean;
-  reason?: SsrfBlockReason;
+  reason?: "scheme";
 }
 
 export type EgressAddressClass = "public" | "private" | "special-purpose";
@@ -49,8 +34,8 @@ const classifyIpv4 = (ip: string): EgressAddressClass => {
   if (a === 100 && b >= 64 && b <= 127) return "private";
   // Special-purpose ranges a consumer sees when a resolver answers with
   // synthetic mappings (Clash/v2ray fake-IP uses 198.18.0.0/15) or that can
-  // never route publicly. Reported separately so the failure surfaces the
-  // real reason instead of a misleading "private network" label.
+  // never route publicly. Classification is diagnostic only: the local
+  // network or a configured proxy may intentionally route synthetic IPs.
   if (a === 198 && (b === 18 || b === 19)) return "special-purpose";
   if (a >= 224) return "special-purpose"; // multicast and reserved space
   if (a === 192 && b === 0 && Number(v4[3]) === 2) return "special-purpose";
@@ -120,65 +105,8 @@ export const classifyIp = (ip: string): EgressAddressClass => {
   return "public";
 };
 
-/**
- * Static hostname classification — names and literals only, no DNS.
- * Returns the block reason when the hostname itself is forbidden.
- */
-export const classifyHostname = (hostname: string): SsrfBlockReason | null => {
-  const host = normalizeIpLiteral(hostname).replace(/\.+$/, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
-    return "private-network";
-  }
-  if (isIP(host) === 0) return null; // ordinary DNS name — resolved on connect
-  const cls = classifyIp(host);
-  if (cls === "private") return "private-network";
-  if (cls === "special-purpose") return "special-purpose";
-  return null;
-};
-
-/**
- * Resolve a hostname and report the class of every answer. Used by the
- * read-only diagnostics surface; the enforcement path classifies inside the
- * connector lookup instead.
- */
-export const resolveAddressClasses = async (
-  hostname: string,
-): Promise<Array<{ address: string; class: EgressAddressClass }>> => {
-  const host = normalizeIpLiteral(hostname);
-  if (isIP(host) > 0) return [{ address: host, class: classifyIp(host) }];
-  const addresses = await lookup(host, { all: true, verbatim: true });
-  return addresses.map((addr) => ({ address: addr.address, class: classifyIp(addr.address) }));
-};
-
-/**
- * Check if a URL is safe to fetch — static decision only.
- * - Must be http: or https:
- * - Hostname literals/names must not be private or special-purpose.
- *   DNS results are enforced on the connect path (egress runtime).
- */
-export const checkSsrf = async (url: string): Promise<SsrfCheckResult> => {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return { blocked: true, reason: "scheme" };
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { blocked: true, reason: "scheme" };
-  }
-
-  const hostnameClass = classifyHostname(parsed.hostname);
-  if (hostnameClass) {
-    return { blocked: true, reason: hostnameClass };
-  }
-
-  return { blocked: false };
-};
-
-/** A local desktop request uses the user's network and may intentionally reach
- * LAN/loopback services. The scheme boundary still excludes file/data URLs. */
-export const checkDesktopHttpUrl = async (url: string): Promise<SsrfCheckResult> => {
+/** Network requests support HTTP(S); file/data URLs have separate resource owners. */
+export const checkHttpUrl = (url: string): HttpUrlCheck => {
   try {
     const protocol = new URL(url).protocol;
     return protocol === "http:" || protocol === "https:" ? { blocked: false } : { blocked: true, reason: "scheme" };

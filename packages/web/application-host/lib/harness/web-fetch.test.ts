@@ -1,33 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createWebFetch } from "./web-fetch.js";
-import type { SsrfPolicy, DomainPolicy } from "./web-fetch.js";
+import type { DomainPolicy } from "./web-fetch.js";
 import { createMaterialStoreFixture } from "./web-materials.test-helper.js";
-
-// Minimal SSRF mock that blocks known private addresses
-const createMockSsrf = (): SsrfPolicy => ({
-  check: async (url: string) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return { blocked: true, reason: "scheme" };
-      }
-      const host = parsed.hostname.toLowerCase();
-      if (host === "localhost" || host === "127.0.0.1" || host === "10.0.0.1" || host === "169.254.169.254") {
-        return { blocked: true, reason: "private-network" };
-      }
-      return { blocked: false };
-    } catch {
-      return { blocked: true, reason: "scheme" };
-    }
-  },
-  isSameHost: (url1: string, url2: string) => {
-    try {
-      return new URL(url1).hostname === new URL(url2).hostname;
-    } catch {
-      return false;
-    }
-  },
-});
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { createEgressRuntime } from "./egress.js";
 
 const noDomainPolicy = (): DomainPolicy => ({ block: [] });
 const fetchContext = {
@@ -45,21 +23,32 @@ describe("web-fetch service", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("blocks private network addresses", async () => {
-    const service = createWebFetch({
-      ssrf: createMockSsrf(),
-      domainPolicy: noDomainPolicy,
+  it("reads an intranet page and follows its redirect through the Host's actual egress", async () => {
+    const paths: string[] = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url!);
+      if (req.url === '/start') { res.writeHead(302, { location: '/docs' }); res.end(); }
+      else { res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>Intranet docs</h1><p>Available inside the container network.</p></body></html>'); }
     });
-    const result = await service.fetch("http://127.0.0.1:8080/", fetchContext);
-    expect(result.status).toBe("blocked");
-    if (result.status === "blocked") {
-      expect(result.reason).toBe("private-network");
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const egress = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: '127.0.0.1', family: 4 }] });
+    const service = createWebFetch({ egress });
+    try {
+      const base = `http://intranet:${(server.address() as AddressInfo).port}`;
+      const result = await service.fetch(`${base}/start`, fetchContext);
+      expect(result).toMatchObject({ status: 'ok', finalUrl: `${base}/docs` });
+      if (result.status === 'ok') expect(result.markdown).toContain('Intranet docs');
+      expect(paths).toEqual(['/start', '/docs']);
+    } finally {
+      await service.dispose();
+      await egress.close();
+      await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
 
   it("blocks non-http schemes", async () => {
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("file:///etc/passwd", fetchContext);
@@ -71,7 +60,6 @@ describe("web-fetch service", () => {
 
   it("blocks domain-blocked URLs", async () => {
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: () => ({ allow: [], block: ["evil.com"] }),
     });
     const result = await service.fetch("https://evil.com/page", fetchContext);
@@ -83,7 +71,6 @@ describe("web-fetch service", () => {
 
   it("enforces allow-list (whitelist mode)", async () => {
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: () => ({ allow: ["allowed.com"], block: [] }),
     });
     const blocked = await service.fetch("https://other.com/page", fetchContext);
@@ -91,7 +78,7 @@ describe("web-fetch service", () => {
   });
 
   it("treats an explicit empty allow list as deny-all", async () => {
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: () => ({ allow: [], block: [] }) });
+    const service = createWebFetch({ domainPolicy: () => ({ allow: [], block: [] }) });
     const result = await service.fetch("https://example.com/page", fetchContext);
     expect(result).toMatchObject({ status: "blocked", reason: "domain-blocked" });
   });
@@ -100,7 +87,6 @@ describe("web-fetch service", () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200,
       headers: new Headers({ "content-type": "text/html" }) }) as never;
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("https://example.com/", { ...fetchContext, render: true });
@@ -119,7 +105,6 @@ describe("web-fetch service", () => {
     }) as never;
 
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("https://example.com/", fetchContext);
@@ -136,7 +121,7 @@ describe("web-fetch service", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(new Response('<html><head><title>Example</title><script>window.TRACKING_SECRET = "not body text";</script></head><body><h1>Example Domain</h1><p>Short static page.</p><a href="https://iana.org/domains/example">Learn more</a></body></html>', { headers: { "content-type": "text/html" } }))
       .mockResolvedValueOnce(new Response('<html><head><title>App</title><script>window.APP_SECRET = "not body text";</script></head><body><div id="root"></div></body></html>', { headers: { "content-type": "text/html" } }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy });
     const page = await service.fetch("https://example.com/", fetchContext);
     expect(page).toMatchObject({ status: "ok", rendered: false, title: "Example" });
     if (page.status !== "ok") throw new Error(page.status);
@@ -158,7 +143,6 @@ describe("web-fetch service", () => {
     globalThis.fetch = mockFetch as never;
 
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
       cacheTtlMs: 60_000,
     });
@@ -181,7 +165,6 @@ describe("web-fetch service", () => {
     });
     globalThis.fetch = mockFetch as never;
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: (workspaceId) => workspaceId === "blocked"
         ? { allow: [], block: ["example.com"] }
         : noDomainPolicy(),
@@ -206,7 +189,7 @@ describe("web-fetch service", () => {
       headers: new Headers({ "content-type": "text/plain" }),
       text: () => body,
     }) as never;
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy });
     const controller = new AbortController();
     const pending = service.fetch("https://example.com/slow-body", {
       workspaceId: "ws",
@@ -234,7 +217,6 @@ describe("web-fetch service", () => {
     }) as never;
 
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("https://example.com/", fetchContext);
@@ -254,7 +236,6 @@ describe("web-fetch service", () => {
     }) as never;
 
     const service = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("https://example.com/missing", fetchContext);
@@ -291,7 +272,7 @@ describe("web-fetch service", () => {
       },
       read: async (_ws: string, snapshotId: string) => snapshots.get(snapshotId) ?? null,
     };
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, materials });
     const result = await service.fetch({ url: "https://example.com/pinned" }, fetchContext);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -322,7 +303,7 @@ describe("web-fetch service", () => {
       byteLength: 10, width: 100, height: 200, sourceHash: "sha256-source" };
     const read = vi.fn(async () => ({ status: "ok" as const, url: ref.sourceUrl, finalUrl: ref.finalUrl,
       contentType: "application/pdf", markdown: "", bytes: 0, fromCache: false, rendered: false, snapshot: ref, pageImage }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials,
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, materials,
       documentReader: { read, ingest: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const result = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 2 }, fetchContext);
     expect(result.status).toBe("ok");
@@ -345,7 +326,7 @@ describe("web-fetch service", () => {
         finalUrl: "https://example.com/shared.pdf", fetchedAt: 1, contentHash: "sha256-text",
         representation: "pdf-native-analysis", byteLength: 6 },
     }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+    const service = createWebFetch({ domainPolicy: noDomainPolicy,
       documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const a = await service.fetch({ url: "https://example.com/shared.pdf" }, fetchContext);
     const b = await service.fetch({ url: "https://example.com/shared.pdf", ocr: true }, {
@@ -368,7 +349,7 @@ describe("web-fetch service", () => {
       status: "ok" as const, url: input.sourceUrl, finalUrl: input.sourceUrl,
       contentType: "application/pdf", markdown: "PDF text", bytes: 8, fromCache: false, rendered: false,
     }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+    const service = createWebFetch({ domainPolicy: noDomainPolicy,
       renderer, documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const result = await service.fetch("https://example.com/visual.pdf", { ...fetchContext, render: true });
     expect(result.status).toBe("ok");
@@ -389,7 +370,7 @@ describe("web-fetch service", () => {
           fetchedAt: 1, contentHash: `source-${text}`, representation: "pdf-source-v1", byteLength: 0 },
       };
     });
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+    const service = createWebFetch({ domainPolicy: noDomainPolicy,
       documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const url = "https://example.com/race.pdf";
     const normal = service.fetch({ url }, fetchContext);
@@ -406,7 +387,7 @@ describe("web-fetch service", () => {
   });
 
   it("reports snapshot-missing for released or foreign snapshots and re-checks domain policy", async () => {
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy });
     const missing = await service.fetch({ snapshotId: "snap-gone" }, fetchContext);
     expect(missing).toEqual({ status: "snapshot-missing", snapshotId: "snap-gone" });
 
@@ -426,7 +407,6 @@ describe("web-fetch service", () => {
       }),
     };
     const guarded = createWebFetch({
-      ssrf: createMockSsrf(),
       domainPolicy: () => ({ allow: [], block: ["evil.com"] }),
       materials,
     });
@@ -448,7 +428,7 @@ describe("web-fetch service", () => {
     });
     globalThis.fetch = mockFetch as never;
     const opened = createMaterialStoreFixture();
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials: opened.materials });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, materials: opened.materials });
     const ctx = (threadId: string, signal?: AbortSignal) => ({
       workspaceId: "ws",
       authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId },
@@ -482,7 +462,7 @@ describe("web-fetch service", () => {
       text: () => body,
     });
     globalThis.fetch = mockFetch as never;
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy });
     const controller = new AbortController();
     const pending = service.fetch({ url: "https://example.com/last" }, {
       workspaceId: "ws",
@@ -511,7 +491,7 @@ describe("web-fetch service", () => {
     const put = vi.fn(async (...args: Parameters<typeof opened.materials.put>) => {
       start(); await release; return opened.materials.put(...args);
     });
-    const service = createWebFetch({ ssrf: createMockSsrf(), materials: { ...opened.materials, put } });
+    const service = createWebFetch({ materials: { ...opened.materials, put } });
     const controller = new AbortController();
     let settled = false;
     const pending = service.fetch({ url: "https://example.com/commit" }, { ...fetchContext, signal: controller.signal })
@@ -524,7 +504,7 @@ describe("web-fetch service", () => {
     const result = await pending;
     expect(result.status === "ok" && result.snapshot?.snapshotId).toBeTruthy();
     expect(put).toHaveBeenCalledOnce();
-    const failed = createWebFetch({ ssrf: createMockSsrf(), materials: {
+    const failed = createWebFetch({ materials: {
       ...opened.materials, put: async () => { throw Object.assign(new Error("original record writer failed"), { code: "storage-unavailable" }); },
     } });
     const unpinned = await failed.fetch({ url: "https://example.com/failure" }, fetchContext);
@@ -544,7 +524,7 @@ describe("web-fetch service", () => {
         text: async () => `page version ${calls} with enough body content to pass checks.`,
       };
     }) as never;
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, cacheTtlMs: 60_000 });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, cacheTtlMs: 60_000 });
     const first = await service.fetch({ url: "https://example.com/refresh" }, fetchContext);
     const cached = await service.fetch({ url: "https://example.com/refresh" }, fetchContext);
     const refreshed = await service.fetch({ url: "https://example.com/refresh", refresh: true }, fetchContext);
@@ -591,7 +571,7 @@ describe("web-fetch service", () => {
       headers: new Headers({ "content-type": "text/plain" }),
       text: async () => "unchanged body with enough content to be retained",
     }) as never;
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, materials });
 
     const first = await service.fetch({ url: "https://example.com/unchanged" }, fetchContext);
     const refreshed = await service.fetch({ url: "https://example.com/unchanged", refresh: true }, fetchContext);
@@ -652,7 +632,7 @@ describe("structured reading (D-315 L3)", () => {
       headers: new Headers({ "content-type": "text/plain" }),
       text: async () => structuredMarkdown,
     }) as never;
-    return createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+    return createWebFetch({ domainPolicy: noDomainPolicy, materials });
   };
 
   it("detects headings/tables/figures and reads positions from a snapshot", async () => {
@@ -708,7 +688,7 @@ describe("structured reading (D-315 L3)", () => {
   it("finds literal webpage passages through URL, cache and fixed snapshots without changing the pinned body", async () => {
     const { materials } = createMaterialStoreFixture();
     globalThis.fetch = async () => new Response(structuredMarkdown, { headers: { "content-type": "text/plain" } });
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+    const service = createWebFetch({ domainPolicy: noDomainPolicy, materials });
     const url = "https://example.com/find";
     const fetched = await service.fetch({ url, find: "mETHODS body" }, fetchContext);
     if (fetched.status !== "ok") throw new Error("fetch failed");
@@ -753,7 +733,7 @@ describe("question-directed original reading", () => {
   const open = (body: string, options: Partial<import("./web-fetch.js").WebFetchDeps> = {}) => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { headers: { "content-type": "text/markdown" } })));
     const fixture = createMaterialStoreFixture();
-    return { ...fixture, service: createWebFetch({ ssrf: createMockSsrf(), materials: fixture.materials, ...options }) };
+    return { ...fixture, service: createWebFetch({ materials: fixture.materials, ...options }) };
   };
   it("returns a short original page directly without spending a helper call on cross-language selection", async () => {
     const helper = vi.fn();
@@ -848,7 +828,7 @@ describe("question-directed original reading", () => {
   it("preserves HTML headings, code and real table cells instead of flattening them", async () => {
     const html = '<html><body><main><h1>Setup</h1><p>Only when enabled:</p><pre><code class="language-js">if (enabled) {\n  run();\n}</code></pre><table><tr><th>Option</th><th>Docs</th></tr><tr><td>TLS</td><td><a href="https://example.com/tls">Guide</a></td></tr></table></main></body></html>';
     vi.stubGlobal("fetch", vi.fn(async () => new Response(html, { headers: { "content-type": "text/html" } })));
-    const service = createWebFetch({ ssrf: createMockSsrf() });
+    const service = createWebFetch({  });
     const result = await service.fetch("https://example.com/table", fetchContext);
     if (result.status !== "ok") throw new Error(result.status);
     expect(result.markdown).toContain("# Setup");
@@ -868,7 +848,7 @@ describe("question-directed original reading", () => {
       controller.close();
     } }), { headers: { "content-type": "text/plain" } })));
     const { materials } = createMaterialStoreFixture();
-    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: 10, materials });
+    const service = createWebFetch({ maxBytes: 10, materials });
     const result = await service.fetch("https://example.com/utf8", fetchContext);
     if (result.status !== "ok") throw new Error(result.status);
     expect(result.markdown).toBe("开源代");
@@ -887,7 +867,7 @@ describe("question-directed original reading", () => {
       for (const byte of source) controller.enqueue(Uint8Array.of(byte));
       controller.close();
     } }), { headers: { "content-type": "text/plain", "content-length": String(source.length) } })));
-    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: source.length });
+    const service = createWebFetch({ maxBytes: source.length });
     const result = await service.fetch("https://example.com/exact", fetchContext);
     expect(result).toMatchObject({ status: "ok", markdown: "你好🙂", bytes: source.length, completeness: { download: { status: "complete", receivedBytes: source.length } } });
     await service.dispose();
@@ -897,14 +877,14 @@ describe("question-directed original reading", () => {
     const shell = '<html><body><div id="app"></div><script src="app.js"></script></body></html>';
     const renderer = vi.fn(async () => ({ html: '<html><body><p>Rendered result</p></body></html>', finalUrl: "https://example.com/shell", blockedRequests: 0 }));
     vi.stubGlobal("fetch", vi.fn(async () => new Response(shell, { headers: { "content-type": "text/html" } })));
-    const service = createWebFetch({ ssrf: createMockSsrf(), renderer });
+    const service = createWebFetch({ renderer });
     expect(await service.fetch("https://example.com/shell", fetchContext)).toMatchObject({ status: "empty-shell" });
     expect(renderer).not.toHaveBeenCalled();
     const rendered = await service.fetch("https://example.com/shell", { ...fetchContext, allowRenderFallback: true });
     expect(rendered).toMatchObject({ status: "ok", rendered: true, markdown: "Rendered result", completeness: { download: { status: "complete" } } });
     expect(renderer).toHaveBeenCalledOnce();
     expect(await service.fetch({ url: "https://example.com/shell", render: false }, { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "empty-shell" });
-    const remote = createWebFetch({ ssrf: createMockSsrf() });
+    const remote = createWebFetch({  });
     expect(await remote.fetch("https://example.com/shell", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "empty-shell", hint: expect.stringContaining("no BrowserOwner") });
     await Promise.all([service.dispose(), remote.dispose()]);
   });
@@ -913,7 +893,7 @@ describe("question-directed original reading", () => {
     const source = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff]);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(source, { headers: { "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" } })));
     const alternateDocumentReader = vi.fn<import("./document-material.js").AlternateDocumentReader>(async () => ({ status: "ok" as const, url: "https://example.com/a.docx", finalUrl: "https://example.com/a.docx", contentType: "text/markdown", markdown: "Office content", bytes: 14, fromCache: false, rendered: false }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), alternateDocumentReader });
+    const service = createWebFetch({ alternateDocumentReader });
     const result = await service.fetch("https://example.com/a.docx", fetchContext);
     expect(result).toMatchObject({ status: "ok", markdown: "Office content" });
     expect(alternateDocumentReader.mock.calls[0]?.[2]).toMatchObject({ source });
@@ -933,7 +913,7 @@ describe("question-directed original reading", () => {
     const released = new Promise<void>(resolve => { stopped = resolve; });
     const cancel = vi.fn(() => released);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ pull() {}, cancel }), { headers: { "content-type": "text/plain" } })));
-    const draining = createWebFetch({ ssrf: createMockSsrf() });
+    const draining = createWebFetch({  });
     const pending = draining.fetch("https://example.com/stream", fetchContext);
     const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
@@ -958,29 +938,33 @@ describe("rendering preserves original egress authority", () => {
       return new Response('<html><script src="app.js"></script><body></body></html>', { headers: { "content-type": "text/html" } });
     }));
     const renderer = vi.fn<NonNullable<import("./web-fetch.js").WebFetchDeps["renderer"]>>(async request => {
-      await expect(request.fetch({ url: "http://127.0.0.1/private", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("private-network");
+      await request.fetch({ url: "http://127.0.0.1/private", method: "GET", headers: {} }, request.signal!);
+      await expect(request.fetch({ url: "file:///private.txt", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("HTTP(S)");
       await expect(request.fetch({ url: "https://denied.example/script.js", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("domain policy");
       await request.fetch({ url: "https://example.com/app.js", method: "GET", headers: {} }, request.signal!);
       return { html: '<p>Original rendered source</p>', finalUrl: "https://example.com/final", blockedRequests: 2 };
     });
-    const service = createWebFetch({ ssrf: createMockSsrf(), renderer, rendererId: "real-owner",
+    const service = createWebFetch({ renderer, rendererId: "real-owner",
       domainPolicy: () => ({ block: ["denied.example"] }) });
     const ctx = { ...fetchContext, allowRenderFallback: true };
     const result = await service.fetch("https://example.com/start", ctx);
     expect(result).toMatchObject({ status: "ok", finalUrl: "https://example.com/final", completeness: { download: { status: "partial" }, extraction: { status: "partial" } } });
-    expect(fetched).toEqual(["https://example.com/start", "https://example.com/app.js"]);
+    expect(fetched).toEqual(["https://example.com/start", "http://127.0.0.1/private", "https://example.com/app.js"]);
     await service.fetch("https://example.com/start", { ...ctx, authority: { ...ctx.authority, threadId: "another-thread" } });
     expect(renderer).toHaveBeenCalledTimes(2);
     await service.fetch("https://example.com/start", ctx);
     expect(renderer).toHaveBeenCalledTimes(3);
     await service.dispose();
   });
-  it("refuses a renderer that reports a forbidden final navigation", async () => {
+  it("accepts a local final navigation and still refuses non-HTTP renderer results", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response('<script src="app.js"></script>', { headers: { "content-type": "text/html" } })));
-    const service = createWebFetch({ ssrf: createMockSsrf(), renderer: async () => ({ html: '<p>private</p>', finalUrl: 'http://127.0.0.1/private', blockedRequests: 0 }) });
-    expect(await service.fetch("https://example.com/start", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "blocked", reason: "private-network" });
-    expect(service.cache.size).toBe(0);
+    const service = createWebFetch({ renderer: async () => ({ html: '<p>private</p>', finalUrl: 'http://127.0.0.1/private', blockedRequests: 0 }) });
+    expect(await service.fetch("https://example.com/start", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "ok", finalUrl: "http://127.0.0.1/private" });
     await service.dispose();
+    const invalid = createWebFetch({ renderer: async () => ({ html: '<p>invalid</p>', finalUrl: 'file:///private.txt', blockedRequests: 0 }) });
+    expect(await invalid.fetch("https://example.com/start", { ...fetchContext, allowRenderFallback: true })).toMatchObject({ status: "blocked", reason: "scheme" });
+    expect(invalid.cache.size).toBe(0);
+    await invalid.dispose();
   });
   it("bounds all concurrent rendered resources by one acquisition budget", async () => {
     const urls: string[] = [];
@@ -989,7 +973,7 @@ describe("rendering preserves original egress authority", () => {
       return url.endsWith("/start") ? new Response("<script></script>", { headers: { "content-type": "text/html" } })
         : new Response("12345678", { headers: { "content-type": "text/plain" } });
     }));
-    const service = createWebFetch({ ssrf: createMockSsrf(), maxBytes: 20, renderer: async request => {
+    const service = createWebFetch({ maxBytes: 20, renderer: async request => {
       const responses = await Promise.allSettled(["a", "b", "c"].map(path => request.fetch({ url: `https://example.com/${path}`, method: "GET", headers: {} }, request.signal!)));
       await expect(request.fetch({ url: "https://example.com/after-limit", method: "GET", headers: {} }, request.signal!)).rejects.toThrow("aggregate download budget");
       return { html: "<p>result</p>", finalUrl: request.url, blockedRequests: responses.filter(value => value.status === "rejected").length + 1 };
@@ -1005,7 +989,7 @@ describe("rendering preserves original egress authority", () => {
     const drained = new Promise<void>(resolve => { release = resolve; });
     let rendererSignal: AbortSignal | undefined;
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<script></script>", { headers: { "content-type": "text/html" } })));
-    const service = createWebFetch({ ssrf: createMockSsrf(), renderer: async request => {
+    const service = createWebFetch({ renderer: async request => {
       rendererSignal = request.signal;
       await drained;
       return { html: "<p>late</p>", finalUrl: request.url, blockedRequests: 0 };

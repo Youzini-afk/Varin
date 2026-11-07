@@ -14,7 +14,7 @@ it('freezes Web configuration failures at its own declarations and preserves the
   const make = (settings: WebRuntimeOptions['settings']) => createWebRuntime({
     runtime: { familyList: unused, run: unused, launch: unused },
     materials, documentReader: createDocumentReader({ materials }),
-    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials }),
+    webFetch: createWebFetch({ materials }),
     fetch: unused, readAuth: unused, settings,
   });
   const snapshot: AgentSettingsSnapshot = { global: { harness: { web: { domains: { block: ['blocked.example'] } } } },
@@ -55,7 +55,7 @@ it('reads and shares retained text through the real material ACL, retaining the 
   const web = createWebRuntime({
     runtime: { familyList: async () => ({ rootThreadId: 'root', members: ['root','child'].map(threadId => ({ threadId, branches: [{ branchId: 'branch' }] })) }), run: unused, launch: unused } as unknown as WebRuntimeOptions['runtime'],
     materials: opened.materials, collections, documentReader,
-    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials: opened.materials, documentReader }),
+    webFetch: createWebFetch({ materials: opened.materials, documentReader }),
     fetch: unused, readAuth: unused, settings: async () => ({ global: {}, project: {}, globalRevision: 'g', projectRevision: 'p', projectTrusted: false }),
   });
   const root = { runtime: 'agent' as const, threadId: 'root', branchId: 'branch' }, child = { ...root, threadId: 'child' };
@@ -82,7 +82,7 @@ it('keeps an unconfirmed Storage mutation unknown and unstopped rather than conv
     runtime: { run: async () => ({ thread_id: 'thread', branch_id: 'branch' }),
       familyList: async () => ({ rootThreadId: 'thread', members: [{ threadId: 'thread', branches: [{ branchId: 'branch' }] }] }), launch: unused } as unknown as WebRuntimeOptions['runtime'],
     materials: opened.materials, collections, documentReader: createDocumentReader({ materials: opened.materials }),
-    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials: opened.materials }),
+    webFetch: createWebFetch({ materials: opened.materials }),
     fetch: unused, readAuth: unused,
     settings: async () => ({ global: {}, project: {}, globalRevision: 'global', projectRevision: 'project', projectTrusted: false }),
   });
@@ -123,7 +123,7 @@ it('default admitted search preserves objective semantics and returns a readable
       expect(material).not.toBeNull(); attached.push(snapshotId);
       return { ref: materialAttachmentRef(snapshotId), filename: 'source.txt', mimeType: 'text/plain', byteLength: material!.ref.byteLength };
     } } as unknown as NonNullable<WebRuntimeOptions['documentSources']>,
-    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials: opened.materials }),
+    webFetch: createWebFetch({ materials: opened.materials }),
     fetch, readAuth: unused, settings: async () => ({ global: {}, project: {}, globalRevision: 'g', projectRevision: 'p', projectTrusted: false }),
   });
   const declaration = WEB_TOOL_DECLARATIONS.find(value => value.tool!.name === 'websearch')!;

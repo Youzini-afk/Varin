@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import net from "node:net";
 import { once } from "node:events";
 import { createEgressRuntime, classifyEgressError, resolveEgressPolicy } from "./egress.js";
-import { checkDesktopHttpUrl, checkSsrf, classifyHostname, classifyIp } from "./ssrf-policy.js";
+import { checkHttpUrl, classifyIp } from "./http-target.js";
 
 const PUBLIC_ADDR = { address: "93.184.216.34", family: 4 };
 const hostProxy = (proxyUrl: string, extra: { noProxy?: string; proxyAuth?: { username: string; password: string } } = {}) => ({
@@ -153,7 +153,7 @@ describe("egress policy", () => {
   });
 });
 
-describe("ssrf classification", () => {
+describe("HTTP targets and diagnostic address classes", () => {
   it("classifies fake-IP and reserved ranges as special-purpose", () => {
     expect(classifyIp("198.18.0.5")).toBe("special-purpose");
     expect(classifyIp("198.19.255.255")).toBe("special-purpose");
@@ -162,12 +162,11 @@ describe("ssrf classification", () => {
   });
 
   it("normalizes IPv6 bracket/zone literals before classification", async () => {
-    expect(classifyHostname("[::1]")).toBe("private-network");
-    expect(classifyHostname("[fe80::1%eth0]")).toBe("private-network");
-    const r = await checkSsrf("http://[::1]:8080/admin");
-    expect(r).toEqual({ blocked: true, reason: "private-network" });
-    expect(await checkSsrf("http://0x7f.1/")).toEqual({ blocked: true, reason: "private-network" });
-    expect(await checkSsrf("http://localhost./")).toEqual({ blocked: true, reason: "private-network" });
+    expect(classifyIp("[::1]")).toBe("private");
+    expect(classifyIp("[fe80::1%eth0]")).toBe("private");
+    for (const url of ["http://[::1]:8080/admin", "http://0x7f.1/", "http://localhost./", "http://magpie:3425/v1", "https://service.local/"]) {
+      expect(checkHttpUrl(url)).toEqual({ blocked: false });
+    }
   });
 
   it("classifies IPv4-embedded IPv6 by the embedded address", () => {
@@ -185,57 +184,51 @@ describe("ssrf classification", () => {
     expect(classifyIp("2001:2::1")).toBe("special-purpose");
     expect(classifyIp("3fff::1")).toBe("special-purpose");
     expect(classifyIp("224.0.0.1")).toBe("special-purpose");
-    expect(classifyHostname("localhost.")).toBe("private-network");
-    expect(classifyHostname("service.local.")).toBe("private-network");
   });
 
   it("blocks ftp and non-URL input at the scheme check", async () => {
-    expect(await checkSsrf("ftp://example.com/")).toEqual({ blocked: true, reason: "scheme" });
-    expect(await checkSsrf("not a url")).toEqual({ blocked: true, reason: "scheme" });
-    expect(await checkDesktopHttpUrl("http://127.0.0.1/")).toEqual({ blocked: false });
-    expect(await checkDesktopHttpUrl("file:///secrets.txt")).toEqual({ blocked: true, reason: "scheme" });
+    for (const url of ["ftp://example.com/", "not a url", "file:///secrets.txt", "data:text/plain,hello"]) {
+      expect(checkHttpUrl(url)).toEqual({ blocked: true, reason: "scheme" });
+    }
   });
 });
 
-describe("connect-path enforcement", () => {
-  it("refuses a DNS answer that resolves private — on the dial path", async () => {
-    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "192.168.1.9", family: 4 }] });
-    await expect(rt.fetch("http://internal-name.test/")).rejects.toMatchObject({ kind: "private-network" });
-  });
-
-  it("lets desktop direct mode reach a local service through ordinary OS routing", async () => {
+describe("direct connection path", () => {
+  it("reaches local services and container DNS names without a desktop-only flag", async () => {
     const server = net.createServer((socket) => socket.once("data", () => {
       socket.end("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
     }));
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
-    const rt = createEgressRuntime({ env: {}, allowLocalTargets: true,
-      getHostConfiguration: async () => ({ mode: "direct" }) });
+    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "127.0.0.1", family: 4 }] });
     cleanups.push(() => rt.close());
-    const url = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}/`;
-    expect(await (await rt.fetch(url)).text()).toBe("ok");
-    expect(await rt.diagnose(url)).toMatchObject({ decision: "allowed" });
+    for (const hostname of ["127.0.0.1", "localhost", "magpie", "service.local."]) {
+      const url = `http://${hostname}:${(server.address() as net.AddressInfo).port}/`;
+      expect(await (await rt.fetch(url)).text()).toBe("ok");
+      expect(await rt.diagnose(url)).toMatchObject({ decision: "allowed", addressCheck: "resolved",
+        addresses: [{ address: "127.0.0.1", class: "private" }] });
+    }
   });
 
   it("uses the desktop system transport for auto routing and checks every redirect URL", async () => {
     const requests: Array<{ url: string; redirect: RequestInit['redirect']; authorization: string | null }> = [];
     const systemFetch = async (url: string, init: RequestInit): Promise<Response> => {
       requests.push({ url, redirect: init.redirect, authorization: new Headers(init.headers).get("authorization") });
-      if (url === "https://public.example/start") return new Response(null, { status: 302, headers: { location: "https://other.example/final" } });
+      if (url === "https://public.example/start") return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/final" } });
       return new Response("ok");
     };
-    const rt = createEgressRuntime({ env: {}, allowLocalTargets: true, systemFetch,
+    const rt = createEgressRuntime({ env: {}, systemFetch,
       resolveAll: async () => { throw new Error("Node DNS must not resolve desktop system routes"); } });
     cleanups.push(() => rt.close());
     expect(await (await rt.fetch("https://public.example/start", { headers: { authorization: "secret" } })).text()).toBe("ok");
     expect(requests).toEqual([
       { url: "https://public.example/start", redirect: "manual", authorization: "secret" },
-      { url: "https://other.example/final", redirect: "manual", authorization: null },
+      { url: "http://127.0.0.1/final", redirect: "manual", authorization: null },
     ]);
     expect(await rt.diagnose("https://public.example/start")).toMatchObject({ policy: { mode: "system" }, resolution: "system", addressCheck: "system-managed" });
 
-    const fileRedirect = createEgressRuntime({ env: {}, allowLocalTargets: true,
+    const fileRedirect = createEgressRuntime({ env: {},
       systemFetch: async () => new Response(null, { status: 302, headers: { location: "file:///private.txt" } }) });
     cleanups.push(() => fileRedirect.close());
     await expect(fileRedirect.fetch("https://public.example/start")).rejects.toMatchObject({ kind: "scheme-denied" });
@@ -249,11 +242,6 @@ describe("connect-path enforcement", () => {
     await expect(rt.fetch("http://missing.test/")).rejects.toMatchObject({ kind: "dns" });
   });
 
-  it("rejects a link-local IPv6 DNS answer before any socket is dialed", async () => {
-    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "fe90::1", family: 6 }] });
-    await expect(rt.fetch("http://public-name.test/")).rejects.toMatchObject({ kind: "private-network" });
-    await rt.close();
-  });
 });
 
 describe("proxy data path", () => {
@@ -322,12 +310,16 @@ describe("proxy data path", () => {
     expect(proxy.authorities).toEqual([]);
   });
 
-  it("honors the Host's explicit NO_PROXY through the direct checked connector", async () => {
+  it("honors the Host's NO_PROXY for a container service through the direct connector", async () => {
     const proxy = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
     cleanups.push(proxy.close);
-    const rt = createEgressRuntime({ ...hostProxy(proxy.url, { noProxy: 'public.example' }),
-      resolveAll: async () => [{ address: '192.168.1.8', family: 4 }] });
-    await expect(rt.fetch('http://public.example/')).rejects.toMatchObject({ kind: 'private-network' });
+    const server = net.createServer(socket => socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok')));
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())));
+    const rt = createEgressRuntime({ env: {}, ...hostProxy(proxy.url, { noProxy: 'magpie' }),
+      resolveAll: async () => [{ address: '127.0.0.1', family: 4 }] });
+    expect(await (await rt.fetch(`http://magpie:${(server.address() as net.AddressInfo).port}/v1`)).text()).toBe('ok');
     expect(proxy.authorities).toEqual([]);
     await rt.close();
   });
@@ -343,27 +335,14 @@ describe("proxy data path", () => {
     await rt.close();
   });
 
-  it("still refuses literal private targets in proxy mode", () => {
-    const rt = createEgressRuntime({ env: { HTTPS_PROXY: "http://127.0.0.1:3128" } });
-    expect(rt.resolve("http://192.168.0.1/").failure?.kind).toBe("private-network");
-    expect(rt.resolve("http://198.18.2.2/").failure?.kind).toBe("special-purpose");
-  });
-
-  it("screens the redirected target before opening a second proxy tunnel", async () => {
-    const proxy = await stubConnectProxy("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:8080/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+  it.each(["127.0.0.1", "192.168.0.1", "198.18.2.2", "[::ffff:7f00:1]", "magpie"])("follows redirects to %s through the configured proxy", async target => {
+    const proxy = await stubConnectProxy(authority => authority === "public.example:80"
+      ? `HTTP/1.1 302 Found\r\nLocation: http://${target}:8080/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
+      : "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
     cleanups.push(proxy.close);
     const rt = createEgressRuntime(hostProxy(proxy.url));
-    await expect(rt.fetch("http://public.example/")).rejects.toMatchObject({ kind: "private-network" });
-    expect(proxy.authorities).toEqual(["public.example:80"]);
-    await rt.close();
-  });
-
-  it("screens an IPv4-mapped IPv6 redirect before opening a second tunnel", async () => {
-    const proxy = await stubConnectProxy("HTTP/1.1 302 Found\r\nLocation: http://[::ffff:7f00:1]:8080/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-    cleanups.push(proxy.close);
-    const rt = createEgressRuntime(hostProxy(proxy.url));
-    await expect(rt.fetch("http://public.example/")).rejects.toMatchObject({ kind: "private-network" });
-    expect(proxy.authorities).toEqual(["public.example:80"]);
+    expect(await (await rt.fetch("http://public.example/")).text()).toBe("ok");
+    expect(proxy.authorities).toEqual(["public.example:80", `${target}:8080`]);
     await rt.close();
   });
 
@@ -387,7 +366,7 @@ describe("diagnose", () => {
     });
     const d = await rt.diagnose("https://example.com/x");
     expect(d.decision).toBe("allowed");
-    expect(d.addressCheck).toBe("public");
+    expect(d.addressCheck).toBe("resolved");
     expect(d.resolution).toBe("local");
     expect(d.addresses).toEqual([
       { address: "93.184.216.34", class: "public" },
@@ -418,42 +397,44 @@ describe("diagnose", () => {
     const rt = createEgressRuntime(hostProxy("http://127.0.0.1:3128"));
     const d = await rt.diagnose("https://93.184.216.34/");
     expect(d.resolution).toBe("static-literal");
-    expect(d.addressCheck).toBe("public");
+    expect(d.addressCheck).toBe("resolved");
     expect(d.addresses).toEqual([{ address: "93.184.216.34", class: "public" }]);
     await rt.close();
   });
 
-  it("reports a blocked literal decision with the reason", async () => {
+  it("reports local and synthetic address classes without denying them", async () => {
     const rt = createEgressRuntime({ env: {} });
-    const d = await rt.diagnose("http://127.0.0.1:9/");
-    expect(d.decision).toBe("blocked");
-    expect(d.addressCheck).toBe("blocked");
-    expect(d.reason).toContain("private-network");
-  });
-
-  it("does not claim an address check for a statically blocked hostname", async () => {
-    const rt = createEgressRuntime({ env: {} });
-    const d = await rt.diagnose("http://service.local/");
-    expect(d.decision).toBe("blocked");
-    expect(d.resolution).toBe("not-run");
-    expect(d.addressCheck).toBe("not-run");
+    for (const [host, classification] of [["127.0.0.1", "private"], ["198.18.0.1", "special-purpose"], ["[::1]", "private"]]) {
+      const d = await rt.diagnose(`http://${host}:9/`);
+      expect(d).toMatchObject({ decision: "allowed", addressCheck: "resolved", addresses: [{ class: classification }] });
+      expect(d.reason).toBeUndefined();
+    }
     await rt.close();
   });
 
-  it("blocks a trailing-dot local hostname before a configured proxy can resolve it", async () => {
+  it("reports local hostnames using the same resolver as direct connections", async () => {
+    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "192.168.1.9", family: 4 }] });
+    const d = await rt.diagnose("http://service.local/");
+    expect(d.decision).toBe("allowed");
+    expect(d.resolution).toBe("local");
+    expect(d.addressCheck).toBe("resolved");
+    await rt.close();
+  });
+
+  it("lets the configured proxy resolve a trailing-dot local hostname", async () => {
     const proxy = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
     cleanups.push(proxy.close);
     const rt = createEgressRuntime({ env: { HTTP_PROXY: proxy.url } });
-    await expect(rt.fetch("http://service.local./")).rejects.toMatchObject({ kind: "private-network" });
-    expect(proxy.authorities).toEqual([]);
+    expect((await rt.fetch("http://service.local./")).status).toBe(200);
+    expect(proxy.authorities).toEqual(["service.local.:80"]);
     await rt.close();
   });
 
-  it("separates a static allow from a DNS answer that would be blocked on connect", async () => {
+  it("keeps IPv6 link-local address classification diagnostic", async () => {
     const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "fe90::1", family: 6 }] });
     const d = await rt.diagnose("http://public-name.test/");
-    expect(d.decision).toBe("blocked");
-    expect(d.addressCheck).toBe("blocked");
+    expect(d.decision).toBe("allowed");
+    expect(d.addressCheck).toBe("resolved");
     expect(d.addresses).toEqual([{ address: "fe90::1", class: "private" }]);
     await rt.close();
   });

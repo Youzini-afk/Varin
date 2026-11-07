@@ -220,7 +220,7 @@ Agent 通过设置工具的 `harness.web.search.connections` 动作管理这些�
 
 普通获取优先使用 Host egress。显式启用渲染后，可请求实际 BrowserOwner 渲染或在空正文时回退。
 Electron 使用同一 BrowserOwner 的目标站点身份，临时隔离页面只经原 Host 网络回调取得 GET/HEAD 资源；
-每个资源和重定向重新核验域名与 SSRF，跨 origin 不转发 cookies/认证。直接 Chromium 网络由拒绝代理封闭，
+每个资源和重定向重新核验 HTTP(S) 协议与用户配置的域名规则，跨 origin 不转发 cookies/认证。直接 Chromium 网络由拒绝代理封闭，
 禁用 worker、frame、弹窗、表单、非 GET/HEAD 和独立 socket。需要这些交互的页面应使用 Browser Use。
 渲染省略资源时标记部分提取；不为网页阅读另建持久登录仓库。没有 BrowserOwner 的 Host 明确返回不可用。
 

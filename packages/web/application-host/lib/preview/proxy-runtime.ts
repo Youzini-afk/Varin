@@ -1141,43 +1141,6 @@ const buildCookie = ({
   return chunks.join('; ');
 };
 
-// SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
-// reserved addresses (incl. cloud-metadata 169.254.169.254). Operates on the
-// WHATWG-normalized hostname, so decimal/hex/octal IPv4 forms are already canonical
-// dotted-decimal here. NOTE: this blocks IP *literals* only — a hostname that
-// resolves to a private IP (DNS rebinding) is not caught and would need
-// resolve-time IP pinning. Loopback for local preview goes through the non-external
-// path (allowExternal=false), which is unaffected.
-const isBlockedExternalHost = (hostname: string): boolean => {
-  if (!hostname) return true;
-  let host = hostname.toLowerCase();
-  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
-
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    if (a === 0 || a === 127 || a === 10) return true;          // this-host / loopback / private
-    if (a === 169 && b === 254) return true;                    // link-local incl. cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true;           // private
-    if (a === 192 && b === 168) return true;                    // private
-    if (a === 100 && b >= 64 && b <= 127) return true;          // carrier-grade NAT
-    return false;
-  }
-
-  if (host.includes(':')) {
-    if (host === '::1' || host === '::') return true;           // loopback / unspecified
-    if (host.startsWith('fe80')) return true;                   // link-local
-    if (host.startsWith('fc') || host.startsWith('fd')) return true; // unique local fc00::/7
-    if (host.includes('::ffff:')) return true;                       // IPv4-mapped (dotted or hex form)
-    return false;
-  }
-
-  return false;
-};
-
 export type NormalizedProxyTarget = {
   ok: true;
   origin: string;
@@ -1206,8 +1169,6 @@ export const normalizeProxyTargetUrl = (
     if (!LOOPBACK_HOSTS.has(hostname)) {
       return { ok: false, error: 'Only loopback hosts are supported' };
     }
-  } else if (isBlockedExternalHost(hostname)) {
-    return { ok: false, error: 'Refusing to proxy private or reserved addresses' };
   }
 
   const port = url.port ? Number.parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
@@ -1215,9 +1176,9 @@ export const normalizeProxyTargetUrl = (
     return { ok: false, error: 'Invalid port' };
   }
 
-  // Normalize common loopback hostnames to IPv4 to avoid environments where
-  // `localhost` resolves to ::1 but the dev server only binds IPv4.
-  if (LOOPBACK_HOSTS.has(hostname) && (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]')) {
+  // Keep the legacy dev-server alias in the implicit local-preview path.
+  // Explicit browser targets retain their selected origin and IPv6 routing.
+  if (!allowExternal && LOOPBACK_HOSTS.has(hostname) && (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]')) {
     url.hostname = '127.0.0.1';
   }
 

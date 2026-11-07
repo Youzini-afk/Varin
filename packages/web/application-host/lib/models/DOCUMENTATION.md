@@ -8,6 +8,9 @@ are neither read nor imported.
 The Host prepares product configuration and authentication. Rust owns native chat protocol execution,
 HTTP/SSE, cancellation and durable request/usage facts. Auxiliary inference uses the existing
 purpose-specific consumers and original inference Operations, rather than another request database.
+Model endpoints may use the executing Host's local, LAN or Docker network in all deployments.
+Discovery uses the same Host egress routing as other HTTP(S) consumers; address classification is
+diagnostic and does not require a desktop transport or a separate private-network setting.
 See [runtime ownership](../../../../../docs/runtime.md) and the
 [Rust adapters](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
 

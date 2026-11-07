@@ -14,7 +14,6 @@ import { createResearchDiscoveryRuntime } from './research-discovery.js';
 import { createExtensionTools, type ExtensionToolScope } from './extension-tool-owner.js';
 import { createResearchSearchService } from '../harness/research-search.js';
 import { createEgressRuntime } from '../harness/egress.js';
-import { checkSsrf, isSameHost } from '../harness/ssrf-policy.js';
 import { createWebFetch } from '../harness/web-fetch.js';
 import { createWebMaterialStore } from '../harness/web-materials.js';
 import { createDocumentReader } from '../harness/document-reading.js';
@@ -82,7 +81,7 @@ async function initialize(frame: Record<string, unknown>) {
   const materials = createWebMaterialStore(access), documentReader = createDocumentReader({ materials });
   const collections = createMaterialCollections(access, { materials });
   const settings = async () => ({ global: {}, globalRevision: 'default', project: {}, projectRevision: 'none', projectTrusted: false });
-  web = createWebRuntime({ runtime, webFetch: createWebFetch({ ssrf: { check: checkSsrf, isSameHost }, egress, materials, documentReader }),
+  web = createWebRuntime({ runtime, webFetch: createWebFetch({ egress, materials, documentReader }),
     documentReader, materials, collections, fetch: egress.fetch as typeof globalThis.fetch, readAuth: unreachable, settings });
   scholar = createResearchDiscoveryRuntime({ service: createResearchSearchService({ fetch: egress.fetch as typeof globalThis.fetch }), settings });
   if (frame.readerOnly) { write({ kind: 'fixture-reader-ready' }); return; }

@@ -109,7 +109,7 @@ async function initialize(frame: Record<string, unknown>) {
   experiments = createExperimentService({ client: kernel, resources, resolveBackend: unreachable,
     onError: error => write({ kind: 'fixture-failed', error: error.stack }) });
   const documentSources = createDocumentSources({ kernel, runtime, resolveLiveSource: live.validate, experiments });
-  const webFetch = createWebFetch({ ssrf: { check: unreachable, isSameHost: () => false }, materials, documentReader });
+  const webFetch = createWebFetch({ materials, documentReader });
   web = createWebRuntime({ runtime, webFetch, documentReader, documentSources, materials, fetch: unreachable, readAuth: unreachable,
     settings: async () => ({ global: {}, globalRevision: 'default', project: {}, projectRevision: 'none', projectTrusted: false }) });
   if (frame.readerOnly) { write({ kind: 'fixture-reader-ready' }); return; }

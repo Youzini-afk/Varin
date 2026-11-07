@@ -29,6 +29,14 @@ The table locates owners rather than duplicating the public API. Protocol and ap
 supply concrete request shapes. Source identity, execution placement and navigation project remain
 separate: changing a selected project or Host cannot retarget already admitted work.
 
+Outbound HTTP(S) uses the executing Host's network in every deployment. Desktop, standalone Web and
+Docker may reach localhost, LAN addresses, container DNS names and synthetic proxy addresses without
+an extra enablement switch. `egress.ts` owns proxy/NO_PROXY selection, frozen request routing, cancellation
+and transport errors; `http-target.ts` classifies IP addresses for diagnostics only. Model discovery,
+search connections, image reads and rendered-page resources share this transport. Web acquisition also
+honors the user's explicit domain rules on every resource and redirect. HTTP(S) validation does not
+grant `file:`/`data:` access or transfer origin credentials across redirects.
+
 Office originals use the same material snapshot records as PDFs. The overview retains a section
 index without eagerly flattening the whole workbook; `office_read` finds content, ranges and objects
 in the original file. Collection keyword search covers the retained representation. Parent-history

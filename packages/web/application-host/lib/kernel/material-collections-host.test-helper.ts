@@ -56,7 +56,7 @@ async function initialize(frame: Record<string, unknown>) {
   const access = createMaterialStorageAccess({ kernel, storage, onCleanupError: error => { throw error; } });
   const materials = createWebMaterialStore(access);
   reader = createDocumentReader({ materials }); collections = createMaterialCollections(access, { materials });
-  const webFetch = createWebFetch({ ssrf: { check: unreachable, isSameHost: () => false }, materials, documentReader: reader });
+  const webFetch = createWebFetch({ materials, documentReader: reader });
   web = createWebRuntime({ runtime, webFetch, documentReader: reader, materials, collections, fetch: unreachable, readAuth: unreachable,
     settings: async () => ({ global: {}, globalRevision: 'default', project: {}, projectRevision: 'none', projectTrusted: false }) });
   if (frame.readerOnly) { write({ kind: 'fixture-reader-ready' }); return; }

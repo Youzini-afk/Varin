@@ -90,6 +90,12 @@ Set `VARIN_DATA_DIR` to choose the persistent data root. The Linux default is
 clients, pairing state, notifications, tunnel state, workspace identity, and document recovery
 journals; it must remain outside immutable release directories.
 
+Outbound HTTP(S) connections can reach the executing Host's localhost, LAN and Docker network,
+including model gateways such as `http://magpie:3425/v1`. No private-network toggle is required.
+The Host's proxy and `NO_PROXY` settings still determine routing; explicit web-domain rules still apply.
+Workbench browser previews and screenshot resources also accept explicitly selected intranet targets;
+preview registration and forwarding retain their existing session and target-token checks.
+
 Binding beyond loopback requires `VARIN_UI_PASSWORD`. Tunnel tokens and passwords are runtime-only
 configuration and must not be placed in package archives or build arguments.
 

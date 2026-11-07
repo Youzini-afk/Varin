@@ -15,13 +15,10 @@
  *   `proxy-config-invalid`.
  * - Each request freezes its own policy version; env edits apply to the next
  *   resolution, never mid-request.
- * - Non-desktop private-address enforcement happens inside the connector
- *   lookup so the classified answer is the address actually dialed. A proxy
- *   resolves the target itself; diagnostics label that `proxy-side` honestly.
- * - Proxy endpoint hosts may be loopback/LAN (that is the whole point of a
- *   local proxy). Every route checks the URL scheme. Desktop requests may
- *   intentionally reach local resources; the configured proxy owns final DNS
- *   and routing, which the Host cannot independently verify.
+ * - All deployments may reach local/LAN/container services. The executing
+ *   Host's resolver and route determine reachability; IP classification is
+ *   diagnostic only. A proxy resolves the target itself; diagnostics label
+ *   that `proxy-side` honestly. Every route checks the HTTP(S) URL scheme.
  * - Credentials embedded in a proxy URL are used for CONNECT auth and are
  *   never copied into errors, logs, or diagnostics.
  */
@@ -30,13 +27,11 @@ import { lookup } from "node:dns/promises";
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
-import { classifyHostname, classifyIp, type EgressAddressClass } from "./ssrf-policy.js";
+import { classifyIp, type EgressAddressClass } from "./http-target.js";
 
 export type EgressErrorKind =
   | "dns"
   | "scheme-denied"
-  | "private-network"
-  | "special-purpose"
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"
@@ -128,7 +123,7 @@ export interface NetworkDiagnosis {
   decision: "allowed" | "blocked";
   reason?: string;
   /** Diagnostic address sample, never a guarantee about a later connection. */
-  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "system-managed";
+  addressCheck: "not-run" | "resolved" | "dns-error" | "proxy-side-unverified" | "system-managed";
   /** How the target gets resolved for this request. */
   resolution: "not-run" | "local" | "proxy-side" | "static-literal" | "system";
   /** Locally resolved addresses with their classes (diagnostic only). */
@@ -308,8 +303,8 @@ const CONNECT_CODES = new Set([
  */
 export const classifyEgressError = (error: unknown, mode: "direct" | "proxy" = "direct"): EgressError => {
   if (error instanceof EgressError) return error;
-  // undici wraps connector-callback failures — a typed EgressError raised in
-  // secureLookup survives only inside the cause chain.
+  // undici wraps connector failures; a typed DNS error may survive only
+  // inside the cause chain.
   {
     let cursor: unknown = error;
     for (let depth = 0; depth < 4 && cursor !== null && typeof cursor === "object"; depth += 1) {
@@ -358,8 +353,6 @@ export const EGRESS_TIMEOUT = "egress-timeout";
 
 export const createEgressRuntime = (options: {
   env?: NodeJS.ProcessEnv;
-  /** Desktop may address local services. Remote server deployments keep connect-time address checks. */
-  allowLocalTargets?: boolean;
   /** Desktop transport backed by Electron's system proxy/PAC network stack. */
   systemFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Live serialized settings owned by this executing Host. */
@@ -371,34 +364,22 @@ export const createEgressRuntime = (options: {
 } = {}): EgressRuntime => {
   const env = options.env ?? process.env;
   const getHostConfiguration = options.getHostConfiguration ?? (async () => undefined);
-  const allowLocalTargets = options.allowLocalTargets === true;
   const resolveAll = options.resolveAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
   const resolveProxyAll = options.resolveProxyAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
 
-  // SSRF on the connect path: the classified answer is the address the
-  // socket actually dials. Any private/special answer refuses the connect;
-  // DNS failure propagates as a typed "dns" error instead of a policy block.
+  // Resolve on the actual connection path without a separate preflight lookup.
+  // Local/container and synthetic answers retain the Host's normal routing.
   type ConnectLookupCallback = (
     err: Error | null,
     address?: string | Array<{ address: string; family: number }>,
     family?: number,
   ) => void;
-  const secureLookup = (hostname: string, lookupOptions: { all?: boolean }, callback: ConnectLookupCallback): void => {
+  const directLookup = (hostname: string, lookupOptions: { all?: boolean }, callback: ConnectLookupCallback): void => {
     void resolveAll(hostname).then(
       (addresses) => {
         if (!addresses.length) {
           callback(new EgressError("dns", `DNS resolution returned no addresses for ${hostname}`));
           return;
-        }
-        for (const addr of addresses) {
-          const cls = classifyIp(addr.address);
-          if (cls !== "public") {
-            callback(new EgressError(
-              cls === "private" ? "private-network" : "special-purpose",
-              `target resolves to a ${cls === "private" ? "private" : "special-purpose"} address (${addr.address})`,
-            ));
-            return;
-          }
         }
         if ("all" in lookupOptions && lookupOptions.all) {
           callback(null, addresses.map((a) => ({ address: a.address, family: a.family })));
@@ -410,7 +391,7 @@ export const createEgressRuntime = (options: {
     );
   };
 
-  const directDispatcher = new Agent(allowLocalTargets ? {} : { connect: { lookup: secureLookup as never } });
+  const directDispatcher = new Agent({ connect: { lookup: directLookup as never } });
 
   const proxyDispatchers = new Map<string, Dispatcher>();
   // A fetch can use either protocol after redirects. Lease both candidate
@@ -508,11 +489,6 @@ export const createEgressRuntime = (options: {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return failure("scheme-denied", `unsupported scheme "${url.protocol}"`);
     }
-    // Static hostname screening applies in every mode — literal/private
-    // targets are refused before any socket opens.
-    const staticClass = allowLocalTargets ? null : classifyHostname(url.hostname);
-    if (staticClass) return failure(staticClass === "scheme" ? "scheme-denied" : staticClass, `hostname is ${staticClass}`);
-
     if (policy.invalid) {
       return failure("proxy-config-invalid", `proxy configuration invalid: ${policy.invalid}`);
     }
@@ -619,7 +595,7 @@ export const createEgressRuntime = (options: {
         return await fetchThroughSystem(targetUrl, init, override, requestEnv, hostConfig, version);
       }
       // undici's fetch follows redirects internally. Its dispatcher receives
-      // every hop's origin, so screen each new literal and select its route
+      // every hop's origin, so validate its scheme and select its route
       // before undici can open a socket. undici retains its normal redirect
       // method, credential stripping, and response semantics.
       const redirectDispatcher = {
@@ -684,7 +660,7 @@ export const createEgressRuntime = (options: {
         decision: "blocked",
         reason: `${resolved.failure.kind}: ${resolved.failure.message}`,
         resolution: literal ? "static-literal" : "not-run",
-        addressCheck: literal && (resolved.failure.kind === "private-network" || resolved.failure.kind === "special-purpose") ? "blocked" : "not-run",
+        addressCheck: "not-run",
       };
     }
     let parsed: URL;
@@ -700,7 +676,7 @@ export const createEgressRuntime = (options: {
         policy,
         decision: "allowed",
         resolution: "static-literal",
-        addressCheck: classifyIp(host) === "public" ? "public" : "system-managed",
+        addressCheck: "resolved",
         addresses: [{ address: host, class: classifyIp(host) }],
       };
     }
@@ -720,17 +696,13 @@ export const createEgressRuntime = (options: {
     }
     try {
       const addresses = await resolveAll(host);
-      const blockedAddress = allowLocalTargets ? undefined : addresses.find((address) => classifyIp(address.address) !== "public");
       return {
         url: targetUrl,
         policy,
-        decision: addresses.length > 0 && !blockedAddress ? "allowed" : "blocked",
-        ...(blockedAddress ? { reason: `target resolves to a ${classifyIp(blockedAddress.address)} address (${blockedAddress.address})` }
-          : addresses.length === 0 ? { reason: "DNS resolution returned no addresses" } : {}),
+        decision: addresses.length > 0 ? "allowed" : "blocked",
+        ...(addresses.length === 0 ? { reason: "DNS resolution returned no addresses" } : {}),
         resolution: "local",
-        addressCheck: addresses.length === 0 ? "dns-error"
-          : blockedAddress ? "blocked"
-            : addresses.some((a) => classifyIp(a.address) !== "public") ? "system-managed" : "public",
+        addressCheck: addresses.length === 0 ? "dns-error" : "resolved",
         addresses: addresses.map((a) => ({ address: a.address, class: classifyIp(a.address) })),
         ...(addresses.length === 0 ? { lookupError: "DNS resolution returned no addresses" } : {}),
       };

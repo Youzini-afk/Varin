@@ -34,7 +34,7 @@ const base = { url: 'https://example.com/start', threadId: 't1', maxBytes: 1024 
 describe('read-only browser capture', () => {
   it('brokers every redirect/resource and never transfers cookie or authorization across origins', async () => {
     const same = request('https://example.com/start', { cookie: 'untrusted=1', authorization: 'Bearer own', 'proxy-authorization': 'secret' });
-    const cross = request('https://cdn.example.net/script.js', { cookie: 'copied=secret', authorization: 'Bearer private' });
+    const cross = request('http://127.0.0.1/script.js', { cookie: 'copied=secret', authorization: 'Bearer private' });
     const fixture = page([same, cross]);
     const fetch = vi.fn<BrowserRenderRequest['fetch']>(async () => ({ status: 200, headers: { 'content-security-policy': "default-src 'self'", 'content-disposition': 'attachment' }, body: new Uint8Array() }));
     const close = vi.fn(async () => undefined);
@@ -54,9 +54,9 @@ describe('read-only browser capture', () => {
 
   it('blocks active methods and denied requests without falling back to browser networking', async () => {
     const post = request('https://example.com/change', {}, 'POST');
-    const denied = request('http://127.0.0.1/private');
+    const denied = request('https://denied.example/private');
     const fixture = page([post, denied]);
-    const fetch = vi.fn<BrowserRenderRequest['fetch']>(async () => { throw new Error('private-network'); });
+    const fetch = vi.fn<BrowserRenderRequest['fetch']>(async () => { throw new Error('domain policy'); });
     const result = await captureBrowserPage({ ...base, fetch }, { page: fixture.value, signal: new AbortController().signal, cookies: async () => '', close: async () => undefined });
     expect(fetch).toHaveBeenCalledOnce();
     expect(post.abort).toHaveBeenCalledOnce();

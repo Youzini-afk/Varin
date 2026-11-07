@@ -51,7 +51,7 @@ function fixture() {
   const catalog = runtime as unknown as AgentRuntimeClient;
   const documentReader = createDocumentReader({ materials: store.materials });
   const web = createWebRuntime({ runtime: catalog, materials: store.materials, documentReader,
-    webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials: store.materials, documentReader }),
+    webFetch: createWebFetch({ materials: store.materials, documentReader }),
     fetch: unused, readAuth: unused,
     settings: async () => ({ global: {}, project: {}, globalRevision: 'global', projectRevision: 'project', projectTrusted: false }) });
   const credentialOwner = { scope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), release() {} } as unknown as ExistingHostCredentialOwner;

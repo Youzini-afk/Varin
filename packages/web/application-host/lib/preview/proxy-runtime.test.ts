@@ -237,7 +237,7 @@ describe('preview target failure signaling', () => {
     const registerTarget = requireRouteHandler(postRoutes.get('/api/preview/targets'), 1);
     const guard = requireRouteHandler(useRoutes.get('/api/preview/proxy'));
     const registrationResponse = createResponse();
-    await registerTarget({ body: { url: 'http://127.0.0.1:4323/' }, secure: false }, registrationResponse);
+    await registerTarget({ body: { url: 'http://magpie:4323/', allowExternal: true }, secure: false }, registrationResponse);
 
     const { id, previewToken } = requirePreviewTargetRegistration(registrationResponse.body);
     const invalidResponse = createResponse();
@@ -664,7 +664,7 @@ describe('preview navigation policy', () => {
   });
 });
 
-describe('proxy target normalization (SSRF guard)', () => {
+describe('proxy target normalization', () => {
   it('allows ordinary external hosts when allowExternal is set', () => {
     expect(normalizeProxyTargetUrl('https://docs.example.org/security/', { allowExternal: true }))
       .toEqual({ ok: true, origin: 'https://docs.example.org' });
@@ -674,7 +674,7 @@ describe('proxy target normalization (SSRF guard)', () => {
     expect(normalizeProxyTargetUrl('https://example.com/', {}).ok).toBe(false);
   });
 
-  it('refuses private, loopback and link-local literals on the external path', () => {
+  it('preserves explicitly selected local, LAN and container origins', () => {
     for (const url of [
       'http://127.0.0.1/',
       'http://10.0.0.5/',
@@ -684,17 +684,21 @@ describe('proxy target normalization (SSRF guard)', () => {
       'http://100.64.0.1/',
       'http://localhost/',
       'http://service.local/',
+      'http://magpie:3425/v1',
+      'http://198.18.0.1/',
       'http://[::1]/',
       'http://[fd00::1]/',
       'http://[fe80::1]/',
       'http://2130706433/', // decimal form of 127.0.0.1, normalized by WHATWG URL
     ]) {
-      expect(normalizeProxyTargetUrl(url, { allowExternal: true }).ok, url).toBe(false);
+      expect(normalizeProxyTargetUrl(url, { allowExternal: true }), url).toEqual({ ok: true, origin: new URL(url).origin });
     }
   });
 
-  it('still blocks private hosts even via IPv4-mapped IPv6', () => {
-    expect(normalizeProxyTargetUrl('http://[::ffff:127.0.0.1]/', { allowExternal: true }).ok).toBe(false);
+  it('supports IPv4-mapped IPv6 while rejecting non-HTTP targets', () => {
+    expect(normalizeProxyTargetUrl('http://[::ffff:127.0.0.1]/', { allowExternal: true }))
+      .toEqual({ ok: true, origin: 'http://[::ffff:7f00:1]' });
+    expect(normalizeProxyTargetUrl('file:///private.txt', { allowExternal: true }).ok).toBe(false);
   });
 });
 

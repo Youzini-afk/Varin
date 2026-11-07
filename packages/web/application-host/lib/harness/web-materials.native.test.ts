@@ -45,7 +45,7 @@ it("persists web material, collection membership and related-thread access throu
     expect((await materials.read(scopeId, chatSnapshot.snapshotId, chatAuthority))?.body.toString())
       .toBe("Ordinary Thread material.");
     expect(await materials.read(scopeId, chatSnapshot.snapshotId, { ...chatAuthority, threadId: "other" })).toBeNull();
-    const fetcher = createWebFetch({ materials, ssrf: { check: async () => ({ blocked: false }), isSameHost: () => true } });
+    const fetcher = createWebFetch({ materials });
     vi.stubGlobal("fetch", async () => new Response(`<html><body><article><h1>Guide</h1><p>${"Durable snapshot content. ".repeat(30)}</p></article></body></html>`, {
       headers: { "content-type": "text/html" },
     }));
