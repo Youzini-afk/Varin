@@ -178,6 +178,7 @@ test('the always-present gate rejects every missing/failed/cancelled/unexpectedl
   const expectedJobs = Object.keys(requiredJobs(all));
   assert.deepEqual(new Set(workflow.jobs['source-quality'].needs), new Set(['changes', ...expectedJobs]));
   for (const scope of [all, ...['docs/guide.md', 'packages/ui/src/file.ts',
+    'packages/web/application-host/lib/memory/thread-remember.ts', 'bun.lock',
     'packages/web/application-host/lib/memory/thread-remember.test.ts',
     'kernel/crates/varin-runtime/tests/host_job_review.rs'].map(file => classifyChanges([file]))]) {
     const needs = { changes: { result: 'success' }, ...Object.fromEntries(Object.entries(requiredJobs(scope))
@@ -196,6 +197,112 @@ test('the always-present gate rejects every missing/failed/cancelled/unexpectedl
   const bad = spawnSync(process.execPath, ['scripts/ci-scope.mjs', 'gate'], { cwd: root,
     env: { ...process.env, CI_NEEDS: JSON.stringify({ changes: { result: 'success', outputs: {} } }) }, encoding: 'utf8' });
   assert.notEqual(bad.status, 0);
+});
+
+test('Rust workspace applicability stays separate from Host-only native verification', () => {
+  for (const [file, native, rust] of [
+    ['docs/guide.md', false, false],
+    ['packages/ui/src/file.ts', false, false],
+    ['packages/web/application-host/lib/memory/thread-remember.ts', true, false],
+    ['kernel/crates/varin-runtime/tests/child_dispatch_review.rs', true, true],
+    ['kernel/crates/varin-runtime/tests/fixtures/child_dispatch.rs', true, true],
+    ['kernel/crates/varin-runtime/src/catalog.rs', true, true],
+    ['kernel/rust-toolchain.toml', true, true],
+    ['bun.lock', true, true],
+    ['.github/workflows/ci.yml', true, true],
+  ]) {
+    const required = requiredJobs(classifyChanges([file]));
+    assert.equal(required['linux-native'], native, file);
+    assert.equal(required['rust-workspace'], rust, file);
+    if (rust) assert.equal(required['native-build'], true, file);
+  }
+  assert.equal(requiredJobs(all)['rust-workspace'], true);
+  assert.equal(requiredJobs(classifyChanges([], { full: true, called: true }))['rust-workspace'], true);
+});
+
+test('independent Linux lanes restore the same kernel and retain their real runtime prerequisites', () => {
+  const producer = workflow.jobs['native-build'];
+  const artifact = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with.name;
+  const native = workflow.jobs['linux-native'];
+  const rust = workflow.jobs['rust-workspace'];
+  const prerequisite = "${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}";
+  for (const [job, surface] of [[native, 'native'], [rust, 'rust']]) {
+    assert.deepEqual(job.needs, ['changes', 'native-build']);
+    assert.equal(job.if, `\${{ !cancelled() && needs.changes.outputs.${surface} == 'true' && needs.native-build.result == 'success' }}`);
+    assert.equal(job['runs-on'], producer['runs-on']);
+    const steps = job.steps;
+    const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkout.with.ref, '${{ inputs.source_sha || github.sha }}');
+    assert.equal(steps.find(step => step.uses?.startsWith('actions/setup-node@')).with['node-version'], 24);
+    assert.equal(steps.find(step => step.uses?.startsWith('oven-sh/setup-bun@')).with['bun-version'], '1.3.14');
+    const download = steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+    assert.equal(download.with.name, artifact);
+    assert.equal(download.with.path, '.build-input/kernel');
+    assert.equal(job.env.VARIN_KERNEL_ARTIFACT, '${{ github.workspace }}/.build-input/kernel');
+    assert.equal(job.env.VARIN_TEST_KERNEL_PATH, '${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel');
+    assert.equal(job.env.VARIN_KERNEL_PATH, job.env.VARIN_TEST_KERNEL_PATH);
+    const restore = steps.find(step => step.id === 'native-restore');
+    assert.equal(restore.run, 'node scripts/build-products.mjs kernel');
+    assert.ok(steps.indexOf(download) < steps.indexOf(restore));
+    const dependencies = steps.find(step => step.id === 'dependencies');
+    assert.equal(dependencies.run, 'bun install --frozen-lockfile');
+    const prepare = steps.find(step => step.id === 'prepare');
+    assert.equal(prepare.run, 'bun run build:type-dependencies');
+    assert.equal(prepare.if, "${{ !cancelled() && steps.dependencies.outcome == 'success' }}");
+    assert.ok(steps.indexOf(dependencies) < steps.indexOf(prepare));
+    const fuse = steps.find(step => step.name?.startsWith('Prepare FUSE'));
+    assert.equal(fuse.if, prerequisite);
+    assert.deepEqual(fuse.run.trim().split('\n'), ['sudo apt-get update',
+      'sudo apt-get install -y --no-install-recommends fuse3', 'sudo modprobe fuse', 'test -c /dev/fuse']);
+    assert.ok(steps.indexOf(restore) < steps.indexOf(fuse));
+    assert.ok(steps.indexOf(prepare) < steps.indexOf(fuse));
+    assert.ok(steps.every(step => !step['continue-on-error']));
+  }
+  assert.notEqual(native.concurrency.group, rust.concurrency.group);
+  assert.ok(native.concurrency.group.includes("format('varin-ci-native-{0}', github.run_id)"));
+  assert.ok(rust.concurrency.group.includes("format('varin-ci-rust-{0}', github.run_id)"));
+  const authority = native.steps.find(step => step.run === 'node scripts/test-kernel-authority.mjs');
+  assert.equal(authority.if, prerequisite);
+  assert.ok(native.steps.indexOf(authority) > native.steps.findIndex(step => step.name?.startsWith('Prepare FUSE')));
+  assert.ok(!rust.steps.some(step => step.run?.includes('test-kernel-authority.mjs')));
+  assert.ok(!native.steps.some(step => step.run?.includes('test:rust') || step.id === 'rust-cache'));
+});
+
+test('Rust lane keeps compilation, FUSE coverage, execution budget and failed-test cache preservation', () => {
+  const steps = workflow.jobs['rust-workspace'].steps;
+  const build = steps.find(step => step.id === 'rust-build');
+  assert.equal(build.run, 'bun run test:rust --no-run');
+  assert.equal(build.if, "${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}");
+  assert.ok(steps.indexOf(build) > steps.findIndex(step => step.name?.startsWith('Prepare FUSE')));
+  const compiled = "${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}";
+  const nativeFuse = steps.find(step => step.name === 'Compile native FUSE workspace adapter');
+  const libfuse = steps.find(step => step.name === 'Compile public libfuse3 mount transport');
+  for (const step of [nativeFuse, libfuse]) {
+    assert.equal(step.if, compiled);
+    assert.equal(step['working-directory'], 'kernel');
+    assert.ok(steps.indexOf(build) < steps.indexOf(step));
+  }
+  assert.equal(nativeFuse.run, 'cargo check -p varin-kernel --all-targets --features workspace-mount --locked');
+  assert.deepEqual(libfuse.run.trim().split('\n'), ['sudo apt-get update',
+    'sudo apt-get install -y --no-install-recommends libfuse3-dev',
+    'cargo check -p varin-kernel --lib --features workspace-mount,fuser/libfuse3 --locked']);
+  const execution = steps.find(step => step.name === 'Test Rust workspace');
+  assert.equal(execution.if, compiled);
+  assert.equal(execution.run, 'bun run test:rust --no-fail-fast');
+  assert.equal(execution['timeout-minutes'], 10);
+  assert.equal(execution.env.VARIN_TEST_KERNEL_EXECUTABLE, workflow.jobs['rust-workspace'].env.VARIN_TEST_KERNEL_PATH);
+  assert.equal(execution.env.RUST_BACKTRACE, 1);
+  assert.ok(steps.indexOf(libfuse) < steps.indexOf(execution));
+  const restore = steps.find(step => step.id === 'rust-cache');
+  assert.ok(restore.with.key.startsWith('rust-tests-${{ runner.os }}-${{ runner.arch }}-'));
+  assert.equal(restore.with['restore-keys'], "rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-");
+  assert.deepEqual(restore.with.path.trim().split('\n'), ['~/.cargo/registry', '~/.cargo/git', 'kernel/target/debug']);
+  assert.ok(steps.indexOf(restore) < steps.indexOf(build));
+  const save = steps.find(step => step.uses?.startsWith('actions/cache/save@'));
+  assert.equal(save.if, "${{ !cancelled() && steps.rust-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}");
+  assert.equal(save.with.path, restore.with.path);
+  assert.equal(save.with.key, '${{ steps.rust-cache.outputs.cache-primary-key }}');
+  assert.ok(steps.indexOf(execution) < steps.indexOf(save));
 });
 
 test('platform discovery keeps native teardown, storage, observation and file-CAS evidence', () => {
@@ -250,7 +357,7 @@ test('release automation can build an older source without borrowing its tool se
 
 test('all heavy Dependabot lanes share one non-cancelling queue, including reusable containers', () => {
   const container = parse(fs.readFileSync(new URL('../.github/workflows/container-check.yml', import.meta.url), 'utf8'));
-  for (const job of [...['portable-source', 'native-build', 'linux-native', 'windows-runtime',
+  for (const job of [...['portable-source', 'native-build', 'linux-native', 'rust-workspace', 'windows-runtime',
     'macos-storage', 'production-build', 'android-build'].map(name => workflow.jobs[name]), container.jobs.verify]) {
     assert.ok(job.concurrency.group.includes("github.event.pull_request.user.login == 'dependabot[bot]'"));
     assert.ok(job.concurrency.group.includes("'varin-dependabot-background'"));
