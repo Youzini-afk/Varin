@@ -49,11 +49,12 @@ export async function prepareHarnessInput(
   owner?: ExternalAttachmentOwner,
   signal?: AbortSignal,
 ): Promise<HarnessInput> {
-  const { attachments = [], _attachmentSelections: _selections, ...plain } = input;
+  const { attachments = [], _attachmentSelections: _selections, attachmentImageReferences, ...plain } = input;
   if (!attachments.length) return plain;
   if (!owner) throw new ExternalAgentError('attachments_unavailable', 'The original attachment owner is unavailable');
   const images = [...(input.images ?? [])];
   const files: NonNullable<HarnessInput['files']> = [];
+  const imageLabels: string[] = [];
   for (const attachment of attachments) {
     signal?.throwIfAborted();
     // These are the image formats accepted by the existing native adapter protocols. Other
@@ -67,12 +68,16 @@ export async function prepareHarnessInput(
       for await (const chunk of original.stream) { signal?.throwIfAborted(); chunks.push(Buffer.from(chunk)); length += chunk.byteLength; }
       if (length !== attachment.byteLength) throw new ExternalAgentError('attachment_incomplete', `The original image ${attachment.filename} is incomplete`);
       images.push({ data: Buffer.concat(chunks).toString('base64'), mimeType: attachment.mimeType });
+      const reference = attachmentImageReferences?.[attachment.ref];
+      if (reference !== undefined) imageLabels.push(`Attached image ${images.length}: [Image ${reference}] / [图片${reference}]`);
     } else {
       if (!capabilities.files) throw new ExternalAgentError('attachment_unsupported', `This Agent cannot receive ${attachment.filename}: neither a supported native block nor an execution-host file path is available`);
       const prepared = await owner.externalPath(conversation, attachment.ref, signal);
       if (!path.isAbsolute(prepared.path) || !prepared.kernelEpoch) throw new ExternalAgentError('attachment_path_unavailable', `No current execution-host path is available for ${attachment.filename}`);
       files.push({ attachment, path: prepared.path });
+      const reference = attachmentImageReferences?.[attachment.ref];
+      if (reference !== undefined) imageLabels.push(`[Image ${reference}] / [图片${reference}]: ${JSON.stringify(attachment.filename)}`);
     }
   }
-  return { ...plain, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) };
+  return { ...plain, ...(imageLabels.length ? { text: [plain.text, imageLabels.join('\n')].filter(Boolean).join('\n\n') } : {}), ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) };
 }

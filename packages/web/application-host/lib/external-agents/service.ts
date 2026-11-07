@@ -1,3 +1,4 @@
+import { parseAttachmentImageReferences } from '../kernel/thread-images.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -899,7 +900,7 @@ export class ExternalAgentsService {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
     if (
-      Object.keys(input).some((key) => !['text', 'images', 'attachments', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
+      Object.keys(input).some((key) => !['text', 'images', 'attachments', 'attachmentImageReferences', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
       (input.config !== undefined && (!input.config || typeof input.config !== 'object' || Array.isArray(input.config) || Object.values(input.config).some((v) => typeof v !== 'string'))) ||
       ['model', 'thinking', 'mode'].some(
         (key) =>
@@ -917,6 +918,7 @@ export class ExternalAgentsService {
           )))
     )
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
+    parseAttachmentImageReferences(input.attachmentImageReferences);
     const selections = parseExternalAttachmentSelections(input.attachments);
     if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length && !selections?.length))
       throw new ExternalAgentError('empty_input', 'Enter a message');

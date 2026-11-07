@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { parseThreadImages, threadInput } from './thread-images.js';
+import { parseThreadImages, parseAttachmentImageReferences, threadInput } from './thread-images.js';
 
 it('retains explicit image numbers across HTTP admission and separates them from image bytes', () => {
   const images = parseThreadImages([{ mimeType: 'image/png', data: 'YQ==', reference: 1 }, { mimeType: 'image/png', data: 'Yg==', reference: 3 }])!;
@@ -15,4 +15,7 @@ it('rejects ambiguous image references before admission', () => {
   const image = { mimeType: 'image/png', data: 'YQ==' };
   for (const reference of [0, -1, 1.5, '1', null]) expect(() => parseThreadImages([{ ...image, reference }])).toThrow();
   expect(() => parseThreadImages([{ ...image, reference: 2 }, { ...image, reference: 2 }])).toThrow();
+  expect(parseAttachmentImageReferences({ 'attachment:first': 1, 'attachment:third': 3 })).toEqual({ 'attachment:first': 1, 'attachment:third': 3 });
+  expect(() => parseAttachmentImageReferences({ 'attachment:first': 1 }, [{ ...image, reference: 1 }])).toThrow();
+  expect(() => parseAttachmentImageReferences({ 'attachment:first': '1' })).toThrow();
 });

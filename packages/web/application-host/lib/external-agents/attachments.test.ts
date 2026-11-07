@@ -24,11 +24,16 @@ it('prepares only selected fixed files in the actual external host without chang
 });
 it('keeps images as real native image blocks when the current adapter accepts them', async () => {
   const owner = fixture(), image = { ...file, filename: 'image.png', mimeType: 'image/png' };
-  vi.mocked(owner.readExternal).mockResolvedValue({ attachment: image, stream: (async function* () { yield Buffer.from('da'); yield Buffer.from('ta'); })() });
+  vi.mocked(owner.readExternal).mockImplementation(async () => ({ attachment: image, stream: (async function* () { yield Buffer.from('da'); yield Buffer.from('ta'); })() }));
   const input = await prepareHarnessInput({ text: '', attachments: [image] }, conversation,
     { images: true, files: 'paths', models: [], resume: true, steering: false }, owner);
   expect(input).toEqual({ text: '', images: [{ data: Buffer.from('data').toString('base64'), mimeType: 'image/png' }] });
   expect(owner.externalPath).not.toHaveBeenCalled();
+  const numbered = await prepareHarnessInput({ text: 'Look at [图片3]', attachments: [image], attachmentImageReferences: { [image.ref]: 3 } }, conversation,
+    { images: true, files: 'paths', models: [], resume: true, steering: false }, owner);
+  expect(numbered.images).toEqual(input.images);
+  expect(numbered.text).toContain('Attached image 1: [Image 3] / [图片3]');
+  expect(numbered).not.toHaveProperty('attachmentImageReferences');
 });
 it('fails before dispatch instead of silently dropping unsupported files or returning stale paths', async () => {
   const owner = fixture(), caps = { images: false, models: [], resume: true, steering: false };

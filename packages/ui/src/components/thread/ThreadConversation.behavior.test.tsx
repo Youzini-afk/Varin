@@ -1143,7 +1143,9 @@ it.each(['paste', 'drop'] as const)('selects mixed binary files through %s and d
   await submitForm(composerForm());
   expect(vi.mocked(f.api.attachments.upload).mock.calls.map(([, value]) => value.data)).toEqual(files);
   expect(f.submit.mock.calls[0]![0].attachments).toHaveLength(3);
-  expect(f.submit.mock.calls[0]![0].text).toBe('');
+  expect(f.submit.mock.calls[0]![0].text).toBe('[Image 1]');
+  expect(f.submit.mock.calls[0]![0].attachmentImageReferences).toEqual({ 'attachment:retained-original': 1 });
+  expect(container.textContent).not.toContain('chat.attachments.selected');
 });
 
 it('keeps all selections and text when a later file fails; retry reuses prepared content and the failed upload key', async () => {
@@ -1429,7 +1431,7 @@ it('adds a hidden skill command and retains the draft and image through a resour
     await new Promise(resolve => setTimeout(resolve, 0));
   });
   await act(async () => { button('Add /skill:review-code to draft').click(); button('Add /skill:review-code to draft').click(); });
-  const text = `/skill:review-code ${draft}`;
+  const text = `/skill:review-code ${draft}[Image 1]`;
   expect(composer().value).toBe(text);
   expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toMatch(/^blob:/);
   expect(f.submit).not.toHaveBeenCalled();

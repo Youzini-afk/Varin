@@ -177,6 +177,7 @@ export interface ThreadSubmit extends ThreadIdentity {
   skills?: ThreadSkillSelection[];
   references?: ThreadObjectReference[];
   attachments?: import('@varin/protocol').AttachmentSelection[];
+  attachmentImageReferences?: Record<string, number>;
   model: ThreadModel;
   agent?: ThreadAgentChoice;
   source?: ThreadSource;
@@ -312,6 +313,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   skills?: ThreadSkillSelection[];
   references?: ThreadObjectReference[];
   attachments?: import('@varin/protocol').AttachmentSelection[];
+  attachmentImageReferences?: Record<string, number>;
 }
 export interface ThreadCollaborationAPI {
   dispatchCatalog(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchCatalog>;
@@ -588,7 +590,7 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
+  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], skills?: ThreadSkillSelection[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;

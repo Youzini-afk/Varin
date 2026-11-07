@@ -121,6 +121,7 @@ export type ExternalTurnStatus =
   | 'cancelled'
   | 'interrupted';
 export interface ExternalInput {
+  attachmentImageReferences?: Record<string, number>;
   attachments?: AttachmentSelection[];
   config?: Record<string, string>;
   text: string;
@@ -358,6 +359,7 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
           ...(input.config === undefined ? {} : { config: input.config }),
           ...(input.images === undefined ? {} : { images: input.images }),
           ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+          ...(input.attachmentImageReferences === undefined ? {} : { attachmentImageReferences: input.attachmentImageReferences }),
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinking ? { thinking: input.thinking } : {}),
           ...(input.mode ? { mode: input.mode } : {}),

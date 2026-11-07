@@ -1,5 +1,16 @@
 import type { ImageAttachment } from '@varin/protocol';
 
+export function parseAttachmentImageReferences(value: unknown, images?: readonly ImageAttachment[]): Record<string, number> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Attachment image references must be an object');
+  const used = new Set(images?.flatMap(image => image.reference === undefined ? [] : [image.reference]));
+  return Object.fromEntries(Object.entries(value).map(([ref, number]) => {
+    if (!ref.startsWith('attachment:') || !Number.isSafeInteger(number) || Number(number) < 1 || used.has(number as number)) throw new Error('Image references must be distinct positive integers');
+    used.add(number as number);
+    return [ref, number as number];
+  }));
+}
+
 /** Validate untrusted HTTP media once. Never accept arbitrary URL/file references from this path. */
 export function parseThreadImages(value: unknown): ImageAttachment[] | undefined {
   if (value === undefined) return undefined;

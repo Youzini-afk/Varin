@@ -99,7 +99,7 @@ export class ThreadAdapter {
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private messageTime?: () => Promise<MessageTimeSettings>;
   bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
-  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
+  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
     const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
     const attachments = parseAttachmentSelections(input.attachments) ?? [];
@@ -107,7 +107,7 @@ export class ThreadAdapter {
     const skills = parseThreadSkills(input.skills, input.text);
     const references = parseThreadObjectReferences(input.references, input.text);
     const text = references?.length && !options.rawReferences ? await createThreadObjectInputPreparer({ runtime: this.runtime, admitSource: this.admitSource })({ ...input, references }, signal) : input.text;
-    const explicit = { ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
+    const explicit = { ...(input.attachmentImageReferences ? { attachmentImageReferences: input.attachmentImageReferences } : {}), ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
       ...(selected?.length ? { materials: selected } : {}), ...(attachmentSelections.length ? { attachmentSelections, originalImageCount: input.images?.length ?? 0 } : {}) } } : {}) };
     const metadata = { ...(text === input.text ? {} : { userText: input.text }), ...explicit, ...(sentTime ? { sentTime } : {}) };
     if (options.rawReferences) return { ...threadInput(input.text, input.images), ...explicit, ...(sentTime ? { sentTime } : {}) };
@@ -118,7 +118,7 @@ export class ThreadAdapter {
         const source = await this.attachments.read(input, attachment.ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of source.stream) chunks.push(chunk);
-        images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64') });
+        images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64'), ...(input.attachmentImageReferences?.[attachment.ref] === undefined ? {} : { reference: input.attachmentImageReferences[attachment.ref] }) });
       }
       return { ...threadInput(text, images.length ? images : input.images), fileAttachments, ...metadata };
     }
@@ -1083,7 +1083,7 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
+  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);

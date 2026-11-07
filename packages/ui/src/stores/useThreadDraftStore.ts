@@ -35,6 +35,9 @@ export interface DraftFileAttachment {
   filename: string;
   mimeType: string;
   data: Blob;
+  imageReference?: number;
+  annotation?: import('@/lib/images/annotations').ImageAnnotationDocument;
+  uploadKey?: string;
   status: 'selected' | 'preparing' | 'ready' | 'failed';
   attachment?: Attachment;
   preparedScope?: string;
@@ -133,7 +136,7 @@ export const useThreadDraftStore = create<{
       next.interactions = mapInteractionRanges(draft.interactions, ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length));
     }
     if (change.images) {
-      let reference = Math.max(next.imageReferenceSequence ?? 0, ...change.images.map(image => image.reference ?? 0));
+      let reference = Math.max(next.imageReferenceSequence ?? 0, ...(next.files ?? []).map(file => file.imageReference ?? 0), ...change.images.map(image => image.reference ?? 0));
       next.images = change.images.map(image => image.reference === undefined ? { ...image, reference: ++reference } : image);
       next.imageReferenceSequence = reference;
     }

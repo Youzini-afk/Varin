@@ -1,11 +1,38 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { selectThreadFiles, prepareDraftFiles } from './fileAttachments';
+import { selectThreadFiles, prepareDraftFiles, updateDraftFileAnnotation, removeDraftFile } from './fileAttachments';
+import { flattenAnnotations, type ImageAnnotationDocument } from '@/lib/images/annotations';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import type { Attachment } from '@varin/protocol';
 const endpoint = vi.hoisted(() => ({ generation: 1 }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), getRuntimeEndpointGeneration: () => endpoint.generation }));
+vi.mock('@/lib/images/annotations', async original => ({ ...await original<typeof import('@/lib/images/annotations')>(), flattenAnnotations: vi.fn() }));
 beforeEach(() => { endpoint.generation = 1; useThreadDraftStore.setState({ drafts: {} }); });
 const descriptor = (ref: string): Attachment => ({ ref: `attachment:${ref}`, filename: 'same.bin', mimeType: 'application/octet-stream', byteLength: 3 });
+it('shares stable image numbering with inline images and removes only the deleted image reference', () => {
+  useThreadDraftStore.getState().patch('draft', { text: 'Keep [Image 1]', images: [{ data: 'YQ==', mimeType: 'image/png', reference: 1 }] });
+  const insert = (number: number) => useThreadDraftStore.getState().patch('draft', draft => ({ text: `${draft.text}[Image ${number}]` }));
+  const selected = selectThreadFiles('draft', [new File(['a'], 'one.PNG'), new File(['pdf'], 'report.pdf'), new File(['b'], 'two.png')], insert);
+  expect(selected.map(file => file.imageReference)).toEqual([2, undefined, 3]);
+  removeDraftFile('draft', selected[0]!.id);
+  expect(useThreadDraftStore.getState().drafts.draft.text).toBe('Keep [Image 1][Image 3]');
+  expect(selectThreadFiles('draft', [new File(['c'], 'three.png')], insert)[0]!.imageReference).toBe(4);
+});
+it('uploads flattened edited pixels under a fresh upload key and reuses that exact upload on retry', async () => {
+  const [original] = selectThreadFiles('draft', [new File(['private original'], 'photo.jpg', { type: 'image/jpeg' })]);
+  const upload = vi.fn(async () => descriptor('fixed'));
+  await prepareDraftFiles('draft', [original!], 'owner', upload);
+  const doc: ImageAnnotationDocument = { source: { data: 'cHJpdmF0ZQ==', mimeType: 'image/jpeg' }, width: 5, height: 5, marks: [], past: [], future: [] };
+  updateDraftFileAnnotation('draft', original!.id, doc);
+  const edited = useThreadDraftStore.getState().drafts.draft.files![0]!;
+  expect(edited.uploadKey).not.toBe(original!.id); expect(edited.attachment).toBeUndefined();
+  vi.mocked(flattenAnnotations).mockResolvedValueOnce({ data: btoa('visible pixels'), mimeType: 'image/png' });
+  await prepareDraftFiles('draft', [edited], 'owner', upload);
+  const sent = (upload.mock.calls[1] as unknown as [typeof edited])[0];
+  expect(sent.filename).toBe('photo.png'); expect(await sent.data.text()).toBe('visible pixels');
+  expect(sent.uploadKey).toBe(edited.uploadKey); expect(sent.imageReference).toBe(1);
+  await prepareDraftFiles('draft', [edited], 'owner', upload);
+  expect(upload).toHaveBeenCalledTimes(2);
+});
 it('keeps original binary Blobs and distinct selections for same-named files without reading on selection', async () => {
   const first = new File([new Uint8Array([0, 255, 3])], 'same.bin');
   const second = new File([new Uint8Array([5, 0, 6])], 'same.bin');

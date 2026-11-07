@@ -15,7 +15,7 @@ import {
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore, type ThreadDraft } from '@/stores/useThreadDraftStore';
 import { useI18n } from '@/lib/i18n';
 import type { CollaborationMember } from './collaborationFeed';
-import { prepareThreadFiles, selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import { prepareThreadFiles, removeDraftFile, selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { composerFileSelections, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { ThreadFileDrafts } from './ThreadAttachments';
@@ -143,7 +143,7 @@ export function CollaborationComposer({
         onDrop={event => { event.preventDefault(); addFiles([...event.dataTransfer.files]); }}>
         <input ref={fileInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')} disabled={busy || retained}
           onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; addFiles(files); }} />
-        <ThreadFileDrafts files={draft.files} locked={busy || retained} onRemove={id => patch({ files: draft.files?.filter(file => file.id !== id) })} />
+        <ThreadFileDrafts draftKey={draftKey} files={draft.files} locked={busy || retained} onRemove={id => removeDraftFile(draftKey, id)} />
         <ComposerSelectedFiles files={draft.selectedAttachments} locked={busy || retained} onRemove={id => removeComposerFile(draftKey, id)} />
         {preparationError && <p role="alert" className="typography-micro text-destructive">{preparationError}</p>}
         {reply && (

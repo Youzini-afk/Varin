@@ -6,7 +6,7 @@ import { acknowledgeEditorContextAttachments } from '@/lib/agent-editor/attachme
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { deliverThreadInput } from './threadInputDelivery';
-import { prepareThreadFiles } from './fileAttachments';
+import { prepareThreadFiles, attachmentImageReferences } from './fileAttachments';
 
 const sending = new Map<string, Promise<string | undefined>>();
 type Preparation = { input: ThreadPrepareSource; release?: () => Promise<void>; unsubscribe?: () => void };
@@ -72,7 +72,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         const input: ThreadPendingInput = { kind: 'submit', status: 'sending', fingerprint: request.key,
           editorText: request.editorText, fileIds: request.files.map(file => file.id), selectedAttachmentIds: request.selectedAttachments?.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
-          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references, attachments: [...attachments.map(({ ref }) => ({ ref })), ...selected],
+          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, ...attachmentImageReferences(request.files, attachments), materials, skills: request.skills, references: request.references, attachments: [...attachments.map(({ ref }) => ({ ref })), ...selected],
             model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }

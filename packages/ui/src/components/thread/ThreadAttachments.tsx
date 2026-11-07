@@ -4,9 +4,10 @@ import type { Attachment } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ConversationImageViewer } from '@/components/images/ConversationImage';
+import { DraftFileImages } from '@/components/images/DraftFileImages';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
-import { attachmentSize } from '@/lib/agent-runtime/fileAttachments';
+import { attachmentSize, updateDraftFileAnnotation } from '@/lib/agent-runtime/fileAttachments';
 import type { DraftFileAttachment } from '@/stores/useThreadDraftStore';
 
 type Reader = { api: Pick<ThreadsAPI, 'attachments'>; identity: ThreadIdentity };
@@ -19,25 +20,28 @@ export function ThreadAttachments({ attachments, api, identity, read }: Partial<
   </div>;
 }
 
-export function ThreadFileDrafts({ files = [], locked, onRemove }: {
-  files?: readonly DraftFileAttachment[]; locked: boolean; onRemove(id: string): void;
+export function ThreadFileDrafts({ files = [], locked, onRemove, draftKey, onReference }: {
+  files?: readonly DraftFileAttachment[]; locked: boolean; onRemove(id: string): void; draftKey?: string; onReference?(reference: number): void;
 }) {
   const { t } = useI18n();
+  const images = React.useMemo(() => files.filter(file => file.mimeType.startsWith('image/')), [files]);
   return files.length ? <div role="group" className="flex flex-wrap gap-2" aria-label={t('chat.attachments.files')}>
-    {files.map(file => <div key={file.id} className="min-w-0 max-w-full rounded-lg border border-border/60 p-2">
+    <DraftFileImages key={draftKey} files={images} locked={locked} onRemove={onRemove} onReference={onReference}
+      onUpdate={draftKey ? (id, doc, image) => updateDraftFileAnnotation(draftKey, id, doc, image) : undefined} />
+    {files.filter(file => !file.mimeType.startsWith('image/')).map(file => <div key={file.id} className="min-w-0 max-w-full rounded-lg border border-border/60 p-2">
       <div className="flex items-start gap-2">
-        <AttachmentCard attachment={file.attachment ?? { ref: '', filename: file.filename, mimeType: file.mimeType, byteLength: file.data.size }} data={file.data} />
+        <AttachmentCard draft attachment={{ ref: '', filename: file.filename, mimeType: file.mimeType, byteLength: file.data.size }} data={file.data} />
         <button type="button" disabled={locked || file.status === 'preparing'} aria-label={t('chat.attachments.remove', { name: file.filename })}
           onClick={() => onRemove(file.id)} className="text-muted-foreground hover:text-foreground disabled:opacity-40"><Icon name="close" className="size-4" /></button>
       </div>
-      <p role={file.status === 'failed' ? 'alert' : 'status'} className={`mt-1 typography-micro ${file.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {t(`chat.attachments.${file.status}`)}{file.error ? `: ${file.error}` : ''}
-      </p>
     </div>)}
+    {files.filter(file => file.status === 'preparing' || file.status === 'failed').map(file => <p key={file.id} role={file.status === 'failed' ? 'alert' : 'status'} className={`w-full typography-micro ${file.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+      {file.filename} · {t(`chat.attachments.${file.status}`)}{file.error ? `: ${file.error}` : ''}
+    </p>)}
   </div> : null;
 }
 
-function AttachmentCard({ attachment, data, api, identity, read }: { attachment: Attachment; data?: Blob; read?: (ref: string, signal: AbortSignal) => Promise<Blob> } & Partial<Reader>) {
+function AttachmentCard({ attachment, data, api, identity, read, draft }: { attachment: Attachment; data?: Blob; draft?: boolean; read?: (ref: string, signal: AbortSignal) => Promise<Blob> } & Partial<Reader>) {
   const { t } = useI18n();
   const localId=React.useId();
   const host = getRuntimeEndpointGeneration();
@@ -103,10 +107,10 @@ function AttachmentCard({ attachment, data, api, identity, read }: { attachment:
       <span className="min-w-0"><span className="block max-w-64 break-words" title={attachment.filename}>{attachment.filename}</span>
         <span className="block typography-micro text-muted-foreground">{attachmentSize(attachment.byteLength)}</span></span>
     </button>
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-micro text-muted-foreground">
+    {!draft && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-micro text-muted-foreground">
       <button type="button" aria-label={`${t('chat.media.download')}: ${attachment.filename}`} disabled={busy} onClick={() => void download()}>{t('chat.media.download')}</button>
       {attachment.ref && <button type="button" aria-label={`${t('chat.attachments.copyRef')}: ${attachment.filename}`} onClick={() => void copyTextToClipboard(attachment.ref).then(result => { if (!result.ok) setError(result.error); }).catch(failure => setError(String(failure)))}>{t('chat.attachments.copyRef')}</button>}
-    </div>
+    </div>}
     {busy && <p role="status">{t('chat.media.loading')}</p>}
     {error && <p role="alert" className="break-words text-destructive">{error}</p>}
     {open && url && image ? <ConversationImageViewer src={url} identity={identity} sourceId={attachment.ref || localId} label={attachment.filename} onClose={()=>setOpen(false)}/> : <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-[90vw]" aria-describedby={undefined}><DialogTitle className="break-words">{attachment.filename}</DialogTitle>
@@ -116,7 +120,7 @@ function AttachmentCard({ attachment, data, api, identity, read }: { attachment:
             : !busy && !error ? <p>{t('chat.attachments.noPreview')}</p> : null}
       {error && <p role="alert">{error}</p>}
       <div className="flex gap-3 typography-meta">
-        <button type="button" aria-label={`${t('chat.media.download')}: ${attachment.filename}`} disabled={busy} onClick={() => void download()}>{t('chat.media.download')}</button>
+        {!draft && <button type="button" aria-label={`${t('chat.media.download')}: ${attachment.filename}`} disabled={busy} onClick={() => void download()}>{t('chat.media.download')}</button>}
         {/* Do not open executable/HTML bytes under the application's Blob origin. */}
         {url && (image && attachment.mimeType !== 'image/svg+xml' || pdf) && <a href={url} target="_blank" rel="noopener noreferrer">{t('chat.attachments.open')}</a>}
       </div>

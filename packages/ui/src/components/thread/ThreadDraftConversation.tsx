@@ -20,7 +20,7 @@ import { WorkOverviewControl } from './WorkOverviewControl';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
-import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
+import { removeDraftFile, attachmentImageReferences, selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadFileDrafts } from './ThreadAttachments';
 import { removeDraftImage, updateDraftImage } from '@/components/chat/composer/imageAttachments';
 import { prepareAnnotatedImages } from '@/lib/images/annotations';
@@ -159,6 +159,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     });
   };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
+  const insertImageReference = (number: number) => {
+    const token = t('chat.imageReference.token', { number });
+    if (editor.current) editor.current.insertText(token);
+    else useThreadDraftStore.getState().patch(draftKey, current => ({ text: current.text + token }));
+  };
   const addFiles = async (files: File[]) => {
     const latest = useThreadDraftStore.getState().drafts[draftKey];
     if (!files.length || reading.current || latest?.firstSend || latest?.externalInput || externalSending.current) return;
@@ -169,7 +174,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     try {
       for (const file of files) {
         if (!current()) return;
-        selectThreadFiles(draftKey, [file]);
+        selectThreadFiles(draftKey, [file], insertImageReference);
       }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (current()) { reading.current = null; setReadingFiles(false); } }
@@ -210,10 +215,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
             if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
             const attachments = draft.externalInput ? [] : await prepareDraftFiles(draftKey, draft.files ?? [], `external:${conversation.id}`,
-              (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
+              (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.uploadKey ?? file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
             if (!current()) return;
             const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-              images: (await prepareAnnotatedImages(draft.images)).map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
+              images: (await prepareAnnotatedImages(draft.images)).map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...attachmentImageReferences(draft.files ?? [], attachments), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
             if (!current()) return;
             patch({ externalInput: request });
             await externalApi.send(conversation.id, request.key, request);
@@ -289,7 +294,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
               onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
               onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
             <ComposerSelectedFiles files={draft.selectedAttachments} locked={sending} onRemove={id => removeComposerFile(draftKey, id)} />
-          <ThreadFileDrafts files={draft.files} locked={locked} onRemove={id => patch(current => ({ files: current.files?.filter(file => file.id !== id) }))} />
+          <ThreadFileDrafts draftKey={draftKey} onReference={insertImageReference} files={draft.files} locked={locked} onRemove={id => removeDraftFile(draftKey, id)} />
             {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
           </div>
         </ThreadComposer>

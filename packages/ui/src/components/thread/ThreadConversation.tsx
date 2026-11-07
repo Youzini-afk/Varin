@@ -56,7 +56,7 @@ import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { removeDraftImage, updateDraftImage } from '@/components/chat/composer/imageAttachments';
 import { prepareAnnotatedImages } from '@/lib/images/annotations';
-import { selectThreadFiles, prepareThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import { removeDraftFile, attachmentImageReferences, selectThreadFiles, prepareThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadFileDrafts } from './ThreadAttachments';
 import { useI18n } from '@/lib/i18n';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
@@ -352,9 +352,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       });
     }
   };
+  const insertImageReference = (number: number) => {
+    const token = t('chat.imageReference.token', { number });
+    if (messageInput.current) messageInput.current.insertText(token);
+    else useThreadDraftStore.getState().patch(draftKey, current => ({ text: current.text + token }));
+  };
   const addFiles = (files: File[]) => {
     if (!files.length || readOnly || pendingAction.current || pendingInput.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
-    selectThreadFiles(draftKey, files);
+    selectThreadFiles(draftKey, files, insertImageReference);
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
@@ -644,7 +649,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           const retained = await prepareThreadFiles(api, identity, draftKey, files);
           if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
           const key = crypto.randomUUID();
-          const attachments = { ...(materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {}),
+          const attachments = { ...attachmentImageReferences(files, retained), ...(materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {}),
             ...(retained.length || selections.length ? { attachments: [...retained.map(({ ref }) => ({ ref })), ...selections] } : {}) };
           const submit = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
           const queued = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, mode: requestedMode };
@@ -744,7 +749,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.firstSend || draft.pendingInput)}
         onRemove={snapshotId => { if (!pendingAction.current && !pendingInput.current) setMaterials(current => current.filter(material => material.snapshotId !== snapshotId)); }} />
       <ComposerSelectedFiles files={draft.selectedAttachments} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} onRemove={id => removeComposerFile(draftKey, id)} />
-      <ThreadFileDrafts files={draft.files} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} onRemove={id => useThreadDraftStore.getState().patch(draftKey, current => ({ files: current.files?.filter(file => file.id !== id) }))} />
+      <ThreadFileDrafts draftKey={draftKey} onReference={insertImageReference} files={draft.files} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} onRemove={id => removeDraftFile(draftKey, id)} />
         </div>
       </ThreadComposer>
       <div className="chat-input-column flex gap-2">

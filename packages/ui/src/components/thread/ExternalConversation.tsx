@@ -43,7 +43,7 @@ import { ChatAgentMessageBubble } from '@/components/conversation/ChatAgentMessa
 import { ExternalInteractionForm } from './ExternalInteractionForm';
 import { ExternalConnectionStatus } from './ExternalConnectionStatus';
 import { externalSessionInput, normalizeExternalSessionChoice } from './externalSessionChoice';
-import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
+import { removeDraftFile, attachmentImageReferences, selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadAttachments, ThreadFileDrafts } from './ThreadAttachments';
 
 const describe = (value: unknown): string =>
@@ -573,10 +573,15 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
       if (isCurrent()) setPending(false);
     }
   };
+  const insertImageReference = (number: number) => {
+    const token = t('chat.imageReference.token', { number });
+    if (editor.current) editor.current.insertText(token);
+    else useThreadDraftStore.getState().patch(key, current => ({ text: current.text + token }));
+  };
   const addFiles = (files: File[]) => {
     if (!isCurrent() || acting.current || draft.externalInput) return;
     if (files.some(file => !externalAttachmentSupported(snapshot?.capabilities ?? (snapshot ? settings?.capabilityCache?.[snapshot.conversation.configurationId]?.capabilities : undefined), file))) { setFailure(new Error(t('external.filesUnsupported'))); return; }
-    selectThreadFiles(key, files);
+    selectThreadFiles(key, files, insertImageReference);
   };
   if (!snapshot)
     return (
@@ -714,10 +719,10 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
                     if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
                     const attachments = draft.externalInput ? [] : await prepareDraftFiles(key, draft.files ?? [], `external:${id}`,
-                      (file, signal) => api.uploadAttachment(id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
+                      (file, signal) => api.uploadAttachment(id, { key: file.uploadKey ?? file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
                     if (!isCurrent()) return;
                     const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text,
-                      images: (await prepareAnnotatedImages(draft.images)).map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })),
+                      images: (await prepareAnnotatedImages(draft.images)).map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...attachmentImageReferences(draft.files ?? [], attachments),
                       ...externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities) };
                     if (!isCurrent()) return;
                     patch({ externalInput: request });
@@ -807,7 +812,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   attachmentNames={draft.files?.map(file => file.filename) ?? []}
                   skills={[]}
                 >
-                  <ThreadFileDrafts files={draft.files} locked={pending || unresolvedInput} onRemove={id => patch({ files: draft.files?.filter(file => file.id !== id) })} />
+                  <ThreadFileDrafts draftKey={key} onReference={insertImageReference} files={draft.files} locked={pending || unresolvedInput} onRemove={id => removeDraftFile(key, id)} />
                   <ImageAttachmentStrip
                     key={key}
                     images={draft.images}

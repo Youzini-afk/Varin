@@ -8,6 +8,14 @@ import { ThreadContent } from './ThreadContent';
 import { historyParts } from '@/lib/agent-runtime/thread-content';
 import type { Attachment } from '@varin/protocol';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import type { ImageAnnotationBinding } from '@/components/images/ImageViewer';
+const viewer = vi.hoisted(() => ({ binding: undefined as ImageAnnotationBinding | undefined }));
+vi.mock('@/components/images/ImageViewer', () => ({ ImageViewer: ({ annotation }: { annotation?: ImageAnnotationBinding }) => {
+  viewer.binding = annotation;
+  return <div role="dialog">image editor</div>;
+} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => null }));
@@ -20,6 +28,7 @@ let root: Root, container: HTMLDivElement;
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'reader', branchId: 'branch' };
 const attachment: Attachment = { ref: 'attachment:fixed-original', filename: 'report.unknown', mimeType: 'application/octet-stream', byteLength: 3 };
 beforeEach(() => {
+  viewer.binding = undefined; useThreadDraftStore.setState({ drafts: {} });
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => {}) } });
@@ -28,6 +37,22 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const click = (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!.click());
+it('keeps unsent file cards compact and opens image annotation in the draft before a conversation exists', async () => {
+  const files = selectThreadFiles('new-draft', [new File(['image'], 'image.png'), new File(['notes'], 'notes.txt')]);
+  const render = () => root.render(<ThreadFileDrafts draftKey="new-draft" files={useThreadDraftStore.getState().drafts['new-draft'].files} locked={false} onRemove={() => {}} />);
+  await act(async () => { render(); });
+  expect(container.textContent).toContain('notes.txt');
+  expect(container.textContent).not.toContain('chat.media.download'); expect(container.textContent).not.toContain('chat.attachments.selected');
+  expect(container.querySelector('[aria-label="imageEditor.annotate"]')).not.toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="imageEditor.annotate"]')!.click());
+  expect(viewer.binding?.mode).toBe('draft');
+  const doc = { source: { data: btoa('image'), mimeType: 'image/png' }, width: 4, height: 4, marks: [], past: [], future: [] };
+  await act(async () => { viewer.binding!.save(files[0]!.id, doc); render(); });
+  expect(viewer.binding!.get(files[0]!.id)).toBe(doc);
+  await act(async () => viewer.binding!.apply(files[0]!.id, { data: btoa('edited'), mimeType: 'image/png' }, doc));
+  const updated = useThreadDraftStore.getState().drafts['new-draft'].files![0]!;
+  expect(await updated.data.text()).toBe('edited'); expect(updated.imageReference).toBe(1);
+});
 it('keeps the file available outside a collapsed message, reads original bytes only for an action and copies its reference', async () => {
   const read = vi.fn<ThreadsAPI['attachments']['read']>(async () => new Blob([new Uint8Array([0, 255, 3])]));
   const api = { attachments: { read } } as unknown as ThreadsAPI;
