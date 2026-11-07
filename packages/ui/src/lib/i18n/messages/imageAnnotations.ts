@@ -6,6 +6,8 @@ export const imageAnnotationsEn = {
   'imageEditor.panHint':'Space + drag to pan · pinch to zoom', 'imageEditor.coverHint':'Covered pixels are removed from the sent image.',
   'imageEditor.text':'Annotation text', 'imageEditor.saving':'Preparing image…', 'imageEditor.failed':'Could not prepare this image. Your annotations are retained; try again.',
   'imageEditor.readFailed':'The original image could not be read for editing. The source may not allow access.', 'imageEditor.edited':'Annotated', 'imageEditor.original':'Show original',
+  'imageEditor.style':'Style', 'imageEditor.styleSelected':'Selected annotation', 'imageEditor.styleNext':'New annotations', 'imageEditor.opacity':'Opacity',
+  'imageEditor.outline':'Outline', 'imageEditor.outline.none':'None', 'imageEditor.outline.light':'Light', 'imageEditor.outline.dark':'Dark', 'imageEditor.outline.auto':'Auto',
 } as const;
 export const imageAnnotationsZhCN = {
   'imageEditor.annotate':'标注', 'imageEditor.done':'完成', 'imageEditor.reply':'用于回复', 'imageEditor.tools':'图片标注工具',
@@ -15,4 +17,6 @@ export const imageAnnotationsZhCN = {
   'imageEditor.panHint':'空格＋拖动平移 · 双指缩放', 'imageEditor.coverHint':'发送的图片会实际覆盖被遮挡的像素。',
   'imageEditor.text':'标注文字', 'imageEditor.saving':'正在准备图片…', 'imageEditor.failed':'图片准备失败，标注已保留，可以重试。',
   'imageEditor.readFailed':'无法读取原图进行编辑，图片来源可能不允许访问。', 'imageEditor.edited':'已标注', 'imageEditor.original':'查看原图',
+  'imageEditor.style':'样式', 'imageEditor.styleSelected':'所选标注', 'imageEditor.styleNext':'新标注', 'imageEditor.opacity':'不透明度',
+  'imageEditor.outline':'描边', 'imageEditor.outline.none':'无', 'imageEditor.outline.light':'浅色', 'imageEditor.outline.dark':'深色', 'imageEditor.outline.auto':'自动',
 } satisfies Record<keyof typeof imageAnnotationsEn,string>;

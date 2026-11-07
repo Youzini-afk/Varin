@@ -6,7 +6,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { ImageAnnotationCanvas, type AnnotationCanvasHandle } from './ImageAnnotationCanvas';
 import { ImageAnnotationTools } from './ImageAnnotationTools';
-import { commitMarks, createAnnotationDocument, flattenAnnotations, imageUrl, readImageSource, undoMarks, redoMarks, type AnnotationTool, type ImageAnnotationDocument } from '@/lib/images/annotations';
+import { commitMarks, createAnnotationDocument, flattenAnnotations, imageUrl, readImageSource, undoMarks, redoMarks, type AnnotationTool, type AnnotationOutline, type ImageMark, type ImageAnnotationDocument } from '@/lib/images/annotations';
 import type { MarkdownImageAsset, MarkdownImageItem } from '@/components/chat/markdown/markdownImages';
 
 export interface ImageAnnotationBinding {
@@ -30,6 +30,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
   const [doc,setDoc]=React.useState<ImageAnnotationDocument>(),[editing,setEditing]=React.useState(initiallyEditing),[selected,setSelected]=React.useState<string|null>(null);
   const [tool,setTool]=React.useState<AnnotationTool>('arrow'),[color,setColor]=React.useState('#e34d59'),[weight,setWeight]=React.useState(3);
   const [previewWeight,setPreviewWeight]=React.useState<number>();
+  const [outline,setOutline]=React.useState<AnnotationOutline>('none'),[opacity,setOpacity]=React.useState(1),[previewOpacity,setPreviewOpacity]=React.useState<number>();
   const [busy,setBusy]=React.useState(false),[editError,setEditError]=React.useState(''),[space,setSpace]=React.useState(false),[showOriginal,setShowOriginal]=React.useState(false);
   const viewport=React.useRef<HTMLDivElement>(null),canvas=React.useRef<AnnotationCanvasHandle>(null),alive=React.useRef(true);
   const binding=React.useRef(annotation);binding.current=annotation;
@@ -105,7 +106,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
   const exportDocument=flattenAnnotations;
   const close=async(applyReply=false)=>{
     if(editingRead.current){editingRead.current.abort();editingRead.current=null;working.current=false;}
-    if(working.current)return;canvas.current?.finishText();working.current=true;setBusy(true);setEditError('');
+    if(working.current)return;canvas.current?.finishText();commitStyle();working.current=true;setBusy(true);setEditError('');
     try{
       if(binding.current?.mode==='draft')for(const key of dirty.current){const document=documents.current.get(key)!,image=await exportDocument(document);if(host!==getRuntimeEndpointGeneration()||!alive.current)return;await binding.current.apply(key,image,document);}
       else if(applyReply&&binding.current){const document=documents.current.get(source)??doc;if(document){const image=await exportDocument(document);if(host!==getRuntimeEndpointGeneration()||!alive.current)return;await binding.current.apply(source,image,document);}}
@@ -113,17 +114,27 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
     }catch{if(alive.current)setEditError(t('imageEditor.failed'));}
     finally{working.current=false;if(alive.current)setBusy(false);}
   };
-  const undo=()=>{if(canvas.current?.cancelGesture())return;if(doc)change(undoMarks(doc));setSelected(null);};
-  const redo=()=>{canvas.current?.cancelGesture();if(doc)change(redoMarks(doc));setSelected(null);};
+  const undo=()=>{if(cancelStyle()||canvas.current?.cancelGesture())return;if(doc)change(undoMarks(doc));setSelected(null);};
+  const redo=()=>{if(cancelStyle())return;canvas.current?.cancelGesture();if(doc)change(redoMarks(doc));setSelected(null);};
   const remove=()=>{if(doc&&selected)change(commitMarks(doc,doc.marks.filter(m=>m.id!==selected)));setSelected(null);};
-  const updateSelected=(update:{color?:string;width?:number})=>{if(doc&&selected&&doc.marks.some(mark=>mark.id===selected&&Object.entries(update).some(([key,value])=>mark[key as keyof typeof update]!==value)))change(commitMarks(doc,doc.marks.map(mark=>mark.id===selected?{...mark,...update}:mark)));};
-  const select=(id:string|null)=>{setSelected(id);setPreviewWeight(undefined);const mark=doc?.marks.find(mark=>mark.id===id);if(mark){setColor(mark.color);setWeight(mark.width*scale);}};
-  const shownDoc=doc&&previewWeight!==undefined?{...doc,marks:doc.marks.map(mark=>mark.id===selected?{...mark,width:previewWeight/scale}:mark)}:doc;
-  const step=(delta:number)=>{if(working.current)return;canvas.current?.finishText();canvas.current?.cancelGesture();setIndex(value=>(value+delta+items.length)%items.length);};
+  const updateSelected=(update:Partial<Pick<ImageMark,'color'|'width'|'outline'|'opacity'>>)=>{if(doc&&selected&&doc.marks.some(mark=>mark.id===selected&&Object.entries(update).some(([key,value])=>mark[key as keyof typeof update]!==value)))change(commitMarks(doc,doc.marks.map(mark=>mark.id===selected?{...mark,...update}:mark)));};
+  const select=(id:string|null)=>{setSelected(id);setPreviewWeight(undefined);setPreviewOpacity(undefined);const mark=doc?.marks.find(mark=>mark.id===id);if(mark){setColor(mark.color);setWeight(mark.width*scale);setOutline(mark.outline??'auto');setOpacity(mark.opacity??1);}};
+  const stylePreview={...(previewWeight===undefined?{}:{width:previewWeight/scale}),...(previewOpacity===undefined?{}:{opacity:previewOpacity})};
+  const shownDoc=doc&&(previewWeight!==undefined||previewOpacity!==undefined)?{...doc,marks:doc.marks.map(mark=>mark.id===selected?{...mark,...stylePreview}:mark)}:doc;
+  const cancelStyle=()=>{
+    if(previewWeight===undefined&&previewOpacity===undefined)return false;
+    const mark=doc?.marks.find(mark=>mark.id===selected);
+    const changed=Boolean(mark&&(previewWeight!==undefined&&previewWeight/scale!==mark.width||previewOpacity!==undefined&&previewOpacity!==(mark.opacity??1)));
+    if(mark){setWeight(mark.width*scale);setOpacity(mark.opacity??1);}
+    setPreviewWeight(undefined);setPreviewOpacity(undefined);return changed;
+  };
+  const commitStyle=()=>{updateSelected(stylePreview);setPreviewWeight(undefined);setPreviewOpacity(undefined);};
+  const selectedMark=doc?.marks.find(mark=>mark.id===selected);
+  const step=(delta:number)=>{if(working.current)return;canvas.current?.finishText();canvas.current?.cancelGesture();commitStyle();setIndex(value=>(value+delta+items.length)%items.length);};
   const button=(label:string,icon:React.ComponentProps<typeof Icon>['name'],action:()=>void)=> <button type="button" className="md-image-viewer-action" title={label} aria-label={label} onClick={action}><Icon name={icon} className="size-4"/></button>;
   const download=async()=>{
     try{
-      canvas.current?.finishText();const document=documents.current.get(source);const image=document?await exportDocument(document):undefined;
+      canvas.current?.finishText();commitStyle();const document=documents.current.get(source);const image=document?await exportDocument(document):undefined;
       const link=window.document.createElement('a');link.href=image?imageUrl(image):loaded!.src;
       const name=item.label.split(/[\\/]/).at(-1)||'image',extension=image?.mimeType.split('/')[1]?.replace('jpeg','jpg');
       link.download=extension?`${name.replace(/\.[^.]+$/,'')}.${extension}`:name;link.click();
@@ -149,7 +160,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
         {annotation&&loaded&&<button type="button" className="md-image-viewer-action image-annotation-entry" disabled={busy} aria-pressed={editing} onClick={()=>{canvas.current?.finishText();if(editing)setEditing(false);else void enterEditing();}}>{t('imageEditor.annotate')}</button>}
         {editing&&doc&&annotation&&<button type="button" className="image-annotation-done" disabled={busy} onClick={()=>void close(annotation.mode==='reply')}>{t(annotation.mode==='reply'?'imageEditor.reply':'imageEditor.done')}</button>}
       </div>
-      {editing&&doc&&annotation&&<ImageAnnotationTools document={doc} tool={tool} setTool={value=>{canvas.current?.finishText();setTool(value);}} color={color} setColor={value=>{setColor(value);updateSelected({color:value});}} weight={weight} setWeight={value=>{setWeight(value);setPreviewWeight(value);}} commitWeight={()=>{if(previewWeight!==undefined)updateSelected({width:previewWeight/scale});setPreviewWeight(undefined);}} undo={undo} redo={redo} remove={remove} selected={Boolean(selected&&doc.marks.some(m=>m.id===selected))} clear={()=>{change(commitMarks(doc,[]));setSelected(null);}}/>}
+      {editing&&doc&&annotation&&<ImageAnnotationTools document={doc} tool={tool} setTool={value=>{canvas.current?.finishText();commitStyle();setTool(value);if(value!=='select')setSelected(null);}} color={color} setColor={value=>{setColor(value);updateSelected({color:value});}} weight={weight} setWeight={value=>{setWeight(value);setPreviewWeight(value);}} commitWeight={commitStyle} outline={outline} setOutline={value=>{setOutline(value);updateSelected({outline:value});}} opacity={opacity} setOpacity={value=>{setOpacity(value);setPreviewOpacity(value);}} commitOpacity={commitStyle} styleTool={selectedMark?.kind??tool} undo={undo} redo={redo} remove={remove} selected={Boolean(selected&&doc.marks.some(m=>m.id===selected))} clear={()=>{change(commitMarks(doc,[]));setSelected(null);}}/>}
       {editError&&<p role="alert" className="image-annotation-status">{editError}<button type="button" onClick={()=>{setEditError('');if(!doc)void enterEditing();}}>{t('chat.media.retry')}</button></p>}
       {busy&&<p role="status" className="image-annotation-status">{t('imageEditor.saving')}</p>}
       <div ref={attachViewport} className="md-image-viewer-viewport" data-zoomed={zoom>1||space} data-annotating={editing||undefined} onPointerDownCapture={event=>{
@@ -174,7 +185,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
           {loaded&&<div className="md-image-viewer-plane" style={{width:Math.max(rendered.width,viewportSize.width),height:Math.max(rendered.height,viewportSize.height)}}>
             <div className="image-annotation-image" style={size.width?{width:rendered.width,height:rendered.height}:{visibility:'hidden'}}>
               <img src={doc?imageUrl(doc.source):loaded.src} alt={item.label} draggable={false} referrerPolicy="no-referrer" decoding="async" onError={()=>setFailed(true)} onLoad={event=>setSize({width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight})} style={size.width?{width:rendered.width,height:rendered.height}:{visibility:'hidden'}}/>
-              {shownDoc&&!showOriginal&&<ImageAnnotationCanvas ref={canvas} document={shownDoc} scale={scale} active={Boolean(annotation)&&editing&&!space&&!busy} tool={tool} color={color} weight={weight} selected={selected} onSelect={select} onChange={change} textLabel={t('imageEditor.text')}/>}
+              {shownDoc&&!showOriginal&&<ImageAnnotationCanvas ref={canvas} document={shownDoc} scale={scale} active={Boolean(annotation)&&editing&&!space&&!busy} tool={tool} color={color} weight={weight} outline={outline} opacity={opacity} selected={selected} onSelect={select} onChange={change} textLabel={t('imageEditor.text')}/>}
             </div>
           </div>}
         </>}

@@ -24,6 +24,22 @@
 .image-annotation-colors > button:disabled { opacity:.35; }
 .image-annotation-properties label { display:flex; align-items:center; gap:8px; }
 .image-annotation-properties input { width:82px; accent-color:var(--primary); }
+.image-annotation-properties output { min-width:30px; font-variant-numeric:tabular-nums; }
+.image-annotation-style-trigger { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; border-radius:var(--radius-control,7px); color:var(--foreground); transition:background-color 120ms; }
+.image-annotation-style-trigger:is(:hover,[data-popup-open]) { background:var(--interactive-hover); }
+.image-annotation-style-popup { width:292px; max-width:calc(100vw - 24px); padding:14px; border:1px solid var(--border); border-radius:var(--radius-panel,12px); background:var(--popover); color:var(--popover-foreground); box-shadow:0 8px 30px #0002; font-size:12px; outline:none; }
+.image-annotation-style-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; font-weight:500; }
+.image-annotation-style-heading span { color:var(--muted-foreground); font-size:11px; font-weight:400; }
+.image-annotation-style-preview { border-radius:7px; overflow:hidden; background:repeating-conic-gradient(var(--muted) 0% 25%,var(--background) 0% 50%) 0 0 / 16px 16px; border:1px solid var(--border); }
+.image-annotation-style-preview svg { display:block; width:100%; height:66px; font-family:system-ui,sans-serif; }
+.image-annotation-style-field { display:block; margin-top:14px; }
+.image-annotation-style-field > span { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--muted-foreground); }
+.image-annotation-style-field output { color:var(--foreground); font-variant-numeric:tabular-nums; }
+.image-annotation-style-field input { width:100%; accent-color:var(--primary); }
+.image-annotation-outline-options { display:flex; gap:3px; padding:3px; border-radius:8px; background:var(--muted); }
+.image-annotation-outline-options button { flex:1; padding:5px 0; border-radius:5px; color:var(--muted-foreground); transition:background-color 120ms,color 120ms; }
+.image-annotation-outline-options button[aria-pressed=true] { background:var(--background); color:var(--foreground); box-shadow:0 1px 3px #0001; }
+.image-annotation-outline-options button:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
 .image-annotation-hint { margin-left:auto; }
 .image-annotation-entry { padding:0 10px; font-size:12px; }
 .image-annotation-entry[aria-pressed=true] { color:var(--primary); background:var(--interactive-hover); }

@@ -2,6 +2,7 @@ import type { ImageAttachment } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, runtimeFetch } from '@varin/application-client';
 
 export type AnnotationTool = 'select' | 'pen' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'number' | 'cover';
+export type AnnotationOutline = 'none' | 'auto' | 'light' | 'dark';
 export type Point = { x: number; y: number };
 export interface ImageMark {
   id: string;
@@ -14,6 +15,8 @@ export interface ImageMark {
   text?: string;
   number?: number;
   fontSize: number;
+  outline?: AnnotationOutline;
+  opacity?: number;
 }
 /** Immutable source bytes are shared by all editing steps; history contains vector objects only. */
 export interface ImageAnnotationDocument {
@@ -84,6 +87,9 @@ export function arrowPoints(mark: ImageMark) {
     { x: mark.to.x-length*Math.cos(angle+.5), y: mark.to.y-length*Math.sin(angle+.5) } ];
 }
 export const markHalo = (color:string) => ['#ffffff','#e0a126'].includes(color) ? '#202124' : '#ffffff';
+export const markOutline = (mark: Pick<ImageMark, 'kind' | 'outline' | 'color'>): string | undefined =>
+  mark.kind === 'cover' || mark.outline === 'none' ? undefined : mark.outline === 'light' ? '#ffffff' : mark.outline === 'dark' ? '#202124' : markHalo(mark.color);
+export const markOpacity = (mark: Pick<ImageMark, 'kind' | 'opacity'>) => mark.kind === 'cover' ? 1 : mark.opacity ?? 1;
 export async function readImageSource(src: string, signal?: AbortSignal): Promise<ImageAttachment> {
   const host=getRuntimeEndpointGeneration();
   signal?.throwIfAborted();
@@ -129,8 +135,30 @@ async function exportAnnotations(doc: ImageAnnotationDocument): Promise<ImageAtt
   canvas.width = doc.width; canvas.height = doc.height;
   const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Image export unavailable');
   ctx.drawImage(source, 0, 0);
+  let layer: HTMLCanvasElement | undefined;
   for (const mark of doc.marks) {
+    const opacity = markOpacity(mark);
+    if (opacity === 1) drawAnnotation(ctx, mark);
+    else if (opacity > 0) {
+      // Composite each translucent mark once, so overlapping outline/arrow segments
+      // have the same opacity as the SVG group used by the live preview.
+      layer ??= document.createElement('canvas');
+      if (layer.width !== doc.width || layer.height !== doc.height) { layer.width = doc.width; layer.height = doc.height; }
+      const paint = layer.getContext('2d'); if (!paint) throw new Error('Image export unavailable');
+      paint.clearRect(0, 0, layer.width, layer.height); drawAnnotation(paint, mark);
+      ctx.save(); ctx.globalAlpha = opacity; ctx.drawImage(layer, 0, 0); ctx.restore();
+    }
+  }
+  if (layer) { layer.width = 0; layer.height = 0; }
+  const blob = await new Promise<Blob>((resolve,reject) => canvas.toBlob(value=>value ? resolve(value) : reject(new Error('Image export failed')), 'image/png'));
+  canvas.width=0;canvas.height=0;
+  const url=URL.createObjectURL(blob);
+  try { return await readImageSource(url); } finally { URL.revokeObjectURL(url); }
+}
+
+function drawAnnotation(ctx: CanvasRenderingContext2D, mark: ImageMark) {
     ctx.save(); ctx.strokeStyle = mark.color; ctx.fillStyle = mark.color; ctx.lineWidth = mark.width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const outline = markOutline(mark);
     const b = markBounds(mark);
     const path = () => {
       ctx.beginPath();
@@ -141,19 +169,14 @@ async function exportAnnotations(doc: ImageAnnotationDocument): Promise<ImageAtt
     };
     if (mark.kind === 'cover') { ctx.fillStyle = '#101010'; ctx.fillRect(b.x,b.y,b.width,b.height); }
     else if (mark.kind === 'text') {
-      ctx.font = `600 ${mark.fontSize}px system-ui, sans-serif`; ctx.textBaseline='top'; ctx.lineWidth=Math.max(2,mark.fontSize/8); ctx.strokeStyle=markHalo(mark.color);
-      (mark.text ?? '').split('\n').forEach((line,i) => { const y=mark.from.y+i*mark.fontSize*1.3; ctx.strokeText(line,mark.from.x,y); ctx.fillText(line,mark.from.x,y); });
+      ctx.font = `600 ${mark.fontSize}px system-ui, sans-serif`; ctx.textBaseline='top'; ctx.lineWidth=Math.max(2,mark.fontSize/8); if(outline)ctx.strokeStyle=outline;
+      (mark.text ?? '').split('\n').forEach((line,i) => { const y=mark.from.y+i*mark.fontSize*1.3; if(outline)ctx.strokeText(line,mark.from.x,y); ctx.fillText(line,mark.from.x,y); });
     } else if (mark.kind === 'number') {
-      ctx.beginPath(); ctx.arc(mark.from.x,mark.from.y,mark.fontSize*.85,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#fff';ctx.lineWidth=Math.max(2,mark.width*.6);ctx.stroke();
+      ctx.beginPath(); ctx.arc(mark.from.x,mark.from.y,mark.fontSize*.85,0,Math.PI*2); ctx.fill(); if(outline){ctx.strokeStyle=outline;ctx.lineWidth=Math.max(2,mark.width*.6);ctx.stroke();}
       ctx.fillStyle=markHalo(mark.color);ctx.font=`600 ${mark.fontSize}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(mark.number),mark.from.x,mark.from.y);
     } else {
-      path(); ctx.strokeStyle=markHalo(mark.color);ctx.lineWidth=mark.width+Math.max(1,mark.width*.5);ctx.stroke();
+      if(outline){path(); ctx.strokeStyle=outline;ctx.lineWidth=mark.width+Math.max(1,mark.width*.5);ctx.stroke();}
       path(); ctx.strokeStyle=mark.color;ctx.lineWidth=mark.width;ctx.stroke();
     }
     ctx.restore();
-  }
-  const blob = await new Promise<Blob>((resolve,reject) => canvas.toBlob(value=>value ? resolve(value) : reject(new Error('Image export failed')), 'image/png'));
-  canvas.width=0;canvas.height=0;
-  const url=URL.createObjectURL(blob);
-  try { return await readImageSource(url); } finally { URL.revokeObjectURL(url); }
 }
