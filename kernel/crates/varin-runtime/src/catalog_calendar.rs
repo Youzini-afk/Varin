@@ -145,6 +145,9 @@ pub struct DefinitionInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DefinitionView {
+    /// Migration admission generation for newly chosen manual keys, not authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_key_prefix: Option<String>,
     pub id: String,
     pub project_id: String,
     pub task_id: String,
@@ -307,13 +310,90 @@ pub(super) fn initialize_new(tx: &Transaction<'_>) -> Result<()> {
         CREATE TABLE calendar_definitions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES calendar_projects(id),task_id TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(project_id,task_id));
         CREATE TABLE calendar_occurrences(id TEXT PRIMARY KEY,definition_id TEXT NOT NULL REFERENCES calendar_definitions(id),thread_id TEXT NOT NULL REFERENCES threads(id),input_id TEXT UNIQUE REFERENCES input_queue(id),body TEXT NOT NULL);
         CREATE INDEX calendar_occurrences_definition ON calendar_occurrences(definition_id);")?;
-    Ok(())
+    initialize_invocations(tx)
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT id,body FROM calendar_projects")?;
     db.prepare("SELECT id,project_id,task_id,body FROM calendar_definitions")?;
     db.prepare("SELECT id,definition_id,thread_id,input_id,body FROM calendar_occurrences")?;
     Ok(())
+}
+/// Accepted identities outlive occurrence bodies and their input/content references.
+/// Manual keys retain their original invocation across definition generations.
+pub(super) fn initialize_invocations(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("CREATE TABLE calendar_invocations(
+        id TEXT PRIMARY KEY, definition_id TEXT NOT NULL, generation INTEGER NOT NULL,
+        reason_digest TEXT NOT NULL, manual_key_digest TEXT,
+        UNIQUE(definition_id,manual_key_digest));
+        CREATE TABLE calendar_legacy_manual_boundaries(definition_id TEXT PRIMARY KEY,key_prefix TEXT NOT NULL UNIQUE);")?;
+    Ok(())
+}
+pub(super) fn check_invocations_format(db: &Connection) -> Result<()> {
+    db.prepare("SELECT id,definition_id,generation,reason_digest,manual_key_digest FROM calendar_invocations")?;
+    db.prepare("SELECT definition_id,key_prefix FROM calendar_legacy_manual_boundaries")?;
+    let invalid: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM calendar_invocations WHERE generation<1
+        OR length(definition_id)=0 OR length(reason_digest)!=64 OR reason_digest GLOB '*[^0-9a-f]*'
+        OR (manual_key_digest IS NOT NULL AND (length(manual_key_digest)!=64 OR manual_key_digest GLOB '*[^0-9a-f]*'))
+        OR id != definition_id||':'||generation||':'||reason_digest)", [], |r| r.get(0))?;
+    if invalid { return Err(RuntimeError::Invalid("Calendar acceptance identity is malformed; data was preserved".into())); }
+    let mut boundaries = db.prepare("SELECT definition_id,key_prefix FROM calendar_legacy_manual_boundaries")?;
+    for row in boundaries.query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
+        let (definition, prefix) = row?;
+        let token = prefix.strip_prefix("calendar-manual:").and_then(|v| v.strip_suffix(':'));
+        if definition.is_empty() || !token.is_some_and(|v| Uuid::parse_str(v).is_ok_and(|id| id.to_string() == v)) {
+            return Err(RuntimeError::Invalid("Calendar manual admission generation is malformed; data was preserved".into()));
+        }
+    }
+    for o in occurrences(db, None)? {
+        let receipt: Option<(String,u64,String,Option<String>)> = db.query_row("SELECT definition_id,generation,reason_digest,manual_key_digest FROM calendar_invocations WHERE id=?1", [&o.id], |r| Ok((r.get(0)?,read_number(r,1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let manual = match &o.reason { OccurrenceReason::Manual{key}=>Some(digest(key)?),_=>None };
+        if receipt != Some((o.definition_id.clone(),o.generation,digest(&o.reason)?,manual)) {
+            return Err(RuntimeError::Invalid("Calendar acceptance receipt disagrees with retained work; data was preserved".into()));
+        }
+    }
+    Ok(())
+}
+fn retain_invocation(tx: &Transaction<'_>, o: &Occurrence) -> Result<()> {
+    let reason_digest = digest(&o.reason)?;
+    if o.id != format!("{}:{}:{}", o.definition_id, o.generation, reason_digest) {
+        return Err(RuntimeError::Conflict("calendar occurrence identity is malformed".into()));
+    }
+    let manual_key_digest = match &o.reason {
+        OccurrenceReason::Manual { key } => Some(digest(key)?),
+        OccurrenceReason::Scheduled { .. } => None,
+    };
+    tx.execute("INSERT INTO calendar_invocations(id,definition_id,generation,reason_digest,manual_key_digest) VALUES(?1,?2,?3,?4,?5)",
+        params![o.id,o.definition_id,sql_number(o.generation)?,reason_digest,manual_key_digest])?;
+    Ok(())
+}
+/// One-time format conversion: preserve existing acceptance without dispatching work.
+pub(super) fn upgrade_invocations(tx: &Transaction<'_>) -> Result<()> {
+    initialize_invocations(tx)?;
+    // Before durable receipts, GC could remove every trace of an ExistingWork
+    // invocation. A random per-definition admission generation separates keys
+    // newly chosen after migration from ambiguous historical retries. Preserve
+    // this boundary across edits; never rewrite an existing key on the caller's behalf.
+    for d in definitions(tx, None)? {
+        tx.execute("INSERT INTO calendar_legacy_manual_boundaries(definition_id,key_prefix) VALUES(?1,?2)",
+            params![d.view.id, format!("calendar-manual:{}:", Uuid::new_v4())])?;
+    }
+    let mut query = tx.prepare("SELECT id,definition_id,thread_id,input_id,body FROM calendar_occurrences")?;
+    let mut rows = query.query([])?;
+    while let Some(row) = rows.next()? {
+        let o: Occurrence = serde_json::from_str(&row.get::<_, String>(4)?)?;
+        if row.get::<_, String>(0)? != o.id
+            || row.get::<_, String>(1)? != o.definition_id
+            || row.get::<_, String>(2)? != o.thread_id
+            || row.get::<_, Option<String>>(3)? != o.input_id
+        {
+            return Err(RuntimeError::Conflict("calendar occurrence columns disagree with acceptance".into()));
+        }
+        retain_invocation(tx, &o)?;
+    }
+    Ok(())
+}
+fn retired_invocation(id: &str) -> RuntimeError {
+    RuntimeError::IdentityUnavailable(format!("calendar invocation {id} was accepted but its work is retired"))
 }
 fn digest(value: &impl Serialize) -> Result<String> {
     use sha2::{Digest, Sha256};
@@ -345,6 +425,10 @@ fn synchronized(db: &Connection, d: &Definition) -> Result<bool> {
 }
 fn project_definition(db: &Connection, d: &Definition) -> Result<DefinitionView> {
     let mut v = d.view.clone();
+    v.manual_key_prefix = db.query_row(
+        "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
+        [&d.view.id], |r| r.get(0),
+    ).optional()?;
     v.synchronized = synchronized(db, d)?;
     v.next_at_ms = d.cursor.slot.as_ref().map(|s| s.at_ms);
     v.calculation_pending = d.cursor.pending;
@@ -920,6 +1004,7 @@ impl Catalog {
             };
             let mut d = Definition {
                 view: DefinitionView {
+                    manual_key_prefix: None,
                     id: id.clone(),
                     project_id: capture.project.clone(),
                     task_id: input.task_id,
@@ -1255,11 +1340,19 @@ fn observe(
     if let Some(existing) = optional_record(tx, "calendar_occurrences", &id)? {
         return Ok(existing);
     }
+    if tx.query_row("SELECT EXISTS(SELECT 1 FROM calendar_invocations WHERE id=?1)", [&id], |r| r.get::<_, bool>(0))? {
+        return Err(retired_invocation(&id));
+    }
     let (thread_id, branch_id) = match &d.view.target {
         Target::NewWork { .. } => {
             let thread = format!("thread:{id}");
             let branch = format!("branch:{id}");
-            super::threads::insert(&tx, &thread)?;
+            // Older stores may already have collected the acceptance body. Never
+            // recreate work from a surviving reserved identity or leak a SQLite error.
+            if tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)", [&thread], |r| r.get::<_, bool>(0))? {
+                return Err(retired_invocation(&id));
+            }
+            super::threads::insert(tx, &thread, &branch, "calendar", None)?;
             tx.execute(
                 "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
                 params![branch, thread],
@@ -1295,6 +1388,7 @@ fn observe(
         target: d.view.target.clone(),
     };
     tx.execute("INSERT INTO calendar_occurrences(id,definition_id,thread_id,input_id,body) VALUES(?1,?2,?3,NULL,?4)",params![o.id,o.definition_id,o.thread_id,encode(&o)?])?;
+    retain_invocation(tx, &o)?;
     event(
         tx,
         &o.id,
@@ -1393,11 +1487,39 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let d: Definition = record(&tx, "calendar_definitions", definition)?;
-        // The key identifies this exact accepted invocation, even after later definition edits.
-        for o in occurrences(&tx, Some(definition))? {
-            if matches!(&o.reason,OccurrenceReason::Manual{key:old} if old==key) {
-                return project_occurrence(&tx, &d, &o);
+        // A key identifies the original accepted invocation, including after edits.
+        let accepted: Option<String> = tx.query_row(
+            "SELECT id FROM calendar_invocations WHERE definition_id=?1 AND manual_key_digest=?2",
+            params![definition, digest(&key)?], |r| r.get(0),
+        ).optional()?;
+        if let Some(id) = accepted {
+            let o: Option<Occurrence> = optional_record(&tx, "calendar_occurrences", &id)?;
+            return match o {
+                Some(o) => project_occurrence(&tx, &d, &o),
+                None => Err(retired_invocation(&id)),
+            };
+        }
+        let prefix: Option<String> = tx.query_row(
+            "SELECT key_prefix FROM calendar_legacy_manual_boundaries WHERE definition_id=?1",
+            [definition], |r| r.get(0),
+        ).optional()?;
+        if let Some(prefix) = prefix {
+            if key.strip_prefix(&prefix).is_none_or(|suffix| suffix.trim().is_empty()) {
+                return Err(RuntimeError::IdentityUnavailable(
+                    "legacy calendar manual invocation history is incomplete; new manual work requires the current admission key prefix".into(),
+                ));
             }
+        }
+        // Pre-receipt GC left only deterministic Thread tombstones. Check all
+        // generations so a definition edit cannot turn an old key into new work.
+        let prefix = format!("thread:{}:", definition);
+        let suffix = format!(":{}", digest(&OccurrenceReason::Manual { key: key.into() })?);
+        let reserved: Option<String> = tx.query_row(
+            "SELECT id FROM threads WHERE substr(id,1,length(?1))=?1 AND substr(id,-length(?2))=?2 LIMIT 1",
+            params![prefix, suffix], |r| r.get(0),
+        ).optional()?;
+        if let Some(id) = reserved {
+            return Err(retired_invocation(&id));
         }
         if d.view.revision != revision || d.view.deleted {
             return Err(RuntimeError::Conflict("calendar definition changed".into()));
@@ -2017,3 +2139,7 @@ impl ColdPreparation {
 #[cfg(test)]
 #[path = "catalog_calendar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_calendar_retention_tests.rs"]
+mod retention_tests;

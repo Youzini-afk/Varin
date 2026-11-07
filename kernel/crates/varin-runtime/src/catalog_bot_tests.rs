@@ -542,7 +542,7 @@ fn bot_scope_delete_retains_shared_history_atomically_then_removes_only_original
     assert_eq!(db.head("main").unwrap(), Some(input.input_id.clone()));
     db.db.execute("UPDATE branches SET head=NULL WHERE id='unrelated-main'", []).unwrap();
     db.remove_bot_scope(&suspension(2)).unwrap();
-    assert!(db.inspect_thread("thread").is_err());
+    assert!(db.inspect_thread("thread").unwrap()["deleted_at_ms"].is_number());
     assert!(db.run(&input.run_id).is_err());
     assert!(db.inspect_thread("unrelated").is_ok());
     db.remove_bot_scope(&suspension(2)).unwrap();
@@ -556,7 +556,7 @@ fn bot_scope_delete_keeps_the_usage_of_its_removed_conversations() {
     assert_eq!(before.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.deleted)).collect::<Vec<_>>(), [("thread", false)]);
     db.publish_bot_gate(gate(2, false)).unwrap(); db.suspend_bot_scope(suspension(2)).unwrap();
     db.remove_bot_scope(&suspension(2)).unwrap();
-    assert!(db.inspect_thread("thread").is_err());
+    assert!(db.inspect_thread("thread").unwrap()["deleted_at_ms"].is_number());
     let after = summary(&db);
     assert_eq!(after.rows, before.rows);
     assert_eq!(after.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.title.clone(), thread.deleted, thread.requests)).collect::<Vec<_>>(),
@@ -658,4 +658,35 @@ fn bot_activity_leaves_out_user_rounds_and_rejects_unknown_bots() {
     assert!(page.before.is_none());
     assert!(db.capture_bot_activity("other-bot", None, None).is_err());
     assert!(db.capture_bot_activity("bot", None, Some(0)).is_err());
+}
+
+#[test]
+fn collected_parent_keeps_surviving_child_bot_ancestry_and_gate() {
+    let mut f=child_fixture::Fixture::new_in_bot("bot");
+    let child=f.accept();
+    f.db.fail_child_preparation(&child.operation_id,"fixture stopped before child execution").unwrap();
+    f.db.settle_child_receipts().unwrap();
+    f.db.mark_child_resources_released(&child.operation_id).unwrap();
+    f.settle_exchange();
+    let run=f.context.run_id.clone();let epoch=f.db.epoch();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Completed,waiting_on:None}).unwrap();
+    let parent=f.db.run(&run).unwrap().thread_id;
+    let revision=f.db.inspect_thread(&parent).unwrap()["revision"].as_u64().unwrap();
+    f.db.delete_thread(&threads::ThreadDelete{thread_id:parent.clone(),key:"parent-delete".into(),expected_revision:revision}).unwrap();
+    let ready=f.db.deleted_thread_retirement_candidates().unwrap().0;
+    assert!(ready.iter().any(|(thread,_)|thread==&parent));
+    f.db.retire_deleted_threads(&[run.clone()]).unwrap();
+    assert!(f.db.inspect_thread(&child.child_thread_id).unwrap()["deleted_at_ms"].is_null());
+    let owner=bot::thread_owner(&f.db.db,&child.child_thread_id).unwrap().unwrap();
+    assert_eq!(owner.bot_id,"bot");assert_eq!(owner.session_thread_id.as_deref(),Some(parent.as_str()));
+    f.db.publish_bot_gate(gate(2,false)).unwrap();
+    assert!(!bot::thread_permitted(&f.db.db,&child.child_thread_id,epoch).unwrap());
+    f.db.publish_bot_gate(gate(3,true)).unwrap();
+    assert!(bot::thread_permitted(&f.db.db,&child.child_thread_id,epoch).unwrap());
+    let root=f.root.clone();drop(f);
+    let mut reopened=Catalog::open(&root).unwrap();
+    assert!(!bot::thread_permitted(&reopened.db,&child.child_thread_id,reopened.epoch()).unwrap());
+    reopened.publish_bot_gate(gate(3,true)).unwrap();
+    assert!(bot::thread_permitted(&reopened.db,&child.child_thread_id,reopened.epoch()).unwrap());
+    drop(reopened);std::fs::remove_dir_all(root).unwrap();
 }

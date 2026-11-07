@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { BotSummary } from '@varin/application-client';
+import { createBotSessions } from '../bots/bot-sessions.js';
 import { KernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelHandshakeResult } from './protocol.generated.js';
@@ -50,13 +50,7 @@ async function handle(frame:Record<string,unknown>) {
       remoteMachineOwners: async () => [], stopMemory: async () => {}, resumeMemory: () => {},
     }) : null;
     bots=createBotService({client:kernel,hostId:'web-domain-host',dataDir:String(frame.root),
-      agent: { ensureEntry: async (bot: BotSummary) => {
-        assert.equal(bot.entry.runtime, 'agent');
-        if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot entry required');
-        await runtime.createBotThread(bot.id, bot.entry.threadId, bot.entry.branchId);
-        return bot.entry;
-      }, model: async () => null, listWork: async () => [], listSessions: async () => [],
-      createSession: async () => { throw new Error('This fixture has no additional Bot conversations'); } },
+      agent: { ...createBotSessions(() => runtime), model: async () => null, listWork: async () => [] },
       publishExecutionGate:gate=>kernel.agentRuntimeRequest<void,'runtime.bot.gate.publish'>('runtime.bot.gate.publish',gate),
       lifecycle:()=>nativeLifecycle ?? ({planWork:async()=>[],planMachines:async()=>[],stop:async()=>{},stopScope:async()=>new Promise<void>(resolve=>{releaseStop=resolve;send({kind:'fixture-stop-entered'});}),machine:async(_bot,machine)=>machine,prepareWake:async()=>{},resume:async()=>{},awakened:async()=>{}}),
     });
@@ -72,6 +66,9 @@ async function handle(frame:Record<string,unknown>) {
         (_runId, error) => send({ kind: 'fixture-failed', error: String(error) }), undefined, owners.context);
     }
     send({kind:'fixture-prepared',bot});return;
+  }
+  if (frame.kind === 'fixture-resolve-entry') {
+    send({ kind: 'fixture-entry', result: await bots.ensureEntry(botId) }); return;
   }
   if (frame.kind === 'fixture-product-submit') {
     assert(productThreads);

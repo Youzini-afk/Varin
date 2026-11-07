@@ -129,6 +129,10 @@ pub(super) fn thread_owner(db: &Connection, thread_id: &str) -> Result<Option<Th
             "SELECT json_extract(o.body,'$.intent.scopeId') FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND json_extract(o.body,'$.intent.kind')=?2",
             params![current, super::memory_work::WORK_KIND], |r| r.get(0),
         ).optional()?;
+        if scope.is_none() {
+            let unknown_identity: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM thread_creations WHERE thread_id=?1 AND identity_known=0)", [&current], |r| r.get(0))?;
+            if unknown_identity { return Err(RuntimeError::IdentityUnavailable(current)); }
+        }
         return scope
             .map(|scope| {
                 scope
@@ -395,9 +399,12 @@ impl Catalog {
             format!("DELETE FROM memory_states WHERE branch_id {b}"),
             format!("DELETE FROM active_contexts WHERE branch_id {b}"),
             format!("DELETE FROM context_checkpoints WHERE branch_id {b}"),
-            "DELETE FROM bot_thread_bindings WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
-            "DELETE FROM branches WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
-            "DELETE FROM threads WHERE id IN (SELECT value FROM json_each(?2))".into(),
+            format!("DELETE FROM thread_title_progress WHERE branch_id {b}"),
+            "DELETE FROM thread_title_state WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            // Identity/principal/Bot evidence must outlive a deleted profile too.
+            // Keep no execution bodies or history heads through these small rows.
+            "UPDATE branches SET head=NULL,active_run=NULL WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
+            "UPDATE threads SET title='New thread',title_initialized=0,pinned=0,archived=0,read_cursor=activity_cursor,deleted_at_ms=coalesce(deleted_at_ms,CAST(unixepoch('subsec')*1000 AS INTEGER)),revision=revision+CASE WHEN deleted_at_ms IS NULL THEN 1 ELSE 0 END WHERE id IN (SELECT value FROM json_each(?2))".into(),
         ];
         for statement in statements {
             // Numbered slots preserve both immutable scope sets, including statements using only ?2.
@@ -495,6 +502,52 @@ impl Catalog {
         bot_id: &str,
     ) -> Result<()> {
         self.create_thread_with_bot(thread_id, branch_id, Some(bot_id))
+    }
+
+    /// Resolve navigation at the same Catalog commit boundary as fallback creation.
+    /// Host retries this original request after an unknown response; it never allocates
+    /// another candidate. The exclusive Catalog owner also serializes other processes.
+    pub fn resolve_bot_entry(&mut self, thread_id: &str, branch_id: &str, bot_id: &str) -> Result<forks::BranchForkReceipt> {
+        let tx = self.db.transaction()?;
+        let original: Option<(Option<i64>, bool)> = tx.query_row(
+            "SELECT deleted_at_ms,archived FROM threads WHERE id=?1", [thread_id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((deleted, archived)) = original {
+            match identity::validate_public(&tx, thread_id, branch_id, Some(bot_id), None) {
+                Ok(()) => (),
+                // Missing legacy facts do not grant ownership. A deleted identity is
+                // skipped only after all surviving principal/Bot/branch facts match.
+                Err(RuntimeError::IdentityUnavailable(_)) if deleted.is_some() => (),
+                Err(error) => return Err(error),
+            }
+            if deleted.is_none() && !archived && !threads::branch_deleted(&tx, branch_id)? {
+                return Ok(forks::BranchForkReceipt { thread_id: thread_id.into(), branch_id: branch_id.into() });
+            }
+        } else {
+            identity::create_public(&tx, thread_id, branch_id, Some(bot_id), None, self.epoch)?;
+            tx.commit()?;
+            return Ok(forks::BranchForkReceipt { thread_id: thread_id.into(), branch_id: branch_id.into() });
+        }
+        let active: Option<(String,Option<String>)> = tx.query_row(
+            "SELECT t.id,c.initial_branch_id FROM bot_thread_bindings binding JOIN threads t ON t.id=binding.thread_id
+             LEFT JOIN thread_creations c ON c.thread_id=t.id
+             WHERE binding.bot_id=?1 AND t.deleted_at_ms IS NULL AND t.archived=0
+             ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", [bot_id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((thread_id, branch_id)) = active {
+            let branch_id = branch_id.ok_or_else(|| RuntimeError::IdentityUnavailable(thread_id.clone()))?;
+            identity::validate_public(&tx, &thread_id, &branch_id, Some(bot_id), None)?;
+            let branch_owner: Option<String> = tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [&branch_id], |r|r.get(0)).optional()?;
+            if branch_owner.as_deref() != Some(thread_id.as_str()) {
+                return Err(RuntimeError::Conflict("Bot session initial branch has another owner".into()));
+            }
+            threads::require_branch_available(&tx, &branch_id)?;
+            return Ok(forks::BranchForkReceipt { thread_id, branch_id });
+        }
+        let key = id();
+        let thread_id = format!("thread:bot:{bot_id}:{key}");
+        let branch_id = format!("branch:bot:{bot_id}:{key}");
+        identity::create_public(&tx, &thread_id, &branch_id, Some(bot_id), None, self.epoch)?;
+        tx.commit()?;
+        Ok(forks::BranchForkReceipt { thread_id, branch_id })
     }
 
     pub fn run_stop_reason(&self, run_id: &str, epoch: u64) -> Result<RunStopReason> {
