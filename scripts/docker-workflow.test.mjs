@@ -76,6 +76,18 @@ test('validation exercises sibling checkouts and benchmark restoration has no or
   assert.match(steps[restore].run, /kernelBuildExecutions < restored.platforms.length/);
 });
 
+test('ARM service smoke starts the real Host before invoking authenticated services', () => {
+  const step = validation.jobs.verify.steps.find(step => step.name === 'Smoke target-architecture native dependencies');
+  assert.match(step.run, /docker run --detach --platform linux\/arm64/);
+  assert.ok(!step.run.includes('--entrypoint'));
+  assert.match(step.run, /http:\/\/127\.0\.0\.1:3000\/health/);
+  assert.match(step.run, /docker exec varin-arm64-smoke node verify-kernel.mjs packages\/web/);
+  assert.match(step.run, /docker exec varin-arm64-smoke node verify-services.mjs/);
+  assert.ok(step.run.indexOf('docker run --detach') < step.run.indexOf('node verify-services.mjs'));
+  const fixture = validation.jobs.verify.steps.find(step => step.id === 'fixture');
+  assert.match(fixture.if, /!cancelled\(\).*steps.warm.outcome == 'success'/);
+});
+
 test('release smokes run candidate-owned scripts with their supported Node runtime', () => {
   for (const id of ['smoke-toolbelt', 'smoke-standard']) {
     const job = release.jobs[id];

@@ -103,6 +103,7 @@ jobs:
         run: node scripts/build-container-images.mjs build
 
       - name: Repeat the exact graph to measure warm reuse
+        id: warm
         if: inputs.benchmark
         working-directory: tooling
         env:
@@ -201,15 +202,35 @@ jobs:
         env:
           STANDARD_IMAGE: ${{ steps.images.outputs.standard_app }}
           TOOLBELT_IMAGE: ${{ steps.images.outputs.toolbelt_app }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
         run: |
+          cleanup() {
+            docker logs varin-arm64-smoke 2>/dev/null || true
+            docker rm --force varin-arm64-smoke 2>/dev/null || true
+          }
+          trap cleanup EXIT
           for image in "$STANDARD_IMAGE" "$TOOLBELT_IMAGE"; do
             if [ -z "$image" ]; then continue; fi
-            docker run --rm --platform linux/arm64 --entrypoint node "$image" verify-kernel.mjs packages/web
-            docker run --rm --platform linux/arm64 --entrypoint node "$image" verify-services.mjs
+            # The service verifier calls the real Host. Overriding ENTRYPOINT
+            # with that verifier would test a server that was never started.
+            docker run --detach --platform linux/arm64 --name varin-arm64-smoke \
+              --env VARIN_UI_PASSWORD=varin-ci-smoke-only --publish 127.0.0.1:3000:3000 "$image"
+            for attempt in $(seq 1 120); do
+              if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then break; fi
+              test "$(docker inspect --format '{{.State.Running}}' varin-arm64-smoke)" = true
+              test "$attempt" -lt 120
+              sleep 2
+            done
+            curl --fail --silent --show-error http://127.0.0.1:3000/health \
+              | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+            docker exec varin-arm64-smoke node verify-kernel.mjs packages/web
+            docker exec varin-arm64-smoke node verify-services.mjs
+            cleanup
+            docker image rm "$image" 2>/dev/null || true
           done
 
       - name: Create a source-only cache fixture and discard the original builder
-        if: inputs.benchmark
+        if: ${{ !cancelled() && inputs.benchmark && steps.warm.outcome == 'success' }}
         id: fixture
         working-directory: tooling
         env:
@@ -226,7 +247,8 @@ jobs:
           docker buildx rm "$ORIGINAL_BUILDER"
 
       - name: Set up an empty builder for registry cache restoration
-        if: inputs.benchmark
+        if: ${{ !cancelled() && inputs.benchmark && steps.fixture.outcome == 'success' }}
+        id: restored-builder
         uses: docker/setup-buildx-action@v4
         with:
           driver-opts: network=host
@@ -235,7 +257,7 @@ jobs:
               http = true
 
       - name: Rebuild changed source using only the exported registry cache
-        if: inputs.benchmark
+        if: ${{ !cancelled() && inputs.benchmark && steps.restored-builder.outcome == 'success' }}
         id: restored
         working-directory: tooling
         env:
