@@ -139,7 +139,10 @@ entry into final process disposal starts the grace. At expiry the Host kills tha
 for its actual exit. The existing owner diagnostics record `broker_cleanup_unconfirmed`: process
 exit does not mean the extension's cleanup or any external effect was completed or undone.
 Independent owners still finish shutdown even if another owner reports a failure. Trusted-native
-extensions retain their distinct in-process cleanup/restart contract.
+extensions retain their distinct in-process cleanup/restart contract. Native disposal aborts normal
+activation work first, then gives each awaited disposer a separate, scoped capability-call signal.
+The original Host grants and cleanup-method declarations still decide authorization. Concurrent
+termination joins the same cleanup result; disposer failure never reopens the stopped entrypoint.
 
 Tool services add `tool` metadata to their existing service provision. The standalone manifest,
 activation declaration, registry snapshot and SDK `inspect` response preserve that same descriptor;

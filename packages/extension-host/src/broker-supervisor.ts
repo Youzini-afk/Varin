@@ -1295,8 +1295,8 @@ export class BrokeredHostSupervisor {
       const grants = hostGrants(selection.capabilityGrants, selection.version);
       const preparedGrantIdentity = grantIdentity(grants, selection.version);
       let crashed: Error | null = null;
-      const requestFromExtension = (method: string, params: unknown, signal: AbortSignal) => (
-        this.#handleChildRequest(owner, grants, method, params, signal)
+      const requestFromExtension = (method: string, params: unknown, signal: AbortSignal, cleanup = false) => (
+        this.#handleChildRequest(owner, grants, method, params, signal, cleanup)
       );
       const broker = selection.manifest.entrypoints?.host?.mode === "native"
         ? new NativeHostTransport({ requestFromExtension })
@@ -1509,6 +1509,7 @@ export class BrokeredHostSupervisor {
     method: string,
     paramsValue: unknown,
     signal: AbortSignal,
+    nativeCleanup = false,
   ): Promise<JsonValue> {
     const params = isRecord(paramsValue) ? paramsValue : {};
     if (method === "capability.call") {
@@ -1526,7 +1527,9 @@ export class BrokeredHostSupervisor {
         asJsonValue(params.params),
         callSignal,
         scoped?.scope,
-        this.#disposing.has(ownerStorageKey(owner)),
+        // Native activation rollback can dispose before a published instance exists.
+        // Only its active disposer scope supplies this flag, never extension JSON.
+        nativeCleanup || this.#disposing.has(ownerStorageKey(owner)),
       );
     }
     if (method === "storage.open") {

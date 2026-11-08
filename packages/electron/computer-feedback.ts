@@ -39,6 +39,10 @@ export function createComputerFeedback() {
           window.webContents.on('will-navigate', event => event.preventDefault());
           const ready = window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(COMPUTER_FEEDBACK_HTML)}`);
           entry = { window, tail: ready, sequence: 0 }; windows.set(display.id, entry);
+          window.on('closed', () => {
+            const current = windows.get(display.id);
+            if (current?.window === window) { clearTimeout(current.hide); windows.delete(display.id); }
+          });
         }
         const view = entry;
         const admitted = generation;
