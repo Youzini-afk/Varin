@@ -4190,6 +4190,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.tools.unknown': '结果未知',
   'chat.timeline.tools.background': '后台任务',
   'chat.composer.hint': '@ 引用文件或智能体；/ 使用命令和技能',
+  'chat.composer.botHint': '@ 引用檔案或任務；/ 使用命令與技能',
   'chat.fileAttachment.actions.chooseImages': '添加图片',
   "chat.mcp.requests": "MCP 请求",
   "chat.mcp.closed": "已处理的请求",

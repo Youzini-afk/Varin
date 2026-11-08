@@ -4396,6 +4396,7 @@ export const dict = {
   'chat.timeline.tools.unknown': 'Outcome unknown',
   'chat.timeline.tools.background': 'Background task',
   'chat.composer.hint': '@ for files and agents; / for commands and skills',
+  'chat.composer.botHint': '@ to reference files or tasks; / for commands and skills',
   'chat.fileAttachment.actions.chooseImages': 'Attach images',
   "chat.mcp.requests": "MCP requests",
   "chat.mcp.closed": "Closed requests",

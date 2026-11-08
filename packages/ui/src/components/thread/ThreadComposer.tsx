@@ -421,7 +421,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
 
           <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
             <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro">
-              <p>{backendControls === undefined ? t('chat.composer.hint') : t('external.inputHint')}</p>
+              <p>{backendControls === undefined ? t(botWorkbench ? 'chat.composer.botHint' : 'chat.composer.hint') : t('external.inputHint')}</p>
               <p aria-live="polite">
               {availableSuggestion && !autocomplete ? <button type="button" className="text-inherit transition-colors hover:text-primary"
                 title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
