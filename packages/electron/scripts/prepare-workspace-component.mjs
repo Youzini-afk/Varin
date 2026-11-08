@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fetchBuildAsset } from '../../../scripts/download-build-asset.mjs';
 
 const require = createRequire(import.meta.url);
 const messages = {
@@ -28,7 +29,7 @@ const messages = {
 };
 
 const resources = fileURLToPath(new URL('../resources/', import.meta.url));
-export async function downloadWorkspaceAsset(url, { request = fetch, wait = delay } = {}) {
+export async function downloadWorkspaceAsset(url, { request = fetchBuildAsset, wait = delay } = {}) {
   const delays = [1000, 3000, 10000];
   for (let attempt = 0; ; attempt++) {
     try {

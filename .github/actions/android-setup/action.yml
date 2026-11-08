@@ -11,3 +11,8 @@ runs:
       with:
         packages: platform-tools platforms;android-36 build-tools;36.0.0
     - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+    - name: Prepare the pinned Gradle Wrapper distribution
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/prepare-gradle.mjs"

@@ -7,6 +7,9 @@ inputs:
   tools:
     description: Prepare the packaging/test toolchain
     default: 'true'
+  package:
+    description: Also prepare the platform installer packaging tools
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -21,7 +24,7 @@ runs:
           ~/Library/Caches/electron-builder
           ~/AppData/Local/electron-builder/Cache
           packages/electron/resources/workspace-component
-        key: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-${{ inputs.electron }}-${{ inputs.tools }}-${{ hashFiles('bun.lock', 'packages/electron/resources/workspace-component.json') }}
+        key: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-${{ inputs.electron }}-${{ inputs.tools }}-${{ inputs.package }}-${{ hashFiles('bun.lock', 'packages/electron/resources/workspace-component.json') }}
         restore-keys: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-
     - shell: bash
       run: bun install --frozen-lockfile
@@ -31,6 +34,8 @@ runs:
       env:
         PREPARE_ELECTRON: ${{ inputs.electron }}
         PREPARE_TOOLS: ${{ inputs.tools }}
+        PREPARE_PACKAGE: ${{ inputs.package }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/../../../packages/electron/scripts/prepare-build-downloads.mjs"
     # Preserve completed downloads even when a later compile/test fails.
     - if: steps.downloads.outputs.cache-hit != 'true'

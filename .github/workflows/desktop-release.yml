@@ -76,6 +76,7 @@ jobs:
           sparse-checkout: |
             .github/actions
             packages/electron/scripts
+            scripts
           path: .release-automation
       - uses: ./.release-automation/.github/actions/setup-bun
         with:
@@ -115,6 +116,7 @@ jobs:
           sparse-checkout: |
             .github/actions
             packages/electron/scripts
+            scripts
           path: .release-automation
       - uses: ./.release-automation/.github/actions/setup-bun
         with:
@@ -196,6 +198,7 @@ jobs:
           sparse-checkout: |
             .github/actions
             packages/electron/scripts
+            scripts
           path: .release-automation
       - uses: ./.release-automation/.github/actions/setup-bun
         with:
@@ -255,6 +258,7 @@ jobs:
           sparse-checkout: |
             .github/actions
             packages/electron/scripts
+            scripts
           path: .release-automation
       - uses: ./.release-automation/.github/actions/setup-bun
         with:
@@ -336,7 +340,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          sparse-checkout: .github/actions
+          sparse-checkout: |
+            .github/actions
+            scripts
           path: .release-automation
 
       - name: Prepare Android release signing and optional push configuration

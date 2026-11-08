@@ -97,6 +97,8 @@ jobs:
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
       - name: Install desktop dependencies
         uses: ./.release-automation/.github/actions/desktop-downloads
+        with:
+          package: 'true'
 
       - name: Attach Linux x64 VM guest runtime
         if: matrix.platform == 'linux' && matrix.architecture == 'x64' && hashFiles('scripts/build-vm-guest-bundle.mjs') != ''

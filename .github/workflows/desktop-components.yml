@@ -35,6 +35,7 @@ jobs:
           sparse-checkout: |
             .github/actions
             packages/electron/scripts
+            scripts
           path: .release-automation
       - uses: ./.release-automation/.github/actions/setup-bun
         with:
