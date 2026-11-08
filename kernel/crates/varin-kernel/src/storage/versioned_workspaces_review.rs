@@ -467,6 +467,7 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
     parent
         .create("right", PathState::Directory { mode: Some(0o755) })
         .unwrap();
+    let sibling = parent.create_file("right-before-children", 0o644).unwrap();
     let file = parent.create_file("left/file", 0o644).unwrap();
     parent.write(&file, None, b"before").unwrap();
     let alias = parent.link(&file, "right/alias").unwrap();
@@ -503,6 +504,9 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
         .unwrap();
     parent.rename("right", "moved", false).unwrap();
     assert!(Arc::ptr_eq(&file, &parent.lookup("moved/alias").unwrap()));
+    assert_eq!(unrelated.path().unwrap().as_deref(), Some("moved/unrelated"));
+    assert_eq!(sibling.path().unwrap().as_deref(), Some("right-before-children"));
+    assert!(parent.lookup("right/alias").is_err());
     parent.flush(&file).unwrap();
     boundary
         .fork(
@@ -561,7 +565,7 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
     assert_eq!(&bytes, b"parent");
     child.close().unwrap();
     parent.close().unwrap();
-    drop((file, alias, unrelated, child_file, child_alias, child, parent));
+    drop((file, alias, unrelated, sibling, child_file, child_alias, child, parent));
     let reopened = Session::open(port.clone(), "hardlinks".into(), grant).unwrap();
     let first = reopened.lookup("moved/alias").unwrap();
     let second = reopened.lookup("left/file").unwrap();
@@ -696,6 +700,9 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     fs::rename(&deferred_body, &body_path).unwrap();
     let opened_file = session.open_file(&opened).unwrap();
     assert!(Arc::ptr_eq(&opened, &session.lookup("folder/a").unwrap()));
+    // This cached sibling sorts after the directory itself but before its
+    // descendants. It must neither stop their rename nor be renamed with them.
+    let sibling = session.create_file("folder-before-children", 0o644).unwrap();
     session.write(&opened, Some(0), b"changed!").unwrap();
     use super::workspace_metadata::Timestamp;
     let chosen = Timestamp {
@@ -722,6 +729,9 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     // The parent continues through the same open handle before child sealing.
     session.write(&opened, Some(0), b"parent!!").unwrap();
     session.rename("folder", "moved", false).unwrap();
+    assert_eq!(opened.path().unwrap().as_deref(), Some("moved/a"));
+    assert_eq!(sibling.path().unwrap().as_deref(), Some("folder-before-children"));
+    assert!(session.lookup("folder/a").is_err());
     assert_eq!(
         session
             .lookup("moved/cold")
@@ -735,6 +745,11 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     session.remove("fresh", true).unwrap();
     assert!(Arc::ptr_eq(&opened, &session.lookup("moved/a").unwrap()));
     session.flush(&opened).unwrap();
+    let persisted = port.call(|s| {
+        let state = s.root_get(&s.branch("main")?.head_root, "moved/a")?.unwrap();
+        Ok(fs::read(object_path(&s.root, state.object_hash().unwrap())?)?)
+    }).unwrap();
+    assert_eq!(persisted, b"parent!!", "the original open handle publishes at its renamed path");
     let child = checkpoint
         .fork("child", "session-fork", &AtomicBool::new(false))
         .unwrap();

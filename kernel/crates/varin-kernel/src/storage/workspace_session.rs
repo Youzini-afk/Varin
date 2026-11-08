@@ -1531,10 +1531,18 @@ impl Session {
             }
         }
         let prefix = format!("{from}/");
+        // The exact path and its descendants are separate sorted ranges:
+        // a sibling such as `foo-bar` sorts between `foo` and `foo/file`.
         let affected = namespace
             .paths
-            .range(from.clone()..)
-            .take_while(|(key, _)| **key == from || key.starts_with(&prefix))
+            .get_key_value(&from)
+            .into_iter()
+            .chain(
+                namespace
+                    .paths
+                    .range(prefix.clone()..)
+                    .take_while(|(key, _)| key.starts_with(&prefix)),
+            )
             .map(|(key, node)| (key.clone(), node.clone()))
             .collect::<Vec<_>>();
         for (old, node) in affected {
