@@ -118,9 +118,8 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
 
 pub(super) fn mode(db: &Connection, thread: &str) -> Result<TitleMode> {
     let value: Option<String> = db
-        .query_row(
-            "SELECT mode FROM thread_title_state WHERE thread_id=?1",
-            [thread],
+        .prepare_cached("SELECT mode FROM thread_title_state WHERE thread_id=?1")?
+        .query_row([thread],
             |row| row.get(0),
         )
         .optional()?;

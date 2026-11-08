@@ -285,27 +285,20 @@ impl Catalog {
             ArchiveFilter::Include => 1,
             ArchiveFilter::Only => 2,
         };
-        let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id")?;
+        let mut statement = self.db.prepare_cached("SELECT t.id,t.title FROM threads t WHERE (?2=0 OR t.principal_id IS NULL OR t.principal_id=?3) AND t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id")?;
         let ids = statement
-            .query_map([archive], |r| r.get::<_, String>(0))?
+            .query_map(params![archive, query.principal_id.is_some(), query.principal_id.as_ref().and_then(Option::as_deref)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let needle = query.query.as_deref().unwrap_or("").trim().to_lowercase();
         let mut result = Vec::new();
-        for id in ids {
-            if let Some(principal) = &query.principal_id {
-                let owner = super::principals::thread(&self.db, &id)?;
-                if owner.is_some() && &owner != principal { continue; }
-            }
-            let summary = self.inspect_thread(&id)?;
+        for (id, title) in ids {
+            // Preserve Unicode case folding in the product search, but do not inspect unrelated
+            // branches, Runs or ownership ancestry for a Thread that cannot match the query.
             if needle.is_empty()
                 || id.to_lowercase().contains(&needle)
-                || summary["title"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&needle)
+                || title.to_lowercase().contains(&needle)
             {
-                result.push(summary);
+                result.push(self.inspect_thread(&id)?);
             }
         }
         Ok(result)
@@ -435,34 +428,31 @@ impl Catalog {
 }
 
 pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
-    let exists: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
-        [thread_id],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(RuntimeError::NotFound(thread_id.into()));
-    }
+    let mut summary = db.prepare_cached("SELECT title,revision,created_at_ms,updated_at_ms,pinned,archived,deleted_at_ms,activity_cursor,read_cursor,principal_id,agent_code FROM threads WHERE id=?1")?
+        .query_row([thread_id], |r| Ok(json!({
+            "title":r.get::<_,String>(0)?, "revision":read_number(r,1)?,
+            "created_at_ms":read_number(r,2)?, "updated_at_ms":read_number(r,3)?,
+            "pinned":r.get::<_,bool>(4)?, "archived":r.get::<_,bool>(5)?,
+            "deleted_at_ms":r.get::<_,Option<i64>>(6)?, "activity_cursor":read_number(r,7)?,
+            "read_cursor":read_number(r,8)?, "unread":read_number(r,7)?>read_number(r,8)?,
+            "principal_id":r.get::<_,Option<String>>(9)?, "agent_code":r.get::<_,String>(10)?
+        }))).optional()?.ok_or_else(|| RuntimeError::NotFound(thread_id.into()))?;
     let mut statement =
-        db.prepare("SELECT b.id,b.head,b.active_run FROM branches b WHERE b.thread_id=?1
+        db.prepare_cached("SELECT b.id,b.head,b.active_run,
+            (SELECT r.body FROM runs r WHERE r.branch_id=b.id ORDER BY r.rowid DESC LIMIT 1)
+            FROM branches b WHERE b.thread_id=?1
             AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid")?;
     let rows = statement.query_map([thread_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
             row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     let mut branches = Vec::new();
     for row in rows {
-        let (branch_id, head, active_run_id) = row?;
-        let latest: Option<String> = db
-            .query_row(
-                "SELECT body FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",
-                [&branch_id],
-                |r| r.get(0),
-            )
-            .optional()?;
+        let (branch_id, head, active_run_id, latest) = row?;
         let latest_run = latest
             .map(|raw| serde_json::from_str::<Run>(&raw))
             .transpose()?;
@@ -470,7 +460,7 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
     }
     // Scope is bound at Run admission, including queued Runs, and survives later context
     // publication. Read only small checkpoint metadata; never hydrate prompt bodies here.
-    let mut scopes = db.prepare(
+    let mut scopes = db.prepare_cached(
         "SELECT DISTINCT c.project_id FROM runs r JOIN branches b ON b.id=r.branch_id
              LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id
              WHERE b.thread_id=?1 ORDER BY c.project_id",
@@ -478,22 +468,13 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
     let observer_project_ids = scopes
         .query_map([thread_id], |row| row.get::<_, Option<String>>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let mut summary = db.query_row("SELECT title,revision,created_at_ms,updated_at_ms,pinned,archived,deleted_at_ms,activity_cursor,read_cursor FROM threads WHERE id=?1", [thread_id], |r| Ok(json!({
-            "title":r.get::<_,String>(0)?, "revision":read_number(r,1)?,
-            "created_at_ms":read_number(r,2)?, "updated_at_ms":read_number(r,3)?,
-            "pinned":r.get::<_,bool>(4)?, "archived":r.get::<_,bool>(5)?,
-            "deleted_at_ms":r.get::<_,Option<i64>>(6)?, "activity_cursor":read_number(r,7)?,
-            "read_cursor":read_number(r,8)?, "unread":read_number(r,7)?>read_number(r,8)?
-        })))?;
     summary["main_branch_id"] = branches
         .first()
         .ok_or_else(|| RuntimeError::Invalid("Thread has no initial branch".into()))?["branch_id"]
         .clone();
     summary["thread_id"] = json!(thread_id);
-    summary["principal_id"] = json!(super::principals::thread(db,thread_id)?);
-    summary["agent_code"] = json!(db.query_row("SELECT agent_code FROM threads WHERE id=?1", [thread_id], |r| r.get::<_,String>(0))?);
-    let child: Option<(String, Option<String>)> = db.query_row(
-        "SELECT json_extract(body,'$.parent_thread_id'), json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=?1",
+    let child: Option<(String, Option<String>)> = db.prepare_cached(
+        "SELECT json_extract(body,'$.parent_thread_id'), json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=?1")?.query_row(
         [thread_id], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional()?;
     summary["parent_thread_id"] = json!(child.as_ref().map(|(parent, _)| parent));

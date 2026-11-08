@@ -223,6 +223,8 @@ fn initialize_metadata(
     // the read does not scan retained history. Their predicates match attention::OPEN_*.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS attention_open_runs ON runs(branch_id) WHERE json_extract(body,'$.state') NOT IN ('completed','failed','cancelled');
         CREATE INDEX IF NOT EXISTS attention_open_operations ON operations(run_id) WHERE (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.effect')='unknown' OR json_extract(body,'$.outcome')='indeterminate' OR (json_extract(body,'$.mcp_resource_subscription') IS NOT NULL AND (json_extract(body,'$.cancel_requested')=0 OR json_extract(body,'$.mcp_resource_subscription.localReleased')=0)))")?;
+    // Product discovery and Bot ancestry need only memory-work owners, not every retained tool.
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS thread_memory_operations ON operations(run_id) WHERE json_extract(body,'$.intent.kind')='memory_work_v1'")?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
@@ -2094,3 +2096,7 @@ pub mod attention;
 
 #[path = "catalog_attachments.rs"]
 pub mod attachments;
+
+#[cfg(test)]
+#[path = "catalog_read_performance_tests.rs"]
+mod read_performance_tests;
