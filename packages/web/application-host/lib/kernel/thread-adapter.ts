@@ -22,8 +22,6 @@ import type { MessageTimeObservation, MessageTimeSettings } from '@varin/protoco
 import { materialInputText, parseThreadMaterials, type ThreadInputMaterials } from './thread-material-input.js';
 import { createThreadObjectInputPreparer, parseThreadObjectReferences } from './thread-object-input.js';
 import type { ThreadObjectReference, ThreadDraftSkillOptions, ThreadSkillSelection, ThreadSkillCatalog, ThreadMaterialAttachment } from '@varin/application-client';
-import { listThreadFollowups } from './thread-followups.js';
-import { listThreadGoals } from './thread-goals.js';
 import { createHash } from 'node:crypto';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, ThreadSource, ThreadSnapshot, ThreadHistoryPage, ThreadCompact, ThreadContextState, ThreadPrepareSource, ThreadPreparedSource, ThreadResourceRefresh, ThreadChildContinuation, ThreadSourcesAPI } from '@varin/application-client';
 import type { InputMode, InitialContext, InputSubmitParams, InputEnqueueParams, InputResourcePreparation, ContextResources, PreparedExplicitSkill, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
@@ -594,6 +592,9 @@ export class ThreadAdapter {
 
   async childExecutions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
+    return this.readChildExecutions(identity, operationId, signal);
+  }
+  private async readChildExecutions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal) {
     const child = operationId ? await this.runtime.child(operationId, signal) : await this.runtime.childForThread(identity.threadId, signal);
     if (!child) return [];
     // A historical fork remains readable without acquiring the original branch's executions.
@@ -622,6 +623,9 @@ export class ThreadAdapter {
   }
   async childPage(identity:ThreadIdentity, options:Omit<FamilyListParams,'callerThreadId'>={}, signal?:AbortSignal):Promise<import('@varin/application-client').ThreadChildPage> {
     await this.requireIdentity(identity,signal);
+    return this.readChildPage(identity, options, signal);
+  }
+  private async readChildPage(identity:ThreadIdentity, options:Omit<FamilyListParams,'callerThreadId'>, signal?:AbortSignal):Promise<import('@varin/application-client').ThreadChildPage> {
     const directory=await this.runtime.familyList({callerThreadId:identity.threadId,...options,parentThreadId:identity.threadId,parentBranchId:identity.branchId},signal);
     const direct=directory.members.filter(member=>member.parentThreadId===identity.threadId && member.operationId && member.latestExecutionId);
     const pairs=await Promise.all(direct.map(async member=>{
@@ -635,7 +639,7 @@ export class ThreadAdapter {
     let cursor:string|undefined;
     let combined:import('@varin/application-client').ThreadChildPage|undefined;
     do {
-      const page=await this.childPage(identity,{scope:'current',...(cursor?{cursor}:{})},signal);
+      const page=await this.readChildPage(identity,{scope:'current',...(cursor?{cursor}:{})},signal);
       combined=combined?{directory:{...page.directory,members:[...combined.directory.members,...page.directory.members]},children:[...combined.children,...page.children],executions:[...combined.executions,...page.executions]}:page;
       cursor=page.directory.nextCursor??undefined;
     }while(cursor);
@@ -1294,7 +1298,7 @@ export class ThreadAdapter {
   }
 
   async historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
-    await this.requireIdentity(identity);
+    await this.requireIdentity(identity, signal);
     return this.readHistoryPage(identity.branchId, cursor, signal);
   }
 
@@ -1318,10 +1322,9 @@ export class ThreadAdapter {
   }
 
   async historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal) {
-    await this.requireIdentity(identity);
-    const page = await this.readHistoryPage(identity.branchId, cursor, signal);
-    return (this.historyUsageReader ??= new HistoryRunUsageReader(this.runtime)).read(identity.branchId, page,
-      page.items.flatMap(item => item.modelRequest ? [item.modelRequest] : []), signal);
+    await this.requireIdentity(identity, signal);
+    const page = await this.runtime.historyPage({ branchId: identity.branchId, limit: 20, ...cursor }, signal);
+    return (this.historyUsageReader ??= new HistoryRunUsageReader(this.runtime)).read(identity.branchId, page, [], signal);
   }
 
   private historyUsageReader?: HistoryRunUsageReader;
@@ -1363,10 +1366,12 @@ export class ThreadAdapter {
     const [page, inputs, activeOperations, context, followups, goals, childState, delegatedExecutions] = await Promise.all([
       this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined, signal),
       this.runtime.inputs(identity.branchId, signal), this.runtime.activeOperations(identity.threadId, identity.branchId, signal), this.context(identity, signal),
-      listThreadFollowups(this, identity, signal),
-      listThreadGoals(this, identity, signal),
+      // The identity/principal check above covers this read only. Keep public
+      // endpoints independently admitted; do not cache authorization across requests.
+      this.runtime.followups(identity.threadId, signal).then(items => items.filter(item => item.thread_id === identity.threadId && item.branch_id === identity.branchId)),
+      this.runtime.goals(identity.threadId, signal).then(items => items.filter(item => item.thread_id === identity.threadId && item.branch_id === identity.branchId)),
       this.currentChildren(identity, signal),
-      this.childExecutions(identity, undefined, signal),
+      this.readChildExecutions(identity, undefined, signal),
     ]);
     if (branch.latest_run && this.readContextPolicy) {
       try { context.policy = await this.readContextPolicy(branch.latest_run, signal); }
@@ -1426,11 +1431,13 @@ export class ThreadAdapter {
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id, signal) : null;
     const shownRun = activeRun ?? latest;
-    const runFailure = shownRun?.state === 'failed' ? await this.runtime.runFailure(shownRun.id, signal) : null;
-    const launch = shownRun ? await this.runtime.launch(shownRun.id, signal) : null;
-    const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id, signal) : {desired:null,active:null};
+    const [runFailure, launch, modelSelection, recovery] = await Promise.all([
+      shownRun?.state === 'failed' ? this.runtime.runFailure(shownRun.id, signal) : null,
+      shownRun ? this.runtime.launch(shownRun.id, signal) : null,
+      shownRun ? this.runtime.modelSelections(shownRun.id, signal) : {desired:null,active:null},
+      this.recoveryReader?.(identity, signal),
+    ]);
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id, signal) : null;
-    const recovery = this.recoveryReader ? await this.recoveryReader(identity, signal) : undefined;
     signal?.throwIfAborted();
     return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,

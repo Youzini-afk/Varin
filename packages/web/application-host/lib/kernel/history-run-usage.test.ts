@@ -30,3 +30,24 @@ it('reads an ended run through the anchored cut, deduplicates requests and refre
   expect(refreshed[0]!.requests.find(value => value.requestId === '请求')?.usage.outputTokens).toBe(7);
   expect(historyPage).toHaveBeenCalledTimes(1);
 });
+
+
+it('reads only ended assistant bodies for usage and retains exact page boundaries', async () => {
+  const reference = (id: string, source: 'user' | 'tool' | 'assistant', runId = 'ended') => ({ id, source, run_id: runId, thread_id: 'thread', parent: null, content_ref: id });
+  const refs = [reference('user', 'user'), reference('tool', 'tool'), reference('answer', 'assistant'), reference('later-tool', 'tool'), reference('streaming', 'assistant', 'active')];
+  const historyItem = vi.fn(async (ref: typeof refs[number]) => {
+    if (ref.id !== 'answer') throw new Error('Unrelated body must not be loaded');
+    return { ...ref, provider: null, content: { id: 'model-item:3:req:part' } };
+  });
+  const usage = { measurement: 'actual', inputTokens: 8, outputTokens: 3 };
+  const modelPresentations = vi.fn(async () => [{ requestId: 'req', usage }]);
+  const reader = new HistoryRunUsageReader({ run: async (id: string) => ({ id, state: id === 'ended' ? 'completed' : 'generating' }),
+    historyPage: vi.fn(), historyItem, modelPresentations } as unknown as ConstructorParameters<typeof HistoryRunUsageReader>[0]);
+  await expect(reader.read('branch', { head: 'streaming', previous: null, items: refs })).resolves.toEqual([
+    { runId: 'ended', throughId: 'later-tool', requests: [{ requestId: 'req', usage }] },
+  ]);
+  expect(historyItem.mock.calls.map(([ref]) => ref.id)).toEqual(['answer']);
+  expect(modelPresentations).toHaveBeenCalledWith(['req'], undefined);
+  historyItem.mockRejectedValueOnce(new Error('Original assistant unavailable'));
+  await expect(reader.read('branch', { head: 'streaming', previous: null, items: refs })).rejects.toThrow('Original assistant unavailable');
+});
