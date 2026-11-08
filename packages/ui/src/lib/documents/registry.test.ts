@@ -26,6 +26,13 @@ const mutationToken = () => ({
   owner: { kind: 'test', id: 'document-registry' },
 });
 
+const deferred = () => {
+  let resolve!: () => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+};
+
 const hashText = async (text: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return `sha256-${Buffer.from(digest).toString('hex')}`;
@@ -1018,6 +1025,264 @@ describe('DocumentRegistry', () => {
     expect(saved.dirty).toBe(true);
     registry.dispose();
   });
+
+  test('repeated reloads preserve edits made during both retention and disk reads', async () => {
+    const { api, files } = createMemoryDocuments();
+    const identity = resource();
+    files.set(documentKey(identity), { content: 'base', revision: 'd1_base' });
+    type Gate = { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> };
+    let retentionGate: Gate | undefined;
+    let readGate: Gate | undefined;
+    const documents: DocumentsAPI = {
+      ...api,
+      setWorkspaceRetention: async ({ retained }) => {
+        const gate = retentionGate;
+        gate?.entered.resolve();
+        await gate?.release.promise;
+        return { retained };
+      },
+      read: async (ref) => {
+        const result = await api.read(ref);
+        const gate = readGate;
+        gate?.entered.resolve();
+        await gate?.release.promise;
+        return result;
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, journalDebounceMs: 60_000 });
+    try {
+      const opened = await registry.open(identity);
+      for (const cycle of [1, 2]) {
+        retentionGate = { entered: deferred(), release: deferred() };
+        readGate = { entered: deferred(), release: deferred() };
+        files.set(documentKey(identity), { content: `disk ${cycle}`, revision: `d1_external_${cycle}` });
+        const reloading = registry.reload(identity);
+        await retentionGate.entered.promise;
+        const duringRetention = registry.applyTransaction(identity, `retention edit ${cycle}`, { origin: 'view' });
+        retentionGate.release.resolve();
+        await readGate.entered.promise;
+        expect(registry.get(identity)).toMatchObject({
+          status: 'loading',
+          buffer: duringRetention.buffer,
+          localEditRevision: duringRetention.localEditRevision,
+          documentInstanceId: opened.documentInstanceId,
+        });
+        const duringRead = registry.applyTransaction(identity, `read edit ${cycle}`, { origin: 'view' });
+        readGate.release.resolve();
+        expect(await reloading).toMatchObject({
+          buffer: duringRead.buffer,
+          localEditRevision: duringRead.localEditRevision,
+          dirty: true,
+          status: 'conflict',
+          baseContent: `disk ${cycle}`,
+          baseRevision: `d1_external_${cycle}`,
+          conflict: { ancestorContent: 'base', ancestorRevision: 'd1_base', diskContent: `disk ${cycle}` },
+        });
+      }
+    } finally {
+      retentionGate?.release.resolve();
+      readGate?.release.resolve();
+      await registry.dispose();
+    }
+  });
+
+  test.each(['dispose', 'generation-change'] as const)(
+    '%s during retention prevents an old reload from publishing or reading',
+    async (interruption) => {
+      const { api, files } = createMemoryDocuments();
+      const identity = resource();
+      files.set(documentKey(identity), { content: 'base', revision: 'd1_base' });
+      const entered = deferred();
+      const release = deferred();
+      let hold = false;
+      let generation = 1;
+      const read = vi.fn(api.read);
+      const documents: DocumentsAPI = {
+        ...api,
+        read,
+        setWorkspaceRetention: async ({ retained }) => {
+          if (hold) { entered.resolve(); await release.promise; }
+          return { retained };
+        },
+      };
+      const registry = new DocumentRegistry({ documents, getGeneration: () => generation, journalDebounceMs: 60_000 });
+      try {
+        await registry.open(identity);
+        hold = true;
+        const reloading = registry.reload(identity);
+        await entered.promise;
+        const edited = registry.applyTransaction(identity, 'new input', { origin: 'view' });
+        if (interruption === 'dispose') await registry.dispose();
+        else generation += 1;
+        release.resolve();
+        await reloading;
+        expect(read).toHaveBeenCalledTimes(1);
+        if (interruption === 'dispose') expect(registry.get(identity)).toBeUndefined();
+        else expect(registry.get(identity)).toBe(edited);
+      } finally {
+        release.resolve();
+        await registry.dispose();
+      }
+    },
+  );
+
+  test('repeated save conflicts keep the latest edits and reconcile the final write receipt', async () => {
+    const { api, files } = createMemoryDocuments();
+    const identity = resource();
+    files.set(documentKey(identity), { content: 'base', revision: 'd1_base' });
+    let readGate: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | undefined;
+    const write = vi.fn(api.write);
+    const documents: DocumentsAPI = {
+      ...api,
+      write,
+      read: async (ref) => {
+        const result = await api.read(ref);
+        const gate = readGate;
+        gate?.entered.resolve();
+        await gate?.release.promise;
+        return result;
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, journalDebounceMs: 60_000 });
+    try {
+      await registry.open(identity);
+      registry.applyTransaction(identity, 'first edit', { origin: 'view' });
+      for (const cycle of [1, 2]) {
+        files.set(documentKey(identity), { content: `disk ${cycle}`, revision: `d1_external_${cycle}` });
+        readGate = { entered: deferred(), release: deferred() };
+        const saving = registry.save(identity, { overwriteConflict: true });
+        await readGate.entered.promise;
+        const edited = registry.applyTransaction(identity, `latest edit ${cycle}`, { origin: 'view' });
+        expect((await registry.save(identity, { overwriteConflict: true })).saving).toBe(true);
+        expect(write).toHaveBeenCalledTimes(cycle);
+        readGate.release.resolve();
+        expect(await saving).toMatchObject({
+          buffer: edited.buffer,
+          localEditRevision: edited.localEditRevision,
+          dirty: true,
+          saving: false,
+          saveOperationId: null,
+          saveCapturedEditRevision: null,
+          status: 'conflict',
+          baseContent: `disk ${cycle}`,
+          baseRevision: `d1_external_${cycle}`,
+          conflict: { ancestorContent: 'base', ancestorRevision: 'd1_base', diskContent: `disk ${cycle}` },
+        });
+      }
+      const saved = await registry.save(identity, { overwriteConflict: true });
+      const disk = await api.read(identity);
+      expect(disk).toMatchObject({ status: 'ready', content: 'latest edit 2', revision: saved.baseRevision });
+      expect(saved).toMatchObject({ buffer: 'latest edit 2', baseContent: 'latest edit 2', dirty: false, saving: false, conflict: null });
+      expect(write.mock.calls.map(([request]) => request.expectedRevision)).toEqual(['d1_base', 'd1_external_1', 'd1_external_2']);
+      expect(new Set(write.mock.calls.map(([request]) => request.operationId)).size).toBe(3);
+    } finally {
+      readGate?.release.resolve();
+      await registry.dispose();
+    }
+  });
+
+  test('a failed save-conflict read keeps edits and allows a later conflict retry', async () => {
+    const { api, files } = createMemoryDocuments();
+    const identity = resource();
+    files.set(documentKey(identity), { content: 'base', revision: 'd1_base' });
+    const entered = deferred();
+    const release = deferred();
+    let failRead = false;
+    const documents: DocumentsAPI = {
+      ...api,
+      read: async (ref) => {
+        if (failRead) { entered.resolve(); await release.promise; }
+        return api.read(ref);
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, journalDebounceMs: 60_000 });
+    try {
+      await registry.open(identity);
+      registry.applyTransaction(identity, 'first edit', { origin: 'view' });
+      files.set(documentKey(identity), { content: 'disk', revision: 'd1_external' });
+      failRead = true;
+      const saving = registry.save(identity);
+      await entered.promise;
+      const edited = registry.applyTransaction(identity, 'newer edit', { origin: 'view' });
+      const rejected = expect(saving).rejects.toThrow('read interrupted');
+      release.reject(new Error('read interrupted'));
+      await rejected;
+      expect(registry.get(identity)).toMatchObject({
+        buffer: edited.buffer, localEditRevision: edited.localEditRevision, dirty: true, saving: false,
+        saveOperationId: null, saveCapturedEditRevision: null, errorMessage: 'read interrupted',
+      });
+      failRead = false;
+      expect(await registry.save(identity)).toMatchObject({ buffer: edited.buffer, status: 'conflict', saving: false });
+      expect(await registry.save(identity, { overwriteConflict: true })).toMatchObject({
+        buffer: edited.buffer, baseContent: edited.buffer, dirty: false, saving: false,
+      });
+    } finally {
+      release.resolve();
+      await registry.dispose();
+    }
+  });
+
+  test.each(['before-write', 'after-write'] as const)(
+    'discard %s stays versioned and reconciles against the captured save bytes',
+    async (phase) => {
+      const { api, files, journals } = createMemoryDocuments();
+      const identity = resource();
+      files.set(documentKey(identity), { content: 'base\r\n', revision: 'd1_base' });
+      const entered = deferred();
+      const release = deferred();
+      let hold = true;
+      const write = vi.fn(async (request: Parameters<DocumentsAPI['write']>[0]) => {
+        const paused = hold;
+        if (paused && phase === 'before-write') { entered.resolve(); await release.promise; }
+        const receipt = await api.write(request);
+        if (paused && phase === 'after-write') { entered.resolve(); await release.promise; }
+        return receipt;
+      });
+      const registry = new DocumentRegistry({ documents: { ...api, write }, getGeneration: () => 1, journalDebounceMs: 60_000 });
+      try {
+        await registry.open(identity);
+        const edited = registry.applyTransaction(identity, 'saved edit\n', { origin: 'view' });
+        const saving = registry.save(identity);
+        await entered.promise;
+        const discarded = registry.discard(identity)!;
+        expect(discarded).toMatchObject({
+          buffer: 'base\n', dirty: false, saving: true, localEditRevision: edited.localEditRevision + 1,
+        });
+        expect(registry.discard(identity)?.localEditRevision).toBe(discarded.localEditRevision);
+        const staleEdit = registry.applyEdits(identity, {
+          expectedLocalEditRevision: edited.localEditRevision,
+          edits: [{ from: 0, to: 0, insert: 'stale' }],
+          origin: 'stale-provider',
+        });
+        expect(staleEdit.status).toBe('stale');
+        hold = false;
+        release.resolve();
+        const saved = await saving;
+        expect(await api.read(identity)).toMatchObject({
+          status: 'ready', content: 'saved edit\r\n', revision: saved.baseRevision,
+        });
+        expect(saved).toMatchObject({
+          buffer: 'base\n', baseContent: 'saved edit\n', dirty: true, saving: false,
+          localEditRevision: discarded.localEditRevision, saveOperationId: null, saveCapturedEditRevision: null,
+        });
+        expect(await registry.open(identity)).toMatchObject({ buffer: 'base\n', dirty: true, baseContent: 'saved edit\n' });
+        await registry.flushRecoveryJournals();
+        expect([...journals.values()]).toEqual([expect.objectContaining({
+          content: 'base\r\n', baseRevision: saved.baseRevision,
+        })]);
+        const resaved = await registry.save(identity);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(write.mock.calls[1]?.[0].expectedRevision).toBe(saved.baseRevision);
+        expect(write.mock.calls[1]?.[0].operationId).not.toBe(write.mock.calls[0]?.[0].operationId);
+        expect(await api.read(identity)).toMatchObject({ status: 'ready', content: 'base\r\n', revision: resaved.baseRevision });
+        expect(resaved).toMatchObject({ buffer: 'base\n', baseContent: 'base\n', dirty: false, saving: false });
+        expect(journals.size).toBe(0);
+      } finally {
+        release.resolve();
+        await registry.dispose();
+      }
+    },
+  );
 
   test('read failure preserves dirty buffers', async () => {
     const { api } = createMemoryDocuments();

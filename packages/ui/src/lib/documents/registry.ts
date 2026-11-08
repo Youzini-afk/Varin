@@ -665,8 +665,13 @@ export class DocumentRegistry {
     }
     const key = this.keyFor(identity);
     const generation = this.getGeneration();
+    await retainEditorWorkspace(this.documents, identity.workspaceId, true);
+    // Retention can cross a Host request. Publish loading from the current
+    // buffer, never from a snapshot taken before the editor could change it.
     const existing = this.records.get(key);
-    await retainEditorWorkspace(this.documents,identity.workspaceId,true);
+    if (this.disposed || generation !== this.getGeneration()) {
+      return existing ?? emptyRecord(identity, generation, this.createDocumentInstanceId());
+    }
     if (
       !options?.reload
       && existing
@@ -1325,44 +1330,43 @@ export class DocumentRegistry {
       if (result.status === 'conflict') {
         const disk = await this.documents.read(current.identity);
         if (this.disposed || generation !== this.getGeneration()) return latest;
-        const withDisk = applyRead(latest, disk);
+        const conflictCurrent = this.records.get(this.keyFor(identity)) ?? latest;
+        const withDisk = applyRead(conflictCurrent, disk);
         this.commit({
           ...withDisk,
           saving: false,
           saveOperationId: null,
           saveCapturedEditRevision: null,
-          buffer: latest.buffer,
+          buffer: conflictCurrent.buffer,
           dirty: true,
-          localEditRevision: latest.localEditRevision,
+          localEditRevision: conflictCurrent.localEditRevision,
           status: 'conflict',
           conflict: {
             diskRevision: disk.status === 'missing' ? 'missing' : disk.revision,
-            ancestorContent: latest.conflict?.ancestorContent ?? latest.baseContent,
-            ancestorRevision: latest.conflict?.ancestorRevision ?? latest.baseRevision,
+            ancestorContent: conflictCurrent.conflict?.ancestorContent ?? conflictCurrent.baseContent,
+            ancestorRevision: conflictCurrent.conflict?.ancestorRevision ?? conflictCurrent.baseRevision,
             diskContent: disk.status === 'ready' ? normalizeEditorLineEndings(disk.content) : '',
           },
         });
         return this.records.get(this.keyFor(identity)) ?? latest;
       }
-      const stillDirty = latest.localEditRevision !== capturedEdit;
+      // The receipt describes the captured write, even if the buffer was edited
+      // or discarded while it was in flight.
+      const savedContent = normalizeEditorLineEndings(content);
       const saved: DocumentRecord = {
         ...latest,
         saving: false,
         saveOperationId: null,
         saveCapturedEditRevision: null,
-        baseContent: stillDirty ? latest.baseContent === latest.buffer ? latest.buffer : normalizeEditorLineEndings(content) : latest.buffer,
+        baseContent: savedContent,
         buffer: latest.buffer,
         baseRevision: result.revision,
-        dirty: stillDirty,
+        dirty: latest.buffer !== savedContent,
         byteLength: result.byteLength,
         status: 'ready',
         conflict: null,
         errorMessage: null,
       };
-      if (stillDirty) {
-        saved.baseContent = normalizeEditorLineEndings(content);
-        saved.dirty = saved.buffer !== saved.baseContent;
-      }
       this.commit(saved);
       if (saved.dirty) this.scheduleJournal(saved);
       else await this.clearJournal(saved);
@@ -1425,6 +1429,7 @@ export class DocumentRegistry {
     const next: DocumentRecord = {
       ...current,
       buffer: current.baseContent,
+      localEditRevision: current.localEditRevision + (current.buffer !== current.baseContent ? 1 : 0),
       dirty: false,
       status: current.status === 'conflict' ? 'ready' : current.status === 'deleted' ? 'deleted' : current.status,
       conflict: current.status === 'conflict' ? null : current.conflict,
