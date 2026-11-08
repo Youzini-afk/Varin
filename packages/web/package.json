@@ -98,7 +98,7 @@
     "google-auth-library": "^11.3.2",
     "http-proxy-middleware": "^4.2.1",
     "ignore": "7.0.14",
-    "jose": "^6.2.14",
+    "jose": "^6.2.15",
     "jsonc-parser": "^3.3.1",
     "linkedom": "0.18.14",
     "luxon": "^3.5.0",
