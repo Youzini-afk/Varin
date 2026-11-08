@@ -9,6 +9,7 @@ import { KnowledgeMutationError, type Knowledge } from "../knowledge/store.js";
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { projectBotPresence } from './bot-presence.js';
 import type { MemoryOrganizer } from '../memory/memory-organizer.js';
+import { BotOrganizationConflict } from './bot-organization.js';
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -36,6 +37,9 @@ const parseModel = (value: unknown): BotModelSelection | null | undefined => {
 };
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof BotOrganizationConflict) {
+    response.status(409).json({ code: 'conflict', error: error.message }); return;
+  }
   if (error instanceof BotProfileConflictError) {
     response.status(409).json({ code: 'conflict', error: error.message, revision: error.revision });
     return;
@@ -59,6 +63,15 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
 };
 
 export function registerBotRoutes(app: Express, { bots, computers, memory, organizer, work, requireAuth = noAuth }: BotRoutesOptions): void {
+  app.get('/api/harness/bots/organization', requireAuth, async (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try { response.json(await bots.organization.read()); }
+    catch (error) { sendError(response, error, 'Unable to read Bot groups'); }
+  });
+  app.post('/api/harness/bots/organization', requireAuth, async (request, response) => {
+    try { response.json(await bots.organization.update(request.body)); }
+    catch (error) { sendError(response, error, 'Unable to update Bot groups'); }
+  });
   app.post('/api/harness/bots/primary', requireAuth, async (_request: Request, response: Response) => {
     response.setHeader('Cache-Control', 'no-store');
     try { response.json({ bot: await bots.primary() }); }

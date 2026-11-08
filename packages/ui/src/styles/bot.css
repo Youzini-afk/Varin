@@ -88,6 +88,38 @@
 .bot-nav-sessions > div { min-height: 0; overflow: hidden; }
 .bot-nav-group[data-open="false"] .bot-nav-sessions { grid-template-rows: 0fr; }
 
+/* Folder sections keep the Bot/conversation indentation unchanged. */
+.bot-folder { margin-top: 12px; }
+.bot-group-heading { display: flex; min-width: 0; align-items: center; }
+.bot-group-toggle { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; padding: 7px 8px; text-align: left; font-size: var(--text-meta); font-weight: 500; color: var(--muted-foreground); border-radius: var(--radius-item); }
+.bot-group-toggle:hover, .bot-group-more:hover { background: var(--interactive-hover); color: var(--foreground); }
+.bot-group-toggle:focus-visible, .bot-group-more:focus-visible, .bot-sort-handle:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -2px; }
+.bot-group-current { max-width: 40%; margin-left: auto; font-size: var(--text-micro); color: var(--foreground); opacity: .75; }
+.bot-group-more { margin-right: 4px; padding: 4px; border-radius: var(--radius-item); opacity: 0; color: var(--muted-foreground); transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-group-heading:hover .bot-group-more, .bot-group-heading:focus-within .bot-group-more, .bot-group-more[data-state="open"] { opacity: 1; }
+.bot-folder-chevron { flex-shrink: 0; transition: transform var(--motion-dur-glide) var(--motion-ease-glide); }
+.bot-folder[data-open="false"] .bot-folder-chevron { transform: rotate(-90deg); }
+.bot-folder-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-folder-fold > div { min-height: 0; overflow: hidden; }
+.bot-folder[data-open="false"] .bot-folder-fold { grid-template-rows: 0fr; opacity: 0; }
+.bot-group-label { padding: 6px 8px; font-size: var(--text-micro); color: var(--muted-foreground); }
+.bot-group-empty { padding: 10px 12px; font-size: var(--text-meta); color: var(--muted-foreground); }
+.bot-group-drop { min-height: 4px; border-radius: var(--radius-item); transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-group-drop[data-over] { background: var(--interactive-hover); }
+.bot-sortable { position: relative; }
+.bot-sortable[data-dragging] { opacity: .35; }
+.bot-sort-handle { position: absolute; left: 0; top: 9px; z-index: 2; padding: 3px 0; color: var(--muted-foreground); opacity: 0; cursor: grab; touch-action: none; border-radius: 4px; transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-sortable-group > .bot-sort-handle { top: 5px; }
+.bot-sortable:hover > .bot-sort-handle, .bot-sortable:focus-within > .bot-sort-handle { opacity: 1; }
+.bot-sortable:has(> .bot-sort-handle) > .bot-nav-group, .bot-sortable:has(> .bot-sort-handle) > .group.bot-group-heading { margin-left: 12px; }
+.bot-group-member { position: relative; }
+.bot-group-member[data-insert]::after { content: ''; position: absolute; height: 2px; left: 12px; right: 6px; border-radius: 2px; background: var(--primary); pointer-events: none; z-index: 3; }
+.bot-group-member[data-insert="before"]::after { top: -1px; }
+.bot-group-member[data-insert="after"]::after { bottom: -1px; }
+.bot-group-drag-preview { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-item); background: var(--surface-elevated); color: var(--foreground); box-shadow: 0 8px 24px #0002; font-size: var(--text-ui-label); }
+.bot-group-select { width: 100%; min-width: 0; border: 1px solid var(--input); border-radius: var(--radius-control); padding: 8px 10px; background: var(--background); color: var(--foreground); }
+@media (hover: none) { .bot-sort-handle, .bot-group-more { opacity: .7; } }
+
 /* ── Right panel frame (§5, §5.9) ──────────────────────────────────────────────────────── */
 /* Docked beside the conversation the panel joins its surface instead of standing apart as a card:
    no gutter, no corners at the seam, the conversation's top edge carried across, and only a faint

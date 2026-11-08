@@ -3,6 +3,7 @@ import type { ThreadMemoryDraft, ChatMemoryOwner, ChatMemoryReceipt } from './ch
 import type { BotActivityPage, MemorySourceExcerpt } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
+import { parseBotOrganization } from './bot-organization.js';
 
 export class BotRequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly retryDisposition?: 'observe' | 'new_attempt' | 'none', readonly savedBot?: BotSummary) { super(message); this.name = 'BotRequestError'; }
@@ -214,6 +215,10 @@ export function createBotsHttpAPI(): BotsAPI {
   };
   const path = (id: string) => `/api/harness/bots/${encodeURIComponent(id)}`;
   return {
+    organization: {
+      read: async signal => parseBotOrganization(await request('/api/harness/bots/organization', 'GET', undefined, signal)),
+      update: async input => parseBotOrganization(await request('/api/harness/bots/organization', 'POST', input)),
+    },
     selection: {
       preview: async (input, signal) => {
         const result = await request('/api/bot-memory/preview', 'POST', input, signal);

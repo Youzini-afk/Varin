@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerBotRoutes } from './bot-routes.js';
 import type { BotService } from './bot-service.js';
 import { createBotsHttpAPI, type BotSummary } from '@varin/application-client';
+import { BotOrganizationConflict } from './bot-organization.js';
 
 const entry = { runtime: 'agent' as const, threadId: 'bot-thread', branchId: 'bot-branch' };
 const bot: BotSummary = { revision: 1, id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bots/bot', entry, archived: false, createdAt: '', updatedAt: '' };
 function fixture() {
+  const organization = { read: vi.fn(async () => ({ revision: 0, groups: [], ungrouped: [] })), update: vi.fn() };
   const create = vi.fn(async () => bot); const update = vi.fn(async () => bot);
   const ensureEntry = vi.fn(async () => ({ bot, entry, model: null }));
   const listWork = vi.fn(async () => [{ runtime: 'agent', identity: entry, thread: { thread_id: entry.threadId, bot_id: bot.id, branches: [], parent_thread_id: null, observer_project_ids: [null] }, activeRun: null, purpose: 'work' }]);
@@ -21,16 +23,33 @@ function fixture() {
   ] }));
   const router = Router();
   const directRouter = router as unknown as { handle(request: Request, response: Response, next: NextFunction): void };
-  registerBotRoutes(router as unknown as Express, { bots: { create, update, ensureEntry, get: async () => bot, listWork, listSessions, createSession } as unknown as BotService,
+  registerBotRoutes(router as unknown as Express, { bots: { organization, create, update, ensureEntry, get: async () => bot, listWork, listSessions, createSession } as unknown as BotService,
     work: { botActivity, botScope } as unknown as NonNullable<Parameters<typeof registerBotRoutes>[1]['work']> });
   const call = (method: string, url: string, body?: unknown) => new Promise<{ status: number; body: unknown }>((resolve, reject) => {
     let status = 200;
     const response = { setHeader() {}, status(value: number) { status = value; return this; }, json(value: unknown) { resolve({ status, body: value }); return this; } };
     directRouter.handle({ method, url, body, headers: {}, query: Object.fromEntries(new URL(url, 'http://host').searchParams) } as unknown as Request, response as unknown as Response, (error?: unknown) => error ? reject(error) : reject(new Error('No matching route')));
   });
-  return { create, update, ensureEntry, listWork, listSessions, createSession, botActivity, botScope, session, call };
+  return { organization, create, update, ensureEntry, listWork, listSessions, createSession, botActivity, botScope, session, call };
 }
 describe('Bot routes without a network listener', () => {
+  it('reads and edits the shared Bot directory through the public client and reports conflicts', async () => {
+    const f = fixture(), originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const result = await f.call(init?.method ?? 'GET', new URL(String(url), 'http://host').pathname, init?.body ? JSON.parse(String(init.body)) : undefined);
+      return globalThis.Response.json(result.body, { status: result.status });
+    };
+    try {
+      const api = createBotsHttpAPI().organization;
+      expect(await api.read()).toEqual({ revision: 0, groups: [], ungrouped: [] });
+      const change = { kind: 'create' as const, id: 'research', name: 'Research' };
+      const result = { revision: 1, groups: [{ id: 'research', name: 'Research', botIds: [] }], ungrouped: [] };
+      f.organization.update.mockResolvedValueOnce(result).mockRejectedValueOnce(new BotOrganizationConflict());
+      expect(await api.update({ expectedRevision: 0, change })).toEqual(result);
+      expect(f.organization.update).toHaveBeenCalledWith({ expectedRevision: 0, change });
+      await expect(api.update({ expectedRevision: 0, change })).rejects.toMatchObject({ status: 409, code: 'conflict' });
+    } finally { globalThis.fetch = originalFetch; }
+  });
   it('keeps thinking settings through create and update and rejects unknown levels', async () => {
     const f = fixture();
     const model = { providerId: 'channel', modelId: 'model', thinkingLevel: 'high' };

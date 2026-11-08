@@ -6,7 +6,8 @@ import type { BotSummary } from '@/lib/bots';
 import { BotSettings } from './BotSettings';
 import { BotDetailsDialog } from './BotDetailsDialog';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), memory: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), memory: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn(), organizationRead: vi.fn(), organizationUpdate: vi.fn() }));
+vi.mock('@/hooks/useRuntimeAPIs', () => { const bots = { organization: { read: api.organizationRead, update: api.organizationUpdate } }; return { useRuntimeAPIs: () => ({ bots }) }; });
 vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, listBotWork: api.work, updateBot: api.update,
   listBotMemory: api.memory, deleteBot: api.remove, archiveBot: api.archive, changeBotState: api.change, createBot: vi.fn(), openBotEntryFor: vi.fn() }));
 vi.mock('./BotMemoryPreferences', () => ({ BotMemoryPreferences: () => null }));
@@ -15,7 +16,7 @@ vi.mock('@/components/ui/dropdown-menu', async () => {
   const { createContext, useContext } = await import('react');
   const Selection = createContext((_id: string) => {});
   const Children = ({ children }: React.PropsWithChildren) => <>{children}</>;
-  return { DropdownMenu: Children, DropdownMenuContent: Children, DropdownMenuTrigger: Children,
+  return { DropdownMenu: Children, DropdownMenuContent: Children, DropdownMenuTrigger: Children, DropdownMenuLabel: Children,
     DropdownMenuRadioGroup: ({ children, onValueChange }: React.PropsWithChildren<{ onValueChange(id: string): void }>) => <Selection.Provider value={onValueChange}>{children}</Selection.Provider>,
     DropdownMenuRadioItem: ({ value }: { value: string }) => { const select = useContext(Selection); return <button onClick={() => select(value)}>select-{value}</button>; } };
 });
@@ -54,8 +55,19 @@ beforeEach(() => {
   api.memory.mockReset().mockResolvedValue([]);
   api.archive.mockReset().mockResolvedValue(bot('a', true)); api.change.mockReset().mockResolvedValue(bot('b'));
   api.remove.mockReset().mockResolvedValue(null);
+  api.organizationRead.mockReset().mockResolvedValue({ revision: 0, groups: [], ungrouped: [] });
+  api.organizationUpdate.mockReset();
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+it('uses the Host grouping and member order in the settings Bot picker', async () => {
+  api.organizationRead.mockResolvedValue({ revision: 1, groups: [{ id: 'research', name: 'Research', botIds: ['a'] }], ungrouped: ['b'] });
+  await render();
+  expect(container.textContent).toContain('Research');
+  expect(container.textContent).toContain('bot.groups.ungrouped');
+  expect([...container.querySelectorAll('button')].filter(button => button.textContent?.startsWith('select-')).map(button => button.textContent)).toEqual(['select-b', 'select-a']);
+  await click('select-b');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')?.value).toBe('b');
+});
 const render = async () => { await act(async () => { root.render(<BotSettings />); }); };
 const click = async (text: string) => {
   const button = [...(container.querySelector('[role=dialog]') ?? container).querySelectorAll('button')].find((item) => item.textContent === text);

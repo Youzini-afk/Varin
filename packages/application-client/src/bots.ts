@@ -162,6 +162,7 @@ export interface BotMemoryMaintenance {
 
 /** Framework-neutral product boundary. All navigation uses the returned tagged identity. */
 export interface BotsAPI {
+  organization: import('./bot-organization.js').BotOrganizationAPI;
   selection: import("./chat-memory.js").ThreadMemoryAPI;
   list(signal?: AbortSignal): Promise<BotSummary[]>;
   get(botId: string, signal?: AbortSignal): Promise<BotSummary | null>;

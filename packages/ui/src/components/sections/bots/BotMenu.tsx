@@ -7,16 +7,16 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 
 export type BotMenuAction = 'pin' | 'rename' | 'profile' | 'memory' | 'sleep' | 'wake' | 'archive' | 'restore' | 'retry' | 'delete';
-export function BotMenu({ bot, disabled, onAction, children, persistentActions = false }: {
-  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode; persistentActions?: boolean;
+export function BotMenu({ bot, disabled, onAction, children, persistentActions = false, onMove }: {
+  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode; persistentActions?: boolean; onMove?(): void;
 }) {
   const { t } = useI18n();
-  const pending = React.useRef<BotMenuAction | null>(null);
+  const pending = React.useRef<BotMenuAction | 'move' | null>(null);
   const returnFocus = React.useRef(true);
   const opened = (open: boolean) => { if (open) { pending.current = null; returnFocus.current = true; } };
   const complete = (open: boolean) => {
     if (open || !pending.current) return;
-    const action = pending.current; pending.current = null; onAction(action);
+    const action = pending.current; pending.current = null; if (action === 'move') onMove?.(); else onAction(action);
   };
   const state = bot.activity?.state ?? 'awake';
   const transitioning = state === 'sleeping' || state === 'waking';
@@ -45,12 +45,12 @@ export function BotMenu({ bot, disabled, onAction, children, persistentActions =
   const items = (dropdown: boolean) => {
     const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
     const Separator = dropdown ? DropdownMenuSeparator : ContextMenuSeparator;
-    return actions.map((action, index) => action ? <Item key={action.id} className={action.id === 'delete' ? 'text-destructive' : undefined} disabled={disabled || action.disabled} onClick={() => {
+    return <>{onMove && !bot.deletion ? <><Item disabled={disabled} onClick={() => { pending.current = 'move'; returnFocus.current = false; }}><Icon name="folder" className="size-4" />{t('bot.groups.move')}</Item><Separator /></> : null}{actions.map((action, index) => action ? <Item key={action.id} className={action.id === 'delete' ? 'text-destructive' : undefined} disabled={disabled || action.disabled} onClick={() => {
       pending.current = action.id;
       returnFocus.current = !['rename', 'profile', 'memory', 'delete'].includes(action.id);
     }}>
       <Icon name={action.icon} className="size-4" />{action.label}
-    </Item> : <Separator key={`separator-${index}`} />);
+    </Item> : <Separator key={`separator-${index}`} />)}</>;
   };
   return <ContextMenu onOpenChange={opened} onOpenChangeComplete={complete}>
     <ContextMenuTrigger asChild>

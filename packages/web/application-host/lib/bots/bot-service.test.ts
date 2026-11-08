@@ -28,7 +28,7 @@ const setup = async () => {
       records.set(row.recordId, row);
       return row;
     },
-    listRecords: async () => ({ records: [...records.values()], nextCursor: null }),
+    listRecords: async (input: { recordType?: string }) => ({ records: [...records.values()].filter(record => !input.recordType || record.recordType === input.recordType), nextCursor: null }),
     releaseRecord: vi.fn(async (_operation: string, _workspace: string, id: string) => { records.delete(id); }),
   };
   const ensureEntry = vi.fn<BotServiceOptions['agent']['ensureEntry']>(async bot => bot.entry);
@@ -68,6 +68,43 @@ it('persists thinking-only profile edits, propagates them and restores the model
   expect((await recreate().get(bot.id))?.model).toEqual(saved?.model);
   await service.update(bot.id, { model });
   expect((await recreate().get(bot.id))?.model).toEqual(model);
+});
+
+it('persists Bot groups and order independently of profiles, and ungrouping preserves the Bots', async () => {
+  const { service, recreate, applyProfile } = await setup();
+  const a = await service.create({ name: 'Research' }), b = await service.create({ name: 'Coding' });
+  applyProfile.mockClear();
+  let organization = await service.organization.read();
+  expect(organization).toEqual({ revision: 0, groups: [], ungrouped: [] });
+  const update = async (change: import('@varin/application-client').BotOrganizationChange) => {
+    organization = await service.organization.update({ expectedRevision: organization.revision, change });
+    return organization;
+  };
+  await update({ kind: 'create', id: 'research', name: ' Research ' });
+  await update({ kind: 'create', id: 'code', name: 'Code' });
+  await update({ kind: 'move-bot', botId: a.id, groupId: 'research', beforeId: null });
+  await update({ kind: 'move-bot', botId: b.id, groupId: 'research', beforeId: a.id });
+  await update({ kind: 'rename', id: 'research', name: 'Projects' });
+  await update({ kind: 'move-group', id: 'code', beforeId: 'research' });
+  expect((await recreate().organization.read()).groups).toEqual([{ id: 'code', name: 'Code', botIds: [] }, { id: 'research', name: 'Projects', botIds: [b.id, a.id] }]);
+  await update({ kind: 'remove', id: 'research' });
+  expect(organization.ungrouped).toEqual([b.id, a.id]);
+  expect(await service.get(a.id)).toEqual(a); expect(await service.get(b.id)).toEqual(b);
+  expect(applyProfile).not.toHaveBeenCalled();
+  expect(await service.list()).toHaveLength(2);
+});
+
+it('rejects stale Bot organization writes and invalid destinations without losing the saved directory', async () => {
+  const { service } = await setup();
+  await service.create();
+  const results = await Promise.allSettled([
+    service.organization.update({ expectedRevision: 0, change: { kind: 'create', id: 'a', name: 'A' } }),
+    service.organization.update({ expectedRevision: 0, change: { kind: 'create', id: 'b', name: 'B' } }),
+  ]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  const saved = await service.organization.read();
+  await expect(service.organization.update({ expectedRevision: saved.revision, change: { kind: 'move-bot', botId: saved.ungrouped[0]!, groupId: 'missing', beforeId: null } })).rejects.toThrow('no longer exists');
+  expect(await service.organization.read()).toEqual(saved);
 });
 
 it('creates one default assistant under concurrent opens and preserves existing assistants', async () => {

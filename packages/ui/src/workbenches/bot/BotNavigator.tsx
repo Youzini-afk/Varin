@@ -13,6 +13,11 @@ import { cn } from '@/lib/utils';
 import { BotFigure } from './BotFigure';
 import { BotSessionMenu, type BotSessionAction } from './BotSessionMenu';
 import { isWaitingStatus, liveRun, runStatus, shortState, type BotFigureState, type BotSessionView } from './botPresentation';
+import { useBotLayout } from './botLayout';
+import { BotOrganizationList } from './BotOrganizationList';
+import { BotOrganizationDialog, type BotOrganizationDialogState } from './BotOrganizationDialog';
+import type { BotOrganizationController } from './useBotOrganization';
+import { useThreadStore } from '@/stores/useThreadStore';
 
 const rowId = (identity: ThreadIdentity) => `session:${identity.threadId}:${identity.branchId}`;
 
@@ -28,9 +33,10 @@ function SessionMark({ waiting, running, unread }: { waiting: boolean; running: 
  * Bot → conversation → branch, the same structure as the workbench's project → session (§3).
  * Only the selected Bot lists its conversations; the others stay folded until chosen.
  */
-export function BotNavigator({ bots, selectedId, sessions, current, figures, busy, showArchived, isMobile, sessionTitle,
+export function BotNavigator({ bots, selectedId, sessions, current, figures, busy, showArchived, isMobile, sessionTitle, organization,
   onSelectBot, onSelectSession, onSessionAction, onNewSession, onBotAction, onCreateBot, onToggleArchived, onRefresh, onOpenSettings }: {
   bots: BotSummary[] | null;
+  organization: BotOrganizationController;
   selectedId: string | null;
   sessions: BotSessionView[] | null;
   current: ThreadIdentity | null;
@@ -53,7 +59,10 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   const list = React.useRef<HTMLDivElement>(null);
   const [query, setQuery] = React.useState('');
   const [searching, setSearching] = React.useState(false);
-  const [folded, setFolded] = React.useState<Record<string, boolean>>({});
+  const [searchFolded, setSearchFolded] = React.useState<{ query: string; bots: Record<string, boolean> }>({ query: '', bots: {} });
+  const folded = useBotLayout(state => state.navigatorFolded), setFolded = useBotLayout(state => state.setNavigatorFolded);
+  const scope = useThreadStore(state => state.hostKey);
+  const [organizationDialog, setOrganizationDialog] = React.useState<BotOrganizationDialogState | null>(null);
   const selected = bots?.find(bot => bot.id === selectedId) ?? null;
   const canStart = Boolean(selected && !selected.archived && !selected.deletion && (selected.activity?.state ?? 'awake') === 'awake');
   const currentRow = current ? rowId(current) : null;
@@ -63,6 +72,9 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle))
     .sort((a, b) => Number(b.thread.pinned) - Number(a.thread.pinned)) ?? null;
   const archivedSessions = shownSessions?.filter(session => session.thread.archived) ?? [];
+  const matchingGroups = new Set(organization.value.groups.filter(group => group.name.toLocaleLowerCase().includes(needle)).flatMap(group => group.botIds));
+  const shownBots = bots?.filter(bot => bot.archived === showArchived && (!needle || bot.name.toLocaleLowerCase().includes(needle)
+    || matchingGroups.has(bot.id) || bot.id === selectedId && !!shownSessions?.length)) ?? [];
   const titleCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
     const title = sessionTitle(session);
@@ -122,6 +134,9 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
       <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={busy} aria-label={t('tasksHub.refresh')} onClick={onRefresh}>
         <Icon name="refresh" className="size-4" />
       </Button>
+      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={!organization.ready || organization.pending} aria-label={t('bot.groups.create')} title={t('bot.groups.create')} onClick={() => setOrganizationDialog({ kind: 'create' })}>
+        <Icon name="folder-add" className="size-4" />
+      </Button>
     </div>
     {searching ? <div className="px-2.5 pb-2">
       <input autoFocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { setSearching(false); setQuery(''); } }}
@@ -129,17 +144,23 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
         className="h-8 w-full rounded-md border border-border bg-transparent px-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" />
     </div> : null}
     <div ref={list} className="bot-nav-list min-h-0 flex-1 overflow-y-auto px-2.5">
-      {bots?.filter(bot => bot.archived === showArchived).map(bot => {
+      {organization.error && <p role="alert" className="px-2 py-2 typography-meta text-destructive">{organization.error} <button type="button" className="underline" onClick={() => { void organization.refresh(); }}>{t('common.retry')}</button></p>}
+      <BotOrganizationList bots={shownBots} organization={organization} selectedId={selectedId} query={query} scope={scope} onDialog={setOrganizationDialog} renderBot={bot => {
         const isSelected = bot.id === selectedId;
-        const open = isSelected && !folded[bot.id];
+        const foldKey = JSON.stringify([scope, 'bot', bot.id]);
+        const open = isSelected && (needle ? !(searchFolded.query === needle && searchFolded.bots[bot.id]) : !folded[foldKey]);
         const figure = figures.get(bot.id) ?? 'idle';
         const short = shortState(figure);
         return <div key={bot.id} className="bot-nav-group" data-open={open}>
-          <BotMenu bot={bot} disabled={busy} onAction={action => onBotAction(bot, action)}>
+          <BotMenu bot={bot} disabled={busy || organization.pending} onAction={action => onBotAction(bot, action)} onMove={organization.ready ? () => setOrganizationDialog({ kind: 'move', bot }) : undefined}>
             <button type="button" data-sidebar-row={`bot:${bot.id}`} aria-expanded={isSelected ? open : undefined}
               aria-label={isSelected ? t(open ? 'bot.sidebar.collapse' : 'bot.sidebar.expand', { name: bot.name }) : bot.name}
               className="bot-nav-row bot-nav-bot min-w-0 flex-1"
-              onClick={() => isSelected ? setFolded(state => ({ ...state, [bot.id]: open })) : onSelectBot(bot.id)}>
+              onClick={() => {
+                if (!isSelected) onSelectBot(bot.id);
+                else if (needle) setSearchFolded(previous => ({ query: needle, bots: { ...(previous.query === needle ? previous.bots : {}), [bot.id]: open } }));
+                else setFolded(foldKey, open);
+              }}>
               <Icon name="arrow-down-s" className="bot-nav-chevron size-3 shrink-0" />
               <BotFigure state={figure} size={22} still />
               <span className="truncate">{bot.name}</span>
@@ -149,7 +170,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
               </span>
             </button>
           </BotMenu>
-          {isSelected ? <div className="bot-nav-sessions"><div>
+          {isSelected ? <div className="bot-nav-sessions" inert={!open}><div>
             {shownSessions === null ? <p role="status" className="py-2 pl-9 typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
             {shownSessions?.length === 0 && needle ? <p className="py-2 pl-9 typography-meta text-muted-foreground">{t('bot.session.noMatch')}</p> : null}
             {shownSessions?.filter(session => !session.thread.archived).map(renderSession)}
@@ -164,7 +185,8 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
             </Collapsible> : null}
           </div></div> : null}
         </div>;
-      })}
+      }} />
+      {needle && !shownBots.length && <p role="status" className="px-2 py-3 typography-meta text-muted-foreground">{t('bot.groups.noMatch')}</p>}
       {bots && !bots.some(bot => bot.archived === showArchived) ? <p className="px-2 py-3 typography-meta text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p> : null}
     </div>
     <div className="border-t border-border px-2.5 py-2">
@@ -178,5 +200,6 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
         <Icon name="settings-3" className="size-4 shrink-0" />{t('sessions.sidebar.footer.actions.settings')}
       </button>
     </div>
+    <BotOrganizationDialog value={organizationDialog} onClose={() => setOrganizationDialog(null)} organization={organization} />
   </nav>;
 }

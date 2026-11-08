@@ -662,6 +662,15 @@ impl Storage {
                 required("coordinatorHostId")?;
                 state_in(&["active", "archived"])?;
             }
+            "bot.organization" => {
+                derived("bot.organization")?;
+                state_in(&["active"])?;
+                if !object.get("groups").is_some_and(Value::is_array)
+                    || !object.get("ungrouped").is_some_and(Value::is_array)
+                {
+                    return Err(KernelError::Operation("Bot organization requires groups and ungrouped lists".into()));
+                }
+            }
             "computer.machine" => {
                 derived("computer.machine")?;
                 required("name")?;
@@ -919,6 +928,7 @@ impl Storage {
             "followup.observation",
             "settings.operation",
             "bot.profile",
+            "bot.organization",
             "agent.personalization",
             "ui.work",
             "ui.view",
@@ -2341,6 +2351,36 @@ mod artifact_page_tests {
             assert!(!storage.conn.query_row("SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1)", [format!("{kind}-original")], |row| row.get::<_, bool>(0)).unwrap());
         }
         drop(storage); std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bot_organization_record_put_persists_and_checks_revision() {
+        let root = std::env::temp_dir().join(format!("bot-organization-{}", Uuid::new_v4()));
+        let open = || {
+            let mut storage = Storage::open(&root, "host").unwrap();
+            storage.issue_grant(&json!({"grantId":"owner","hostGeneration":"generation","capabilities":["storage.admin"],"pathScopes":[]}),
+                "host", "generation", &root.to_string_lossy(), "epoch").unwrap();
+            storage
+        };
+        let dispatch = |storage: &mut Storage, method: &str, input: &Value| {
+            let (grant, input) = storage.authorize(Some("owner"), "epoch", "host", "generation", method, input).unwrap();
+            storage.dispatch(method, &input, Some("owner"), &grant)
+        };
+        let mut storage = open();
+        let mut input = json!({"operationId":"groups-create","workspaceId":"__varin_bots__","recordId":"bot.organization:sidebar",
+            "recordType":"bot.organization","state":"active","payloadJson":json!({"id":"sidebar","groups":[{"id":"research","name":"Research","botIds":["bot-a"]}],"ungrouped":[]}).to_string(),"references":[],"ownerIds":[]});
+        let first = dispatch(&mut storage, "storage.record.put", &input).unwrap();
+        input["operationId"] = json!("groups-stale"); input["expectedRecordRevision"] = json!(0);
+        assert!(matches!(dispatch(&mut storage, "storage.record.put", &input), Err(KernelError::RecordRevisionConflict)));
+        input["operationId"] = json!("groups-remove"); input["expectedRecordRevision"] = first["recordRevision"].clone();
+        let payload = json!({"id":"sidebar","groups":[],"ungrouped":["bot-a"]}); input["payloadJson"] = json!(payload.to_string());
+        let saved = dispatch(&mut storage, "storage.record.put", &input).unwrap();
+        drop(storage);
+        let mut reopened = open();
+        let read = dispatch(&mut reopened, "storage.record.get", &json!({"workspaceId":"__varin_bots__","recordId":"bot.organization:sidebar"})).unwrap();
+        assert_eq!(read["recordRevision"], saved["recordRevision"]);
+        assert_eq!(serde_json::from_str::<Value>(read["payloadJson"].as_str().unwrap()).unwrap(), payload);
+        drop(reopened); std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

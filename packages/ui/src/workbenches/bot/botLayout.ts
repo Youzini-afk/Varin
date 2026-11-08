@@ -33,6 +33,8 @@ interface BotLayoutState {
   memoryScope: 'current' | 'all';
   seen: Record<string, BotSeenMarks>;
   pinnedComputers: Record<string, string[]>;
+  navigatorFolded: Record<string, boolean>;
+  setNavigatorFolded(key: string, folded: boolean): void;
   toggleComputerPin(scope: string, id: string): void;
   setSidebarOpen(open: boolean): void;
   setOrdinarySidebar(open: boolean | null): void;
@@ -57,6 +59,8 @@ export const useBotLayout = create<BotLayoutState>()(persist((set) => ({
   memoryScope: 'current',
   seen: {},
   pinnedComputers: {},
+  navigatorFolded: {},
+  setNavigatorFolded: (key, folded) => set(state => ({ navigatorFolded: { ...state.navigatorFolded, [key]: folded } })),
   toggleComputerPin: (scope, id) => set(state => { const current = state.pinnedComputers[scope] ?? []; return { pinnedComputers: { ...state.pinnedComputers, [scope]: current.includes(id) ? current.filter(value => value !== id) : [...current, id] } }; }),
   setSidebarOpen: sidebarOpen => set({ sidebarOpen }),
   setOrdinarySidebar: ordinarySidebar => set({ ordinarySidebar }),
@@ -75,5 +79,5 @@ export const useBotLayout = create<BotLayoutState>()(persist((set) => ({
 }), {
   name: 'varin.botLayout.v1',
   storage: createDeferredSafeJSONStorage(),
-  partialize: ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers }) => ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers }),
+  partialize: ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers, navigatorFolded }) => ({ sidebarOpen, ordinarySidebar, panelOpen, panelWidth, tab, activityScope, overviewScope, memoryScope, seen, pinnedComputers, navigatorFolded }),
 }));

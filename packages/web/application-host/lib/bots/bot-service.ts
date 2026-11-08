@@ -5,6 +5,7 @@ import { THINKING_LEVELS } from '@varin/protocol';
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
+import { createBotOrganization } from './bot-organization.js';
 import type {
   BotActivity,
   BotCreateInput,
@@ -74,6 +75,7 @@ export interface BotServiceOptions {
   publishExecutionGate?(gate: BotExecutionGate): Promise<void>;
   onChange?(bot: BotSummary): void;
   onDeleted?(botId: string): void;
+  onOrganizationChange?(): void;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -144,6 +146,7 @@ const parseActivity = (value: unknown): BotActivity => {
 };
 
 export interface BotService {
+  organization: import('@varin/application-client').BotOrganizationAPI;
   primary(): Promise<BotSummary>;
   list(): Promise<BotSummary[]>;
   get(botId: string): Promise<BotSummary | null>;
@@ -600,6 +603,8 @@ export function createBotService(options: BotServiceOptions): BotService {
   });
 
   return {
+    organization: createBotOrganization({ client: scoped, workspaceId: BOT_CATALOG_WORKSPACE_ID,
+      botIds: async () => (await list()).map(bot => bot.id), changed: options.onOrganizationChange }),
     primary: () => serialize('__primary__', async () => {
       const existing = (await list()).find(bot => !bot.archived && !bot.deletion);
       return existing ?? create({ name: 'Varin' });

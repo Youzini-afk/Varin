@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./theme-library.js";
 export * from "./bots.js";
+export * from './bot-organization.js';
 export * from "./bots-http.js";
 export * from "./ui-dto.js";
 export * from "./chat-memory.js";

@@ -41,6 +41,7 @@ import {
 import type { BotStageEvent } from './botStageDirector';
 import type { BotStageFeed } from './botStageRenderer';
 import { useBotFacts, useBotPresence } from './useBotFacts';
+import { useBotOrganization } from './useBotOrganization';
 import { useBotStage } from './useBotStage';
 import { BotFigure } from './BotFigure';
 import { BotMobileTitle } from './BotMobileTitle';
@@ -142,6 +143,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const appliedNavigation = React.useRef<string | null>(null);
   const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
+  const organization = useBotOrganization(bots, committed && !settingsOpen);
   const [showArchived, setShowArchived] = React.useState(false);
   const [details, setDetails] = React.useState<{ id: string; name: string; tab: 'profile' | 'memory' } | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -691,7 +693,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     <TooltipContent side="bottom">{panelLabel}</TooltipContent>
   </Tooltip></>;
 
-  const navigator = () => <BotNavigator bots={bots} selectedId={selectedId} sessions={sessionsWithWork} current={ownsConversation ? selectedEntry : null}
+  const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
     onSelectBot={selectBot} onSelectSession={openSession} onNewSession={() => { void newSession(); }}
     onSessionAction={(session, identity, action) => { void sessionAction(session, identity, action); }}
