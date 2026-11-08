@@ -26,10 +26,10 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
 function Harness({ api, revision = 0 }: { api: ThreadFollowupsAPI; revision?: number }) {
   const facts = useBotFacts({ botId: 'bot', identity: entry, followups: api, enabled: true, revision });
-  const model = { bot: { id: 'bot', entry }, threads: { followups: api }, facts } as unknown as BotPanelModel;
+  const model = { bot: { id: 'bot', entry: { ...entry, threadId: 'deleted-profile-entry', branchId: 'deleted-branch' } }, threads: { followups: api }, facts } as unknown as BotPanelModel;
   return <BotPanelContext.Provider value={model}><BotArrangements /></BotPanelContext.Provider>;
 }
-it('reads through the real Bot entry, keeps failures separate and opens management without retargeting', async () => {
+it('reads and opens management through the resolved session instead of the deleted profile entry', async () => {
   const arrangements = vi.fn().mockResolvedValue([item]);
   const eventSources = vi.fn().mockResolvedValue([{ extensionId: 'mail', sourceId: 'incoming', displayName: 'Customer inbox', connections: [{ connectionId: 'work', accountId: 'account', displayName: 'Work mailbox' }] }]);
   const api = { arrangements, eventSources } as unknown as ThreadFollowupsAPI;

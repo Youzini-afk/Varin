@@ -13,7 +13,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import {
   archiveBot, changeBotState, createBot, createBotSession, ensureBotEntry, ensurePrimaryBot, listBots, listBotSessions, listBotWork,
-  openBotConversation, openBotWorkInWorkbench, updateBot, useBotNavigation, useBotReturn,
+  openBotConversation, openBotWorkInWorkbench, sameBotEntry, updateBot, useBotNavigation, useBotReturn,
   type BotModelSelection, type BotReturnPoint, type BotSummary, type BotWorkItem,
 } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
@@ -167,7 +167,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
   const profileModelKey = JSON.stringify(selected?.model ?? null);
-  const [entryModel, setEntryModel] = React.useState<{ botId: string; profileModelKey: string; model: BotModelSelection | null }>();
+  const [entryResolution, setEntryResolution] = React.useState<{ botId: string; entry: ThreadIdentity; profileModelKey: string; model: BotModelSelection | null }>();
   const readOnly = Boolean(selected?.archived || selected?.deletion || (selected?.activity && selected.activity.state !== 'awake'));
   const botsRef = React.useRef(bots);
   botsRef.current = bots;
@@ -237,6 +237,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       const { bot, entry, model } = await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
+      setEntryResolution({ botId: bot.id, entry, profileModelKey: JSON.stringify(bot.model), model });
       await openBotConversation(bot.id, entry, model);
     } catch (cause) {
       if (!controller.signal.aborted) setError(message(cause));
@@ -298,7 +299,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       : known);
     return items ? sessionViews(items, catalog, []) : null;
   }, [selected, sessionItems, sessionsError, catalog]);
-  const facts = useBotFacts({ botId: selected?.id ?? null, identity: selected?.entry, followups: threads?.followups, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
+  const facts = useBotFacts({ botId: selected?.id ?? null, identity: selectedEntry ?? undefined, followups: threads?.followups, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
   const activity = facts.activity.value;
   const work = React.useMemo(() => workViews(workItems ?? [], catalog, activity), [workItems, catalog, activity]);
   // The Host's presence for every live Bot drives their figures; the selected Bot falls back to the
@@ -310,22 +311,23 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const currentSession = sessionsWithWork?.find(session => session.identity.threadId === selectedEntry?.threadId) ?? null;
   const conversationArchived = currentSession?.thread.archived ?? catalog.find(thread => thread.thread_id === selectedEntry?.threadId)?.archived ?? false;
   const ownsConversation = Boolean(selectedEntry && selected && (currentSession
+    || (entryResolution?.botId === selected.id && sameBotEntry(entryResolution.entry, selectedEntry))
     || (!sessionItems && selectedEntry.threadId === selected.entry.threadId)
     || catalog.some(thread => thread.thread_id === selectedEntry.threadId && thread.bot_id === selected.id && !thread.parent_thread_id && thread.branches.some(branch => branch.branch_id === selectedEntry.branchId))));
   const sessionEntry = Boolean(ownsConversation);
 
   React.useEffect(() => {
     if (!committed || !selected || readOnly || conversationArchived || !sessionEntry) return;
-    if (entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey) return;
+    if (entryResolution?.botId === selected.id && entryResolution.profileModelKey === profileModelKey) return;
     const controller = new AbortController();
     const botId = selected.id;
-    void ensureBotEntry(botId, controller.signal).then(({ model }) => {
-      if (!controller.signal.aborted) setEntryModel({ botId, profileModelKey, model });
+    void ensureBotEntry(botId, controller.signal).then(({ entry, model }) => {
+      if (!controller.signal.aborted) setEntryResolution({ botId, entry, profileModelKey, model });
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(message(cause));
     });
     return () => controller.abort();
-  }, [committed, selected, profileModelKey, readOnly, conversationArchived, sessionEntry, entryModel]);
+  }, [committed, selected, profileModelKey, readOnly, conversationArchived, sessionEntry, entryResolution]);
 
   // "Listening" is the user typing into this conversation's composer.
   const draftKey = selectedEntry ? threadComposerKey(threadHostKey(), selectedEntry) : null;
@@ -708,7 +710,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       ? <ChildNavigationContext.Provider value={childNavigation}><MemoryNavigationContext.Provider value={memoryNavigation}>
         <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork} onActivity={stage.onActivity}
           inheritWorkbenchModel={!selected?.model}
-          preferredModel={selected && entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey ? entryModel.model : null} readOnly={readOnly || conversationArchived}
+          preferredModel={selected && entryResolution?.botId === selected.id && entryResolution.profileModelKey === profileModelKey ? entryResolution.model : null} readOnly={readOnly || conversationArchived}
           emptyHero={selected ? { visual: <BotFigure state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refreshWork(); }} />
       </MemoryNavigationContext.Provider></ChildNavigationContext.Provider>

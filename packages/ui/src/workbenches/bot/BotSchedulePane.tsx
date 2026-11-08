@@ -58,10 +58,10 @@ function ScheduleRow({ task, open, onToggle, locale, rule }: { task: ScheduledTa
 export function BotArrangements() {
   const { t } = useI18n();
   const model = useBotPanel();
-  const { arrangements: read, eventSources, retryArrangements, retryEventSources } = model.facts;
-  if (!model.threads?.followups || !model.bot.entry) return null;
+  const { arrangements: read, eventSources, arrangementIdentity, retryArrangements, retryEventSources } = model.facts;
+  if (!model.threads?.followups || !arrangementIdentity) return null;
   const sources = eventSources.value ?? [];
-  const open = (id?: string) => useUIStore.getState().openArrangements(model.bot.entry, id);
+  const open = (id?: string) => useUIStore.getState().openArrangements(arrangementIdentity, id);
   return <section aria-label={t('arrangements.title')}>
     <p className="bot-section-label">{t('arrangements.title')}</p>
     {read.status === 'loading' && !read.value && <p role="status" className="px-3 typography-meta">{t('common.loading')}</p>}

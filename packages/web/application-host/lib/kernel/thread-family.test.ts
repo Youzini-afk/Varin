@@ -63,6 +63,23 @@ function fixture() {
 }
 afterEach(() => vi.unstubAllGlobals());
 
+it('lists reference candidates for a bare @ and preserves typed searches and pagination', async () => {
+  const f = fixture();
+  f.facts.reply = { rootThreadId: identity.threadId, members: [], nextCursor: 'next-page' };
+  for (const query of [undefined, '', 'review']) {
+    const options = { includeSelf: true, limit: 50, ...(query === undefined ? {} : { query }) };
+    expect(await f.api.list(identity, options)).toEqual(f.facts.reply);
+    expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.family.list', { callerThreadId: identity.threadId, ...options }]);
+    await f.api.list(identity, { ...options, cursor: 'next-page' });
+    expect(f.requests.mock.calls.at(-1)![1]).toEqual({ callerThreadId: identity.threadId, ...options, cursor: 'next-page' });
+  }
+  f.requests.mockClear();
+  for (const query of [null, 1, {}]) {
+    expect((await f.request('/api/threads/family/list', { ...identity, query })).status).toBe(400);
+  }
+  expect(f.requests).not.toHaveBeenCalled();
+});
+
 it('keeps the caller separate from the target and preserves fixed view, Run and original-page identities through all consumers', async () => {
   const f = fixture();
   f.facts.reply = { rootThreadId: 'thread:root', members: [] };

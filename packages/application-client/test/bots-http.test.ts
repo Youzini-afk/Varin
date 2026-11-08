@@ -5,16 +5,21 @@ import { BotRequestError, createBotsHttpAPI } from '../src/bots-http.js';
 import { switchRuntimeEndpoint } from '../src/transport/runtime-switch.js';
 const entry = { runtime: 'agent' as const, threadId: 'thread-original', branchId: 'branch-original' };
 const bot = { revision: 1, id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bot', entry, archived: false, createdAt: '', updatedAt: '' };
-it('consumes tagged native entry and changed memory sources; refuses mismatched navigation identity', async () => {
-  const original = globalThis.fetch; let mismatch = false;
+it('consumes tagged native entry and changed memory sources; refuses malformed entries or another Bot', async () => {
+  const original = globalThis.fetch; let response: unknown = { bot, model: null, entry };
   globalThis.fetch = async input => String(input).endsWith('/source')
     ? Response.json({ sources: [{ status: 'changed', span: { kind: 'history-item', threadId: entry.threadId, branchId: entry.branchId, headId: 'head', id: 'item', revision: 'original', start: 0, end: 3 } }] })
-    : Response.json({ bot, model: null, entry: mismatch ? { ...entry, branchId: 'foreign' } : entry });
+    : Response.json(response);
   try {
     const api = createBotsHttpAPI();
     assert.deepEqual((await api.entry(bot.id)).entry, entry);
     assert.equal((await api.memory.source(bot.id, 1))[0]?.status, 'changed');
-    mismatch = true; await assert.rejects(api.entry(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+    for (const invalidEntry of [{ ...entry, branchId: '' }, { ...entry, threadId: null }, { runtime: 'pi', sessionId: 'old' }]) {
+      response = { bot, model: null, entry: invalidEntry };
+      await assert.rejects(api.entry(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+    }
+    response = { bot: { ...bot, id: 'another-bot' }, model: null, entry };
+    await assert.rejects(api.entry(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
   } finally { globalThis.fetch = original; }
 });
 it('retains uncertain preview retry semantics and frozen source identity', async () => {

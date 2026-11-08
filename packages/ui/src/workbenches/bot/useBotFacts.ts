@@ -133,11 +133,12 @@ export function useBotFacts({ botId, revision, enabled, identity, followups }: {
   const { activity, retryActivity, loadEarlier, earlier } = useBotActivity(enabled ? botId : null, revision);
   const [memory, retryMemory] = useRead<BotMemoryItem[]>(enabled && botId ? botId : null, revision + memoryRevision, signal => listBotMemory(botId!, signal));
   const [tasks, retryTasks] = useRead<ScheduledTask[]>(enabled && botId ? botId : null, revision + scheduleRevision, signal => listBotSchedules(botId!, signal));
-  // Read through the Bot's real entry, independent of the conversation being browsed.
+  // Use a resolved session, never the profile's original (possibly deleted) entry.
   const arrangementKey = enabled && botId && identity && followups ? JSON.stringify([botId, identity]) : null;
   const [arrangements, retryArrangements] = useRead<Followup[]>(arrangementKey, revision + scheduleRevision, signal => followups!.arrangements(identity!, botId!, signal));
   const [eventSources, retryEventSources] = useRead<VarinEventSourceDescriptor[]>(arrangementKey, revision + scheduleRevision, signal => followups!.eventSources(identity!, signal));
-  return { activity, memory, tasks, arrangements, eventSources, retryArrangements, retryEventSources, retryActivity, loadEarlier, earlier, retryMemory, retryTasks, refreshMemory, refreshSchedules };
+  return { activity, memory, tasks, arrangements, eventSources, arrangementIdentity: arrangementKey ? identity : undefined,
+    retryArrangements, retryEventSources, retryActivity, loadEarlier, earlier, retryMemory, retryTasks, refreshMemory, refreshSchedules };
 }
 
 /**

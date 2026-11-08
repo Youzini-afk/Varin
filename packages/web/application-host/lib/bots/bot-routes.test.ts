@@ -2,7 +2,7 @@ import { Router, type Express, type NextFunction, type Request, type Response } 
 import { describe, expect, it, vi } from 'vitest';
 import { registerBotRoutes } from './bot-routes.js';
 import type { BotService } from './bot-service.js';
-import type { BotSummary } from '@varin/application-client';
+import { createBotsHttpAPI, type BotSummary } from '@varin/application-client';
 
 const entry = { runtime: 'agent' as const, threadId: 'bot-thread', branchId: 'bot-branch' };
 const bot: BotSummary = { revision: 1, id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bots/bot', entry, archived: false, createdAt: '', updatedAt: '' };
@@ -49,6 +49,22 @@ describe('Bot routes without a network listener', () => {
     const work = await f.call('GET', '/api/harness/bots/bot/work');
     expect(work.status).toBe(200);
     expect(work.body).toMatchObject({ threads: [{ identity: entry, purpose: 'work', desktops: [], artifacts: [] }] });
+  });
+  it('passes a replacement entry from the Host through the public client without rewriting the profile', async () => {
+    const f = fixture();
+    const replacement = { runtime: 'agent' as const, threadId: 'surviving-session', branchId: 'surviving-branch' };
+    f.ensureEntry.mockResolvedValue({ bot, entry: replacement, model: null });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const result = await f.call(init?.method ?? 'GET', new URL(String(url), 'http://host').pathname);
+      return globalThis.Response.json(result.body, { status: result.status });
+    };
+    try {
+      const result = await createBotsHttpAPI().entry(bot.id);
+      expect(result.entry).toEqual(replacement);
+      expect(result.bot.entry).toEqual(entry);
+      expect(f.ensureEntry).toHaveBeenCalledExactlyOnceWith(bot.id);
+    } finally { globalThis.fetch = originalFetch; }
   });
   it('lists the Bot conversations and starts another one through the service owner', async () => {
     const f = fixture();

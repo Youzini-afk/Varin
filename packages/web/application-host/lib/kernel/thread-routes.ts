@@ -395,6 +395,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('family/list', (body, signal) => {
     if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
+    const query = body.query;
+    if (query !== undefined && typeof query !== 'string') throw new Error('query must be a string');
     return adapter.familyList(identity(body), { ...(body.includeSelf===undefined?{}:{includeSelf:body.includeSelf}),
       ...(body.parentThreadId===undefined?{}:{parentThreadId:text(body.parentThreadId)}),
       ...(body.parentBranchId===undefined?{}:{parentBranchId:text(body.parentBranchId)}),
@@ -402,7 +404,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(body.filePath===undefined?{}:{filePath:text(body.filePath)}),
       ...(body.updatedAfterMs===undefined?{}:{updatedAfterMs:revision(body.updatedAfterMs)}),
       ...(body.updatedBeforeMs===undefined?{}:{updatedBeforeMs:revision(body.updatedBeforeMs)}),
-      ...(body.scope===undefined?{}:{scope:text(body.scope)}), ...(body.query===undefined?{}:{query:text(body.query)}),
+      ...(body.scope===undefined?{}:{scope:text(body.scope)}), ...(query===undefined?{}:{query}),
       ...(body.cursor===undefined?{}:{cursor:text(body.cursor)}), ...(body.limit===undefined?{}:{limit:revision(body.limit)}) }, signal);
   });
   post('family/runs', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));

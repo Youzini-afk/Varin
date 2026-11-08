@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Run, ThreadSummary } from '@varin/protocol';
+import type { BotEntryResult } from '@varin/application-client';
 import { BotWorkspaceShell } from './BotWorkspaceShell';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -15,7 +16,7 @@ const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
   create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
-  fork: vi.fn(), copy: vi.fn(),
+  fork: vi.fn(), copy: vi.fn(), arrangements: vi.fn(), eventSources: vi.fn(),
 }));
 vi.mock('@/lib/bots', async original => ({
   ...await original<typeof import('@/lib/bots')>(),
@@ -36,7 +37,7 @@ vi.mock('@/lib/bots', async original => ({
   openBotWorkInWorkbench: state.openWork,
   deleteBot: vi.fn(),
 }));
-vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { fork: state.fork, sources: { list: async () => ({ targets: [], unavailable: [] }) } }; return { useRuntimeAPIs: () => ({ threads }) }; });
+vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { fork: state.fork, sources: { list: async () => ({ targets: [], unavailable: [] }) }, followups: { arrangements: state.arrangements, eventSources: state.eventSources } }; return { useRuntimeAPIs: () => ({ threads }) }; });
 vi.mock('@/lib/clipboard', () => ({ copyTextToClipboard: state.copy }));
 vi.mock('@/lib/computers', () => ({ listComputers: async () => ({ desktops: [], machines: [], defaultDesktopId: null }) }));
 vi.mock('./BotWorkDetail', async () => {
@@ -180,6 +181,8 @@ describe('Bot workbench', () => {
     state.createSession.mockReset();
     state.memory.mockReset().mockResolvedValue([]);
     state.schedules.mockReset().mockResolvedValue([]);
+    state.arrangements.mockReset().mockResolvedValue([]);
+    state.eventSources.mockReset().mockResolvedValue([]);
     state.activity.mockReset().mockImplementation(async (botId: string) => ({ botId, events: [], participants: [], before: null, eventCursor: 0 }));
     // Without a projection the selected Bot falls back to the live catalog and work list.
     state.presence.mockReset().mockRejectedValue(new Error('presence unavailable'));
@@ -243,6 +246,26 @@ describe('Bot workbench', () => {
     await click('Bot a');
     expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
     expect(state.create).not.toHaveBeenCalled();
+  });
+
+  it('waits for a resolved session before reading arrangements after the original entry was deleted', async () => {
+    const original = bot('a');
+    const replacement = { runtime: 'agent' as const, threadId: 'replacement-session', branchId: 'replacement-branch' };
+    let resolve!: (value: BotEntryResult) => void;
+    const ready = new Promise<BotEntryResult>(done => { resolve = done; });
+    state.list.mockResolvedValue([original]);
+    state.sessions.mockResolvedValue([]);
+    state.ensure.mockReturnValue(ready);
+    await render();
+    expect(state.arrangements).not.toHaveBeenCalled();
+    expect(state.eventSources).not.toHaveBeenCalled();
+    await act(async () => { resolve({ bot: original, entry: replacement, model: null }); });
+    await settle();
+    expect(useBotNavigation.getState().entry).toEqual(replacement);
+    expect(centre()?.getAttribute('data-agent')).toBe(replacement.threadId);
+    expect(state.arrangements).toHaveBeenCalledWith(replacement, original.id, expect.any(AbortSignal));
+    expect(state.eventSources).toHaveBeenCalledWith(replacement, expect.any(AbortSignal));
+    expect(state.arrangements.mock.calls.every(([identity]) => identity.threadId === replacement.threadId)).toBe(true);
   });
 
   it('asks the Host for the primary Bot when none is active and creates others only on request', async () => {

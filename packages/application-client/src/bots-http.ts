@@ -55,7 +55,8 @@ export const decodeBot = (value: unknown): BotSummary => {
 };
 export const decodeBotEntryResult = (value: unknown): BotEntryResult => {
   const result = record(value); const bot = decodeBot(result.bot); const target = entry(result.entry);
-  if (bot.entry.threadId !== target.threadId || bot.entry.branchId !== target.branchId) invalid();
+  // Catalog resolves a live session after the original entry is archived or deleted.
+  // The profile keeps that original identity; it is not the navigation target.
   if (result.model !== null) { const model = record(result.model); string(model.providerId); string(model.modelId); }
   return { bot, entry: target, model: result.model } as BotEntryResult;
 };
@@ -234,7 +235,11 @@ export function createBotsHttpAPI(): BotsAPI {
     archive: async id => decodeBot((await request(`${path(id)}/archive`, 'POST')).bot),
     remove: async id => { const result = await request(path(id), 'DELETE'); return result.bot === null ? null : decodeBot(result.bot); },
     changeState: async (id, action) => decodeBot((await request(`${path(id)}/${action}`, 'POST')).bot),
-    entry: async (id, signal) => decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal)),
+    entry: async (id, signal) => {
+      const result = decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal));
+      if (result.bot.id !== id) invalid();
+      return result;
+    },
     work: async (id, signal) => array((await request(`${path(id)}/work`, 'GET', undefined, signal)).threads, decodeBotWork),
     activity: async (id, page = {}, signal) => {
       const query = new URLSearchParams();
