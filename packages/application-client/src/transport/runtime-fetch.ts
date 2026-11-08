@@ -1,5 +1,5 @@
 import { tryObservationFetch } from './observation-transport.js';
-import { getActiveRelayTunnel } from './relay-provider.js';
+import { getActiveRelayTunnel, type RelayTunnelFetchClient } from './relay-provider.js';
 import { buildRuntimeAuthHeaders } from './runtime-auth.js';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url.js';
 import { getRuntimeEndpointGeneration } from './runtime-switch.js';
@@ -244,12 +244,9 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 // ---------------------------------------------------------------------------
 // In-flight read coalescing
 //
-// On cold start two independent data layers (the sync bootstrap and the config
-// store) fire the SAME idempotent reads — providers, config, path, agents,
-// project — concurrently, with no shared dedup. That saturates the single
-// OpenCode process and delays everything queued behind it (e.g. createSession).
-// Coalesce genuinely-concurrent identical GETs to those read endpoints so
-// OpenCode does the work once; every caller gets an independent `clone()`.
+// Independent data layers can request the same Host reads concurrently. Share
+// only identical requests within one endpoint generation and transport, including
+// their effective auth/routing headers; every caller gets an independent clone.
 //
 // Scope is deliberately tight: GET only, an allowlist of read paths, never an
 // event stream, and never a request carrying an AbortSignal (so one caller
@@ -259,13 +256,16 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 // ---------------------------------------------------------------------------
 const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
+const RELAY_READ_COALESCE = new WeakMap<RelayTunnelFetchClient, Map<string, Promise<Response>>>();
 
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean, generation: number, headers: Headers, init: RequestInit): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
+  if (init.body != null) return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}`;
+  return JSON.stringify([generation, method, url, [...headers], init.cache, init.credentials,
+    init.integrity, init.keepalive, init.mode, init.priority, init.redirect, init.referrer, init.referrerPolicy]);
 };
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
@@ -281,9 +281,13 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let headers: Headers;
+  let reads = READ_COALESCE;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
-    const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
+    headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
+    reads = RELAY_READ_COALESCE.get(relay) ?? new Map<string, Promise<Response>>();
+    RELAY_READ_COALESCE.set(relay, reads);
     doFetch = input instanceof Request
       ? () => relay.fetch(input, { ...requestInit, headers })
       : () => relay.fetch(relayPath, { ...requestInit, headers });
@@ -292,7 +296,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   } else {
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-    const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
     doFetch = resolvedInput instanceof Request
       ? () => fetchWithoutRuntimeRouting(new Request(resolvedInput, { ...requestInit, headers }))
       : () => fetchWithoutRuntimeRouting(resolvedInput, { ...requestInit, headers });
@@ -312,17 +316,17 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal);
+  const key = coalesceReadKey(method, url, hasSignal, generation, headers, requestInit);
   if (!key) return doFetch();
 
-  const existing = READ_COALESCE.get(key);
+  const existing = reads.get(key);
   if (existing) return existing.then((res) => res.clone());
 
   const pending = doFetch();
-  READ_COALESCE.set(key, pending);
+  reads.set(key, pending);
   pending.then(
-    () => READ_COALESCE.delete(key),
-    () => READ_COALESCE.delete(key),
+    () => reads.delete(key),
+    () => reads.delete(key),
   );
   return pending.then((res) => res.clone());
 };

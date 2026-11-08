@@ -601,7 +601,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onSave={async (input, text, images) => {
         let saved = false;
         await act(async () => {
-          await (images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, await prepareAnnotatedImages(images)));
+          const preparedImages = images === undefined ? undefined : await prepareAnnotatedImages(images);
+          // Image export may outlive a Host switch. The API resolves its endpoint
+          // at dispatch, so the original edit must not follow the new selection.
+          if (host !== getRuntimeEndpointGeneration()) return;
+          await (preparedImages === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, preparedImages));
           saved = true;
         });
         return saved;

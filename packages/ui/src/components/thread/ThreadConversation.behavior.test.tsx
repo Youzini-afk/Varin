@@ -1,4 +1,5 @@
 import { uiSession } from '@/lib/interactive-ui/sessions';
+import * as imageAnnotations from '@/lib/images/annotations';
 import { addEditorContextAttachment, listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
@@ -3129,6 +3130,81 @@ it('keeps stored images for a text edit, explicitly removes them with [], and re
   await act(async () => button('Keep original images').click());
   await submitForm(form());
   expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
+});
+
+const beginQueuedImageEdit = async () => {
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
+  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'edited image message');
+  const picker = container.querySelector<HTMLInputElement>('[aria-label="Replace queued images"]')!;
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [new File([Uint8Array.of(1, 2, 3)], 'new.png', { type: 'image/png' })] });
+    picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  return container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!;
+};
+
+it.each(['unchanged', 'branch', 'host', 'host-roundtrip'] as const)('keeps queued image preparation on its original Host when selection is %s', async selection => {
+  const f = fixture(true);
+  f.view.inputs = [{ id: 'image-queue', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
+    mode: 'boundary', state: 'queued', revision: 1, content: { text: 'original text', attachments: [storedImage] }, cursor: 1 }];
+  const prepare = imageAnnotations.prepareAnnotatedImages;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const exportImages = vi.spyOn(imageAnnotations, 'prepareAnnotatedImages').mockImplementationOnce(async images => {
+    await gate;
+    return prepare(images);
+  });
+  const dispatchedHosts: string[] = [];
+  const editInput = vi.fn<ThreadsAPI['editInput']>(async (id, revision, text) => {
+    dispatchedHosts.push(endpoint.hostKey);
+    return f.editInput(id, revision, text);
+  });
+  f.api.editInput = editInput;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await submitForm(await beginQueuedImageEdit());
+  expect(exportImages).toHaveBeenCalledOnce();
+  expect(editInput).not.toHaveBeenCalled();
+  if (selection === 'branch') {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={{ ...identity, branchId: 'another-branch' }} />));
+  } else if (selection === 'host' || selection === 'host-roundtrip') {
+    await act(async () => { endpoint.generation++; endpoint.hostKey = 'host-b'; endpoint.listeners.forEach(listener => listener()); });
+    if (selection === 'host-roundtrip') {
+      await act(async () => { endpoint.generation++; endpoint.hostKey = 'host-a'; endpoint.listeners.forEach(listener => listener()); });
+    }
+    await edit('[aria-label="Message thread"]', 'new selection draft');
+  }
+  await act(async () => { release(); await gate; });
+  if (selection === 'host' || selection === 'host-roundtrip') {
+    expect(editInput).not.toHaveBeenCalled();
+    expect(f.view.inputs[0]).toMatchObject({ revision: 1, content: { text: 'original text' } });
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('new selection draft');
+    // The new selection stays usable. An explicit new Save belongs to its Host.
+    await submitForm(await beginQueuedImageEdit());
+    expect(dispatchedHosts).toEqual([endpoint.hostKey]);
+  } else {
+    expect(dispatchedHosts).toEqual(['host-a']);
+  }
+  expect(editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }]);
+  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
+});
+
+it('retains the queued image edit after export failure and clears it only after a successful retry', async () => {
+  const f = fixture(true);
+  f.view.inputs = [{ id: 'image-queue', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
+    mode: 'boundary', state: 'queued', revision: 1, content: { text: 'original text', attachments: [storedImage] }, cursor: 1 }];
+  vi.spyOn(imageAnnotations, 'prepareAnnotatedImages').mockRejectedValueOnce(new Error('Image export failed'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const form = await beginQueuedImageEdit();
+  await submitForm(form);
+  expect(f.editInput).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Image export failed');
+  expect(form.querySelector('textarea')!.value).toBe('edited image message');
+  expect(form.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
+  await submitForm(form);
+  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }]);
+  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
+  expect(container.textContent).not.toContain('Image export failed');
 });
 
 it('reads actual operation completion, result and external receipt images through their distinct original holders', async () => {

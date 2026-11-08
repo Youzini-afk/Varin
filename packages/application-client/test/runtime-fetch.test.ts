@@ -2,9 +2,10 @@ import './network-fixture.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, it } from 'node:test';
 import { runtimeFetch } from '../src/transport/runtime-fetch.js';
-import { clearRuntimeAuthCredentialProvider, setRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '../src/transport/runtime-auth.js';
+import { clearRuntimeAuthCredentialProvider, setRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '../src/transport/runtime-auth.js';
 import { configureRuntimeUrlResolver } from '../src/transport/runtime-url.js';
 import { switchRuntimeEndpoint } from '../src/transport/runtime-switch.js';
+import { registerRelayTunnelProvider, type RelayTunnelFetchClient } from '../src/transport/relay-provider.js';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -16,9 +17,13 @@ const deferred = () => {
 beforeEach(() => {
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://host.test/team' });
   clearRuntimeAuthCredentialProvider();
+  setRuntimeBearerToken(null);
+  setRuntimeExtraHeaders(null);
+  registerRelayTunnelProvider(() => null);
 });
 afterEach(async () => {
   clearRuntimeAuthCredentialProvider();
+  registerRelayTunnelProvider(() => null);
   await tick();
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
   else Reflect.deleteProperty(globalThis, 'window');
@@ -109,6 +114,92 @@ it('shares only overlapping reads and gives each caller an independently readabl
   assert.equal(overlappingCalls, 1);
   assert.deepEqual(await Promise.all(responses.map(response => response.json())), [{ fresh: 1 }, { fresh: 1 }]);
   assert.deepEqual(await (await runtimeFetch('/api/config/providers')).json(), { fresh: 2 });
+});
+
+it('keeps pending reads separate across Host generations at the same gateway URL', async t => {
+  for (const routingHeaders of [false, true]) {
+    const gate = deferred();
+    const calls: string[] = [];
+    let selected = 'host-a';
+    const mock = t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/auth/url-token')) return new Response(null, { status: 404 });
+      const host = new Headers(init?.headers).get('x-target-host') ?? selected;
+      calls.push(host);
+      await gate.promise;
+      return Response.json({ host });
+    });
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://gateway.test', runtimeKey: selected,
+      requestHeaders: routingHeaders ? { 'X-Target-Host': selected } : null });
+    const first = runtimeFetch('/api/config/settings');
+    await tick();
+    selected = 'host-b';
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://gateway.test', runtimeKey: selected,
+      requestHeaders: routingHeaders ? { 'X-Target-Host': selected } : null });
+    const second = runtimeFetch('/api/config/settings');
+    const sameHost = runtimeFetch('/api/config/settings');
+    await tick();
+    gate.resolve();
+    const responses = await Promise.all([first, second, sameHost]);
+    assert.deepEqual(calls, ['host-a', 'host-b']);
+    assert.deepEqual(await Promise.all(responses.map(response => response.json())),
+      [{ host: 'host-a' }, { host: 'host-b' }, { host: 'host-b' }]);
+    mock.mock.restore();
+  }
+});
+
+it('coalesces equivalent effective headers, but not different routing, auth, or fetch options', async t => {
+  const gate = deferred();
+  const calls: Array<{ tenant: string | null; authorization: string | null; credentials: RequestCredentials | undefined }> = [];
+  t.mock.method(globalThis, 'fetch', async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    const context = { tenant: headers.get('x-target-host'), authorization: headers.get('authorization'), credentials: init?.credentials };
+    calls.push(context);
+    await gate.promise;
+    return Response.json(context);
+  });
+  setRuntimeExtraHeaders({ 'X-Target-Host': 'a' });
+  setRuntimeBearerToken('token-a');
+  const first = runtimeFetch('/api/config/settings', { headers: { Accept: 'application/json', 'X-View': 'settings' } });
+  const equivalent = runtimeFetch('/api/config/settings', { headers: [['x-view', 'settings'], ['accept', 'application/json']] });
+  await tick();
+  setRuntimeExtraHeaders({ 'X-Target-Host': 'b' });
+  const routed = runtimeFetch('/api/config/settings', { headers: { accept: 'application/json', 'x-view': 'settings' } });
+  await tick();
+  setRuntimeBearerToken('token-b');
+  const authenticated = runtimeFetch('/api/config/settings', { headers: { accept: 'application/json', 'x-view': 'settings' } });
+  const credentialed = runtimeFetch('/api/config/settings', { headers: { accept: 'application/json', 'x-view': 'settings' }, credentials: 'omit' });
+  await tick();
+  gate.resolve();
+  const results = await Promise.all([first, equivalent, routed, authenticated, credentialed].map(async response => (await response).json()));
+  assert.equal(calls.length, 4);
+  assert.deepEqual(results, [
+    { tenant: 'a', authorization: 'Bearer token-a' }, { tenant: 'a', authorization: 'Bearer token-a' },
+    { tenant: 'b', authorization: 'Bearer token-a' }, { tenant: 'b', authorization: 'Bearer token-b' },
+    { tenant: 'b', authorization: 'Bearer token-b', credentials: 'omit' },
+  ]);
+});
+
+it('shares reads within one relay client without joining network or other relay requests', async t => {
+  configureRuntimeUrlResolver({ apiBaseUrl: '' });
+  const gate = deferred();
+  const calls: string[] = [];
+  const reply = async (transport: string) => { calls.push(transport); await gate.promise; return Response.json({ transport }); };
+  t.mock.method(globalThis, 'fetch', async () => reply('network'));
+  const first = runtimeFetch('/api/config/settings');
+  await tick();
+  let relay: RelayTunnelFetchClient = { fetch: async () => reply('relay-a') };
+  registerRelayTunnelProvider(() => relay);
+  const second = runtimeFetch('/api/config/settings');
+  const sameRelay = runtimeFetch('/api/config/settings');
+  await tick();
+  relay = { fetch: async () => reply('relay-b') };
+  const third = runtimeFetch('/api/config/settings');
+  await tick();
+  gate.resolve();
+  const responses = await Promise.all([first, second, sameRelay, third]);
+  assert.deepEqual(calls, ['network', 'relay-a', 'relay-b']);
+  assert.deepEqual(await Promise.all(responses.map(response => response.json())),
+    [{ transport: 'network' }, { transport: 'relay-a' }, { transport: 'relay-a' }, { transport: 'relay-b' }]);
 });
 
 it('never shares mutations, streams, or independently cancellable reads', async t => {
