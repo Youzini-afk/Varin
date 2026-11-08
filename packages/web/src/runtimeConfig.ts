@@ -1,7 +1,8 @@
-import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
+import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setLocalRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
 import { installRuntimeFetchBridge } from '@varin/application-client';
 import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
 import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
+import { desktopLocalClientTokenGet } from '@varin/ui/lib/desktopHosts';
 import { configureRuntimeUrlResolver } from '@varin/application-client';
 import { registerRelayTransport } from '@varin/ui/lib/relay/register-transport';
 import type { EmbeddedSessionRuntimeBootstrap } from '@varin/ui/components/layout/contextPanelEmbeddedChat';
@@ -60,6 +61,10 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
   });
   setRuntimeBearerToken(clientToken || null);
   setRuntimeExtraHeaders(runtimeHeaders || null);
+  setLocalRuntimeAuthCredentialProvider(localOrigin || null, localOrigin ? async () => {
+    const token = await desktopLocalClientTokenGet();
+    return token ? { type: 'bearer', token } : null;
+  } : null);
   if (relay) {
     switchRuntimeEndpoint({
       apiBaseUrl,

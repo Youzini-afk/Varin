@@ -18,6 +18,12 @@ including current capabilities, directory limits, and revocation; the bearer
 remains only in the short-lived in-memory grant and is never returned in a URL.
 A saved-connection proxy prefix does not expand the inner read/realtime path
 allowlist, and the proxy additionally requires Host-wide full-control authority.
+The packaged desktop UI mints local application-Host URL credentials with the
+desktop-local bearer obtained from its IPC bridge. This credential stays bound
+to the local origin independently of the selected remote runtime's bearer and
+proxy headers; browser cookies alone cannot authenticate this cross-origin boot
+after the user enables a desktop UI password. A failed initial extension catalog
+read exposes the workspace recovery screen instead of keeping the splash covered.
 When client authentication is required without a UI password, arbitrary session
 cookies are not trusted and missing credentials cannot mint a session.
 

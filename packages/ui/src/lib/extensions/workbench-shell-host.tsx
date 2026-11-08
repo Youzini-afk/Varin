@@ -8,7 +8,7 @@ import {
   markWorkbenchProfileTransitionTargetPainted,
   subscribeWorkbenchProfileTransition,
 } from '@/lib/workbench/profile-transition';
-import { useVarinExtensionCatalog } from './catalog-store';
+import { startVarinExtensionCatalog, stopVarinExtensionCatalog, useVarinExtensionCatalog } from './catalog-store';
 import { varinSurfaceRuntime } from './surface-runtime';
 import {
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -59,6 +59,11 @@ export const WorkbenchShellHost: React.FC<{
   const catalog = useVarinExtensionCatalog();
   const surfaceSnapshot = useSurfaceRegistrySnapshot();
   const workspace = useWorkbenchWorkspace();
+  const catalogFailure = !catalog.snapshot ? catalog.error : null;
+  const retryCatalog = React.useCallback(() => {
+    stopVarinExtensionCatalog();
+    void startVarinExtensionCatalog().catch(() => {});
+  }, []);
   const transition = React.useSyncExternalStore(
     subscribeWorkbenchProfileTransition,
     getWorkbenchProfileTransitionSnapshot,
@@ -115,7 +120,7 @@ export const WorkbenchShellHost: React.FC<{
     && view === 'ready' && Boolean(resolvedShellContributionId)
     && mountedShell?.contributionId === resolvedShellContributionId
     && mountedShell?.contributionInstanceKey === selectedShellInstanceKey;
-  const recoveryReady = workspace.status === 'error' || view === 'recovery';
+  const recoveryReady = Boolean(catalogFailure) || workspace.status === 'error' || view === 'recovery';
   React.useEffect(() => {
     if (!onReadyChange) return;
     onReadyChange(false);
@@ -178,7 +183,8 @@ export const WorkbenchShellHost: React.FC<{
   ]);
 
   let content: React.ReactNode;
-  if (workspace.status === 'loading' && !retainShell) content = fallback;
+  if (catalogFailure) content = <WorkspaceResolutionFailure errorMessage={catalogFailure} retry={retryCatalog} />;
+  else if (workspace.status === 'loading' && !retainShell) content = fallback;
   else if (workspace.status === 'error') {
     content = <WorkspaceResolutionFailure errorMessage={workspace.errorMessage} retry={workspace.retry} />;
   } else if (view === 'loading' || !resolved) content = fallback;
@@ -190,10 +196,10 @@ export const WorkbenchShellHost: React.FC<{
 
   return (
     <WorkbenchShellStagingHost key={owner}
-      contribution={view === 'ready' && (workspace.status === 'ready' || workspace.status === 'none' || retainShell)
+      contribution={!catalogFailure && view === 'ready' && (workspace.status === 'ready' || workspace.status === 'none' || retainShell)
         && selectedShell?.descriptor.id === resolvedShellContributionId ? selectedShell : undefined}
       profileId={resolvedProfileId} fallback={content}
-      recovery={workspace.status === 'error' || view === 'recovery'}
+      recovery={recoveryReady}
       errorFallback={renderShellFailure} onMountReady={handleShellMountReady} />
   );
 };

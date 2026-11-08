@@ -13,13 +13,15 @@ vi.mock('@varin/application-client', () => ({
   registerRelayTunnelLifecycle: vi.fn(),
   registerRelayTunnelProvider: vi.fn(),
   setRuntimeBearerToken: vi.fn(),
+  setLocalRuntimeAuthCredentialProvider: vi.fn(),
   setRuntimeExtraHeaders: vi.fn(),
   switchRuntimeEndpoint: vi.fn(),
 }));
 vi.mock('@varin/ui/lib/desktopRelayRestore', () => ({ restoreDesktopRelayRuntime: vi.fn(() => Promise.resolve()) }));
+vi.mock('@varin/ui/lib/desktopHosts', () => ({ desktopLocalClientTokenGet: vi.fn(async () => 'local-desktop-token') }));
 vi.mock('./api', () => ({ createWebAPIs: vi.fn() }));
 
-import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
+import { setLocalRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
 import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
 import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
 import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
@@ -93,6 +95,15 @@ describe('readRuntimeBootstrapConfig', () => {
 });
 
 describe('createConfiguredWebAPIs', () => {
+  test('keeps local desktop credentials available when the selected runtime is remote', async () => {
+    createConfiguredWebAPIs({ apiBaseUrl: 'https://remote.example.com', clientToken: 'remote-token',
+      localOrigin: 'http://127.0.0.1:57123', relayHostId: '' });
+    const [origin, credential] = vi.mocked(setLocalRuntimeAuthCredentialProvider).mock.calls[0];
+    expect(origin).toBe('http://127.0.0.1:57123');
+    expect(await credential!()).toEqual({ type: 'bearer', token: 'local-desktop-token' });
+    expect(setRuntimeBearerToken).toHaveBeenCalledWith('remote-token');
+  });
+
   test('applies an embedded handshake before restoring its relay host', () => {
     const bootstrap = {
       apiBaseUrl: 'https://remote.example.com',

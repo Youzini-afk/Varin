@@ -4,13 +4,14 @@ import { afterEach, beforeEach, it } from 'node:test';
 import {
   buildRuntimeAuthHeaders, clearRuntimeAuthCredentialProvider, clearRuntimeUrlAuthToken,
   getLocalRuntimeUrlAuthTokenSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken,
-  setRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders,
+  setLocalRuntimeAuthCredentialProvider, setRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders,
 } from '../src/transport/runtime-auth.js';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-beforeEach(() => { clearRuntimeAuthCredentialProvider(); setRuntimeExtraHeaders(null); });
+beforeEach(() => { clearRuntimeAuthCredentialProvider(); setRuntimeExtraHeaders(null); setLocalRuntimeAuthCredentialProvider(null, null); });
 afterEach(() => {
   clearRuntimeAuthCredentialProvider(); setRuntimeExtraHeaders(null); clearRuntimeUrlAuthToken();
+  setLocalRuntimeAuthCredentialProvider(null, null);
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
   else Reflect.deleteProperty(globalThis, 'window');
 });
@@ -62,4 +63,29 @@ it('never publishes or reuses a local URL token for a different origin', async t
   await rejected;
   assert.equal(getLocalRuntimeUrlAuthTokenSync('http://127.0.0.1:3001'), '');
   assert.equal(getLocalRuntimeUrlAuthTokenSync('http://127.0.0.1:3002'), 'second-origin');
+});
+
+it('authenticates password-protected local Host initialization with the desktop credential, separately from the selected runtime', async t => {
+  setRuntimeBearerToken('remote-runtime-token');
+  setRuntimeExtraHeaders({ 'X-Remote-Proxy': 'remote-proxy-secret' });
+  let desktopToken = 'local-desktop-token';
+  setLocalRuntimeAuthCredentialProvider('http://127.0.0.1:57123', async () => ({ type: 'bearer', token: desktopToken }));
+  const calls: Array<{ url: string; headers: Headers }> = [];
+  t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    calls.push({ url: String(input), headers });
+    if (String(input).includes(':57123') && headers.get('Authorization') !== `Bearer ${desktopToken}`) {
+      return Response.json({ authenticated: false }, { status: 401 });
+    }
+    return Response.json({ token: `local-url-${calls.length}`, expiresAt: Date.now() + 60_000 });
+  });
+  assert.equal(await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:57123'), 'local-url-1');
+  assert.equal(calls[0]?.headers.get('Authorization'), 'Bearer local-desktop-token');
+  assert.equal(calls[0]?.headers.get('X-Remote-Proxy'), null);
+  await refreshLocalRuntimeUrlAuthToken('https://another-host.test');
+  assert.equal(calls[1]?.headers.get('Authorization'), null);
+  desktopToken = 'renewed-desktop-token';
+  clearRuntimeUrlAuthToken();
+  await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:57123');
+  assert.equal(calls[2]?.headers.get('Authorization'), 'Bearer renewed-desktop-token');
 });

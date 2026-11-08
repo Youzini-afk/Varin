@@ -8,6 +8,8 @@ type RuntimeAuthCredential =
 export type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promise<RuntimeAuthCredential>;
 
 let credentialProvider: RuntimeAuthCredentialProvider = () => null;
+let localCredentialOrigin = '';
+let localCredentialProvider: RuntimeAuthCredentialProvider = () => null;
 let runtimeBearerToken = '';
 let runtimeExtraHeaders: Record<string, string> = {};
 let runtimeUrlAuthToken = '';
@@ -103,6 +105,16 @@ const clearLocalRuntimeUrlAuthToken = (): void => {
   localRuntimeUrlAuthRefreshPromise = null;
   localRuntimeUrlAuthRefreshOrigin = '';
   localRuntimeUrlAuthGeneration += 1;
+};
+
+/** The application Host keeps its own credentials when the selected runtime is remote. */
+export const setLocalRuntimeAuthCredentialProvider = (
+  origin: string | null,
+  provider: RuntimeAuthCredentialProvider | null,
+): void => {
+  localCredentialOrigin = origin ? normalizeOrigin(origin) : '';
+  localCredentialProvider = provider ?? (() => null);
+  clearLocalRuntimeUrlAuthToken();
 };
 
 export const clearRuntimeUrlAuthToken = (): void => {
@@ -300,9 +312,17 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
   }
   const generation = localRuntimeUrlAuthGeneration;
   const refreshPromise = withMintDeadline(async (signal) => {
+    const credential = origin === localCredentialOrigin ? await localCredentialProvider() : null;
+    signal.throwIfAborted();
+    if (generation !== localRuntimeUrlAuthGeneration) throw new Error('Local runtime URL auth request is stale');
+    const headers = new Headers();
+    if (credential?.type === 'bearer' && normalizeBearerToken(credential.token)) {
+      headers.set('Authorization', `Bearer ${normalizeBearerToken(credential.token)}`);
+    }
     const response = await fetchWithoutRuntimeRouting(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
+      headers,
       signal,
     });
     signal.throwIfAborted();

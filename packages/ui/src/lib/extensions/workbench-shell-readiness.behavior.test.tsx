@@ -8,6 +8,10 @@ import { WorkbenchShellHost } from './workbench-shell-host';
 const state = vi.hoisted(() => ({
   generation: 1, selected: null as SurfaceContribution | null,
   workspace: { status: 'none' } as Record<string, unknown>,
+  catalog: { snapshot: { catalog: { hostId: 'test-host' } }, error: null } as {
+    snapshot: { catalog: { hostId: string } } | null; error: string | null;
+  },
+  startCatalog: vi.fn(async () => {}), stopCatalog: vi.fn(),
 }));
 vi.mock('@varin/application-client', () => ({ getRuntimeEndpointGeneration: () => state.generation }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -17,7 +21,8 @@ vi.mock('@/lib/workbench/profile-transition', () => {
   const snapshot = { phase: 'idle', id: 0 };
   return { getWorkbenchProfileTransitionSnapshot: () => snapshot, subscribeWorkbenchProfileTransition: () => () => {}, markWorkbenchProfileTransitionTargetPainted: () => {} };
 });
-vi.mock('./catalog-store', () => ({ useVarinExtensionCatalog: () => ({ snapshot: { catalog: { hostId: 'test-host' } } }) }));
+vi.mock('./catalog-store', () => ({ useVarinExtensionCatalog: () => state.catalog,
+  startVarinExtensionCatalog: state.startCatalog, stopVarinExtensionCatalog: state.stopCatalog }));
 vi.mock('./surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
 vi.mock('./workbench-workspace', () => ({ useWorkbenchWorkspace: () => state.workspace }));
 vi.mock('./workbench-shell-view', () => ({ resolveWorkbenchShellView: () => ({
@@ -45,6 +50,8 @@ beforeEach(() => {
   window.requestAnimationFrame = callback => { frames.set(++id, callback); return id; };
   window.cancelAnimationFrame = handle => { frames.delete(handle); };
   state.generation = 1; state.workspace = { status: 'none' };
+  state.catalog = { snapshot: { catalog: { hostId: 'test-host' } }, error: null };
+  state.startCatalog.mockClear(); state.stopCatalog.mockClear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); expect(frames.size).toBe(0); vi.unstubAllGlobals(); });
@@ -91,4 +98,16 @@ it('lets the actual recovery screen release startup when workspace resolution fa
   expect(readiness).not.toHaveBeenCalledWith(true);
   await paint(); await paint();
   expect(readiness).toHaveBeenLastCalledWith(true);
+});
+
+it('uncovers a retryable startup error when the local application Host cannot authenticate its catalog', async () => {
+  state.catalog = { snapshot: null, error: 'Failed to mint local runtime URL auth token (401)' };
+  const readiness = vi.fn();
+  await act(async () => root.render(<WorkbenchShellHost onReadyChange={readiness} />));
+  expect(host.textContent).toContain('Failed to mint local runtime URL auth token (401)');
+  await paint(); await paint();
+  expect(readiness).toHaveBeenLastCalledWith(true);
+  await act(async () => { host.querySelector('button')!.click(); });
+  expect(state.stopCatalog).toHaveBeenCalledOnce();
+  expect(state.startCatalog).toHaveBeenCalledOnce();
 });
