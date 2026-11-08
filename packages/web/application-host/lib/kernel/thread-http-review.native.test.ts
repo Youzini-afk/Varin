@@ -97,8 +97,21 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { api: createThreadsHttpAPI(), adapter, runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: async () => { await stopContinuations?.(); await kernel.close(); } };
+  return { api: createThreadsHttpAPI(), kernel, adapter, runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: async () => { await stopContinuations?.(); await kernel.close(); } };
 }
+
+it('reads Bot arrangements through HTTP and reaches the original follow-up event owners', async () => {
+  const f = await fixture();
+  const botId = 'bot:arrangements';
+  await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish', { botId, profileRevision: 1, activityOperationId: null, permitted: true });
+  const session = await f.runtime.createBotThread(botId, 'thread:bot:arrangements', 'branch:bot:arrangements');
+  const identity: ThreadIdentity = { runtime: 'agent', ...session };
+  await expect(f.api.followups.arrangements(identity, botId)).resolves.toEqual([]);
+  await expect(f.runtime.eventSourceSubscriptions()).resolves.toEqual([]);
+  await expect(f.runtime.eventTransportSources()).resolves.toEqual([]);
+  await expect(f.runtime.eventTransportImports()).resolves.toEqual([]);
+  await expect(f.api.followups.arrangements(identity, 'bot:other')).rejects.toThrow('400');
+});
 
 it('deleting a completed HTTP conversation automatically releases its native history and content', async () => {
   const f = await fixture();

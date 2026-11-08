@@ -5,13 +5,14 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ScheduledTask, ScheduledTasksAPI, ThreadResolvedSource, ThreadSourceTargets } from '@varin/application-client';
 import type { CalendarSource, SourceResourceOwner } from '@varin/protocol';
 import { CalendarTaskEditorDialog } from './CalendarTaskEditorDialog';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
 
 const api = vi.hoisted(() => ({
   schedules: { listSources: vi.fn<ScheduledTasksAPI['listSources']>(), resolveSource: vi.fn<ScheduledTasksAPI['resolveSource']>() },
   threads: { listModels: vi.fn() },
   hostGeneration: 1,
 }));
-vi.mock('@varin/application-client', () => ({ createScheduledTasksHttpAPI: () => api.schedules, getRuntimeEndpointGeneration: () => api.hostGeneration }));
+vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createScheduledTasksHttpAPI: () => api.schedules, getRuntimeEndpointGeneration: () => api.hostGeneration }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: api.threads }) }));
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children, onOpenChange }: React.PropsWithChildren<{ open: boolean; onOpenChange(value: boolean): void }>) => open ? <div role="dialog">{children}<button onClick={() => onOpenChange(false)}>Close editor</button></div> : null,
@@ -43,7 +44,7 @@ const save = vi.fn<React.ComponentProps<typeof CalendarTaskEditorDialog>['onSave
 const close = vi.fn();
 const render = async (changes: Partial<typeof props> = {}) => {
   props = { ...props, ...changes };
-  await act(async () => root.render(<CalendarTaskEditorDialog {...props} />));
+  await act(async () => root.render(<I18nProvider><CalendarTaskEditorDialog {...props} /></I18nProvider>));
 };
 const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text)!;
 const click = async (text: string) => { await act(async () => button(text).click()); };
@@ -64,9 +65,10 @@ const selectRemote = async () => {
   await edit('Calendar source Host', remoteKey);
   await edit('Calendar workspace folder', '/remote/repo', 'input');
 };
-beforeEach(() => {
+beforeEach(async () => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  await useI18nStore.getState().setLocale('en');
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   vi.clearAllMocks(); api.hostGeneration = 1;
   api.schedules.listSources.mockReset().mockResolvedValue(targets);
@@ -76,6 +78,26 @@ beforeEach(() => {
   props = { open: true, projectId: 'project', task: existing(), onSave: save, onOpenChange: close };
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+
+it('uses Chinese labels without resetting the draft or translating saved schedule values', async () => {
+  await render({ task: null, initialTarget: { runtime: 'agent', threadId: 'thread:bot:session', branchId: 'branch:bot:session' } });
+  await editField('Name', '晚间简报');
+  await editField('Instruction', '总结今天的进展');
+  await act(async () => { await useI18nStore.getState().setLocale('zh-CN'); });
+  expect(container.querySelector('h2')?.textContent).toBe('新建 Agent 日程');
+  expect(container.textContent).toContain('继续已有任务');
+  expect(container.textContent).not.toContain('Create Agent calendar');
+  expect(control('日程执行目标').value).toBe('existing_work');
+  await edit('日程执行频率', 'weekly');
+  expect(control('日程执行频率').querySelector('option[value="weekly"]')?.textContent).toBe('每周');
+  await click('保存日程');
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    name: '晚间简报', execution: { prompt: '总结今天的进展' },
+    schedule: expect.objectContaining({ kind: 'weekly', weekdays: [1] }),
+    target: { kind: 'existing_work', threadId: 'thread:bot:session', branchId: 'branch:bot:session' },
+  }));
+  expect(api.schedules.listSources).toHaveBeenCalledOnce();
+});
 
 it('defaults new work to the project source and can save when source discovery fails', async () => {
   api.schedules.listSources.mockRejectedValueOnce(new Error('Directory unavailable'));

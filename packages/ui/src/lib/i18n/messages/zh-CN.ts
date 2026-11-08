@@ -6,6 +6,7 @@ import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './zh-CN.settings';
 import { followupPanelZhCN } from './followups';
+import { calendarZhCN } from './calendar';
 import { toolMessagesZhCN } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
@@ -246,6 +247,7 @@ export const dict: Record<I18nKey, string> = {
   "contextManager.addSkill": "加入草稿",
   "contextManager.addedSkill": "已加入草稿",
   ...followupPanelZhCN,
+  ...calendarZhCN,
   "chat.dialogue.read": "读取文件",
   "chat.dialogue.list": "浏览文件",
   "chat.dialogue.search": "搜索文件",

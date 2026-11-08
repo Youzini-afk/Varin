@@ -4,6 +4,7 @@ import { externalAgentEn } from './external-agents';
 import { officeReaderMessages } from './office';
 import { settingsDict } from './en.settings';
 import { followupPanelEn } from './followups';
+import { calendarEn } from './calendar';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
@@ -272,6 +273,7 @@ export const dict = {
   ...officeReaderMessages('en'),
   ...browserMessages('en'),
   ...followupPanelEn,
+  ...calendarEn,
   "chat.dialogue.read": "Read files",
   "chat.dialogue.list": "Browse files",
   "chat.dialogue.search": "Search files",

@@ -970,23 +970,12 @@ pub(crate) fn spawn(
                                 &cancellation,
                             );
                         }
-                        if matches!(
-                            method,
-                            "runtime.followup.register" | "runtime.followup.registration.prepare"
-                                | "runtime.followup.get"
-                                | "runtime.followup.occurrences"
-                                | "runtime.followup.occurrence"
-                                | "runtime.followup.metrics"
-                                | "runtime.followup.metric.observe"
-                                | "runtime.followup.research"
-                                | "runtime.followup.research.observe"
-                                | "runtime.followup.log.observe"
-                                | "runtime.followup.files"
-                                | "runtime.followup.registrations.pending"
-                                | "runtime.followup.registration.cancel"
-                                | "runtime.followup.file.observe"
-                                | "runtime.followup.file.release"
-                        ) {
+                        // The follow-up owner routes its whole namespace, including Bot arrangements
+                        // and plugin event delivery. Keep the synchronous list and control admission
+                        // below; a second method list here can silently strand new owner operations.
+                        if method.starts_with("runtime.followup.")
+                            && !matches!(method, "runtime.followup.list" | "runtime.followup.control")
+                        {
                             let runtime = runtime.clone();
                             let resources = resources.clone();
                             let method = method.to_owned();

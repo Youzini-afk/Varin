@@ -7,11 +7,11 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/lib/i18n';
 
 const schedules = createScheduledTasksHttpAPI();
 const sourceOwnerKey = (owner: SourceResourceOwner) => owner.kind === 'local'
   ? 'local' : JSON.stringify([owner.connectionId, owner.endpointIdentity, owner.hostId]);
-const changedHostMessage = 'Application Host changed. Close this editor and reopen it from the current project.';
 
 /** Edits external definitions only. Preview/admission and every occurrence stay with the Host. */
 export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget, onOpenChange, onSave }: {
@@ -19,6 +19,9 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
   open: boolean; projectId: string; task: ScheduledTask | null; onOpenChange(open: boolean): void; onSave(task: Partial<ScheduledTask>): Promise<void>;
 }) {
   const { threads } = useRuntimeAPIs();
+  const { t } = useI18n();
+  // Translating async failures must not restart the editing session or discard its draft.
+  const effectText = React.useEffectEvent(t);
   const [name, setName] = React.useState(''), [instruction, setInstruction] = React.useState('');
   const [kind, setKind] = React.useState<ScheduledTask['schedule']['kind']>('daily');
   const [timezone, setTimezone] = React.useState('UTC'), [times, setTimes] = React.useState('09:00');
@@ -63,7 +66,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
     const host = editorHostGeneration.current;
     if (host === null || host !== getRuntimeEndpointGeneration()) {
       retireResolution(); setResolving(false); setSaving(false); setLoadingSources(false); setSourceTargets({ targets: [], unavailable: [] });
-      setSource(null); setModels([]); setError(changedHostMessage);
+      setSource(null); setModels([]); setError(effectText('calendar.error.hostChanged'));
       return;
     }
     const controller = new AbortController();
@@ -87,11 +90,11 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
     } else { setModel(''); setThinking('off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
     setThreadId(selection?.kind === 'existing_work' ? selection.threadId : initialTarget?.threadId ?? ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : initialTarget?.branchId ?? '');
     setModels([]);
-    void threads?.listModels().then(value => { if (isCurrent()) setModels(value); }, value => { if (isCurrent()) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); });
+    void threads?.listModels().then(value => { if (isCurrent()) setModels(value); }, value => { if (isCurrent()) setError(value instanceof Error ? value.message : effectText('calendar.error.models')); });
     void schedules.listSources(projectId, controller.signal).then(value => {
       if (isCurrent()) setSourceTargets(value);
     }, value => {
-      if (isCurrent()) setDirectoryError(value instanceof Error ? value.message : 'Source Hosts could not be loaded');
+      if (isCurrent()) setDirectoryError(value instanceof Error ? value.message : effectText('calendar.error.hosts'));
     }).finally(() => { if (isCurrent()) setLoadingSources(false); });
     return () => { controller.abort(); editorGeneration.current += 1; retireResolution(); };
   }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId]);
@@ -99,7 +102,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
   const resolveSource = async () => {
     if (saving || resolving || !resourceOwner || !selectedHost || !path.trim()) return;
     const host = editorHostGeneration.current;
-    if (host === null || host !== getRuntimeEndpointGeneration()) { invalidateSource(); setError(changedHostMessage); return; }
+    if (host === null || host !== getRuntimeEndpointGeneration()) { invalidateSource(); setError(t('calendar.error.hostChanged')); return; }
     invalidateSource();
     const controller = new AbortController();
     resolveController.current = controller;
@@ -110,12 +113,12 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
       const resolved = await schedules.resolveSource(projectId, { resourceOwner, path }, controller.signal);
       if (!isCurrent()) return;
       if (!resolved.workspaceId.trim() || sourceOwnerKey(resolved.resourceOwner) !== sourceOwnerKey(resourceOwner)) {
-        throw new Error('The selected Host did not return the requested workspace identity');
+        throw new Error(t('calendar.error.workspaceIdentity'));
       }
       setSource({ kind: 'workspace', resourceOwner: resolved.resourceOwner, workspaceId: resolved.workspaceId });
       setPath(resolved.path);
     } catch (value) {
-      if (isCurrent()) setSourceError(value instanceof Error ? value.message : 'Workspace could not be resolved');
+      if (isCurrent()) setSourceError(value instanceof Error ? value.message : t('calendar.error.workspace'));
     } finally {
       if (isCurrent()) { resolveController.current = null; setResolving(false); }
     }
@@ -123,77 +126,77 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
   const save = async () => {
     if (saving) return;
     const host = editorHostGeneration.current;
-    if (host === null || host !== getRuntimeEndpointGeneration()) { invalidateSource(); setError(changedHostMessage); return; }
+    if (host === null || host !== getRuntimeEndpointGeneration()) { invalidateSource(); setError(t('calendar.error.hostChanged')); return; }
     const generation = editorGeneration.current;
     const isCurrent = () => generation === editorGeneration.current && host === getRuntimeEndpointGeneration();
     setSaving(true); setError('');
     try {
       const selected = models.find(value => JSON.stringify([value.providerId, value.modelId]) === model);
-      if (target === 'new_work' && !selected) throw new Error('Select an available registered model');
-      if (target === 'new_work' && (!source || resolving)) throw new Error('Resolve the selected workspace before saving');
-      if (!name.trim() || !instruction.trim()) throw new Error('Name and instruction are required');
+      if (target === 'new_work' && !selected) throw new Error(t('calendar.error.modelRequired'));
+      if (target === 'new_work' && (!source || resolving)) throw new Error(t('calendar.error.sourceRequired'));
+      if (!name.trim() || !instruction.trim()) throw new Error(t('calendar.error.fieldsRequired'));
       const maxOutputTokens = budget.trim() ? Number(budget) : null;
-      if (goal && maxOutputTokens !== null && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 0)) throw new Error('Goal budget must be a non-negative output-token count');
+      if (goal && maxOutputTokens !== null && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 0)) throw new Error(t('calendar.error.budget'));
       await onSave({ id: creationKey.current!, name, enabled, runtime: 'agent', execution: { prompt: instruction }, missedPolicy: missed,
         schedule: { kind, timezone, ...(kind === 'once' ? { date, time: times.trim() } : kind === 'cron' ? { cron } : { times: times.split(',').map(value => value.trim()), ...(kind === 'weekly' ? { weekdays: weekdays.split(',').map(value => Number(value.trim())) } : {}) }) },
         target: target === 'existing_work' ? { kind: 'existing_work', threadId, branchId } : { kind: 'new_work', source: source!, sourceMode,
           model: { providerId: selected!.providerId, modelId: selected!.modelId, thinkingLevel: thinking, ...(task?.target?.kind === 'new_work' && task.target.model.providerId === selected!.providerId && task.target.model.modelId === selected!.modelId && task.target.model.temperature !== undefined ? { temperature: task.target.model.temperature } : {}) },
           goal: goal ? { budget: maxOutputTokens === null ? null : { maxOutputTokens } } : null } });
       if (isCurrent()) onOpenChange(false);
-    } catch (value) { if (isCurrent()) setError(value instanceof Error ? value.message : 'Calendar definition could not be saved'); }
+    } catch (value) { if (isCurrent()) setError(value instanceof Error ? value.message : t('calendar.error.save')); }
     finally { if (isCurrent()) setSaving(false); }
   };
   const field = (label: string, value: string, change: (value: string) => void, type = 'text') => <label className="grid gap-1 text-sm">{label}<Input type={type} value={value} onChange={event => change(event.target.value)} /></label>;
   return <Dialog open={open} onOpenChange={value => { if (!saving) { if (!value) retireResolution(); onOpenChange(value); } }}><DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
-    <DialogTitle>{task ? 'Edit Agent calendar' : 'Create Agent calendar'}</DialogTitle>
-    <DialogDescription>Each occurrence uses its original Thread, Run and Goal. Pausing this definition holds undelivered scheduled work; stopping a Run does not disable future slots.</DialogDescription>
-    {field('Name', name, setName)}
-    <label className="grid gap-1 text-sm">Instruction<Textarea value={instruction} onChange={event => setInstruction(event.target.value)} /></label>
-    <label className="text-sm">Schedule <select aria-label="Calendar schedule" value={kind} onChange={event => { const value = event.target.value as typeof kind; setKind(value); setMissed(value === 'once' ? 'coalesce_once' : 'skip'); }}>
-      {['once', 'daily', 'weekly', 'cron'].map(value => <option key={value}>{value}</option>)}
+    <DialogTitle>{t(task ? 'calendar.edit' : 'calendar.create')}</DialogTitle>
+    <DialogDescription>{t('calendar.description')}</DialogDescription>
+    {field(t('calendar.name'), name, setName)}
+    <label className="grid gap-1 text-sm">{t('calendar.instruction')}<Textarea value={instruction} onChange={event => setInstruction(event.target.value)} /></label>
+    <label className="text-sm">{t('calendar.schedule')} <select aria-label={t('calendar.scheduleLabel')} value={kind} onChange={event => { const value = event.target.value as typeof kind; setKind(value); setMissed(value === 'once' ? 'coalesce_once' : 'skip'); }}>
+      {(['once', 'daily', 'weekly', 'cron'] as const).map(value => <option key={value} value={value}>{t(`calendar.schedule.${value}`)}</option>)}
     </select></label>
-    {field('IANA timezone', timezone, setTimezone)}
-    {kind === 'cron' ? field('Cron expression', cron, setCron) : field(kind === 'once' ? 'Time (HH:mm)' : 'Times (HH:mm, separated by commas)', times, setTimes)}
-    {kind === 'once' && field('Date', date, setDate, 'date')}
-    {kind === 'weekly' && field('Weekdays (0 Sunday through 6 Saturday)', weekdays, setWeekdays)}
-    <label className="text-sm">Missed slots <select aria-label="Missed calendar slots" value={missed} onChange={event => setMissed(event.target.value as typeof missed)}><option value="skip">Skip</option><option value="coalesce_once">Run latest missed slot once</option></select></label>
-    <label className="text-sm">Target <select aria-label="Calendar target" value={target} onChange={event => { retireResolution(); setResolving(false); setSourceError(''); setTarget(event.target.value as typeof target); }}><option value="new_work">New work</option><option value="existing_work">Existing work</option></select></label>
-    {target === 'existing_work' ? <>{field('Thread ID', threadId, setThreadId)}{field('Branch ID', branchId, setBranchId)}<p className="text-sm text-muted-foreground">Uses that work's actual model, source, permissions and Goal.</p></> : <>
-      <label className="text-sm">Model <select aria-label="Calendar model" value={model} onChange={event => setModel(event.target.value)}><option value="">Select model</option>{models.map(value => <option key={JSON.stringify([value.providerId, value.modelId])} value={JSON.stringify([value.providerId, value.modelId])}>{value.providerId} / {value.name ?? value.modelId}</option>)}</select></label>
-      {field('Thinking level', thinking, setThinking)}
-      <label className="text-sm">Source <select aria-label="Calendar source" disabled={saving} value={sourceKind} onChange={event => {
+    {field(t('calendar.timezone'), timezone, setTimezone)}
+    {kind === 'cron' ? field(t('calendar.cron'), cron, setCron) : field(t(kind === 'once' ? 'calendar.time' : 'calendar.times'), times, setTimes)}
+    {kind === 'once' && field(t('calendar.date'), date, setDate, 'date')}
+    {kind === 'weekly' && field(t('calendar.weekdays'), weekdays, setWeekdays)}
+    <label className="text-sm">{t('calendar.missed')} <select aria-label={t('calendar.missedLabel')} value={missed} onChange={event => setMissed(event.target.value as typeof missed)}><option value="skip">{t('calendar.missed.skip')}</option><option value="coalesce_once">{t('calendar.missed.once')}</option></select></label>
+    <label className="text-sm">{t('calendar.target')} <select aria-label={t('calendar.targetLabel')} value={target} onChange={event => { retireResolution(); setResolving(false); setSourceError(''); setTarget(event.target.value as typeof target); }}><option value="new_work">{t('calendar.target.new')}</option><option value="existing_work">{t('calendar.target.existing')}</option></select></label>
+    {target === 'existing_work' ? <>{field(t('calendar.threadId'), threadId, setThreadId)}{field(t('calendar.branchId'), branchId, setBranchId)}<p className="text-sm text-muted-foreground">{t('calendar.existingHint')}</p></> : <>
+      <label className="text-sm">{t('calendar.model')} <select aria-label={t('calendar.modelLabel')} value={model} onChange={event => setModel(event.target.value)}><option value="">{t('calendar.selectModel')}</option>{models.map(value => <option key={JSON.stringify([value.providerId, value.modelId])} value={JSON.stringify([value.providerId, value.modelId])}>{value.providerId} / {value.name ?? value.modelId}</option>)}</select></label>
+      {field(t('calendar.thinking'), thinking, setThinking)}
+      <label className="text-sm">{t('calendar.source')} <select aria-label={t('calendar.sourceLabel')} disabled={saving} value={sourceKind} onChange={event => {
         invalidateSource(); const kind = event.target.value as CalendarSource['kind']; setSourceKind(kind);
         setSource(kind === 'project' ? { kind: 'project' } : null); setResourceOwner(null); setPath('');
-      }}><option value="project">Project folder</option><option value="workspace">Workspace on selected Host</option></select></label>
-      {sourceKind === 'project' ? <p className="text-sm text-muted-foreground">Uses the project folder on this Application Host when each occurrence starts.</p> : <>
-        <label className="grid gap-1 text-sm">Source Host
-          <select aria-label="Calendar source Host" disabled={saving} value={resourceOwner ? sourceOwnerKey(resourceOwner) : ''} onChange={event => {
+      }}><option value="project">{t('calendar.source.project')}</option><option value="workspace">{t('calendar.source.workspace')}</option></select></label>
+      {sourceKind === 'project' ? <p className="text-sm text-muted-foreground">{t('calendar.projectHint')}</p> : <>
+        <label className="grid gap-1 text-sm">{t('calendar.sourceHost')}
+          <select aria-label={t('calendar.sourceHostLabel')} disabled={saving} value={resourceOwner ? sourceOwnerKey(resourceOwner) : ''} onChange={event => {
             const selected = sourceTargets.targets.find(value => sourceOwnerKey(value.resourceOwner) === event.target.value);
             if (!selected) return;
             invalidateSource(); setResourceOwner(selected.resourceOwner); setPath('');
           }}>
-            <option value="" disabled>Select source Host</option>
-            {resourceOwner && !selectedHost && <option value={sourceOwnerKey(resourceOwner)}>{resourceOwner.kind === 'local' ? 'This Host' : resourceOwner.hostId} ({loadingSources ? 'loading' : 'unavailable'})</option>}
+            <option value="" disabled>{t('calendar.selectHost')}</option>
+            {resourceOwner && !selectedHost && <option value={sourceOwnerKey(resourceOwner)}>{resourceOwner.kind === 'local' ? t('calendar.thisHost') : resourceOwner.hostId} ({t(loadingSources ? 'calendar.loading' : 'calendar.unavailable')})</option>}
             {sourceTargets.targets.map(value => <option key={sourceOwnerKey(value.resourceOwner)} value={sourceOwnerKey(value.resourceOwner)}>{value.label}</option>)}
           </select>
         </label>
-        {resourceOwner?.kind === 'managed_host' && <p className="break-all text-xs text-muted-foreground">Host {resourceOwner.hostId} · connection {resourceOwner.connectionId} · endpoint {resourceOwner.endpointIdentity}</p>}
-        {resourceOwner && !selectedHost && !loadingSources && <p className="text-sm text-muted-foreground">The selected Host is unavailable. Its saved identity is retained; choose another Host explicitly to replace it.</p>}
-        <label className="grid gap-1 text-sm">Workspace folder on the selected Host<Input aria-label="Calendar workspace folder" disabled={saving || !resourceOwner} value={path} onChange={event => { invalidateSource(); setPath(event.target.value); }} /></label>
-        <Button type="button" variant="outline" disabled={saving || resolving || !selectedHost || !path.trim()} onClick={() => void resolveSource()}>{resolving ? 'Resolving workspace…' : 'Resolve workspace'}</Button>
-        {source?.kind === 'workspace' && <p aria-label="Calendar workspace identity" className="break-all text-sm">Selected workspace: {source.workspaceId}</p>}
-        {!source && <p className="text-sm text-muted-foreground">Resolve a folder to select its workspace before saving.</p>}
+        {resourceOwner?.kind === 'managed_host' && <p className="break-all text-xs text-muted-foreground">{t('calendar.hostIdentity', { host: resourceOwner.hostId, connection: resourceOwner.connectionId, endpoint: resourceOwner.endpointIdentity })}</p>}
+        {resourceOwner && !selectedHost && !loadingSources && <p className="text-sm text-muted-foreground">{t('calendar.hostUnavailable')}</p>}
+        <label className="grid gap-1 text-sm">{t('calendar.folder')}<Input aria-label={t('calendar.folderLabel')} disabled={saving || !resourceOwner} value={path} onChange={event => { invalidateSource(); setPath(event.target.value); }} /></label>
+        <Button type="button" variant="outline" disabled={saving || resolving || !selectedHost || !path.trim()} onClick={() => void resolveSource()}>{t(resolving ? 'calendar.resolving' : 'calendar.resolve')}</Button>
+        {source?.kind === 'workspace' && <p aria-label={t('calendar.workspaceIdentityLabel')} className="break-all text-sm">{t('calendar.workspaceIdentity', { workspace: source.workspaceId })}</p>}
+        {!source && <p className="text-sm text-muted-foreground">{t('calendar.resolveHint')}</p>}
         {sourceError && <p role="alert" className="text-sm text-destructive">{sourceError}</p>}
       </>}
-      {loadingSources && <p className="text-sm text-muted-foreground">Loading source Hosts…</p>}
-      {directoryError && <p role="alert" className="text-sm text-destructive">{directoryError} Project folder remains available.</p>}
+      {loadingSources && <p className="text-sm text-muted-foreground">{t('calendar.loadingHosts')}</p>}
+      {directoryError && <p role="alert" className="text-sm text-destructive">{directoryError} {t('calendar.projectAvailable')}</p>}
       {sourceTargets.unavailable.map(value => <p key={value.connectionId} className="text-sm text-muted-foreground">{value.label}: {value.message}</p>)}
-      <label className="text-sm">Workspace access <select aria-label="Calendar source mode" value={sourceMode} onChange={event => setSourceMode(event.target.value as typeof sourceMode)}><option value="fixed_branch">Read-only snapshot</option><option value="materialized">Isolated editable copy</option><option value="live_root">Live workspace directory</option></select></label>
-      <label className="text-sm"><input type="checkbox" checked={goal} onChange={event => setGoal(event.target.checked)} /> Continuing Goal</label>
-      {goal && field('Output-token budget (blank means no configured limit)', budget, setBudget, 'number')}
+      <label className="text-sm">{t('calendar.access')} <select aria-label={t('calendar.accessLabel')} value={sourceMode} onChange={event => setSourceMode(event.target.value as typeof sourceMode)}><option value="fixed_branch">{t('calendar.access.readOnly')}</option><option value="materialized">{t('calendar.access.isolated')}</option><option value="live_root">{t('calendar.access.live')}</option></select></label>
+      <label className="text-sm"><input type="checkbox" checked={goal} onChange={event => setGoal(event.target.checked)} /> {t('calendar.goal')}</label>
+      {goal && field(t('calendar.budget'), budget, setBudget, 'number')}
     </>}
-    <label className="text-sm"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /> Enable scheduled fires</label>
+    <label className="text-sm"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /> {t('calendar.enabled')}</label>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <Button disabled={saving || (target === 'new_work' && (!source || resolving))} onClick={() => void save()}>{saving ? 'Saving…' : 'Save definition'}</Button>
+    <Button disabled={saving || (target === 'new_work' && (!source || resolving))} onClick={() => void save()}>{t(saving ? 'calendar.saving' : 'calendar.save')}</Button>
   </DialogContent></Dialog>;
 }

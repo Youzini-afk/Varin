@@ -495,7 +495,7 @@ export function ScheduledTasksDialog() {
   const createButton = <DropdownMenu>
     <DropdownMenuTrigger asChild><Button size="sm" className="shrink-0 gap-1 rounded-full px-3">{t('tasksHub.create')}<Icon name="arrow-down-s" className="size-3.5" /></Button></DropdownMenuTrigger>
     <DropdownMenuContent align="end">
-      <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>Agent calendar</DropdownMenuItem>
+      <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>{t('calendar.title')}</DropdownMenuItem>
       <DropdownMenuItem disabled={projects.length === 0} onSelect={openNewTaskEditor}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
       <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t(botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</DropdownMenuItem>
     </DropdownMenuContent>
@@ -555,7 +555,7 @@ export function ScheduledTasksDialog() {
       </DialogContent></Dialog>
 
       <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} initialTarget={botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
-      <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>Calendar work</DialogTitle>
+      <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>{t('calendar.work')}</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>
       <ScheduledTaskLoopEditorDialog
