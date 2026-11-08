@@ -130,6 +130,28 @@ test('same-digest partial publication retries inspect existing tags and complete
   assert.equal(fixture.formalWrites().length, before);
 });
 
+test('acknowledged tags may become visible after a short delay without repeating any writes', () => {
+  const fixture = registryFixture(), waiting = new Map(), delays = [];
+  const { copy, manifest } = fixture.registry;
+  fixture.registry.copy = (from, to) => { copy(from, to); waiting.set(to, 2); };
+  fixture.registry.manifest = (ref, options) => {
+    if (waiting.get(ref) > 0) {
+      assert.equal(options?.allowMissing, true);
+      waiting.set(ref, waiting.get(ref) - 1);
+      return null;
+    }
+    return manifest(ref, options);
+  };
+  promoteImages(plan(), 'candidate-12-1', fixture.registry, { wait: delay => delays.push(delay) });
+  const writes = fixture.events.filter(event => event.type === 'copy');
+  assert.equal(new Set(writes.map(write => write.to)).size, writes.length);
+  assert.deepEqual(delays.slice(0, 2), [1000, 2000]);
+  assert.equal(fixture.manifests.get(`${prefix}varin:latest`).digest, digest('1'));
+
+  fixture.registry.manifest = (ref, options) => ref.includes(':candidate-13-') ? null : manifest(ref, options);
+  assert.throws(() => promoteImages(plan(), 'candidate-13-1', fixture.registry, { wait() {} }), /still not visible/);
+});
+
 test('a rebuilt retry with different bytes conflicts rather than replacing an exact version', () => {
   const fixture = registryFixture();
   promoteImages(plan(), 'candidate-12-1', fixture.registry);

@@ -171,7 +171,10 @@ export function resolveRuntimeBase(reference, variant, registry) {
   return verifyImage(image, { role: 'runtime-base', variant }, registry);
 }
 
-export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {}, replaceVersion } = {}) {
+export function promoteImages(plan, stageTag, registry, {
+  verifyStaged = () => {}, replaceVersion,
+  wait = milliseconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+} = {}) {
   if (!/^candidate-\d+-\d+$/.test(stageTag)) throw new Error('Promotion requires this run’s unique candidate tag');
   if (replaceVersion !== undefined) versionParts(replaceVersion);
   const desired = new Map();
@@ -183,9 +186,21 @@ export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {
     }
     verifyImage(artifact.source, artifact, registry);
   }
+  const confirm = (target, digest) => {
+    // GHCR can acknowledge a tag write before its read endpoint sees the tag.
+    // Re-read that exact tag; never repeat the write or accept a different digest.
+    for (const delay of [0, 1000, 2000, 4000, 8000]) {
+      if (delay) wait(delay);
+      const manifest = registry.manifest(target, { allowMissing: true });
+      if (!manifest) continue;
+      if (manifest.digest !== digest) throw new Error(`Registry copy did not preserve the verified digest: ${target}`);
+      return;
+    }
+    throw new Error(`Registry acknowledged the copy but the tag is still not visible: ${target}. Retry promotion to complete the existing publication.`);
+  };
   const copy = (source, target, digest) => {
     registry.copy(source, target);
-    if (registry.manifest(target)?.digest !== digest) throw new Error(`Registry copy did not preserve the verified digest: ${target}`);
+    confirm(target, digest);
   };
   // Candidate-only writes establish new packages, including explicitly selected
   // base overrides. No exact version, SHA or floating release tag changes yet.
@@ -217,7 +232,7 @@ export function promoteImages(plan, stageTag, registry, { verifyStaged = () => {
     copy(write.source, write.ref, write.digest);
   }
   for (const artifact of plan) for (const target of artifact.targets) {
-    if (registry.manifest(target.ref)?.digest !== artifact.digest) throw new Error(`Incomplete image publication at ${target.ref}`);
+    confirm(target.ref, artifact.digest);
   }
 }
 

@@ -1,0 +1,47 @@
+name: Varin desktop dependencies
+description: Restore verified binary downloads before installing dependencies and preparing desktop tooling
+inputs:
+  electron:
+    description: Prepare the native Electron runtime
+    default: 'true'
+  tools:
+    description: Prepare the packaging/test toolchain
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - id: downloads
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/electron
+          ~/Library/Caches/electron
+          ~/AppData/Local/electron/Cache
+          ~/.cache/electron-builder
+          ~/Library/Caches/electron-builder
+          ~/AppData/Local/electron-builder/Cache
+          packages/electron/resources/workspace-component
+        key: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-${{ inputs.electron }}-${{ inputs.tools }}-${{ hashFiles('bun.lock', 'packages/electron/resources/workspace-component.json') }}
+        restore-keys: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-
+    - shell: bash
+      run: bun install --frozen-lockfile
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    - shell: bash
+      env:
+        PREPARE_ELECTRON: ${{ inputs.electron }}
+        PREPARE_TOOLS: ${{ inputs.tools }}
+      run: node "$GITHUB_ACTION_PATH/../../../packages/electron/scripts/prepare-build-downloads.mjs"
+    # Preserve completed downloads even when a later compile/test fails.
+    - if: steps.downloads.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        key: ${{ steps.downloads.outputs.cache-primary-key }}
+        path: |
+          ~/.cache/electron
+          ~/Library/Caches/electron
+          ~/AppData/Local/electron/Cache
+          ~/.cache/electron-builder
+          ~/Library/Caches/electron-builder
+          ~/AppData/Local/electron-builder/Cache
+          packages/electron/resources/workspace-component

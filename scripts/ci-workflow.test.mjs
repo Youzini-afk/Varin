@@ -129,10 +129,11 @@ test('owner/dependency/build input decisions include the actual downstream bound
 
 test('deletion, rename and unusual filenames cannot erase the old owner', t => {
   const f = fixture(t);
-  const base = f.commit('kernel/crates/old owner\n.rs');
-  f.git('mv', 'kernel/crates/old owner\n.rs', 'packages-ui-moved.ts'); f.commit();
+  const oldPath = process.platform === 'win32' ? 'kernel/crates/old owner 中文.rs' : 'kernel/crates/old owner\n.rs';
+  const base = f.commit(oldPath);
+  f.git('mv', oldPath, 'packages-ui-moved.ts'); f.commit();
   const paths = changedPaths({ cwd: f.cwd, eventName: 'push', event: { before: base } });
-  assert.ok(paths.includes('kernel/crates/old owner\n.rs'));
+  assert.ok(paths.includes(oldPath));
   assert.equal(classifyChanges(paths).rust, true);
   const nextBase = f.git('rev-parse', 'HEAD');
   f.git('rm', 'packages-ui-moved.ts'); f.commit();
@@ -234,7 +235,7 @@ test('independent Linux lanes restore the same kernel and retain their real runt
     const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
     assert.equal(checkout.with.ref, '${{ inputs.source_sha || github.sha }}');
     assert.equal(steps.find(step => step.uses?.startsWith('actions/setup-node@')).with['node-version'], 24);
-    assert.equal(steps.find(step => step.uses?.startsWith('oven-sh/setup-bun@')).with['bun-version'], '1.3.14');
+    assert.equal(steps.find(step => step.uses === './.github/actions/setup-bun').with['bun-version'], '1.3.14');
     const download = steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     assert.equal(download.with.name, artifact);
     assert.equal(download.with.path, '.build-input/kernel');
@@ -341,7 +342,9 @@ test('release automation can build an older source without borrowing its tool se
   const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@') && step.with.path
     && setup.uses.startsWith(`./${step.with.path}/`));
   assert.equal(checkout.with.ref, '${{ github.sha }}');
-  assert.ok(checkout.with['sparse-checkout'].includes('.github/actions/android-setup'));
+  const setupPath = setup.uses.slice(`./${checkout.with.path}/`.length);
+  assert.ok(checkout.with['sparse-checkout'].trim().split('\n').some(directory =>
+    setupPath === directory || setupPath.startsWith(`${directory}/`)));
   assert.ok(steps.indexOf(checkout) < steps.indexOf(setup));
   const build = release.jobs['native-build'];
   assert.equal(build['runs-on'], 'ubuntu-22.04');

@@ -1,0 +1,43 @@
+name: Varin Bun toolchain
+description: Use the pinned Bun release, with the same official npm release when GitHub downloads fail
+inputs:
+  bun-version:
+    required: true
+    description: Exact Bun version
+runs:
+  using: composite
+  steps:
+    - id: github
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      continue-on-error: true
+      with:
+        bun-version: ${{ inputs.bun-version }}
+    - name: Install the same Bun release from npm
+      if: steps.github.outcome == 'failure'
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+      run: |
+        set -euo pipefail
+        npm install --prefix "$RUNNER_TEMP/varin-bun" --no-audit --no-fund --registry=https://registry.npmjs.org "bun@$BUN_VERSION"
+        node --input-type=module <<'NODE'
+        import fs from 'node:fs';
+        import path from 'node:path';
+        import { execFileSync } from 'node:child_process';
+        const root = path.join(process.env.RUNNER_TEMP, 'varin-bun');
+        const pkgDir = path.join(root, 'node_modules/bun');
+        const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+        const executable = path.resolve(pkgDir, pkg.bin.bun);
+        if (execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim() !== process.env.BUN_VERSION) {
+          throw new Error('npm Bun binary does not match the requested release');
+        }
+        // Expose the executable itself: native child_process callers on Windows
+        // cannot launch npm's .cmd shim without introducing an extra shell.
+        const bin = path.join(root, 'bin');
+        fs.mkdirSync(bin, { recursive: true });
+        const binary = path.join(bin, process.platform === 'win32' ? 'bun.exe' : 'bun');
+        fs.copyFileSync(executable, binary);
+        fs.chmodSync(binary, 0o755);
+        fs.linkSync(binary, path.join(bin, process.platform === 'win32' ? 'bunx.exe' : 'bunx'));
+        fs.appendFileSync(process.env.GITHUB_PATH, `${bin}\n`);
+        NODE
