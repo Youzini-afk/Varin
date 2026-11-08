@@ -8,7 +8,8 @@ import { Icon } from '@/components/icon/Icon';
 import { BotMemoryPreferences } from './BotMemoryPreferences';
 import { SettingsFieldRow, SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { VarinLogo } from '@/components/ui/VarinLogo';
+import { BotFigure } from '@/workbenches/bot/BotFigure';
+import { BotAppearanceSettings } from './BotAppearanceSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -203,7 +204,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
       <div className="mb-5 flex min-w-0 flex-wrap items-center justify-between gap-3">
         {selected ? <BotMenu bot={selected} persistentActions disabled={busy !== null || organization.pending} onAction={value => action(selected, value)} onMove={organization.ready ? () => setOrganizationDialog({ kind: 'move', bot: selected }) : undefined}>
           <div className="flex min-w-0 items-center gap-3 py-1 pr-2">
-            <VarinLogo decorative width={24} height={24} className="shrink-0 text-muted-foreground" />
+            <BotFigure bot={selected} state="idle" size={28} still />
             <div className="min-w-0">
               {!initialBotId && bots.length > 1 ? <DropdownMenu>
                 <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" disabled={busy !== null}
@@ -215,6 +216,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
                     {organization.sections.filter(section => section.bots.length > 0).map(section => <React.Fragment key={section.group ? `group:${section.group.id}` : 'ungrouped'}>
                       {organization.value.groups.length > 0 && <DropdownMenuLabel>{section.group?.name ?? t('bot.groups.ungrouped')}</DropdownMenuLabel>}
                     {section.bots.map(bot => <DropdownMenuRadioItem key={bot.id} value={bot.id}>
+                      <BotFigure bot={bot} state="idle" size={22} still />
                       <span className="min-w-0 flex-1 truncate">{bot.name}</span>
                       <span className="ml-3 shrink-0 typography-micro text-muted-foreground">{botStatusLabel(bot)}</span>
                     </DropdownMenuRadioItem>)}</React.Fragment>)}
@@ -244,6 +246,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
       <div id={`${panelId}-profile`} role="tabpanel" aria-label={t('bot.profile.title')} className="settings-tab-panel" hidden={tab !== 'profile'}>
       {selected ? <div className="space-y-6">
         {selected.deletion || !selected.archived ? <BotActivityBanner bot={selected} busy={busy !== null} onAction={(value) => action(selected, value)} /> : null}
+        <BotAppearanceSettings key={selected.id} bot={selected} disabled={locked} onChanged={saved => setBots(list => list?.map(item => item.id === saved.id ? saved : item) ?? null)} />
         <SettingsFieldRow label={t('settings.bots.name.label')}>
           <Input aria-label={t('settings.bots.name.label')} value={name} disabled={locked} onChange={(event) => setName(event.target.value)} />
         </SettingsFieldRow>

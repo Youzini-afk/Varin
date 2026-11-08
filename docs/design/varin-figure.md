@@ -75,4 +75,4 @@
 - `botStageRenderer.ts`：在舞台图层里画团队和飞行物，跟着形象的帧走，形象停帧它也停。
 - `varinFigurePalette.ts`：按当前主题的重点色给换色部位取色，OKLab 换算沿用桌宠配色解析器的实现。
 - `BotFigure.tsx`：React 外壳。接收一个姿态（`BotFigurePose`，即状态加舞台细化），Bot 区的宽形象另外接收团队和时刻（`stage`）。
-- 所有 Bot 共用这一个形象；二次元桌宠保持现状。
+- 这是内置 Varin 的默认形象。每个 Bot 现可指定独立配色或导入自定义形象，入口与外部格式见 [Bot 形象](../bot-appearances.md)；二次元桌宠保持独立。

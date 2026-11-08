@@ -30,7 +30,7 @@ export function BotMobileTitle({ bot, figure, line, open, onToggle, model }: {
   const work = model?.work.filter(item => item.lead && item.status && item.sessionThreadId === model.session?.identity.threadId) ?? [];
   return <Popover.Root open={previewOpen} onOpenChange={setPreviewOpen}><Popover.Trigger render={<button type="button" className="bot-mobile-title bot-mobile-capsule" data-open={previewOpen || undefined}
     aria-label={`${t(open ? 'bot.mobile.closePanel' : 'bot.mobile.openPanel', { name: bot.name })}, ${state}`}>
-    <BotFigure state={figure} size={26} still />
+    <BotFigure bot={bot} state={figure} size={26} still />
     <span className="bot-mobile-title-text">
       <span className="bot-mobile-title-name">{bot.name}</span>
       <span className="bot-mobile-title-state" data-tone={line.tone === 'warn' ? 'warn' : undefined}><SwapText text={state} resize className="min-w-0" /></span>

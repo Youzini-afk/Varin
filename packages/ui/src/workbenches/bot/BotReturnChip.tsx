@@ -23,7 +23,7 @@ export function BotReturnChip() {
     aria-label={t('bot.return.back', { name: point.botName, session: point.sessionTitle })}
     onClick={() => { setLeaving(true); void returnToBot(point).finally(() => setLeaving(false)); }}>
     <Icon name="arrow-left-s" className="size-3.5 shrink-0" />
-    <BotFigure state="idle" size={15} still />
+    <BotFigure botId={point.botId} state="idle" size={15} still />
     <span className="truncate">{point.botName} · {point.sessionTitle}</span>
   </button>;
 }

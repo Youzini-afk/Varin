@@ -713,12 +713,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork} onActivity={stage.onActivity}
           inheritWorkbenchModel={!selected?.model}
           preferredModel={selected && entryResolution?.botId === selected.id && entryResolution.profileModelKey === profileModelKey ? entryResolution.model : null} readOnly={readOnly || conversationArchived}
-          emptyHero={selected ? { visual: <BotFigure state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
+          emptyHero={selected ? { visual: <BotFigure bot={selected} state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refreshWork(); }} />
       </MemoryNavigationContext.Provider></ChildNavigationContext.Provider>
       : <p role="alert">Conversation service unavailable</p>}</div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-        <BotFigure state={selected ? figure : 'idle'} size={64} />
+        <BotFigure {...(selected ? { bot: selected } : {})} state={selected ? figure : 'idle'} size={64} />
         <h1 className="typography-title">{selected?.name ?? 'Varin'}</h1>
         {busy || (!bots && !error) ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {bots && !bots.some(bot => bot.archived === showArchived) ? <>

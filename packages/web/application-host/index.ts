@@ -1516,6 +1516,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); },
     onDeleted: (botId) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }); botPresence.schedule(); },
     onOrganizationChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-organization-changed', properties: {} }); },
+    onAppearanceLibraryChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-appearance-library-changed', properties: {} }); },
     removeData: createBotDataCleanup({
       dataDir: VARIN_DATA_DIR, hostId,
       deleteAgentScope: async bot => {

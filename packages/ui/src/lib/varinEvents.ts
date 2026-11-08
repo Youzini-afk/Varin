@@ -50,6 +50,7 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | HarnessKnowl
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
   | { type: 'bot-organization-changed' }
+  | { type: 'bot-appearance-library-changed' }
   | { type: 'bot-work-changed' }
   | { type: 'bot-presence'; botId: string; presence: BotPresence }
   | ({ type: 'computer-activity' } & ComputerActivityEntry)
@@ -208,6 +209,10 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
   if (envelope.type === 'varin:bot-organization-changed') {
     for (const listener of listeners) listener({ type: 'bot-organization-changed' });
+    return;
+  }
+  if (envelope.type === 'varin:bot-appearance-library-changed') {
+    for (const listener of listeners) listener({ type: 'bot-appearance-library-changed' });
     return;
   }
   if (envelope.type === 'varin:bot-work-changed') {

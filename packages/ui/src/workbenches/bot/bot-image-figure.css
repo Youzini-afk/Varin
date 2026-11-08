@@ -1,0 +1,11 @@
+.bot-image-pending { display:inline-flex; align-items:center; justify-content:center; }
+.bot-image-artwork { position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:100%; overflow:hidden; }
+.bot-image-artwork[data-portrait] { border-radius:22%; }
+.bot-image-artwork > img { display:block; width:100%; height:100%; animation:bot-image-enter var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-custom-figure { position:relative; display:inline-flex; justify-content:center; align-items:center; flex-shrink:0; }
+.bot-custom-body { display:block; width:100%; height:100%; }
+.bot-custom-figure[data-wide] .bot-custom-body { position:absolute; bottom:6%; height:90%; width:190px; max-width:70%; }
+.bot-custom-stage { pointer-events:none; position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.bot-custom-figure[data-state=offline] .bot-custom-body { opacity:.65; }
+@keyframes bot-image-enter { from { opacity:0; } to { opacity:1; } }
+:root[data-motion=off] .bot-image-artwork > img { animation:none; }

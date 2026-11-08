@@ -2,7 +2,7 @@ import type { AgentAvatarId } from '@varin/protocol';
 import { AGENT_AVATAR_ART } from '@/components/ui/agent-avatar-art';
 import type { BotMemberStatus, BotStageEvent, BotStageLead, BotStageMember, BotStageOutcome } from './botStageDirector';
 import { BotReactionGrader, type BotReactionInput } from './botStageReactions';
-import type { VarinFigureRig, VarinFigureStageLayers } from './varinFigureRig';
+import type { BotStageActor, BotStageLayers } from './botStageActor';
 
 /**
  * The Bot panel's stage (docs/design/bot-ui.md §5.7.2, docs/design/varin-figure.md): her team on the
@@ -125,8 +125,8 @@ export class BotStageRenderer {
   private started = false;
   private disposed = false;
 
-  constructor(private readonly rig: VarinFigureRig) {
-    const layers: VarinFigureStageLayers | null = rig.stageLayers;
+  constructor(private readonly rig: BotStageActor) {
+    const layers: BotStageLayers | null = rig.stageLayers;
     if (!layers) throw new Error('The stage needs the wide figure');
     this.team = el('g', {}, layers.team);
     this.ledge = el('g', {}, layers.ledge);
@@ -149,7 +149,7 @@ export class BotStageRenderer {
     el('rect', { x: -110, y: -74, width: 220, height: 148, rx: 18, fill: '#ffffff', stroke: '#d6d9e4', 'stroke-width': 5 }, this.card);
     rig.paintAccent(el('rect', { x: -80, y: -46, width: 110, height: 14, rx: 7, fill: ACCENT }, this.card), 'fill', ACCENT);
     for (const [y, width] of [[-14, 160], [12, 130], [38, 150]]) rig.paintAccent(el('rect', { x: -80, y, width, height: 12, rx: 6, fill: ACCENT_SOFT }, this.card), 'fill', ACCENT_SOFT);
-    rig.onFrame = dt => this.frame(dt);
+    rig.onFrame = dt => { this.frame(dt); return this.seats.size > 0 || this.flights.length > 0 || this.letters.length > 0 || this.timers.length > 0; };
     rig.onResize = () => { this.dirty = true; if (!this.rig.stageLive) this.snap(); };
     rig.onStagePause = () => this.snap();
   }

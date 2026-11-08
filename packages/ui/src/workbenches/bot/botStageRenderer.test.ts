@@ -17,6 +17,8 @@ vi.mock('@/lib/motion/frame', () => ({
 import type { BotMemberStatus, BotStageEvent, BotStageLead } from './botStageDirector';
 import { BotStageRenderer, type BotStageFeed } from './botStageRenderer';
 import { VarinFigureRig } from './varinFigureRig';
+import { CustomBotStage } from './customBotStage';
+import { DEFAULT_FIGURE_ACCENT } from './varinFigurePalette';
 
 const AVATARS: AgentAvatarId[] = ['slope-lilac', 'dome-ivory', 'taper-sage', 'pebble-blue', 'overlap-coral', 'notch-ochre'];
 const lead = (n: number, status: BotMemberStatus = 'thinking', subs = 0): BotStageLead => ({
@@ -76,6 +78,26 @@ describe('Bot stage', () => {
     expect(frames.queue).toHaveLength(1);
     renderer.dispose(); rig.dispose();
     expect(frames.queue).toHaveLength(0);
+  });
+
+  it('keeps the work stage, reports and visibility lifecycle working with an imported character', () => {
+    vi.stubGlobal('MutationObserver', window.MutationObserver);
+    Object.defineProperty(document, 'hidden', { get: () => visibility === 'hidden', configurable: true });
+    const actor = new CustomBotStage(host, 'supervising', DEFAULT_FIGURE_ACCENT, false);
+    const renderer = new BotStageRenderer(actor);
+    renderer.update({ leads: [lead(1)], events: [], typing: false });
+    expect(actor.stageLayers.team.firstElementChild?.children.length).toBe(1);
+    renderer.update({ leads: [lead(1)], events: [{ id: 1, event: { kind: 'lead-report', lead: 'lead-1', session: 'chat', outcome: 'ok' } }], typing: false });
+    expect(frames.queue).toHaveLength(1);
+    run(2);
+    expect(actor.stageLayers.fx.firstElementChild?.children.length).toBe(0);
+    visibility = 'hidden'; document.dispatchEvent(new window.Event('visibilitychange'));
+    expect(frames.queue).toHaveLength(0);
+    visibility = 'visible'; document.dispatchEvent(new window.Event('visibilitychange'));
+    expect(frames.queue).toHaveLength(1);
+    renderer.dispose(); actor.dispose();
+    expect(frames.queue).toHaveLength(0);
+    expect(host.children.length).toBe(0);
   });
 
   it('takes in a report even when its receipt arrives before the envelope lands', () => {

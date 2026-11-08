@@ -10,6 +10,7 @@ import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { projectBotPresence } from './bot-presence.js';
 import type { MemoryOrganizer } from '../memory/memory-organizer.js';
 import { BotOrganizationConflict } from './bot-organization.js';
+import { registerBotAppearanceRoutes } from './bot-appearance-routes.js';
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -63,6 +64,7 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
 };
 
 export function registerBotRoutes(app: Express, { bots, computers, memory, organizer, work, requireAuth = noAuth }: BotRoutesOptions): void {
+  registerBotAppearanceRoutes(app, bots, requireAuth);
   app.get('/api/harness/bots/organization', requireAuth, async (_request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     try { response.json(await bots.organization.read()); }
@@ -181,6 +183,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
         ...(body.name !== undefined ? { name: body.name as string } : {}),
         ...(body.instructions !== undefined ? { instructions: body.instructions as string | null } : {}),
         ...(body.model !== undefined ? { model: parseModel(body.model) ?? null } : {}),
+        ...(body.appearance === undefined ? {} : { appearance: body.appearance }),
       });
       if (!bot) throw new HarnessServiceError("not-found", "Unknown or archived bot");
       response.json({ bot });

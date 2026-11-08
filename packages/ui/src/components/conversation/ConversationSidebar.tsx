@@ -396,7 +396,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-normal">{title}</span>
             {session.botId ? <span className="inline-flex shrink-0 opacity-70" title={t('bot.sidebar.delegated')} aria-label={t('bot.sidebar.delegated')} role="img">
-              <BotFigure state="idle" size={14} still />
+              <BotFigure botId={session.botId} state="idle" size={14} still />
             </span> : null}
             {extensionDecoration}
             {pendingDialogCount > 0 ? (

@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotAppearanceSettings } from '@/components/sections/bots/BotAppearanceSettings';
 import { getRuntimeEndpointGeneration, type BotModelSelection } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -77,6 +78,7 @@ export function BotProfilePage({ leaving, guard }: { leaving: boolean; guard: Re
     </header>
     <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-24 pt-4">
       <div className="flex flex-col gap-[18px]">
+        <BotAppearanceSettings key={bot.id} bot={bot} disabled={locked} onChanged={model.onBotChanged} />
         <label className={field}><span className={label}>{t('settings.bots.name.label')}</span>
           <Input value={name} disabled={locked} onChange={event => setName(event.target.value)} aria-label={t('settings.bots.name.label')} />
         </label>

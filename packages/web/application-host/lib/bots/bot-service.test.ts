@@ -58,6 +58,17 @@ const setup = async () => {
   return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, listSessions, createSession, failWrite: () => { failWrite = true; } };
 };
 
+it('persists each Bot appearance without propagating model instructions or overwriting profile edits', async () => {
+  const { service, recreate, applyProfile } = await setup();
+  const bot = await service.create({ name: 'Moon', instructions: 'Keep it clear' });
+  await service.update(bot.id, { appearance: { kind: 'varin', color: '#ab97cd' } });
+  await service.update(bot.id, { name: 'Moonlight' });
+  expect(await recreate().get(bot.id)).toMatchObject({ name: 'Moonlight', instructions: 'Keep it clear', appearance: { kind: 'varin', color: '#ab97cd' } });
+  expect(applyProfile).not.toHaveBeenCalled();
+  await expect(service.update(bot.id, { appearance: { kind: 'custom', assetId: 'a'.repeat(64), portrait: { x: .5, y: .5, scale: 1 }, figure: { x: .5, y: .5, scale: 1 } } })).rejects.toThrow('not found');
+  expect((await service.get(bot.id))?.appearance).toEqual({ kind: 'varin', color: '#ab97cd' });
+});
+
 it('persists thinking-only profile edits, propagates them and restores the model default', async () => {
   const { service, recreate, applyProfile } = await setup();
   const model = { providerId: 'channel', modelId: 'model' };

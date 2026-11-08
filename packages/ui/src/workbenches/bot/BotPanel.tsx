@@ -61,7 +61,7 @@ function BotStage() {
       </DropdownMenu>
     </div>
     <div className="bot-stage-figure">
-      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} stage={model.stage} size={216} wide label={bot.name} />
+      <BotFigure key={bot.id} bot={bot} className="bot-figure-arrive" state={model.figure} stage={model.stage} size={216} wide label={bot.name} />
     </div>
     <div className="bot-stage-text">
       {/* The edit badge sits by the name, leaving the ledge to her team (§5.7.2). */}

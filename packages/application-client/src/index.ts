@@ -64,3 +64,4 @@ export * from './transport/document-watch-events.js';
 export * from "./plugin-center.js";
 
 export * from "./plugin-install-intent.js";
+export * from './bot-appearance.js';

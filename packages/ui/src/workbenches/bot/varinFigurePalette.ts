@@ -27,6 +27,13 @@ export function resolveFigureAccent(theme: Theme | null | undefined): FigureAcce
   if (!accent) return DEFAULT_FIGURE_ACCENT;
   if ((theme?.metadata?.id === 'varin-dark' && accent.hex === '7aa7ef')
     || (theme?.metadata?.id === 'varin-light' && accent.hex === '4b6fac')) return DEFAULT_FIGURE_ACCENT;
+  return resolveFigureColor(`#${accent.hex}`);
+}
+
+/** The same artwork palette, independently selected for an individual Bot. */
+export function resolveFigureColor(color: string): FigureAccent {
+  const accent = parseAccent(color);
+  if (!accent) return DEFAULT_FIGURE_ACCENT;
   const [La, aa, ba] = toLab(accent.rgb), chroma = Math.hypot(aa, ba);
   const neutral = chroma < 0.005;
   // A small lightness bias separates pine from mint and brown from apricot, as for the companion.

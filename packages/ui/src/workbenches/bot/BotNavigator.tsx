@@ -162,7 +162,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
                 else setFolded(foldKey, open);
               }}>
               <Icon name="arrow-down-s" className="bot-nav-chevron size-3 shrink-0" />
-              <BotFigure state={figure} size={22} still />
+              <BotFigure bot={bot} state={figure} size={22} still />
               <span className="truncate">{bot.name}</span>
               {bot.pinnedAt ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" /> : null}
               <span className={cn('ml-auto shrink-0 text-[11.5px] font-normal', short?.tone === 'warn' ? 'text-[var(--status-warning)]' : 'text-muted-foreground')}>

@@ -671,6 +671,11 @@ impl Storage {
                     return Err(KernelError::Operation("Bot organization requires groups and ungrouped lists".into()));
                 }
             }
+            "bot.appearance" => {
+                derived("bot.appearance")?;
+                required("name")?;
+                state_in(&["active"])?;
+            }
             "computer.machine" => {
                 derived("computer.machine")?;
                 required("name")?;
@@ -929,6 +934,7 @@ impl Storage {
             "settings.operation",
             "bot.profile",
             "bot.organization",
+            "bot.appearance",
             "agent.personalization",
             "ui.work",
             "ui.view",
@@ -2351,6 +2357,36 @@ mod artifact_page_tests {
             assert!(!storage.conn.query_row("SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1)", [format!("{kind}-original")], |row| row.get::<_, bool>(0)).unwrap());
         }
         drop(storage); std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bot_appearance_record_retains_media_across_restart_and_releases_it() {
+        let root = std::env::temp_dir().join(format!("bot-appearance-{}", Uuid::new_v4()));
+        let open = || {
+            let mut storage = Storage::open(&root, "host").unwrap();
+            storage.issue_grant(&json!({"grantId":"owner","hostGeneration":"generation","capabilities":["storage.read","storage.write","storage.maintenance"],
+                "owningWorkspace":"__varin_bots__","executionWorkspace":"__varin_bots__","pathScopes":[""]}),
+                "host", "generation", &root.to_string_lossy(), "epoch").unwrap();
+            storage
+        };
+        let dispatch = |storage: &mut Storage, method: &str, input: &Value| {
+            let (grant, input) = storage.authorize(Some("owner"), "epoch", "host", "generation", method, input).unwrap();
+            storage.dispatch(method, &input, Some("owner"), &grant).unwrap()
+        };
+        let hash = format!("sha256-{}", hex::encode(Sha256::digest(b"image")));
+        let mut storage = open();
+        dispatch(&mut storage, "storage.putBlob.begin", &json!({"operationId":"art-blob","streamId":"image","workspaceId":"__varin_bots__","byteLength":5,"expectedHash":hash}));
+        dispatch(&mut storage, "storage.putBlob.chunk", &json!({"streamId":"image","sequence":0,"bytesBase64":"aW1hZ2U="}));
+        let blob = dispatch(&mut storage, "storage.putBlob.finish", &json!({"operationId":"art-blob","streamId":"image","workspaceId":"__varin_bots__","expectedHash":hash}));
+        dispatch(&mut storage, "storage.record.put", &json!({"operationId":"art-save","workspaceId":"__varin_bots__","recordId":"bot.appearance:figure","recordType":"bot.appearance",
+            "state":"active","payloadJson":json!({"id":"figure","name":"Figure"}).to_string(),"ownerIds":[blob["ownerId"]],"references":[{"slot":"image","objectHash":hash}]}));
+        drop(storage);
+        let mut reopened = open();
+        let image = dispatch(&mut reopened, "storage.getBlob", &json!({"hash":hash,"recordId":"bot.appearance:figure","slot":"image"}));
+        assert_eq!(image["bytesBase64"], "aW1hZ2U=");
+        dispatch(&mut reopened, "storage.record.release", &json!({"operationId":"art-remove","workspaceId":"__varin_bots__","recordId":"bot.appearance:figure"}));
+        assert!(!reopened.conn.query_row("SELECT EXISTS(SELECT 1 FROM domain_record_refs WHERE workspace_id='__varin_bots__' AND record_id='bot.appearance:figure')", [], |row| row.get::<_, bool>(0)).unwrap());
+        drop(reopened); std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
