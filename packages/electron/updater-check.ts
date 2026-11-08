@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 const MISSING_UPDATE_FEED_RE =
   /404|ENOTFOUND|Cannot find (?:channel|latest)|latest-linux(?:-arm64)?\.yml|HttpError:\s*404|status code 404/i;
 
@@ -7,6 +9,10 @@ export const isMissingUpdateFeedError = (error: unknown): boolean => {
 };
 
 export interface DesktopUpdateInfo {
+  files?: unknown;
+  path?: unknown;
+  sha512?: unknown;
+  packages?: unknown;
   releaseDate?: string | null | undefined;
   releaseNotes?: unknown;
   version: string;
@@ -26,6 +32,7 @@ export const checkForDesktopUpdate = async <Result extends DesktopUpdateResult>(
   autoUpdater,
   currentVersion,
   compareVersions,
+  pendingUpdate,
 }: {
   autoUpdater: { checkForUpdates(): Promise<Result | null> };
   compareVersions(left: string, right: string): number;
@@ -57,11 +64,21 @@ export const checkForDesktopUpdate = async <Result extends DesktopUpdateResult>(
     (typeof updateInfo?.version === 'string' && updateInfo.version) ||
     currentVersion;
   const available = compareVersions(nextVersion, currentVersion) > 0;
+  const previous = pendingUpdate?.electronUpdate?.updateInfo;
+  const samePayload = pendingUpdate?.version === nextVersion && previous && updateInfo
+    && isDeepStrictEqual(
+      [previous.files, previous.path, previous.sha512, previous.packages],
+      [updateInfo.files, updateInfo.path, updateInfo.sha512, updateInfo.packages],
+    );
   return {
     available,
     updateInfo,
     updateResult,
     nextVersion,
-    pendingUpdate: available && updateResult ? { version: nextVersion, electronUpdate: updateResult } : null,
+    // Release notes/dates can change without replacing the downloaded installer.
+    // Keep its record alive so a download completing during the check is not lost.
+    pendingUpdate: available && updateResult
+      ? samePayload ? pendingUpdate : { version: nextVersion, electronUpdate: updateResult }
+      : null,
   };
 };

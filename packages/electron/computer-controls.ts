@@ -44,6 +44,8 @@ export function createComputerControls() {
       window = new BrowserWindow({ ...bounds(), show: false, frame: false, transparent: true, focusable: false,
         resizable: false, skipTaskbar: true, hasShadow: false, fullscreenable: false, title: nativeText('Varin Computer controls'),
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'varin-computer-controls' } });
+      const created = window;
+      created.on('closed', () => { if (window === created) window = undefined; });
       window.setAlwaysOnTop(true, 'floating'); window.setContentProtection(true);
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       window.webContents.on('will-navigate', (event, url) => {

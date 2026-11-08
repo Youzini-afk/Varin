@@ -1596,7 +1596,7 @@ const spawnLocalServer = async () => {
   const computerControls = createComputerControls();
   desktopComputerControls?.dispose(); desktopComputerControls = computerControls;
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = computerFeedback;
-  app.once('before-quit', () => { computerFeedback.dispose(); computerControls.dispose(); });
+  // The Host owns these surfaces until killSidecar; before-quit can be cancelled.
   desktopBrowser ??= new ElectronBrowserOwner({ scratchDirectory: path.join(app.getPath('userData'), 'browser-transfers') });
   desktopBrowser.subscribe(event => {
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && isTrustedLocalRendererUrl(window.webContents.getURL(), {
@@ -4753,6 +4753,7 @@ const handleInvoke = async (
       state.pendingUpdate = pendingUpdate;
       return {
         available,
+        downloaded: pendingUpdate?.downloaded === true,
         currentVersion,
         version: available ? nextVersion : null,
         body: body || null,

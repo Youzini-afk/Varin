@@ -23,6 +23,7 @@ type ManagedRemoteTunnelPreset = {
 };
 export type UpdateInfo = {
   available: boolean;
+  downloaded?: boolean;
   version?: string;
   currentVersion: string;
   body?: string;
@@ -675,6 +676,7 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
   if (!result) return null;
   return {
     available: result.available,
+    downloaded: result.downloaded,
     currentVersion: result.currentVersion,
     ...(result.version === null ? {} : { version: result.version }),
     ...(result.body === null ? {} : { body: result.body }),

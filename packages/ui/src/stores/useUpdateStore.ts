@@ -178,6 +178,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
         set({
           checking: false,
           available: desktopInfo?.available ?? false,
+          downloaded: desktopInfo?.downloaded === true,
           info: desktopInfo,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
@@ -231,6 +232,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       }
 
       set((state) => ({
+        downloaded: desktopInfo.downloaded === true,
         info: state.info
           ? {
             ...state.info,

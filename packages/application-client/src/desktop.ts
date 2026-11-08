@@ -147,6 +147,7 @@ export type DesktopHostsConfigInput = {
 
 export type DesktopUpdateCheckResult = {
   available: boolean;
+  downloaded: boolean;
   currentVersion: string;
   version: string | null;
   body: string | null;

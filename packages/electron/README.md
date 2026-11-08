@@ -77,12 +77,18 @@ extension broker must complete a real IPC handshake and clean shutdown before an
 Ordinary app/tray quit confirms background-work risk, then lets Electron close its windows and run
 `beforeunload` while the embedded Host is still available. `quit-lifecycle.ts` drains services at
 `will-quit`, after renderer clients have disconnected, and then exits. A page that blocks unloading
-cancels the pending quit; tray state and the Host remain available for another attempt. Update install
+cancels the pending quit; tray state and the Host remain available for another attempt. Computer
+controls and feedback are disposed with Host shutdown, not during the cancelable quit request;
+utility windows closed before an unload veto can be recreated by their next presentation update. Update install
 retains the updater's existing quit/install sequence.
 
 ## Desktop IPC contract
 
 All `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@varin/application-client/desktop` subpath.
+
+Update checks return the native pending installer’s downloaded state. A repeated check keeps a
+completed download only for the same version and payload; renderer polling projects that state
+instead of retaining a downloaded flag for a different release.
 
 The contract exports:
 
