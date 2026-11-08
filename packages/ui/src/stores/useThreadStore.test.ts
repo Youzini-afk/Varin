@@ -143,3 +143,124 @@ it('sends a first input only once, preserves later typing, and retries unknown a
     expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' })]);
   expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'Follow-up being typed', firstSend: undefined, pendingInput: undefined });
 });
+
+
+it('selects the accepted creation immediately and does not replace a newer draft after the catalog loads', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const draft = useThreadStore.getState().openDraft();
+  const catalog = deferred<ThreadSummary[]>();
+  f.list.mockImplementationOnce(() => catalog.promise);
+  let accepted: ThreadIdentity | undefined;
+  const creating = useThreadStore.getState().materializeDraft(draft, { waitForCatalog: false }).then(value => { accepted = value; });
+  try {
+    await settle();
+    expect(accepted).toEqual(identity);
+    expect(useThreadDraftStore.getState().drafts[draft].identity).toEqual(identity);
+    expect(useThreadStore.getState().selectedDraftKey).toBeNull();
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(threadComposerKey(threadHostKey(), identity)).toBe(draft);
+    const newer = useThreadStore.getState().openDraft();
+    catalog.resolve([summary()]); await creating; await settle();
+    expect(useThreadStore.getState().selectedDraftKey).toBe(newer);
+    expect(useThreadStore.getState().selectedIdentity).toBeNull();
+  } finally { catalog.resolve([summary()]); await creating; }
+});
+
+it('ignores a pre-creation catalog absence but retains authoritative removal on a current read', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const draft = useThreadStore.getState().openDraft();
+  const beforeCreation = deferred<ThreadSummary[]>();
+  const afterCreation = deferred<ThreadSummary[]>();
+  f.list.mockImplementationOnce(() => beforeCreation.promise).mockImplementationOnce(() => afterCreation.promise);
+  const refreshing = useThreadStore.getState().loadCatalog();
+  try {
+    await useThreadStore.getState().materializeDraft(draft, { waitForCatalog: false });
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    beforeCreation.resolve([]); await settle();
+    expect(useThreadStore.getState().threads).toEqual([]);
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(useThreadStore.getState().selectedDraftKey).toBeNull();
+    afterCreation.resolve([summary()]); await refreshing;
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    f.list.mockResolvedValueOnce([]);
+    await useThreadStore.getState().loadCatalog();
+    expect(useThreadStore.getState().selectedIdentity).toBeNull();
+  } finally { beforeCreation.resolve([]); afterCreation.resolve([summary()]); await refreshing; }
+});
+
+it('does not supersede newer pending navigation when creation returns', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const draft = useThreadStore.getState().openDraft();
+  const creation = deferred<ThreadIdentity>();
+  vi.mocked(f.api.create).mockImplementationOnce(() => creation.promise);
+  const creating = useThreadStore.getState().materializeDraft(draft, { waitForCatalog: false });
+  const catalog = deferred<ThreadSummary[]>();
+  const newerIdentity = { ...identity, threadId: 'thread-b', branchId: 'main-b' };
+  const newerThread = summary({ thread_id: newerIdentity.threadId, main_branch_id: newerIdentity.branchId,
+    branches: [{ branch_id: newerIdentity.branchId, head: null, active_run_id: null, latest_run: null }] });
+  f.list.mockImplementationOnce(() => catalog.promise).mockResolvedValue([newerThread]);
+  const selecting = useThreadStore.getState().selectThread(newerIdentity);
+  try {
+    creation.resolve(identity); await creating;
+    expect(useThreadStore.getState().selectedIdentity).toBeNull();
+    catalog.resolve([newerThread]); await expect(selecting).resolves.toEqual(newerIdentity);
+    expect(useThreadStore.getState().selectedIdentity).toEqual(newerIdentity);
+  } finally { creation.resolve(identity); catalog.resolve([newerThread]); await creating; await selecting; }
+});
+
+it('does not restore the accepted creation after a Host switch during its catalog refresh', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const draft = useThreadStore.getState().openDraft();
+  const catalog = deferred<ThreadSummary[]>();
+  f.list.mockImplementationOnce(() => catalog.promise);
+  try {
+    await useThreadStore.getState().materializeDraft(draft, { waitForCatalog: false });
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    for (const listener of endpoint.before) listener();
+    endpoint.url = 'https://host-after-creation'; endpoint.generation += 1;
+    f.list.mockResolvedValue([]);
+    for (const listener of endpoint.after) listener();
+    const newer = useThreadStore.getState().openDraft();
+    catalog.resolve([summary()]); await settle();
+    expect(useThreadStore.getState().hostKey).toBe(threadHostKey());
+    expect(useThreadStore.getState().selectedIdentity).toBeNull();
+    expect(useThreadStore.getState().selectedDraftKey).toBe(newer);
+    expect(useThreadDraftStore.getState().drafts[draft].identity).toEqual(identity);
+  } finally { catalog.resolve([summary()]); await settle(); }
+});
+
+it('merges a large refreshed catalog with linear identity lookups and preserves newer receipts', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const size = 1000;
+  let inspected = 0;
+  const previous = Array.from({ length: size }, (_, index) => ({ ...summary({ revision: 3, title: `Newer ${index}` }),
+    get thread_id() { inspected += 1; return `thread-${index}`; } }));
+  useThreadStore.setState({ threads: previous });
+  f.list.mockResolvedValue(Array.from({ length: size }, (_, index) => summary({ thread_id: `thread-${index}`, revision: 2, title: 'older' })));
+  await useThreadStore.getState().loadCatalog();
+  expect(useThreadStore.getState().threads).toHaveLength(size);
+  expect(useThreadStore.getState().threads.at(-1)?.title).toBe(`Newer ${size - 1}`);
+  expect(inspected).toBeLessThan(size * 4);
+});
+
+
+it('submits the first message while the sidebar catalog is still loading', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const key = useThreadStore.getState().openDraft();
+  useThreadDraftStore.getState().patch(key, { text: 'Send without waiting' });
+  const catalog = deferred<ThreadSummary[]>();
+  f.list.mockImplementationOnce(() => catalog.promise);
+  const submit = vi.fn().mockResolvedValue({ run_id: 'accepted-run', input_id: 'accepted-input' });
+  f.api.submit = submit;
+  const request = { key: 'first-input-during-catalog', text: 'Send without waiting', editorText: 'Send without waiting', images: [], files: [],
+    model: { providerId: 'account', modelId: 'model' }, editorContext: [], inlineContext: [], status: 'sending' as const };
+  const sending = sendThreadDraft(f.api, key, request);
+  try {
+    await settle();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, key: request.key, expectedHead: null, text: request.text }));
+    expect(useThreadDraftStore.getState().drafts[key].firstMessageReceipt?.inputId).toBe('accepted-input');
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(useThreadStore.getState().selectedDraftKey).toBeNull();
+  } finally { catalog.resolve([summary()]); await sending; await settle(); }
+});
