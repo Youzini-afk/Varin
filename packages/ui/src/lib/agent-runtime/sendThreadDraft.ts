@@ -60,7 +60,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
   patch({ firstSend: { ...request, status: 'sending', error: undefined }, sendError: undefined });
   const task = (async () => {
     try {
-      const identity = await useThreadStore.getState().materializeDraft(draftKey);
+      const identity = await useThreadStore.getState().materializeDraft(draftKey, { waitForCatalog: false });
       assertHost();
       if (!read().pendingInput) {
         const preparedSource = read().preparedSource ?? await prepare(identity);

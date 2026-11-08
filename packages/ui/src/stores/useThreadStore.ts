@@ -29,7 +29,7 @@ interface ThreadNavigationState {
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
   openDraft(options?: { workspacePath?: string }): string;
-  materializeDraft(draftKey: string): Promise<ThreadIdentity>;
+  materializeDraft(draftKey: string, options?: { waitForCatalog?: boolean }): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
   deleteBranch(identity: ThreadIdentity): Promise<ThreadIdentity>;
@@ -91,20 +91,25 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
       try {
         do {
           catalogAgain = false;
+          const selectedNavigation = navigation;
           const threads = await api.list({ archived: 'include' });
           if (owner !== binding || request !== catalogRequest) return;
           const current = get();
+          const previous = new Map(current.threads.map(thread => [thread.thread_id, thread]));
           const merged = threads.filter(thread => !deleted.has(thread.thread_id)).map(thread => {
-            const summary = mergeSummary(current.threads.find(value => value.thread_id === thread.thread_id), thread);
+            const summary = mergeSummary(previous.get(thread.thread_id), thread);
             return deletedBranches.size ? { ...summary, branches: summary.branches.filter(branch => !deletedBranches.has(branch.branch_id)) } : summary;
           });
           const selected = current.selectedIdentity;
           const selectedThread = selected && merged.find(thread => thread.thread_id === selected.threadId);
           const retained = selectedThread && selectedThread.branches.some(branch => branch.branch_id === selected?.branchId);
           const fallback = selectedThread ? { runtime: 'agent' as const, threadId: selectedThread.thread_id, branchId: selectedThread.main_branch_id } : null;
-          if (selected && !retained && fallback) selections.set(current.hostKey, fallback);
+          // A list started before navigation cannot invalidate a newly accepted
+          // creation or selection. A subsequent current read still owns removal.
+          const reconcileSelection = selected && !retained && selectedNavigation === navigation;
+          if (reconcileSelection && fallback) selections.set(current.hostKey, fallback);
           set({ threads: merged, catalogLoaded: true, catalogError: null,
-            ...(selected && !retained ? { selectedIdentity: fallback } : {}) });
+            ...(reconcileSelection ? { selectedIdentity: fallback } : {}) });
         } while (catalogAgain && owner === binding);
       } catch (error) {
         if (owner === binding && request === catalogRequest) set({ catalogError: errorMessage(error) });
@@ -145,12 +150,13 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     set({ selectedIdentity: null, selectedDraftKey: key });
     return key;
   },
-  async materializeDraft(draftKey) {
-    const api = requireAPI(); const owner = binding; const host = get().hostKey;
+  async materializeDraft(draftKey, options) {
+    const api = requireAPI(); const owner = binding; const host = get().hostKey; const selectedNavigation = navigation;
     const draft = useThreadDraftStore.getState().drafts[draftKey];
     if (!draft || JSON.parse(draftKey)[0] !== host) throw new Error('Conversation draft is unavailable on this Host');
     if (draft.identity) {
       if (get().selectedDraftKey === draftKey) {
+        navigation += 1;
         selections.set(host, draft.identity); draftSelections.delete(host);
         set({ selectedIdentity: draft.identity, selectedDraftKey: null });
       }
@@ -164,11 +170,18 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
       composerKeys.set(threadIdentityKey(host, identity), draftKey);
       useThreadDraftStore.getState().patch(draftKey, { identity });
       if (owner !== binding) throw new Error('Application Host changed during conversation creation');
-      await get().loadCatalog().catch(() => {});
-      if (owner === binding && get().selectedDraftKey === draftKey) {
-        selections.set(host, identity); draftSelections.delete(host);
-        set({ selectedIdentity: identity, selectedDraftKey: null });
-      }
+      const selectCreated = () => {
+        if (owner === binding && selectedNavigation === navigation && get().selectedDraftKey === draftKey) {
+          navigation += 1;
+          selections.set(host, identity); draftSelections.delete(host);
+          set({ selectedIdentity: identity, selectedDraftKey: null });
+        }
+      };
+      // Creation is authoritative. First send mounts the real conversation and
+      // its observer immediately; an older sidebar read cannot undo that navigation.
+      if (options?.waitForCatalog === false) selectCreated();
+      const catalogReady = get().loadCatalog().catch(() => {});
+      if (options?.waitForCatalog !== false) { await catalogReady; selectCreated(); }
       return identity;
     })();
     materializations.set(draftKey, pending);

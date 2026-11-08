@@ -1040,6 +1040,52 @@ it('opens a local draft and creates its canonical Thread only when the first mes
   } finally { await act(async () => unbind?.()); }
 });
 
+it('observes first-send streaming and queues a follow-up while the sidebar catalog is still loading', async () => {
+  const f = fixture(); runtimeState.api = f.api;
+  const list = vi.fn(f.api.list); f.api.list = list;
+  const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
+  let finishCatalog!: (threads: Awaited<ReturnType<ThreadsAPI['list']>>) => void;
+  const catalog = new Promise<Awaited<ReturnType<ThreadsAPI['list']>>>(resolve => { finishCatalog = resolve; });
+  let unbind: (() => void) | undefined;
+  try {
+    await act(async () => { unbind = bindThreadStore(f.api); });
+    await act(async () => { useThreadStore.getState().openDraft(); root.render(<ChatView />); });
+    expect(container.querySelector('[aria-label="Conversation draft"]')).not.toBeNull();
+    await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+    await edit('[aria-label="Message thread"]', 'Start without waiting for the sidebar');
+    const draftKey = useThreadStore.getState().selectedDraftKey!;
+    list.mockImplementationOnce(() => catalog);
+    await submitForm(composerForm());
+    expect(useThreadStore.getState().catalogLoading).toBe(true);
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(threadComposerKey(threadHostKey(), identity)).toBe(draftKey);
+    expect(container.querySelector('[aria-label="Conversation draft"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
+    expect(snapshot).toHaveBeenCalled();
+    expect(f.submit).toHaveBeenCalledOnce();
+    expect(useThreadDraftStore.getState().drafts[draftKey].firstSend).toBeUndefined();
+    f.view.activeRun = initialSnapshot(true).activeRun;
+    f.view.thread.branches[0]!.active_run_id = 'ui-run';
+    f.view.thread.branches[0]!.latest_run = f.view.activeRun;
+    f.view.history = [{ id: 'sent', thread_id: identity.threadId, run_id: 'ui-run', parent: null,
+      source: 'user', provider: null, content: { text: 'Start without waiting for the sidebar' } }];
+    f.view.historyPage.head = 'sent'; f.view.thread.branches[0]!.head = 'sent';
+    await act(async () => f.emit({ cursor: 1, subject: 'ui-run', revision: 1, kind: 'run.accepted', data: {} }));
+    await act(async () => f.emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', streamId: 'stream',
+      threadId: identity.threadId, branchId: identity.branchId, runId: 'ui-run', requestId: 'streaming-request', sequence: 1,
+      event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: 'Visible before the sidebar finishes' } }] } }));
+    expect(container.textContent).toContain('Visible before the sidebar finishes');
+    await edit('[aria-label="Message thread"]', 'Follow up on the active run');
+    expect(button('Queue message').disabled).toBe(false);
+    await submitForm(composerForm());
+    expect(f.submit).toHaveBeenCalledOnce();
+    expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Follow up on the active run', mode: 'next_run' }));
+    expect(useThreadStore.getState().catalogLoading).toBe(true);
+  } finally {
+    await act(async () => { unbind?.(); finishCatalog([f.view.thread]); });
+  }
+});
+
 it('freezes editor and inline context on an unknown send and acknowledges only captured revisions', async () => {
   const f = fixture(); f.submit.mockRejectedValueOnce(new Error('lost receipt'));
   const host = threadHostKey(); const threadKey = threadComposerKey(host, identity);

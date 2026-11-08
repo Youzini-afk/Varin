@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isUtf8 } from 'node:buffer';
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
@@ -11,7 +12,13 @@ export type InspectedDocument =
   | { kind: 'unsupported-encoding'; byteLength: number; candidates: string[] }
   | { kind: 'text'; encoding: string; bom: boolean; content: string; byteLength: number };
 
-export const inspectDocumentBytes = (input: Buffer | Uint8Array): InspectedDocument => {
+export type InspectedDocumentMetadata =
+  | Exclude<InspectedDocument, { kind: 'text' }>
+  | Omit<Extract<InspectedDocument, { kind: 'text' }>, 'content'>;
+
+export function inspectDocumentBytes(input: Buffer | Uint8Array): InspectedDocument;
+export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent: false): InspectedDocumentMetadata;
+export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent = true): InspectedDocument | InspectedDocumentMetadata {
   const bytes = Buffer.isBuffer(input) ? input : Buffer.from(input);
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
     return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-16le'] };
@@ -31,13 +38,19 @@ export const inspectDocumentBytes = (input: Buffer | Uint8Array): InspectedDocum
     return { kind: 'binary', byteLength: bytes.length };
   }
 
+  // Save/conflict receipts need classification and byte metadata, not another
+  // allocation of the complete editor text. Validate the same UTF-8 bytes natively.
+  if (!includeContent) return isUtf8(payload)
+    ? { kind: 'text', encoding: 'utf-8', bom, byteLength: bytes.length }
+    : { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-8'] };
+
   try {
     const content = new TextDecoder('utf-8', { fatal: true }).decode(payload);
     return { kind: 'text', encoding: 'utf-8', bom, content, byteLength: bytes.length };
   } catch {
     return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-8'] };
   }
-};
+}
 
 export interface EncodeDocumentTextOptions {
   content: unknown;

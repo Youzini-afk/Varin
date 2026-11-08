@@ -1,6 +1,8 @@
 import type { ThreadHistoryPage, ThreadRunUsage } from '@varin/application-client';
-import type { HistoryItem, ModelPresentation } from '@varin/protocol';
+import type { HistoryItem, HistoryReference, ModelPresentation } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
+
+type UsagePage = Pick<ThreadHistoryPage, 'head' | 'previous'> & { items: readonly (HistoryItem | HistoryReference)[] };
 
 type Reader = Pick<AgentRuntimeClient, 'run' | 'historyPage' | 'historyItem' | 'modelPresentations'>;
 
@@ -19,14 +21,18 @@ export class HistoryRunUsageReader {
   // late original usage publication can refine an unknown count.
   private earlierRequests = new Map<string, string[]>();
 
-  async read(branchId: string, page: ThreadHistoryPage, presentations: readonly ModelPresentation[], signal?: AbortSignal): Promise<ThreadRunUsage[]> {
+  async read(branchId: string, page: UsagePage, presentations: readonly ModelPresentation[] = [], signal?: AbortSignal): Promise<ThreadRunUsage[]> {
     const runIds = [...new Set(page.items.map(item => item.run_id))];
     const runs = await Promise.all(runIds.map(id => this.runtime.run(id, signal)));
     const ended = new Set(runs.filter(run => ['completed', 'failed', 'cancelled'].includes(run.state)).map(run => run.id));
     const requests = new Map([...ended].map(id => [id, new Set<string>()]));
-    for (const item of page.items) {
+    // Usage needs request identities from ended assistant messages only. Do not
+    // reread user text, large tool outputs or active Run bodies just to show a footer.
+    const assistants = page.items.filter(item => item.source === 'assistant' && ended.has(item.run_id));
+    const items = await Promise.all(assistants.map(item => 'content_ref' in item ? this.runtime.historyItem(item, signal) : item));
+    for (const item of items) {
       const id = historyModelRequestId(item);
-      if (id) requests.get(item.run_id)?.add(id);
+      if (id) requests.get(item.run_id)!.add(id);
     }
     const first = page.items[0];
     if (first && page.head && page.previous && ended.has(first.run_id)) {
@@ -41,7 +47,8 @@ export class HistoryRunUsageReader {
     const metadata = new Map(presentations.map(view => [view.requestId, view]));
     const missing = [...new Set([...requests.values()].flatMap(ids => [...ids]))].filter(id => !metadata.has(id));
     if (missing.length) for (const view of await this.runtime.modelPresentations(missing, signal)) metadata.set(view.requestId, view);
-    return [...requests].map(([runId, ids]) => ({ runId, throughId: page.items.slice().reverse().find(item => item.run_id === runId)!.id, requests: [...ids].map(requestId => {
+    const through = new Map(page.items.map(item => [item.run_id, item.id]));
+    return [...requests].map(([runId, ids]) => ({ runId, throughId: through.get(runId)!, requests: [...ids].map(requestId => {
       const view = metadata.get(requestId);
       if (!view) throw new Error('Original history usage is unavailable');
       return { requestId, usage: view.usage, ...(view.completeInputTokens !== undefined ? { completeInputTokens: view.completeInputTokens } : {}) };

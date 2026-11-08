@@ -106,6 +106,8 @@ type SnapshotResult =
   | { status: 'unsupported-encoding'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt: string; candidates?: string[] }
   | { status: 'ready'; resource: DocumentResource; revision: string; content: string; encoding: string; bom: boolean; byteLength: number; modifiedAt: string };
 
+type SnapshotMetadata = Exclude<SnapshotResult, { status: 'ready' }>
+  | Omit<Extract<SnapshotResult, { status: 'ready' }>, 'content'>;
 type SnapshotWithEpoch = SnapshotResult & { epoch: number };
 
 type WithoutContentResult =
@@ -421,23 +423,6 @@ const toIso = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
 const revisionFromObjectHash = (objectHash: string): string | null => {
   const match = /^sha256-([0-9a-f]{64})$/i.exec(objectHash);
   return match ? `d1_${Buffer.from(match[1]!, 'hex').toString('base64url')}` : null;
-};
-
-const withoutContent = (result: SnapshotWithEpoch): WithoutContentResult => {
-  if (result.status === 'ready') {
-    const next: WithoutContentResult = {
-      status: 'ready',
-      epoch: result.epoch,
-      resource: result.resource,
-      revision: result.revision,
-      encoding: result.encoding,
-      bom: result.bom,
-      byteLength: result.byteLength,
-    };
-    if (result.modifiedAt) (next as { modifiedAt?: string }).modifiedAt = result.modifiedAt;
-    return next;
-  }
-  return result;
 };
 
 // ── Factory ──────────────────────────────────────────────────────────────
@@ -768,7 +753,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const snapshotFile = async (resource: DocumentResource, absolutePath: string, signal?: AbortSignal): Promise<SnapshotResult> => {
+  function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal): Promise<SnapshotResult>;
+  function snapshotFile(resource: DocumentResource, absolutePath: string, signal: AbortSignal | undefined, includeContent: false): Promise<SnapshotMetadata>;
+  async function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal, includeContent = true): Promise<SnapshotResult | SnapshotMetadata> {
     signal?.throwIfAborted();
     let stat: import('node:fs').Stats;
     try {
@@ -801,7 +788,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     const bytes = await fsPromises.readFile(absolutePath, { signal });
     const revision = revisionFromBytes(bytes);
-    const inspected = inspectDocumentBytes(bytes);
+    const inspected = includeContent ? inspectDocumentBytes(bytes) : inspectDocumentBytes(bytes, false);
     const modifiedAt = toIso(stat.mtimeMs);
     if (inspected.kind === 'binary') {
       return {
@@ -827,13 +814,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       status: 'ready',
       resource,
       revision,
-      content: inspected.content,
+      ...('content' in inspected ? { content: inspected.content } : {}),
       encoding: inspected.encoding,
       bom: inspected.bom,
       byteLength: inspected.byteLength,
       modifiedAt,
     };
-  };
+  }
 
   const atomicReplace = async (absolutePath: string, bytes: Uint8Array): Promise<void> => {
     await fsPromises.mkdir(pathModule.dirname(absolutePath), { recursive: true });
@@ -1070,15 +1057,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       writer = await mutations.registerWriter(request.token, { purpose: 'document-write' });
       const { resolved } = target!;
       const current = {
-        ...(await snapshotFile(request.resource, resolved.absolutePath)),
+        ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)),
         epoch: request.token.epoch,
-      } as SnapshotWithEpoch;
+      } as WithoutContentResult;
       if (request.expectedRevision === null) {
         if (current.status !== 'missing') {
-          return { status: 'conflict', current: withoutContent(current) };
+          return { status: 'conflict', current };
         }
       } else if (current.status === 'missing' || (current.status !== 'binary' && current.status !== 'unsupported-encoding' && current.revision !== request.expectedRevision)) {
-        return { status: 'conflict', current: withoutContent(current) };
+        return { status: 'conflict', current };
       }
       let bytes: Uint8Array;
       try {
@@ -1136,13 +1123,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       if (writeConflict) {
         const latest = {
-          ...(await snapshotFile(request.resource, resolved.absolutePath)),
+          ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)),
           epoch: request.token.epoch,
-        } as SnapshotWithEpoch;
-        return { status: 'conflict', current: withoutContent(latest) };
+        } as WithoutContentResult;
+        return { status: 'conflict', current: latest };
       }
       await writer.markMutated();
-      const next = await snapshotFile(request.resource, resolved.absolutePath);
+      const next = await snapshotFile(request.resource, resolved.absolutePath, undefined, false);
       if (next.status !== 'ready') {
         throw new DocumentAuthorityError('Failed to read document after write', { code: 'failed', statusCode: 500 });
       }
@@ -1186,17 +1173,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       writer = await mutations.registerWriter(request.token, { purpose: 'document-move' });
       if (!source || !target) throw new DocumentAuthorityError('Document move resources are unavailable');
       const current = {
-        ...(await snapshotFile(request.from, source.resolved.absolutePath)),
+        ...(await snapshotFile(request.from, source.resolved.absolutePath, undefined, false)),
         epoch: request.token.epoch,
-      } as SnapshotWithEpoch;
+      } as WithoutContentResult;
       if (current.status === 'missing') return { status: 'missing', resource: request.from };
       if (current.status !== 'ready' && current.status !== 'binary' && current.status !== 'unsupported-encoding') {
-        return { status: 'conflict', current: withoutContent(current) };
+        return { status: 'conflict', current };
       }
       if (current.revision !== request.expectedRevision) {
-        return { status: 'conflict', current: withoutContent(current) };
+        return { status: 'conflict', current };
       }
-      const targetCurrent = await snapshotFile(request.to, target.resolved.absolutePath);
+      const targetCurrent = await snapshotFile(request.to, target.resolved.absolutePath, undefined, false);
       if (targetCurrent.status !== 'missing') return { status: 'target-exists', resource: request.to };
       let moveStatus: 'moved' | 'target-exists' | 'conflict' = 'moved';
       if (durableMutationStorage) {
@@ -1245,13 +1232,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if (moveStatus === 'target-exists') return { status: 'target-exists', resource: request.to };
       if (moveStatus === 'conflict') {
         const latest = {
-          ...(await snapshotFile(request.from, source.resolved.absolutePath)),
+          ...(await snapshotFile(request.from, source.resolved.absolutePath, undefined, false)),
           epoch: request.token.epoch,
-        } as SnapshotWithEpoch;
-        return { status: 'conflict', current: withoutContent(latest) };
+        } as WithoutContentResult;
+        return { status: 'conflict', current: latest };
       }
       await writer.markMutated();
-      const next = await snapshotFile(request.to, target.resolved.absolutePath);
+      const next = await snapshotFile(request.to, target.resolved.absolutePath, undefined, false);
       const result: { status: 'moved'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt?: string } = {
         status: 'moved',
         resource: request.to,
@@ -1293,12 +1280,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       writer = await mutations.registerWriter(request.token, { purpose: 'document-delete' });
       const { resolved } = target!;
       const current = {
-        ...(await snapshotFile(request.resource, resolved.absolutePath)),
+        ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)),
         epoch: request.token.epoch,
-      } as SnapshotWithEpoch;
+      } as WithoutContentResult;
       if (current.status === 'missing') return { status: 'missing', resource: request.resource };
       if ((current.status === 'ready' || current.status === 'binary' || current.status === 'unsupported-encoding') && current.revision !== request.expectedRevision) {
-        return { status: 'conflict', current: withoutContent(current) };
+        return { status: 'conflict', current };
       }
       let deleteConflict = false;
       if (durableMutationStorage) {
@@ -1335,10 +1322,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       if (deleteConflict) {
         const latest = {
-          ...(await snapshotFile(request.resource, resolved.absolutePath)),
+          ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)),
           epoch: request.token.epoch,
-        } as SnapshotWithEpoch;
-        return { status: 'conflict', current: withoutContent(latest) };
+        } as WithoutContentResult;
+        return { status: 'conflict', current: latest };
       }
       await writer.markMutated();
       publishMutation({

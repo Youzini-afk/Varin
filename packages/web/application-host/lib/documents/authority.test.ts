@@ -119,6 +119,28 @@ describe('document authority contract', () => {
     ]);
   });
 
+  it('saves and checks conflicts without decoding unused file bodies, while reads retain exact text', async () => {
+    const resource = harness.resource('metadata-save.txt');
+    const original = '\ufeffOriginal 中文\r\n';
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, resource.resourceId), original);
+    const opened = requireStatus(await harness.authority.read(resource), 'ready');
+    const decode = vi.spyOn(TextDecoder.prototype, 'decode');
+    try {
+      const written = requireStatus(await harness.authority.write({ token: harness.token(), resource,
+        content: 'Saved 中文🙂\r\n', encoding: 'utf-8', bom: true, expectedRevision: opened.revision }), 'written');
+      expect(decode).not.toHaveBeenCalled();
+      const conflict = requireStatus(await harness.authority.write({ token: harness.token(), resource,
+        content: 'stale', encoding: 'utf-8', bom: false, expectedRevision: opened.revision }), 'conflict');
+      expect(conflict.current).toMatchObject({ status: 'ready', revision: written.revision, bom: true });
+      expect(conflict.current).not.toHaveProperty('content');
+      expect(decode).not.toHaveBeenCalled();
+      const read = requireStatus(await harness.authority.read(resource), 'ready');
+      expect(read.content).toBe('Saved 中文🙂\r\n');
+      expect(read.revision).toBe(written.revision);
+      expect(decode).toHaveBeenCalledOnce();
+    } finally { decode.mockRestore(); }
+  });
+
   it('creates when expected revision is missing and conflicts when the file exists', async () => {
     const resource = harness.resource('created.txt');
     const written = requireStatus(await harness.authority.write({

@@ -136,6 +136,9 @@ it('projects only the displayed failed Run\'s original failure and preserves an 
     }
   });
   expect((await f.api.snapshot(identity)).runFailure).toEqual(failure);
+  // One admitted identity serves this snapshot; nested readers must not inspect
+  // the entire Thread again for goals, follows or each page of child activity.
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.thread.inspect')).toHaveLength(1);
   expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.run.failure')).toHaveLength(1);
   expect(f.requests.mock.calls.some(([method]) => method === 'runtime.events.read')).toBe(false);
   run.state = 'cancelled';

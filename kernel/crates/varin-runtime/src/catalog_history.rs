@@ -76,7 +76,9 @@ impl Catalog {
         thread_id: &str,
         branch_id: Option<&str>,
     ) -> Result<Vec<Operation>> {
-        let mut statement=self.db.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND (?2 IS NULL OR b.id=?2) AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.outcome')='indeterminate' OR (json_extract(o.body,'$.mcp_resource_subscription') IS NOT NULL AND (json_extract(o.body,'$.cancel_requested')=0 OR json_extract(o.body,'$.mcp_resource_subscription.localReleased')=0))) ORDER BY o.id")?;
+        // The attention predicate is an indexed superset. Keep this view's original narrower
+        // predicate too: a terminal unknown effect alone is not an active operation here.
+        let mut statement=self.db.prepare_cached(&format!("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND (?2 IS NULL OR b.id=?2) AND {} AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.outcome')='indeterminate' OR (json_extract(o.body,'$.mcp_resource_subscription') IS NOT NULL AND (json_extract(o.body,'$.cancel_requested')=0 OR json_extract(o.body,'$.mcp_resource_subscription.localReleased')=0))) ORDER BY o.id", super::attention::OPEN_OPERATION))?;
         let rows =
             statement.query_map(params![thread_id, branch_id], |row| row.get::<_, String>(0))?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
@@ -131,6 +133,13 @@ impl HistoryPageRead {
         }
         let current = self.head.clone();
         let mut cursor = current.clone();
+        // Ancestry is an original Catalog relation. Traverse it without repeatedly decoding
+        // unrelated history metadata; only the returned page needs complete references.
+        let mut parents = db.prepare("SELECT parent FROM history WHERE id=?1")?;
+        let mut parent = |key: &str| -> Result<Option<String>> {
+            parents.query_row([key], |row| row.get(0)).optional()?
+                .ok_or_else(|| RuntimeError::NotFound(key.into()))
+        };
         if let Some(anchor) = head_id {
             while cursor.as_deref() != Some(anchor) {
                 if cancelled() {
@@ -139,8 +148,7 @@ impl HistoryPageRead {
                 let key = cursor.ok_or_else(|| {
                     RuntimeError::Conflict("history anchor is no longer on this branch".into())
                 })?;
-                let item: HistoryItem = record(&db, "history", &key)?;
-                cursor = item.parent;
+                cursor = parent(&key)?;
             }
         }
         let head = cursor.clone();
@@ -155,8 +163,7 @@ impl HistoryPageRead {
                 if after_id == Some(key.as_str()) {
                     return Err(RuntimeError::Conflict("history cursor precedes the selected incremental boundary".into()));
                 }
-                let item: HistoryItem = record(&db, "history", &key)?;
-                cursor = item.parent;
+                cursor = parent(&key)?;
                 if key == before {
                     break;
                 }
@@ -164,6 +171,7 @@ impl HistoryPageRead {
         }
         let mut items = Vec::new();
         let mut reached_after = after_id.is_none();
+        let mut references = db.prepare("SELECT body FROM history WHERE id=?1")?;
         while items.len() < (limit as usize) {
             if cancelled() {
                 return Err(RuntimeError::DispatchCancelled);
@@ -172,7 +180,9 @@ impl HistoryPageRead {
                 break;
             };
             if after_id == Some(key.as_str()) { reached_after = true; cursor = None; break; }
-            let item: HistoryItem = record(&db, "history", &key)?;
+            let raw: String = references.query_row([&key], |row| row.get(0)).optional()?
+                .ok_or_else(|| RuntimeError::NotFound(key.clone()))?;
+            let item: HistoryItem = serde_json::from_str(&raw)?;
             cursor = item.parent.clone();
             let content_ref = item
                 .content

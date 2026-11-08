@@ -1,4 +1,5 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import * as content from '@varin/application-client';
 import { projectUiEmbeds } from './embed-projection';
 import type { ChatAssistantMessage, ChatSessionEntry } from '@/components/conversation/types';
 import type { UiCardProjection } from '@/components/conversation/ConversationContext';
@@ -23,4 +24,32 @@ it('retains streamed native item placement across history commit and does not in
   expect(live.targets).toEqual(durable.targets);
   const example = projectUiEmbeds([entry('example', [{ type: 'text', text: '````markdown\n' + fence('ui:report@1') + '\n````' }])], cards);
   expect(example.embeds).toEqual({});
+});
+
+
+it('does not reparse retained history on each stream frame and still recomputes placement ownership', () => {
+  const parse = vi.spyOn(content, 'parseConversationContent');
+  try {
+    const history = Array.from({ length: 40 }, (_, i) => entry(`saved:${i}`, [{ type: 'text', text: `Earlier ${i}\n${fence(`ui:report-${i}@1`)}` }]));
+    let result = projectUiEmbeds(history, {});
+    const original = result.embeds;
+    expect(parse).toHaveBeenCalledTimes(40);
+    for (let i = 0; i < 20; i++) {
+      result = projectUiEmbeds(history, {}, { ...message('live', [{ type: 'text', text: `Current ${i}` }]), stopReason: 'pending' });
+      expect(result.embeds).toEqual(original);
+    }
+    expect(parse).toHaveBeenCalledTimes(60);
+    const part = { type: 'text' as const, text: fence('ui:report@1') };
+    const answer = entry('answer', [part]);
+    expect(Object.values(projectUiEmbeds([entry('creation', [call]), answer], {}).embeds)[0]?.sessionId).not.toBe('make');
+    expect(Object.values(projectUiEmbeds([entry('creation', [call]), answer], cards).embeds)[0]?.sessionId).toBe('make');
+    part.text = fence('ui:replacement@2');
+    expect(Object.values(projectUiEmbeds([answer], {}).embeds)[0]?.ref).toBe('ui:replacement@2');
+    const before = parse.mock.calls.length;
+    const live: ChatAssistantMessage = { ...message('live', [part]), stopReason: 'pending' };
+    projectUiEmbeds([], {}, live);
+    live.stopReason = 'stop';
+    projectUiEmbeds([], {}, live);
+    expect(parse.mock.calls.length - before).toBe(2);
+  } finally { parse.mockRestore(); }
 });

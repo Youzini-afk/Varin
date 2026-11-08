@@ -99,17 +99,16 @@ pub(super) fn thread_owner(db: &Connection, thread_id: &str) -> Result<Option<Th
             ));
         }
         let direct: Option<String> = db
-            .query_row(
-                "SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1",
-                [&current],
+            .prepare_cached("SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1")?
+            .query_row([&current],
                 |r| r.get(0),
             )
             .optional()?;
         if let Some(bot_id) = direct {
             return Ok(Some(ThreadOwner { bot_id, session_thread_id: Some(current) }));
         }
-        let parent: Option<String> = db.query_row(
-            "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",
+        let parent: Option<String> = db.prepare_cached(
+            "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1")?.query_row(
             [&current], |r| r.get(0),
         ).optional()?;
         if let Some(parent) = parent {
@@ -117,20 +116,20 @@ pub(super) fn thread_owner(db: &Connection, thread_id: &str) -> Result<Option<Th
             continue;
         }
         // The source branch is authoritative even for an explicit summary without owner_run_id.
-        let source: Option<String> = db.query_row(
-            "SELECT source.thread_id FROM context_jobs c JOIN runs r ON r.id=c.run_id JOIN branches helper ON helper.id=r.branch_id JOIN branches source ON source.id=c.branch_id WHERE helper.thread_id=?1",
+        let source: Option<String> = db.prepare_cached(
+            "SELECT source.thread_id FROM context_jobs c JOIN runs r ON r.id=c.run_id JOIN branches helper ON helper.id=r.branch_id JOIN branches source ON source.id=c.branch_id WHERE helper.thread_id=?1")?.query_row(
             [&current], |r| r.get(0),
         ).optional()?;
         if let Some(source) = source {
             current = source;
             continue;
         }
-        let scope: Option<String> = db.query_row(
-            "SELECT json_extract(o.body,'$.intent.scopeId') FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND json_extract(o.body,'$.intent.kind')=?2",
+        let scope: Option<String> = db.prepare_cached(
+            "SELECT json_extract(o.body,'$.intent.scopeId') FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND json_extract(o.body,'$.intent.kind')=?2")?.query_row(
             params![current, super::memory_work::WORK_KIND], |r| r.get(0),
         ).optional()?;
         if scope.is_none() {
-            let unknown_identity: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM thread_creations WHERE thread_id=?1 AND identity_known=0)", [&current], |r| r.get(0))?;
+            let unknown_identity: bool = db.prepare_cached("SELECT EXISTS(SELECT 1 FROM thread_creations WHERE thread_id=?1 AND identity_known=0)")?.query_row([&current], |r| r.get(0))?;
             if unknown_identity { return Err(RuntimeError::IdentityUnavailable(current)); }
         }
         return scope
