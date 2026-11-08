@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
 const messages = {
@@ -27,6 +28,25 @@ const messages = {
 };
 
 const resources = fileURLToPath(new URL('../resources/', import.meta.url));
+export async function downloadWorkspaceAsset(url, { request = fetch, wait = delay } = {}) {
+  const delays = [1000, 3000, 10000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await request(url);
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw Object.assign(new Error(`WinFsp download failed (${response.status})`), { status: response.status });
+      }
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      const temporary = [408, 429, 500, 502, 503, 504].includes(error.status)
+        || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(error.cause?.code ?? error.code);
+      if (!temporary || attempt === delays.length) throw error;
+      console.warn('[electron] WinFsp download interrupted; retrying the same official asset');
+      await wait(delays[attempt]);
+    }
+  }
+}
 export async function prepareWorkspaceComponent() {
   const component = JSON.parse(await readFile(path.join(resources, 'workspace-component.json'), 'utf8'));
   const directory = path.join(resources, 'workspace-component');
@@ -35,9 +55,7 @@ export async function prepareWorkspaceComponent() {
   const digest = bytes => createHash('sha256').update(bytes).digest('hex');
   const existing = await readFile(target).catch(error => { if (error.code !== 'ENOENT') throw error; });
   if (!existing || digest(existing) !== component.sha256) {
-    const response = await fetch(component.url);
-    if (!response.ok) throw new Error(`WinFsp download failed (${response.status})`);
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await downloadWorkspaceAsset(component.url);
     if (digest(bytes) !== component.sha256) throw new Error('Official WinFsp MSI checksum mismatch');
     const temporary = `${target}.${process.pid}.tmp`;
     try { await writeFile(temporary, bytes, { flag: 'wx' }); await rename(temporary, target); }
@@ -46,9 +64,7 @@ export async function prepareWorkspaceComponent() {
   const licenseFile = path.join(directory, 'License.txt');
   const cachedLicense = await readFile(licenseFile).catch(error => { if (error.code !== 'ENOENT') throw error; });
   if (!cachedLicense || digest(cachedLicense) !== component.licenseSha256) {
-    const license = await fetch(component.licenseUrl);
-    if (!license.ok) throw new Error(`WinFsp license download failed (${license.status})`);
-    const bytes = Buffer.from(await license.arrayBuffer());
+    const bytes = await downloadWorkspaceAsset(component.licenseUrl);
     if (digest(bytes) !== component.licenseSha256) throw new Error('WinFsp license checksum mismatch');
     await writeFile(licenseFile, bytes);
   }
