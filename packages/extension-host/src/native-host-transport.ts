@@ -67,7 +67,7 @@ const storageKey = (address: Pick<VarinExtensionStorageOpenRequest, "key" | "sco
 );
 
 export interface NativeHostTransportOptions {
-  requestFromExtension(method: string, params: unknown, signal: AbortSignal): Promise<JsonValue>;
+  requestFromExtension(method: string, params: unknown, signal: AbortSignal, cleanup?: boolean): Promise<JsonValue>;
 }
 
 const resolveExtension = (moduleValue: unknown): NativeHostExtension => {
@@ -95,6 +95,7 @@ const resolveExtension = (moduleValue: unknown): NativeHostExtension => {
 
 export class NativeHostTransport implements BrokeredHostTransport {
   readonly #invocationContext = new AsyncLocalStorage<NativeInvocationContext>();
+  readonly #cleanupContext = new AsyncLocalStorage<NativeInvocationContext>();
   readonly #disposers: Array<() => void | Promise<void>> = [];
   readonly #requestFromExtension: NativeHostTransportOptions["requestFromExtension"];
   readonly #serviceHandlers = new Map<string, NativeServiceHandler>();
@@ -103,6 +104,9 @@ export class NativeHostTransport implements BrokeredHostTransport {
   #moduleValue: unknown;
   readonly #storages = new Map<string, Set<NativeStorageClientState>>();
   #terminated = false;
+  #deactivation: Promise<void> | undefined;
+  #activation: Promise<void> | null = null;
+  #cleanupController: AbortController | null = null;
   #callId = 0;
 
   constructor(options: NativeHostTransportOptions) {
@@ -129,9 +133,11 @@ export class NativeHostTransport implements BrokeredHostTransport {
       }
       case "activate": {
         await this.#deactivate().catch(() => undefined);
-        this.#terminated = false;
+        if (this.#terminated) throw new Error("Trusted-native Host entrypoint is inactive");
+        this.#deactivation = undefined;
         const extension = this.#load(String(params.modulePath ?? ""));
-        this.#controller = new AbortController();
+        const controller = new AbortController();
+        this.#controller = controller;
         this.#storages.clear();
         const stagedHandlers = new Map<string, NativeServiceHandler>();
         const provisions: unknown[] = [];
@@ -147,18 +153,20 @@ export class NativeHostTransport implements BrokeredHostTransport {
           return {
             get snapshot() { return state.snapshot; },
             refresh: async () => {
+              controller.signal.throwIfAborted();
               state.snapshot = await this.#requestFromExtension(
                 "storage.refresh",
                 request,
-                this.#controller?.signal ?? new AbortController().signal,
+                controller.signal,
               ) as unknown as VarinExtensionStorageSnapshot;
               return state.snapshot;
             },
             update: async (data, expectedRevision = state.snapshot.document.revision) => {
+              controller.signal.throwIfAborted();
               state.snapshot = await this.#requestFromExtension(
                 "storage.update",
                 { data, expectedRevision, key: request.key, scope: request.scope },
-                this.#controller?.signal ?? new AbortController().signal,
+                controller.signal,
               ) as unknown as VarinExtensionStorageSnapshot;
               return state.snapshot;
             },
@@ -174,7 +182,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
             path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
           },
           capabilities: {
-            call: (capability, method, params) => this.#callCapability(this.#invocationContext.getStore(), capability, method, params),
+            call: (capability, method, params) => this.#callCapability(this.#invocationContext.getStore(), capability, method, params, controller.signal),
           },
           effect: (disposer) => {
             if (typeof disposer !== "function") throw new Error("Trusted-native Host effect disposer must be a function");
@@ -198,38 +206,48 @@ export class NativeHostTransport implements BrokeredHostTransport {
             ...createHostServiceDependencyClients(params.dependencies as VarinHostServiceDependencyBinding[], request => {
               const scope = this.#invocationContext.getStore();
               if (scope && !scope.active) return Promise.reject(new Error('Host dependency invocation has expired'));
-              const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error('Host owner is inactive'));
+              const signal = scope?.signal ?? controller.signal;
               if (signal.aborted) return Promise.reject(signal.reason);
               return this.#requestFromExtension('service.invoke', { ...request,
                 ...(scope?.invocationId ? { invocationId: scope.invocationId } : {}),
               }, signal);
             }),
           },
-          signal: this.#controller.signal,
+          signal: controller.signal,
           storage: {
             get snapshot() {
               return defaultStorage.snapshot;
             },
-            open: async (request) => createStorageClient(
-              request,
-              await this.#requestFromExtension(
-                "storage.open",
+            open: async (request) => {
+              controller.signal.throwIfAborted();
+              return createStorageClient(
                 request,
-                this.#controller?.signal ?? new AbortController().signal,
-              ) as unknown as VarinExtensionStorageSnapshot,
-            ),
+                await this.#requestFromExtension(
+                  "storage.open",
+                  request,
+                  controller.signal,
+                ) as unknown as VarinExtensionStorageSnapshot,
+              );
+            },
             refresh: () => defaultStorage.refresh(),
             update: (data, expectedRevision) => defaultStorage.update(data, expectedRevision),
           },
         };
-        try {
+        const activation = Promise.resolve().then(async () => {
           const returned = await extension.activate(context);
           if (typeof returned === "function") this.#disposers.push(returned as () => void | Promise<void>);
+        });
+        this.#activation = activation;
+        try {
+          await activation;
+          controller.signal.throwIfAborted();
           for (const [key, handler] of stagedHandlers) this.#serviceHandlers.set(key, handler);
           return { provisions };
         } catch (error) {
           await this.#deactivate().catch(() => undefined);
           throw error;
+        } finally {
+          if (this.#activation === activation) this.#activation = null;
         }
       }
       case "service.invoke": {
@@ -259,8 +277,8 @@ export class NativeHostTransport implements BrokeredHostTransport {
         }
         return null;
       case "deactivate":
-        await this.#deactivate();
         this.#terminated = true;
+        await this.#deactivate();
         return null;
       default:
         throw new Error(`Unknown trusted-native Host request method: ${method}`);
@@ -272,18 +290,21 @@ export class NativeHostTransport implements BrokeredHostTransport {
   }
 
   forceTerminate(): void {
-    this.#controller?.abort("Trusted-native Host entrypoint force-disabled");
     this.#terminated = true;
+    this.#controller?.abort("Trusted-native Host entrypoint force-disabled");
+    this.#cleanupController?.abort("Trusted-native Host entrypoint force-disabled");
   }
 
-  #callCapability(scope: NativeInvocationContext | undefined, capability: string, method: string, params: JsonValue): Promise<JsonValue> {
+  #callCapability(scope: NativeInvocationContext | undefined, capability: string, method: string, params: JsonValue, ownerSignal = this.#controller?.signal): Promise<JsonValue> {
+    const cleanup = this.#cleanupContext.getStore();
+    scope ??= cleanup;
     if (scope && !scope.active) return Promise.reject(new Error("Host capability invocation has expired"));
-    const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error("Host extension is inactive"));
+    const signal = scope?.signal ?? ownerSignal ?? AbortSignal.abort(new Error("Host extension is inactive"));
     if (signal.aborted) return Promise.reject(signal.reason);
     return this.#requestFromExtension("capability.call", {
       capability, method, params,
       ...(scope?.invocationId !== undefined ? { invocationId: scope.invocationId } : {}),
-    }, signal);
+    }, signal, cleanup !== undefined && scope === cleanup);
   }
 
   #load(modulePath: string): NativeHostExtension {
@@ -295,16 +316,35 @@ export class NativeHostTransport implements BrokeredHostTransport {
     return resolveExtension(this.#moduleValue);
   }
 
-  async #deactivate(): Promise<void> {
+  #deactivate(): Promise<void> {
+    if (this.#deactivation) return this.#deactivation;
     this.#controller?.abort("Trusted-native Host entrypoint deactivated");
     this.#controller = null;
     this.#serviceHandlers.clear();
-    const errors: string[] = [];
-    while (this.#disposers.length > 0) {
-      const disposer = this.#disposers.pop();
-      try { await disposer?.(); }
-      catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
-    }
-    if (errors.length > 0) throw new Error(`Trusted-native Host cleanup failed: ${errors.join("; ")}`);
+    const controller = new AbortController();
+    this.#cleanupController = controller;
+    // Only disposer callbacks get a live cleanup signal. Ordinary callbacks keep
+    // the aborted activation signal; Host grants/cleanupMethods remain authoritative.
+    const activation = this.#activation;
+    this.#deactivation = Promise.resolve().then(async () => {
+      // Activation can still return or register cleanup after cancellation. Join
+      // that real callback before draining its complete disposer stack.
+      await activation?.catch(() => undefined);
+      const errors: string[] = [];
+      while (this.#disposers.length > 0) {
+        const disposer = this.#disposers.pop()!;
+        const scope: NativeInvocationContext = { signal: controller.signal, active: true };
+        try {
+          await this.#invocationContext.exit(() => this.#cleanupContext.run(scope, disposer));
+        } catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
+        finally { scope.active = false; }
+      }
+      if (errors.length > 0) throw new Error(`Trusted-native Host cleanup failed: ${errors.join("; ")}`);
+    }).finally(() => {
+      controller.abort("Trusted-native Host cleanup completed");
+      this.#cleanupController = null;
+      this.#storages.clear();
+    });
+    return this.#deactivation;
   }
 }
