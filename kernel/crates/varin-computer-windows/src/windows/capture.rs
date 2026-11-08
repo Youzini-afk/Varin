@@ -97,7 +97,7 @@ impl Surface {
         unsafe {
             let dc = CreateCompatibleDC(None);
             if dc.0.is_null() {
-                return Err(windows::core::Error::from_win32().into());
+                return Err(windows::core::Error::from_thread().into());
             }
             let mut surface = Self {
                 dc,
@@ -131,7 +131,7 @@ impl Surface {
             surface.previous = SelectObject(dc, HGDIOBJ(surface.bitmap.0));
             if surface.previous.0.is_null() || surface.previous.0 as isize == -1 {
                 surface.previous = HGDIOBJ::default();
-                return Err(windows::core::Error::from_win32().into());
+                return Err(windows::core::Error::from_thread().into());
             }
             ptr::write_bytes(surface.bits, 0, len);
             Ok(surface)
@@ -148,7 +148,7 @@ impl Surface {
         unsafe {
             let screen = ScreenDc(GetDC(None));
             if screen.0 .0.is_null() {
-                return Err(windows::core::Error::from_win32().into());
+                return Err(windows::core::Error::from_thread().into());
             }
             BitBlt(
                 self.dc,

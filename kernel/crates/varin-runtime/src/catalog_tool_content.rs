@@ -198,7 +198,7 @@ impl RequestBudgetRead {
         if !matches!(view.origin, RequestOrigin::Conversation { .. }) {
             return Ok(local());
         }
-        let db = Connection::open_with_flags(
+        let mut db = Connection::open_with_flags(
             &self.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;

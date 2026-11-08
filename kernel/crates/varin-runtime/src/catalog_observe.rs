@@ -24,7 +24,7 @@ impl Catalog {
         self.event_observers.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), sender);
         EventSubscription { observers: self.event_observers.clone(), id }
     }
-    pub(super) fn install_event_notifier(&self) -> Result<()> {
+    pub(super) fn install_event_notifier(&mut self) -> Result<()> {
         let observers = self.event_observers.clone();
         self.db.update_hook(Some(
             move |action, _database: &str, table: &str, _row: i64| {

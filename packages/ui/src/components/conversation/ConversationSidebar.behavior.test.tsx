@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: ({ name }: { name: string }) => <span data-icon={name} /> }));
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => null }));
+// This fixture checks the sidebar's delegation mark; appearance loading has its own Host/asset tests.
+vi.mock('@/workbenches/bot/BotFigure', () => ({ BotFigure: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ files: {} }) }));
 vi.mock('@/lib/desktop', () => ({ canUseElectronDesktopIPC: () => false, isDesktopLocalOriginActive: () => false }));

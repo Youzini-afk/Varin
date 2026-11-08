@@ -266,7 +266,7 @@ impl AttentionRead {
         sql_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<AttentionSnapshot> {
         check(cancel)?;
-        let db = history_views::current_history_owner(&self.database, self.epoch)?;
+        let mut db = history_views::current_history_owner(&self.database, self.epoch)?;
         if let Some(signal) = sql_cancel {
             db.progress_handler(
                 1000,
