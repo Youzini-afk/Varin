@@ -36,6 +36,7 @@ import {
   type CollaborationFeedItem,
 } from "./collaborationFeed";
 import { CollaborationComposer } from "./CollaborationComposer";
+import { CollaborationExchangeQueue } from './CollaborationExchangeQueue';
 import { memberBranch } from "./collaborationPresentation";
 import { CollaborationMessage } from "./CollaborationMessage";
 import {
@@ -307,6 +308,7 @@ function CollaborationRoomContent({
         <span className="h-px flex-1 bg-border/40" />{day}<span className="h-px flex-1 bg-border/40" />
       </div>}
       <CollaborationMessage api={api} identity={identity} item={item} members={state.members} original={original}
+        onQueueChanged={() => { if (item.kind === 'message') void feed.refreshMessage(item.message.messageId); }}
         expanded={expandedMessages.has(item.id)}
         onExpandedChange={open => {
           if (open) setAtEnd(false);
@@ -529,6 +531,7 @@ function CollaborationRoomContent({
             </Button>
           </p>
         )}
+        {!selection && api.collaboration?.queuedExchanges && <CollaborationExchangeQueue api={api} values={state.exchanges} onChanged={() => void feed.refresh(false)} />}
         <div
           className={cn(
             "collaboration-feed relative flex min-h-0 flex-1",

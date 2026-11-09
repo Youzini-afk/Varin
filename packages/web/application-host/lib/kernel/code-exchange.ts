@@ -21,6 +21,7 @@ import path from 'node:path';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { exchangeExternalCode } from '../external-agents/code-exchange.js';
 import type { ExternalChild } from './protocol.generated.js';
+import type { CodeExchangeQueueOwner } from './code-exchange-queue.js';
 
 export { CODE_EXCHANGE_CAPABILITY };
 export type CodeSelection = string | { path: string; before: string; after: string };
@@ -30,13 +31,14 @@ export type ExchangeScope = IntegrationTargetScope & { store: WorkingStateRootSt
 export interface CodeExchangeOwners extends IntegrationTargetOwners {
   coordinator: Pick<IntegrationCoordinator, 'mergeResult' | 'inspectIntegration'>;
   onCleanupError(operationId: string, error: unknown): void;
+  queue?: CodeExchangeQueueOwner;
 }
 const validators = new Map(CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => [d.id.slice('varin.code.'.length),
   { tool: d.tool!, validate: compileToolJsonSchema(d.tool!.inputSchema) }]));
 
 /** Publish the existing peer notice after the callback's actual receipt is committed.
  * Reconciling inside that callback would retire its own invocation before it returns. */
-function publishCodeNoticeAfterSettlement(owners: CodeExchangeOwners, authority: ToolInvocationAuthority) {
+export function publishCodeNoticeAfterSettlement(owners: CodeExchangeOwners, authority: ToolInvocationAuthority) {
   let disposed = false, reading = false, dirty = false;
   const inspect = async () => {
     dirty = true; if (reading || disposed) return; reading = true;
@@ -291,7 +293,7 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
   return async (method, params, context) => {
     const selected = validators.get(method);
     if (!selected || !selected.validate(params)) throw new Error('Select an Agent and files or exact code fragments');
-    const input = params as { source?: string; target?: string; files?: CodeSelection[] };
+    const input = params as { source?: string; target?: string; files?: CodeSelection[]; afterCurrent?: boolean };
     return runToolDomainCall(context, { domain: CODE_EXCHANGE_CAPABILITY, toolName: selected.tool.name,
       operation: 'effect', arguments: params }, async authority => {
       const opened: Array<{release():Promise<void>}> = [];
@@ -306,7 +308,12 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
           ? 'This is a root Agent with no parent to submit to. Set target to a related Agent from threads, or keep the work in this task.'
           : 'This Agent has no parent to update from. Set source to a related Agent from threads.'), { code: method === 'submit' ? 'target_required' : 'source_required' });
         const external = await owners.kernel.agentRuntimeRequest<ExternalChild | null, 'runtime.external.command'>('runtime.external.command', { command: { action: 'child_target', runId: authority.runId, target: peerId } }, context.signal);
-        if (external) return exchangeExternalCode(owners, authority, self, external, method === 'submit' ? 'send' : 'receive', input.files, context.signal);
+        if (external) return exchangeExternalCode(owners, authority, self, external, method === 'submit' ? 'send' : 'receive', input.files, context.signal,
+          input.afterCurrent ? { defer: result => {
+            if (!owners.queue) throw new Error('File exchange queue is unavailable');
+            return owners.queue.enqueue(authority, run.branch_id, { kind: 'external', self, child: external,
+              direction: method === 'submit' ? 'send' : 'receive', result });
+          } } : {});
         const peer = await participant(owners.runtime, authority.threadId, peerId, context.signal);
         const [source, target] = method === 'submit' ? [self, peer] : [peer, self];
         if (source.member.threadId === target.member.threadId) throw new Error('Select another Agent');
@@ -324,8 +331,14 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         }
         let result:WorkingResult;
         let merged:Awaited<ReturnType<IntegrationCoordinator['mergeResult']>>;
+        const defer = input.afterCurrent ? async (result: WorkingResult) => {
+          if (!owners.queue) throw new Error('File exchange queue is unavailable');
+          return owners.queue.enqueue(authority, run.branch_id, { kind: 'native', source, target, result });
+        } : undefined;
         if(source.source.resource_owner.kind==='managed_host') {
-          ({result,merged}=await exchangeManagedCode(owners,authority,run.branch_id,source,target,input.files,context.signal,()=>{dispatched=true;}));
+          const exchange = await exchangeManagedCode(owners,authority,run.branch_id,source,target,input.files,context.signal,()=>{dispatched=true;}, defer ? { defer } : {});
+          if (exchange.queued) return exchange.queued;
+          result = exchange.result; merged = exchange.merged!;
         } else {
         const targetScope = await openExchangeScope(owners, authority, target, context.signal); opened.push(targetScope);
         const sourceScope = source.source.mode==='fixed_branch'?await openFixedCodeSource(owners,authority,source.source,context.signal)
@@ -345,6 +358,7 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
           baselineBranchId: baseline.branch_id, baselineRevision: baseline.revision,
           ...(input.files ? { files: input.files } : {}), acknowledged, signal: context.signal });
         if (!result.root) throw new Error('The source snapshot has no immutable root');
+        if (defer) return await defer(result);
         integration = codeIntegration(authority,run.branch_id,source,target,result,targetScope,context.signal);
         dispatched = true;
         merged = await owners.coordinator.mergeResult(integration);
@@ -373,6 +387,7 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
             message: error instanceof Error ? error.message : String(error) }, parts: [] } } };
       } finally {
         for (const scope of opened.reverse()) await scope.release().catch(error => owners.onCleanupError(authority.operationId, error));
+        owners.queue?.release(authority.operationId);
       }
     });
   };

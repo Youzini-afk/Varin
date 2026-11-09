@@ -741,6 +741,7 @@ export interface HostJobSource {
 }
 
 export interface HostJobLink {
+  codeExchange?: CodeExchangeQueue;
   mcpHolderReleased: boolean;
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
@@ -749,6 +750,15 @@ export interface HostJobLink {
 
 export interface HostJobBeginParams {
   binding: HostJobBinding;
+}
+
+export interface CodeExchangeQueue {
+  requestRef: unknown;
+  targetThreadId: string;
+  targetBranchId: string;
+  afterRunId: string | null;
+  externalOperationId: string | null;
+  started: boolean;
 }
 
 export interface HostJobAcceptParams {
@@ -951,6 +961,15 @@ export interface CalendarCalculationRetryParams {
   expectedRevision: number;
 }
 
+export interface MessageControlParams {
+  threadId: string;
+  branchId: string;
+  messageId: string;
+  expectedRevision: number;
+  action: string;
+  text?: string;
+}
+
 export type MessageKind = 'inform' | 'request';
 
 export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';
@@ -971,6 +990,7 @@ export interface MessageSendParams {
   attachments?: AttachmentSelection[];
   preparedAttachments?: Attachment[];
   preparedAttachmentMedia?: IncomingMedia[];
+  afterCurrent?: boolean;
 }
 
 export interface MessageListParams {
@@ -1013,6 +1033,8 @@ export interface MessageSummary extends MessageReceipt {
   deliveredRunId: string | null;
   deliveredCursor: number | null;
   attachments: Attachment[];
+  revision?: number;
+  afterCurrent?: boolean;
 }
 
 export interface MessageView extends MessageSummary {

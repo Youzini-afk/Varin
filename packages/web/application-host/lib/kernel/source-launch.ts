@@ -160,8 +160,10 @@ export async function admitRunSourceAuthority(
   if (integration) {
     if (selection.mode === 'fixed_branch' || !options.operationId) throw new Error('Integration requires an admitted physical target Operation');
     const operation = await runtime.operation(options.operationId, signal);
-    if (operation.run_id !== run.id || operation.phase !== 'running' || !['integrate_child','submit_code','update'].includes(String(operation.executor))
-      || operation.execution_owner?.kind !== 'external' || operation.cancel_requested) throw new Error('Integration target authority requires its original active Host tool Operation');
+    const retainedExchange = operation.lifetime === 'thread' && operation.host_job?.binding.domain === 'collaboration.code'
+      && operation.host_job.codeExchange?.started && !operation.external_receipt?.executor_stopped;
+    if (operation.run_id !== run.id || (operation.phase !== 'running' && !retainedExchange) || !['integrate_child','submit_code','update'].includes(String(operation.executor))
+      || operation.execution_owner?.kind !== 'external' || (operation.cancel_requested && !retainedExchange)) throw new Error('Integration target authority requires its original active Host tool Operation');
   }
   if (options.purpose === 'script_environment') {
     if (!options.operationId || options.retention !== 'caller') throw new Error('Script source requires its original environment operation');

@@ -9,9 +9,11 @@ import { acknowledgedCode, captureCodeSelection, codeBaseline, codeIntegration, 
 import type { ToolInvocationAuthority } from './tool-invocation.js';
 import { toolOperationId, validToolOrigin } from './protocol.generated.js';
 import { sourcePathMap } from './source-path-map.js';
+import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:ToolInvocationAuthority,branchId:string,
-  source:CodeParticipant,target:CodeParticipant,files:CodeSelection[]|undefined,signal:AbortSignal,onApply:()=>void) {
+  source:CodeParticipant,target:CodeParticipant,files:CodeSelection[]|undefined,signal:AbortSignal,onApply:()=>void,
+  options: { frozen?: WorkingResult; defer?: (result: WorkingResult) => Promise<ToolExecutionReceipt> } = {}) {
   const retained:Array<{release():Promise<void>}>=[];
   try {
     const own=source.runId===invocation.runId?source:target;
@@ -38,14 +40,19 @@ export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:T
       const address={coordinatorHostId:owners.runtime.coordinatorHostId,authorityId:admitted.binding.authorityId,resourceEpoch:admitted.binding.resourceEpoch};
       return {service:admitted.service,address};
     };
-    const sender=await open(source),receiver=await open(target);
+    let result = options.frozen;
+    if (!result) {
+    const sender=await open(source);
     const {source:baseline,participant:baselineOwner}=await codeBaseline(owners.runtime,source,target,signal);
     if(!baseline.branch_id || baseline.revision===null)throw Object.assign(new Error('No common file baseline links these Agents: neither side records the fixed revision both started from, so their changes cannot be merged'),{code:'baseline_unavailable'});
-    const result=await sender.service.service({...sender.address,requestId:randomUUID(),operation:{kind:'code_capture',invocation,
+    result=await sender.service.service({...sender.address,requestId:randomUUID(),operation:{kind:'code_capture',invocation,
       mapping: await sourcePathMap(owners.runtime, source, target, signal),
       baselineMapping: await sourcePathMap(owners.runtime, baselineOwner, source, signal),
       sourceThreadId:source.member.threadId,targetThreadId:target.member.threadId,
       baselineBranchId:baseline.branch_id,baselineRevision:baseline.revision,...(files?{files}:{})}},signal) as WorkingResult;
+    }
+    if (options.defer) return { result, queued: await options.defer(result) };
+    const receiver=await open(target);
     onApply();
     const merged=await receiver.service.service({...receiver.address,requestId:randomUUID(),
       operation:{kind:'code_apply',invocation,branchId,source,target,result}},signal) as IntegrationOperationReceipt;
@@ -53,9 +60,24 @@ export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:T
   } finally {for(const scope of retained.reverse())await scope.release().catch(error=>owners.onCleanupError(invocation.operationId,error));}
 }
 
+export async function releaseManagedCodeResult(owners: CodeExchangeOwners, invocation: ToolInvocationAuthority,
+  result: { branchId: string; resultRevision?: number }) {
+  const signal = new AbortController().signal;
+  const launch = await owners.runtime.launch(invocation.runId, signal);
+  if (!launch) throw new Error('Original file storage launch is unavailable');
+  const scope = await admitRunSourceAuthority(owners.kernel, owners.runtime,
+    savedSourceLaunch(invocation.runId, invocation.source!, sourceToolSchemas(launch.selection).map(tool => tool.name)),
+    { signal, resolveLiveSource: owners.resolveLiveSource, operationId: invocation.operationId, retention: 'caller' });
+  try {
+    if (scope.kind !== 'managed') throw new Error('Original file storage Host is unavailable');
+    await scope.service.service({ coordinatorHostId: owners.runtime.coordinatorHostId, authorityId: scope.binding.authorityId,
+      resourceEpoch: scope.binding.resourceEpoch, requestId: randomUUID(), operation: { kind: 'code_release', invocation, result } });
+  } finally { await scope.release(); }
+}
+
 export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,'kernel'|'storage'|'documents'|'recovery'|'metadataReader'|'coordinator'>):ManagedSourceServiceHandler {
   return async(scope,operation,suppliedSignal)=>{
-    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply')throw new Error('Unknown code exchange operation');
+    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply'&&operation.kind!=='code_release')throw new Error('Unknown code exchange operation');
     const invocation=operation.invocation;
     if(!scope.principal.capabilities.includes('filesystem:write') || !validToolOrigin(invocation.origin)
       || toolOperationId(invocation.origin,invocation.callId)!==invocation.operationId
@@ -63,6 +85,16 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
       || invocation.source?.workspace_id!==scope.source.workspace_id
       || !isDeepStrictEqual(invocation.source.resource_owner,scope.source.resource_owner))throw new Error('The exchange differs from its original source authority');
     const signal=suppliedSignal??new AbortController().signal;
+    if (operation.kind === 'code_release') {
+      if (operation.result.branchId !== `code-exchange:${invocation.operationId}`) throw new Error('File delivery snapshot changed');
+      const fixed = await openFixedCodeSource(owners, invocation, scope.source, signal);
+      try {
+        const revisions = operation.result.resultRevision === undefined ? (await fixed.store.listResults(operation.result.branchId)).map(result => result.resultRevision) : [operation.result.resultRevision];
+        await fixed.store.deleteResults(operation.result.branchId, revisions);
+        await fixed.store.deleteBranch(operation.result.branchId);
+        return { released: true };
+      } finally { await fixed.release(); }
+    }
     if(scope.source.mode==='fixed_branch') {
       if(operation.kind!=='code_capture')throw new Error('该 Agent 当前保存的是固定成果；续接后即可交换改动。');
       const fixed=await openFixedCodeSource(owners,invocation,scope.source,signal);

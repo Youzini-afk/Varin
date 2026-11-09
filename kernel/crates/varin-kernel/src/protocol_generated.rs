@@ -959,6 +959,33 @@ pub(crate) struct HostJobBeginParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeExchangeQueueParams {
+    pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
+    pub(crate) payload: Value,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) after_current: bool,
+    pub(crate) external_operation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeExchangeControlParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationParams {
+    pub(crate) operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostJobUserParams {
     pub(crate) subject_id: String,
     pub(crate) thread_id: String,
@@ -976,12 +1003,6 @@ pub(crate) struct HostJobAcceptParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
     pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
     pub(crate) task: Option<varin_runtime::catalog::host_jobs::McpTaskState>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct OperationParams {
-    pub(crate) operation_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3303,6 +3324,18 @@ pub(crate) struct MessageSendParams {
     pub(crate) attachments: Option<Vec<varin_runtime::catalog::attachments::AttachmentSelection>>,
     pub(crate) prepared_attachments: Option<Vec<varin_runtime::catalog::attachments::Attachment>>,
     pub(crate) prepared_attachment_media: Option<Vec<varin_runtime::output::IncomingMedia>>,
+    pub(crate) after_current: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MessageControlParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) message_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) action: String,
+    pub(crate) text: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4693,6 +4726,26 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.host_job.begin" => serde_json::from_value::<HostJobBeginParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.host_job.code_exchange.queue" => {
+            serde_json::from_value::<CodeExchangeQueueParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.code_exchange.control" => {
+            serde_json::from_value::<CodeExchangeControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.code_exchange.request" => {
+            serde_json::from_value::<OperationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.host_job.code_exchange.pending" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.host_job.user" => serde_json::from_value::<HostJobUserParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -5966,6 +6019,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.messages.send" => serde_json::from_value::<MessageSendParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.messages.control" => {
+            serde_json::from_value::<MessageControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.messages.list" => serde_json::from_value::<MessageListParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -3,6 +3,8 @@
 mod fixture;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
+#[path = "fixtures/content_collection.rs"]
+mod content_collection;
 use fixture::Fixture;
 use input_admission::InputAdmission;
 use serde_json::json;
@@ -102,6 +104,62 @@ fn separate_work_waits_for_the_current_execution_without_steering_it() {
     let RequestActivationAdmission::Bound(run) = f.db.admit_request_activation(activation).unwrap() else { panic!("new execution") };
     assert_ne!(run, f.context.run_id);
     assert_eq!(view(&f.db, &receipt).summary.delivered_run_id.as_deref(), Some(run.as_str()));
+}
+#[test]
+fn queued_collaboration_can_be_edited_sent_now_or_withdrawn_without_replacing_its_identity() {
+    let mut f = Fixture::new(); f.accept(); f.settle_exchange();
+    let make = |key: &str, db: &mut Catalog| {
+        let prepared = db.prepare_user_message(key.into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+            attachments: vec![], after_current: Some(true), source_agent: None, name: None, wait: None,
+            target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
+            reply_to: None, kind: MessageKind::Request, text: "Original draft".into(),
+        }).unwrap().load().unwrap();
+        db.admit_message(prepared).unwrap().receipt
+    };
+    let receipt = make("editable", &mut f.db);
+    let first = view(&f.db, &receipt);
+    assert!(first.summary.after_current);
+    let edit = f.db.prepare_queued_message_edit("thread:parent", "branch:parent", &receipt.identity.message_id, first.summary.revision).unwrap().load("Edited instruction".into()).unwrap();
+    f.db.admit_queued_message_edit(edit).unwrap();
+    content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
+    let changed = view(&f.db, &receipt);
+    assert_eq!(changed.text, "Edited instruction");
+    assert_eq!(changed.summary.receipt, first.summary.receipt);
+    assert!(f.db.control_queued_message("thread:parent", "branch:parent", &receipt.identity.message_id, first.summary.revision, "cancel").is_err());
+    f.db.control_queued_message("thread:parent", "branch:parent", &receipt.identity.message_id, changed.summary.revision, "send_now").unwrap();
+    let sent = view(&f.db, &receipt);
+    assert!(!sent.summary.after_current);
+    assert!(matches!(sent.summary.activation, MessageActivation::Bound { .. }));
+    let head = f.db.head("branch:parent").unwrap();
+    let delivery = f.db.prepare_input_delivery(&f.context.run_id, f.db.epoch(), head.as_deref()).unwrap().load().unwrap();
+    assert!(f.db.admit_input_delivery(delivery).unwrap().is_some());
+    assert!(serde_json::to_string(&f.db.history("branch:parent").unwrap()).unwrap().contains("Edited instruction"));
+    assert!(f.db.prepare_queued_message_edit("thread:parent", "branch:parent", &receipt.identity.message_id, sent.summary.revision).is_err());
+    let withdrawn = make("withdrawn", &mut f.db);
+    let queued = view(&f.db, &withdrawn);
+    f.db.control_queued_message("thread:parent", "branch:parent", &withdrawn.identity.message_id, queued.summary.revision, "cancel").unwrap();
+    assert_eq!(view(&f.db, &withdrawn).summary.state, InputState::Cancelled);
+    finish(&mut f, RunState::Completed);
+    assert!(f.db.capture_request_activations().unwrap().is_empty());
+}
+
+#[test]
+fn deferred_inform_becomes_available_after_the_run_without_waking_a_model() {
+    let mut f = Fixture::new(); f.accept(); f.settle_exchange();
+    let prepared = f.db.prepare_user_message("passive-after".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+        attachments: vec![], after_current: Some(true), source_agent: None, name: None, wait: None,
+        target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()), reply_to: None,
+        kind: MessageKind::Inform, text: "Reference for later".into(),
+    }).unwrap().load().unwrap();
+    let receipt = f.db.admit_message(prepared).unwrap().receipt;
+    assert!(view(&f.db, &receipt).summary.after_current);
+    let delivery = f.db.prepare_input_delivery(&f.context.run_id, f.db.epoch(), f.db.head("branch:parent").unwrap().as_deref()).unwrap().load().unwrap();
+    assert!(f.db.admit_input_delivery(delivery).unwrap().is_none_or(|batch| batch.items.is_empty()));
+    finish(&mut f, RunState::Completed);
+    let later = view(&f.db, &receipt);
+    assert!(!later.summary.after_current);
+    assert!(matches!(later.summary.activation, MessageActivation::Passive));
+    assert!(f.db.capture_request_activations().unwrap().is_empty());
 }
 #[test]
 fn active_request_binds_once_joins_closed_boundary_and_cancel_cannot_reopen_it() {

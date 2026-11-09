@@ -81,9 +81,26 @@
 .collaboration-dispatch-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 0.75rem; padding-top: 0.625rem; border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); font-size: var(--text-micro); color: var(--muted-foreground); }
 .collaboration-dispatch-footer button { display: inline-flex; align-items: center; gap: 0.125rem; }
 .collaboration-dispatch-agent-state { margin-left: auto; }
+.collaboration-send-timing { display: inline-flex; align-items: center; gap: .25rem; padding: .25rem .375rem; border-radius: .375rem; color: var(--muted-foreground); font-size: var(--text-micro); transition: color var(--motion-dur-fade), background var(--motion-dur-fade); }
+.collaboration-send-timing:hover { color: var(--foreground); background: var(--interactive-hover); }
+.collaboration-queue-controls { margin-top: .75rem; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); padding-top: .5rem; }
+.collaboration-queue-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .625rem; font-size: var(--text-micro); color: var(--muted-foreground); }
+.collaboration-queue-state { display: inline-flex; align-items: center; gap: .25rem; margin-right: auto; }
+.collaboration-queue-actions button { padding: .125rem 0; display: inline-flex; align-items: center; gap: .25rem; transition: color var(--motion-dur-fade); }
+.collaboration-queue-actions button:hover { color: var(--primary); }
+.collaboration-queue-actions button:disabled { opacity: .45; }
+.collaboration-queue-editor { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms var(--motion-ease-out), opacity 160ms var(--motion-ease-out); }
+.collaboration-queue-editor[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
+.collaboration-queue-editor > div { min-height: 0; overflow: hidden; }
+.collaboration-queue-editor textarea { margin-top: .625rem; max-height: 16rem; }
+.collaboration-exchange-queue { flex: none; min-height: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.collaboration-exchange-queue-list { max-height: 35vh; overflow-y: auto; overscroll-behavior: contain; padding: 0 1rem .5rem; }
+.collaboration-exchange-queued { padding: .625rem 0; border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.collaboration-queued-files { padding: .5rem 0 0 1.5rem; overflow-wrap: anywhere; font-size: var(--text-micro); color: var(--muted-foreground); }
+.collaboration-queue-actions button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: .25rem; }
 @media (hover: none) { .collaboration-message-menu { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .collaboration-message-window, .collaboration-message-menu { transition: none; }
+  .collaboration-message-window, .collaboration-message-menu, .collaboration-queue-editor, .collaboration-send-timing { transition: none; }
 }
 
 /* Chat keeps the exchange in the reading flow, with a folded preview by default. */

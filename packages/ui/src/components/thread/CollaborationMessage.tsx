@@ -12,6 +12,7 @@ import { ChildState } from '../conversation/childPresentation';
 import type { CollaborationFeedItem, CollaborationMember } from './collaborationFeed';
 import { exchangeSummary } from './collaborationPresentation';
 import { CollaborationExchangeCard } from './CollaborationExchange';
+import { CollaborationQueueControls } from './CollaborationQueueControls';
 
 /** Measure the rendered body, including Markdown, fonts and later image loads. */
 export function CollaborationMessageBody({ id, text, expanded, onExpandedChange }: {
@@ -54,7 +55,8 @@ export function CollaborationMessageBody({ id, text, expanded, onExpandedChange 
   </div>;
 }
 
-export function CollaborationMessage({ api, identity, item, members, original, expanded, onExpandedChange, onMember, onReply, onCopy, onExchange }: {
+export function CollaborationMessage({ api, identity, item, members, original, expanded, onExpandedChange, onMember, onReply, onCopy, onExchange, onQueueChanged }: {
+  onQueueChanged?(): void;
   api?: ThreadsAPI; identity?: ThreadIdentity;
   item: CollaborationFeedItem; members: CollaborationMember[]; original?: MessageFeedEntry;
   expanded: boolean; onExpandedChange(open: boolean): void;
@@ -117,6 +119,9 @@ export function CollaborationMessage({ api, identity, item, members, original, e
             {exchange && message ? <CollaborationExchangeCard message={message} onOpen={() => onExchange(message)} />
               : text && <CollaborationMessageBody id={item.id} text={text} expanded={expanded} onExpandedChange={onExpandedChange} />}
             {api && identity && <ThreadAttachments api={api} identity={identity} attachments={record.attachments} />}
+            {api?.messages?.control && message?.state === 'queued' && message.revision !== undefined
+              && (message.actor.kind === 'user' || message.actor.kind === 'agent') && !exchange
+              && <CollaborationQueueControls api={api} message={message} onChanged={() => onQueueChanged?.()} />}
             {item.kind === 'dispatch' && <div className="collaboration-dispatch-footer">
               <button type="button" onClick={() => onMember(targetId, targetBranch)}>
                 {t('collaboration.openAgent')}<Icon name="arrow-right-s" className="size-3.5" />
@@ -137,7 +142,7 @@ export function CollaborationMessage({ api, identity, item, members, original, e
             </time>}
             {message?.activation.state === 'failed' ? <span role="status" title={message.activation.code} className="text-destructive">{t('chat.messages.failed')}</span>
               : message?.state === 'cancelled' ? <span>{t('chat.messages.cancelled')}</span>
-                : outgoing && message?.state === 'queued' ? <span>{t('chat.messages.queued')}</span> : null}
+                : outgoing && message?.state === 'queued' && !api?.messages?.control ? <span>{t('chat.messages.queued')}</span> : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" className="collaboration-message-menu" aria-label={t('collaboration.messageActions')}>

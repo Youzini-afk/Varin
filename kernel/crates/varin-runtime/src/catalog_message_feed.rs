@@ -263,11 +263,14 @@ impl Read {
                 continue;
             }
             let row: QueuedInputMetadata = serde_json::from_str(&body)?;
+            let reference: Value = match &row.origin {
+                InputOrigin::Message { edited_intent: Some(reference), .. } => reference.clone(),
+                _ => serde_json::from_str(&content)?,
+            };
             let message_summary = summary(&db, row)?;
             let identity = &message_summary.receipt.identity;
             participants.insert(identity.sender_thread_id.clone());
             participants.insert(identity.target_thread_id.clone());
-            let reference: Value = serde_json::from_str(&content)?;
             let original: MessageIntent =
                 serde_json::from_value(self.content.load_cancellable(&reference, cancel)?)?;
             let exchange = match &identity.actor {

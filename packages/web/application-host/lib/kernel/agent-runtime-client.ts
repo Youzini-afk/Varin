@@ -649,6 +649,9 @@ export class AgentRuntimeClient {
   sendMessage(input: MessageSendParams, signal?: AbortSignal): Promise<MessageReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.messages.send', input, signal);
   }
+  controlMessage(input: import('./protocol.generated.js').MessageControlParams, signal?: AbortSignal): Promise<MessageView> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.control', input, signal);
+  }
   listMessages(input: MessageListParams, signal?: AbortSignal): Promise<MessagePage> {
     return this.kernel.agentRuntimeRequest('runtime.messages.list', input, signal);
   }

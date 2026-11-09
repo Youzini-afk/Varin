@@ -23,6 +23,7 @@ function fixture() {
   return {
     cancelObservation: vi.fn<(operationId: string) => Promise<void>>(async () => {}),
     api: {
+      control: vi.fn<ThreadMessagesAPI['control']>(),
       feed: vi.fn<ThreadMessagesAPI['feed']>(),
       list: vi.fn<ThreadMessagesAPI['list']>(async (_identity, request) => ({ messages: request.direction === 'incoming' ? [summary] : [], nextCursor: null })),
       get: vi.fn<ThreadMessagesAPI['get']>(async () => ({ ...summary, text: 'Original message body' })),

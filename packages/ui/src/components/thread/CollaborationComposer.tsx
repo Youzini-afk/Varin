@@ -48,6 +48,7 @@ export function CollaborationComposer({
   const draft = useThreadDraftStore((state) => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const patch = (value: Partial<ThreadDraft>) => useThreadDraftStore.getState().patch(draftKey, value);
   const collaboration = draft.collaboration;
+  const afterCurrent = collaboration?.afterCurrent ?? false;
   const targets = direct ? [direct] : (collaboration?.targets ?? (defaultTarget ? [defaultTarget] : []));
   const pending = collaboration?.attempts?.some((attempt) => !attempt.receipt) ?? false;
   const busy = collaboration?.sending ?? false;
@@ -57,7 +58,7 @@ export function CollaborationComposer({
     members.find((member) => member.threadId === id)?.agentId ||
     id;
   const editTargets = (next: CollaborationTarget[]) =>
-    patch({ collaboration: { targets: next, reply: collaboration?.reply } });
+    patch({ collaboration: { targets: next, reply: collaboration?.reply, afterCurrent } });
   const targetName = (target: CollaborationTarget) => {
     const branches = members.find((member) => member.threadId === target.threadId)?.detail?.branches ?? [];
     const ordinal = branches.findIndex((branch) => branch.branchId === target.branchId);
@@ -99,6 +100,7 @@ export function CollaborationComposer({
         request: {
           key: crypto.randomUUID(),
           kind: 'request' as const,
+          afterCurrent,
           text: current.text,
           attachments,
           targetThreadId: target.threadId,
@@ -106,7 +108,7 @@ export function CollaborationComposer({
           ...(current.collaboration?.reply ? { replyTo: current.collaboration.reply.messageId } : {}),
         },
       }));
-    patch({ collaboration: { targets, reply: current.collaboration?.reply, attempts, sending: true } });
+    patch({ collaboration: { targets, reply: current.collaboration?.reply, afterCurrent, attempts, sending: true } });
     const results = await Promise.all(
       attempts.map(async (attempt) => {
         if ('receipt' in attempt && attempt.receipt) return attempt;
@@ -129,7 +131,7 @@ export function CollaborationComposer({
       const latest = useThreadDraftStore.getState().drafts[draftKey];
       patch({ text: latest?.text === current.text ? '' : latest?.text ?? '', files: latest?.files?.filter(file => !current.files?.some(selected => selected.id === file.id)), selectedAttachments: latest?.selectedAttachments?.filter(file => !current.selectedAttachments?.some(selected => selected.id === file.id)), collaboration: { targets } });
     } else
-      patch({ collaboration: { targets, reply: current.collaboration?.reply, attempts: results, sending: false } });
+      patch({ collaboration: { targets, reply: current.collaboration?.reply, afterCurrent, attempts: results, sending: false } });
     if (host === getRuntimeEndpointGeneration()) onSent();
   };
   const reply: MessageFeedEntry | undefined = collaboration?.reply;
@@ -268,6 +270,23 @@ export function CollaborationComposer({
               {t('chat.messages.newDraft')}
             </button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="collaboration-send-timing" disabled={busy || retained}
+                aria-label={t('collaboration.queue.timing')} title={t(afterCurrent ? 'collaboration.queue.afterHint' : 'collaboration.queue.nowHint')}>
+                <Icon name={afterCurrent ? 'time' : 'arrow-up'} className="size-3.5" />
+                <span>{t(afterCurrent ? 'collaboration.queue.after' : 'collaboration.queue.now')}</span>
+                <Icon name="arrow-down-s" className="size-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top">
+              {[false, true].map(value => <DropdownMenuItem key={String(value)} onClick={() => patch({ collaboration: { ...collaboration, targets, afterCurrent: value } })}>
+                <Icon name={value ? 'time' : 'arrow-up'} className="size-4" />
+                <span>{t(value ? 'collaboration.queue.after' : 'collaboration.queue.now')}</span>
+                {afterCurrent === value && <Icon name="check" className="ml-auto size-4" />}
+              </DropdownMenuItem>)}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             type="button"
             size="icon"
@@ -276,7 +295,7 @@ export function CollaborationComposer({
             onClick={() => void send()}
             aria-label={t(pending ? 'chat.messages.retry' : 'collaboration.send')}
           >
-            <Icon name={busy ? 'more' : 'arrow-up'} className="size-4" />
+            <Icon name={busy ? 'more' : afterCurrent ? 'time' : 'arrow-up'} className="size-4" />
           </Button>
         </div>
       </div>

@@ -150,9 +150,12 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'history/file': ['runtime', 'threadId', 'branchId', 'itemId', 'path'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/control': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/list': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/feed': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/exchange': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/exchanges/queued': ['runtime', 'threadId', 'branchId'],
+    'messages/exchanges/control': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/get': ['runtime', 'threadId', 'branchId', 'messageId'],
     'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf', 'scope', 'query', 'cursor', 'limit', 'parentThreadId', 'parentBranchId', 'workspaceId', 'updatedAfterMs', 'updatedBeforeMs', 'filePath'],
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
@@ -361,13 +364,29 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('messages/send', (body, signal) => {
     const request = object(body.request);
-    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments'].includes(key))) throw new Error('Invalid message field');
+    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments', 'afterCurrent'].includes(key))) throw new Error('Invalid message field');
+    if (request.afterCurrent !== undefined && typeof request.afterCurrent !== 'boolean') throw new Error('Invalid message timing');
     if ((request.kind !== 'inform' && request.kind !== 'request') || typeof request.text !== 'string') throw new Error('Invalid message content');
     return adapter.sendMessage(identity(body), { key: text(request.key), kind: request.kind, text: request.text,
+      ...(request.afterCurrent === undefined ? {} : { afterCurrent: request.afterCurrent as boolean }),
       ...(request.attachments === undefined ? {} : { attachments: parseAttachmentSelections(request.attachments)! }),
       ...(request.targetThreadId === undefined ? {} : { targetThreadId: text(request.targetThreadId) }),
       ...(request.targetBranchId === undefined ? {} : { targetBranchId: text(request.targetBranchId) }),
       ...(request.replyTo === undefined ? {} : { replyTo: text(request.replyTo) }) }, signal);
+  });
+  post('messages/control', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['messageId', 'expectedRevision', 'action', 'text'].includes(key))
+      || !['send_now', 'cancel', 'edit'].includes(String(request.action))) throw new Error('Invalid queued message action');
+    return adapter.controlMessage(identity(body), { messageId: text(request.messageId), expectedRevision: revision(request.expectedRevision),
+      action: String(request.action), ...(request.text === undefined ? {} : { text: typeof request.text === 'string' ? request.text : text(request.text) }) }, signal);
+  });
+  post('messages/exchanges/queued', (body, signal) => adapter.queuedExchanges(identity(body), signal));
+  post('messages/exchanges/control', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['operationId', 'expectedRevision', 'action'].includes(key))
+      || (request.action !== 'send_now' && request.action !== 'cancel' && request.action !== 'retry')) throw new Error('Invalid queued exchange action');
+    return adapter.controlExchange(identity(body), { operationId: text(request.operationId), expectedRevision: revision(request.expectedRevision), action: request.action }, signal);
   });
   post('messages/list', (body, signal) => {
     const request = object(body.request);

@@ -123,6 +123,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       sources: (selection, request = {}, signal) => post('research/sources', { ...selection, request }, signal),
     },
     messages: {
+      control: (identity, request, signal) => post('messages/control', { ...identity, request }, signal),
       feed: (identity, request, signal) => post('messages/feed', { ...identity, request }, signal),
       send: (identity, request, signal) => post('messages/send', { ...identity, request }, signal),
       list: (identity, request, signal) => post('messages/list', { ...identity, request }, signal),
@@ -137,6 +138,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
+      queuedExchanges: (identity, signal) => post('messages/exchanges/queued', identity, signal),
+      controlExchange: (identity, request, signal) => post('messages/exchanges/control', { ...identity, request }, signal),
       dispatchCatalog: (identity, signal) => post('child/dispatch/catalog', identity, signal),
       dispatch: (input, signal) => post('child/dispatch', input, signal),
       exchange: (identity, request, signal) => post('messages/exchange', { ...identity, request }, signal),

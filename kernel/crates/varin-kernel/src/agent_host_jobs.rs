@@ -13,6 +13,32 @@ pub(super) fn execute(
     }
     let owner = runtime.catalog();
     match method {
+        "runtime.host_job.code_exchange.pending" => {
+            let operations = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.pending_code_exchanges().map_err(domain)?;
+            let result = operations.into_iter().map(HostJobPending::from_operation).collect::<std::result::Result<Vec<_>, _>>().map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        }
+        "runtime.host_job.code_exchange.queue" => {
+            let p: CodeExchangeQueueParams = serde_json::from_value(params)?;
+            let preparation = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.prepare_result_content();
+            let prepared = preparation.write_result(&p.payload).map_err(domain)?;
+            let mut db = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            db.begin_host_job(p.binding.clone()).map_err(domain)?;
+            let op = db.queue_code_exchange(&p.binding, &p.thread_id, &p.branch_id, p.after_current, p.external_operation_id.as_deref(), prepared).map_err(domain)?;
+            Ok(serde_json::to_value(op)?)
+        }
+        "runtime.host_job.code_exchange.request" => {
+            let p: OperationParams = serde_json::from_value(params)?;
+            let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.code_exchange_request(&p.operation_id).map_err(domain)?;
+            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
+        }
+        "runtime.host_job.code_exchange.control" => {
+            let p: CodeExchangeControlParams = serde_json::from_value(params)?;
+            let op = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .control_code_exchange(&p.thread_id, &p.branch_id, &p.operation_id,
+                    p.expected_revision.try_into().map_err(|_| KernelError::Protocol("exchange revision".into()))?, &p.action).map_err(domain)?;
+            Ok(serde_json::to_value(op)?)
+        }
         "runtime.research.scopes" => {
             let p: ResearchScopeParams = serde_json::from_value(params)?;
             let result = owner

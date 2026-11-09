@@ -72,6 +72,7 @@ import { createChildProjectSourcePreparer } from './lib/kernel/child-project-sou
 import { createDelegationModelSelection } from './lib/kernel/delegation-model-selection.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
 import { createCodeExchangeOwner, CODE_EXCHANGE_CAPABILITY } from './lib/kernel/code-exchange.js';
+import { createCodeExchangeQueue } from './lib/kernel/code-exchange-queue.js';
 import { createManagedCodeExchangeService } from './lib/kernel/managed-code-exchange.js';
 import { createPlanOwner } from './lib/kernel/plan-owner.js';
 import { PlanService } from './lib/kernel/plan-service.js';
@@ -2371,7 +2372,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         case 'child_refresh_capture': case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
-        case 'code_capture': case 'code_apply': return targetCodeExchange(scope, operation, signal);
+        case 'code_capture': case 'code_apply': case 'code_release': return targetCodeExchange(scope, operation, signal);
         case 'user_integration': return targetUserIntegrations(scope, operation, signal);
         case 'schedule': return targetSchedules(scope, operation, signal);
         default: return targetSourceQuery(scope, operation, signal);
@@ -2898,11 +2899,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       openTarget: createIntegrationTargetOpener({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
         recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore, resolveLiveSource: liveSources.validate,
         documents: documentsAuthority }) }));
-  const unregisterCodeExchangeCapability = extensionRuntime.capabilities.register(CODE_EXCHANGE_CAPABILITY,
-    createCodeExchangeOwner({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
+  const codeExchangeOwners = { kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
       coordinator: threadIntegrationCoordinator, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
       resolveLiveSource: liveSources.validate, documents: documentsAuthority,
-      onCleanupError: () => console.error('[CodeExchange] Original delivery or source cleanup requires retry') }));
+      onCleanupError: () => console.error('[CodeExchange] Original delivery or source cleanup requires retry') };
+  const codeExchangeQueue = createCodeExchangeQueue(codeExchangeOwners);
+  threads.bindCodeExchangeQueue(codeExchangeQueue);
+  const unregisterCodeExchangeCapability = extensionRuntime.capabilities.register(CODE_EXCHANGE_CAPABILITY,
+    createCodeExchangeOwner({ ...codeExchangeOwners, queue: codeExchangeQueue.owner }));
+  codeExchangeQueue.start();
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -3178,6 +3183,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('unregisterScriptCapability', () => unregisterScriptCapability());
         await shutdown.run('unregisterResearchCapability', () => unregisterResearchCapability());
         await shutdown.run('researchRuntime.dispose', () => researchRuntime.dispose());
+        await shutdown.run('codeExchangeQueue.dispose', () => codeExchangeQueue.dispose());
         await shutdown.run('userIntegrations.dispose', () => userIntegrations.dispose());
         await shutdown.run('managedMcpInteractions.dispose', () => managedMcpInteractions.dispose());
         await shutdown.run('mcpInteractionRuntime.dispose', () => mcpInteractionRuntime.dispose());

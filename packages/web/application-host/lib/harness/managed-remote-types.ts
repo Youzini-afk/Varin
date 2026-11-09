@@ -104,6 +104,7 @@ export type SourceServiceOperation =
       path: string; expectedRevision: string | null; bytesBase64: string; byteLength: number }
   | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string;mapping?:import('../kernel/source-path-map.js').SourcePathMap;baselineMapping?:import('../kernel/source-path-map.js').SourcePathMap}
   | {kind:'code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;branchId:string;source:import('../kernel/code-exchange.js').CodeParticipant;target:import('../kernel/code-exchange.js').CodeParticipant;result:import('./working-state/types.js').WorkingResult}
+  | {kind:'code_release';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;result:{branchId:string;resultRevision?:number}}
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
@@ -220,6 +221,7 @@ export interface SourceServiceResults {
   attachment_discard: void;
   code_capture: import('./working-state/types.js').WorkingResult;
   code_apply: import('./working-state/integration-coordinator.js').IntegrationOperationReceipt;
+  code_release: { released: boolean };
   user_integration: import('../kernel/thread-integrations.js').UserIntegrationResult;
   schedule: import('../kernel/tool-bridge.js').ToolExecutionReceipt;
   mcp: import('./managed-mcp-contract.js').ManagedMcpReply;

@@ -456,6 +456,8 @@ fn capture_roots(db: &Connection, check: &dyn Fn() -> WorkResult<()>, at_root: &
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.task.observationRef') FROM events WHERE kind IN ('host_job.task_observed','host_job.result_observed') AND json_extract(data,'$.task.observationRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.result_ref') FROM events WHERE kind='host_job.result_observed' AND json_extract(data,'$.result_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.acceptanceRef') FROM operations WHERE json_extract(body,'$.host_job.acceptanceRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.host_job.codeExchange.requestRef') FROM operations WHERE json_extract(body,'$.host_job.codeExchange.requestRef') IS NOT NULL");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.origin.edited_intent') FROM input_queue WHERE json_extract(body,'$.origin.edited_intent') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.inputRef') FROM attachment_deliveries WHERE json_extract(body,'$.inputRef') IS NOT NULL");

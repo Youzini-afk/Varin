@@ -21,6 +21,60 @@ struct Fixture {
     run: String,
     dispatch: Option<Value>,
 }
+#[test]
+fn deferred_file_job_claims_only_after_recipient_run_and_cannot_be_withdrawn_after_claim() {
+    let mut f = Fixture::new();
+    let (context, _) = f.tool("research_submit", "queued-files");
+    let op = f.db.operation(&context.operation_id).unwrap();
+    let binding = HostJobBinding { operation_id: op.id.clone(), execution_owner: op.execution_owner.unwrap(),
+        domain: "collaboration.code".into(), domain_version: 1,
+        subject: HostJobSubject::Workspace { workspace_id: "ws".into(), subject_id: op.id.clone() } };
+    f.db.begin_host_job(binding.clone()).unwrap();
+    f.db.create_thread("recipient", "recipient-branch").unwrap();
+    let recipient = f.db.submit(&SubmitInput { key: "recipient-work".into(), thread_id: "recipient".into(), branch_id: "recipient-branch".into(),
+        expected_head: None, input: json!("Working"), configuration: json!({}) }).unwrap();
+    let body = f.db.prepare_result_content().write_result(&json!({"fixedResult":"original-root"})).unwrap();
+    f.db.queue_code_exchange(&binding, "recipient", "recipient-branch", true, None, body).unwrap();
+    assert_eq!(f.db.pending_code_exchanges().unwrap().len(), 1);
+    let accepted = f.db.prepare_result_content().write_result(&json!({"status":"queued"})).unwrap();
+    let pending = f.db.accept_host_job(binding.clone(), accepted).unwrap();
+    let waiting = f.db.control_code_exchange("thread", "branch", &op.id, pending.revision, "claim").unwrap();
+    assert!(!waiting.host_job.as_ref().unwrap().code_exchange.as_ref().unwrap().started);
+    assert!(f.db.control_code_exchange("thread", "branch", &op.id, waiting.revision - 1, "send_now").is_err());
+    for state in [RunState::Preparing, RunState::Runnable, RunState::Completed] {
+        f.db.commit_execution(&recipient.run_id, f.db.epoch(), &ExecutionRecord::StateChanged { state, waiting_on: None }).unwrap();
+    }
+    let applying = f.db.control_code_exchange("thread", "branch", &op.id, waiting.revision, "claim").unwrap();
+    assert!(applying.host_job.as_ref().unwrap().code_exchange.as_ref().unwrap().started);
+    assert!(f.db.control_code_exchange("thread", "branch", &op.id, applying.revision, "cancel").is_err());
+    let request = f.db.code_exchange_request(&op.id).unwrap().load().unwrap();
+    assert!(serde_json::to_string(&request).unwrap().contains("original-root"));
+    assert!(!serde_json::to_string(&f.db.host_job_acceptance(&op.id).unwrap().load().unwrap()).unwrap().contains("original-root"));
+}
+
+#[test]
+fn queued_file_job_can_send_now_or_cancel_and_keeps_its_original_request_after_reopen() {
+    let mut f = Fixture::new();
+    let (context, _) = f.tool("research_submit", "queued-files-now");
+    let op = f.db.operation(&context.operation_id).unwrap();
+    let binding = HostJobBinding { operation_id: op.id.clone(), execution_owner: op.execution_owner.unwrap(), domain: "collaboration.code".into(),
+        domain_version: 1, subject: HostJobSubject::Workspace { workspace_id: "ws".into(), subject_id: op.id.clone() } };
+    f.db.begin_host_job(binding.clone()).unwrap();
+    let body = f.db.prepare_result_content().write_result(&json!({"fixedResult":"queued-root"})).unwrap();
+    f.db.queue_code_exchange(&binding, "thread", "branch", true, None, body).unwrap();
+    let body = f.db.prepare_result_content().write_result(&json!({"status":"queued"})).unwrap();
+    f.db.accept_host_job(binding, body).unwrap();
+    let old = std::mem::replace(&mut f.db, Catalog::open(f.root.join("replacement")).unwrap()); drop(old);
+    f.db = Catalog::open(&f.root).unwrap();
+    let op = f.db.operation(&op.id).unwrap();
+    let now = f.db.control_code_exchange("thread", "branch", &op.id, op.revision, "send_now").unwrap();
+    assert!(now.host_job.as_ref().unwrap().code_exchange.as_ref().unwrap().after_run_id.is_none());
+    let cancelled = f.db.control_code_exchange("thread", "branch", &op.id, now.revision, "cancel").unwrap();
+    assert!(cancelled.cancel_requested);
+    let claimed = f.db.control_code_exchange("thread", "branch", &op.id, cancelled.revision, "claim").unwrap();
+    assert!(!claimed.host_job.as_ref().unwrap().code_exchange.as_ref().unwrap().started);
+    assert!(serde_json::to_string(&f.db.code_exchange_request(&op.id).unwrap().load().unwrap()).unwrap().contains("queued-root"));
+}
 impl Fixture {
     fn new() -> Self {
         let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,

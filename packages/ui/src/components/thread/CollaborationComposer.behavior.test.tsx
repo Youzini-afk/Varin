@@ -44,7 +44,7 @@ it('retains exact recipient branches and retries only unconfirmed recipients wit
   selectThreadFiles('group', [new File(['zip'], 'payload.zip')]);
   useThreadDraftStore
     .getState()
-    .patch('group', { text: 'Check the selected worktree', collaboration: { targets: [rootIdentity, target] } });
+    .patch('group', { text: 'Check the selected worktree', collaboration: { targets: [rootIdentity, target], afterCurrent: true } });
   const render = () =>
     root.render(
       <CollaborationComposer
@@ -64,6 +64,7 @@ it('retains exact recipient branches and retries only unconfirmed recipients wit
     [rootIdentity, 'worker', 'worktree-branch'],
   ]);
   const original = send.mock.calls[1]![1];
+  expect(original.afterCurrent).toBe(true);
   expect(original.attachments).toEqual([{ ref: 'attachment:partial-original' }]);
   expect(useThreadDraftStore.getState().drafts.group.files).toHaveLength(1);
   expect(container.querySelector<HTMLTextAreaElement>('textarea')!.disabled).toBe(true);

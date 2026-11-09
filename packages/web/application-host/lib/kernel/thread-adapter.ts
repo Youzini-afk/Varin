@@ -194,6 +194,18 @@ export class ThreadAdapter {
   bindDefaultDeviceSource(prepare: (identity: ThreadIdentity) => Promise<ThreadSource>): void { this.defaultDeviceSource = prepare; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
   private codeExchangeReader?: import('./thread-code-exchange.js').ThreadCodeExchangeReader;
+  private exchangeQueue?: ReturnType<typeof import('./code-exchange-queue.js').createCodeExchangeQueue>;
+  bindCodeExchangeQueue(queue: NonNullable<ThreadAdapter['exchangeQueue']>): void { this.exchangeQueue = queue; }
+  async queuedExchanges(identity: ThreadIdentity, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    if (!this.exchangeQueue) throw new Error('File exchange queue is unavailable');
+    return this.exchangeQueue.list(identity, signal);
+  }
+  async controlExchange(identity: ThreadIdentity, request: { operationId: string; expectedRevision: number; action: 'send_now' | 'cancel' | 'retry' }, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    if (!this.exchangeQueue) throw new Error('File exchange queue is unavailable');
+    return this.exchangeQueue.control(identity, request, signal);
+  }
   bindCodeExchangeReader(reader: import('./thread-code-exchange.js').ThreadCodeExchangeReader): void { this.codeExchangeReader = reader; }
   async codeExchange(identity: ThreadIdentity, request: import('@varin/application-client').ThreadCodeExchangeRequest, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
@@ -513,6 +525,10 @@ export class ThreadAdapter {
       }
       throw error;
     }
+  }
+  async controlMessage(identity: ThreadIdentity, request: { messageId: string; expectedRevision: number; action: string; text?: string }, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.controlMessage({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
   }
   async listMessages(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);

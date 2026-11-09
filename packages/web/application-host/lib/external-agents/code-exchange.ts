@@ -22,6 +22,7 @@ import type { ToolExecutionReceipt } from '../kernel/tool-bridge.js';
 import { UnconfirmedIntegrationCommitError } from '../recovery/durable-file-operation.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { record, text } from './transport.js';
+import type { WorkingResult } from '../harness/working-state/types.js';
 
 function scopedMapping(base: SourcePathMap, prefix: string): SourcePathMap {
   if (prefix === base.from) return { from: '', to: base.to };
@@ -42,6 +43,7 @@ export async function exchangeExternalCode(
   direction: 'receive' | 'send',
   files: CodeSelection[] | undefined,
   signal: AbortSignal,
+  options: { frozen?: WorkingResult; defer?: (result: WorkingResult) => Promise<ToolExecutionReceipt> } = {},
 ): Promise<ToolExecutionReceipt> {
   const opened: Array<{ release(): Promise<void> }> = [];
   let integration: (IntegrationPlanInput & { operationId: string }) | undefined;
@@ -161,7 +163,7 @@ export async function exchangeExternalCode(
     const sourceId = direction === 'receive' ? child.conversation_id : caller.threadId;
     const targetId = direction === 'receive' ? caller.threadId : child.conversation_id;
     const acknowledged = await acknowledgedCode(from.store, sourceId, targetId);
-    const result = await captureCodeSelection({
+    const result = options.frozen ?? await captureCodeSelection({
       ownerThreadId:caller.threadId,
       store: from.store,
       operationId: caller.operationId,
@@ -180,6 +182,7 @@ export async function exchangeExternalCode(
       signal,
     });
     if (!result.root) throw new Error('External exchange snapshot has no retained root');
+    if (options.defer) return await options.defer(result);
     integration = {
       operationId: `integration:${caller.operationId}`,
       workspaceId: source.workspace_id,

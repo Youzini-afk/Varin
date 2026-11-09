@@ -294,6 +294,7 @@ export interface ThreadFamilyAPI {
 /** Durable same-family messages. Acceptance, history delivery, request activation and Agent reply
  * observations are distinct facts. Native ingress owns request activation. */
 export interface ThreadMessagesAPI {
+  control(identity: ThreadIdentity, request: { messageId: string; expectedRevision: number; action: 'send_now' | 'cancel' | 'edit'; text?: string }, signal?: AbortSignal): Promise<MessageView>;
   /** Original family messages, including peer exchanges; reading never activates a participant. */
   feed(identity: ThreadIdentity, request: Omit<MessageFeedParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessageFeedPage>;
   send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia'>, signal?: AbortSignal): Promise<MessageReceipt>;
@@ -315,7 +316,20 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   attachments?: import('@varin/protocol').AttachmentSelection[];
   attachmentImageReferences?: Record<string, number>;
 }
+export interface ThreadQueuedExchange {
+  operationId: string;
+  revision: number;
+  senderThreadId: string;
+  senderBranchId: string;
+  source: { threadId: string; name: string };
+  target: { threadId: string; name: string };
+  files: string[];
+  state: 'queued' | 'applying' | 'withdrawing' | 'needs_attention';
+  afterCurrent: boolean;
+}
 export interface ThreadCollaborationAPI {
+  queuedExchanges(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadQueuedExchange[]>;
+  controlExchange(identity: ThreadIdentity, request: { operationId: string; expectedRevision: number; action: 'send_now' | 'cancel' | 'retry' }, signal?: AbortSignal): Promise<void>;
   dispatchCatalog(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchCatalog>;
   dispatch(input: import('./thread-dispatch.js').ThreadDispatchInput, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchReceipt>;
   exchange(identity: ThreadIdentity, request: ThreadCodeExchangeRequest, signal?: AbortSignal): Promise<ThreadCodeExchange>;

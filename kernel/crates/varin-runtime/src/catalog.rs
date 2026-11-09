@@ -225,6 +225,7 @@ fn initialize_metadata(
         CREATE INDEX IF NOT EXISTS attention_open_operations ON operations(run_id) WHERE (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.effect')='unknown' OR json_extract(body,'$.outcome')='indeterminate' OR (json_extract(body,'$.mcp_resource_subscription') IS NOT NULL AND (json_extract(body,'$.cancel_requested')=0 OR json_extract(body,'$.mcp_resource_subscription.localReleased')=0)))")?;
     // Product discovery and Bot ancestry need only memory-work owners, not every retained tool.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS thread_memory_operations ON operations(run_id) WHERE json_extract(body,'$.intent.kind')='memory_work_v1'")?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS pending_code_exchange_jobs ON operations(run_id) WHERE json_extract(body,'$.host_job.binding.domain')='collaboration.code' AND (coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal')")?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
@@ -2052,6 +2053,8 @@ mod ingress;
 
 #[path = "catalog_host_jobs.rs"]
 pub mod host_jobs;
+#[path = "catalog_code_exchange_queue.rs"]
+pub mod code_exchange_queue;
 
 #[path = "catalog_computer_requests.rs"]
 pub mod computer_requests;

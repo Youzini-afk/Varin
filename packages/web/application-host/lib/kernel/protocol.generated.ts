@@ -133,6 +133,10 @@ export type KernelMethod =
   | "runtime.computer.scope"
   | "runtime.research.scopes"
   | "runtime.host_job.begin"
+  | "runtime.host_job.code_exchange.queue"
+  | "runtime.host_job.code_exchange.control"
+  | "runtime.host_job.code_exchange.request"
+  | "runtime.host_job.code_exchange.pending"
   | "runtime.host_job.user"
   | "runtime.host_job.accept"
   | "runtime.host_job.sources"
@@ -445,6 +449,7 @@ export type KernelMethod =
   | "runtime.family.read"
   | "runtime.family.item"
   | "runtime.messages.send"
+  | "runtime.messages.control"
   | "runtime.messages.list"
   | "runtime.messages.feed"
   | "runtime.messages.get"
@@ -1727,6 +1732,7 @@ export interface HostJobSource {
 }
 
 export interface HostJobLink {
+  codeExchange?: CodeExchangeQueue;
   mcpHolderReleased: boolean;
   binding: HostJobBinding;
   acceptanceRef: unknown | null;
@@ -1735,6 +1741,32 @@ export interface HostJobLink {
 
 export interface HostJobBeginParams {
   binding: HostJobBinding;
+}
+
+export interface CodeExchangeQueue {
+  requestRef: unknown;
+  targetThreadId: string;
+  targetBranchId: string;
+  afterRunId: string | null;
+  externalOperationId: string | null;
+  started: boolean;
+}
+
+export interface CodeExchangeQueueParams {
+  binding: HostJobBinding;
+  payload: unknown;
+  threadId: string;
+  branchId: string;
+  afterCurrent: boolean;
+  externalOperationId?: string;
+}
+
+export interface CodeExchangeControlParams {
+  threadId: string;
+  branchId: string;
+  operationId: string;
+  expectedRevision: number;
+  action: string;
 }
 
 export interface HostJobAcceptParams {
@@ -1937,6 +1969,15 @@ export interface CalendarCalculationRetryParams {
   expectedRevision: number;
 }
 
+export interface MessageControlParams {
+  threadId: string;
+  branchId: string;
+  messageId: string;
+  expectedRevision: number;
+  action: string;
+  text?: string;
+}
+
 export type MessageKind = 'inform' | 'request';
 
 export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';
@@ -1957,6 +1998,7 @@ export interface MessageSendParams {
   attachments?: AttachmentSelection[];
   preparedAttachments?: Attachment[];
   preparedAttachmentMedia?: IncomingMedia[];
+  afterCurrent?: boolean;
 }
 
 export interface MessageListParams {
@@ -1999,6 +2041,8 @@ export interface MessageSummary extends MessageReceipt {
   deliveredRunId: string | null;
   deliveredCursor: number | null;
   attachments: Attachment[];
+  revision?: number;
+  afterCurrent?: boolean;
 }
 
 export interface MessageView extends MessageSummary {
@@ -7275,6 +7319,10 @@ export type KernelMethodParams = {
   "runtime.computer.scope": ComputerScopeParams;
   "runtime.research.scopes": ResearchScopeParams;
   "runtime.host_job.begin": HostJobBeginParams;
+  "runtime.host_job.code_exchange.queue": CodeExchangeQueueParams;
+  "runtime.host_job.code_exchange.control": CodeExchangeControlParams;
+  "runtime.host_job.code_exchange.request": OperationParams;
+  "runtime.host_job.code_exchange.pending": KernelEmptyParams;
   "runtime.host_job.user": HostJobUserParams;
   "runtime.host_job.accept": HostJobAcceptParams;
   "runtime.host_job.sources": RunParams;
@@ -7598,6 +7646,7 @@ export type KernelMethodParams = {
   "runtime.family.read": FamilyReadParams;
   "runtime.family.item": FamilyItemParams;
   "runtime.messages.send": MessageSendParams;
+  "runtime.messages.control": MessageControlParams;
   "runtime.messages.list": MessageListParams;
   "runtime.messages.get": MessageGetParams;
   "runtime.messages.feed": MessageFeedParams;
@@ -8615,6 +8664,42 @@ export type KernelRequest =
       id: string;
       method: "runtime.host_job.begin";
       params: HostJobBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.code_exchange.queue";
+      params: CodeExchangeQueueParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.code_exchange.control";
+      params: CodeExchangeControlParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.code_exchange.request";
+      params: OperationParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.host_job.code_exchange.pending";
+      params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;
     }
@@ -11522,6 +11607,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.messages.send";
       params: MessageSendParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.messages.control";
+      params: MessageControlParams;
       epoch?: string;
       grantId?: string;
     }

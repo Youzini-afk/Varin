@@ -109,6 +109,7 @@ export interface ThreadDraft {
   sourceSelection?: DraftSourceSelection;
   /** Unsent collaboration input and exact per-recipient attempts, retained in memory only. */
   collaboration?: {
+    afterCurrent?: boolean;
     targets: ThreadIdentity[];
     reply?: import('@varin/protocol').MessageFeedEntry;
     attempts?: Array<{ request: Parameters<NonNullable<ThreadsAPI['messages']>['send']>[1]; receipt?: import('@varin/protocol').MessageReceipt; error?: string }>;

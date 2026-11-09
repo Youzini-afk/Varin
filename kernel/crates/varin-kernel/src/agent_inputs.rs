@@ -261,7 +261,7 @@ pub(super) fn execute(
     match method {
         "runtime.messages.send" => {
             let p: MessageSendParams = serde_json::from_value(params)?;
-            let input = varin_runtime::catalog::messages::MessageInput { attachments: p.attachments.unwrap_or_default(), after_current: None,
+            let input = varin_runtime::catalog::messages::MessageInput { attachments: p.attachments.unwrap_or_default(), after_current: p.after_current,
                 source_agent: p.source_agent,
             name: p.name,
                 wait: None,
@@ -286,6 +286,22 @@ pub(super) fn execute(
             Ok(serde_json::to_value(
                 owner.admit_message(prepared).map_err(domain)?.receipt,
             )?)
+        }
+        "runtime.messages.control" => {
+            let p: MessageControlParams = serde_json::from_value(params)?;
+            let revision = p.expected_revision.try_into().map_err(|_| KernelError::Protocol("message revision".into()))?;
+            if p.action == "edit" {
+                let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .prepare_queued_message_edit(&p.thread_id, &p.branch_id, &p.message_id, revision).map_err(domain)?;
+                let prepared = read.load(p.text.ok_or_else(|| KernelError::Protocol("Edited message text is required".into()))?).map_err(domain)?;
+                catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.admit_queued_message_edit(prepared).map_err(domain)?;
+            } else {
+                catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                    .control_queued_message(&p.thread_id, &p.branch_id, &p.message_id, revision, &p.action).map_err(domain)?;
+            }
+            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_message(&p.thread_id, &p.branch_id, &p.message_id).map_err(domain)?;
+            Ok(serde_json::to_value(read.load().map_err(domain)?)?)
         }
         "runtime.messages.list" => {
             let p: MessageListParams = serde_json::from_value(params)?;

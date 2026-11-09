@@ -107,6 +107,8 @@ pub struct HostJobLink {
     pub mcp_holder_released: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_task: Option<McpTaskLink>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_exchange: Option<super::code_exchange_queue::CodeExchangeQueue>,
 }
 /// Public body projection. Durable records retain only the original content references.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -394,6 +396,7 @@ impl Catalog {
                 acceptance_ref: None,
                 mcp_holder_released: domain != "mcp.task",
                 mcp_task: None,
+                code_exchange: None,
             }),
             external_receipt: None,
             call_completion: None,
@@ -674,6 +677,7 @@ impl Catalog {
             binding,
             acceptance_ref: None,
             mcp_task: None,
+            code_exchange: None,
         });
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;

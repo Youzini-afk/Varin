@@ -527,6 +527,7 @@
   "HostJobPending",
   "HostJobOrigin",
   "HostJobLink",
+  "CodeExchangeQueue",
   "HostJobBeginParams",
   "HostJobBinding",
   "ResearchScope",
@@ -850,6 +851,7 @@
   "MessageActivation",
   "MessageDirection",
   "MessageSendParams",
+  "MessageControlParams",
   "MessageListParams",
   "MessageGetParams",
   "MessageActor",
@@ -1354,6 +1356,10 @@
     "runtime.computer.scope": "ComputerScopeParams",
     "runtime.research.scopes": "ResearchScopeParams",
     "runtime.host_job.begin": "HostJobBeginParams",
+    "runtime.host_job.code_exchange.queue": "CodeExchangeQueueParams",
+    "runtime.host_job.code_exchange.control": "CodeExchangeControlParams",
+    "runtime.host_job.code_exchange.request": "OperationParams",
+    "runtime.host_job.code_exchange.pending": "KernelEmptyParams",
     "runtime.host_job.user": "HostJobUserParams",
     "runtime.host_job.accept": "HostJobAcceptParams",
     "runtime.host_job.sources": "RunParams",
@@ -1678,6 +1684,7 @@
     "runtime.family.read": "FamilyReadParams",
     "runtime.family.item": "FamilyItemParams",
     "runtime.messages.send": "MessageSendParams",
+    "runtime.messages.control": "MessageControlParams",
     "runtime.messages.list": "MessageListParams",
     "runtime.messages.get": "MessageGetParams",
     "runtime.messages.feed": "MessageFeedParams",
@@ -2054,6 +2061,7 @@
     },
     "HostJobLink": {
       "fields": {
+        "codeExchange": {"type":"CodeExchangeQueue","optional":true},
         "mcpHolderReleased": {
           "type": "boolean"
         },
@@ -2071,6 +2079,12 @@
       "rustType": "varin_runtime::catalog::host_jobs::HostJobLink"
     },
     "HostJobBeginParams": {"fields":{"binding":{"type":"HostJobBinding"}}},
+    "CodeExchangeQueue": {"fields":{
+      "requestRef":{"type":"unknown"},"targetThreadId":{"type":"string"},"targetBranchId":{"type":"string"},
+      "afterRunId":{"type":"string | null"},"externalOperationId":{"type":"string | null"},"started":{"type":"boolean"}
+    },"rustType":"varin_runtime::catalog::code_exchange_queue::CodeExchangeQueue"},
+    "CodeExchangeQueueParams":{"fields":{"binding":{"type":"HostJobBinding"},"payload":{"type":"unknown"},"threadId":{"type":"string"},"branchId":{"type":"string"},"afterCurrent":{"type":"boolean"},"externalOperationId":{"type":"string","optional":true}}},
+    "CodeExchangeControlParams":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"operationId":{"type":"string"},"expectedRevision":{"type":"number"},"action":{"type":"string"}}},
     "HostJobAcceptParams": {
       "fields": {
         "binding": {
@@ -2129,17 +2143,18 @@
     "CalendarPreparationFailedParams": {"fields":{"occurrenceId":{"type":"string"},"expectedRevision":{"type":"number"},"ownerEpoch":{"type":"number"},"failureCode":{"type":"string"}}},
     "CalendarOccurrenceControlAction": {"raw":"export type CalendarOccurrenceControlAction = 'cancel' | 'retry';","rustType":"varin_runtime::catalog::calendar::OccurrenceControlAction"},
     "CalendarCalculationRetryParams": {"fields":{"definitionId":{"type":"string"},"expectedRevision":{"type":"number"}}},
+    "MessageControlParams": {"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"messageId":{"type":"string"},"expectedRevision":{"type":"number"},"action":{"type":"string"},"text":{"type":"string","optional":true}}},
     "MessageKind": {"raw": "export type MessageKind = 'inform' | 'request';"},
     "MessageActivationHold": {"raw": "export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';"},
     "MessageActivation": {"raw": "export type MessageActivation = { state: 'passive' } | { state: 'pending'; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'bound'; runId: string; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'cancelled'; runId: string | null; executionId: string | null } | { state: 'failed'; executionId: string | null; code: string };"},
-    "MessageSendParams": {"fields":{"sourceAgent":{"type":"string","optional":true},"name":{"type":"string","optional":true},"key":{"type":"string"},"senderThreadId":{"type":"string"},"senderBranchId":{"type":"string"},"targetThreadId":{"type":"string","optional":true},"targetBranchId":{"type":"string","optional":true},"replyTo":{"type":"string","optional":true},"kind":{"type":"MessageKind"},"text":{"type":"string"},"attachments":{"type":"AttachmentSelection[]","optional":true},"preparedAttachments":{"type":"Attachment[]","optional":true},"preparedAttachmentMedia":{"type":"IncomingMedia[]","optional":true}}},
+    "MessageSendParams": {"fields":{"sourceAgent":{"type":"string","optional":true},"name":{"type":"string","optional":true},"key":{"type":"string"},"senderThreadId":{"type":"string"},"senderBranchId":{"type":"string"},"targetThreadId":{"type":"string","optional":true},"targetBranchId":{"type":"string","optional":true},"replyTo":{"type":"string","optional":true},"kind":{"type":"MessageKind"},"text":{"type":"string"},"attachments":{"type":"AttachmentSelection[]","optional":true},"preparedAttachments":{"type":"Attachment[]","optional":true},"preparedAttachmentMedia":{"type":"IncomingMedia[]","optional":true},"afterCurrent":{"type":"boolean","optional":true}}},
     "MessageListParams": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}, "direction": {"type": "MessageDirection"}, "cursor": {"type": "string", "optional": true}, "limit": {"type": "number", "optional": true}}},
     "MessageDirection": {"raw": "export type MessageDirection = 'incoming' | 'outgoing';", "rustType": "varin_runtime::catalog::messages::MessageDirection"},
     "MessageGetParams": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}, "messageId": {"type": "string"}}},
     "MessageActor": {"raw": "export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin} | {kind: 'agent_report'; executionId: string; operationId: string} | {kind: 'work_report'; runId: string; requestMessageId: string};", "rustType":"varin_runtime::catalog::messages::MessageActor"},
     "MessageReceipt": {"fields": {"messageId": {"type": "string"}, "senderThreadId": {"type": "string"}, "senderBranchId": {"type": "string"}, "targetThreadId": {"type": "string"}, "targetBranchId": {"type": "string"}, "actor": {"type": "MessageActor"}, "kind": {"type": "MessageKind"}, "replyTo": {"type": "string | null"}, "acceptedCursor": {"type": "number"}, "acceptedAtMs": {"type": "number"}}},
     "ReplyWaitView": {"raw": "export interface ReplyWaitView { waitId: string; operationId: string; runId: string; deadlineAtMs: number | null; state: 'waiting' | 'replied' | 'expired' | 'cancelled'; replyMessageId: string | null; delivered: boolean }", "rustType": "varin_runtime::catalog::messages::ReplyWaitView"},
-    "MessageSummary": {"extends":["MessageReceipt"],"fields":{"state":{"type":"'queued' | 'delivered' | 'cancelled'"},"activation":{"type":"MessageActivation"},"replyWait":{"type":"ReplyWaitView | null"},"deliveredRunId":{"type":"string | null"},"deliveredCursor":{"type":"number | null"},"attachments":{"type":"Attachment[]"}}},
+    "MessageSummary": {"extends":["MessageReceipt"],"fields":{"state":{"type":"'queued' | 'delivered' | 'cancelled'"},"activation":{"type":"MessageActivation"},"replyWait":{"type":"ReplyWaitView | null"},"deliveredRunId":{"type":"string | null"},"deliveredCursor":{"type":"number | null"},"attachments":{"type":"Attachment[]"},"revision":{"type":"number","optional":true},"afterCurrent":{"type":"boolean","optional":true}}},
     "MessageView": {"extends": ["MessageSummary"], "fields": {"text": {"type": "string"}}},
     "MessagePage": {"fields": {"messages": {"type": "MessageSummary[]"}, "nextCursor": {"type": "string | null"}}},
     "MessageFeedParams": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}, "before": {"type": "number", "optional": true}, "after": {"type": "number", "optional": true}, "limit": {"type": "number", "optional": true}}},
@@ -3425,6 +3440,10 @@
     "runtime.computer.scope": "Read actual Computer Thread/branch/Run family identity without a file source",
     "runtime.research.scopes": "Trusted Host research and original job authority",
     "runtime.host_job.begin": "Trusted Host domain dispatch identity",
+    "runtime.host_job.code_exchange.queue": "Original file exchange snapshot delivery boundary",
+    "runtime.host_job.code_exchange.control": "Claim, send or withdraw an original queued file exchange",
+    "runtime.host_job.code_exchange.request": "Original private file exchange delivery request",
+    "runtime.host_job.code_exchange.pending": "Unfinished original file deliveries",
     "runtime.host_job.user": "Trusted Host research and original job authority",
     "runtime.host_job.accept": "Trusted Host research and original job authority",
     "runtime.host_job.sources": "Accepted original Jobs readable by an actual observer Run",
@@ -3737,6 +3756,7 @@
     "runtime.family.read": "Read actual task-family read without starting target work",
     "runtime.family.item": "Read actual task-family item without starting target work",
     "runtime.messages.send": "Accept an immutable User inform or request to an exact task-family peer; execution activation is separate",
+    "runtime.messages.control": "Edit, withdraw or send an unconsumed collaboration message now",
     "runtime.messages.list": "Read original incoming or outgoing message delivery metadata",
     "runtime.messages.feed": "Read a chronological page of original messages across one task family",
     "runtime.messages.get": "Read one original message body for its actual sender or receiver",

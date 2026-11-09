@@ -64,9 +64,6 @@ pub struct MessageInput {
 }
 impl MessageInput {
     pub fn validate(&self) -> Result<()> {
-        if self.after_current == Some(true) && self.kind != MessageKind::Request {
-            return Err(RuntimeError::Invalid("afterCurrent queues a new work request".into()));
-        }
         if let Some(duration) = self.wait.as_ref().and_then(|w| w.timeout_ms) {
             super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?;
         }
@@ -118,6 +115,8 @@ pub struct MessageReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSummary {
+    pub revision: u64,
+    pub after_current: bool,
     #[serde(default)]
     pub attachments: Vec<super::attachments::Attachment>,
     #[serde(flatten)]
@@ -566,14 +565,16 @@ impl Catalog {
             accepted_cursor: cursor,
             accepted_at_ms,
         };
-        let activation = if prepared.next_run { activation::IngressActivationFact::Pending { execution_id: None } }
+        let activation = if identity.kind == MessageKind::Inform { activation::IngressActivationFact::Passive }
+            else if prepared.next_run { activation::IngressActivationFact::Pending { execution_id: None } }
             else { activation::accept(&tx, identity)? };
+        let active: Option<String> = tx.query_row("SELECT active_run FROM branches WHERE id=?1", [&identity.target_branch_id], |r| r.get(0))?;
         let input = QueuedInputMetadata {
             id: identity.message_id.clone(),
             thread_id: identity.target_thread_id.clone(),
             branch_id: identity.target_branch_id.clone(),
             run_id: activation.run_id().map(str::to_owned),
-            mode: if prepared.next_run { InputMode::NextRun } else { InputMode::Boundary },
+            mode: if prepared.next_run && (identity.kind == MessageKind::Request || active.is_some()) { InputMode::NextRun } else { InputMode::Boundary },
             state: InputState::Queued,
             revision: 1,
             cursor,
@@ -581,6 +582,7 @@ impl Catalog {
                 identity: identity.clone(),
                 command_key: prepared.key.clone(),
                 activation,
+                edited_intent: None,
             },
             activation: if identity.kind == MessageKind::Request {
                 InputActivation::Activating
@@ -830,6 +832,8 @@ fn summary(db: &Connection, row: QueuedInputMetadata) -> Result<MessageSummary> 
     let reply_wait = reply_wait::project(db, &identity)?;
     Ok(MessageSummary {
         attachments: super::attachments::descriptors(db,"input",&row.id)?,
+        revision: row.revision,
+        after_current: row.mode == InputMode::NextRun,
         receipt,
         reply_wait,
         state: row.state,
@@ -900,6 +904,10 @@ impl Catalog {
             [command_key],
             |r| r.get(0),
         )?;
+        let intent = match &row.origin {
+            InputOrigin::Message { edited_intent: Some(reference), .. } => reference.clone(),
+            _ => serde_json::from_str(&intent)?,
+        };
         Ok(MessageRead {
             database: self
                 .db
@@ -908,7 +916,7 @@ impl Catalog {
                 .into(),
             epoch: self.epoch,
             summary: summary(&self.db, row)?,
-            intent: serde_json::from_str(&intent)?,
+            intent,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
         })
@@ -1078,3 +1086,6 @@ impl MessageListRead {
 }
 
 pub use super::activation::{IngressActivationFact, MessageActivation, MessageActivationHold};
+
+#[path = "catalog_message_queue.rs"]
+mod queue;

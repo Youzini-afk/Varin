@@ -74,6 +74,8 @@ pub enum InputOrigin {
         identity: super::messages::MessageIdentity,
         command_key: String,
         activation: super::messages::IngressActivationFact,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edited_intent: Option<Value>,
     },
 }
 impl InputOrigin {
@@ -817,6 +819,18 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
     )?;
     if active.is_some() {
         return Ok(None);
+    }
+    let passive = {
+        let mut q = tx.prepare("SELECT body FROM input_queue WHERE branch_id=?1 AND origin='message' AND mode='next_run' AND state='queued' AND activation='passive'")?;
+        let rows = q.query_map([branch], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+        rows
+    };
+    for raw in passive {
+        let mut row: QueuedInputMetadata = serde_json::from_str(&raw)?;
+        row.mode = InputMode::Boundary;
+        row.revision += 1;
+        write_input(tx, &row)?;
+        event(tx, &row.id, row.revision, "message.queue_changed", json!({}))?;
     }
     loop {
         // Delegated requests acquire a Run through activation after source preparation.
