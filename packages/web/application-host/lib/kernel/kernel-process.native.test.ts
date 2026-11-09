@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, expect, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient, type KernelScopedClient } from "./kernel-client.js";
-import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
+import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
@@ -1179,7 +1179,10 @@ it('retains independent output defaults, channel EOF and byte-accurate replay th
 
 it('Host observes stdout EOF before process exit without ending still-live stderr', async () => {
   const f = await fixture();
-  const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }) });
+  const processErrors: string[] = [];
+  const service = createKernelProcessService({ client: f.host,
+    resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }),
+    onError: error => { processErrors.push(error.message); } });
   try {
     // Windows libuv deliberately leaves descriptors 0–2 open in fs.closeSync.
     // Close the actual stdout handle there so this fixture produces real EOF.
@@ -1220,7 +1223,27 @@ public static class OutputPipe {
     let stdout = ''; let stderr = '';
     child.stdout.on('data', bytes => { stdout += bytes.toString(); });
     child.stderr.on('data', bytes => { stderr += bytes.toString(); });
-    await expect.poll(() => child.stdout.readableEnded).toBe(true);
+    try {
+      await expect.poll(() => child.stdout.readableEnded).toBe(true);
+    } catch (error) {
+      const nativeEvents = f.probe.received
+        .filter(event => event.kind === 'process-event' && event.processId === child.address.processId)
+        .map(envelope => {
+          const event = envelope as unknown as KernelProcessStreamEvent;
+          const result = event.result;
+          return { stream: event.stream, sequence: event.sequence, error: event.error,
+            nextCursor: result?.nextCursor, endCursor: result?.endCursor,
+            channelEnds: result?.channelEnds, outputComplete: result?.outputComplete, outputError: result?.outputError,
+            process: result?.process && { status: result.process.status, pid: result.process.pid,
+              writerActive: result.process.writerActive, exitCode: result.process.exitCode, reason: result.process.reason },
+            chunks: result?.chunks?.map(chunk => ({ channel: chunk.channel, offset: chunk.offset,
+              byteLength: typeof chunk.bytesBase64 === 'string' ? Buffer.from(chunk.bytesBase64, 'base64').length : undefined })) };
+        });
+      throw new Error(`Stdout EOF was not observed: ${JSON.stringify({ stdout, stderr, processErrors,
+        exitConfirmed: child.exitConfirmed, exitCode: child.exitCode, signal: child.signalCode,
+        stdoutEnded: child.stdout.readableEnded, stdoutDestroyed: child.stdout.destroyed,
+        stderrEnded: child.stderr.readableEnded, stderrDestroyed: child.stderr.destroyed, nativeEvents })}`, { cause: error });
+    }
     assert.equal(stdout, 'stdout');
     assert.equal(child.stderr.readableEnded, false);
     assert.equal(child.exitConfirmed, false);
