@@ -11,7 +11,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
-        node packages/electron/scripts/prepare-workspace-component.mjs
+        node packages/electron/scripts/prepare-workspace-component.mjs --assets-only
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
         $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"

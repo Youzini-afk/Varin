@@ -223,9 +223,11 @@ Windows setup offers an optional WinFsp component page, selected by default when
 is detected and unselected when the installed component can be reused. `workspace-component.json` pins the
 unmodified official **WinFsp 2026 Beta5 (2.2.26286)** MSI, SHA-256 and license. The selected preview
 contains the upstream cached-write/concurrent-rename fixes; the installer names that preview explicitly.
-`prepare-workspace-component.mjs` prepares the verified build cache through the existing Windows
-before-pack hook. A matching or newer installed component is reused. User-selected installation asks
-Windows for permission and reports cancellation, failure or a required restart without blocking normal
+`prepare-workspace-component.mjs --assets-only` prepares the SHA-256-verified MSI and license with
+Node built-ins, so native workspace CI does not require npm dependencies. The default invocation
+also generates the NSIS includes and localized installer copy using the installed electron-builder
+through the existing Windows before-pack hook. A matching or newer installed component is reused.
+User-selected installation asks Windows for permission and reports cancellation, failure or a required restart without blocking normal
 Varin use. Silent updates do not install a system component, and uninstall leaves the shared component
 in place. The application ships its license and retains the required attribution in About and notices.
 

@@ -48,7 +48,7 @@ export async function downloadWorkspaceAsset(url, { request = fetchBuildAsset, w
     }
   }
 }
-export async function prepareWorkspaceComponent() {
+export async function prepareWorkspaceAssets() {
   const component = JSON.parse(await readFile(path.join(resources, 'workspace-component.json'), 'utf8'));
   const directory = path.join(resources, 'workspace-component');
   await mkdir(directory, { recursive: true });
@@ -69,6 +69,11 @@ export async function prepareWorkspaceComponent() {
     if (digest(bytes) !== component.licenseSha256) throw new Error('WinFsp license checksum mismatch');
     await writeFile(licenseFile, bytes);
   }
+  return { component, directory };
+}
+
+export async function prepareWorkspaceComponent() {
+  const { component, directory } = await prepareWorkspaceAssets();
   await writeFile(path.join(directory, 'component.nsh'), [
     `!define VARIN_WINFSP_FILE "${component.file}"`,
     `!define VARIN_WINFSP_VERSION "${component.version}.0"`,
@@ -91,4 +96,13 @@ export async function prepareWorkspaceComponent() {
   await writeFile(path.join(directory, 'strings.nsh'), '\uFEFF' + strings.join('\n') + '\n');
   console.log(`[electron] Prepared unmodified WinFsp ${component.release} (${component.sha256})`);
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await prepareWorkspaceComponent();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  if (args.length > 1 || (args.length && args[0] !== '--assets-only')) {
+    throw new Error('Usage: prepare-workspace-component.mjs [--assets-only]');
+  }
+  if (args[0] === '--assets-only') {
+    const { component } = await prepareWorkspaceAssets();
+    console.log(`[workspace] Verified unmodified WinFsp ${component.release} (${component.sha256})`);
+  } else await prepareWorkspaceComponent();
+}
