@@ -224,8 +224,15 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
     policy_target: { kind: 'default' }, source_basis: null, source: { kind: 'pending', handoff }, code_result: { kind: 'pending' },
     state: 'accepted', revision: 1, cursor: 1, receipt: null, report: null, terminal_head: null, resources_released: false, cancel_requested: false };
   const signal = new AbortController().signal;
-  const preparedChild = await withManagedChildSource(runtime, child, signal, (client, address) =>
-    client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: child } }));
+  const preparedChild = await withManagedChildSource(runtime, child, signal, async (client, address) => {
+    try {
+      return await client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: child } });
+    } catch (error) {
+      // Preserve the original failure if scope release also fails in finally.
+      process.stderr.write(`Managed fixture child_prepare failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      throw error;
+    }
+  });
   assert.equal(preparedChild.source.mode, 'native_workspace'); assert.equal(preparedChild.source.branch_id, `child-source:${dispatch}`);
   assert.deepEqual(preparedChild.source.resource_owner, owner);
   const childRun = 'run:managed-private-child';
