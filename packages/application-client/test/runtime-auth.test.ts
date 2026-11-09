@@ -2,7 +2,7 @@ import './network-fixture.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, it } from 'node:test';
 import {
-  buildRuntimeAuthHeaders, clearRuntimeAuthCredentialProvider, clearRuntimeUrlAuthToken,
+  buildLocalRuntimeAuthHeaders, buildRuntimeAuthHeaders, clearRuntimeAuthCredentialProvider, clearRuntimeUrlAuthToken,
   getLocalRuntimeUrlAuthTokenSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken,
   setLocalRuntimeAuthCredentialProvider, setRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders,
 } from '../src/transport/runtime-auth.js';
@@ -30,6 +30,19 @@ it('keeps explicit authorization, Host credentials and proxy headers in their ow
   assert.equal((await buildRuntimeAuthHeaders()).get('authorization'), 'Bearer injected-token');
 });
 
+it('authenticates application-Host fetches with its own credential and leaves browser sessions to cookies', async () => {
+  setRuntimeBearerToken('remote-runtime-token');
+  setRuntimeExtraHeaders({ 'X-Remote-Proxy': 'remote-proxy-secret' });
+  setLocalRuntimeAuthCredentialProvider('http://127.0.0.1:57123', async () => ({ type: 'bearer', token: 'desktop-token' }));
+  const headers = await buildLocalRuntimeAuthHeaders('http://127.0.0.1:57123/', { Accept: 'application/json' });
+  assert.equal(headers.get('Authorization'), 'Bearer desktop-token');
+  assert.equal(headers.get('Accept'), 'application/json');
+  assert.equal(headers.get('X-Remote-Proxy'), null);
+  assert.equal((await buildLocalRuntimeAuthHeaders('https://another-host.test')).get('Authorization'), null);
+  setLocalRuntimeAuthCredentialProvider(null, null);
+  assert.equal((await buildLocalRuntimeAuthHeaders('https://browser-host.test')).get('Authorization'), null);
+});
+
 it('mints with Host and proxy credentials and reuses the token until the effective headers change', async t => {
   setRuntimeBearerToken('host-token');
   const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
@@ -53,11 +66,14 @@ it('mints with Host and proxy credentials and reuses the token until the effecti
 
 it('never publishes or reuses a local URL token for a different origin', async t => {
   let release!: (response: Response) => void;
+  let entered!: () => void;
+  const firstStarted = new Promise<void>(resolve => { entered = resolve; });
   t.mock.method(globalThis, 'fetch', (input: RequestInfo | URL) => String(input).includes(':3001')
-    ? new Promise<Response>(resolve => { release = resolve; })
+    ? new Promise<Response>(resolve => { release = resolve; entered(); })
     : Promise.resolve(Response.json({ token: 'second-origin', expiresAt: Date.now() + 60_000 })));
   const first = refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3001');
   const rejected = assert.rejects(first, /stale/);
+  await firstStarted;
   assert.equal(await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3002'), 'second-origin');
   release(Response.json({ token: 'late-first-origin', expiresAt: Date.now() + 60_000 }));
   await rejected;

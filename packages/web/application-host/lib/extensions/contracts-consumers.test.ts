@@ -18,15 +18,15 @@ import {
   type VarinRuntimeSourceRequest,
 } from '@varin/extension-contract';
 import type { ExtensionsAPI } from '@varin/application-client';
+import { clearRuntimeAuthCredentialProvider, setLocalRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { registerExtensionRoutes } from './routes.js';
 import { routerTransport } from './direct-router.test-helper.js';
 
-const transport = vi.hoisted(() => ({ fetch: vi.fn(), token: vi.fn() }));
+const transport = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   fetchWithoutRuntimeRouting: transport.fetch,
-  refreshLocalRuntimeUrlAuthToken: transport.token,
 }));
 
 
@@ -89,14 +89,14 @@ beforeEach(async () => {
     extensionCatalog: runtime.catalog, extensionPackages: runtime.packages, extensionRuntime: runtime, documents,
     readProjects: async () => [{ id: 'saved-project', path: directory }],
     uiAuthController: {
-      requireAuth: (request, response, next) => request.headers['x-varin-application-token'] === 'host-token'
+      requireAuth: (request, response, next) => request.headers.authorization === 'Bearer host-token'
         ? next() : response.status(401).json({ error: { message: 'Authentication required' } }),
       requireSessionAuth: (_request, _response, next) => next(),
     },
   });
   fetchRoute = routerTransport(router);
   transport.fetch.mockImplementation(fetchRoute);
-  transport.token.mockResolvedValue('host-token');
+  setLocalRuntimeAuthCredentialProvider('https://application-host.invalid', async () => ({ type: 'bearer', token: 'host-token' }));
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
@@ -119,9 +119,52 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
   vi.restoreAllMocks();
   transport.fetch.mockReset();
-  transport.token.mockReset();
+  setLocalRuntimeAuthCredentialProvider(null, null);
+  clearRuntimeAuthCredentialProvider();
+  setRuntimeExtraHeaders(null);
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
   else Reflect.deleteProperty(globalThis, 'window');
+});
+
+it('switches packaged desktop modes through password auth using the local Host credential, including with a remote runtime selected', async () => {
+  const previousDataDir = process.env.VARIN_DATA_DIR;
+  process.env.VARIN_DATA_DIR = path.join(root, 'auth');
+  const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+  const auth = createUiAuth({ password: 'test-password', clientAuthController: {
+    authenticateBearerToken: async token => token === 'host-token' ? { ok: true, clientId: 'desktop' } : null,
+  } });
+  try {
+    const router = express.Router();
+    registerExtensionRoutes(router as unknown as Express, {
+      extensionCatalog: runtime.catalog, extensionPackages: runtime.packages, extensionRuntime: runtime, uiAuthController: auth,
+    });
+    const route = routerTransport(router);
+    setRuntimeBearerToken('remote-runtime-token');
+    setRuntimeExtraHeaders({ 'X-Remote-Proxy': 'remote-proxy-secret' });
+    transport.fetch.mockImplementation((target: URL, init: RequestInit) => {
+      expect(target.origin).toBe('https://application-host.invalid');
+      expect(new Headers(init.headers).has('X-Remote-Proxy')).toBe(false);
+      return route(target, init);
+    });
+    for (const profileId of ['default', 'varin.ide', 'varin.bot']) {
+      const before = await runtime.workbench.snapshot();
+      const selected = await api.selectWorkbenchProfile({
+        expectedRevision: before.document.revision, scope: 'user', scopeId: 'default', profileId,
+      });
+      expect(selected.document.profileSelections.users.default).toBe(profileId);
+      expect((await runtime.workbench.snapshot()).document).toEqual(selected.document);
+    }
+    const before = await runtime.workbench.snapshot();
+    setLocalRuntimeAuthCredentialProvider('https://application-host.invalid', async () => ({ type: 'bearer', token: 'revoked-token' }));
+    await expect(api.selectWorkbenchProfile({
+      expectedRevision: before.document.revision, scope: 'user', scopeId: 'default', profileId: 'default',
+    })).rejects.toThrow('UI authentication required');
+    expect((await runtime.workbench.snapshot()).document).toEqual(before.document);
+  } finally {
+    auth.dispose();
+    if (previousDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+    else process.env.VARIN_DATA_DIR = previousDataDir;
+  }
 });
 
 const sourceExtensionId = 'dev.contract.source';
@@ -338,8 +381,7 @@ describe('runtime contract User API through the real HTTP handler and runtime', 
     expect(target.pathname).toBe('/api/varin/extensions/v1/contracts/query');
     expect(init.signal).toBe(signal);
     expect(init.credentials).toBe('include');
-    expect(new Headers(init.headers).get('X-Varin-Application-Token')).toBe('host-token');
-    expect(transport.token).toHaveBeenCalledWith(target.origin);
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer host-token');
   });
 
   it('derives directory and saved project scope through the original identity owner', async () => {
@@ -405,7 +447,7 @@ describe('runtime contract User API through the real HTTP handler and runtime', 
     const target = new URL('https://application-host.invalid/api/varin/extensions/v1/contracts/query');
     const send = (body: unknown, authenticated = true) => fetchRoute(target, {
       method: 'POST', body: JSON.stringify(body),
-      headers: authenticated ? { 'X-Varin-Application-Token': 'host-token' } : {},
+      headers: authenticated ? { Authorization: 'Bearer host-token' } : {},
     });
     expect((await send({ request: { action: 'list', kind: 'service' } }, false)).status).toBe(401);
     for (const body of [

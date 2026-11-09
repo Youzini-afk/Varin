@@ -1,25 +1,43 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setLocalRuntimeAuthCredentialProvider } from '@varin/application-client';
 
-const refreshLocalRuntimeUrlAuthToken = vi.fn();
-const fetchWithoutRuntimeRouting = vi.fn();
+const { fetchWithoutRuntimeRouting } = vi.hoisted(() => ({ fetchWithoutRuntimeRouting: vi.fn() }));
 
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   fetchWithoutRuntimeRouting,
-  refreshLocalRuntimeUrlAuthToken,
 }));
 
 const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
+beforeEach(() => {
+  setLocalRuntimeAuthCredentialProvider('http://127.0.0.1:57123', async () => ({ type: 'bearer', token: 'local-desktop-token' }));
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
-  refreshLocalRuntimeUrlAuthToken.mockReset();
+  setLocalRuntimeAuthCredentialProvider(null, null);
   fetchWithoutRuntimeRouting.mockReset();
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
   else Reflect.deleteProperty(globalThis, 'window');
 });
 
 describe('createWebExtensionsAPI', () => {
+  it('uses the same local authentication for plugin-center requests', async () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+      location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
+    } });
+    fetchWithoutRuntimeRouting.mockResolvedValue(Response.json([]));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    await createWebExtensionsAPI().pluginCenter!.checkUpdates();
+    const [target, init] = fetchWithoutRuntimeRouting.mock.calls[0] as [URL, RequestInit];
+    expect(target.pathname).toBe('/api/varin/extensions/v1/updates');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer local-desktop-token');
+  });
+
   it('reads from the application host instead of the selected Pi runtime', async () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
@@ -29,7 +47,6 @@ describe('createWebExtensionsAPI', () => {
         location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
     fetchWithoutRuntimeRouting.mockResolvedValue(Response.json({
       supported: true,
       status: 'ready',
@@ -49,11 +66,11 @@ describe('createWebExtensionsAPI', () => {
     const result = await createWebExtensionsAPI().catalog();
 
     expect(result.supported).toBe(true);
-    expect(refreshLocalRuntimeUrlAuthToken).toHaveBeenCalledWith('http://127.0.0.1:57123');
     const target = new URL(String(fetchWithoutRuntimeRouting.mock.calls[0]?.[0]));
     expect(target.origin).toBe('http://127.0.0.1:57123');
     expect(target.pathname).toBe('/api/varin/extensions/v1/catalog');
-    expect(target.searchParams.get('varin_url_token')).toBe('local-url-token');
+    expect(target.searchParams.has('varin_url_token')).toBe(false);
+    expect(new Headers(fetchWithoutRuntimeRouting.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer local-desktop-token');
   });
 
   it('rejects a malformed contract response through the shared decoder', async () => {
@@ -74,7 +91,6 @@ describe('createWebExtensionsAPI', () => {
         location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
     fetchWithoutRuntimeRouting.mockResolvedValue(Response.json({
       outcome: 'unchanged',
       snapshot: {
@@ -113,7 +129,6 @@ describe('createWebExtensionsAPI', () => {
         location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
     fetchWithoutRuntimeRouting.mockResolvedValue(Response.json({
       snapshot: {
         schemaVersion: 1,
@@ -157,7 +172,6 @@ describe('Surface composition lease stream', () => {
 
   it('holds one authenticated POST until EOF, parsing fragmented UTF-8 SSE events without renewing', async () => {
     setup();
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
     let stream!: ReadableStreamDefaultController<Uint8Array>;
     const cancelled = vi.fn();
     fetchWithoutRuntimeRouting.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; }, cancel: cancelled }),
@@ -176,7 +190,7 @@ describe('Surface composition lease stream', () => {
     expect(url.pathname).toBe('/api/varin/extensions/v1/services/lease');
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('include');
-    expect(new Headers(init.headers).get('X-Varin-Application-Token')).toBe('application-token');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer local-desktop-token');
     expect(new Headers(init.headers).get('Accept')).toBe('text/event-stream');
     expect(JSON.parse(String(init.body))).toEqual(request);
     expect(events[1]).toEqual({ kind: 'error', message: '连接断开' });
@@ -187,7 +201,6 @@ describe('Surface composition lease stream', () => {
 
   it('cancels a blocked reader and keeps the original invocation routing and AbortSignal', async () => {
     setup();
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
     const cancelled = vi.fn();
     fetchWithoutRuntimeRouting.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), { headers: { 'Content-Type': 'text/event-stream' } }));
     const { createWebExtensionsAPI } = await import('./extensions');
@@ -210,7 +223,6 @@ describe('Surface composition lease stream', () => {
 
   it('releases a non-SSE lease response before rejecting it', async () => {
     setup();
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
     const cancelled = vi.fn();
     fetchWithoutRuntimeRouting.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), {
       headers: { 'Content-Type': 'text/html' },
@@ -224,7 +236,6 @@ describe('Surface composition lease stream', () => {
 
   it('rejects malformed lease events and cancels the stream', async () => {
     setup();
-    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
     const cancelled = vi.fn();
     fetchWithoutRuntimeRouting.mockResolvedValue(new Response(new ReadableStream({
       start(controller) { controller.enqueue(new TextEncoder().encode('data: {"kind":"ready","leaseId":"missing-provider-fields"}\n\n')); }, cancel: cancelled,

@@ -2,7 +2,7 @@ import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, it } from 'node:test';
 import { isAllowedObservationRequest, type ObservationClientMessage, type ObservationServerMessage } from '../src/transport/observation-protocol.js';
-import { clearRuntimeAuthCredentialProvider, setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from '../src/transport/runtime-auth.js';
+import { clearRuntimeAuthCredentialProvider, setLocalRuntimeAuthCredentialProvider, setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from '../src/transport/runtime-auth.js';
 import { configureRuntimeUrlResolver } from '../src/transport/runtime-url.js';
 import { fetchWithoutRuntimeRouting, runtimeFetch } from '../src/transport/runtime-fetch.js';
 import { registerRelayTunnelProvider } from '../src/transport/relay-provider.js';
@@ -43,6 +43,7 @@ afterEach(() => {
   registerRelayTunnelProvider(() => null);
   setRuntimeExtraHeaders(null);
   clearRuntimeAuthCredentialProvider();
+  setLocalRuntimeAuthCredentialProvider(null, null);
   configureRuntimeUrlResolver({});
   Object.defineProperty(globalThis, 'window', { configurable: true, value: original.window });
   globalThis.WebSocket = original.WebSocket;
@@ -150,6 +151,31 @@ it('keeps Host-local extension waits separate from selected remote mount, creden
   assert.equal(opens(localSocket)[0]!.headers.authorization, undefined);
   for (const socket of Socket.instances) headers(socket, opens(socket)[0]!.id);
   await (await remote).body!.cancel(); await (await local).body!.cancel();
+});
+
+it('waits for local handshake authentication before observing the application Host with a remote runtime selected', async () => {
+  Object.assign(window, { __VARIN_LOCAL_ORIGIN__: 'https://local.test' });
+  setLocalRuntimeAuthCredentialProvider('https://local.test', async () => ({ type: 'bearer', token: 'local-bearer' }));
+  let release!: (response: Response) => void;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), 'https://local.test/auth/url-token');
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer local-bearer');
+    return new Promise<Response>(resolve => { release = resolve; });
+  };
+  const response = fetchWithoutRuntimeRouting('https://local.test/api/varin/extensions/v1/host-state/wait', {
+    method: 'POST', body: '{"revision":2}', headers: { Authorization: 'Bearer local-bearer' },
+  });
+  await flush();
+  assert.equal(Socket.instances.length, 0);
+  release(Response.json({ token: 'local-url-token', expiresAt: Date.now() + 120_000 }));
+  await flush();
+  const socket = Socket.instances[0]!;
+  assert.equal(socket.url, 'wss://local.test/api/varin/observations/ws?varin_url_token=local-url-token');
+  socket.open(); await flush();
+  const open = opens(socket)[0]!;
+  assert.equal(open.headers.authorization, 'Bearer local-bearer');
+  headers(socket, open.id);
+  await (await response).body!.cancel();
 });
 
 it('keeps relay observations on their existing multiplex transport and short/external requests on HTTP', async () => {

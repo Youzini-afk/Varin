@@ -6,15 +6,15 @@ import express, { type Express } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import type { ExtensionsAPI } from '@varin/application-client';
+import { setLocalRuntimeAuthCredentialProvider } from '@varin/application-client';
 import type { VarinExtensionCandidatePublicationRequest } from '@varin/extension-contract';
 import { registerExtensionRoutes } from './routes.js';
 import { routerTransport } from './direct-router.test-helper.js';
 
-const transport = vi.hoisted(() => ({ fetch: vi.fn(), token: vi.fn() }));
+const transport = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   fetchWithoutRuntimeRouting: transport.fetch,
-  refreshLocalRuntimeUrlAuthToken: transport.token,
 }));
 const savedWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const deferred = () => {
@@ -24,6 +24,7 @@ const deferred = () => {
 };
 afterEach(() => {
   vi.restoreAllMocks();
+  setLocalRuntimeAuthCredentialProvider(null, null);
   if (savedWindow) Object.defineProperty(globalThis, 'window', savedWindow);
   else Reflect.deleteProperty(globalThis, 'window');
 });
@@ -50,12 +51,13 @@ it('real Web publication consumer keeps exact readiness and cancellation through
   });
   const router = express.Router();
   const auth: Parameters<typeof registerExtensionRoutes>[1]['uiAuthController']['requireAuth'] = (request, response, next) =>
-    request.headers['x-varin-application-token'] === 'controlled-ui-token'
+    request.headers.authorization === 'Bearer controlled-ui-token'
       ? next() : response.status(401).json({ error: { message: 'Authentication required' } });
   registerExtensionRoutes(router as unknown as Express, { extensionRuntime: runtime, extensionCatalog: runtime.catalog,
     extensionPackages: runtime.packages, uiAuthController: { requireAuth: auth, requireSessionAuth: auth } });
   const fetchRoute = routerTransport(router);
-  transport.fetch.mockImplementation(fetchRoute); transport.token.mockResolvedValue('controlled-ui-token');
+  transport.fetch.mockImplementation(fetchRoute);
+  setLocalRuntimeAuthCredentialProvider('https://application-host.invalid', async () => ({ type: 'bearer', token: 'controlled-ui-token' }));
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
     __VARIN_LOCAL_ORIGIN__: 'https://application-host.invalid',
     location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
@@ -114,7 +116,7 @@ it('real Web publication consumer keeps exact readiness and cancellation through
     const selected = await api.selectCandidate(publication);
     expect(selected.extensions[0]!.integrity).toBe(candidateIntegrity);
     expect(await runtime.services.bind(serviceId, 1).invoke('read', [])).toBe(2);
-    expect(transport.token).toHaveBeenCalled();
+    expect(new Headers(transport.fetch.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer controlled-ui-token');
   } finally {
     if (locked) await rm(lockPath);
     await runtime.stop(); await rm(root, { recursive: true, force: true });

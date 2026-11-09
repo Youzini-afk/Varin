@@ -9,7 +9,7 @@ import express from 'express';
 import { WebSocket } from 'ws';
 import { test } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
-import { clearRuntimeUrlAuthToken } from '@varin/application-client';
+import { clearRuntimeUrlAuthToken, setLocalRuntimeAuthCredentialProvider } from '@varin/application-client';
 import type { VarinSurfaceServiceLeaseEvent, VarinSurfaceServiceLeaseRequest } from '@varin/extension-contract';
 import { registerExtensionRoutes } from '#application-host/lib/extensions/routes.js';
 import { attachObservations } from '#application-host/lib/observations.js';
@@ -113,18 +113,13 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     setGlobal('window', { location: { origin: 'https://surface.invalid', href: 'https://surface.invalid/' },
       __VARIN_LOCAL_ORIGIN__: origin });
     clearRuntimeUrlAuthToken();
+    setLocalRuntimeAuthCredentialProvider(origin, async () => ({ type: 'bearer', token: principal }));
     setGlobal('fetch', (input: URL | string, init: RequestInit = {}) => {
       const target = new URL(String(input)); assert.equal(target.origin, origin);
       assert.equal(init.credentials, 'include');
       const headers = new Headers(init.headers);
-      // Controlled browser authentication only at token mint. Actual service requests must use
-      // the real client's application-token header and the original middleware/path authority.
-      if (target.pathname === '/auth/url-token') headers.set('authorization', `Bearer ${principal}`);
-      else {
-        assert(headers.has('x-varin-application-token'));
-        assert.equal(headers.has('authorization'), false);
-        if (!authorized) headers.delete('x-varin-application-token');
-      }
+      assert.equal(headers.get('authorization'), `Bearer ${principal}`);
+      if (!authorized && target.pathname !== '/auth/url-token') headers.delete('authorization');
       return originalFetch(target, { ...init, headers });
     });
     const api = createWebExtensionsAPI();
@@ -159,7 +154,7 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     await assert.rejects(p.invoke('read'), /authenticated composition owner/);
     principal = 'review-user'; clearRuntimeUrlAuthToken();
     authorized = false;
-    await assert.rejects(api.watchServiceLease(await request('p', 3), () => undefined, new AbortController().signal), /request failed \(401\)/);
+    await assert.rejects(api.watchServiceLease(await request('p', 3), () => undefined, new AbortController().signal), /unauthorized/);
     authorized = true;
     const held = p.invoke('hold'); void held.catch(() => undefined); await entered.promise;
     await route('p', 'review.surface.c');
@@ -184,7 +179,7 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     finally {
       observations.stop(); server.closeAllConnections();
       if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-      auth.dispose(); clearRuntimeUrlAuthToken();
+      auth.dispose(); clearRuntimeUrlAuthToken(); setLocalRuntimeAuthCredentialProvider(null, null);
       if (previousDataDir === undefined) delete process.env.VARIN_DATA_DIR; else process.env.VARIN_DATA_DIR = previousDataDir;
       for (const [name, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
       await rm(directory, { recursive: true, force: true });

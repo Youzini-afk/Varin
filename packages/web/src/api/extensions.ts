@@ -24,7 +24,7 @@ import {
 } from '@varin/extension-contract';
 import type { ExtensionsAPI } from '@varin/application-client';
 import { createPluginCenterHttpAPI } from '@varin/application-client';
-import { refreshLocalRuntimeUrlAuthToken } from '@varin/application-client';
+import { buildLocalRuntimeAuthHeaders } from '@varin/application-client';
 import { fetchWithoutRuntimeRouting } from '@varin/application-client';
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '');
@@ -35,11 +35,6 @@ const applicationHostOrigin = (): string => {
     ? normalizeOrigin(window.__VARIN_LOCAL_ORIGIN__)
     : '';
   return injected || normalizeOrigin(window.location.origin);
-};
-
-const currentOrigin = (): string => {
-  if (typeof window === 'undefined') return '';
-  return normalizeOrigin(window.location.origin);
 };
 
 const errorResult = (message: string, retryable: boolean): VarinExtensionCatalogAvailability => ({
@@ -57,10 +52,7 @@ const applicationHostRequest = async (
 ): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  const headers = new Headers({ Accept: accept, 'Content-Type': 'application/json' });
-  if (origin && origin !== currentOrigin()) {
-    headers.set('X-Varin-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
-  }
+  const headers = await buildLocalRuntimeAuthHeaders(origin, { Accept: accept, 'Content-Type': 'application/json' });
   return fetchWithoutRuntimeRouting(target, {
     body: JSON.stringify(body),
     credentials: 'include',
@@ -73,22 +65,19 @@ const applicationHostRequest = async (
 const applicationHostRead = async (path: string): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  if (origin && origin !== currentOrigin()) {
-    target.searchParams.set('varin_url_token', await refreshLocalRuntimeUrlAuthToken(origin));
-  }
   return fetchWithoutRuntimeRouting(target, {
     credentials: 'include',
-    headers: { Accept: 'application/json' },
+    headers: await buildLocalRuntimeAuthHeaders(origin, { Accept: 'application/json' }),
   });
 };
 
 const readJsonOrThrow = async (response: Response): Promise<unknown> => {
   const payload = await response.json().catch(() => null) as unknown;
   if (response.ok) return payload;
-  const message = payload && typeof payload === 'object' && 'error' in payload
-    && typeof (payload as { error?: { message?: unknown } }).error?.message === 'string'
-    ? String((payload as { error: { message: string } }).error.message)
-    : `Varin extension host request failed (${response.status})`;
+  const error = payload && typeof payload === 'object' && 'error' in payload ? payload.error : null;
+  const detail = typeof error === 'string' ? error
+    : error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : '';
+  const message = detail || `Varin extension host request failed (${response.status})`;
   throw new Error(message);
 };
 
@@ -96,8 +85,7 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   pluginCenter: createPluginCenterHttpAPI(async (path, options) => {
     const origin = applicationHostOrigin();
     const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-    const headers = new Headers(options.headers);
-    if (origin && origin !== currentOrigin()) headers.set('X-Varin-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
+    const headers = await buildLocalRuntimeAuthHeaders(origin, options.headers);
     return fetchWithoutRuntimeRouting(target, { ...options, headers, credentials: 'include' });
   }),
   queryContracts: async (request, context, signal) => parseVarinRuntimeContractResult(
@@ -116,18 +104,7 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   },
   catalog: async () => {
     try {
-      const origin = applicationHostOrigin();
-      const target = origin
-        ? new URL('/api/varin/extensions/v1/catalog', `${origin}/`)
-        : new URL('/api/varin/extensions/v1/catalog', window.location.href);
-      if (origin && origin !== currentOrigin()) {
-        const token = await refreshLocalRuntimeUrlAuthToken(origin);
-        target.searchParams.set('varin_url_token', token);
-      }
-      const response = await fetchWithoutRuntimeRouting(target, {
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await applicationHostRead('/api/varin/extensions/v1/catalog');
       const payload = await response.json().catch(() => null) as unknown;
       if (!response.ok) {
         try {

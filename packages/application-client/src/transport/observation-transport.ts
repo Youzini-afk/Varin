@@ -1,4 +1,4 @@
-import { getLocalRuntimeUrlAuthTokenSync, getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth.js';
+import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth.js';
 import { getRuntimeEndpointGeneration } from './runtime-switch.js';
 import { getRuntimeUrlResolver } from './runtime-url.js';
 import { isAllowedObservationRequest, OBSERVATION_WEBSOCKET_PATH, type ObservationClientMessage, type ObservationServerMessage } from './observation-protocol.js';
@@ -61,7 +61,7 @@ const resolveTarget = (input: RequestInfo | URL, method: string, headers: Header
       const endpoint = new URL(OBSERVATION_WEBSOCKET_PATH, target.origin);
       const token = target.searchParams.get('varin_url_token')
         || headers.get('X-Varin-Application-Token')
-        || (target.origin !== window.location.origin ? getLocalRuntimeUrlAuthTokenSync(target.origin) : '');
+        || (target.origin !== window.location.origin ? await refreshLocalRuntimeUrlAuthToken(target.origin) : '');
       if (token) endpoint.searchParams.set('varin_url_token', token);
       return websocketUrl(endpoint);
     },
