@@ -18,14 +18,18 @@ export interface DocumentTextCodec {
     | { kind: 'unrepresentable'; encoding: string; position: number; character: string; message: string }
     | { kind: 'invalid' | 'binary' | 'unsupported-encoding'; message: string }>;
 }
-let nativeCodec: DocumentTextCodec | undefined;
+const codecBindings: Array<{ codec: DocumentTextCodec }> = [];
 /** The Application Host binds its existing kernel; this does not create another writer or authority. */
 export const bindDocumentTextCodec = (codec: DocumentTextCodec): (() => void) => {
-  const previous = nativeCodec;
-  nativeCodec = codec;
-  return () => { if (nativeCodec === codec) nativeCodec = previous; };
+  const binding = { codec };
+  codecBindings.push(binding);
+  return () => {
+    const index = codecBindings.indexOf(binding);
+    if (index !== -1) codecBindings.splice(index, 1);
+  };
 };
 const codec = (): DocumentTextCodec => {
+  const nativeCodec = codecBindings.at(-1)?.codec;
   if (!nativeCodec) throw new DocumentAuthorityError('Native text service is unavailable', { code: 'failed', statusCode: 503 });
   return nativeCodec;
 };
