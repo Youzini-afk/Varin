@@ -104,14 +104,17 @@ before later size measurements. Layout-only changes settle without starting a fo
 new messages and streaming growth retain the interruptible follow spring. Resuming following after
 entry still preserves end space the user manually revealed.
 
-The pinned LegendList `/react` CJS and ESM exports skip 0×0 measurements in the synchronous
+The pinned LegendList `/react` CJS and ESM exports skip 0×0 measurements in the
 container layout pass, matching its observer path. A mounted list hidden by an ancestor must retain
 its measured sizes rather than collapse rows and recursively allocate more containers. Nonzero-width,
-zero-height rows still measure normally, and visible updates resume measurement. The existing immediate
-shrink patch remains independent. `LegendListMeasurement.behavior.test.tsx` exercises both real exports
-and the conversation timeline using injected geometry. [LegendList #567](https://github.com/LegendApp/legend-list/issues/567)
-is a related upstream report; these tests do not establish browser layout timing or the original
-reporter's trigger in [#301](https://github.com/Youzini-afk/Varin/issues/301).
+zero-height rows still measure normally, and visible updates resume measurement. Container measurement
+runs at the commit's microtask checkpoint: long runs of empty or collapsed rows otherwise synchronously
+allocate and measure successive batches inside React's layout phase, exceeding its nested-update depth.
+LegendList's existing scheduled-work owner coalesces pending measurements and cancels them on unmount.
+This adds no animation-frame delay; the immediate shrink patch remains independent.
+`LegendListMeasurement.behavior.test.tsx` exercises both real exports, a long collapsed prefix and the
+conversation timeline using injected geometry. [LegendList #567](https://github.com/LegendApp/legend-list/issues/567)
+is a related upstream report.
 
 Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
 commands use native user Operations and the existing Integration journal. Preview refresh reads those
@@ -272,7 +275,7 @@ Dispatch and turn end:
 - A task message being sent settles in once (`ChatAgentMessageBubble` `live`). Its preview and body swap on the glide curve.
 - A turn footer that saw its turn run fades its actions in 24ms apart and rolls its usage numbers into place (`CountUp`). Footers from history are static.
 
-Disclosures in the timeline open and close on the glide curve, and the row below follows in the same painted frame both ways (`layout.cjs`, measured after paint). Growth always did. Shrinking needs a patch: LegendList on the web defers a smaller item size by one animation frame outside its scroll-anchoring mode, so the row below trailed a closing row by a frame. `bun-patches/@legendapp%2Flist@3.6.0.patch` skips that deferral inside a list marked `data-legend-immediate-shrink`, which `ChatTimeline` sets. Re-check the patch when upgrading LegendList.
+Disclosures in the timeline open and close on the glide curve, and the row below follows in the same painted frame both ways. Growth always did. Shrinking needs a patch: LegendList on the web defers a smaller item size by one animation frame outside its scroll-anchoring mode, so the row below trailed a closing row by a frame. `bun-patches/@legendapp%2Flist@3.7.1.patch` skips that deferral inside a list marked `data-legend-immediate-shrink`, which `ChatTimeline` sets. Re-check the patch when upgrading LegendList.
 
 Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it.
 
