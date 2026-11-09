@@ -6,10 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      native_diagnostics:
-        description: Temporary read-only Windows native diagnosis
-        default: false
-        type: boolean
       container_benchmark:
         description: Measure cold, warm and clean-builder registry cache reuse without publication
         default: false
@@ -41,7 +37,6 @@ concurrency:
 
 jobs:
   changes:
-    if: ${{ !inputs.native_diagnostics }}
     name: Identify affected owners
     runs-on: ubuntu-latest
     outputs:
@@ -704,7 +699,7 @@ jobs:
     name: Source quality
     runs-on: ubuntu-latest
     needs: [changes, production-preflight, portable-source, native-build, linux-native, rust-workspace, windows-runtime, windows-native-build, windows-native, windows-workspace, macos-storage, production-build, container-check, android-build]
-    if: ${{ always() && !inputs.native_diagnostics }}
+    if: ${{ always() }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -716,37 +711,3 @@ jobs:
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: node scripts/ci-scope.mjs gate
-
-
-  native-diagnostics:
-    name: Temporary Windows native diagnosis
-    if: ${{ inputs.native_diagnostics }}
-    runs-on: windows-latest
-    permissions:
-      contents: read
-      actions: read
-    env:
-      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
-      VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-win32-x64/varin-kernel.exe
-      VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-win32-x64/varin-kernel.exe
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-bun
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - run: bun install --frozen-lockfile
-      - run: node scripts/windows-stdout-eof-probe.mjs
-      - run: bun run build:type-dependencies
-      - uses: actions/download-artifact@v8
-        with:
-          name: varin-ci-kernel-windows-x64
-          path: .build-input/kernel
-          run-id: 42694933043
-          github-token: ${{ github.token }}
-      - run: node scripts/build-products.mjs kernel
-      - uses: ./.github/actions/workspace-component
-      - name: Verify affected Windows native owners
-        run: node scripts/test-kernel-authority.mjs --vitest-file=application-host/lib/kernel/kernel-process.native.test.ts --vitest-file=application-host/lib/kernel/child-source-store.native.test.ts --vitest-file=application-host/lib/recovery/dirty-recovery.native.test.ts --vitest-file=test/text-encoding.native.test.ts
