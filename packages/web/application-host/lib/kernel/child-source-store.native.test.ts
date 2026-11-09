@@ -34,10 +34,23 @@ it('refreshes differently encoded immutable versions through the native codec an
       await fs.writeFile(path.join(directory, 'attributes.txt'), gbkPrefix, { mode: 0o644 });
       const result = await store.publishDirectoryResult('previous', directory, ['file.txt', 'attributes.txt'], { publicationId: 'legacy-result' });
       const incoming = await store.putObject(Buffer.from('中文\r\nown=0\r\n\r\nteam=1\r\n', 'utf8'));
+      // Windows exposes writable/read-only, not POSIX owner/group permissions.
+      // Capture a real supported attribute edit on each platform, independently
+      // of the previous result's body edit.
+      const incomingMode = process.platform === 'win32' ? 0o444 : 0o600;
+      await fs.writeFile(path.join(directory, 'attributes.txt'), 'base');
+      await fs.chmod(path.join(directory, 'attributes.txt'), incomingMode);
+      const incomingStates = await store.captureDirectory(directory, ['attributes.txt']);
+      const incomingAttributes = incomingStates['attributes.txt'];
+      if (incomingAttributes?.kind !== 'regular-file') throw new Error('Incoming attributes were not captured');
+      expect(incomingAttributes.mode).toBe(incomingMode);
+      if (process.platform === 'win32') expect((incomingAttributes.native?.windowsAttributes ?? 0) & 1).toBe(1);
       await store.createBranch(workspace.workspaceId, 'child-incoming:refresh-encoding', { 'file.txt': { ...baselineFile, kind: 'regular-file', objectHash: incoming.hash, byteLength: incoming.byteLength },
-        'attributes.txt': { ...baselineAttributes, mode: 0o600 } },
+        'attributes.txt': incomingAttributes },
         undefined, [], [], { sourceProvenance: provenance('utf-8') });
       await incoming.release?.();
+      await store.releaseCapturedStates(incomingStates);
+      await fs.chmod(path.join(directory, 'attributes.txt'), baselineAttributes.mode ?? 0o644);
       const source: LaunchSource = { resource_owner: { kind: 'local' }, mode: 'fixed_branch', live_root: null,
         workspace_id: workspace.workspaceId, execution_workspace_id: workspace.workspaceId, branch_id: 'previous', revision: result.resultRevision };
       const child = { execution_id: 'refresh-encoding', child_thread_id: 'child-thread', selected_profile: { work_mode: 'read_only' },
@@ -49,7 +62,8 @@ it('refreshes differently encoded immutable versions through the native codec an
       expect(await store.readContent(entry!)).toEqual(Buffer.from('中文\r\nown=1\r\n\r\nteam=1\r\n', 'utf8'));
       const attr = await store.readPath(prepared.source.branch_id!, 'attributes.txt', { revision: 0 });
       expect(await store.readContent(attr!)).toEqual(gbkPrefix);
-      expect(attr?.state).toMatchObject({ mode: 0o600 });
+      expect(attr?.state).toMatchObject({ mode: incomingMode });
+      if (process.platform === 'win32') expect(attr?.state).toMatchObject({ native: { windowsAttributes: incomingAttributes.native!.windowsAttributes } });
       expect(prepared.provenance).toMatchObject({ consistency: 'refreshed-root', conflicts: [], textEncoding: { files: { 'file.txt': 'utf-8', 'attributes.txt': 'gbk' } } });
       expect((await prepareRefreshedContinuationSourceStore(child, store, signal)).pin.root).toBe(prepared.pin.root);
       const continuation = { ...child, execution_id: 'continue-encoding', source_basis: {
@@ -61,5 +75,12 @@ it('refreshes differently encoded immutable versions through the native codec an
       expect(await store.readTextEncoding(continued.source.branch_id!, 0, { root: continued.pin.root }))
         .toEqual(await store.readTextEncoding(prepared.source.branch_id!, 0, { root: prepared.pin.root }));
     });
-  } finally { await native?.dispose(); await documents.dispose(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally {
+    await native?.dispose(); await documents.dispose();
+    // Also clear READONLY if capture or an assertion failed before restoration.
+    await fs.chmod(path.join(directory, 'attributes.txt'), 0o666).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

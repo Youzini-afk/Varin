@@ -21,7 +21,7 @@ afterEach(async () => { for (const dispose of close.splice(0).reverse()) await d
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-text-encoding-'));
-  const directory = path.join(root, 'workspace'); await fs.mkdir(directory);
+  const workspacePath = path.join(root, 'workspace'); await fs.mkdir(workspacePath);
   close.push(() => fs.rm(root, { recursive: true, force: true }));
   let override: string | undefined;
   let failRemember = false;
@@ -31,7 +31,9 @@ async function fixture() {
   close.push(() => documents.dispose());
   const native = await createAuthorityTestRuntime({ documents, hostId: 'text-codec-native', dataDir: path.join(root, 'data') });
   close.push(() => native.dispose());
-  const workspace = await documents.resolveWorkspace({ path: directory });
+  const workspace = await documents.resolveWorkspace({ path: workspacePath });
+  // Runner temp paths can be aliases. Source capture uses the original Documents-admitted root.
+  const { root: directory } = await documents.inspectWorkspace(workspace.workspaceId);
   const app = express(); app.use(express.json({ limit: '256mb' })); registerDocumentRoutes(app, { documents });
   let server!: Server;
   await new Promise<void>(resolve => { server = app.listen(0, '127.0.0.1', () => resolve()); });
