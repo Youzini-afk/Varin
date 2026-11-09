@@ -2500,6 +2500,8 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
   let parentSteps = 0; let middleSteps = 0; let leafSteps = 0; let siblingSteps = 0;
   let middleOperation = ''; let leafOperation = ''; let siblingOperation = '';
   const leafEntered = gate(); const leafClosed = gate();
+  const siblingEntered = gate();
+  let siblingResponse: ServerResponse | undefined;
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
@@ -2513,7 +2515,7 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
     const firstInput = (body.input as Array<Record<string, unknown>>).find(item => item.role === 'user');
     const task = JSON.stringify(firstInput);
     if (task.includes('SIBLING_LEVEL')) {
-      siblingSteps++; complete(response, [answer('Independent sibling report', 'sibling-report')]); return;
+      siblingSteps++; siblingResponse = response; siblingEntered.release(); return;
     }
     if (task.includes('MIDDLE_LEVEL')) {
       if (++middleSteps === 1) complete(response, [tool('dispatch', { task: 'LEAF_LEVEL: read the fixed source and report',
@@ -2550,7 +2552,9 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
   prepared.source.tools = ['file_read'];
   const parent = await h.api.submit({ ...identity, key: 'root', expectedHead: null, text: 'Delegate a nested task and an independent sibling', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
-  await expect.poll(async () => siblingOperation && (await h.runtime.child(siblingOperation)).report?.outcome, { timeout: 15_000 }).toBe('succeeded');
+  // Keep a real sibling request in flight while the other subtree settles. A
+  // previously completed sibling cannot prove cancellation leaves live work alone.
+  await siblingEntered.promise;
   if (mode === 'cancel') {
     await leafEntered.promise;
     await expect.poll(() => leafOperation).toBeTruthy();
@@ -2562,6 +2566,13 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
   } else {
     await expect.poll(async () => (await h.runtime.child(middleOperation)).report?.outcome, { timeout: 15_000 }).toBe('succeeded');
   }
+  const activeSibling = await h.runtime.child(siblingOperation);
+  expect(activeSibling.report).toBeNull();
+  expect(activeSibling.receipt).not.toBeNull();
+  expect(await h.runtime.run(activeSibling.receipt!.run_id)).toMatchObject({ state: 'generating', cancel_requested: false });
+  expect(siblingResponse!.destroyed).toBe(false);
+  complete(siblingResponse!, [answer('Independent sibling report', 'sibling-report')]);
+  await expect.poll(async () => (await h.runtime.child(siblingOperation)).report?.outcome, { timeout: 15_000 }).toBe('succeeded');
   const middle = await h.runtime.child(middleOperation);
   const leaf = await h.runtime.child(leafOperation);
   const sibling = await h.runtime.child(siblingOperation);

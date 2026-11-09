@@ -82,12 +82,15 @@ async function waitFor(client: KernelScopedClient, processId: string, predicate:
     await pause();
   }
 }
-async function drain(client: KernelScopedClient, processId: string, start = 0) {
+async function drain(client: KernelScopedClient, processId: string, start = 0, signal?: AbortSignal) {
   let cursor = start;
   const stdout: Buffer[] = [], stderr: Buffer[] = [];
-  const deadline = Date.now() + 15_000;
+  // Compound platform acceptance uses its existing test deadline, including
+  // cold shell startup, rather than silently imposing a shorter per-command cap.
+  const deadline = signal ? Infinity : Date.now() + 15_000;
   for (;;) {
-    const result = await client.processRead({ workspaceId: "ws", processId, cursor });
+    signal?.throwIfAborted();
+    const result = await client.processRead({ workspaceId: "ws", processId, cursor }, signal);
     for (const chunk of result.chunks) {
       assert.equal(chunk.offset, cursor);
       const bytes = Buffer.from(chunk.bytesBase64, "base64");
@@ -120,7 +123,7 @@ vitestIt.skipIf(!available || process.platform !== 'win32')('Windows cmd PTY sta
   assert(!output.includes('UNC'), output);
 }, 30_000);
 
-vitestIt.skipIf(!available || process.platform !== 'win32')('Windows native workspaces support realpath and shell execution through one user volume', async () => {
+vitestIt.skipIf(!available || process.platform !== 'win32')('Windows native workspaces support realpath and shell execution through one user volume', async ({ signal }) => {
   const f = await fixture();
   assert.equal((await f.client.inspectWorkspaceBackend()).dependenciesReady, true);
   await fs.writeFile(path.join(f.workspace, 'child', 'before.txt'), 'original source');
@@ -142,8 +145,11 @@ vitestIt.skipIf(!available || process.platform !== 'win32')('Windows native work
   const borrower = await f.scoped('native-borrower');
   assert.equal((await borrower.bindWorkspace({ branchId: child.branchId, generation: child.generation, sourcePath: 'child' })).rootId, child.rootId);
   const run = async (id: string, command: string, args: string[], mode = 'pipe') => {
-    await borrower.processSpawn({ ...f.spawn(id, '', mode), rootId: child.rootId, cwd: '', command, args });
-    const result = await drain(borrower, id);
+    // These commands have no input. Close stdin explicitly; interactive pipe and
+    // PTY input/EOF behavior is exercised independently below.
+    await borrower.processSpawn({ ...f.spawn(id, '', mode), rootId: child.rootId, cwd: '', command, args,
+      stdinMode: mode === 'pipe' ? 'null' : 'pipe' });
+    const result = await drain(borrower, id, 0, signal);
     assert.equal(result.process.exitCode, 0, result.stderr.toString());
     return stripVTControlCharacters(result.stdout.toString('utf8'));
   };
