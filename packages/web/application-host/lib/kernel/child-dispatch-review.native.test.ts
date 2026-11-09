@@ -2481,6 +2481,12 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   expect(finished.launch.source).toBeNull();
   expect((await reopened.runtime.launch(finished.receipt.run_id))!.selection.source).toEqual(finished.source.selection);
   expect(finished.source).toMatchObject({ kind: 'ready', handoff: null, pin: { root: original.code_result.result.root } });
+  expect(finished.source.provenance).toEqual(accepted.source_basis!.provenance);
+  const continuedSource = finished.source, originalResult = original.code_result.result;
+  await reopened.workingStates.withBranchStore(originalResult.workspace_id, 'review-continuation-text-policy', async store => {
+    expect(await store.readTextEncoding(continuedSource.pin.source.branch_id!, 0, { root: continuedSource.pin.root }))
+      .toEqual(await store.readTextEncoding(originalResult.branch_id, originalResult.result_revision, { root: originalResult.root }));
+  }, 'shared', { threadId: original.child_thread_id });
   expect(finished.code_result.result.publication_id).not.toBe(original.code_result.result.publication_id);
   expect(finished.code_result.result.base_root).toBe(original.code_result.result.root);
   expect(finished.report.history_ids.some(id => original.report!.history_ids.includes(id))).toBe(false);

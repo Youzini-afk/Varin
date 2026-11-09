@@ -140,6 +140,8 @@ export interface WorkingSourcePreparation {
 }
 export interface WorkingBranchCreateOptions {
   sourceProvenance?: ChildSourceProvenance;
+  /** Revision-owned codec choices may be richer than the accepted Catalog provenance. */
+  textEncoding?: KernelTextPolicy;
   signal?: AbortSignal;
 }
 export interface WorkingResultPublicationOptions {

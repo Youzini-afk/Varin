@@ -139,18 +139,21 @@ export function parseSourceResourceCapture(value: unknown): SourceResourceCaptur
   return structuredClone(value) as SourceResourceCapture;
 }
 
-function capsuleReader(capsule: SourceResourceCapsule): ResourceReader {
-  const reader = createCapsuleResourceReader(capsule);
-  return { ...reader,
+function capsuleReader(capsule: SourceResourceCapsule, viewId = capsule.viewId): ResourceReader {
+  const base = createCapsuleResourceReader(capsule);
+  const reader: ResourceReader = { ...base, viewId,
     async read(target, signal) {
-      const result = await reader.read(target, signal);
-      return result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      const result = await base.read(target, signal);
+      const captured = result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      return remap(reader, captured.status === 'ready' ? captured.reference.path : captured.path, captured);
     },
     async list(target, signal) {
-      const result = await reader.list(target, signal);
-      return result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      const result = await base.list(target, signal);
+      const captured = result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      return remap(reader, captured.status === 'ready' ? captured.reference.path : captured.path, captured);
     },
   };
+  return reader;
 }
 /** Resource-only Host admission may follow an actually requested instruction/skill alias.
  * The resulting handle remains capture-only; this creates no model file or process grant. */
@@ -355,7 +358,8 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (isPathWithinRoot(canonical, root)) {
         const relative = normalize(path.relative(root, canonical)); scopes.add(relative); sourcePaths.add(relative);
-        return { target: { kind: 'source', directory: relative }, reader: source, directory: relative, root };
+        // All roles in this view share the recorder, including validation of configured resources.
+        return { target: { kind: 'source', directory: relative }, reader: observed.reader, directory: relative, root };
       }
       let captured = captures.get(domainRoot);
       if (!captured) {
@@ -462,7 +466,9 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         if (skills.status !== 'ready') throw new ResourceScopeError(skills);
       }
       const capsule = captures.get(ancestor)!.capsule();
-      scope.ancestors!.push({ reader: capsuleReader(capsule), displayRoot: ancestor, appliesTo: '', includeSkills });
+      // This immutable ancestor snapshot is distinct from the recorder, which may still
+      // capture configured skills from the same domain before the final capsule is published.
+      scope.ancestors!.push({ reader: capsuleReader(capsule, `${capsule.viewId}:ancestor`), displayRoot: ancestor, appliesTo: '', includeSkills });
       capture.ancestors.push({ capsule, appliesTo: '', includeSkills });
     }
     if (nearestGit && owners.resolvePrimaryWorktreeRoot && (await lstat(path.join(nearestGit, '.git'))).isFile()) {

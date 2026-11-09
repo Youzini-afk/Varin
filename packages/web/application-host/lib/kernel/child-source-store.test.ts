@@ -35,17 +35,18 @@ function fixture() {
 describe('child source encoding ownership', () => {
   it('forks the exact published encoding choices even when ASCII bytes have no raw diff', async () => {
     const f = fixture();
+    const provenance = { consistency: 'fixed-root' as const, root: 'selected' };
     const child = { execution_id: 'continued', selected_profile: { work_mode: 'read_only' }, source_basis: {
-      kind: 'working_result', source, root: 'selected', provenance: f.original.provenance,
+      kind: 'working_result', source, root: 'selected', provenance,
     } } as unknown as DelegatedExecution;
     const prepared = await prepareContinuationSourceStore(child, f.owners.store, signal);
-    expect(prepared.provenance).toMatchObject({ root: 'selected', textEncoding: {
-      root: '/original', defaultEncoding: 'utf-8', files: { 'keep.txt': 'utf-16le', 'ascii.txt': 'gbk' },
-    } });
+    expect(prepared.provenance).toEqual(provenance);
     expect(f.store.readTextEncoding).toHaveBeenCalledWith('previous', 2, { signal, root: 'selected' });
     expect(f.store.getResult).not.toHaveBeenCalled();
     expect(f.store.createBranchFromPin).toHaveBeenCalledWith('workspace', 'child-source:continued', f.pin, 'previous@2', undefined, [],
-      { sourceProvenance: prepared.provenance });
+      { sourceProvenance: provenance, textEncoding: {
+        root: '/original', defaultEncoding: 'utf-8', files: { 'keep.txt': 'utf-16le', 'ascii.txt': 'gbk' },
+      } });
     expect(f.pin.release).toHaveBeenCalledOnce();
   });
 

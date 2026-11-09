@@ -120,15 +120,23 @@ it('preserves mixed EOL/no-op bytes and serializes immutable surface snapshots w
   const noOp = await f.api.write({ resource: f.resource, token: f.token, content: opened.buffer, encoding: opened.encoding, bom: opened.bom,
     sourceFormat: opened.baseFormat, expectedRevision: opened.baseRevision, operationId: 'no-op' });
   expect(noOp.status).toBe('written'); expect(await fs.readFile(file)).toEqual(original);
-  f.registry.applyTransaction(f.resource, opened.buffer.replace('final', 'edited'), { origin: 'native-test' });
+  // Preserve the real editor range. A whole-buffer replacement intentionally owns every delimiter.
+  const edit = f.registry.applyEdits(f.resource, { expectedLocalEditRevision: opened.localEditRevision,
+    edits: [{ from: opened.buffer.indexOf('final'), to: opened.buffer.length, insert: 'edited' }], origin: 'native-test' });
+  expect(edit.status).toBe('applied');
   const consumer = { kind: 'thread' as const, threadId: 'encoding-thread', branchId: 'main' };
   const context = await f.registry.captureAgentInputContext(consumer, f.resource.workspaceId);
   expect(context.source).toBe('surface');
   const drafts = await readSourceDrafts({ documents: f.documents, consumer, context, workspaceId: f.resource.workspaceId });
   expect(drafts.editorDrafts[0]?.content).toEqual(Buffer.concat([gbkChinese, Buffer.from('\r\na\nb\redited')]));
   f.registry.setFormat(f.resource, { lineEnding: 'crlf' });
+  const normalized = await f.registry.captureAgentInputContext(consumer, f.resource.workspaceId);
   await f.registry.save(f.resource);
   expect(await fs.readFile(file)).toEqual(Buffer.concat([gbkChinese, Buffer.from('\r\na\r\nb\r\nedited')]));
+  const frozen = await readSourceDrafts({ documents: f.documents, consumer, context, workspaceId: f.resource.workspaceId });
+  expect(frozen.editorDrafts[0]?.content).toEqual(drafts.editorDrafts[0]?.content);
+  const converted = await readSourceDrafts({ documents: f.documents, consumer, context: normalized, workspaceId: f.resource.workspaceId });
+  expect(converted.editorDrafts[0]?.content).toEqual(Buffer.concat([gbkChinese, Buffer.from('\r\na\r\nb\r\nedited')]));
 });
 
 it('journals unrepresentable Unicode, leaves GBK bytes intact, and recovers a conversion receipt without rewriting', async () => {

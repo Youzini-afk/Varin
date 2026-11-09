@@ -956,7 +956,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         draftBasePaths: normalizedDraftPaths,
         captureScopes: normalizedCaptureScopes,
         ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
-        ...(sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
+        ...(options?.textEncoding !== undefined ? { textEncoding: options.textEncoding }
+          : sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
       }, options?.signal);
     } catch (error) {
       await releasePendingOwners(true);
@@ -1020,7 +1021,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       draftBasePaths: normalizedDraftPaths,
       captureScopes: normalizedCaptureScopes,
       ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
-        ...(sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
+        ...(options?.textEncoding !== undefined ? { textEncoding: options.textEncoding }
+          : sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
     }, options?.signal); } catch (error) {
       if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
       throw error;

@@ -8,7 +8,6 @@ import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { buildThreeWayMergePlan, type PathTextInterpretations } from '../harness/working-state/three-way-merge.js';
 import type { ChildPhysicalCapture } from './child-source-capture.js';
 import { scopeFixedSourceResources } from './scoped-source-resources.js';
-import { overlayResultTextEncoding, originalSourceTextEncoding } from './source-provenance.js';
 import { textEncodingForResource } from '../projects/text-encoding.js';
 import { inspectDocumentBytes, serializeDocumentText } from '../documents/inspect.js';
 
@@ -160,9 +159,11 @@ export async function prepareContinuationSourceStore(
     signal.throwIfAborted();
     const branchId = `child-source:${child.execution_id}`;
     const textEncoding = await fixedTextEncoding(store, basis.source.branch_id, basis.source.revision, basis.root, signal);
-    const provenance = { ...basis.provenance, ...('root' in basis.provenance ? { root: basis.root } : {}), textEncoding };
+    // Catalog accepted this exact provenance before preparation. Storage owns
+    // the selected revision's policy separately; do not rewrite that receipt.
+    const provenance = basis.provenance;
     const branch = await store.createBranchFromPin(basis.source.workspace_id, branchId, pin,
-      `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: provenance });
+      `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: provenance, textEncoding });
     if (branch.baseRoot !== basis.root) throw new Error('Continuation branch has a different fixed baseline');
     const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
     signal.throwIfAborted();
@@ -227,9 +228,9 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
     const states = await store.readStateSlice(incomingBranch, allPaths, { revision: 0, signal });
     if (!states) throw new Error('Incoming stage content is unavailable');
     const original = result ? await store.readOriginalSource(result.branchId, { signal }) : null;
-    const basePolicy = originalSourceTextEncoding(original?.provenance ?? basis.provenance);
-    const childPolicy = overlayResultTextEncoding(basePolicy, result?.textFormats);
-    const incomingPolicy = originalSourceTextEncoding(incoming.provenance);
+    const basePolicy = result ? await fixedTextEncoding(store, result.branchId, 0, result.baseRoot, signal) : {};
+    const childPolicy = result ? await fixedTextEncoding(store, result.branchId, result.resultRevision, result.root, signal) : basePolicy;
+    const incomingPolicy = await fixedTextEncoding(store, incomingBranch, 0, incoming.branch.baseRoot, signal);
     const interpretations: Record<string, PathTextInterpretations> = Object.fromEntries(changes.map(file => {
       const format = result?.textFormats?.[file];
       const baseEncoding = format?.base?.encoding ?? draftEncoding(original?.provenance ?? basis.provenance, file);

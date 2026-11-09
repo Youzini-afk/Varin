@@ -2232,7 +2232,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const result = entry as Record<string, unknown>;
       const allowed = new Set([
         'resource', 'status', 'documentInstanceId', 'beforeLocalEditRevision', 'beforeHash',
-        'afterLocalEditRevision', 'afterHash', 'content', 'baseContent', 'message',
+        'afterLocalEditRevision', 'afterHash', 'content', 'baseContent', 'edits', 'message',
       ]);
       const resource = result.resource && typeof result.resource === 'object' && !Array.isArray(result.resource)
         ? result.resource as Record<string, unknown> : {};
@@ -2251,6 +2251,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         && validHash(result.beforeHash) && validHash(result.afterHash)
         && (result.content === undefined || typeof result.content === 'string')
         && (result.baseContent === undefined || typeof result.baseContent === 'string')
+        && (result.edits === undefined || isDocumentTextEdits(result.edits))
         && (result.message === undefined || typeof result.message === 'string')
         && (status !== 'captured' || (typeof result.content === 'string' && typeof result.documentInstanceId === 'string'
           && result.beforeLocalEditRevision !== undefined && result.beforeHash !== undefined))

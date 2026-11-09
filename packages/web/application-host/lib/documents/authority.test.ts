@@ -844,14 +844,24 @@ it('routes surface bodies only to the bound owner registration and rejects late 
       ownerId, generation, requestId: event.requestId, workspaceId: harness.identity.workspaceId,
     });
     expect(payload.targets[0]).toMatchObject({ resource: { resourceId: 'surface.txt' } });
-    await expect(harness.authority.completeSurfaceOperation({
+    const captured = {
+      resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
+      documentInstanceId: 'document-instance', beforeLocalEditRevision: 7, beforeHash: surfaceHash('draft\n'),
+      edits: [{ start: 0, end: 0, text: 'draft\n' }],
+    };
+    const completion = {
       ownerId, generation, requestId: event.requestId, operationId: 'integration-surface',
-      workspaceId: harness.identity.workspaceId, resources: [{
-        resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
-        documentInstanceId: 'document-instance', beforeLocalEditRevision: 7, beforeHash: surfaceHash('draft\n'),
-      }],
+      workspaceId: harness.identity.workspaceId,
+    };
+    for (const edits of [null, [{ start: -1, end: 0, text: 'draft\n' }], [{ start: 0, end: 0, text: 1 }]]) {
+      await expect(harness.authority.completeSurfaceOperation({
+        ...completion, resources: [{ ...captured, edits }],
+      })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
+    }
+    await expect(harness.authority.completeSurfaceOperation({
+      ...completion, resources: [captured],
     })).resolves.toEqual({ accepted: true });
-    await expect(pending).resolves.toMatchObject([{ status: 'captured', content: 'draft\n' }]);
+    await expect(pending).resolves.toEqual([captured]);
 
     const disconnected = harness.authority.requestSurfaceOperation({
       action: 'capture', ownerId, generation, registrationId: publication.registrationId!,

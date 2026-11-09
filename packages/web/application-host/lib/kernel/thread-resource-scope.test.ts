@@ -159,6 +159,43 @@ async function reviewDraftResourceClosure() {
 }
 
 describe('Thread source resource admission', () => {
+  it('captures local configured and package skills through the original observed source reader', async () => {
+    const f = await fixture({
+      'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../rules'], packages: ['npm:local'] }),
+      'rules/SKILL.md': skill('configured', 'CONFIGURED ORIGINAL'),
+      'local-package/package.json': JSON.stringify({ varin: { skills: ['skills'] } }),
+      'local-package/skills/review/SKILL.md': skill('packaged', 'PACKAGE ORIGINAL'),
+    });
+    f.packages.push({ identity: 'npm:local', source: 'npm:local', installedPath: path.join(f.root, 'local-package'), scope: 'project' });
+    const catalog = await f.scope.draftSourceSkills!('workspace');
+    expect(catalog.skills.map(skill => skill.name).sort()).toEqual(['configured', 'packaged']);
+    const prepared = await f.prepare();
+    expect(prepared.provenance.resources?.configuredPaths[0]?.target).toEqual({ kind: 'source', directory: 'rules' });
+    expect(prepared.provenance.resources?.installedPackages[0]?.target).toEqual({ kind: 'source', directory: 'local-package' });
+    await f.write('workspace/rules/SKILL.md', skill('configured', 'CONFIGURED LATER'));
+    await f.write('workspace/local-package/skills/review/SKILL.md', skill('packaged', 'PACKAGE LATER'));
+    const snapshot = await f.candidate();
+    const configured = await read(f, snapshot, 'configured');
+    const packaged = await read(f, snapshot, 'packaged');
+    expect(configured.status === 'ready' && configured.kind === 'skill' && configured.file.content).toContain('CONFIGURED ORIGINAL');
+    expect(packaged.status === 'ready' && packaged.kind === 'skill' && packaged.file.content).toContain('PACKAGE ORIGINAL');
+  });
+
+  it('shares an ancestor reader with configured resources captured from that same domain', async () => {
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../../SKILL.md'] }) });
+    await f.write('AGENTS.md', 'ANCESTOR ORIGINAL');
+    await f.write('SKILL.md', skill('ancestor-skill', 'ANCESTOR SKILL ORIGINAL'));
+    await f.prepare();
+    await f.write('AGENTS.md', 'ANCESTOR LATER');
+    await f.write('SKILL.md', skill('ancestor-skill', 'ANCESTOR SKILL LATER'));
+    const snapshot = await f.candidate();
+    expect(snapshot.capturedFiles.some(file => file.content === 'ANCESTOR ORIGINAL')).toBe(true);
+    const selected = await read(f, snapshot, 'ancestor-skill');
+    expect(selected.status === 'ready' && selected.kind === 'skill' && selected.file.content).toContain('ANCESTOR SKILL ORIGINAL');
+  });
+
   it.each(['saved', 'draft'] as const)('validates %s resources using assembled range bytes, not the descriptor digest', async mode => {
     const f = await fixture({ 'AGENTS.md': '\ufeff中文\r\n' });
     const bytes = Buffer.from(mode === 'draft' ? '\ufeff中文草稿\r\n' : '\ufeff中文\r\n');
@@ -262,11 +299,12 @@ describe('Thread source resource admission', () => {
     expect(support.status === 'ready' && support.kind === 'skill-resource' && support.file.content).toBe('EXTERNAL SUPPORT');
   });
 
-  it('rejects source dependency changes before branch publication and preserves absence evidence', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': '{}' });
+  it.each(['.varin/settings.json', 'rules/SKILL.md'])('rejects changed %s before branch publication', async file => {
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../rules'] }), 'rules/SKILL.md': skill('configured', 'ORIGINAL') });
     const prepareResources = async (...args: Parameters<typeof f.scope.prepareSourceCapture>) => {
       const plan = await f.scope.prepareSourceCapture(...args);
-      await f.write('workspace/.varin/settings.json', '{"resources":{"skills":["different"]}}');
+      await f.write(`workspace/${file}`, file.endsWith('.json') ? nativeResources({ skills: ['different'] }) : skill('configured', 'LATER'));
       return plan;
     };
     await expect(captureStableSourceBaseline({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',
