@@ -102,6 +102,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
   const checkpoint = { id: 'checkpoint:original', revision: 4, proposal: { through_id: 'compacted-head', summary: 'Original summary' } };
   const context = { effectiveSystemPrompt: 'Original child role', instructionSources: [], memoryCheckpoint: 'old-memory', resources: { snapshot: { id: 'new-fixed-resources' } } };
   const skill = { command: 'fixture-original-command' };
+  const textEncoding = { root: '/removed/original', files: { 'source.txt': 'gbk' }, choiceRevisions: { 'source.txt': 3 } };
   // Keep the real branch adapter/store. Only their native Storage ports are
   // controlled, with a newer head that must not replace the selected revision.
   const branches = new Map([['old-result', {
@@ -117,7 +118,8 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       if (!branch) throw new Error(`Unexpected branch ${input.branchId}`);
       return { ...branch, view: input.revision === undefined ? 'current' : 'revision', revision: input.revision ?? branch.headRevision,
         root: input.revision === 0 ? branch.baseRoot : input.revision === 7 ? 'fixed-result-root' : branch.root,
-        entries: [], nextCursor: null };
+        entries: [], nextCursor: null,
+        ...(input.branchId === 'old-result' && input.revision === 7 ? { textEncoding } : {}) };
     }),
     pinBranch: vi.fn(async (input: Parameters<KernelScopedClient['pinBranch']>[0]) => {
       const branch = branches.get(input.branchId);
@@ -183,8 +185,9 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(scoped.forkBranch).toHaveBeenCalledOnce();
     expect(scoped.forkBranch).toHaveBeenCalledWith({ operationId: 'branch-fork:child-source:execution:new',
       branchId: 'child-source:execution:new', workspaceId: 'workspace', sourceBranchId: 'old-result', sourcePinId: 'predecessor-query-pin', parentRef: 'old-result@7',
-      draftBasePaths: [], captureScopes: [], textEncoding: {}, sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } }, undefined);
-    expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual({ ...child.source_basis!.provenance, textEncoding: {} });
+      draftBasePaths: [], captureScopes: [], textEncoding, sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } }, undefined);
+    expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual(child.source_basis!.provenance);
+    expect(scoped.readBranch).toHaveBeenCalledWith({ branchId: 'old-result', revision: 7, includeEntries: false }, expect.any(AbortSignal));
     expect(scoped.pinBranch).toHaveBeenNthCalledWith(2, expect.objectContaining({ branchId: 'child-source:execution:new',
       pinId: 'child-source-pin:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(scoped.readBranch.mock.calls.every(([input]) => input.includeEntries === false)).toBe(true);
@@ -195,7 +198,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(runtime.readyChildSource).toHaveBeenCalledWith({ executionId: child.execution_id,
       source: { mode: 'native_workspace', liveRoot: null, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId, branchId: 'child-source:execution:new', revision: null },
       pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, execution_workspace_id: executionWorkspaceId, branch_id: 'child-source:execution:new', revision: 0 } },
-      provenance: { ...child.source_basis!.provenance, textEncoding: {} } }, expect.any(AbortSignal));
+      provenance: child.source_basis!.provenance }, expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
       expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
     if (kind !== 'user_continuation') {
