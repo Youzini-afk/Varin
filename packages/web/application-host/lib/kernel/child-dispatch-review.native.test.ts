@@ -27,6 +27,7 @@ import { createPlanOwner } from './plan-owner.js';
 import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './native-workspaces.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
@@ -153,6 +154,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
+    const releaseCodec = bindDocumentTextCodec(kernel);
+    disposers.push(async () => { releaseCodec(); await kernel.close(); });
     const grants: Array<{ runId: string; grantId: string; pathScopes: string[] }> = [];
     const issueGrant = kernel.issueGrant.bind(kernel);
     kernel.issueGrant = async (input, signal) => {
@@ -336,11 +339,12 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await delegationModels.close(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
-      await sources?.dispose();await compute?.dispose();
-      await recovery?.dispose();
-      try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
-      finally { await documents.dispose(); await kernel.close(); }
+      try {
+        collaboration?.stop(); await delegationModels.close(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
+        await sources?.dispose();await compute?.dispose();
+        await recovery?.dispose();
+        try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
+      } finally { releaseCodec(); try { await documents.dispose(); } finally { await kernel.close(); } }
     };
     disposers.push(close);
     const crash = async () => {
@@ -349,7 +353,7 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
       crashed = true;
       const exited = once(kernelProcess, 'exit');
       if (!kernelProcess.kill('SIGKILL')) throw new Error('Could not kill this fixture kernel');
-      await exited; await kernel.close();
+      await exited; releaseCodec(); await kernel.close();
     };
     return { kernel, grants, crash, runtime, adapter, collaboration, external, models, credentials, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
       errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };

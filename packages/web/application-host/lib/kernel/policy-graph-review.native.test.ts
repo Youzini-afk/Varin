@@ -1,3 +1,4 @@
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
@@ -57,7 +58,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     if (args[0].recordId === 'agent.personalization') memoryWrites.push({ operationId: args[0].operationId, expectedRecordRevision: args[0].expectedRecordRevision });
     return putRecord(...args);
   };
-  cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   const secret = 'fake-http-provider-key-not-a-real-secret';
   const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
   const provider = createServer((request, response) => {
@@ -126,7 +128,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   extensions.services.bind = (...args) => observeBinding(bind(...args));
   extensions.services.bindPinned = (...args) => observeBinding(bindPinned(...args));
   let closed = false; let crashed = false;
-  const close = async () => { if (closed) return; closed = true; await extensions.stop(); if (!crashed) await storage.dispose(); await documents.dispose(); await kernel.close(); };
+  const close = async () => { if (closed) return; closed = true;
+    try { await extensions.stop(); if (!crashed) await storage.dispose(); await documents.dispose(); }
+    finally { releaseCodec(); await kernel.close(); }
+  };
   cleanups.push(close);
 
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({threadId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId:threadId,projectId:'selected-project'}, changed, signal) }, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
