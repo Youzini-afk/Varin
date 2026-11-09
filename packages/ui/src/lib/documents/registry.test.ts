@@ -1430,6 +1430,55 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
+  test.each([
+    { name: 'workspace root', paths: ['.'], caseSensitive: true, affected: ['nested/note.txt', 'second.txt'], otherWorkspace: true },
+    { name: 'normalized root', paths: ['.\\'], caseSensitive: false, affected: ['nested/note.txt', 'second.txt'], otherWorkspace: true },
+    { name: 'exact parent inventory', paths: ['.\\Folder\\', 'Folder\\note.txt', 'folder/nested/second.txt', 'Folder/new.txt'], caseSensitive: false, affected: ['folder/note.txt', 'Folder/nested/second.txt'], otherWorkspace: false },
+  ])('$name barriers finish pending journals and fence only their selected resources', async ({ paths, caseSensitive, affected, otherWorkspace }) => {
+    const memory = createMemoryDocuments();
+    const first = resource(affected[0]);
+    const second = resource(affected[1]);
+    const unrelated = ['folder/untouched.txt', 'folder-other/note.txt'].map(file => ({ ...resource(file), ...(otherWorkspace ? { workspaceId: 'another-workspace' } : {}) }));
+    for (const ref of [first, second, ...unrelated]) memory.files.set(`${ref.workspaceId}\0${ref.resourceId}`, { content: 'base', revision: 'd1_base' });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'barrier-journal' });
+    const started = deferred(), finish = deferred();
+    const write = memory.api.writeRecoveryJournal;
+    const writes = vi.spyOn(memory.api, 'writeRecoveryJournal').mockImplementation(async request => {
+      if (request.resource.resourceId === first.resourceId) { started.resolve(); await finish.promise; }
+      return write(request);
+    });
+    const targetWrites = () => writes.mock.calls.filter(([request]) => request.resource.resourceId === first.resourceId);
+    try {
+      await Promise.all([first, second, ...unrelated].map(ref => registry.open(ref)));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      registry.applyTransaction(first, 'draft', { origin: 'editor' });
+      memory.emit({ action: 'acquire', barrierId: 'source-barrier', caseSensitive, kind: 'dirty-state-barrier', paths, workspaceId: first.workspaceId });
+      for (const ref of [first, second]) expect(() => registry.applyTransaction(ref, 'blocked', { origin: 'editor' })).toThrow('temporarily fenced');
+      for (const ref of unrelated) expect(registry.applyTransaction(ref, 'unrelated', { origin: 'editor' }).buffer).toBe('unrelated');
+      await started.promise;
+      expect(memory.barrierAcknowledgements).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(1);
+      finish.resolve();
+      await memory.barrierAcknowledged;
+      expect([...memory.journals.values()].find(journal => journal.resource.resourceId === first.resourceId)?.content).toBe('draft');
+      let opened = false;
+      const opening = registry.open(resource('folder/new.txt')).then(record => { opened = true; return record; });
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(1);
+      expect(opened).toBe(false);
+      memory.emit({ action: 'release', barrierId: 'source-barrier', caseSensitive, kind: 'dirty-state-barrier', paths, workspaceId: first.workspaceId });
+      expect((await opening).status).toBe('missing');
+      registry.applyTransaction(first, 'later draft', { origin: 'editor' });
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(2);
+    } finally {
+      finish.resolve();
+      vi.useRealTimers();
+      await registry.dispose();
+    }
+  });
+
   test('stale generation completions do not replace newer buffers', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();

@@ -20,6 +20,12 @@ external registry, not in Zustand or Local Storage.
 - Connected affected surfaces contribute read-only preview snapshots. Execution binds each actual
   registration, instance, base and local version. Divergent drafts at one path have no shared text
   version and are reported as conflicts; unrelated windows/resources are not part of the edit.
+- Dirty-state barriers cover exact selected relative paths; `.` is the source-capture fence for the
+  whole workspace. Parent directory entries do not expand a file operation to its siblings, and
+  Surface mutation admission still requires exact targets. Matching respects separators, case policy
+  and verified workspace aliases. Before acknowledgement, the Registry drains affected saves and
+  finishes scheduled recovery journals, so a delayed journal cannot invalidate source capture
+  while the barrier is held.
 - One async undo restores the original batch conditionally. Later edits are retained and uncertain
   steps appear in Recovery with per-resource state and original draft content. A lost response reads
   the original operation, never repeats its effects. Reopened records cannot receive old dispatches.

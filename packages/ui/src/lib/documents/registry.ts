@@ -673,17 +673,23 @@ export class DocumentRegistry {
   }
 
   private barrierPath(value: string, caseSensitive: boolean): string {
-    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    const normalized = value.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
+    if (normalized === '.') return '';
     return caseSensitive ? normalized : normalized.toLowerCase();
+  }
+
+  private barrierCoversResource(barrier: DirtyBarrierHold, resource: DocumentIdentity): boolean {
+    if (resource.workspaceId !== barrier.workspaceId) return false;
+    const target = this.barrierPath(resource.resourceId, barrier.caseSensitive);
+    // Source capture explicitly fences '.', while mutation inventories also contain
+    // parent directories that must not turn an exact file operation into a subtree fence.
+    return barrier.paths.has('') || barrier.paths.has(target);
   }
 
   private isDirtyBarrierHeld(identity: DocumentIdentity): boolean {
     return [...this.dirtyBarriers.values()].some((barrier) => (
       barrier.active
-      && this.aliasesFor(identity).some((alias) => (
-        barrier.workspaceId === alias.workspaceId
-        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))
-      ))
+      && this.aliasesFor(identity).some((alias) => this.barrierCoversResource(barrier, alias))
     ));
   }
 
@@ -721,8 +727,7 @@ export class DocumentRegistry {
     this.assertActive();
     while (this.isDirtyBarrierHeld(identity)) {
       await Promise.all([...this.dirtyBarriers.values()].filter(barrier => barrier.active
-        && this.aliasesFor(identity).some(alias => alias.workspaceId === barrier.workspaceId
-          && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))).map(barrier => barrier.released));
+        && this.aliasesFor(identity).some(alias => this.barrierCoversResource(barrier, alias))).map(barrier => barrier.released));
       this.assertActive();
     }
     const key = this.keyFor(identity);
@@ -1678,8 +1683,7 @@ export class DocumentRegistry {
 
   private async waitForDirtyBarrierOperations(barrier: DirtyBarrierHold): Promise<boolean> {
     const affected = () => [...this.records.values()].filter((record) => (
-      this.aliasesFor(record.identity).some((alias) => alias.workspaceId === barrier.workspaceId
-        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))
+      this.aliasesFor(record.identity).some((alias) => this.barrierCoversResource(barrier, alias))
     ));
     const busy = () => affected().some(record => record.saving || record.status === 'loading');
     if (!busy()) return true;
@@ -1733,13 +1737,17 @@ export class DocumentRegistry {
     this.dirtyBarriers.set(event.barrierId, barrier);
     try {
       if (!await this.waitForDirtyBarrierOperations(barrier) || !barrier.active) return;
-      const journalWrites = [...this.records.values()].filter(record => this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.workspaceId && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))));
-      for (const record of journalWrites) {
-        const timer = this.journalTimers.get(this.keyFor(record.identity));
-        if (timer) clearTimeout(timer);
-        this.journalTimers.delete(this.keyFor(record.identity));
-      }
-      await Promise.all(journalWrites.map(record => this.journalOperations.get(this.keyFor(record.identity))));
+      const journalWrites = [...this.records.values()].filter(record => this.aliasesFor(record.identity).some(alias => this.barrierCoversResource(barrier, alias)));
+      await Promise.all(journalWrites.map(record => {
+        const key = this.keyFor(record.identity);
+        const timer = this.journalTimers.get(key);
+        if (!timer) return this.journalOperations.get(key);
+        clearTimeout(timer);
+        this.journalTimers.delete(key);
+        // Finish the scheduled journal before acknowledgement, rather than losing
+        // its draft or letting the debounce write invalidate the held capture.
+        return this.enqueueJournal(record.identity, () => this.flushJournal(record.identity, record.connectionGeneration));
+      }));
       await this.publishDirtyWorkspace(event.workspaceId);
       if (!barrier.active) return;
       const result = await this.documents.ackDirtyStateBarrier?.({
