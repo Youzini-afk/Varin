@@ -948,7 +948,7 @@ impl Storage {
         let mut policy = self.branch_text_snapshot(branch, revision, root)?.policy;
         if let (Some(policy), Some(scopes)) = (&mut policy, scopes) {
             for field in ["files", "choiceRevisions"] {
-                if let Some(files) = policy[field].as_object_mut() {
+                if let Some(files) = policy.get_mut(field).and_then(Value::as_object_mut) {
                     files.retain(|path, _| {
                         if path == "./" {
                             return true;
@@ -2124,6 +2124,68 @@ mod tests {
                 .encoding,
             "gbk"
         );
+    }
+
+    #[test]
+    fn branch_policy_read_and_fork_preserve_absent_and_populated_optional_fields() {
+        let mut f = Fixture::new();
+        for (index, policy) in [
+            None,
+            Some(json!({})),
+            Some(json!({"root":"/original"})),
+            Some(json!({"defaultEncoding":"gbk"})),
+            Some(json!({"files":{"a.txt":"gbk"}})),
+            Some(json!({"root":"/original","defaultEncoding":"utf-8",
+                "files":{"a.txt":"gbk"},"choiceRevisions":{"a.txt":9}})),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let branch = format!("policy-{index}");
+            let operation = format!("branch-create:{branch}");
+            let mut create = json!({"operationId":operation,"builderId":operation,
+                "workspaceId":"workspace","branchId":branch,"draftBasePaths":[],"captureScopes":[]});
+            if let Some(policy) = &policy {
+                create["textEncoding"] = policy.clone();
+            }
+            f.invoke("branch.create.begin", create);
+            f.invoke(
+                "branch.create.finish",
+                json!({"operationId":operation,"builderId":operation}),
+            );
+            let selected = f.invoke(
+                "branch.read",
+                json!({"branchId":branch,"revision":0,"includeEntries":false}),
+            );
+            assert_eq!(selected.get("textEncoding"), policy.as_ref(), "{selected}");
+            // Reuse the actual read projection exactly as the Host prepares
+            // the child's source-provenance object and branch.fork request.
+            let projected = selected
+                .get("textEncoding")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let provenance = json!({"consistency":"fixed-root","root":selected["root"],"textEncoding":projected});
+            let uploaded = f.upload(&serde_json::to_vec(&provenance).unwrap());
+            let pin = f.invoke(
+                "branch.pin",
+                json!({"operationId":format!("pin:{branch}"),
+                "branchId":branch,"revision":0,"pinId":format!("selected:{branch}")}),
+            );
+            let child = format!("child:{branch}");
+            f.invoke(
+                "branch.fork",
+                json!({"operationId":format!("branch-fork:{child}"),
+                "workspaceId":"workspace","sourceBranchId":branch,"sourcePinId":pin["pinId"],
+                "branchId":child,"draftBasePaths":[],"captureScopes":[],"textEncoding":projected,
+                "sourceProvenance":{"objectHash":uploaded["hash"],"ownerId":uploaded["ownerId"]}}),
+            );
+            let forked = f.invoke(
+                "branch.read",
+                json!({"branchId":child,"revision":0,"includeEntries":false}),
+            );
+            assert_eq!(forked["root"], selected["root"]);
+            assert_eq!(forked["textEncoding"], projected, "{forked}");
+        }
     }
 
     #[test]
