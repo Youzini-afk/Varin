@@ -24,12 +24,39 @@ pub(crate) fn code_page() -> Option<u32> {
 }
 
 pub(crate) fn validate_encoding(label: Option<&str>) -> Result<(), String> {
-    if let Some(label) = label.filter(|label| *label != "auto") {
-        if Encoding::for_label(label.as_bytes()).is_none() {
+    if let Some(label) = label.filter(|label| !label.eq_ignore_ascii_case("auto")) {
+        if Encoding::for_label(label.as_bytes()).is_none_or(|encoding| encoding == encoding_rs::REPLACEMENT) {
             return Err(format!("Unsupported text encoding {label:?}; use an Encoding Standard label such as utf-8, gbk, shift_jis or utf-16le, or mode: raw for original bytes."));
         }
     }
     Ok(())
+}
+
+/// Text stdin is encoded at the process owner, independently of stdout. Byte writes
+/// bypass this function. Never use the encoder's numeric-character-reference fallback.
+pub(crate) fn encode_input(text: &str, label: Option<&str>) -> Result<Vec<u8>, String> {
+    validate_encoding(label)?;
+    let encoding = label.filter(|label| !label.eq_ignore_ascii_case("auto"))
+        .and_then(|label| Encoding::for_label(label.as_bytes())).unwrap_or(encoding_rs::UTF_8);
+    if encoding == encoding_rs::UTF_16LE { return Ok(text.encode_utf16().flat_map(u16::to_le_bytes).collect()); }
+    if encoding == encoding_rs::UTF_16BE { return Ok(text.encode_utf16().flat_map(u16::to_be_bytes).collect()); }
+    if encoding == encoding_rs::REPLACEMENT { return Err("The replacement encoding cannot encode process input".into()); }
+    let (bytes, _, errors) = encoding.encode(text);
+    if errors { return Err(format!("Process input contains a character that cannot be represented in {}; no input was sent", encoding.name())); }
+    Ok(bytes.into_owned())
+}
+
+pub(crate) fn encode_process_input(text: &str, label: Option<&str>, record: &Value) -> Result<Vec<u8>, String> {
+    let label = label.or_else(|| record["inputEncoding"].as_str());
+    if cfg!(windows) && record["mode"] == "pty" && label.is_some_and(|label| !label.eq_ignore_ascii_case("auto")
+        && Encoding::for_label(label.as_bytes()) != Some(encoding_rs::UTF_8)) {
+        return Err("Windows ConPTY text input must use its UTF-8 wire encoding".into());
+    }
+    encode_input(text, label)
+}
+pub(super) fn legacy_terminal(record: &Value) -> bool {
+    record["mode"] == "pty" && record["outputEncoding"].as_str()
+        .and_then(|label| Encoding::for_label(label.as_bytes())).is_some_and(|encoding| encoding != encoding_rs::UTF_8)
 }
 
 fn readable(text: &str) -> bool {
@@ -132,12 +159,22 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     if let Some(state) = output_state(value) { value["outputState"] = state; }
     if matches!(mode, Mode::Screen) { return; }
     if let (Some(next), Some(end), Some(chunks)) = (value["nextCursor"].as_u64(), value["endCursor"].as_u64(), value["chunks"].as_array()) {
-        let returned: u64 = chunks.iter().filter_map(|chunk| chunk["byteLength"].as_u64()).sum();
+        let returned: u64 = if value["textProjected"] == true { next.saturating_sub(value["requestedCursor"].as_u64().unwrap_or(0)) }
+            else { chunks.iter().filter_map(|chunk| chunk["byteLength"].as_u64()).sum() };
         let unread = end.saturating_sub(next);
         value["outputSummary"] = json!({"returnedBytes":returned,"retainedBytes":end,"startCursor":value["startCursor"].as_u64().unwrap_or(0),"endCursor":end,
             "unreadBytes":unread,"nextCursor":next,
             "message":format!("Read a {returned}-byte page; {end} bytes retained at this observation, {unread} bytes remain after cursor {next}. {}",
                 if unread > 0 {"Continue with process_read using nextCursor."} else if value["outputComplete"] == true {"Output is complete."} else {"The output may still grow."})});
+    }
+    if value["textProjected"] == true {
+        if let Some(chunks) = value["chunks"].as_array_mut() {
+            for chunk in chunks {
+                if let Some(text) = chunk["text"].as_str() { chunk["text"] = json!(plain(text)); }
+                chunk.as_object_mut().unwrap().remove("bytesBase64");
+            }
+        }
+        return;
     }
     let process = &value["process"];
     let process_id = process["processId"].as_str().or_else(|| value["processId"].as_str()).map(str::to_owned);
@@ -145,13 +182,14 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     let pty = process["mode"] == "pty";
     let source_bom = value["textEncoding"].as_str().and_then(|label|Encoding::for_label(label.as_bytes()));
     let aligned = value["characterAligned"] == true;
-    let explicit = label.filter(|label| *label != "auto").and_then(|label| Encoding::for_label(label.as_bytes()));
+    let explicit = label.filter(|label| !label.eq_ignore_ascii_case("auto")).and_then(|label| Encoding::for_label(label.as_bytes()));
     let Some(chunks) = value["chunks"].as_array_mut() else { return; };
     for chunk in chunks {
         let Some(fields) = chunk.as_object_mut() else { continue; };
         if matches!(mode, Mode::Raw) { fields.remove("text"); fields.insert("encoding".into(), json!("base64")); continue; }
         let Some(bytes) = fields.get("bytesBase64").and_then(Value::as_str).and_then(|s| BASE64.decode(s).ok()) else { continue; };
-        let bom = Encoding::for_bom(&bytes).map(|(encoding, _)| encoding).or(source_bom);
+        let bom = fields.get("offset").and_then(Value::as_u64).filter(|offset| *offset == 0)
+            .and_then(|_| Encoding::for_bom(&bytes).map(|(encoding, _)| encoding)).or(source_bom);
         let selected = explicit.or(bom);
         let decoded = if let Some(encoding) = selected {
             let (text, _, errors) = encoding.decode(&bytes);

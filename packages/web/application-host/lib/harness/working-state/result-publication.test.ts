@@ -59,6 +59,18 @@ describe('WorkingResult publication owner adapter', () => {
     expect(f.client.releaseResultCandidate).toHaveBeenCalledWith(expect.objectContaining({ operationId: 'result-candidate-release:publication' }));
   });
 
+  it('retains immutable per-state format evidence from the original published result', async () => {
+    const f = fixture();
+    const format = { encoding: 'gbk', bom: false, lineEnding: 'crlf', defaultLineEnding: 'crlf', source: 'explicit' };
+    f.resultGet.mockResolvedValue({ record: { ...resultRecord.record,
+      textFormats: { 'file.txt': { base: format, child: { ...format, encoding: 'utf-8' } }, 'unchanged.txt': { child: format } } } });
+    expect(await f.store.getResult('branch', 1)).toMatchObject({ textFormats: {
+      'file.txt': { base: { encoding: 'gbk' }, child: { encoding: 'utf-8' } }, 'unchanged.txt': { child: { encoding: 'gbk' } },
+    } });
+    f.resultGet.mockResolvedValue({ record: { ...resultRecord.record, textFormats: { '../other.txt': { base: format } } } });
+    await expect(f.store.getResult('branch', 1)).rejects.toThrow(/path/i);
+  });
+
   it('rejects a changed candidate for an existing publication identity', async () => {
     const f = fixture();
     f.client.getOperation.mockResolvedValue(prepared);
@@ -102,7 +114,7 @@ describe('WorkingResult publication owner adapter', () => {
 describe('source preparation receipt recovery', () => {
   it('hydrates the original provenance blob through its original record reference', async () => {
     const f = fixture();
-    const body = Buffer.from(JSON.stringify({ consistency: 'stable-capture', contentMode: 'saved-files', captureScopes: [], omittedDraftPaths: ['dirty.txt'] }));
+    const body = Buffer.from(JSON.stringify({ consistency: 'stable-capture', contentMode: 'saved-files', captureScopes: [], omittedDraftPaths: ['dirty.txt'], textEncoding: { root: '/original', files: { 'legacy.txt': 'gbk' } } }));
     f.client.getOperation.mockResolvedValue({ kind: 'branch.create', state: 'committed', result: {
       branchId: 'branch', workspaceId: 'workspace', root: 'fixed', writeRevision: 0, headRevision: 0,
       sourceProvenance: { objectHash: 'body-hash', recordId: 'working-source:branch', slot: 'source-provenance' },
@@ -115,7 +127,7 @@ describe('source preparation receipt recovery', () => {
     }));
     Object.assign(f.client, { getBlob });
     const recovered = await f.store.readSourcePreparation('branch');
-    expect(recovered?.provenance).toMatchObject({ omittedDraftPaths: ['dirty.txt'] });
+    expect(recovered?.provenance).toMatchObject({ omittedDraftPaths: ['dirty.txt'], textEncoding: { root: '/original', files: { 'legacy.txt': 'gbk' } } });
     expect(getBlob).toHaveBeenCalledTimes(2);
     expect(getBlob.mock.calls.every(([, source]) => JSON.stringify(source) === JSON.stringify({ recordId: 'working-source:branch', slot: 'source-provenance' }))).toBe(true);
     branch.mockResolvedValue({ branchId: 'branch', workspaceId: 'workspace', root: 'later', baseRoot: 'later-base',

@@ -210,7 +210,7 @@ return ({
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<VarinWorkspaceIdentity>,
   setWorkspaceRetention: input=>postJson('/api/documents/workspace/retention',input) as Promise<{retained:boolean}>,
   resolveResourceIdentity,
-  read: (resource: VarinResourceReference) => postJson('/api/documents/read', { resource }) as Promise<VarinDocumentReadResult>,
+  read: (resource, options) => postJson('/api/documents/read', { resource, options }) as Promise<VarinDocumentReadResult>,
   write: (request: VarinDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<VarinDocumentWriteResult>,
   move: (request: VarinDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<VarinDocumentMoveResult>,
   publishDirtyBuffers: (request) => postJson('/api/documents/dirty/publish', request) as Promise<VarinDirtyBufferPublication>,

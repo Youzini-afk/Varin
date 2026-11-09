@@ -76,3 +76,13 @@ it('keeps input failures as failures and rejects another principal or process on
   await expect(owner.processControl(principal, { ...input, processId: 'other-job', kind: 'close' })).rejects.toThrow('identity changed');
   await view.close();
 });
+
+
+it('forwards legacy terminal Unicode input to the original native encoder', async () => {
+  const processWrite = vi.fn(async (input: unknown) => input);
+  const owner = createManagedSourceProcesses({ kernel: { sourceAuthorityGrant: () => 'grant', scoped: () => ({ processWrite }) } as never,
+    access: async () => ({ source: { workspace_id: 'B' }, physicalRoot: { rootId: 'root' } }) as never, release: async () => {} });
+  await owner.processWrite(principal, { ...address, operationId: 'legacy-input', text: '中文', encoding: 'gbk' });
+  expect(processWrite).toHaveBeenCalledWith({ workspaceId: 'B', rootId: 'root', processId: address.processId,
+    operationId: 'legacy-input', text: '中文', encoding: 'gbk' });
+});

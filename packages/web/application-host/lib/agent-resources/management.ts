@@ -208,7 +208,8 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
     context.assertTrust();
     signal?.throwIfAborted();
     const result = await deps.documents.write({ resource, token: { workspaceId: resource.workspaceId, epoch: current.epoch, owner: { kind: 'resource-editor', id: key } },
-      content: input.content, encoding: current.status === 'ready' ? current.encoding : 'utf-8', bom: current.status === 'ready' ? current.bom : false,
+      content: input.content, encoding: current.status === 'ready' ? current.encoding : current.status === 'missing' ? current.format?.encoding ?? 'utf-8' : 'utf-8', bom: current.status === 'ready' ? current.bom : current.status === 'missing' ? current.format?.bom ?? false : false,
+      ...(current.status === 'ready' && current.format ? { sourceFormat: current.format } : {}),
       expectedRevision: create ? null : (input as NativeResourceUpdate).expectedRevision, operationId: key });
     if (result.status !== 'written') return conflict();
     // Return the confirmed owner's revision, not a later refresh that could hide a successful save.

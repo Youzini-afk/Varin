@@ -39,3 +39,21 @@ Files UI still owns tree and Agent tab navigation. Split groups, preview/pinned 
 cursor restore live in the Editor Workbench Kernel. Document records survive Profile/Settings
 remounts until application-host endpoint switch. `FilesAPI` and `WorkspaceAPI` no longer expose
 text read/write; editors and helpers use DocumentsAPI only.
+
+## Encoding and format edits
+
+The Registry keeps Unicode text, original format and current format intent. Encoding, BOM and explicit
+line-ending changes participate in dirty/local revisions, undo, in-flight save checks and recovery.
+A completed save never clears a newer format change. Ordinary editing does not open an encoding dialog.
+Rare actions reuse the editor's existing more menu and optional IDE encoding field; mobile keeps them
+in its file actions. A save that cannot encode a character keeps the editable draft visible, pauses
+autosave for that failed local revision and offers an explicit UTF-8 save in the file area.
+
+Reopen changes interpretation, while save-with-encoding changes bytes. A dirty document is retained
+rather than replaced by a reinterpretation. Codec selection and byte serialization remain native;
+Monaco and CodeMirror pass text edits and history signals to the same Registry owner.
+
+Format undo checks its actual edit-history anchor, not merely equal final text. Encoding/BOM changes
+can be undone after saving. Explicit mixed-EOL normalization can be undone locally before its save;
+after it has replaced the baseline, restoring the old byte layout belongs to the existing file Recovery
+operation. The format menu does not advertise a local undo that cannot restore that layout.

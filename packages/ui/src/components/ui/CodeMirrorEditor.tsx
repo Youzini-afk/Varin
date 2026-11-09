@@ -130,7 +130,7 @@ export type BlockWidgetDef = {
 
 type CodeMirrorEditorProps = {
   value: string;
-  onChange: (value: string, changes?: CodeMirrorTextChange[]) => void;
+  onChange: (value: string, changes?: CodeMirrorTextChange[], history?: 'undo' | 'redo') => void;
   extensions?: Extension[];
   className?: string;
   readOnly?: boolean;
@@ -411,7 +411,9 @@ export function CodeMirrorEditor({
           // the end of the original document keeps every following offset valid.
           changes.sort((left, right) => right.from - left.from || right.to - left.to);
           valueRef.current = next;
-          onChangeRef.current(next, changes);
+          const history = update.transactions.every(transaction => !transaction.docChanged || transaction.isUserEvent('undo')) ? 'undo'
+            : update.transactions.every(transaction => !transaction.docChanged || transaction.isUserEvent('redo')) ? 'redo' : undefined;
+          onChangeRef.current(next, changes, history);
           syncPortalWidgets(blockWidgetsRef.current);
         }),
         editableCompartment.of(EditorView.editable.of(!readOnly)),

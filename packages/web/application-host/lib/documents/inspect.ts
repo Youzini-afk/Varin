@@ -1,68 +1,91 @@
 import { createHash } from 'node:crypto';
-import { isUtf8 } from 'node:buffer';
-
-const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+import type { VarinTextFormat } from '@varin/application-client';
+import { DocumentAuthorityError } from './errors.js';
 
 export const revisionFromBytes = (bytes: Buffer | Uint8Array): string => (
   `d1_${createHash('sha256').update(bytes).digest('base64url')}`
 );
 
+/** Transport adapter only. Rust is the sole file codec and strict serializer. */
+export interface DocumentTextCodec {
+  textDecode(input: { bytesBase64: string; encoding?: string; defaultEncoding?: string; includeContent?: boolean }): Promise<
+    | { kind: 'text'; content?: string; format: VarinTextFormat; byteLength: number }
+    | { kind: 'binary' | 'unsupported-encoding'; byteLength: number; message?: string; candidates?: string[] }>;
+  textSerialize(input: { content: string; sourceBytesBase64?: string; sourceFormat?: VarinTextFormat;
+    targetFormat?: { encoding?: string; bom?: boolean; lineEnding?: 'lf' | 'crlf' | 'cr' | 'mixed' }; normalizeLineEndings?: boolean;
+    edits?: Array<{ start: number; end: number; text: string }> }): Promise<
+    | { kind: 'serialized'; bytesBase64: string; format: VarinTextFormat; byteLength: number }
+    | { kind: 'unrepresentable'; encoding: string; position: number; character: string; message: string }
+    | { kind: 'invalid' | 'binary' | 'unsupported-encoding'; message: string }>;
+}
+let nativeCodec: DocumentTextCodec | undefined;
+/** The Application Host binds its existing kernel; this does not create another writer or authority. */
+export const bindDocumentTextCodec = (codec: DocumentTextCodec): (() => void) => {
+  const previous = nativeCodec;
+  nativeCodec = codec;
+  return () => { if (nativeCodec === codec) nativeCodec = previous; };
+};
+const codec = (): DocumentTextCodec => {
+  if (!nativeCodec) throw new DocumentAuthorityError('Native text service is unavailable', { code: 'failed', statusCode: 503 });
+  return nativeCodec;
+};
+
+/** Format validation, not byte decoding. Aliases are resolved by the native codec. */
+export const isDocumentEncoding = (value: unknown): value is string => typeof value === 'string'
+  && ['utf-8', 'gbk', 'utf-16le', 'utf-16be'].includes(value);
+
+export const isDocumentTextFormat = (value: unknown): value is VarinTextFormat => {
+  if (!value || typeof value !== 'object') return false;
+  const format = value as VarinTextFormat;
+  return isDocumentEncoding(format.encoding) && typeof format.bom === 'boolean'
+    && ['lf', 'crlf', 'cr', 'mixed', 'none'].includes(format.lineEnding)
+    && ['lf', 'crlf', 'cr'].includes(format.defaultLineEnding) && typeof format.source === 'string';
+};
+
+/** Structural validation only. Native validates ordering, baseline bounds and exact outcome. */
+export const isDocumentTextEdits = (value: unknown): value is Array<{ start: number; end: number; text: string }> =>
+  Array.isArray(value) && value.every(edit => edit && typeof edit === 'object'
+    && Number.isSafeInteger(edit.start) && Number.isSafeInteger(edit.end)
+    && edit.start >= 0 && edit.end >= edit.start && typeof edit.text === 'string');
+
+export const sameDocumentTextFormat = (left: VarinTextFormat | undefined, right: VarinTextFormat | undefined): boolean =>
+  left === right || Boolean(left && right && left.encoding === right.encoding && left.bom === right.bom
+    && left.lineEnding === right.lineEnding && left.defaultLineEnding === right.defaultLineEnding);
+
 export type InspectedDocument =
   | { kind: 'binary'; byteLength: number }
-  | { kind: 'unsupported-encoding'; byteLength: number; candidates: string[] }
-  | { kind: 'text'; encoding: string; bom: boolean; content: string; byteLength: number };
-
-export type InspectedDocumentMetadata =
-  | Exclude<InspectedDocument, { kind: 'text' }>
+  | { kind: 'unsupported-encoding'; byteLength: number; candidates?: string[] }
+  | { kind: 'text'; encoding: string; bom: boolean; format: VarinTextFormat; content: string; byteLength: number };
+export type InspectedDocumentMetadata = Exclude<InspectedDocument, { kind: 'text' }>
   | Omit<Extract<InspectedDocument, { kind: 'text' }>, 'content'>;
-
-export function inspectDocumentBytes(input: Buffer | Uint8Array): InspectedDocument;
-export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent: false): InspectedDocumentMetadata;
-export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent = true): InspectedDocument | InspectedDocumentMetadata {
-  const bytes = Buffer.isBuffer(input) ? input : Buffer.from(input);
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-16le'] };
-  }
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-16be'] };
-  }
-
-  let bom = false;
-  let payload: Buffer = bytes;
-  if (bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM)) {
-    bom = true;
-    payload = bytes.subarray(3);
-  }
-
-  if (payload.subarray(0, Math.min(payload.length, 4096)).includes(0)) {
-    return { kind: 'binary', byteLength: bytes.length };
-  }
-
-  // Save/conflict receipts need classification and byte metadata, not another
-  // allocation of the complete editor text. Validate the same UTF-8 bytes natively.
-  if (!includeContent) return isUtf8(payload)
-    ? { kind: 'text', encoding: 'utf-8', bom, byteLength: bytes.length }
-    : { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-8'] };
-
-  try {
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(payload);
-    return { kind: 'text', encoding: 'utf-8', bom, content, byteLength: bytes.length };
-  } catch {
-    return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-8'] };
-  }
+export interface InspectDocumentOptions { encoding?: string; defaultEncoding?: string }
+export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent?: true, options?: InspectDocumentOptions): Promise<InspectedDocument>;
+export function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent: false, options?: InspectDocumentOptions): Promise<InspectedDocumentMetadata>;
+export async function inspectDocumentBytes(input: Buffer | Uint8Array, includeContent = true, options: InspectDocumentOptions = {}): Promise<InspectedDocument | InspectedDocumentMetadata> {
+  const result = await codec().textDecode({ bytesBase64: Buffer.from(input).toString('base64'), includeContent, ...options });
+  if (result.kind !== 'text') return result;
+  if (includeContent && typeof result.content !== 'string') throw new Error('Native text read returned no content');
+  return { kind: 'text', encoding: result.format.encoding, bom: result.format.bom, format: result.format,
+    byteLength: result.byteLength, ...(includeContent ? { content: result.content! } : {}) };
 }
-
 export interface EncodeDocumentTextOptions {
-  content: unknown;
-  encoding: string;
-  bom: boolean;
+  content: string; encoding: string; bom: boolean;
+  sourceBytes?: Uint8Array; sourceFormat?: VarinTextFormat;
+  lineEnding?: 'lf' | 'crlf' | 'cr' | 'mixed'; normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
 }
-
-export const encodeDocumentText = ({ content, encoding, bom }: EncodeDocumentTextOptions): Buffer => {
-  if (encoding !== 'utf-8') {
-    throw new Error('Unsupported document encoding');
-  }
-  const body = Buffer.from(String(content ?? ''), 'utf8');
-  if (!bom) return body;
-  return Buffer.concat([UTF8_BOM, body]);
+export const serializeDocumentText = async (options: EncodeDocumentTextOptions) => {
+  // JSON would replace lone surrogates before Rust can inspect a string. Reject them at this boundary.
+  if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(options.content)) throw new DocumentAuthorityError('The document contains an unpaired Unicode surrogate', { code: 'invalid-text', statusCode: 400 });
+  const result = await codec().textSerialize({ content: options.content,
+    ...(options.sourceBytes ? { sourceBytesBase64: Buffer.from(options.sourceBytes).toString('base64') } : {}),
+    ...(options.sourceFormat ? { sourceFormat: options.sourceFormat } : {}),
+    targetFormat: { encoding: options.encoding, bom: options.bom, ...(options.lineEnding ? { lineEnding: options.lineEnding } : {}) },
+    ...(options.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: options.normalizeLineEndings }),
+    ...(options.edits ? { edits: options.edits } : {}),
+  });
+  if (result.kind !== 'serialized') throw new DocumentAuthorityError(result.message,
+    { code: result.kind === 'unrepresentable' ? 'unrepresentable' : 'invalid-text', statusCode: 400 });
+  return { bytes: Buffer.from(result.bytesBase64, 'base64'), format: result.format, byteLength: result.byteLength };
 };
+export const encodeDocumentText = async (options: EncodeDocumentTextOptions): Promise<Buffer> => (await serializeDocumentText(options)).bytes;

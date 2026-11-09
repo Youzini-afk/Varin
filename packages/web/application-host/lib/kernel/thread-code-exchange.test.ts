@@ -1,3 +1,8 @@
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import { createRecoveryJournalFixture } from "../recovery/journal-fixture.test-helper.js";

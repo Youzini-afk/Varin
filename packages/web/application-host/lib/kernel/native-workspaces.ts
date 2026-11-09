@@ -1,3 +1,5 @@
+import { sourceTextEncodingChoiceId } from '../projects/text-encoding.js';
+import { originalSourceTextEncoding, readFixedSourceTextEncoding, resolveSourceTextPolicy } from './source-provenance.js';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import type { ProjectEntry, ThreadSource, VersionedProjectWorkspace } from '@varin/application-client';
@@ -54,6 +56,7 @@ interface Flight<T> {
     observers: number;
 }
 interface SnapshotOptions {
+    textEncoding?: import('./protocol.generated.js').KernelTextPolicy;
     threadId?: string;
     selection?: Extract<ChildSourceProvenance, {
         consistency: 'fixed-root';
@@ -236,6 +239,20 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         const entry = await open(source, signal);
         const physical = await acquire(source, entry.grant, signal);
         return { workspaceId, originalPath: entry.originalPath, root: physical.path, hostId: physical.hostId, reference: { ...source } };
+    };
+    /** Read-only receipt projection through the existing native workspace owner, not a new filesystem root. */
+    const textEncodingSource = async (workspaceId: string): Promise<import('../projects/text-encoding.js').TextEncodingSource | undefined> => {
+        const native = await resolveId(workspaceId);
+        if (!native) return undefined;
+        const entry = await open(native.reference);
+        const actual = await acquire(native.reference, entry.grant);
+        const client = owners.kernel.scoped(entry.grant);
+        const captured = await client.readBranch({ branchId: native.reference.branch_id!, revision: 0, includeEntries: false });
+        if (captured.workspaceId !== native.reference.workspace_id || captured.branchId !== native.reference.branch_id
+            || captured.view !== 'revision' || captured.revision !== 0) throw new Error('Native text source identity changed');
+        return { workspaceId: native.reference.workspace_id, rootId: actual.rootId, canonicalRoot: actual.path, client,
+            ...(captured.textEncoding === undefined ? {} : { choiceId: sourceTextEncodingChoiceId(native.reference.workspace_id, native.reference.branch_id!), frozenPolicy: { ...captured.textEncoding, root: captured.textEncoding.root ?? native.originalPath },
+                ...(native.reference.native_scope ? { sourcePath: native.reference.native_scope } : {}) }) };
     };
     const resolvePath = async (value: string, containing = false): Promise<NativeDocumentWorkspace | undefined> => {
         if (!opened.size) return undefined;
@@ -425,9 +442,15 @@ export function createNativeWorkspaceOwner(owners: Owners) {
                 throw new Error('Workspace snapshot identity changed');
         }
         else {
+            const actual = await acquire(source, entry.grant, signal);
+            const textEncoding = options.textEncoding ?? await resolveSourceTextPolicy(owners.kernel, actor,
+                { ...source, mode: 'native_workspace', revision: null }, { rootId: actual.rootId, canonicalRoot: actual.path }, signal);
+            // Freeze the selected namespace with the original checkpoint. A replay
+            // above uses that committed metadata, never today's project settings.
             await actor.forkWorkspace({ branchId: source.branch_id!, generation: entry.view.binding.generation, targetBranchId: temporary, operationId,
-                ...(source.native_scope ? { sourcePath: source.native_scope } : {}) }, signal);
+                textEncoding, ...(source.native_scope ? { sourcePath: source.native_scope } : {}) }, signal);
         }
+        const capturedTextEncoding = await readFixedSourceTextEncoding(actor, source.workspace_id, temporary, 0, signal);
         const drafts = options.editorDrafts ?? [];
         if (drafts.length && !await actor.getOperation(`snapshot-overlay:${operationId}`, signal)) {
             const paths = withAncestorDirectories(drafts.map(draft => draft.path));
@@ -463,9 +486,12 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         let provenance: Awaited<ReturnType<typeof actor.putBlob>> | undefined;
         let transferred = false;
         try {
-            provenance = await actor.putBlob(Buffer.from(JSON.stringify({ consistency: 'fixed-root', root: pin.root, ...(options.selection ? { selection: options.selection } : {}), ...(options.resources ? { resources: options.resources } : {}) })), `snapshot-provenance:${randomUUID()}`, signal);
+            const sourceProvenance: ChildSourceProvenance = { consistency: 'fixed-root', root: pin.root,
+                textEncoding: capturedTextEncoding, ...(options.selection ? { selection: options.selection } : {}), ...(options.resources ? { resources: options.resources } : {}) };
+            provenance = await actor.putBlob(Buffer.from(JSON.stringify(sourceProvenance)), `snapshot-provenance:${randomUUID()}`, signal);
             const branch = await actor.forkBranch({ workspaceId: source.workspace_id, branchId: targetBranchId, operationId: `branch-fork:${targetBranchId}`,
-                sourceBranchId: temporary, sourcePinId: pinId, parentRef, draftBasePaths: drafts.map(item => item.path).sort(), captureScopes: options.selection?.captureScopes ?? [], sourceProvenance: { objectHash: provenance.hash, ownerId: provenance.ownerId } }, signal);
+                sourceBranchId: temporary, sourcePinId: pinId, parentRef, draftBasePaths: drafts.map(item => item.path).sort(), captureScopes: options.selection?.captureScopes ?? [],
+                textEncoding: originalSourceTextEncoding(sourceProvenance), sourceProvenance: { objectHash: provenance.hash, ownerId: provenance.ownerId } }, signal);
             transferred = branch.created === true;
         }
         finally {
@@ -620,6 +646,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, acquire, resolveId, resolvePath, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { prepare, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

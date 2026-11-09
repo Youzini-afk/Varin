@@ -46,6 +46,7 @@ pub(crate) struct ImmutableReadTask {
     cancellation: Arc<AtomicBool>,
     retention: BlobReadRetention,
     file_output: Option<(String, Value, String)>,
+    text_receipt: Option<crate::text::Format>,
     #[cfg(test)]
     hold: std::sync::Mutex<Option<(BlobReadPhase, Box<dyn FnOnce() + Send>)>>,
 }
@@ -62,6 +63,18 @@ pub(crate) enum PreparedBlobRead {
     File(super::file_reads::PreparedFileRead),
 }
 impl BlobReadTask {
+    /// Hash assembled immutable bytes on the admitted worker, never the range
+    /// descriptor. Used only when comparing a fixed basis with physical bytes.
+    pub(crate) fn content_digest(&self)->Result<String,KernelError>{
+        let Self::Immutable(task)=self else{return Err(KernelError::Storage("Expected immutable content reader".into()));};
+        let mut reader=super::file_content::Reader::open(&task.storage_root,&task.hash,task.byte_length,task.cancellation.clone())?.with_verification(task.verification.clone());
+        let mut digest=Sha256::new();let mut buffer=[0u8;128*1024];let mut length=0;
+        loop {task.check_cancelled()?;let count=reader.read(&mut buffer)?;if count==0{break;}digest.update(&buffer[..count]);length+=count as u64;}
+        if length!=task.byte_length{return Err(KernelError::Storage("Immutable baseline length changed".into()));}
+        Ok(format!("sha256-{}",hex::encode(digest.finalize())))
+    }
+    pub(crate) fn with_text_receipt(mut self,format:Option<crate::text::Format>)->Self {if let Self::Immutable(task)=&mut self{task.text_receipt=format;}self}
+
     pub(crate) fn params(&self) -> &Value {
         match self { Self::Immutable(task) => &task.params, Self::File(task) => &task.params }
     }
@@ -158,56 +171,19 @@ impl ImmutableReadTask {
             }
         }
         self.checkpoint(BlobReadPhase::Read)?;
-        if let Some(mut lines) = super::line_reads::LineRead::from_params(&self.params)? {
-            file.seek(SeekFrom::Start(0))?;
-            let mut buffer = [0u8; 128 * 1024];
-            while !lines.complete() {
-                self.check_cancelled()?;
-                let count = file.read(&mut buffer)?;
-                if count == 0 { break; }
-                lines.push(&buffer[..count])?;
-            }
-            let mut value = lines.content(self.byte_length);
-            value["hash"] = json!(self.hash);
-            if let Some((path, source, version)) = &self.file_output {
-                value = json!({"path":path,"source":source,"missing":false,"readVersion":version,"content":value});
-            }
+        if let Some((path,source,version))=&self.file_output {
+            let format=if let Some(format)=&self.text_receipt {Ok(format.clone())}else{crate::text::stream::probe(&mut *file,&self.params,&||self.check_cancelled())?};
+            let mut content=crate::text::stream::page(&mut *file,self.byte_length,&self.params,format,&||self.check_cancelled())?;
+            content["hash"]=json!(self.hash);
+            let version=content["format"]["encoding"].as_str().map(|encoding|super::file_mutations::text_read_version(version,encoding)).unwrap_or_else(||version.clone());
             self.checkpoint(BlobReadPhase::Encoded)?;
-            return Ok(PreparedImmutableRead { value, verified: self.verify });
+            return Ok(PreparedImmutableRead{value:json!({"path":path,"source":source,"missing":false,"readVersion":version,"content":content}),verified:self.verify});
         }
         let next = self.offset + self.length as u64;
-        // Text file pages, like live file reads, include complete boundary
-        // characters. Generic getBlob remains an exact raw byte-range API.
-        let padded=self.file_output.is_some() && self.length>0;
-        let from=if padded {self.offset.saturating_sub(3)} else {self.offset};
-        let to=if padded {next.saturating_add(3).min(self.byte_length)} else {next};
-        file.seek(SeekFrom::Start(from))?;
-        let mut bytes = vec![0u8; (to-from) as usize];
-        for part in bytes.chunks_mut(128 * 1024) {
-            self.check_cancelled()?;
-            file.read_exact(part)?;
-        }
-        self.check_cancelled()?;
-        let mut value = json!({"hash":self.hash,"byteLength":self.byte_length,"offset":self.offset,"nextOffset":next,"eof":next >= self.byte_length});
-        if let Some((path, source, version)) = &self.file_output {
-            let left=(self.offset-from) as usize;let right=(next-from) as usize;
-            let(mut start,mut end)=(left,right);
-            if padded {
-                while start>0 && bytes.get(start).is_some_and(|byte|byte & 0xc0==0x80) {start-=1;}
-                while end<bytes.len() && bytes[end] & 0xc0==0x80 {end+=1;}
-            }
-            match std::str::from_utf8(&bytes[start..end]) {
-                Ok(text) if !text.contains('\0') => {
-                    value["text"]=json!(text);value["offset"]=json!(from+start as u64);
-                    value["nextOffset"]=json!(from+end as u64);value["eof"]=json!(from+end as u64>=self.byte_length);
-                },
-                _ => {value["bytesBase64"]=json!(BASE64.encode(&bytes[left..right]));value["encoding"]=json!("base64");}
-            }
-            value["returnedBytes"] = json!(value["nextOffset"].as_u64().unwrap() - value["offset"].as_u64().unwrap());
-            value = json!({"path":path,"source":source,"missing":false,"readVersion":version,"content":value});
-        } else {
-            value["bytesBase64"] = Value::String(BASE64.encode(bytes));
-        }
+        file.seek(SeekFrom::Start(self.offset))?;
+        let mut bytes=vec![0u8;self.length];
+        for part in bytes.chunks_mut(128*1024){self.check_cancelled()?;file.read_exact(part)?;}
+        let value=json!({"hash":self.hash,"byteLength":self.byte_length,"offset":self.offset,"nextOffset":next,"eof":next>=self.byte_length,"bytesBase64":BASE64.encode(bytes)});
         self.checkpoint(BlobReadPhase::Encoded)?;
         Ok(PreparedImmutableRead {
             value,
@@ -302,6 +278,7 @@ impl Storage {
             cancellation,
             retention: self.blob_read_roots.retain(hash),
             file_output: None,
+            text_receipt:None,
             #[cfg(test)]
             hold: Default::default(),
         }))

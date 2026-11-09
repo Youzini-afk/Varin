@@ -27,6 +27,7 @@ tokio = { version = "1", features = ["rt", "sync", "macros"] }
 
 portable-pty.workspace = true
 encoding_rs.workspace = true
+similar = "=2.7.0"
 grep-regex.workspace = true
 grep-matcher.workspace = true
 ignore.workspace = true

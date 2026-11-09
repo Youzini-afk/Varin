@@ -3485,3 +3485,65 @@ fn attachment_upload_retry_renews_retired_owner_without_changing_original_bytes(
     drop(host); drop(owner);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn managed_process_text_input_uses_persistent_codec_with_strict_per_write_overrides() {
+    let root = std::env::temp_dir().join(format!("varin-process-encoding-{}", uuid::Uuid::new_v4()));
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let owner = Owner::new(root.join("storage"), "managed-target", "managed-target-generation", "managed-target-epoch");
+    let (address, source) = owner.bind_live(&work, "encoding-owner", 1);
+    let node = std::env::var("VARIN_NODE").unwrap_or_else(|_| "node".into());
+    let accepted = owner.tool(&address, "process_spawn", "encoded-process", json!({
+        "cwd":"", "command":node, "mode":"pipe", "inputEncoding":"gbk", "outputEncoding":"utf-8",
+        "args":["-e","let chunks=[];process.stdin.on('data',b=>chunks.push(b));process.stdin.on('end',()=>{const bytes=Buffer.concat(chunks);require('node:fs').writeFileSync('received',bytes);process.stdout.write(bytes.toString('hex'))})"]
+    })).unwrap();
+    assert_eq!(accepted["result"]["completion"]["kind"], "job_accepted", "{accepted}");
+    let id = "request:tool:encoded-process";
+    let rejected = owner.tool(&address, "process_write", "unrepresentable", json!({"processId":id,"text":"🙂"}));
+    assert!(rejected.is_err() || rejected.as_ref().is_ok_and(|value| value["result"]["completion"]["kind"] == "not_dispatched"), "{rejected:?}");
+    let first = owner.tool(&address, "process_write", "gbk-input", json!({"processId":id,"text":"中文","submit":true})).unwrap();
+    assert_eq!(first["result"]["completion"]["content"]["data"]["confirmedBytes"], 5, "{first}");
+    // The terminal Host sends Unicode, while the same native process owner encodes
+    // its saved stdin codec. Retrying the original operation cannot write twice.
+    let wire = json!({"v":crate::protocol::PROTOCOL_VERSION,"kind":"request","id":"host-text-input",
+        "method":"process.write","epoch":owner.epoch,"grantId":"encoding-owner",
+        "params":{"workspaceId":"workspace","rootId":source["live_root"]["rootId"],"processId":id,
+            "operationId":"host-text-input","text":"文"}});
+    let interactions = owner.resources.interactions.as_ref().unwrap();
+    let receipt = interactions.wire(wire.clone(), CancellationToken::default()).unwrap();
+    assert_eq!(receipt["confirmedBytes"], 2, "{receipt}");
+    assert_eq!(interactions.wire(wire.clone(), CancellationToken::default()).unwrap(), receipt);
+    let mut invalid = wire.clone();
+    invalid["params"]["operationId"] = json!("host-invalid-input");
+    invalid["params"]["text"] = json!("🙂");
+    assert!(interactions.wire(invalid, CancellationToken::default()).is_err());
+    let mut ambiguous = wire;
+    ambiguous["params"]["operationId"] = json!("host-ambiguous-input");
+    ambiguous["params"]["bytesBase64"] = json!("QQ==");
+    assert!(interactions.wire(ambiguous, CancellationToken::default()).is_err());
+    let second = owner.tool(&address, "process_write", "utf8-input", json!({"processId":id,"text":"🙂","encoding":"utf-8","eof":true})).unwrap();
+    assert_eq!(second["result"]["completion"]["content"]["data"]["confirmedBytes"], 4, "{second}");
+    assert_eq!(second["result"]["completion"]["content"]["data"]["eofApplied"], true, "{second}");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut observation = 0;
+    loop {
+        // Retrying a source operation intentionally returns its original receipt.
+        // Polling the live process therefore needs a new observation identity.
+        observation += 1;
+        let output = owner.tool(&address, "process_read", &format!("encoding-output-{observation}"), json!({"processId":id,"cursor":0})).unwrap();
+        let result = &output["result"]["completion"]["content"]["data"];
+        if result["outputComplete"] == true && result["process"]["writerActive"] == false {
+            let text = result["chunks"].as_array().unwrap().iter().filter_map(|chunk|chunk["text"].as_str()).collect::<String>();
+            assert_eq!(text, "d6d0cec40acec4f09f9982");
+            assert_eq!(result["process"]["inputEncoding"], "gbk");
+            assert_eq!(result["process"]["outputEncoding"], "utf-8");
+            break;
+        }
+        assert!(Instant::now() < deadline, "{output}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(std::fs::read(work.join("received")).unwrap(), [0xd6,0xd0,0xce,0xc4,10,0xce,0xc4,0xf0,0x9f,0x99,0x82]);
+    drop(owner);
+    std::fs::remove_dir_all(root).unwrap();
+}

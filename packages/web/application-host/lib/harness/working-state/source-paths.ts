@@ -12,6 +12,6 @@ export function mapSourceResult(result: WorkingResult, mapping?: SourcePathMap):
   const states = <T>(values: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(values).flatMap(([file, state]) => {
     const mapped = mapSourcePath(file, mapping); return mapped ? [[mapped, state]] : [];
   }));
-  return { ...result, baseStates: states(result.baseStates), pathStates: states(result.pathStates),
+  return { ...result, ...(result.textFormats ? { textFormats: states(result.textFormats) } : {}), baseStates: states(result.baseStates), pathStates: states(result.pathStates),
     changedPaths: result.changedPaths.flatMap(file => { const mapped = mapSourcePath(file, mapping); return mapped ? [mapped] : []; }) };
 }

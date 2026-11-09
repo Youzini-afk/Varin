@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { CaptureInventoryChangedError, createCaptureInventory } from '../../documents/capture-inventory.js';
 import { captureStableDirectoryBaseline, captureStableSourceBaseline, type SourceCaptureDocuments } from './source-preparation.js';
@@ -94,6 +95,23 @@ describe('shared stable source capture', () => {
     expect(f.barrier.settle).toHaveBeenCalled();
     expect(f.barrier.release).toHaveBeenCalledOnce();
     expect(f.create).toHaveBeenCalledWith('workspace', 'captured', expect.any(Object), 'zero-commit', [], [], { sourceProvenance: result.provenance });
+  });
+
+  it('passes captured draft encoding to resource discovery and persists the same fixed interpretation', async () => {
+    const f = fixture();
+    f.documents.resolveTextEncodingPolicy = vi.fn(async () => ({ files: { 'file.txt': 'utf-8' }, defaultEncoding: 'utf-8' }));
+    f.store.putObject = vi.fn(async bytes => ({ hash: `sha256-${createHash('sha256').update(bytes).digest('hex')}`, byteLength: bytes.length }));
+    const prepareResources = vi.fn(async () => ({ captureScopes: [], observedPaths: [], validate: async () => undefined,
+      resources: { root: '/source', cwd: '/source', skillAncestorBoundary: '/source', coverage: { kind: 'complete' as const },
+        ancestors: [], configuredPaths: [], installedPackages: [], shadowedContextCanonicalIds: [], sourceLinks: [] } }));
+    const bytes = Buffer.from([0xd6, 0xd0]);
+    const result = await captureStableSourceBaseline({ ...f.input, content: { mode: 'fixed-draft-baseline' },
+      editorDrafts: [{ path: 'file.txt', content: bytes, encoding: 'gbk' }] }, { ...f, prepareResources });
+    expect(prepareResources).toHaveBeenCalledWith(expect.objectContaining({
+      textEncoding: { files: { 'file.txt': 'gbk' }, defaultEncoding: 'utf-8' },
+      editorDrafts: [{ path: 'file.txt', content: bytes, encoding: 'gbk' }],
+    }));
+    expect(result.provenance.textEncoding).toEqual({ files: { 'file.txt': 'gbk' }, defaultEncoding: 'utf-8' });
   });
 
   it('recovers the fixed source and provenance before observing newer Documents or disk state', async () => {

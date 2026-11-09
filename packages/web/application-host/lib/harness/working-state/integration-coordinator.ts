@@ -10,7 +10,7 @@ import type {
   DocumentSurfaceOperationResult,
 } from "../../documents/authority.js";
 import type { IntegrationApplyResult, RecoveryState, ThreeWayMergePlan, ThreeWayPathPlan, WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./types.js";
-import { buildThreeWayMergePlan } from "./three-way-merge.js";
+import { buildThreeWayMergePlan, type PathTextInterpretations } from "./three-way-merge.js";
 import {
   classifyIntegrationTarget,
   dirtyResourceMap,
@@ -44,7 +44,8 @@ import {
 } from "../../recovery/durable-file-operation.js";
 import { sameState } from "../../recovery/journal-files.js";
 import { normalizePathIdentity } from "../../workspace/path-safety.js";
-import { inspectDocumentBytes } from "../../documents/inspect.js";
+import { inspectDocumentBytes, encodeDocumentText } from "../../documents/inspect.js";
+import { textEncodingForResource } from '../../projects/text-encoding.js';
 import { mapSourcePath, mapSourceResult, type SourcePathMap } from './source-paths.js';
 
 export class DirectoryApplyUnresolvedError extends Error {
@@ -65,6 +66,7 @@ interface PlannedSurfaceTextEdit {
 }
 
 export interface IntegrationCoordinatorOptions {
+  resolveTextInterpretation?: (resource: { workspaceId: string; resourceId: string }) => Promise<{ encoding?: string; defaultEncoding?: string }>;
   readIntegrationOperation?: (workspaceId: string, operationId: string) => Promise<Record<string, unknown> | null>;
   resolveDocumentWorkspaceId?: (owningScopeId: string) => Promise<string>;
   workingStates: WorkspaceWorkingStateRootAccess;
@@ -169,7 +171,9 @@ const mergeTarget = async (
   }
   if (pathPlan.decision === 'merge-clean' && pathPlan.mergedState) return pathPlan.mergedState;
   if (pathPlan.decision === "merge-clean" && pathPlan.mergedText !== undefined) {
-    const bytes = Buffer.from(pathPlan.mergedText, "utf8");
+    const sourceBytes = pathPlan.parentState.kind === 'regular-file' ? await store.getObject(pathPlan.parentState.objectHash) : null;
+    const bytes = await encodeDocumentText({ content: pathPlan.mergedText, encoding: pathPlan.textFormat?.encoding ?? 'utf-8', bom: pathPlan.textFormat?.bom ?? false,
+      ...(sourceBytes ? { sourceBytes } : {}), ...(pathPlan.textFormat ? { sourceFormat: pathPlan.textFormat } : {}) });
     const object = await store.putObject(bytes);
     return {
       kind: "regular-file",
@@ -180,7 +184,9 @@ const mergeTarget = async (
     };
   }
   if (pathPlan.decision === "conflict" && pathPlan.conflictMarkers !== undefined) {
-    const bytes = Buffer.from(pathPlan.conflictMarkers, "utf8");
+    const sourceBytes = pathPlan.parentState.kind === 'regular-file' ? await store.getObject(pathPlan.parentState.objectHash) : null;
+    const bytes = await encodeDocumentText({ content: pathPlan.conflictMarkers, encoding: pathPlan.textFormat?.encoding ?? 'utf-8', bom: pathPlan.textFormat?.bom ?? false,
+      ...(sourceBytes ? { sourceBytes } : {}), ...(pathPlan.textFormat ? { sourceFormat: pathPlan.textFormat } : {}) });
     const object = await store.putObject(bytes);
     return {
       kind: "regular-file",
@@ -214,11 +220,12 @@ const normalizeEditorText = (content: string): string => content.replace(/\r\n|\
 const editorStateFrom = async (
   store: WorkingStateRootStore,
   state: RecoveryState,
+  interpretation?: { encoding?: string; defaultEncoding?: string },
 ): Promise<RecoveryState> => {
   if (state.kind !== "regular-file") return state;
   const bytes = await store.getObject(state.objectHash);
   if (bytes === null) return state;
-  const inspected = inspectDocumentBytes(bytes);
+  const inspected = await inspectDocumentBytes(bytes, true, interpretation);
   if (inspected.kind !== "text") return state;
   const object = await store.putObject(Buffer.from(normalizeEditorText(inspected.content), "utf8"));
   return {
@@ -229,11 +236,11 @@ const editorStateFrom = async (
   };
 };
 
-const readableText = async (store: Pick<WorkingStateRootStore,'getObject'>, state: RecoveryState): Promise<string | undefined> => {
+const readableText = async (store: Pick<WorkingStateRootStore,'getObject'>, state: RecoveryState, interpretation?: { encoding?: string; defaultEncoding?: string }): Promise<string | undefined> => {
   if (state.kind !== "regular-file") return undefined;
   const bytes = await store.getObject(state.objectHash);
   if (bytes === null) return undefined;
-  const inspected = inspectDocumentBytes(bytes);
+  const inspected = await inspectDocumentBytes(bytes, true, interpretation);
   return inspected.kind === "text" ? inspected.content : undefined;
 };
 
@@ -337,6 +344,7 @@ const projectPreview = (
 };
 
 export class IntegrationCoordinator {
+  private readonly resolveTextInterpretation?: IntegrationCoordinatorOptions["resolveTextInterpretation"];
   private readonly workingStates: WorkspaceWorkingStateRootAccess;
   private readonly readIntegrationOperation?: IntegrationCoordinatorOptions["readIntegrationOperation"];
   private readonly resolveDocumentWorkspaceId?: IntegrationCoordinatorOptions["resolveDocumentWorkspaceId"];
@@ -351,6 +359,7 @@ export class IntegrationCoordinator {
   private readonly merging = new Map<string, { identity: string; result: Promise<IntegrationOperationReceipt> }>();
 
   constructor(options: IntegrationCoordinatorOptions) {
+    this.resolveTextInterpretation = options.resolveTextInterpretation;
     this.readIntegrationOperation = options.readIntegrationOperation;
     this.workingStates = options.workingStates;
     this.resolveDocumentWorkspaceId = options.resolveDocumentWorkspaceId;
@@ -1740,6 +1749,32 @@ export class IntegrationCoordinator {
         }
       }
 
+      const source = await store.readOriginalSource(input.branchId);
+      const provenance = source?.provenance;
+      const drafts = provenance && ('drafts' in provenance ? provenance.drafts
+        : provenance.consistency === 'fixed-root' ? provenance.selection?.drafts : undefined);
+      const capturedEncodings = new Map((drafts?.resources ?? []).flatMap(resource => {
+        const file = input.pathMapping ? mapSourcePath(resource.resourceId, input.pathMapping) : resource.resourceId;
+        return file ? [[file, resource.encoding] as const] : [];
+      }));
+      const interpretations: Record<string, PathTextInterpretations> = Object.fromEntries(await Promise.all(result.changedPaths.map(async file => {
+        // Each raw state owns its interpretation. Never reuse today's project rule to
+        // reinterpret an immutable capture or a child mutation's accepted receipt.
+        const receipt = result.textFormats?.[file];
+        const sourceFile = input.pathMapping ? mapSourcePath(file, { from: input.pathMapping.to, to: input.pathMapping.from }) : file;
+        const frozen = provenance?.textEncoding && sourceFile ? textEncodingForResource(provenance.textEncoding, sourceFile) : {};
+        const originalBase = storedResult?.baseStates[file];
+        const exactBaseFormat = originalBase && sameState(originalBase, result.baseStates[file]!) ? receipt?.base
+          : sameState(result.pathStates[file]!, result.baseStates[file]!) ? receipt?.child : undefined;
+        const baseEncoding = exactBaseFormat?.encoding ?? capturedEncodings.get(file);
+        const parentEncoding = selectedSurfaces.get(file)?.baseFormat?.encoding;
+        return [file, {
+          base: baseEncoding ? { encoding: baseEncoding } : frozen,
+          child: receipt?.child ? { encoding: receipt.child.encoding } : baseEncoding ? { encoding: baseEncoding } : frozen,
+          parent: parentEncoding ? { encoding: parentEncoding }
+            : await this.resolveTextInterpretation?.({ workspaceId: documentWorkspaceId, resourceId: file }) ?? {},
+        }] as const;
+      })));
       const mergeBaseStates = { ...result.baseStates };
       const mergeChildStates = { ...result.pathStates };
       const diskObjects=new Map((parentAuthority.kind === "branch" ? [] : Object.values(diskParentStates)).flatMap(state=>state.kind==='regular-file'?[[state.objectHash,state] as const]:[]));
@@ -1751,18 +1786,20 @@ export class IntegrationCoordinator {
         mergeBaseStates[file] ??= { kind: "missing" };
         mergeChildStates[file] ??= { kind: "missing" };
         if (targets[file] === "surface") {
-          mergeBaseStates[file] = await editorStateFrom(store, result.baseStates[file]!);
-          mergeChildStates[file] = await editorStateFrom(store, result.pathStates[file]!);
+          mergeBaseStates[file] = await editorStateFrom(store, result.baseStates[file]!, interpretations[file]?.base);
+          mergeChildStates[file] = await editorStateFrom(store, result.pathStates[file]!, interpretations[file]?.child);
         }
-        const childText = await readableText(store, mergeChildStates[file]!);
-        const parentText = await readableText(mergeReader, parentState[file]!);
-        const baselineText = await readableText(store, mergeBaseStates[file]!);
+        const interpretation = targets[file] === 'surface' ? { base: { encoding: 'utf-8' }, parent: { encoding: 'utf-8' }, child: { encoding: 'utf-8' } } : interpretations[file];
+        const childText = await readableText(store, mergeChildStates[file]!, interpretation?.child);
+        const parentText = await readableText(mergeReader, parentState[file]!, interpretation?.parent);
+        const baselineText = await readableText(store, mergeBaseStates[file]!, interpretation?.base);
         if (childText !== undefined) texts[file] = { ...texts[file], child: childText };
         if (parentText !== undefined) texts[file] = { ...texts[file], parent: parentText };
         if (baselineText !== undefined) texts[file] = { ...texts[file], baseline: baselineText };
       }
 
       const preliminary = await buildThreeWayMergePlan({
+        interpretations: Object.fromEntries(result.changedPaths.map(file => [file, targets[file] === 'surface' ? { base: { encoding: 'utf-8' }, parent: { encoding: 'utf-8' }, child: { encoding: 'utf-8' } } : interpretations[file]!])),
         operationId: "preview-pending-binding",
         workspaceId: input.workspaceId,
         threadId: input.threadId,

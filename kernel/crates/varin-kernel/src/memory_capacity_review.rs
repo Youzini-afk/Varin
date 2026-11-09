@@ -225,7 +225,7 @@ fn combined(ending: Ending) {
             }))
         }
     });
-    let binding = ToolBinding {
+    let binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "search".into(),

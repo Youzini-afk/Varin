@@ -1,8 +1,14 @@
+import type { VarinTextFormat } from '@varin/application-client';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
 
 export interface SurfaceSnapshotResource {
   baseRevision: string | null;
+  sourceFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
+  /** Original bytes verified against baseRevision at capture; internal, never sent to renderers. */
+  sourceBytesBase64?: string;
   encoding: string;
   bom: boolean;
   content: string;

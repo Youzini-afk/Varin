@@ -807,15 +807,18 @@ it('process startup waits for an overlapping file lease and cancellation withdra
   await f.client.fileLeaseRelease({ ...f.address, leaseId: held.leaseId });
 }, 30_000);
 
-it('text pagination aligns GBK characters and raw reads can revisit any earlier byte', async () => {
+it('text pagination completes GBK across raw cursors and can revisit any earlier byte', async () => {
   const f = await fixture();
   const source = Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a]);
   await f.client.processSpawn(f.spawn('gbk-pages', `process.stdout.write(Buffer.from(${JSON.stringify([...source])}))`));
   await drain(f.client, 'gbk-pages');
   const first = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, maxBytes: 1, mode: 'text', encoding: 'gbk' });
-  assert.equal(first.nextCursor, 2);
+  assert.equal(first.nextCursor, 1);
+  assert.equal(first.chunks.length, 0);
+  const continuation = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 1, maxBytes: 1, mode: 'text', encoding: 'gbk' });
+  assert.equal(continuation.chunks.map(chunk => chunk.text ?? '').join(''), '中');
   const second = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 3, maxBytes: 1, mode: 'text', encoding: 'gbk' });
-  assert.equal(second.requestedCursor, 3);assert.equal(second.actualCursor, 2);assert.equal(second.nextCursor, 4);
+  assert.equal(second.requestedCursor, 3);assert.equal(second.actualCursor, 3);assert.equal(second.nextCursor, 4);
   assert.equal(Buffer.concat(second.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString('hex'), 'cec4');
   const raw = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, mode: 'raw' });
   assert.deepEqual(Buffer.concat(raw.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))), source);
@@ -1135,3 +1138,63 @@ it("a held subscription data credit cannot block stdin acknowledgements or nativ
   const read = await drain(f.client, processId);
   assert.deepEqual(read.stdout, Buffer.alloc(8*1024*1024,61));
 }, 30_000);
+
+
+it('retains independent output defaults, channel EOF and byte-accurate replay through the native owner', async () => {
+  const f = await fixture();
+  const processId = 'encoding-defaults';
+  const params = { ...f.spawn(processId, `
+    const fs = require('node:fs');
+    fs.writeSync(1, Buffer.from([0xd6]));
+    setTimeout(() => {
+      fs.writeSync(2, Buffer.from([0xb4, 0xed]));
+      setTimeout(() => { fs.writeSync(1, Buffer.from([0xd0])); }, 30);
+    }, 30);
+  `), inputEncoding: 'utf-8', outputEncoding: 'gbk' };
+  await f.client.processSpawn(params);
+  const drained = await drain(f.client, processId);
+  assert.equal(drained.process.inputEncoding, 'utf-8');
+  assert.equal(drained.process.outputEncoding, 'gbk');
+  const joined = { stdout: '', stderr: '' };
+  let cursor = 0;
+  while (cursor < drained.cursor) {
+    const page = await f.client.processRead({ workspaceId: 'ws', processId, cursor, maxBytes: 1, mode: 'text' });
+    assert.equal(page.nextCursor, cursor + 1);
+    for (const chunk of page.chunks) joined[chunk.channel] += chunk.text ?? '';
+    cursor = page.nextCursor;
+  }
+  assert.deepEqual(joined, { stdout: '中', stderr: '错' });
+  const replay = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'text' });
+  const stdout = replay.chunks.find(chunk => chunk.channel === 'stdout')!;
+  assert.equal(stdout.text, '中');
+  assert.deepEqual(stdout.sourceRanges, [{ offset: 0, byteLength: 1 }, { offset: 3, byteLength: 1 }]);
+  assert.equal(replay.channelEnds?.length, 2);
+  assert.equal(replay.outputComplete, true);
+  const override = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'text', encoding: 'utf-8' });
+  assert.notEqual(override.chunks.map(chunk => chunk.text ?? '').join(''), '错中');
+  assert.equal((await f.client.processInspect({ workspaceId: 'ws', processId })).outputEncoding, 'gbk');
+  const raw = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'raw' });
+  assert.equal(Buffer.concat(raw.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString('hex'), 'd6b4edd0');
+}, 20_000);
+
+it('Host observes stdout EOF before process exit without ending still-live stderr', async () => {
+  const f = await fixture();
+  const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }) });
+  try {
+    const child = await service.spawn(process.execPath, ['-e', `
+      const fs = require('node:fs'); fs.writeSync(1, 'stdout'); fs.closeSync(1);
+      process.stdin.once('data', () => { fs.writeSync(2, 'after stdout EOF'); process.stdin.destroy(); });
+    `], { cwd: f.workspace, env: process.env, stdio: 'pipe' });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', bytes => { stdout += bytes.toString(); });
+    child.stderr.on('data', bytes => { stderr += bytes.toString(); });
+    await expect.poll(() => child.stdout.readableEnded).toBe(true);
+    assert.equal(stdout, 'stdout');
+    assert.equal(child.stderr.readableEnded, false);
+    assert.equal(child.exitConfirmed, false);
+    await child.writeInput('finish');
+    await child.completion;
+    assert.equal(stderr, 'after stdout EOF');
+    assert.equal(child.exitCode, 0);
+  } finally { await service.dispose(); }
+}, 20_000);

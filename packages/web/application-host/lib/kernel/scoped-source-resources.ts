@@ -2,11 +2,14 @@
  * outside it remain immutable instruction/skill capsules, not writable siblings. */
 import path from 'node:path';
 import { CONTEXT_FILE_NAMES } from '../agent-resources/formats.js';
+import { decodeResourceBytes } from '../agent-resources/source-reader.js';
+import { textEncodingForResource, type SourceTextEncoding } from '../projects/text-encoding.js';
 import type { SourceResourceCapture, SourceResourceCapsule, SourceResourceTarget } from './protocol.generated.js';
 import type { WorkingStateRootStore } from '../harness/working-state/types.js';
 
 export async function scopeFixedSourceResources(store: WorkingStateRootStore, source: { branchId: string; revision: number },
-  capture: SourceResourceCapture, prefix: string, signal: AbortSignal): Promise<SourceResourceCapture> {
+  capture: SourceResourceCapture, prefix: string, signal: AbortSignal, textEncoding: SourceTextEncoding = {}): Promise<SourceResourceCapture> {
+  const policy = structuredClone(textEncoding);
   const within = (file: string) => file === prefix || file.startsWith(`${prefix}/`);
   const strip = (file: string) => file === prefix ? '' : file.slice(prefix.length + 1);
   const capsules = new Map<string, Promise<SourceResourceCapsule>>();
@@ -36,8 +39,10 @@ export async function scopeFixedSourceResources(store: WorkingStateRootStore, so
           } else if (state.kind==='regular-file') {
             const bytes=await store.getObject(state.objectHash);
             if (!bytes) throw new Error('Original fixed resource bytes are unavailable');
-            try { result.files.push({reference:{...location,canonicalId:path.join(capture.root,file),version:state.objectHash},content:new TextDecoder('utf-8',{fatal:true}).decode(bytes)}); }
-            catch {result.failures.push({...location,status:'invalid',reason:'The captured resource is not UTF-8 text'});}
+            const decoded = await decodeResourceBytes(location, relative, bytes, path.join(capture.root,file), state.objectHash,
+              textEncodingForResource(policy, file), signal);
+            if (decoded.status === 'ready') result.files.push({ reference: decoded.reference, content: decoded.content });
+            else result.failures.push(decoded);
           } else if (state.kind==='directory') {
             const childPrefix=`${file}/`;
             result.directories.push({path:relative,version:viewId,entries:requested.filter(child=>child.startsWith(childPrefix)&&!child.slice(childPrefix.length).includes('/')).map(child=>({

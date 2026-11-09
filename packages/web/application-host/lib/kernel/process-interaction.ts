@@ -1,7 +1,7 @@
 import type { KernelProcessInteractionReceipt } from './protocol.generated.js';
 
 type ExpectedInteraction = { processId: string; operationId: string; kernelEpoch?: string } & (
-  | { kind: 'write'; requestedBytes: number; eofRequested: boolean }
+  | ({ kind: 'write'; eofRequested: boolean } & ({ requestedBytes: number } | { textEncodedByOwner: true }))
   | { kind: 'resize'; cols: number; rows: number }
 );
 
@@ -23,7 +23,8 @@ export function requireAppliedProcessInteraction(receipt: KernelProcessInteracti
     throw new Error('Process interaction receipt identity or state is invalid');
   }
   if (receipt.kind === 'write' && expected.kind === 'write') {
-    if (receipt.requestedBytes !== expected.requestedBytes || receipt.eofRequested !== expected.eofRequested
+    if (!Number.isSafeInteger(receipt.requestedBytes) || receipt.requestedBytes < 0
+      || ('requestedBytes' in expected && receipt.requestedBytes !== expected.requestedBytes) || receipt.eofRequested !== expected.eofRequested
       || !Number.isSafeInteger(receipt.confirmedBytes) || receipt.confirmedBytes < 0 || receipt.confirmedBytes > receipt.requestedBytes
       || typeof receipt.eofApplied !== 'boolean'
       || (receipt.eofApplied && !receipt.eofRequested)

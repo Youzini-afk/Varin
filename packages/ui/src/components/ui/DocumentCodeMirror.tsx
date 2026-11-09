@@ -1,3 +1,5 @@
+import { Prec } from '@codemirror/state';
+import { keymap } from '@codemirror/view';
 import React from 'react';
 import { CodeMirrorEditor, type CodeMirrorTextChange } from '@/components/ui/CodeMirrorEditor';
 import { getDocumentRegistry } from '@/lib/documents/session';
@@ -36,6 +38,7 @@ export const applyDocumentCodeMirrorChanges = (
   changes: readonly CodeMirrorTextChange[] | undefined,
   origin: string,
   expectedLocalEditRevision: number,
+  history?: 'undo' | 'redo',
 ): DocumentCodeMirrorAdapterResult => {
   const record = registry.get(identity);
   if (!record) return { status: 'unsupported', reason: 'document-not-open' };
@@ -46,6 +49,7 @@ export const applyDocumentCodeMirrorChanges = (
     expectedLocalEditRevision,
     edits: changes.map(({ from, to, insert }) => ({ from, to, insert })),
     origin,
+    ...(history ? { history } : {}),
   });
 };
 
@@ -99,7 +103,7 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     projectedRevisionRef.current = record?.localEditRevision ?? 0;
   }, [identity, record?.localEditRevision]);
 
-  const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[]) => {
+  const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[], history?: 'undo' | 'redo') => {
     if (!identity) return;
     const current = registry.get(identity);
     const identityKey = documentKey(identity);
@@ -118,6 +122,7 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
       changes,
       origin,
       projectedRevisionRef.current,
+      history,
     );
     switch (result.status) {
       case 'applied':
@@ -154,13 +159,15 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     }
   }, [identity, origin, registry, scopedRegistry]);
 
+  const formatUndo = React.useMemo(() => Prec.highest(keymap.of([{ key: 'Mod-z', run: () => Boolean(identity && registry.undoFormat(identity)) }])), [identity, registry]);
+
   if (!identity) return null;
 
   return (
     <CodeMirrorEditor
       value={buffer}
       onChange={handleChange}
-      extensions={[...languageExtensions, ...(extensions ?? [])]}
+      extensions={[formatUndo, ...languageExtensions, ...(extensions ?? [])]}
       onViewReady={(view) => {
         viewRef.current = view;
         onViewReady?.(view);

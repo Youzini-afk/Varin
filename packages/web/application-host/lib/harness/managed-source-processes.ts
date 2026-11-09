@@ -69,7 +69,11 @@ export function createManagedSourceProcesses(options: {
       const authority = await options.access(principal, input);
       return options.kernel.scoped(options.kernel.sourceAuthorityGrant(authority)).processWrite({
         workspaceId: authority.source.workspace_id, rootId: authority.physicalRoot!.rootId, processId: input.processId,
-        operationId: input.operationId, bytesBase64: input.bytesBase64, ...(input.eof === undefined ? {} : { eof: input.eof }) });
+        operationId: input.operationId,
+        ...(input.bytesBase64 === undefined ? {} : { bytesBase64: input.bytesBase64 }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+        ...(input.encoding === undefined ? {} : { encoding: input.encoding }),
+        ...(input.eof === undefined ? {} : { eof: input.eof }) });
     },
     async processResize(principal, input) {
       processPermission(principal);

@@ -194,14 +194,17 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       if(native?.source.mode==='native_workspace'){
         if(native.source.workspaceId!==owningWorkspace)throw new SourceAdmissionError('source_changed');
         const selected=native.source;
-        const captured=input.content.mode==='surface-drafts'?readSourceDrafts({documents,consumer:{kind:'thread',threadId:input.threadId,branchId:input.branchId},context:input.content.context,workspaceId,signal}):{editorDrafts:[]};
-        const resources=await prepareResources?.({store,directory:native.path,workspaceId:owningWorkspace,captureWorkspaceId:workspaceId,branchId,editorDrafts:captured.editorDrafts,signal});
+        const capturedPolicy = await documents.resolveTextEncodingPolicy?.(workspaceId);
+        const captured=input.content.mode==='surface-drafts'?await readSourceDrafts({documents,consumer:{kind:'thread',threadId:input.threadId,branchId:input.branchId},context:input.content.context,workspaceId,signal}):{editorDrafts:[]};
+        const draftEncodings = Object.fromEntries(captured.editorDrafts.map(draft => [draft.path, draft.encoding]));
+        const textEncoding = { ...capturedPolicy, ...(Object.keys(draftEncodings).length ? { files: { ...capturedPolicy?.files, ...draftEncodings } } : {}) };
+        const resources=await prepareResources?.({textEncoding,store,directory:native.path,workspaceId:owningWorkspace,captureWorkspaceId:workspaceId,branchId,editorDrafts:captured.editorDrafts,signal});
         const dirty=input.content.mode==='saved-files'?await documents.inspectDirtyBuffers(workspaceId):[];
         const selection={captureIdentity,contentMode:input.content.mode==='saved-files'?'saved-files' as const:'fixed-draft-baseline' as const,
           captureScopes:input.captureScopes,omittedDraftPaths:[...new Set(dirty.flatMap(publication=>publication.resources.map(resource=>resource.resource.resourceId)))].sort(),...(captured.drafts?{drafts:captured.drafts}:{})};
         await nativeWorkspaces!.snapshot({workspace_id:selected.workspaceId,execution_workspace_id:selected.executionWorkspaceId,
           branch_id:selected.branchId,...(selected.nativeScope?{native_scope:selected.nativeScope}:{})},branchId,`source-snapshot:${key}`,signal,captureIdentity,
-          {threadId:input.threadId,selection,editorDrafts:captured.editorDrafts,...(resources?{resources:{...resources.resources,coverage:{kind:'complete' as const}},beforePublish:async(_actor,temporary)=>{
+          {threadId:input.threadId,selection,...(textEncoding ? { textEncoding } : {}),editorDrafts:captured.editorDrafts,...(resources?{resources:{...resources.resources,coverage:{kind:'complete' as const}},beforePublish:async(_actor,temporary)=>{
             const states=await store.readStateSlice(temporary,resources.observedPaths,{signal});await resources.validate(states??{},signal);
           }}:{})});
         const fixed=await store.readOriginalSource(branchId,{signal});
@@ -210,7 +213,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       }
       const { root } = await documents.inspectWorkspace(workspaceId, { signal });
       const capturedDraft = input.content.mode === 'surface-drafts'
-        ? readSourceDrafts({ documents, consumer: { kind: 'thread', threadId: input.threadId, branchId: input.branchId },
+        ? await readSourceDrafts({ documents, consumer: { kind: 'thread', threadId: input.threadId, branchId: input.branchId },
           context: input.content.context, workspaceId, signal }) : { editorDrafts: [] };
         const captured = await captureStableSourceBaseline({ store, directory: root, workspaceId, captureWorkspaceId: workspaceId,
           branchId, captureScopes: input.captureScopes, captureIdentity, ...(capturedDraft.drafts ? { drafts: capturedDraft.drafts } : {}),

@@ -59,6 +59,9 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private pendingDataAck: (() => Promise<void>) | null = null;
   private endCursor = 0;
   private outputComplete = false;
+  private captureFailed = false;
+  private readonly channelEnds = new Map<'stdout' | 'stderr', { offset: number; error?: string }>();
+  private readonly endedChannels = new Set<'stdout' | 'stderr'>();
   private ready = false;
   private readyResolve!: () => void;
   private readyReject!: (error: Error) => void;
@@ -104,6 +107,10 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   get killed(): boolean { return this.stopRequested; }
   get snapshot(): KernelProcessSnapshot { return { ...this.current }; }
   get replayCursor(): number { return this.replayEnd ?? 0; }
+  get nativeTerminalText(): boolean {
+    return this.current.mode === 'pty' && this.current.outputEncoding !== undefined
+      && !['utf-8', 'auto'].includes(this.current.outputEncoding.toLowerCase());
+  }
   ownedBy(scoped: KernelScopedClient): boolean { return this.scoped === scoped; }
 
   async start(): Promise<void> {
@@ -158,11 +165,19 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
         || (result.inputError !== null && typeof result.inputError !== "string") || typeof result.outputComplete !== "boolean"
         || (result.outputError !== null && typeof result.outputError !== "string")) throw new Error("Native process stream result is malformed");
       this.endCursor = Math.max(this.endCursor, result.endCursor);
+      for (const end of result.channelEnds ?? []) {
+        if ((end.channel !== 'stdout' && end.channel !== 'stderr') || !Number.isSafeInteger(end.offset) || end.offset < 0
+          || end.offset > result.endCursor || (end.error !== undefined && typeof end.error !== 'string')) throw new Error('Native output channel end is malformed');
+        const previous = this.channelEnds.get(end.channel);
+        if (previous && (previous.offset !== end.offset || previous.error !== end.error)) throw new Error('Native output channel end changed');
+        this.channelEnds.set(end.channel, { offset: end.offset, ...(end.error === undefined ? {} : { error: end.error }) });
+      }
       if (event.stream === "control") {
         if (result.chunks.length !== 0) throw new Error("Native control event included output bytes");
         validateSnapshot(result.process, this.address, this.epoch);
         this.current = result.process;
         this.outputComplete = result.outputComplete;
+        this.captureFailed = result.outputError !== null;
         if (result.outputError !== null && this.outputFailure === null) {
           this.outputFailure = new Error(result.outputError); this.emit("error", this.outputFailure);
         }
@@ -176,16 +191,42 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
         if (result.nextCursor <= this.cursor) throw new Error("Native process data stream made no progress");
         for (const chunk of result.chunks) {
           if (chunk.offset !== this.cursor || (chunk.channel !== "stdout" && chunk.channel !== "stderr")) throw new Error("Native output cursor or channel is invalid");
+          if (this.endedChannels.has(chunk.channel) || typeof chunk.bytesBase64 !== 'string') throw new Error('Native output arrived after channel end or without raw bytes');
           const bytes = Buffer.from(chunk.bytesBase64, "base64");
           this.cursor += bytes.length;
           if (!this.ignoreOutput) (chunk.channel === "stdout" ? this.stdout : this.stderr).push(bytes);
         }
         if (this.cursor !== result.nextCursor) throw new Error("Native process output cursor did not match its bytes");
+        if (this.nativeTerminalText) {
+          if (!Array.isArray(result.textChunks)) throw new Error('Native legacy terminal text projection is missing');
+          for (const chunk of result.textChunks) {
+            if (chunk.channel !== 'stdout') continue;
+            const last = chunk.sourceRanges?.at(-1);
+            const end = last ? last.offset + last.byteLength : chunk.offset + (chunk.byteLength ?? 0);
+            if (!Number.isSafeInteger(end) || end < 0 || end > this.cursor) throw new Error('Native terminal text source range is invalid');
+            if (typeof chunk.text === 'string') this.emit('terminal-text', chunk.text, end);
+            else if (chunk.encodingReason) this.emit('error', new Error(chunk.encodingReason));
+          }
+        }
         this.pendingDataAck = acknowledge;
         this.maybeAcknowledgeData();
       }
+      this.finishChannels();
       this.maybeFinish();
     } catch (error) { this.invalidate(asError(error)); }
+  }
+  private finishChannels(): void {
+    for (const [channel, end] of this.channelEnds) {
+      // Control can overtake data credits. EOF becomes visible only after the
+      // consumer has received all raw bytes preceding its ordered end record.
+      if (this.cursor < end.offset || this.endedChannels.has(channel)) continue;
+      this.endedChannels.add(channel);
+      (channel === 'stdout' ? this.stdout : this.stderr).push(null);
+      if (end.error && this.outputFailure === null) {
+        this.outputFailure = new Error(end.error);
+        this.emit('error', this.outputFailure);
+      }
+    }
   }
   private maybeAcknowledgeData(): void {
     if (this.closed || this.lost || this.pendingDataAck === null) return;
@@ -195,9 +236,10 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   }
   private maybeFinish(): void {
     if (this.finishing || this.closed || this.lost || this.current.writerActive || this.cursor !== this.endCursor
-      || (!this.outputComplete && this.outputFailure === null)) return;
+      || (!this.outputComplete && !this.captureFailed)) return;
     this.finishing = true; this.pendingDataAck = null;
-    this.stdout.push(null); this.stderr.push(null);
+    if (!this.endedChannels.has('stdout')) { this.endedChannels.add('stdout'); this.stdout.push(null); }
+    if (!this.endedChannels.has('stderr')) { this.endedChannels.add('stderr'); this.stderr.push(null); }
     this.emit("exit", this.exitCode, this.signalCode);
     void (async () => {
       await this.subscription?.close().catch((error: unknown) => this.reportError(asError(error)));
@@ -207,7 +249,24 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       if (this.outputFailure) this.rejectCompletion(this.outputFailure); else this.resolveCompletion();
     })();
   }
-  writeInput(data: string, operationId?: string): Promise<void> { return this.writeBytes(Buffer.from(data), false, operationId); }
+  writeInput(data: string, operationId?: string): Promise<void> {
+    if (!this.current.inputEncoding || ['utf-8', 'auto'].includes(this.current.inputEncoding.toLowerCase())) {
+      return this.writeBytes(Buffer.from(data), false, operationId);
+    }
+    return this.writeEncodedText(data, operationId);
+  }
+  private async writeEncodedText(text: string, identity?: string): Promise<void> {
+    await this.readyPromise;
+    if (this.lost) throw this.lost;
+    if (this.options.stdinIgnored || this.finishing || this.stopRequested || !this.current.writerActive) throw new Error('Native process input is closed');
+    const operationId = identity ?? `process-input:${randomUUID()}`;
+    // The execution owner performs strict encoding and retains the actual-byte
+    // intent digest. The Host never implements a second legacy input codec.
+    const receipt = await this.scoped.processWrite({ ...this.address, operationId, text });
+    requireAppliedProcessInteraction(receipt, { ...this.address, operationId, kernelEpoch: this.epoch,
+      kind: 'write', textEncodedByOwner: true, eofRequested: false });
+    if (!identity) await this.releaseAcknowledgedInput(operationId);
+  }
   private async writeBytes(bytes: Buffer, eof: boolean, identity?: string): Promise<void> {
     await this.readyPromise;
     if (this.lost) throw this.lost;
@@ -297,12 +356,20 @@ export function projectProcessTerminal(child: KernelManagedProcess, options: { r
     events.emit("exit", exited);
     resolveExit();
   };
+  if (child.nativeTerminalText) {
+    child.on('terminal-text', (text: string, end: number) => {
+      outputCursor = end;
+      emitData(text, options.replayHistory === true && end <= child.replayCursor);
+    });
+    child.stdout.resume();
+  } else {
   child.stdout.on("data", (bytes: Buffer) => {
     const replayLength = options.replayHistory ? Math.min(bytes.length, Math.max(0, child.replayCursor - outputCursor)) : 0;
     if (replayLength) emitData(decoder.write(bytes.subarray(0, replayLength)), true);
     if (replayLength < bytes.length) emitData(decoder.write(bytes.subarray(replayLength)), false);
     outputCursor += bytes.length;
   });
+  }
   child.stdout.on("end", () => {
     outputEnded = true;
     deliverExit();
@@ -398,6 +465,7 @@ export function createKernelProcessService(options: Options) {
     const params: KernelMethodParams["process.spawn"] = {
       processId: "process:" + randomUUID(), workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId,
       cwd, command, args: [...args], mode, cols, rows, stdinMode: stdinIgnored ? 'null' : 'pipe',
+      ...(mode === 'pty' ? { inputEncoding: 'utf-8', outputEncoding: 'utf-8' } : {}),
       env: Object.entries(input.env ?? process.env).flatMap(([name, value]) => value === undefined || name === "NODE_CHANNEL_FD" ? [] : [{ name, value }]),
     };
     // The trusted source callback belongs to the original source owner, not the JSON

@@ -110,6 +110,8 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     captureScopes: [] as string[], draftBasePaths: [] as string[], createdAt: 1, updatedAt: 2,
   }]]);
   const scoped = {
+    getOperation: vi.fn(async () => null),
+    workingResultGet: vi.fn(async () => null),
     readBranch: vi.fn(async (input: Parameters<KernelScopedClient['readBranch']>[0]) => {
       const branch = branches.get(input.branchId);
       if (!branch) throw new Error(`Unexpected branch ${input.branchId}`);
@@ -181,8 +183,8 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(scoped.forkBranch).toHaveBeenCalledOnce();
     expect(scoped.forkBranch).toHaveBeenCalledWith({ operationId: 'branch-fork:child-source:execution:new',
       branchId: 'child-source:execution:new', workspaceId: 'workspace', sourceBranchId: 'old-result', sourcePinId: 'predecessor-query-pin', parentRef: 'old-result@7',
-      draftBasePaths: [], captureScopes: [], sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } }, undefined);
-    expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual(child.source_basis!.provenance);
+      draftBasePaths: [], captureScopes: [], textEncoding: {}, sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } }, undefined);
+    expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual({ ...child.source_basis!.provenance, textEncoding: {} });
     expect(scoped.pinBranch).toHaveBeenNthCalledWith(2, expect.objectContaining({ branchId: 'child-source:execution:new',
       pinId: 'child-source-pin:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(scoped.readBranch.mock.calls.every(([input]) => input.includeEntries === false)).toBe(true);
@@ -193,7 +195,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(runtime.readyChildSource).toHaveBeenCalledWith({ executionId: child.execution_id,
       source: { mode: 'native_workspace', liveRoot: null, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId, branchId: 'child-source:execution:new', revision: null },
       pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, execution_workspace_id: executionWorkspaceId, branch_id: 'child-source:execution:new', revision: 0 } },
-      provenance: child.source_basis!.provenance }, expect.any(AbortSignal));
+      provenance: { ...child.source_basis!.provenance, textEncoding: {} } }, expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
       expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
     if (kind !== 'user_continuation') {

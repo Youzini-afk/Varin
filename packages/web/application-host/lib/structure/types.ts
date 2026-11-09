@@ -69,6 +69,8 @@ export interface StructureFileRequest {
   lines?: number[];
   /** Compare captured bytes before parsing; only usable with the same recipe. */
   unchangedRevision?: string;
+  /** A previous resolved interpretation, paired with the raw revision and recipe. */
+  unchangedTextIdentity?: string;
 }
 
 export type StructureFixedComputeInput = Omit<KernelComputeInput, "workspaceId" | "pinId" | "rootId" | "objects" | "operation"> & {
@@ -186,6 +188,7 @@ export function unsupportedResult(
 
 /** One native parse supplies every model-neutral structure category. */
 export interface StructureAnalysis {
+  textIdentity?: string;
   outline: StructureOutlineResult;
   classify: StructureClassifyResult;
   literalCalls: StructureLiteralCallsResult;
@@ -208,6 +211,7 @@ export interface StructureUnit {
   fallback: boolean;
 }
 export interface StructureUnitsResult {
+  textIdentity?: string;
   status: StructureStatus;
   revision: string;
   units: StructureUnit[];

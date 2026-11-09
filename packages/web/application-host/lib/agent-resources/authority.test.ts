@@ -1,3 +1,8 @@
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, symlink, rename } from 'node:fs/promises';
 import path from 'node:path';

@@ -8,6 +8,7 @@ import { InlineCommentInput } from '@/components/comments/InlineCommentInput';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { cn } from '@/lib/utils';
@@ -424,7 +425,12 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   }
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col', className)}>
+    <div className={cn('flex h-full min-h-0 flex-col', className)} onKeyDownCapture={event => {
+      if (!readOnly && (event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'z'
+        && (scope?.documents ?? getDocumentRegistry()).undoFormat(identity)) {
+        event.preventDefault(); event.stopPropagation();
+      }
+    }}>
       {modelSnapshot.status === 'ready' && modelSnapshot.syncFailure ? (
         <div className="shrink-0 border-b border-status-warning/40 bg-status-warning/10 px-3 py-1.5 typography-meta text-status-warning">
           {t('filesView.editor.syncRecovered')}

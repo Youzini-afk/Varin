@@ -67,6 +67,7 @@ mod objects;
 pub(crate) mod object_views;
 pub(crate) mod file_content;
 mod operations;
+pub(crate) mod text_formats;
 #[cfg(test)]
 mod native_authority_tests;
 #[cfg(test)]
@@ -232,6 +233,7 @@ pub(crate) struct Storage {
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: file_content::VerifiedObjects,
+    text_formats: text_formats::Projection,
     object_view_tasks: BTreeSet<String>,
     source_capture_cache: HashMap<(String, String), capture_resources::CaptureReuse>,
     blob_read_roots: blob_reads::BlobReadRoots,

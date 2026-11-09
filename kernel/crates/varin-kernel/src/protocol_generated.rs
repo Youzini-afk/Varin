@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 83;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 84;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -266,6 +266,26 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTextDecodeParams {
+    pub(crate) bytes_base64: String,
+    pub(crate) encoding: Option<String>,
+    pub(crate) default_encoding: Option<String>,
+    pub(crate) include_content: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTextSerializeParams {
+    pub(crate) content: String,
+    pub(crate) source_bytes_base64: Option<String>,
+    pub(crate) source_format: Option<crate::text::Format>,
+    pub(crate) target_format: Option<KernelTextTargetFormat>,
+    pub(crate) normalize_line_endings: Option<bool>,
+    pub(crate) edits: Option<Vec<KernelTextEdit>>,
+}
 
 pub(crate) type FollowupEventAttachmentReadParams =
     varin_runtime::catalog::followups::EventAttachmentReadInput;
@@ -1915,6 +1935,8 @@ pub(crate) struct KernelProcessSpawnParams {
     pub(crate) stdin_mode: Option<String>,
     pub(crate) cols: Option<i64>,
     pub(crate) rows: Option<i64>,
+    pub(crate) input_encoding: Option<String>,
+    pub(crate) output_encoding: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1936,7 +1958,9 @@ pub(crate) struct KernelProcessWriteParams {
     pub(crate) process_id: String,
     pub(crate) root_id: Option<String>,
     pub(crate) operation_id: String,
-    pub(crate) bytes_base64: String,
+    pub(crate) bytes_base64: Option<String>,
+    pub(crate) text: Option<String>,
+    pub(crate) encoding: Option<String>,
     pub(crate) eof: Option<bool>,
 }
 
@@ -2139,6 +2163,21 @@ pub(crate) struct KernelFileReadParams {
     pub(crate) path: String,
     pub(crate) offset: Option<i64>,
     pub(crate) length: Option<i64>,
+    pub(crate) encoding: Option<String>,
+    pub(crate) default_encoding: Option<String>,
+    pub(crate) raw: Option<bool>,
+    pub(crate) start_line: Option<i64>,
+    pub(crate) end_line: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileTextConversionsParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: Option<String>,
+    pub(crate) cursor: Option<String>,
+    pub(crate) page_size: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2550,6 +2589,7 @@ pub(crate) struct KernelCreateBranchBeginParams {
     pub(crate) draft_base_paths: Vec<String>,
     pub(crate) capture_scopes: Vec<String>,
     pub(crate) source_provenance: Option<KernelSourceProvenanceReference>,
+    pub(crate) text_encoding: Option<crate::text::Policy>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2629,6 +2669,7 @@ pub(crate) struct KernelBranchForkParams {
     pub(crate) draft_base_paths: Vec<String>,
     pub(crate) capture_scopes: Vec<String>,
     pub(crate) source_provenance: Option<KernelSourceProvenanceReference>,
+    pub(crate) text_encoding: Option<crate::text::Policy>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2677,6 +2718,7 @@ pub(crate) struct KernelWorkspaceForkParams {
     pub(crate) target_branch_id: String,
     pub(crate) operation_id: String,
     pub(crate) source_path: Option<String>,
+    pub(crate) text_encoding: Option<crate::text::Policy>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3051,6 +3093,9 @@ pub(crate) struct KernelComputeStartParams {
     pub(crate) queries: Option<Vec<String>>,
     pub(crate) paths_only: Option<bool>,
     pub(crate) paged: Option<bool>,
+    pub(crate) encoding: Option<String>,
+    pub(crate) default_encoding: Option<String>,
+    pub(crate) text_encoding: Option<crate::text::Policy>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3673,6 +3718,22 @@ pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAc
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTextTargetFormat {
+    pub(crate) encoding: Option<String>,
+    pub(crate) bom: Option<bool>,
+    pub(crate) line_ending: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTextEdit {
+    pub(crate) start: i64,
+    pub(crate) end: i64,
+    pub(crate) text: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelAdapterContribution {
     pub(crate) identity: String,
     pub(crate) id: String,
@@ -4062,6 +4123,7 @@ pub(crate) struct KernelComputeObject {
     pub(crate) object_hash: Option<String>,
     pub(crate) owner_id: Option<String>,
     pub(crate) missing: Option<bool>,
+    pub(crate) encoding: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4071,7 +4133,9 @@ pub(crate) struct KernelComputeFile {
     pub(crate) recipe_id: Option<String>,
     pub(crate) revision: Option<String>,
     pub(crate) unchanged_revision: Option<String>,
+    pub(crate) unchanged_text_identity: Option<String>,
     pub(crate) lines: Option<Vec<i64>>,
+    pub(crate) encoding: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4224,6 +4288,12 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "text.decode" => serde_json::from_value::<KernelTextDecodeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "text.serialize" => serde_json::from_value::<KernelTextSerializeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.followup.eventAttachment.read" => {
             serde_json::from_value::<FollowupEventAttachmentReadParams>(params.clone())
                 .map(|_| ())
@@ -5428,6 +5498,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "file.read" => serde_json::from_value::<KernelFileReadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "file.text.conversions" => {
+            serde_json::from_value::<KernelFileTextConversionsParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "file.root.register" => {
             serde_json::from_value::<KernelFileRootRegisterParams>(params.clone())
                 .map(|_| ())

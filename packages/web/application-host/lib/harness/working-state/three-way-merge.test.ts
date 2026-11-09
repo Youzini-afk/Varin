@@ -1,3 +1,8 @@
+import { bindUtf8CoordinationCodec } from '../../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import { expect, it } from 'vitest';
 import { buildThreeWayMergePlan, mergeText3Way, planThreeWayPath } from './three-way-merge.js';
 import type { RecoveryState } from './types.js';

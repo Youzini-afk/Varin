@@ -1,3 +1,4 @@
+import { resolveSourceTextPolicy } from './source-provenance.js';
 import { SourceAdmissionError, sourceReadError } from './source-admission-error.js';
 import type { LiveSourceResolver } from './live-source.js';
 import type { ThreadSource } from '@varin/application-client';
@@ -187,6 +188,7 @@ export async function admitRunSourceAuthority(
     if (!isDeepStrictEqual(binding.source, sourceSelection)) throw new SourceAdmissionError('source_changed');
     const fixed = { branchId: selection.branchId!, revision: selection.revision! };
     const toolBinding: SourceToolBinding = {
+      ...(binding.textEncoding ? { textEncoding: binding.textEncoding } : {}),
       resourceOwner: selection.resourceOwner, grantId: binding.authorityId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
       enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,
@@ -273,7 +275,12 @@ export async function admitRunSourceAuthority(
       if (view?.status==='ready') {rootId=view.rootId;executionCwd=view.canonicalRoot;}
     }
     const fixed = { branchId: selection.branchId!, revision: selection.revision! };
+    // Reconcile durable conversion receipts before freezing a new Run's interpretation.
+    // The source's own read grant is sufficient; no event timing or replacement writer is involved.
+    const textEncoding = await resolveSourceTextPolicy(kernel, actor, sourceSelection,
+      rootId && executionCwd ? { rootId, canonicalRoot: executionCwd } : null, signal, source?.root);
     const toolBinding: SourceToolBinding = {
+      ...(textEncoding ? { textEncoding } : {}),
       resourceOwner: selection.resourceOwner, grantId: grant.grantId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
       enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,

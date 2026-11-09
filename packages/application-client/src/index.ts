@@ -65,3 +65,5 @@ export * from "./plugin-center.js";
 
 export * from "./plugin-install-intent.js";
 export * from './bot-appearance.js';
+
+export * from "./documents-edits.js";

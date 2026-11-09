@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
+import { hasTextEncodingRules } from "../projects/text-encoding.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { NativeProcessIdentity } from "./process-service.js";
 import type { KernelComputeGrammarParams, KernelComputeObject } from "./protocol.generated.js";
@@ -83,7 +84,7 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
         const operationId = "compute-text:" + randomUUID();
         const object = await client.putBlob(Buffer.from(input.text, "utf8"), operationId, signal);
         owners.push({ ownerId: object.ownerId, operationId });
-        objects.push({ path: sourcePath, revision: input.revision, objectHash: object.hash, ownerId: object.ownerId });
+        objects.push({ path: sourcePath, revision: input.revision, objectHash: object.hash, ownerId: object.ownerId, encoding: 'utf-8' });
       }
       return await run(objects);
     } finally {
@@ -138,7 +139,9 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
         signal.throwIfAborted();
         const admitted = await context(identity);
         const join = (value: string) => [base, relative(value)].filter(Boolean).join("/");
+        const textEncoding = await options.client.textEncodingPolicy?.(identity.workspaceId);
         const params: KernelComputeInput = {
+          ...(textEncoding && hasTextEncodingRules(textEncoding) ? { textEncoding } : {}),
           ...input, workspaceId: identity.workspaceId, rootId: admitted.rootId!,
           paths: (input.paths ?? [""]).map(join),
           ...(input.startAfterPath === undefined ? {} : { startAfterPath: join(input.startAfterPath) }),

@@ -84,6 +84,14 @@ consumer's actual registered read-tool name; this module does not invent a `read
 
 `source-reader.ts` supplies adapters for existing owners:
 
+Original file bytes use the shared Rust text codec, including GBK/GB2312 and UTF-16;
+captured resource bodies are Unicode, not byte buffers implicitly decoded as UTF-8. Readers keep
+the selected source's per-file encoding policy. Fixed readers use the exact branch/revision policy
+projection, including committed conversions; a same-pin symlink scope extension also projects its
+target's policy. Captured editor drafts use their own serialized format. Source validation compares
+original raw revisions/hashes, never a UTF-8 hash of decoded text. Parser-visible BOMs are retained.
+Protocol and provenance JSON retain their separate UTF-8 wire/storage contract.
+
 - `createPinnedResourceReader`: `WorkingState.readPath/listPaths/readContent` with the caller's original
   pin and capture coverage. It does not acquire or release a pin. Relative file and directory symlinks are
   resolved component by component inside that same pin, including `..` that remains inside the pin.
@@ -92,7 +100,8 @@ consumer's actual registered read-tool name; this module does not invent a `read
 - `createCapsuleResourceReader`: exact captured files, directory listings and explicit missing candidates.
   Inputs are copied. An uncaptured path is `unavailable`, not inferred missing.
 - `createDocumentResourceReader`: Documents `readSnapshot` plus an admitted directory-listing callback.
-  It preserves the actual document revision and propagates cancellation. It is `capture-only`.
+  It preserves the actual raw document revision, a supplied capture policy (including Auto), and
+  cancellation. It is `capture-only`.
 - `createAdmittedDirectoryReader`: read-only local user/installed-package assets at an owner-admitted
   root. It uses the existing canonical path/containment helpers, checks root and file identity, reports
   changes during capture, and is `capture-only`. Known nonregular files are rejected before opening;
@@ -116,7 +125,7 @@ Results distinguish `ready` (including an empty string), `missing`, `invalid`, `
 configuration means the existing default; malformed configuration fails preparation. Malformed skills,
 filter exclusions, collisions and unavailable optional resource roots remain observable diagnostics.
 A higher-priority inaccessible SYSTEM does not silently select a lower-priority one. A non-file context
-alias is diagnosed and skipped, matching first-file selection; malformed UTF-8 is not treated as missing.
+alias is diagnosed and skipped, matching first-file selection; binary or invalid text is not treated as missing.
 No operation logs prompt or file bodies.
 
 ## Original capture coverage is necessary

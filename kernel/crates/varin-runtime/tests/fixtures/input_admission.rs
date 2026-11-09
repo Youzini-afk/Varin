@@ -255,7 +255,7 @@ impl InputAdmission for Catalog {
                         source: pin_source,
                     },
                     source.clone(),
-                    varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
+                    varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot { text_encoding:None,
                         root,
                         selection: None,
                         resources: None,

@@ -4,7 +4,7 @@ use super::file_effects::Control;
 #[cfg(test)]
 use super::file_effects::Local;
 use super::file_mutations::{
-    edit_preserving_line_endings, fixed_read_namespace, read_version, FileWriteMode, TextMutation,
+    located_edits, fixed_read_namespace, read_version, FileWriteMode, TextMutation,
 };
 use super::file_resource_leases::{canonical_lease_path, FileLeaseRequest};
 use super::file_resources::{
@@ -33,9 +33,14 @@ pub(crate) struct Task {
     lease: String,
     pub cancellation: Arc<AtomicBool>,
     expected_key: Option<String>,
+    text_policy:Option<crate::text::Policy>,
+    text_branch:Option<String>,
     live_root: Option<varin_runtime::catalog::launches::LiveRoot>,
 }
 impl Task {
+    pub(crate) fn with_text_branch(mut self,branch:Option<String>)->Self{self.text_branch=branch;self}
+
+    pub(crate) fn with_text_policy(mut self,policy:Option<crate::text::Policy>)->Self{self.text_policy=policy;self}
     pub(crate) fn with_source(
         mut self,
         key: Option<String>,
@@ -102,18 +107,18 @@ impl Task {
     fn upload(
         &self,
         owner: &mut impl Control,
-        text: &str,
+        bytes: &[u8],
         label: &str,
     ) -> Result<Value, KernelError> {
         let stream = format!("text-{}", Uuid::new_v4());
-        let upload = json!({"workspaceId":self.workspace,"operationId":format!("{label}:{}",self.operation),"streamId":stream,"byteLength":text.len()});
+        let upload = json!({"workspaceId":self.workspace,"operationId":format!("{label}:{}",self.operation),"streamId":stream,"byteLength":bytes.len()});
         let begin = upload.clone();
         self.control(owner, move |t, s| {
             t.authorize(s)?;
             s.begin_blob_stream(&begin, &t.grant.grant_id)
         })?;
         let outcome = (|| {
-            for (sequence, bytes) in text.as_bytes().chunks(65536).enumerate() {
+            for (sequence, bytes) in bytes.chunks(65536).enumerate() {
                 self.check()?;
                 let (stream, bytes) = (stream.clone(), bytes.to_vec());
                 self.control(owner, move |t, s| {
@@ -179,14 +184,14 @@ impl Task {
                 }
                 if prior["state"]=="committed"{
                     let receipt=receipt.clone();
-                    return self.control(owner,move |t,s|s.mutation_receipt(receipt,&t.root.root_id,t.mutation.path()));
+                    return self.control(owner,move |t,s|{let committed=s.operation_get(&json!({"operationId":t.operation}))?;s.mutation_receipt(if committed["state"]=="committed"{committed["result"].clone()}else{receipt},&t.root.root_id,t.mutation.path())});
                 }
                 if prior["state"]!="started"{return Err(KernelError::Operation("mutation journal state cannot be replayed".into()));}
                 let mut intent=receipt["intent"].clone();intent["leaseId"]=json!(self.lease);
                 *dispatched=true;
                 let effect=self.control(owner,move |t,s|s.prepare_file_effect("file.apply",&intent,&t.authorize(s)?,t.cancellation.clone()))?;
                 let receipt=effect.run_borrowed(owner)?;
-                return self.control(owner,move |t,s|s.mutation_receipt(receipt,&t.root.root_id,t.mutation.path()));
+                return self.control(owner,move |t,s|{let committed=s.operation_get(&json!({"operationId":t.operation}))?;s.mutation_receipt(if committed["state"]=="committed"{committed["result"].clone()}else{receipt},&t.root.root_id,t.mutation.path())});
             }
             if self.mutation.read_version().is_empty() {
                 match fs::symlink_metadata(&resource.absolute) {
@@ -198,7 +203,7 @@ impl Task {
             }
             let reader=self.control(owner,|t,s|{
                 let grant=t.authorize(s)?;
-                s.prepare_retained_mutation_read(&json!({"rootId":t.root.root_id,"path":t.mutation.path(),"offset":0,"leaseId":t.lease}),&grant,t.cancellation.clone())
+                s.prepare_retained_mutation_read(&json!({"rootId":t.root.root_id,"path":t.mutation.path(),"offset":0,"raw":true,"leaseId":t.lease}),&grant,t.cancellation.clone())
             })?;
             let prepared=reader.run()?;
             let expected=prepared.state.clone();
@@ -211,7 +216,7 @@ impl Task {
                         "reason":if missing{"replace_target_missing"}else{"create_target_exists"}}));
                 }
             }
-            let mut version_matches=if self.mutation.read_version().is_empty(){matches!(expected,FileState::Missing)}else{self.mutation.read_version()==current_version};
+            let mut version_matches=if self.mutation.read_version().is_empty(){matches!(expected,FileState::Missing)}else{self.mutation.raw_read_version()==current_version};
             if !version_matches && !self.mutation.read_version().is_empty(){
                 if let Some(baseline)=&self.baseline {
                     let original=self.control(owner,|t,s|{
@@ -220,9 +225,19 @@ impl Task {
                     })?;
                     let state=original["entries"].as_array().and_then(|entries|entries.first()).and_then(|entry|entry.get("state")).cloned().unwrap_or_else(||json!({"kind":"missing"}));
                     let mut state:FileState=serde_json::from_value(state)?;
-                    if read_version(&fixed_read_namespace(&self.workspace,baseline),self.mutation.path(),&state)?==self.mutation.read_version(){
+                    if read_version(&fixed_read_namespace(&self.workspace,baseline),self.mutation.path(),&state)?==self.mutation.raw_read_version(){
                         #[cfg(windows)]
                         if let FileState::RegularFile{mode:Some(mode),..}=&mut state{*mode=if *mode&0o222==0{0o444}else{0o666};}
+                        if let FileState::RegularFile{object_hash,..}=&mut state {
+                            if super::file_content::is_range(object_hash) {
+                                let hash=object_hash.clone();
+                                let reader=self.control(owner,move |t,s|{
+                                    let grant=t.authorize(s)?;let base=t.baseline.as_ref().expect("fixed mutation baseline");
+                                    s.prepare_blob_read(&json!({"hash":hash,"branchId":base.branch_id,"revision":base.revision,"path":t.mutation.path(),"offset":0,"length":0}),&grant,t.cancellation.clone())
+                                })?;
+                                *object_hash=reader.content_digest()?;
+                            }
+                        }
                         version_matches=Storage::file_state_matches(&expected,&state);
                     }
                 }
@@ -236,21 +251,29 @@ impl Task {
                 _=>return Err(KernelError::Operation("text mutation requires a regular file or a missing write target".into()))
             };
             let previous=if matches!(expected,FileState::RegularFile{..}){
-                let text=observed["content"]["text"].as_str().ok_or_else(||KernelError::Operation("text mutation requires UTF-8 content".into()))?;
-                if text.contains('\0'){return Err(KernelError::Operation("text mutation cannot overwrite binary content".into()));}
-                Some(text.to_owned())
+                let encoded=observed["content"]["bytesBase64"].as_str().ok_or_else(||KernelError::Storage("Original file read omitted raw bytes".into()))?;
+                Some(BASE64.decode(encoded).map_err(|_|KernelError::Storage("Invalid original bytes".into()))?)
             }else{None};
-            let content=match &*self.mutation{
-                TextMutation::Write(args)=>if previous.as_ref().is_some_and(|text|text.starts_with('\u{feff}'))&&!args.content.starts_with('\u{feff}'){
-                    format!("\u{feff}{}",args.content)
-                }else{args.content.clone()},
-                TextMutation::Edit(args)=>edit_preserving_line_endings(previous.as_deref().ok_or_else(||KernelError::Operation("cannot edit a missing file".into()))?,&args.edits)?
+            if let (Some(encoding),Some(format))=(self.mutation.read_encoding(),self.mutation.source_format()){
+                if crate::text::codec(encoding).map_err(crate::text::Failure::kernel)?!=crate::text::codec(&format.encoding).map_err(crate::text::Failure::kernel)?{
+                    return Err(KernelError::Operation("sourceFormat differs from the original read interpretation; read again with the requested encoding".into()));
+                }
+            }
+            let text_receipts=self.control(owner,|t,s|s.text_format_receipts(&t.authorize(s)?,&t.root.root_id))?;
+            let receipt_format=observed["content"]["hash"].as_str().and_then(|hash|text_receipts.format(self.mutation.path(),hash));
+            let decoded=previous.as_deref().map(|bytes|crate::text::decode(bytes,self.mutation.read_encoding().or_else(||self.mutation.source_format().map(|f|f.encoding.as_str())).or_else(||receipt_format.map(|f|f.encoding.as_str())).or_else(||self.text_policy.as_ref().and_then(|p|p.encoding(self.mutation.path()))),self.text_policy.as_ref().and_then(|p|p.default_for(self.mutation.path())))).transpose().map_err(crate::text::Failure::kernel)?;
+            let empty_format=if previous.is_none(){Some(crate::text::decode(&[],self.text_policy.as_ref().and_then(|p|p.encoding(self.mutation.path())),self.text_policy.as_ref().and_then(|p|p.default_for(self.mutation.path()))).map_err(crate::text::Failure::kernel)?.1)}else{None};
+            let source_format=decoded.as_ref().map(|(_,format)|format).or(self.mutation.source_format()).or(empty_format.as_ref());
+            let (content,edits,normalized)=match &*self.mutation{
+                TextMutation::Write(args)=>(args.content.clone(),None,false),
+                TextMutation::Edit(args)=>{let(content,edits,normalized)=located_edits(decoded.as_ref().map(|(text,_)|text.as_ref()).ok_or_else(||KernelError::Operation("cannot edit a missing file".into()))?,&args.edits)?;(content,Some(edits),normalized)}
             };
             if content.contains('\0'){return Err(KernelError::Operation("text mutation content must not contain NUL bytes".into()));}
+            let (content,format)=crate::text::serialize(&content,previous.as_deref(),source_format,self.mutation.target_format(),normalized,edits.as_deref()).map_err(crate::text::Failure::kernel)?;
             let stored=self.upload(owner,&content,"text-content")?;
             let content_owner=string(&stored,"ownerId")?.to_owned();provisional.push(content_owner.clone());
             let native=expected.native().map(|metadata|{
-                let mut value=metadata.clone();let now=super::workspace_metadata::Timestamp::now();
+                let mut value=metadata.clone();if previous.as_deref()==Some(content.as_slice()){return value;}let now=super::workspace_metadata::Timestamp::now();
                 value.modified=varin_runtime::catalog::followups::FileTimestamp{seconds:now.seconds,nanos:now.nanos};value
             });
             let target=FileState::RegularFile{object_hash:string(&stored,"hash")?.into(),byte_length:content.len() as u64,mode,native};
@@ -260,8 +283,8 @@ impl Task {
             })?;
             let mut before_owner=None;
             if turn.is_some(){
-                if let Some(text)=&previous{
-                    let stored=self.upload(owner,text,"journal-before")?;
+                if let Some(bytes)=&previous{
+                    let stored=self.upload(owner,bytes,"journal-before")?;
                     let id=string(&stored,"ownerId")?.to_owned();provisional.push(id.clone());before_owner=Some(id);
                     if serde_json::to_value(&expected)?["objectHash"]!=stored["hash"]{
                         return Err(KernelError::Storage("captured journal before-image differs".into()));
@@ -270,7 +293,13 @@ impl Task {
             }
             let mut params=json!({"workspaceId":self.workspace,"operationId":self.operation,"rootId":self.root.root_id,"path":self.mutation.path(),
                 "leaseId":self.lease,"targetJson":serde_json::to_string(&target)?,"expectedJson":serde_json::to_string(&expected)?,
-                "ownerId":content_owner,"__nativeRequestHash":request_hash,"__nativeGrantId":self.grant.grant_id,"__nativeEpoch":self.grant.kernel_epoch});
+                "ownerId":content_owner,"__textFormat":format,"__textSourceFormat":source_format,"__nativeRequestHash":request_hash,"__nativeGrantId":self.grant.grant_id,"__nativeEpoch":self.grant.kernel_epoch});
+            if let Some(branch)=&self.text_branch {params["__textBranchId"]=json!(branch);}
+            params["__textSourceMode"]=json!(self.source_mode);
+            if let Some(root)=self.text_policy.as_ref().and_then(|p|p.root.as_ref()){params["__textPolicyRoot"]=json!(root);}
+            if self.mutation.target_format().and_then(|target|target.encoding.as_ref()).is_some() && source_format.is_some_and(|source|source.encoding!=format.encoding) {
+                params["__textConversion"]=json!({"sourceEncoding":source_format.unwrap().encoding,"targetEncoding":format.encoding,"rawHash":string(&stored,"hash")?,"choiceRevision":self.text_policy.as_ref().and_then(|p|p.choice_revision(self.mutation.path())).unwrap_or(0)});
+            }
             if let Some(turn)=turn{
                 params["__recoveryTurn"]=turn;params["__recoveryBeforeOwner"]=json!(before_owner);
                 params["__recoveryTool"]=json!(match &*self.mutation{TextMutation::Write(_)=>"file_write",TextMutation::Edit(_)=>"file_edit"});
@@ -279,7 +308,7 @@ impl Task {
             let effect=self.control(owner,move |t,s|s.prepare_file_effect("file.apply",&params,&t.authorize(s)?,t.cancellation.clone()))?;
             *dispatched=true;
             let receipt=effect.run_borrowed(owner)?;
-            self.control(owner,move |t,s|s.mutation_receipt(receipt,&t.root.root_id,t.mutation.path()))
+            self.control(owner,move |t,s|{let committed=s.operation_get(&json!({"operationId":t.operation}))?;s.mutation_receipt(if committed["state"]=="committed"{committed["result"].clone()}else{receipt},&t.root.root_id,t.mutation.path())})
         })).unwrap_or_else(|_|Err(KernelError::Storage("Text mutation worker panicked; inspect its original operation receipt".into())));
         let cleanup = self.control(owner, move |t, s| {
             // An accepted intent owns its exact target and before-image. Anything
@@ -354,6 +383,8 @@ impl Storage {
             lease: format!("write:{}", Uuid::new_v4()),
             cancellation,
             expected_key: None,
+            text_policy:None,
+            text_branch:None,
             live_root: None,
         };
         task.authorize(self)?;

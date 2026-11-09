@@ -238,7 +238,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     ]);
     let mut tools = crate::process_wait::schemas(KernelToolExecutor::selected_schemas(&kinds));
     tools.push(crate::followup_tools::schema());
-    let mut binding = ToolBinding {
+    let mut binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "source".into(),
@@ -855,7 +855,7 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
         ToolKind::ProcessResize,
     ]);
     let tools = KernelToolExecutor::selected_schemas(&kinds);
-    let mut binding = ToolBinding {
+    let mut binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "source".into(),

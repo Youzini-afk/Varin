@@ -1,7 +1,7 @@
 /** Reads the original immutable Documents capture for the existing WorkingState branch preparation. */
 import type { AgentInputContext, AgentInputSnapshotConsumer } from '@varin/protocol';
 import type { DocumentAuthority } from '../../documents/authority.js';
-import { encodeDocumentText } from '../../documents/inspect.js';
+import { encodeDocumentText, isDocumentEncoding } from '../../documents/inspect.js';
 import type { SourceDraftProvenance, SourceDraftResource } from '../../kernel/protocol.generated.js';
 
 
@@ -28,7 +28,7 @@ export function parseSourceDraftProvenance(value: unknown): SourceDraftProvenanc
       || /^[A-Za-z]:/.test(resource.resourceId) || resource.resourceId.split('/').some(part => !part || part === '.' || part === '..')
       || (resource.baseRevision !== null && typeof resource.baseRevision !== 'string')
       || !Number.isSafeInteger(resource.localEditRevision) || Number(resource.localEditRevision) < 0
-      || !text(resource.revision) || resource.encoding !== 'utf-8' || typeof resource.bom !== 'boolean'
+      || !text(resource.revision) || !isDocumentEncoding(resource.encoding) || typeof resource.bom !== 'boolean'
       || (resource.coordinationId !== undefined && !text(resource.coordinationId))
       || (resource.documentInstanceId !== undefined && !text(resource.documentInstanceId))
       || (resource.bufferHash !== undefined && (typeof resource.bufferHash !== 'string' || !/^sha256-[0-9a-f]{64}$/.test(resource.bufferHash)))
@@ -44,13 +44,13 @@ export function parseSourceDraftProvenance(value: unknown): SourceDraftProvenanc
     ownerId: input.ownerId, ownerGeneration: Number(input.ownerGeneration), resources };
 }
 
-export function readSourceDrafts(input: {
+export async function readSourceDrafts(input: {
   documents: Pick<DocumentAuthority, 'cloneInputSnapshot'>;
   consumer: Extract<AgentInputSnapshotConsumer, { kind: 'thread' }>;
   context: AgentInputContext;
   workspaceId: string;
   signal?: AbortSignal;
-}): { editorDrafts: Array<{ path: string; content: Buffer }>; drafts?: SourceDraftProvenance } {
+}): Promise<{ editorDrafts: Array<{ path: string; content: Buffer; encoding: string }>; drafts?: SourceDraftProvenance }> {
   const { documents, consumer, context, workspaceId, signal } = input;
   signal?.throwIfAborted();
   if (context.source === 'disk') return { editorDrafts: [] };
@@ -68,6 +68,7 @@ export function readSourceDrafts(input: {
   }
   const drafts = parseSourceDraftProvenance({ threadId: consumer.threadId, branchId: consumer.branchId,
     snapshotRef: context.snapshot.ref, ownerId: clone.owner.ownerId, ownerGeneration: clone.owner.generation,
-    resources: resources.map(({ content: _content, aliases: _aliases, resource, ...metadata }) => ({ ...resource, ...metadata })) });
-  return { editorDrafts: resources.map(resource => ({ path: resource.resource.resourceId, content: encodeDocumentText(resource) })), drafts };
+    resources: resources.map(({ content: _content, sourceBytesBase64: _sourceBytes, sourceFormat: _sourceFormat, normalizeLineEndings: _normalize, edits: _edits, aliases: _aliases, resource, ...metadata }) => ({ ...resource, ...metadata })) });
+  return { editorDrafts: await Promise.all(resources.map(async resource => ({ path: resource.resource.resourceId, encoding: resource.encoding, content: await encodeDocumentText({ ...resource, ...(resource.sourceBytesBase64 ? { sourceBytes: Buffer.from(resource.sourceBytesBase64, 'base64') } : {}),
+      ...(resource.sourceFormat && !resource.normalizeLineEndings && resource.lineEnding === resource.sourceFormat.defaultLineEnding ? { lineEnding: 'mixed' as const } : {}), normalizeLineEndings: true }) }))), drafts };
 }

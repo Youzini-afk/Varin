@@ -474,6 +474,7 @@ pub(crate) struct SourceResourceControlParams {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SourceResourceAction {
     Read {
+        encoding:Option<String>,raw:Option<bool>,
         path: String,
         offset: u64,
         length: Option<u64>,

@@ -299,7 +299,7 @@ fn file_effect_crud_replays_original_receipts_and_cleans_pre_effect_cancellation
 #[test]
 fn text_mutation_worker_borrows_one_lease_and_keeps_journal_replay_conditional() {
     let mut f = Fixture::new();
-    let mutation = TextMutation::Write(FileWriteArgs {
+    let mutation = TextMutation::Write(FileWriteArgs { source_format:None,target_format:None,
         path: "body".into(),
         read_version: String::new(),
         content: "first\r\n".into(),
@@ -325,7 +325,7 @@ fn text_mutation_worker_borrows_one_lease_and_keeps_journal_replay_conditional()
         ("create", mutation),
         (
             "replace",
-            TextMutation::Write(FileWriteArgs {
+            TextMutation::Write(FileWriteArgs { source_format:None,target_format:None,
                 path: "body".into(),
                 read_version: "stale".into(),
                 content: "must not write".into(),

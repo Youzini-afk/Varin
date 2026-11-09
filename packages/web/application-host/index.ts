@@ -179,6 +179,7 @@ import webPush from 'web-push';
 import { ApplicationExtensionCatalog, ApplicationExtensionRuntime, ExtensionPackageManager } from '@varin/extension-host';
 import { VARIN_BUNDLED_LANGUAGE_SERVERS } from '@varin/extension-builtins';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
+import { bindDocumentTextCodec } from './lib/documents/inspect.js';
 
 import { createKernelProcessService } from './lib/kernel/process-service.js';
 import { createKernelProcessIdentityResolver } from './lib/kernel/process-identity.js';
@@ -324,6 +325,7 @@ import { createGracefulShutdownRuntime, createShutdownCollector, ShutdownDeadlin
 import { createDrainingAdmission, createHttpObservationDrain } from './lib/draining-admission.js';
 import { assertDataRootMayStart } from './lib/data-restore-guard.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createProjectTextEncodingService } from './lib/projects/text-encoding.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
@@ -1057,12 +1059,38 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let nativeWorkspaces:NativeWorkspaceOwner|undefined;
   let requestSourceMaintenance=()=>{};
   let releaseSourcePreparations=async(_threads:readonly string[])=>{};
+  bindDocumentTextCodec(kernelClient);
+  const projectTextEncoding = createProjectTextEncodingService({
+    projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    canonicalRoot: async (workspaceId): Promise<string> => {
+      const registration = await documentsAuthority.admitWorkspaceRegistration(workspaceId);
+      const native = await nativeWorkspaces?.resolveId(workspaceId, undefined, registration.nativeSource);
+      return native ? path.join(native.originalPath, native.reference.native_scope ?? '') : registration.canonicalPath;
+    },
+    source: async workspaceId => {
+      // Registration supplies only the settings namespace. The actual Documents owner admits
+      // its current physical root; native views retain their logical root and existing grant.
+      const workspace = await documentsAuthority.getWorkspace(workspaceId);
+      if (workspace.kind !== 'directory') return undefined;
+      const native = await nativeWorkspaces?.textEncodingSource(workspaceId);
+      if (native) return native;
+      return kernelStorageAdapter.fileAuthorityContext({ owningWorkspaceId: workspaceId,
+        executionWorkspaceId: workspaceId, canonicalRoot: workspace.root });
+    },
+    read: projectConfigRuntime.readTextEncoding,
+    remember: projectConfigRuntime.rememberTextEncoding,
+    reconcile: projectConfigRuntime.reconcileTextEncoding,
+  });
+  kernelClient.textEncodingPolicy = projectTextEncoding.policyFor;
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: VARIN_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
     isTrusted: workspaceRootGuard,
+    resolveTextEncoding: projectTextEncoding.resolve,
+    resolveTextEncodingPolicy: projectTextEncoding.policyFor,
+    rememberTextEncoding: projectTextEncoding.remember,
     nativeWorkspaces:{resolveId:(id,signal,reference)=>nativeWorkspaces?.resolveId(id,signal,reference)??Promise.resolve(undefined),
       resolvePath:(value,containing)=>nativeWorkspaces?.resolvePath(value,containing)??Promise.resolve(undefined),
       retainReference:(source,key)=>nativeWorkspaces!.retainReference(source,key),releaseReference:key=>nativeWorkspaces!.releaseReference(key)},
@@ -1738,7 +1766,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
   webMaterialAccess.findAnalysisConfig = webMaterials.findAnalysisConfig;
   const materialCollectionsService = createMaterialCollectionsService(materialStorage, { materials: webMaterials });
-  const threadIntegrationCoordinator = new IntegrationCoordinator({ readIntegrationOperation: (workspaceId, operationId) => kernelRecoveryStore.getOperation(workspaceId, operationId), resolveDocumentWorkspaceId: scopeDocumentWorkspace, workingStates: harnessWorkingStates, inspectDirtyBuffers: workspaceId => documentsAuthority.inspectDirtyBuffers(workspaceId), beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths), requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options), resolveDirectoryApplyContext });
+  const threadIntegrationCoordinator = new IntegrationCoordinator({ resolveTextInterpretation: resource => documentsAuthority.resolveTextInterpretation(resource), readIntegrationOperation: (workspaceId, operationId) => kernelRecoveryStore.getOperation(workspaceId, operationId), resolveDocumentWorkspaceId: scopeDocumentWorkspace, workingStates: harnessWorkingStates, inspectDirtyBuffers: workspaceId => documentsAuthority.inspectDirtyBuffers(workspaceId), beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths), requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options), resolveDirectoryApplyContext });
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
     threadIntegrationCoordinator.invalidateWorkspace(workspaceId, resourceIds);
   };

@@ -62,6 +62,7 @@ impl Storage {
         session: Uuid,
         grant: &Grant,
         file_owner: &Grant,
+        text_snapshot: &super::text_formats::CheckpointText,
     ) -> Result<Value, KernelError> {
         let current = self.require_result_scope(&grant.grant_id, &branch.workspace_id)?;
         if current.state != crate::model::GrantState::Active
@@ -205,11 +206,11 @@ impl Storage {
                 base_root: filesystem_base,
                 base_pin_id: filesystem_base_pin,
             };
-            Ok(
-                json!({"publicationId":publication,"candidateOperationId":operation,"workspaceId":branch.workspace_id,"branchId":branch_id,
+            let mut candidate = json!({"publicationId":publication,"candidateOperationId":operation,"workspaceId":branch.workspace_id,"branchId":branch_id,
                 "root":root,"baseRoot":branch.base_root,"writeRevision":branch.write_revision,"pinId":pin_id,"basePinId":base_pin,
-                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null,"filesystem":filesystem}),
-            )
+                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null,"filesystem":filesystem});
+            text_snapshot.freeze_candidate(&mut candidate)?;
+            Ok(candidate)
         })
     }
     pub(super) fn require_result_filesystem_pin(

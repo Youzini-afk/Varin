@@ -327,6 +327,7 @@ impl Storage {
                     storage.recovery_operation_release(authorized_params, grant_id.unwrap_or(""))
                 })
             }
+            "file.text.conversions" => storage.file_text_conversions(authorized_params, authorized_grant),
             "operation.get" => storage.operation_get(authorized_params),
             "operation.release" => storage.operation_release(authorized_params),
             _ => Err(KernelError::Protocol(format!("unknown method: {method}"))),

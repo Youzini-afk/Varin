@@ -1,3 +1,4 @@
+import { inspectDocumentBytes } from '../../documents/inspect.js';
 import type {
   RecoveryState,
   ThreeWayMergePlan,
@@ -12,16 +13,6 @@ export interface TextMergeResult {
   clean: boolean;
   text: string;
 }
-
-export const isBinaryBuffer = (buffer: Buffer): boolean => {
-  if (buffer.includes(0)) return true;
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-    return false;
-  } catch {
-    return true;
-  }
-};
 
 const splitLineTokens = (text: string): string[] => (
   text.match(/[^\r\n]*(?:\r\n|\n|\r|$)/gu)?.filter((token) => token.length > 0) ?? []
@@ -199,12 +190,16 @@ export const statesEqual = (a?: RecoveryState | null, b?: RecoveryState | null):
   return sameState(a, b);
 };
 
+export type TextInterpretation = { encoding?: string; defaultEncoding?: string };
+export interface PathTextInterpretations { base?: TextInterpretation; parent?: TextInterpretation; child?: TextInterpretation }
+
 export interface PathMergeContext {
   path: string;
   baseState: RecoveryState;
   parentState: RecoveryState;
   childState: RecoveryState;
   readContent(state: RecoveryState): Promise<Buffer | null>;
+  interpretations?: PathTextInterpretations;
 }
 
 const mergeMode = (
@@ -292,8 +287,12 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
       };
     }
 
-    const isBinary = isBinaryBuffer(parentBuf) || isBinaryBuffer(childBuf) || isBinaryBuffer(baseBuf ?? Buffer.from(""));
-    if (isBinary) {
+    const [parentText, childText, baseText] = await Promise.all([
+      inspectDocumentBytes(parentBuf, true, ctx.interpretations?.parent),
+      inspectDocumentBytes(childBuf, true, ctx.interpretations?.child),
+      inspectDocumentBytes(baseBuf ?? Buffer.from(''), true, ctx.interpretations?.base),
+    ]);
+    if (parentText.kind !== 'text' || childText.kind !== 'text' || baseText.kind !== 'text') {
       return {
         path,
         decision: "conflict",
@@ -305,9 +304,9 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
       };
     }
 
-    const baseStr = (baseBuf ?? Buffer.from("")).toString("utf8");
-    const parentStr = parentBuf.toString("utf8");
-    const childStr = childBuf.toString("utf8");
+    const baseStr = baseText.content;
+    const parentStr = parentText.content;
+    const childStr = childText.content;
 
     const merged = mergeText3Way(baseStr, parentStr, childStr);
     if (merged.clean) {
@@ -318,6 +317,7 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
         parentState,
         childState,
         mergedText: merged.text,
+        textFormat: parentText.format,
         ...(mode.mode === undefined ? {} : { mergedMode: mode.mode }),
         ...(attributes.value?{mergedNative:attributes.value}:{}),
         isText: true,
@@ -328,6 +328,7 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
       path,
       decision: "conflict",
       conflictMarkers: merged.text,
+      textFormat: parentText.format,
       conflictReason: "Text divergence with conflicting chunks",
       baseState,
       parentState,
@@ -360,6 +361,7 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
 };
 
 export interface BuildPlanInput {
+  interpretations?: Record<string, PathTextInterpretations>;
   operationId: string;
   workspaceId: string;
   threadId: string;
@@ -389,6 +391,7 @@ export const buildThreeWayMergePlan = async (input: BuildPlanInput): Promise<Thr
       parentState: pState,
       childState: cState,
       readContent: input.readContent,
+      ...(input.interpretations?.[p] ? { interpretations: input.interpretations[p] } : {}),
     });
 
     paths.push(pathPlan);

@@ -110,7 +110,7 @@ const observedRevision = (
   return revisions.values().next().value ?? "";
 };
 
-const captureOf = (path: string, result: KernelComputeResult): { unchanged?: boolean; sourceMetadata?: StructureSourceMetadata } => {
+const captureOf = (path: string, result: KernelComputeResult): { unchanged?: boolean; textIdentity?: string; sourceMetadata?: StructureSourceMetadata } => {
   const frame = result.records.find(record => record.path === path && record.kind === "document"
     && ["captured", "unchanged"].includes(String(recordOf(record.data).status)));
   if (!frame) return {};
@@ -118,6 +118,7 @@ const captureOf = (path: string, result: KernelComputeResult): { unchanged?: boo
   const data = recordOf(frame.data);
   const metadata = data.metadata as Partial<StructureSourceMetadata> | null;
   return {
+    ...(typeof data.textIdentity === "string" ? { textIdentity: data.textIdentity } : {}),
     ...(data.status === "unchanged" ? { unchanged: true } : {}),
     ...(typeof metadata?.byteLength === "string" && typeof metadata.modifiedTimeNs === "string"
       ? { sourceMetadata: { byteLength: metadata.byteLength, modifiedTimeNs: metadata.modifiedTimeNs } } : {}),
@@ -230,6 +231,7 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
         paths: [request.path],
         parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
         files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}),
+          ...(request.unchangedTextIdentity ? { unchangedTextIdentity: request.unchangedTextIdentity } : {}),
           ...(request.unchangedRevision ? { unchangedRevision: request.unchangedRevision } : {}) }],
       },
       { signal: request.signal },

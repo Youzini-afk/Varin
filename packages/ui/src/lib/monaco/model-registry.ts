@@ -323,6 +323,7 @@ export class FileEditorModelRegistry {
       expectedLocalEditRevision,
       edits: changes,
       origin: `monaco:${entry.documentInstanceId ?? 'pending'}`,
+      ...(event.isUndoing ? { history: 'undo' as const } : event.isRedoing ? { history: 'redo' as const } : {}),
     });
     if (result.status === 'applied') {
       entry.record = result.record;

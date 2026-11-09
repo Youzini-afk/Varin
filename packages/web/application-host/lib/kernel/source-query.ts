@@ -1,13 +1,13 @@
+import { resolveSourceTextPolicy } from './source-provenance.js';
 import { randomUUID } from 'node:crypto';
 import { sourceReadError } from './source-admission-error.js';
 /** Query access retains the original admitted source authority. Private derived-language
  * service contexts prepare and release Storage-owned views; they never replace a Run grant. */
 import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
-import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
 import type { ExploreFileSnapshot } from '../harness/file-snapshot.js';
 import { normalizePathIdentity, stripWindowsNamespacePrefix } from '../workspace/path-safety.js';
-import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
+import type { KernelClient, KernelGrantHandle, KernelScopedClient } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { runKernelCompute, type KernelComputeInput, type KernelComputeOptions, type KernelComputeResult } from './compute-runner.js';
 import type { LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
@@ -15,9 +15,12 @@ import type { SourceServiceOperation, SourceServiceResponse } from '../harness/m
 import type { NativeProcessIdentity } from './process-service.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
 import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
+import { hasTextEncodingRules } from '../projects/text-encoding.js';
 
 export type SourceComputeInput = Omit<KernelComputeInput, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'>;
 export interface SourceQueryAccess {
+  encoding?: string;
+  textEncoding?: import('./protocol.generated.js').KernelTextPolicy;
   runId?: string;
   threadId: string;
   grantId?: string;
@@ -141,6 +144,8 @@ export function createSourceQueryOwner(options: {
       throw new Error(`The selected language backend reads the entire ${project}; the current grant only allows selected paths. Use a whole-project read grant or file_read for path-scoped access.`);
     }
   };
+  const textPolicy = (query: SourceQueryAccess, client: KernelScopedClient, signal?: AbortSignal) =>
+    query.textEncoding ?? resolveSourceTextPolicy(kernel, client, query.source, query.physicalRoot, signal);
   const compute: SourceQueryOwner['compute'] = async (query, input, options = {}) => {
     if (managed(query)) {
       const result = await service(query, { kind: 'compute', input: { ...input, jobId: `compute:${randomUUID()}` } }, options.signal);
@@ -151,7 +156,8 @@ export function createSourceQueryOwner(options: {
     const source = query.source;
     let drained = false;
     try {
-      return await runKernelCompute(client, { ...input, workspaceId: source.workspace_id,
+      const textEncoding = await textPolicy(query, client, options.signal);
+      return await runKernelCompute(client, { ...(textEncoding && hasTextEncodingRules(textEncoding) ? { textEncoding } : {}), ...input, workspaceId: source.workspace_id,
         ...(immutable(query) ? { branchId: source.branch_id!, revision: source.revision! }
           : { rootId: query.physicalRoot!.rootId }) }, { ...options, onDrained: () => {
             drained = true; options.onDrained?.();
@@ -242,48 +248,33 @@ export function createSourceQueryOwner(options: {
       const client = kernel.scoped(sourceGrant(query));
       const address = query.physicalRoot ? { workspaceId: source.workspace_id, rootId: query.physicalRoot.rootId, path } : null;
       const before = address ? await client.fileReadCheck(address, signal) : null;
-      let result: ExploreFileSnapshot;
-      if (source.mode === 'live_root') {
-        let workspaceId = source.workspace_id;
-        const owning = await documents.admitWorkspaceRegistration(workspaceId, signal);
-        if (normalizePathIdentity(owning.canonicalPath) !== normalizePathIdentity(source.live_root!.canonicalRoot)) {
-          if (!documents.resolveWorkspace) throw new Error('Scoped source document admission is unavailable');
-          workspaceId = (await documents.resolveWorkspace({ path: source.live_root!.canonicalRoot })).workspaceId;
-          const selected = await documents.admitWorkspaceRegistration(workspaceId, signal);
-          if (normalizePathIdentity(selected.canonicalPath) !== normalizePathIdentity(source.live_root!.canonicalRoot)) throw new Error('Scoped source document root changed');
-        }
-        const snapshot = await documents.readSnapshot({ workspaceId, resourceId: path }, { signal });
-        result = snapshot.status === 'ready' ? { status: 'ready', content: snapshot.content, revision: snapshot.revision, source: 'disk' }
-          : { status: 'unavailable', message: `Source text is unavailable (${snapshot.status})` };
-      } else {
-        // A single native capture supplies all pages, retaining its actual reader until drain.
-        // The explicit range avoids the bytes operation's default 64 KiB partial read.
-        const parts: Buffer[] = [];
-        let offset = 0, byteLength: number | undefined, revision: string | undefined;
-        const page = await compute(query, { operation: 'bytes', lane: 'foreground', paths: [path], files: [{ path }],
-          includeHidden: true, respectGitignore: false, byteLength: Number.MAX_SAFE_INTEGER }, { signal, collect: false, onRecords(records) {
-          for (const record of records) {
-            if (record.kind !== 'bytes') continue;
-            if (record.path !== path || !record.data || typeof record.data !== 'object') throw new Error('The original source reader changed its path');
-            const data = record.data as Record<string, unknown>;
-            if (!Number.isSafeInteger(data.byteLength) || Number(data.byteLength) < 0 || data.offset !== offset
-              || typeof data.bytesBase64 !== 'string' || (revision !== undefined && revision !== record.revision)
-              || (byteLength !== undefined && byteLength !== data.byteLength)) throw new Error('The original source reader returned incomplete pages');
-            const bytes = Buffer.from(data.bytesBase64, 'base64');
-            revision = record.revision; byteLength = Number(data.byteLength); offset += bytes.byteLength;
-            if (offset > byteLength) throw new Error('The original source reader exceeded its bytes');
-            parts.push(bytes);
+      // Read, search and structure share the admitted native reader and its exact
+      // format receipts. Re-decoding raw bytes here would apply a frozen source
+      // rule over a newer successful conversion of those same source bytes.
+      const parts: string[] = [];
+      let offset = 0, revision: string | undefined, complete = false, unavailable: string | undefined;
+      const page = await compute(query, { operation: 'read', lane: 'foreground', paths: [path], files: [{ path }],
+        includeHidden: true, respectGitignore: false, ...(query.encoding ? { encoding: query.encoding } : {}) },
+      { signal, collect: false, onRecords(records) {
+        for (const record of records) {
+          if (record.path !== path || !record.data || typeof record.data !== 'object') throw new Error('The original source reader changed its path');
+          const data = record.data as Record<string, unknown>;
+          if (record.kind !== 'text') {
+            if (record.kind === 'error' || record.kind === 'document') unavailable = typeof data.message === 'string'
+              ? data.message : `Source text is unavailable (${String(data.status ?? 'unreadable')})`;
+            continue;
           }
-        } });
-        if (!['ready', 'empty'].includes(page.status) || byteLength === undefined || offset !== byteLength || !revision) {
-          return { status: 'unavailable', message: page.message ?? 'The selected source is missing or is not a regular readable file' };
+          if (complete || data.offset !== offset || typeof data.text !== 'string' || typeof data.final !== 'boolean'
+            || (revision !== undefined && revision !== record.revision)) throw new Error('The original source reader returned incomplete text pages');
+          revision = record.revision;
+          offset += Buffer.byteLength(data.text, 'utf8');
+          complete = data.final;
+          parts.push(data.text);
         }
-        const bytes = Buffer.concat(parts), inspected = inspectDocumentBytes(bytes);
-        if (revisionFromBytes(bytes) !== revision) throw new Error('The original source reader revision differs from its bytes');
-        result = inspected.kind === 'text' ? { status: 'ready', content: inspected.content, revision,
-          source: immutable(query) ? 'working-branch' : 'disk' }
-          : { status: 'unavailable', message: `The selected source is ${inspected.kind}` };
-      }
+      } });
+      const result: ExploreFileSnapshot = ['ready', 'empty'].includes(page.status) && complete && revision
+        ? { status: 'ready', content: parts.join(''), revision, source: immutable(query) ? 'working-branch' : 'disk' }
+        : { status: 'unavailable', message: unavailable ?? page.message ?? 'The selected source is missing or is not a regular readable file' };
       const after = address ? await client.fileReadCheck(address, signal) : null;
       await validate(query, signal);
       if (before?.resourceKey !== after?.resourceKey) return { status: 'stale', message: 'Resource identity changed during source read' };

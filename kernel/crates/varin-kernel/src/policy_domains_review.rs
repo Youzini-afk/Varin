@@ -738,7 +738,7 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
         ToolKind::ProcessRead,
         ToolKind::ProcessWrite,
     ]);
-    let mut binding = ToolBinding {
+    let mut binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "process".into(),

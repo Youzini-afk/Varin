@@ -10,6 +10,10 @@ import type { LanguageQuery, LaunchSource, LiveRoot, KernelMaterializedView } fr
 export interface LanguageResult {
   revision?: string;
   contentHash?: string;
+  rawContentHash?: string;
+  sourceObjectHash?: string;
+  textIdentity?: string;
+  format?: import('./protocol.generated.js').KernelTextFormat;
   status: 'ready' | 'partial' | 'pending' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled';
   source?: {
     selection: LaunchSource;
@@ -57,7 +61,8 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
       await sources.checkPath(query,query.path,signal);
       const recipeId=await structure().unitsRecipe?.({path:query.path,workspaceId:query.source.workspace_id,languageId:languageIdForPath(query.path)});
       if (!recipeId) return failure('unsupported','No Tree-sitter grammar is available for this file');
-      const computed=await sources.compute(query,{operation:'structure',lane:'foreground',files:[{path:query.path,recipeId}]},{signal});
+      const computed=await sources.compute(query,{operation:'structure',lane:'foreground',files:[{path:query.path,recipeId}],
+        ...(query.encoding ? { encoding: query.encoding } : {})},{signal});
       const summary=computed.records.find(row=>row.kind==='structure');
       const state=record(summary?.data);
       if (!summary || !['ready','empty'].includes(String(state.status))) {
@@ -68,7 +73,11 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
       const items=computed.records.filter(row=>row.kind==='structure-part' && record(row.data).category==='symbols' && row.revision===summary.revision)
         .flatMap(row=>Array.isArray(record(row.data).items) ? (record(row.data).items as unknown[]).map(record) : []);
       await sources.checkPath(query,query.path,signal);
-      return {...failure('ready'),items,revision:summary.revision,contentHash:String(state.contentHash)};
+      return {...failure('ready'),items,revision:summary.revision,contentHash:String(state.contentHash),
+        ...(typeof state.textIdentity === 'string' ? { textIdentity: state.textIdentity } : {}),
+        ...(typeof state.rawContentHash === 'string' ? { rawContentHash: state.rawContentHash } : {}),
+        ...(typeof state.sourceObjectHash === 'string' ? { sourceObjectHash: state.sourceObjectHash } : {}),
+        ...(state.format && typeof state.format === 'object' ? { format: state.format as import('./protocol.generated.js').KernelTextFormat } : {})};
     }
     if (!supervisor) return failure('unsupported','IDE language services are not enabled');
     await sources.validateLanguage(query, signal);

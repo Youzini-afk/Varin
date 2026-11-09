@@ -1010,7 +1010,7 @@ mod tests {
                 .unwrap();
             let state = self.storage.capture_file_state(&resource).unwrap();
             let read_version = read_version(&self.root_id, path, &state).unwrap();
-            let mutation = TextMutation::Write(FileWriteArgs {
+            let mutation = TextMutation::Write(FileWriteArgs { source_format:None,target_format:None,
                 mode: None,
                 path: path.into(),
                 content: text.into(),
@@ -1059,6 +1059,16 @@ mod tests {
             drop(self);
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn gbk_journal_restore_and_undo_recover_original_bytes_not_reencoded_unicode(){
+        let mut f=Fixture::new();let original=b"\xa3\xa0\r\n\xd6\xd0\xce\xc4\n";
+        fs::write(f.workspace.join("legacy.txt"),original).unwrap();
+        f.write("legacy.txt","　\r\n新文\n");
+        let after=fs::read(f.workspace.join("legacy.txt")).unwrap();assert_eq!(after,b"\xa3\xa0\r\n\xd0\xc2\xce\xc4\n");
+        let restored=f.restore("gbk-restore",Some("current:before"),None);assert_eq!(restored["status"],"applied","{restored}");assert_eq!(fs::read(f.workspace.join("legacy.txt")).unwrap(),original);
+        let undone=f.restore("gbk-undo",None,Some("gbk-restore"));assert_eq!(undone["status"],"applied","{undone}");assert_eq!(fs::read(f.workspace.join("legacy.txt")).unwrap(),after);f.close();
     }
 
     #[test]

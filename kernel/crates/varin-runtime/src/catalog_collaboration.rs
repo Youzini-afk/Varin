@@ -51,6 +51,18 @@ pub struct SourceDraftProvenance {
     pub resources: Vec<SourceDraftResource>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceTextPolicy {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_encoding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choice_revisions: Option<std::collections::BTreeMap<String,u64>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "consistency", deny_unknown_fields)]
 pub enum ChildSourceProvenance {
     #[serde(rename = "refreshed-root")]
@@ -64,6 +76,8 @@ pub enum ChildSourceProvenance {
         conflicts: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
+        #[serde(rename = "textEncoding", skip_serializing_if = "Option::is_none")]
+        text_encoding: Option<SourceTextPolicy>,
     },
     #[serde(rename = "fixed-root")]
     FixedRoot {
@@ -72,6 +86,8 @@ pub enum ChildSourceProvenance {
         selection: Option<SourceSnapshotSelection>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
+        #[serde(rename = "textEncoding", skip_serializing_if = "Option::is_none")]
+        text_encoding: Option<SourceTextPolicy>,
     },
     #[serde(rename = "stable-capture")]
     StableCapture {
@@ -88,6 +104,8 @@ pub enum ChildSourceProvenance {
         drafts: Option<SourceDraftProvenance>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
+        #[serde(rename = "textEncoding", skip_serializing_if = "Option::is_none")]
+        text_encoding: Option<SourceTextPolicy>,
     },
     #[serde(rename = "git-base-with-overlay")]
     GitBaseWithOverlay {
@@ -104,6 +122,8 @@ pub enum ChildSourceProvenance {
         drafts: Option<SourceDraftProvenance>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
+        #[serde(rename = "textEncoding", skip_serializing_if = "Option::is_none")]
+        text_encoding: Option<SourceTextPolicy>,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -15,6 +15,7 @@ import {
   FILE_EDITOR_COMMAND_IDS,
   saveFileEditorDocument,
 } from '@/lib/monaco/editor-command-service';
+import { DocumentEncodingMenuItems, DocumentEncodingNotice } from './DocumentEncodingMenu';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -187,14 +188,14 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }, [record?.dirty, tab.preview, tab.tabId, workspaceId]);
 
   React.useEffect(() => {
-    if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready') return;
+    if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready' || record.saveErrorRevision === record.localEditRevision) return;
     const timer = setTimeout(() => {
       void saveFileEditorDocument(identity).catch((error) => {
         console.error('[Editor] Auto-save failed:', error);
       });
     }, 1_500);
     return () => clearTimeout(timer);
-  }, [autoSaveEnabled, identity, record?.dirty, record?.localEditRevision, record?.saving, record?.status]);
+  }, [autoSaveEnabled, identity, record?.dirty, record?.localEditRevision, record?.saving, record?.status, record?.saveErrorRevision]);
 
   React.useEffect(() => {
     if (activeProviderId !== BUILTIN_EDITOR_PROVIDER_IDS.image || isSvgFile(path) || !runtime.isDesktop) {
@@ -415,7 +416,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     </div>
   ) : null;
 
-  const toolbar = <div className="workbench-editor-location flex min-h-8 shrink-0 flex-wrap items-center gap-1 border-b border-border/50 px-2">
+  const toolbar = <><div className="workbench-editor-location flex min-h-8 shrink-0 flex-wrap items-center gap-1 border-b border-border/50 px-2">
     <nav aria-label={displayPath} title={displayPath} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden typography-micro text-muted-foreground">
       {tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? <><Icon name="global" className="size-3 shrink-0" /><span className="truncate">{displayPath}</span></> : <>
         <span className="min-w-0 truncate">{tab.resourceId.split('/').slice(0, -1).join(' / ')}</span>
@@ -456,9 +457,10 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         <DropdownMenuItem onSelect={() => setAutoSaveEnabled(!autoSaveEnabled)}>
           <span className="flex-1">{t('filesView.editor.autoSaveOn')}</span>{autoSaveEnabled ? <Icon name="check" className="size-3.5" /> : null}
         </DropdownMenuItem>
+        <DocumentEncodingMenuItems identity={identity} />
       </DropdownMenuContent>
     </DropdownMenu> : null}
-  </div>;
+  </div>{needsText ? <DocumentEncodingNotice identity={identity} /> : null}</>;
 
   if (needsDocument && (!record || record.status === 'loading' || record.status === 'unloaded')) {
     return (

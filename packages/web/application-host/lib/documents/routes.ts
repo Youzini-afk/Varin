@@ -5,7 +5,7 @@ interface DocumentAuthority {
   setWorkspaceRetention?(request:unknown):Promise<unknown>;
   resolveWorkspace(input: unknown): Promise<unknown>;
   resolveResourceIdentity(resource: unknown, options?: unknown): Promise<unknown>;
-  read(resource: unknown): Promise<unknown>;
+  read(resource: unknown, options?: unknown): Promise<unknown>;
   write(request: unknown): Promise<unknown>;
   prepareWorkspaceEdit(request: unknown): Promise<unknown>;
   discardWorkspaceEdit(request: unknown): Promise<unknown>;
@@ -85,7 +85,7 @@ export const registerDocumentRoutes = (app: Express, {
     try {
       const resource = readBody(req).resource;
       if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
-      return res.json(await documents.read(resource));
+      return res.json(await documents.read(resource, readBody(req).options));
     } catch (error) {
       return sendError(res, error);
     }

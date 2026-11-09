@@ -3,6 +3,8 @@
 export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory","capsule-sky","pillar-lilac","lozenge-mint","wedge-apricot","arch-butter","oval-rose","squircle-periwinkle","shield-sage","sail-ivory","lean-coral","bridge-aqua","crest-lilac","step-blue","offset-peach","orbit-sage","cushion-ochre","curve-mint","bevel-rose","drift-blue","stack-ivory","tilt-pistachio","fan-coral","mound-lavender","tab-butter","span-jade","ripple-peach","facet-blue","comma-lilac","inset-sage","pocket-rose","rise-ivory","sweep-aqua","bend-ochre","twin-periwinkle","arc-apricot","tuck-jade","plate-lavender","drop-melon","ribbon-blue","cove-sage","terrace-ivory","slide-rose","ramp-mint","echo-ochre","lens-lilac","ledge-aqua","swell-apricot","parcel-periwinkle","scoop-pistachio","beam-coral","chamfer-jade","float-butter"] as const;
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
+export interface KernelTextPolicy {defaultEncoding?:string;files?:Record<string,string>;root?:string;choiceRevisions?:Record<string,number>;}
+
 export interface BotMatterThread {
   threadId: string;
   branchId: string;
@@ -1616,6 +1618,8 @@ export interface LanguageQuery {
   character?: number;
   query?: string;
   direction?: "incoming" | "outgoing";
+  encoding?: string;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface RecoveryAnchor {
@@ -1800,7 +1804,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 83; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 84; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3155,7 +3159,7 @@ export interface SourceDraftResource { workspaceId: string; resourceId: string; 
 
 export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }
 
-export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
+export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy };
 
 export type ChildSource = { kind: 'project'; handoff?: never; project: ChildProjectSource; source_path: string | null } | { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 

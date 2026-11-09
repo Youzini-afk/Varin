@@ -18,8 +18,12 @@ fn text_batches(shared:&Shared,kind:&str,path:&str,revision:&str,text:&str,metad
         if end==text.len(){break;}offset=end;
     }Ok(())
 }
-fn source_lines(text:&str)->Vec<&str>{text.split('\n').map(|s|s.strip_suffix('\r').unwrap_or(s)).collect()}
-fn search_lines(text:&str)->Vec<&str>{let mut lines=source_lines(text);if text.ends_with('\n'){lines.pop();}lines}
+fn source_lines(text:&str)->Vec<&str>{
+    let bytes=text.as_bytes();let mut result=Vec::new();let(mut start,mut at)=(0,0);
+    while at<bytes.len(){if matches!(bytes[at],b'\r'|b'\n'){result.push(&text[start..at]);if bytes[at]==b'\r'&&bytes.get(at+1)==Some(&b'\n'){at+=1;}at+=1;start=at;}else{at+=1;}}
+    result.push(&text[start..]);result
+}
+fn search_lines(text:&str)->Vec<&str>{let mut lines=source_lines(text);if text.ends_with(['\r','\n']){lines.pop();}lines}
 fn line_range(lines:&[&str],start:usize,end:usize)->String{lines.get(start.saturating_sub(1)..end.min(lines.len())).unwrap_or_default().join("\n")}
 fn container(kind:&str,json:bool)->bool{if json{matches!(kind,"property"|"object"|"array")}else{
     matches!(kind,"function"|"method"|"constructor"|"class"|"interface"|"enum"|"module"|"namespace"|"type"|"struct"|"package")}}
@@ -70,6 +74,7 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
     shared.check()?;
     if task.params.operation == "inventory" { return source::inventory(task, shared).map(|partial|(partial,false)); }
     let params=task.params.clone();
+    let text_receipts=task.text_receipts.clone();
     let files=params.files.clone().unwrap_or_default().into_iter().map(|f|(f.path.clone(),f)).collect::<HashMap<_,_>>();
     let recipes=task.recipes.clone();
     if params.operation=="grammar" {
@@ -130,10 +135,6 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
                     shared.emit("structure",path,revision,json!({"status":"stale","message":"The structure source revision changed"}))?;
                     structure_failed=true;return Ok(true);
                 }
-                let metadata=document.metadata.map(|m|json!({"byteLength":m.byte_length.to_string(),"modifiedTimeNs":m.modified_time_ns}));
-                let unchanged=files.get(path).and_then(|f|f.unchanged_revision.as_deref())==Some(revision.as_str());
-                shared.emit("document",path,revision,json!({"status":if unchanged{"unchanged"}else{"captured"},"metadata":metadata}))?;
-                if unchanged{return Ok(true);}
             }
             if params.operation=="bytes"{
                 let start=params.byte_offset.unwrap_or(0) as usize;let length=params.byte_length.unwrap_or(TEXT_BATCH_BYTES as i64) as usize;
@@ -142,9 +143,26 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
                 for(offset,chunk)in bytes[start..end].chunks(TEXT_BATCH_BYTES).enumerate(){shared.emit("bytes",path,revision,json!({"bytesBase64":STANDARD.encode(chunk),"offset":start+offset*TEXT_BATCH_BYTES,"byteLength":bytes.len()}))?;}
                 if start==end{shared.emit("bytes",path,revision,json!({"bytesBase64":"","offset":start,"byteLength":bytes.len()}))?;}
             }else{
-                let text=match std::str::from_utf8(&bytes){Ok(text)if !text.contains('\0')=>text,_=>{
-                    if params.operation!="search"{shared.emit("document",path,revision,json!({"status":"binary","byteLength":bytes.len()}))?;}return Ok(true);
+                let raw_hash=match &document.state {PathState::RegularFile{object_hash,..}=>object_hash.clone(),_=>String::new()};
+                let receipt_format=text_receipts.format(path,&raw_hash);
+                let explicit=document.encoding.as_deref().or_else(||files.get(path).and_then(|f|f.encoding.as_deref())).or(params.encoding.as_deref()).or_else(||receipt_format.map(|f|f.encoding.as_str())).or_else(||params.text_encoding.as_ref().and_then(|policy|policy.encoding(path)));
+                let default=params.default_encoding.as_deref().or_else(||params.text_encoding.as_ref().and_then(|p|p.default_for(path)));
+                let (decoded,format)=match crate::text::decode(&bytes,explicit,default){Ok(value)=>value,Err(error)=>{
+                    if error.kind=="binary" {if params.operation!="search"{shared.emit("document",path,revision,json!({"status":"binary","byteLength":bytes.len()}))?;}}
+                    else {structure_failed=true;shared.emit("error",path,revision,json!({"status":"unsupported-encoding","message":error.message}))?;}
+                    return Ok(true);
                 }};
+                let text=decoded.as_ref();
+                let text_identity=hex::encode(Sha256::digest(format!("{}:{}:{}",revision,format.encoding,format.bom).as_bytes()));
+                if matches!(params.operation.as_str(),"structure"|"chunks") {
+                    let prior_identity=files.get(path).and_then(|f|f.unchanged_text_identity.as_deref());
+                    let no_policy=params.text_encoding.as_ref().is_none_or(|p|p.encoding(path).is_none()&&p.default_for(path).is_none());
+                    let legacy_unchanged=prior_identity.is_none()&&text_receipts.is_empty()&&params.encoding.is_none()&&params.default_encoding.is_none()&&no_policy&&document.encoding.is_none()&&files.get(path).is_none_or(|f|f.encoding.is_none());
+                    let unchanged=files.get(path).and_then(|f|f.unchanged_revision.as_deref())==Some(revision.as_str())&&(legacy_unchanged||prior_identity==Some(text_identity.as_str()));
+                    let metadata=document.metadata.as_ref().map(|m|json!({"byteLength":m.byte_length.to_string(),"modifiedTimeNs":m.modified_time_ns}));
+                    shared.emit("document",path,revision,json!({"status":if unchanged{"unchanged"}else{"captured"},"metadata":metadata,"textIdentity":text_identity,"format":format}))?;
+                    if unchanged {return Ok(true);}
+                }
                 if params.operation == "search" {
                     let lines=search_lines(text);
                     let mut file_hits=std::collections::BTreeSet::new();
@@ -163,7 +181,7 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
                             if !line.is_char_boundary(start) {return Err("Search expression matched inside a UTF-8 codepoint".into());}
                             let before=params.before.unwrap_or(0) as usize;let after=params.after.unwrap_or(0) as usize;
                             let mut data = json!({"line":index+1,"column":line[..start].encode_utf16().count()+1,"preview":line,
-                                "before":lines[index.saturating_sub(before)..index],"after":lines[(index+1)..(index+1).saturating_add(after).min(lines.len())]});
+                                "format":format,"textIdentity":text_identity,"before":lines[index.saturating_sub(before)..index],"after":lines[(index+1)..(index+1).saturating_add(after).min(lines.len())]});
                             if params.queries.is_some() { data["queryIndices"] = json!(hits); }
                             shared.emit("hit",path,revision,data)?;
                             count+=1;if shared.page_full() || params.max_results.is_some_and(|max|count>=max as u64){limited=true;return Ok(false);}
@@ -177,13 +195,13 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
                     let lines=source_lines(text);let start=params.start_line.unwrap_or(1) as usize;
                     let end=params.end_line.unwrap_or(lines.len() as i64) as usize;
                     let body=if params.start_line.is_none()&&params.end_line.is_none(){text.to_string()}else{line_range(&lines,start,end)};
-                    text_batches(shared,"text",path,revision,&body,&json!({"startLine":start,"endLine":end.min(lines.len()),"totalLines":lines.len(),"byteLength":bytes.len()}))?;
+                    text_batches(shared,"text",path,revision,&body,&json!({"startLine":start,"endLine":end.min(lines.len()),"totalLines":lines.len(),"byteLength":bytes.len(),"format":format,"textIdentity":text_identity}))?;
                 }else if matches!(params.operation.as_str(),"structure"|"chunks"){
                     let file=files.get(path);
                     let recipe=file.and_then(|f|f.recipe_id.as_ref()).and_then(|id|recipes.get(id));
                     let analysis=match recipe{
                         Some(recipe)=>match syntax.analyze(recipe,text,file.and_then(|f|f.lines.as_deref()).unwrap_or_default(),params.parse_budget_ms.unwrap_or(250) as u64,
-                            document.state.object_hash().and_then(|hash|hash.strip_prefix("sha256-")).ok_or("Captured content identity is unavailable")?,shared){
+                            &hex::encode(Sha256::digest(text.as_bytes())),shared){
                             Ok(value)=>Some(value),Err(error)=>{shared.check()?;
                                 let status=if error.starts_with("unavailable:"){"unavailable"}else{"failed"};
                                 shared.emit("structure",path,revision,json!({"status":status,"message":error,"recipeId":recipe.recipe_id}))?;structure_failed=true;None
@@ -191,6 +209,10 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
                         },None=>{shared.emit("structure",path,revision,json!({"status":"unsupported","message":"No native grammar recipe supplied"}))?;None}
                     };
                     if let Some(mut value)=analysis.clone(){
+                        value["rawContentHash"]=json!(hex::encode(Sha256::digest(&bytes)));
+                        value["sourceObjectHash"]=json!(raw_hash);
+                        value["textIdentity"]=json!(text_identity);value["format"]=json!(format);
+                        crate::text::locate_structure_ranges(&mut value,&bytes,text,&format).map_err(|e|e.message)?;
                         for category in ["symbols","hits","calls","imports"]{
                             let records=value[category].as_array().cloned().unwrap_or_default();
                             value.as_object_mut().unwrap().remove(category);

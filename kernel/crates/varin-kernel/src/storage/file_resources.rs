@@ -118,6 +118,7 @@ pub(super) fn file_params_value(params_value: &Value) -> Value {
 fn public_file_result(mut result: Value) -> Value {
     if let Some(object) = result.as_object_mut() {
         object.remove("__recoveryTurn"); object.remove("__recoveryTool"); object.remove("__artifactGrantId");
+        object.remove("__textReceipt");
     }
     result
 }
@@ -130,7 +131,7 @@ fn file_operation_identity(params_value: &Value) -> Result<(Value, String), Kern
     // The first writer owns artifact provenance; an already admitted operation
     // may be observed with a new grant without changing its original arguments.
     let mut arguments = identity.clone();
-    if let Some(object) = arguments.as_object_mut() { object.remove("__artifactGrantId"); }
+    if let Some(object) = arguments.as_object_mut() { object.remove("__artifactGrantId"); object.remove("__textAdmission"); }
     let hash = hash_json(&arguments)?;
     Ok((identity, hash))
 }
@@ -143,6 +144,14 @@ pub(super) fn parse_file_params<T: DeserializeOwned>(
     // validation rejects it; it remains part of the durable intent identity.
     if let Some(object) = value.as_object_mut() {
         object.remove("__nativeRequestHash");
+        object.remove("__textFormat");
+        object.remove("__textConversion");
+        object.remove("__textSourceFormat");
+        object.remove("__textBranchId");
+        object.remove("__textBranchPath");
+        object.remove("__textAdmission");
+        object.remove("__textPolicyRoot");
+        object.remove("__textSourceMode");
         object.remove("__nativeGrantId");
         object.remove("__nativeEpoch");
         object.remove("__artifactGrantId");
@@ -661,7 +670,7 @@ impl Storage {
         kind: &str,
         params_value: &Value,
     ) -> Result<(String, Option<Value>, bool), KernelError> {
-        let (identity_params, params_hash) = file_operation_identity(params_value)?;
+        let (mut identity_params, params_hash) = file_operation_identity(params_value)?;
         if let Some((state, result)) =
             self.file_operation_record(operation_id, kind, &params_hash)?
         {
@@ -683,6 +692,7 @@ impl Storage {
                 params![operation_id],
             )?;
         }
+        self.admit_text_receipt(&mut identity_params)?;
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             self.operation_begin(operation_id, kind, &params_hash)?;
@@ -775,6 +785,9 @@ impl Storage {
                     durable_result[field] = json!(identity);
                 }
             }
+            for field in ["__textFormat","__textSourceFormat","__textConversion"] {
+                if let Some(format)=envelope["intent"].get(field){durable_result[field]=format.clone();}
+            }
             // Keep the native journal identity with this operation's own receipt.
             // A later write to the same checkpoint path can replace the current
             // after-image, but must not erase the original external tool outcome.
@@ -783,12 +796,18 @@ impl Storage {
                 durable_result["__recoveryTool"] = envelope["intent"]["__recoveryTool"].clone();
             }
         }
+        if let Some(intent) = &journal_intent {
+            if let Some(evidence) = self.text_receipt_evidence(operation_id, intent, result)? {
+                durable_result["__textReceipt"] = evidence;
+            }
+        }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             if let Some(intent)=&journal_intent {
                 if let Some(attachment)=self.retain_file_artifact(operation_id,intent,result)? {durable_result["attachment"]=json!(attachment);}
             }
             self.operation_finish(operation_id, &durable_result)?;
+            self.persist_current_text_format(operation_id, &durable_result)?;
             if let Some(intent)=&journal_intent { self.journal_file_receipt(operation_id,intent,result)?; }
             if let (Some(owner_id), Some(workspace_id)) = (owner_id, workspace_id) {
                 self.conn.execute(
@@ -801,6 +820,7 @@ impl Storage {
         match outcome {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
+                self.index_text_receipt(operation_id, &durable_result);
                 Ok(())
             }
             Err(error) => {

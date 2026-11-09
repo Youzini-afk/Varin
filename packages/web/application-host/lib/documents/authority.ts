@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { VarinWorkspaceEditBuffer, VarinWorkspaceEditBufferSlot, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from '@varin/application-client';
+import type { VarinTextFormat, VarinDocumentReadOptions, VarinWorkspaceEditBuffer, VarinWorkspaceEditBufferSlot, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from '@varin/application-client';
 import { createWorkspaceEditCoordinator, WorkspaceEditSurfaceAppliedError, WorkspaceEditSurfaceRejectedError } from './workspace-edit.js';
 import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -29,7 +29,7 @@ import {
   DocumentWorkspaceUnregisteredError,
   isDocumentAuthorityError,
 } from './errors.js';
-import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './inspect.js';
+import { serializeDocumentText, inspectDocumentBytes, isDocumentEncoding, isDocumentTextFormat, isDocumentTextEdits, sameDocumentTextFormat, revisionFromBytes } from './inspect.js';
 import { createWorkspaceMutationAuthority, type CaptureToken } from './mutation-authority.js';
 import { createCaptureInventory } from './capture-inventory.js';
 import {
@@ -101,17 +101,17 @@ interface ResolveResourceResult {
 }
 
 type SnapshotResult =
-  | { status: 'missing'; resource: DocumentResource }
+  | { status: 'missing'; resource: DocumentResource; format?: VarinTextFormat }
   | { status: 'binary'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt: string }
   | { status: 'unsupported-encoding'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt: string; candidates?: string[] }
-  | { status: 'ready'; resource: DocumentResource; revision: string; content: string; encoding: string; bom: boolean; byteLength: number; modifiedAt: string };
+  | { status: 'ready'; resource: DocumentResource; revision: string; content: string; encoding: string; bom: boolean; format?: VarinTextFormat; byteLength: number; modifiedAt: string };
 
 type SnapshotMetadata = Exclude<SnapshotResult, { status: 'ready' }>
   | Omit<Extract<SnapshotResult, { status: 'ready' }>, 'content'>;
 type SnapshotWithEpoch = SnapshotResult & { epoch: number };
 
 type WithoutContentResult =
-  | { status: 'ready'; epoch: number; resource: DocumentResource; revision: string; encoding: string; bom: boolean; byteLength: number; modifiedAt?: string }
+  | { status: 'ready'; epoch: number; resource: DocumentResource; revision: string; encoding: string; bom: boolean; format?: VarinTextFormat; byteLength: number; modifiedAt?: string }
   | Exclude<SnapshotWithEpoch, { status: 'ready' }>;
 
 interface WriteRequest {
@@ -121,6 +121,10 @@ interface WriteRequest {
   encoding: string;
   bom: boolean;
   expectedRevision: string | null;
+  sourceFormat?: VarinTextFormat;
+  lineEnding?: 'lf' | 'crlf' | 'cr' | 'mixed';
+  rememberEncoding?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
   operationId?: string | undefined;
 }
 
@@ -191,7 +195,10 @@ interface DirtySurfaceSubscription {
 }
 
 export interface DirtyBufferResource {
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
   baseRevision: string | null;
+  sourceFormat?: VarinTextFormat;
   bufferHash?: string;
   documentInstanceId?: string;
   encoding?: string;
@@ -221,6 +228,8 @@ export interface DirtyBufferPublication {
 }
 
 export interface DocumentSurfaceBinding {
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
   baseRevision: string | null;
   bufferHash: string;
   documentInstanceId: string;
@@ -239,6 +248,9 @@ export interface DocumentSurfaceOperationTarget extends DocumentSurfaceBinding {
 }
 
 export interface DocumentSurfaceRestoreState {
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
   baseContent: string;
   baseRevision: string | null;
   encoding: string;
@@ -259,6 +271,7 @@ export interface DocumentSurfaceOperationRequest {
 }
 
 export interface DocumentSurfaceOperationResult {
+  edits?: Array<{ start: number; end: number; text: string }>;
   workspaceEditBuffer?: VarinWorkspaceEditBuffer | null;
   resource: DocumentResource;
   status: 'captured' | 'applied' | 'undone' | 'restored' | 'failed';
@@ -345,7 +358,7 @@ type StaleEpochResult = { status: 'stale-epoch'; currentEpoch: number | undefine
 
 export type DocumentReadResult = SnapshotWithEpoch;
 export type DocumentWriteResult =
-  | { status: 'written'; revision: string; byteLength: number; modifiedAt?: string | undefined }
+  | { status: 'written'; revision: string; byteLength: number; encoding: string; bom: boolean; format: VarinTextFormat; modifiedAt?: string | undefined }
   | { status: 'conflict'; current: WithoutContentResult }
   | StaleEpochResult;
 export type DocumentMoveResult =
@@ -375,6 +388,9 @@ export interface DocumentAuthorityOptions {
     resolveId(id:string,signal?:AbortSignal,reference?:import('./workspace-registry.js').NativeWorkspaceReference):Promise<import('../kernel/native-workspaces.js').NativeDocumentWorkspace|undefined>;
     resolvePath(path:string,containing?:boolean):Promise<import('../kernel/native-workspaces.js').NativeDocumentWorkspace|undefined>;
   };
+  resolveTextEncodingPolicy?: (workspaceId: string) => Promise<import("../kernel/protocol.generated.js").KernelTextPolicy>;
+  resolveTextEncoding?: (resource: DocumentResource) => Promise<{ encoding?: string; defaultEncoding?: string }>;
+  rememberTextEncoding?: (resource: DocumentResource, encoding: string) => Promise<void>;
   onSourceRetentionChanged?():void;
   onWorkspaceResolved?: (resolved: ResolveWorkspaceResult) => void;
   onMutation?: (event: DocumentMutationObservation) => void | Promise<void>;
@@ -424,6 +440,12 @@ const revisionFromObjectHash = (objectHash: string): string | null => {
   const match = /^sha256-([0-9a-f]{64})$/i.exec(objectHash);
   return match ? `d1_${Buffer.from(match[1]!, 'hex').toString('base64url')}` : null;
 };
+
+const documentWriteOperationId = (request: Omit<WriteRequest, 'token'>): string | undefined =>
+  request.operationId ? `document-write:${request.resource.workspaceId}:${request.resource.resourceId}:${request.operationId}:${createHash('sha256').update(JSON.stringify({
+    content: request.content, encoding: request.encoding, bom: request.bom, expectedRevision: request.expectedRevision,
+    sourceFormat: request.sourceFormat ?? null, edits: request.edits ?? null, lineEnding: request.lineEnding ?? null, rememberEncoding: request.rememberEncoding ?? false,
+  })).digest('hex')}` : undefined;
 
 // ── Factory ──────────────────────────────────────────────────────────────
 
@@ -753,15 +775,57 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal): Promise<SnapshotResult>;
-  function snapshotFile(resource: DocumentResource, absolutePath: string, signal: AbortSignal | undefined, includeContent: false): Promise<SnapshotMetadata>;
-  async function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal, includeContent = true): Promise<SnapshotResult | SnapshotMetadata> {
+  const pendingJournalsFor = async (resource: DocumentResource) => {
+    const summaries = (await journals.list({ workspaceId: resource.workspaceId }))
+      .filter(summary => summary.resource.resourceId === resource.resourceId);
+    const records = await Promise.all(summaries.map(summary => journals.read(summary.journalId)));
+    return records.filter((record): record is Extract<typeof record, { status: 'ready' }> => record.status === 'ready' && Boolean(record.pendingSave));
+  };
+  const settlePendingEncoding = async (request: Omit<WriteRequest, 'token'>, encoding: string): Promise<void> => {
+    if (!request.rememberEncoding) return;
+    const pending = (await pendingJournalsFor(request.resource)).filter(record =>
+      record.pendingSave && documentWriteOperationId(record.pendingSave) === documentWriteOperationId(request));
+    if (pending.length && pending.every(record => record.pendingSaveReconciled)) return;
+    await options.rememberTextEncoding?.(request.resource, encoding);
+    for (const record of pending) if (!record.pendingSaveReconciled) {
+      await journals.markPendingSaveReconciled(record.journal.journalId, record.journal.revision, record.pendingSave!);
+    }
+  };
+  const reconcilePendingRead = async (resource: DocumentResource, rawRevision: string): Promise<{ encoding: string } | undefined> => {
+    if (!durableMutationStorage) return undefined;
+    const pending = (await pendingJournalsFor(resource)).filter(record => !record.pendingSaveReconciled && record.pendingSave?.rememberEncoding)
+      .sort((a, b) => b.journal.updatedAt.localeCompare(a.journal.updatedAt));
+    for (const record of pending) {
+      const request = record.pendingSave!;
+      const operationId = documentWriteOperationId(request)!;
+      const matches = await durableMutationStorage(resource.workspaceId, async context => {
+        const receipt = await context.fileResources?.readWriteReceipt?.(context.identity, operationId);
+        return receipt?.status === 'applied' && receipt.state.kind === 'regular-file'
+          && revisionFromObjectHash(receipt.state.objectHash) === rawRevision;
+      });
+      if (!matches) continue;
+      // This is reconciliation of an accepted receipt, never replay of the write.
+      // Even while settings are unavailable, the exact saved bytes remain readable.
+      try { await settlePendingEncoding(request, request.encoding); } catch { /* The durable journal remains pending. */ }
+      return { encoding: request.encoding };
+    }
+    return undefined;
+  };
+
+  function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal, includeContent?: true, interpretation?: { encoding?: string; defaultEncoding?: string }, reconcilePending?: boolean): Promise<SnapshotResult>;
+  function snapshotFile(resource: DocumentResource, absolutePath: string, signal: AbortSignal | undefined, includeContent: false, interpretation?: { encoding?: string; defaultEncoding?: string }, reconcilePending?: boolean): Promise<SnapshotMetadata>;
+  async function snapshotFile(resource: DocumentResource, absolutePath: string, signal?: AbortSignal, includeContent = true, interpretation?: { encoding?: string; defaultEncoding?: string }, reconcilePending = false): Promise<SnapshotResult | SnapshotMetadata> {
     signal?.throwIfAborted();
+    const missing = async (): Promise<Extract<SnapshotResult, { status: 'missing' }>> => {
+      const rule = interpretation ?? await options.resolveTextEncoding?.(resource) ?? {};
+      const inspected = await inspectDocumentBytes(Buffer.alloc(0), false, rule);
+      return { status: 'missing', resource, ...(inspected.kind === 'text' ? { format: inspected.format } : {}) };
+    };
     let stat: import('node:fs').Stats;
     try {
       stat = await fsPromises.lstat(absolutePath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { status: 'missing', resource };
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return missing();
       throw error;
     }
     if (stat.isSymbolicLink()) {
@@ -769,7 +833,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       try {
         real = await fsPromises.realpath(absolutePath);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { status: 'missing', resource };
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return missing();
         throw error;
       }
       const workspace = await loadWorkspace(resource.workspaceId);
@@ -788,7 +852,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     const bytes = await fsPromises.readFile(absolutePath, { signal });
     const revision = revisionFromBytes(bytes);
-    const inspected = includeContent ? inspectDocumentBytes(bytes) : inspectDocumentBytes(bytes, false);
+    const rule = interpretation ?? (reconcilePending ? await reconcilePendingRead(resource, revision) : undefined) ?? await options.resolveTextEncoding?.(resource) ?? {};
+    const inspected = includeContent ? await inspectDocumentBytes(bytes, true, rule) : await inspectDocumentBytes(bytes, false, rule);
     const modifiedAt = toIso(stat.mtimeMs);
     if (inspected.kind === 'binary') {
       return {
@@ -817,6 +882,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       ...('content' in inspected ? { content: inspected.content } : {}),
       encoding: inspected.encoding,
       bom: inspected.bom,
+      format: inspected.format,
       byteLength: inspected.byteLength,
       modifiedAt,
     };
@@ -1017,27 +1083,50 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const read = (resource: DocumentResource, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}): Promise<DocumentReadResult> => withResolvedResourceOperation([
+  const read = (resource: DocumentResource, readOptions: VarinDocumentReadOptions & { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}): Promise<DocumentReadResult> => withResolvedResourceOperation([
     { resource, scope: 'exact' },
   ], async ([target]) => {
     try {
-      options.reportPhase?.('document:mutation-state');
-      const mutation = await waitWithSignal(mutations.inspect(resource.workspaceId, options.signal), options.signal);
+      readOptions.reportPhase?.('document:mutation-state');
+      const mutation = await waitWithSignal(mutations.inspect(resource.workspaceId, readOptions.signal), readOptions.signal);
       const { resolved } = target!;
-      options.signal?.throwIfAborted();
-      options.reportPhase?.('document:read');
-      return { ...(await snapshotFile(resource, resolved.absolutePath, options.signal)), epoch: mutation.epoch };
+      readOptions.signal?.throwIfAborted();
+      readOptions.reportPhase?.('document:read');
+      if (readOptions.encoding !== undefined && (typeof readOptions.encoding !== 'string' || !readOptions.encoding.trim())) {
+        throw new DocumentAuthorityError('Unsupported document encoding', { code: 'unsupported', statusCode: 400 });
+      }
+      const snapshot = await snapshotFile(resource, resolved.absolutePath, readOptions.signal, true,
+        readOptions.encoding ? { encoding: readOptions.encoding } : undefined, !readOptions.encoding);
+      if (snapshot.status === 'ready' && readOptions.encoding && readOptions.rememberEncoding) {
+        await options.rememberTextEncoding?.(resource, snapshot.encoding);
+        // A later explicit interpretation supersedes old incomplete preference steps.
+        for (const pending of await pendingJournalsFor(resource)) if (!pending.pendingSaveReconciled) {
+          await journals.markPendingSaveReconciled(pending.journal.journalId, pending.journal.revision, pending.pendingSave!);
+        }
+      }
+      return { ...snapshot, epoch: mutation.epoch };
     } catch (error) {
       return fail(error);
     }
-  }, options);
+  }, readOptions);
 
-  const readSnapshot = (resource: DocumentResource, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}): Promise<SnapshotResult> => withResolvedResourceOperation([
+  const resolveTextEncodingPolicy = async (workspaceId: string) => {
+    await admitWorkspaceRegistration(workspaceId);
+    return await options.resolveTextEncodingPolicy?.(workspaceId) ?? {};
+  };
+
+  const resolveTextInterpretation = async (resource: DocumentResource) => {
+    await admitWorkspaceRegistration(resource.workspaceId);
+    return await options.resolveTextEncoding?.(resource) ?? {};
+  };
+
+  const readSnapshot = (resource: DocumentResource, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void; encoding?: string; defaultEncoding?: string } = {}): Promise<SnapshotResult> => withResolvedResourceOperation([
     { resource, scope: 'exact' },
   ], async ([target]) => {
     options.signal?.throwIfAborted();
     options.reportPhase?.('document:read');
-    return snapshotFile(resource, target!.resolved.absolutePath, options.signal);
+    return snapshotFile(resource, target!.resolved.absolutePath, options.signal, true,
+      options.encoding || options.defaultEncoding ? { ...(options.encoding ? { encoding: options.encoding } : {}), ...(options.defaultEncoding ? { defaultEncoding: options.defaultEncoding } : {}) } : undefined);
   }, options);
 
   /** Capture related files under one exact-resource lease. An unreadable candidate
@@ -1048,6 +1137,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       resolved => Promise.allSettled(resources.map((resource, index) => snapshotFile(resource, resolved[index]!.resolved.absolutePath, options.signal))), options);
   };
 
+  const reconcileWrittenEncoding = async (request: WriteRequest, encoding: string): Promise<void> => {
+    if (!request.rememberEncoding) return;
+    try {
+      await settlePendingEncoding(request, encoding);
+    } catch (cause) {
+      throw new DocumentAuthorityError('File saved; its encoding preference is still being reconciled. Retry the original save.', {
+        code: 'reconciliation-pending', statusCode: 503, cause,
+      });
+    }
+  };
+
   const write = (request: WriteRequest): Promise<DocumentWriteResult> => withResolvedResourceOperation([
     { resource: request.resource, scope: 'subtree' },
   ], async ([target]) => {
@@ -1056,6 +1156,33 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-write' });
       const { resolved } = target!;
+      // Bind retries to the exact original interpretation and save intent. The original
+      // Storage operation is also the recovery receipt when preference coordination fails.
+      const writeId = documentWriteOperationId(request);
+      if (writeId && durableMutationStorage) {
+        const originalState = await durableMutationStorage(request.resource.workspaceId, async context => {
+          const original = await context.fileResources?.readWriteReceipt?.(context.identity, writeId);
+          return original?.status === 'applied' && original.state.kind === 'regular-file' ? original.state : null;
+        });
+        if (originalState) {
+          const currentBytes = await fsPromises.readFile(resolved.absolutePath).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+            throw error;
+          });
+          if (!currentBytes || revisionFromBytes(currentBytes) !== revisionFromObjectHash(originalState.objectHash)) {
+            return { status: 'conflict', current: { ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)), epoch: request.token.epoch } };
+          }
+          // The current bytes are used only after proving the original receipt's raw hash.
+          // No new content owner/grant or fallback write is needed to consume this receipt.
+          const inspected = await inspectDocumentBytes(currentBytes, false, { encoding: request.encoding });
+          if (inspected.kind !== 'text') throw new Error('The original document write format is unavailable');
+          const receipt = { status: 'written' as const, revision: revisionFromBytes(currentBytes), byteLength: currentBytes.length,
+            encoding: inspected.encoding, bom: inspected.bom, format: inspected.format };
+          await reconcileWrittenEncoding(request, receipt.encoding);
+          return receipt;
+        }
+      }
+
       const current = {
         ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)),
         epoch: request.token.epoch,
@@ -1064,19 +1191,24 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (current.status !== 'missing') {
           return { status: 'conflict', current };
         }
-      } else if (current.status === 'missing' || (current.status !== 'binary' && current.status !== 'unsupported-encoding' && current.revision !== request.expectedRevision)) {
+      } else if (current.status === 'missing' || current.revision !== request.expectedRevision) {
         return { status: 'conflict', current };
       }
-      let bytes: Uint8Array;
-      try {
-        bytes = encodeDocumentText({
-          content: request.content,
-          encoding: request.encoding,
-          bom: request.bom,
-        });
-      } catch {
-        throw new DocumentAuthorityError('Unsupported document encoding', { code: 'failed', statusCode: 400 });
+      // Pin the user's original interpretation independently of current project preferences.
+      // Raw revision is rechecked after this read and again by the Storage CAS below.
+      const sourceBytes = current.status === 'missing' ? undefined : await fsPromises.readFile(resolved.absolutePath);
+      if (sourceBytes && revisionFromBytes(sourceBytes) !== request.expectedRevision) {
+        return { status: 'conflict', current: { ...(await snapshotFile(request.resource, resolved.absolutePath, undefined, false)), epoch: request.token.epoch } };
       }
+      const serialized = await serializeDocumentText({
+        content: request.content, encoding: request.encoding, bom: request.bom,
+        ...(sourceBytes ? { sourceBytes } : {}),
+        ...(request.sourceFormat ? { sourceFormat: request.sourceFormat } : current.status === 'ready' && current.format ? { sourceFormat: current.format } : {}),
+        ...(request.lineEnding ? { lineEnding: request.lineEnding } : {}),
+        normalizeLineEndings: true,
+        ...(request.edits ? { edits: request.edits } : {}),
+      });
+      const bytes = serialized.bytes;
       let writeConflict = false;
       if (durableMutationStorage) {
         writeConflict = await durableMutationStorage(request.resource.workspaceId, async (context) => {
@@ -1111,8 +1243,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
               ...(captured.state.kind === 'regular-file' && captured.state.mode !== undefined
                 ? { mode: captured.state.mode }
                 : {}),
-              ...(request.operationId
-                ? { operationId: `document-write:${request.resource.workspaceId}:${request.resource.resourceId}:${request.operationId}` }
+              ...(writeId
+                ? { operationId: writeId }
                 : {}),
             },
           );
@@ -1129,16 +1261,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         return { status: 'conflict', current: latest };
       }
       await writer.markMutated();
-      const next = await snapshotFile(request.resource, resolved.absolutePath, undefined, false);
-      if (next.status !== 'ready') {
-        throw new DocumentAuthorityError('Failed to read document after write', { code: 'failed', statusCode: 500 });
-      }
-      const result: { status: 'written'; revision: string; byteLength: number; modifiedAt?: string } = {
-        status: 'written',
-        revision: next.revision,
-        byteLength: next.byteLength,
+      // The accepted serializer/Storage bytes are the receipt, not a racy reread that
+      // may already observe an external writer or a changed project interpretation.
+      const result: Extract<DocumentWriteResult, { status: 'written' }> = {
+        status: 'written', revision: revisionFromBytes(bytes), byteLength: bytes.byteLength,
+        encoding: serialized.format.encoding, bom: serialized.format.bom, format: serialized.format,
       };
-      if (next.modifiedAt) result.modifiedAt = next.modifiedAt;
+      await reconcileWrittenEncoding(request, serialized.format.encoding);
       publishMutation({
         workspaceId: request.resource.workspaceId,
         resourceId: request.resource.resourceId,
@@ -1547,6 +1676,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     encoding: resource.encoding ?? null,
     bom: resource.bom ?? null,
     lineEnding: resource.lineEnding ?? null,
+    baseFormat: resource.baseFormat ?? resource.sourceFormat ?? null,
+    normalizeLineEndings: resource.normalizeLineEndings ?? false,
   });
   const sameDirtyResources = (left: readonly DirtyBufferResource[], right: readonly DirtyBufferResource[]): boolean => {
     const a = left.map(dirtyResourceIdentity).sort();
@@ -1811,6 +1942,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || ((entry as Record<string, unknown>).bufferHash !== undefined
           && (typeof (entry as Record<string, unknown>).bufferHash !== 'string'
             || !/^sha256-[0-9a-f]{64}$/u.test((entry as Record<string, unknown>).bufferHash as string)))
+        || ((entry as Record<string, unknown>).baseFormat !== undefined && !isDocumentTextFormat((entry as Record<string, unknown>).baseFormat))
+        || ((entry as Record<string, unknown>).sourceFormat !== undefined && !isDocumentTextFormat((entry as Record<string, unknown>).sourceFormat))
+        || ((entry as Record<string, unknown>).normalizeLineEndings !== undefined && typeof (entry as Record<string, unknown>).normalizeLineEndings !== 'boolean')
         || ((entry as Record<string, unknown>).encoding !== undefined
           && typeof (entry as Record<string, unknown>).encoding !== 'string')
         || ((entry as Record<string, unknown>).bom !== undefined
@@ -1821,6 +1955,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       return {
         baseRevision: (entry as Record<string, unknown>).baseRevision as string | null,
+        ...(isDocumentTextFormat((entry as Record<string, unknown>).baseFormat) ? { baseFormat: (entry as Record<string, unknown>).baseFormat as VarinTextFormat } : {}),
+        ...(isDocumentTextFormat((entry as Record<string, unknown>).sourceFormat) ? { sourceFormat: (entry as Record<string, unknown>).sourceFormat as VarinTextFormat } : {}),
+        ...(typeof (entry as Record<string, unknown>).normalizeLineEndings === 'boolean' ? { normalizeLineEndings: (entry as Record<string, unknown>).normalizeLineEndings as boolean } : {}),
         localEditRevision: (entry as Record<string, unknown>).localEditRevision as number,
         resource: { ...((entry as Record<string, unknown>).resource as DocumentResource) },
         ...(typeof (entry as Record<string, unknown>).documentInstanceId === 'string'
@@ -1964,7 +2101,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || (request.action === 'restore' && (typeof target.newText !== 'string'
           || !target.restoreState || typeof target.restoreState.baseContent !== 'string'
           || (target.restoreState.baseRevision !== null && typeof target.restoreState.baseRevision !== 'string')
-          || target.restoreState.encoding !== 'utf-8' || typeof target.restoreState.bom !== 'boolean'
+          || (target.restoreState.baseFormat !== undefined && !isDocumentTextFormat(target.restoreState.baseFormat))
+          || (target.restoreState.normalizeLineEndings !== undefined && typeof target.restoreState.normalizeLineEndings !== 'boolean')
+          || (target.restoreState.edits !== undefined && !isDocumentTextEdits(target.restoreState.edits))
+          || !isDocumentEncoding(target.restoreState.encoding) || typeof target.restoreState.bom !== 'boolean'
           || !['lf', 'crlf', 'cr'].includes(target.restoreState.lineEnding)))
         || (request.action === 'undo' && (!Number.isSafeInteger(target.expectedAppliedRevision)
           || target.expectedAppliedRevision! < 0
@@ -1985,6 +2125,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || current.bufferHash !== expectedBufferHash
         || current.encoding !== target.encoding || current.bom !== target.bom
         || current.lineEnding !== target.lineEnding
+        || (target.baseFormat !== undefined && !sameDocumentTextFormat(current.baseFormat ?? current.sourceFormat, target.baseFormat))
+        || (target.normalizeLineEndings !== undefined && Boolean(current.normalizeLineEndings) !== target.normalizeLineEndings)
       );
       if (!resourceId || seen.has(resourceId) || target.resource.workspaceId !== request.workspaceId
         || (request.action !== 'undo' && !barrier && !current) || currentMismatch) {
@@ -2200,7 +2342,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
         || (candidate.documentInstanceId !== undefined && (typeof candidate.documentInstanceId !== 'string' || !candidate.documentInstanceId))
         || typeof candidate.content !== 'string'
-        || (candidate.encoding !== undefined && candidate.encoding !== 'utf-8')
+        || (candidate.edits !== undefined && !isDocumentTextEdits(candidate.edits))
+        || (candidate.normalizeLineEndings !== undefined && typeof candidate.normalizeLineEndings !== 'boolean')
+        || (candidate.sourceFormat !== undefined && !isDocumentTextFormat(candidate.sourceFormat))
+        || (candidate.encoding !== undefined && !isDocumentEncoding(candidate.encoding))
         || (candidate.bom !== undefined && typeof candidate.bom !== 'boolean')
         || (candidate.bufferHash !== undefined
           && (typeof candidate.bufferHash !== 'string' || !/^sha256-[0-9a-f]{64}$/u.test(candidate.bufferHash)))
@@ -2216,6 +2361,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         : `sha256-${createHash('sha256').update(normalizeEditorLineEndings(candidate.content), 'utf8').digest('hex')}`;
       return {
         baseRevision: candidate.baseRevision as string | null,
+        ...(isDocumentTextFormat(candidate.sourceFormat) ? { sourceFormat: candidate.sourceFormat } : {}),
+        ...(typeof candidate.normalizeLineEndings === 'boolean' ? { normalizeLineEndings: candidate.normalizeLineEndings } : {}),
+        ...(Array.isArray(candidate.edits) ? { edits: candidate.edits as Array<{ start: number; end: number; text: string }> } : {}),
         encoding: candidate.encoding === undefined ? 'utf-8' : candidate.encoding,
         bom: candidate.bom === undefined ? false : candidate.bom,
         content: candidate.content,
@@ -2258,6 +2406,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
             || (published.encoding !== undefined && published.encoding !== resource.encoding)
             || (published.bom !== undefined && published.bom !== resource.bom)
             || (published.lineEnding !== undefined && published.lineEnding !== resource.lineEnding)
+            || !sameDocumentTextFormat(published.baseFormat ?? published.sourceFormat, resource.sourceFormat)
+            || Boolean(published.normalizeLineEndings) !== Boolean(resource.normalizeLineEndings)
             || (publishedHash !== undefined && publishedHash !== serializedHash)
             || (resource.bufferHash !== undefined && resource.bufferHash !== serializedHash);
         })) {
@@ -2267,10 +2417,20 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       publications.set(workspaceId, publication);
     }
-    const resolvedResources = await Promise.all(resources.map(async (resource) => ({
-      ...resource,
-      ...await resolveResourceIdentity(resource.resource),
-    })));
+    const resolvedResources = await Promise.all(resources.map(async resource => {
+      const identity = await resolveResourceIdentity(resource.resource);
+      // Retain only a verified original baseline. No codec validation of the draft:
+      // emoji in a GBK buffer must still be capturable and journaled.
+      let sourceBytesBase64: string | undefined;
+      if (resource.sourceFormat && resource.baseRevision) {
+        sourceBytesBase64 = await withResolvedResourceOperation([{ resource: resource.resource, scope: 'exact' }], async ([target]) => {
+          const bytes = await fsPromises.readFile(target!.resolved.absolutePath);
+          if (revisionFromBytes(bytes) !== resource.baseRevision) throw new DocumentAuthorityError('Document base changed before draft capture', { code: 'stale-completion', statusCode: 409 });
+          return bytes.toString('base64');
+        });
+      }
+      return { ...resource, ...identity, ...(sourceBytesBase64 ? { sourceBytesBase64 } : {}) };
+    }));
     if ([...publications].some(([workspaceId, publication]) => (
       dirtyBuffersByOwner.get(dirtyBufferKey(request.ownerId, workspaceId)) !== publication
     ))) {
@@ -2472,6 +2632,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     runResourceOperation,
     read,
     readSnapshot,
+    resolveTextInterpretation,
+    resolveTextEncodingPolicy,
     readSnapshots,
     prepareWorkspaceEdit: workspaceEdits.prepare,
     discardWorkspaceEdit: async (request: { workspaceId: string; operationId: string }) => workspaceEdits.discard(request),

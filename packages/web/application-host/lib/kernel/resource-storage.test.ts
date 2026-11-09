@@ -1,3 +1,8 @@
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import { createHash } from 'node:crypto';
 import { createThreadSourceAdmission } from './thread-sources.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';

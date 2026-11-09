@@ -29,7 +29,8 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.read"
         | "file.read.check"
         | "file.measure"
-        | "file.operation.list" => "storage.read",
+        | "file.operation.list"
+        | "file.text.conversions" => "storage.read",
         "workspace.inspect" | "workspace.acquire" | "workspace.release" => "storage.read",
         "storage.putBlob.begin"
         | "workspace.adopt"

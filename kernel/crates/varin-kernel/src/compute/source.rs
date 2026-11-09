@@ -39,7 +39,7 @@ pub(crate) struct Traversal {
 }
 
 pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
-pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
+pub(crate) struct Document {pub encoding:Option<String>,pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
 pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path.strip_prefix(root).is_some_and(|tail|tail.is_empty()||root.ends_with('/')||tail.starts_with('/'))}
 fn relative_to<'a>(path:&'a str,root:&str)->&'a str {
     if root.is_empty(){path}else{path.strip_prefix(root).unwrap_or(path).trim_start_matches('/')}
@@ -94,12 +94,12 @@ fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<Capt
 fn reserve_capture(bytes:&mut Vec<u8>,additional:usize)->Result<()> {
     bytes.try_reserve_exact(additional).map_err(|_|"Insufficient memory to capture the file; retry when memory is available".to_string())
 }
-fn search_capture(mut file:File,shared:&Shared)->Result<Option<CapturedFile>> {
+fn search_capture(mut file:File,shared:&Shared,encoding:Option<&str>)->Result<Option<CapturedFile>> {
     shared.check()?;
     let mut prefix=[0u8;8192];
     let count=file.read(&mut prefix).map_err(|e|e.to_string())?;
     let prefix=&prefix[..count];
-    if prefix.contains(&0) || std::str::from_utf8(prefix).is_err_and(|error|error.error_len().is_some()) {return Ok(None);}
+    if !encoding.and_then(|e|crate::text::codec(e).ok()).is_some_and(|e|e==encoding_rs::UTF_16LE||e==encoding_rs::UTF_16BE) && crate::text::clearly_binary(prefix) {return Ok(None);}
     file.seek(SeekFrom::Start(0)).map_err(|e|e.to_string())?;
     read_capture(file,None,shared).map(Some)
 }
@@ -131,7 +131,7 @@ fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document
     if let Some((root,length,_retention))=source.range {
         let object_hash=source.hash.ok_or("Immutable file version identity is missing")?;
         let bytes=if content{Some(crate::storage::file_content::read_all(&root,&object_hash,length,&shared.cancelled).map_err(|error|error.to_string())?)}else{None};
-        return Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None});
+        return Ok(Document{encoding:source.encoding,path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None});
     }
     if let Some(file)=source.file{
         let (bytes,object_hash,length)=if content{
@@ -141,8 +141,8 @@ fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document
         }else{(None,source.hash.unwrap_or_default(),0)};
         // Registry drafts retain their supplied revision; their content identity
         // still comes from the verified object bytes, not that opaque revision.
-        Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None})
-    }else{Ok(Document{path:source.path,revision:source.revision,state:PathState::Missing,bytes:None,metadata:None})}
+        Ok(Document{encoding:source.encoding,path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None})
+    }else{Ok(Document{encoding:source.encoding,path:source.path,revision:source.revision,state:PathState::Missing,bytes:None,metadata:None})}
 }
 fn disk_name(root:&Path,path:&Path,device:bool)->Result<String>{
     if device {
@@ -328,7 +328,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                             (Some(captured.bytes),captured.revision)
                         }
                     },_=>{let revision=if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};(None,revision)}};
-                    let more=callback(Document{path,revision,state,bytes,metadata:None})?;
+                    let more=callback(Document{encoding:None,path,revision,state,bytes,metadata:None})?;
                     if !more{return Ok(partial);}
                 }
             }}
@@ -425,10 +425,10 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     let matcher=ignore::WalkBuilder::new(&directory).hidden(false).build_matchers().remove(0);
                     Some(std::sync::Arc::new(std::sync::Mutex::new(vec![(prefix.clone(),matcher)])))
                 }else if respect{ignore_matchers.clone()}else{None};
-                // Keep device selections and walker entries in the same logical
-                // namespace (Windows short names and ancestor symlinks included).
-                // Canonical identity and safe-open scope checks remain separate.
-                let walk_directory=if device { root.join(&prefix) } else { directory.clone() };
+                // Keep selections and walker entries in the same logical namespace,
+                // including an explicitly selected file below an ancestor alias.
+                // Canonical root/scope checks above and at safe-open stay separate.
+                let walk_directory=root.join(&prefix);
                 let mut builder=ignore::WalkBuilder::new(&walk_directory);
                 if immediate&&selections.len()==roots.len() { builder.max_depth(Some(1)); }
                 builder.sort_by_file_name(|a,b|a.cmp(b)).standard_filters(false).follow_links(false)
@@ -492,14 +492,14 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 else if kind.is_file(){
                     if content {
                         let result: Result<Option<CapturedFile>>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes,device)?;let file=File::open(&canonical).map_err(|e|e.to_string())?;
-                            let b=if task.params.operation=="search"{search_capture(file,shared)?}else{Some(read_capture(file,None,shared)?)};
+                            let b=if task.params.operation=="search"{search_capture(file,shared,if task.text_receipts.may_be_utf16(&path){Some("utf-16le")}else{task.params.encoding.as_deref().or_else(||task.params.text_encoding.as_ref().and_then(|p|p.encoding(&path))).or(task.params.default_encoding.as_deref()).or_else(||task.params.text_encoding.as_ref().and_then(|p|p.default_for(&path)))})?}else{Some(read_capture(file,None,shared)?)};
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
                         match result{Ok(Some(captured))=>{bytes=Some(captured.bytes);metadata=Some(captured.metadata);object_hash=captured.object_hash;revision=captured.revision;},Ok(None)=>continue,Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
                     PathState::RegularFile{object_hash,byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
                 let path=display_name(&path,device_root.as_deref()).into();
-                if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
+                if !callback(Document{encoding:None,path,revision,state,bytes,metadata})?{return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
             }
             partial|=ignore_errors.load(std::sync::atomic::Ordering::Relaxed);
         }
@@ -523,9 +523,9 @@ mod tests {
     fn search_skips_binary_before_allocating_the_file_length() {
         let fixture=TestFile(std::env::temp_dir().join(format!("varin-search-binary-{}",uuid::Uuid::new_v4())));
         let file=File::create(&fixture.0).unwrap(); file.set_len(32*1024*1024).unwrap(); drop(file);
-        assert!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false)).unwrap().is_none());
+        assert!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false),None).unwrap().is_none());
         fs::write(&fixture.0,"中文🙂 needle").unwrap();
-        assert_eq!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false)).unwrap().unwrap().bytes,"中文🙂 needle".as_bytes());
+        assert_eq!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false),None).unwrap().unwrap().bytes,"中文🙂 needle".as_bytes());
     }
     #[test]
     fn capture_allocation_failure_preserves_existing_bytes() {

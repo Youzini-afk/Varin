@@ -989,7 +989,7 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
                     source: source.clone(),
                 },
                 source.clone(),
-                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
+                varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot { text_encoding:None,
                     root,
                     selection:None,
                     resources: None,

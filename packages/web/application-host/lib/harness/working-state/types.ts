@@ -266,6 +266,8 @@ export interface DraftBaseline {
 }
 
 export interface WorkingResult {
+  /** Formats proven by the original native operation receipts for these exact raw states. */
+  textFormats?: Record<string, { base?: import("../../kernel/protocol.generated.js").KernelTextFormat; child?: import("../../kernel/protocol.generated.js").KernelTextFormat }>;
   resultRevision: number;
   branchId: string;
   parentRef?: string | undefined;
@@ -292,6 +294,7 @@ export type ThreeWayPathDecision =
   | "conflict";
 
 export interface ThreeWayPathPlan {
+  textFormat?: import('@varin/application-client').VarinTextFormat;
   path: string;
   decision: ThreeWayPathDecision;
   baseState: RecoveryState;

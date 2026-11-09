@@ -426,7 +426,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         |_| Ok(()),
         crate::process::ProcessControlRegistry::default(),
     );
-    let binding = ToolBinding {
+    let binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "parent".into(),
@@ -513,7 +513,7 @@ grant_id: "parent".into(),
     source.revision = Some(0);
     let source_preparation=db.lock().unwrap().prepare_child_source(&operation,
         varin_runtime::catalog::collaboration::ChildSourcePin {pin_id:format!("child-source-pin:{operation}"),root:child.source.pin().unwrap().root.clone(),source:source.clone()},
-        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone(),resources:None,selection:None}).unwrap().load().unwrap();
+        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{ text_encoding:None,root:child.source.pin().unwrap().root.clone(),resources:None,selection:None}).unwrap().load().unwrap();
     db.lock().unwrap().attach_child_source(source_preparation).unwrap();
     let proposal = ContextProposal {
         key: format!("context:{operation}"),
