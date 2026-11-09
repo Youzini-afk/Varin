@@ -1181,10 +1181,42 @@ it('Host observes stdout EOF before process exit without ending still-live stder
   const f = await fixture();
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }) });
   try {
-    const child = await service.spawn(process.execPath, ['-e', `
+    // Windows libuv deliberately leaves descriptors 0–2 open in fs.closeSync.
+    // Close the actual stdout handle there so this fixture produces real EOF.
+    const command = process.platform === 'win32' ? 'powershell.exe' : process.execPath;
+    const args = process.platform === 'win32' ? ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'
+      try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class OutputPipe {
+  [DllImport("kernel32.dll")]
+  private static extern IntPtr GetStdHandle(int standardHandle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr handle);
+  public static void CloseStdout() {
+    if (!CloseHandle(GetStdHandle(-11))) throw new Win32Exception(Marshal.GetLastWin32Error());
+  }
+}
+'@
+        [Console]::Out.Write('stdout')
+        [Console]::Out.Flush()
+        [OutputPipe]::CloseStdout()
+        if ([Console]::OpenStandardInput().ReadByte() -lt 0) { throw 'Missing stdin handshake' }
+        [Console]::Error.Write('after stdout EOF')
+        [Console]::Error.Flush()
+        exit 0
+      } catch {
+        [Console]::Error.Write($_.Exception.ToString())
+        exit 1
+      }
+    `] : ['-e', `
       const fs = require('node:fs'); fs.writeSync(1, 'stdout'); fs.closeSync(1);
       process.stdin.once('data', () => { fs.writeSync(2, 'after stdout EOF'); process.stdin.destroy(); });
-    `], { cwd: f.workspace, env: process.env, stdio: 'pipe' });
+    `];
+    const child = await service.spawn(command, args, { cwd: f.workspace, env: process.env, stdio: 'pipe' });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', bytes => { stdout += bytes.toString(); });
     child.stderr.on('data', bytes => { stderr += bytes.toString(); });
