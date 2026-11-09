@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createThreadsHttpAPI, switchRuntimeEndpoint } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadAdapter, type ThreadModelAuthority } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import type { KernelClient } from './kernel-client.js';
+import { installRuntimeEndpointFetchFixture } from '../../../test/runtime-endpoint.fixture.js';
+const fetchMock = installRuntimeEndpointFetchFixture();
 const identity = { runtime: 'agent' as const, threadId: 'thread:usage', branchId: 'branch:usage' };
 const projection = { threadId: identity.threadId, branchId: identity.branchId, throughCursor: 91, notDispatchedRequests: 0, rows: [] };
-afterEach(() => vi.unstubAllGlobals());
 function fixture() {
   const requests = vi.fn(async (method: string, _params: unknown, _signal?: AbortSignal): Promise<unknown> => {
     if (method === 'runtime.thread.inspect') return { branches: [{ branch_id: identity.branchId }] };
@@ -35,7 +36,7 @@ function fixture() {
 }
 it('routes the original branch through the authenticated Host and native read-only owner', async () => {
   const f = fixture(); const calls: Array<{ url: string; body: unknown }> = [];
-  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+  fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)); calls.push({ url, body }); const result = await f.call(body);
     return Response.json(result.value, { status: result.status });
   });
@@ -46,7 +47,7 @@ it('routes the original branch through the authenticated Host and native read-on
 });
 it('reads the original nested calls through the authenticated operation route', async () => {
   const f = fixture();
-  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+  fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
     expect(url).toBe('/api/threads/operation/calls');
     const reply = await f.call(JSON.parse(String(init.body)), 'operation/calls');
     return Response.json(reply.value, { status: reply.status });
@@ -64,7 +65,11 @@ it('rejects cross-thread branch selection and unsupported source fields before r
 });
 it('rejects a late original Host usage reply instead of publishing it as current Host data', async () => {
   let release!: (value: unknown) => void;
-  vi.stubGlobal('fetch', async () => ({ ok: true, json: () => new Promise(resolve => { release = resolve; }) }));
+  fetchMock.mockImplementation(async () => {
+    const response = new Response();
+    vi.spyOn(response, 'json').mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    return response;
+  });
   const pending = createThreadsHttpAPI().usage(identity);
   await new Promise(resolve => setImmediate(resolve));
   switchRuntimeEndpoint({ apiBaseUrl: 'http://usage-other.test', runtimeKey: 'usage-other' });
