@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelProcessService } from "./process-service.js";
 import fs from "node:fs/promises";
 import os from "node:os";
-import { stripVTControlCharacters } from "node:util";
+import { promisify, stripVTControlCharacters } from "node:util";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, expect, it as vitestIt } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient, type KernelScopedClient } from "./kernel-client.js";
 import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
@@ -23,6 +23,22 @@ const it = vitestIt.skipIf(!available);
 const clients: KernelClient[] = [];
 const roots: string[] = [];
 const pause = (ms = 10) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+let stdoutEofFixtureDirectory: string | undefined;
+let stdoutEofCommand = process.execPath;
+beforeAll(async () => {
+  if (!available || process.platform !== 'win32') return;
+  // Node/libuv leaves descriptors 0–2 open, and PowerShell/.NET duplicates
+  // stdout's inherited handle. Neither fixture can produce early pipe EOF by
+  // closing just fd 1 / GetStdHandle(-11). Use the verified raw Win32 helper.
+  stdoutEofFixtureDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-stdout-eof-'));
+  stdoutEofCommand = path.join(stdoutEofFixtureDirectory, 'stdout-eof.exe');
+  await promisify(execFile)('rustc', ['--edition=2021', '--crate-name', 'stdout_eof',
+    fileURLToPath(new URL('./tests/fixtures/stdout-eof-windows.rs', import.meta.url)),
+    '-o', stdoutEofCommand], { windowsHide: true, timeout: 60_000 });
+}, 60_000);
+afterAll(async () => {
+  if (stdoutEofFixtureDirectory) await fs.rm(stdoutEofFixtureDirectory, { recursive: true, force: true });
+});
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close()));
   for (const root of roots.splice(0)) {
@@ -1184,42 +1200,11 @@ it('Host observes stdout EOF before process exit without ending still-live stder
     resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }),
     onError: error => { processErrors.push(error.message); } });
   try {
-    // Windows libuv deliberately leaves descriptors 0–2 open in fs.closeSync.
-    // Close the actual stdout handle there so this fixture produces real EOF.
-    const command = process.platform === 'win32' ? 'powershell.exe' : process.execPath;
-    const args = process.platform === 'win32' ? ['-NoProfile', '-NonInteractive', '-Command', `
-      $ErrorActionPreference = 'Stop'
-      try {
-        Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-public static class OutputPipe {
-  [DllImport("kernel32.dll")]
-  private static extern IntPtr GetStdHandle(int standardHandle);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool CloseHandle(IntPtr handle);
-  public static void CloseStdout() {
-    if (!CloseHandle(GetStdHandle(-11))) throw new Win32Exception(Marshal.GetLastWin32Error());
-  }
-}
-'@
-        [Console]::Out.Write('stdout')
-        [Console]::Out.Flush()
-        [OutputPipe]::CloseStdout()
-        if ([Console]::OpenStandardInput().ReadByte() -lt 0) { throw 'Missing stdin handshake' }
-        [Console]::Error.Write('after stdout EOF')
-        [Console]::Error.Flush()
-        exit 0
-      } catch {
-        [Console]::Error.Write($_.Exception.ToString())
-        exit 1
-      }
-    `] : ['-e', `
+    const args = process.platform === 'win32' ? [] : ['-e', `
       const fs = require('node:fs'); fs.writeSync(1, 'stdout'); fs.closeSync(1);
       process.stdin.once('data', () => { fs.writeSync(2, 'after stdout EOF'); process.stdin.destroy(); });
     `];
-    const child = await service.spawn(command, args, { cwd: f.workspace, env: process.env, stdio: 'pipe' });
+    const child = await service.spawn(stdoutEofCommand, args, { cwd: f.workspace, env: process.env, stdio: 'pipe' });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', bytes => { stdout += bytes.toString(); });
     child.stderr.on('data', bytes => { stderr += bytes.toString(); });
