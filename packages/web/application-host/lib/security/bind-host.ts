@@ -56,8 +56,8 @@ export const isNetworkExposedBindHost = (host: unknown): boolean => !isLoopbackB
 export const getInvalidBindHostErrorMessage = (host: unknown): string =>
   `Invalid Varin bind host: ${JSON.stringify(host)}. Use a hostname or IP address without a URL scheme, port, or path.`;
 
-export const isUnsafeUnauthenticatedLanAllowed = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  env?.VARIN_ALLOW_UNAUTHENTICATED_LAN === 'true';
+export const isUnsafeUnauthenticatedLanAllowed = (env: NodeJS.ProcessEnv = process.env, explicitlyAllowed = false): boolean =>
+  explicitlyAllowed === true || env?.VARIN_ALLOW_UNAUTHENTICATED_LAN === 'true';
 
 export const getUnauthenticatedLanErrorMessage = (host: unknown): string =>
   `Varin refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `

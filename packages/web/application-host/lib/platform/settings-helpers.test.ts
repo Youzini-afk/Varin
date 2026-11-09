@@ -86,9 +86,11 @@ it('keeps local and remote speech preferences usable without reviving the retire
 
 it('projects actual desktop LAN availability separately from persisted intent', () => {
   vi.stubEnv('VARIN_RUNTIME', 'desktop'); vi.stubEnv('VARIN_DESKTOP_LAN_ACCESS_ACTIVE', 'false');
-  vi.stubEnv('VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON', 'missing-password');
-  expect(roundTrip({ desktopLanAccessEnabled: true }))
-    .toMatchObject({ desktopLanAccessEnabled: true, desktopLanAccessActive: false, desktopLanAccessBlockedReason: 'missing-password' });
+  expect(roundTrip({ desktopLanAccessEnabled: true, desktopUiPassword: '' }))
+    .toMatchObject({ desktopLanAccessEnabled: true, desktopUiPassword: '', desktopLanAccessActive: false });
+  vi.stubEnv('VARIN_DESKTOP_LAN_ACCESS_ACTIVE', 'true');
+  expect(roundTrip({ desktopLanAccessEnabled: true, desktopUiPassword: '' }))
+    .toMatchObject({ desktopLanAccessEnabled: true, desktopUiPassword: '', desktopLanAccessActive: true });
 });
 
 it('retains previously dropped model-picker preferences together and supports clearing selections', () => {

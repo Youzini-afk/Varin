@@ -39,7 +39,6 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
   const [draftPassword, setDraftPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [lanAccessActive, setLanAccessActive] = React.useState(false);
-  const [lanAccessBlockedReason, setLanAccessBlockedReason] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
@@ -77,7 +76,6 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
           desktopLanAccessEnabled?: unknown;
           desktopUiPassword?: unknown;
           desktopLanAccessActive?: unknown;
-          desktopLanAccessBlockedReason?: unknown;
           desktopMacMenuBarEnabled?: unknown;
         };
         if (cancelled) {
@@ -91,9 +89,6 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
         setSavedPassword(password);
         setDraftPassword(password);
         setLanAccessActive(data?.desktopLanAccessActive === true);
-        setLanAccessBlockedReason(
-          typeof data?.desktopLanAccessBlockedReason === 'string' ? data.desktopLanAccessBlockedReason : null
-        );
         const macMenuBarEnabled = data?.desktopMacMenuBarEnabled !== false;
         setSavedMacMenuBarEnabled(macMenuBarEnabled);
         setDraftMacMenuBarEnabled(macMenuBarEnabled);
@@ -215,16 +210,8 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, []);
   const lanUrl = draftValue && lanAccessActive && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
-  const lanRequiresPassword = draftValue && !draftPassword.trim();
-  const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
-  const saveDisabled = isLoading || isSaving || !isDirty || (section !== 'general' && lanRequiresPassword);
-
-  const handlePasswordChange = React.useCallback((value: string) => {
-    setDraftPassword(value);
-    if (!value.trim()) {
-      setDraftValue(false);
-    }
-  }, []);
+  const passwordlessLanAccess = draftValue && !draftPassword.trim();
+  const saveDisabled = isLoading || isSaving || !isDirty;
 
   const handleLaunchAtLoginToggle = React.useCallback(async () => {
     if (!launchAtLoginSupported || isSavingLaunchAtLogin) {
@@ -423,11 +410,9 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
             type={showPassword ? 'text' : 'password'}
             className="h-8 min-w-0 flex-1"
             value={draftPassword}
-            onChange={(event) => handlePasswordChange(event.target.value)}
+            onChange={(event) => setDraftPassword(event.target.value)}
             placeholder={t('settings.varin.desktopPassword.field.passwordPlaceholder')}
             disabled={isLoading || isSaving}
-            required={draftValue}
-            aria-invalid={lanRequiresPassword}
           />
           <Button
             type="button"
@@ -450,18 +435,11 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
             disabled={isLoading || isSaving}
             label={t('settings.varin.desktopNetwork.field.allowLanAccess')}
             info={t('settings.varin.desktopNetwork.field.allowLanAccessDescription')}
-            description={(
-              <>
-                <span className="block text-[var(--status-warning)]/85">
-                  {t('settings.varin.desktopNetwork.field.warning')}
-                </span>
-                {lanRequiresPassword || lanBlockedByMissingPassword ? (
-                  <span className="block text-[var(--status-warning)]/85">
-                    {t('settings.varin.desktopNetwork.field.passwordRequiredWarning')}
-                  </span>
-                ) : null}
-              </>
-            )}
+            description={passwordlessLanAccess ? (
+              <span className="block text-[var(--status-warning)]/85">
+                {t('settings.varin.desktopNetwork.field.warning')}
+              </span>
+            ) : undefined}
             ariaLabel={t('settings.varin.desktopNetwork.field.allowLanAccessAria')}
           />
         </div>

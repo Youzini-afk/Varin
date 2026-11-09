@@ -771,7 +771,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   if (
     isNetworkExposedBindHost(effectiveBindHost)
     && !(typeof uiPassword === 'string' && uiPassword.trim())
-    && !isUnsafeUnauthenticatedLanAllowed(process.env)
+    && !isUnsafeUnauthenticatedLanAllowed(process.env, options.allowUnauthenticatedLan)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
   }

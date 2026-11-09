@@ -1540,12 +1540,7 @@ const spawnLocalServer = async () => {
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
   setDesktopKeepAwakeActive(settings.desktopKeepAwakeEnabled === true);
   const desktopUiPassword = typeof settings.desktopUiPassword === 'string' ? settings.desktopUiPassword.trim() : '';
-  const lanAccessBlockedByMissingPassword = lanAccessEnabled && !desktopUiPassword;
-  const effectiveLanAccessEnabled = lanAccessEnabled && !lanAccessBlockedByMissingPassword;
-  const bindHost = effectiveLanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
-  if (lanAccessBlockedByMissingPassword) {
-    log.warn('[desktop] LAN access was requested without a desktop UI password; starting on loopback only.');
-  }
+  const bindHost = lanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
 
   // Probe before starting the server — main() in the server module sets up a
   // lot of global state before binding, and calling it twice after a listen
@@ -1568,12 +1563,7 @@ const spawnLocalServer = async () => {
   // set before the first import. After this point, the same env is used by
   // both the Electron main and the server running inside it.
   process.env.VARIN_HOST = bindHost;
-  process.env.VARIN_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
-  if (lanAccessBlockedByMissingPassword) {
-    process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
-  } else {
-    delete process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
-  }
+  process.env.VARIN_DESKTOP_LAN_ACCESS_ACTIVE = lanAccessEnabled ? 'true' : 'false';
   process.env.VARIN_DIST_DIR = resolveWebDistDir();
   process.env.VARIN_RUNTIME = 'desktop';
   if (!process.env.VARIN_KERNEL_PATH?.trim()) {
@@ -1617,6 +1607,7 @@ const spawnLocalServer = async () => {
     desktopNetworkFetch: createDesktopNetworkFetch(outboundSession),
     port: chosenPort,
     host: bindHost,
+    allowUnauthenticatedLan: lanAccessEnabled,
     uiPassword: desktopUiPassword || null,
     attachSignals: false,
     exitOnShutdown: false,

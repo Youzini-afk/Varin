@@ -820,10 +820,6 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
       ...(process.env.VARIN_RUNTIME === 'desktop'
         ? {
             desktopLanAccessActive: process.env.VARIN_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
-            desktopLanAccessBlockedReason:
-              process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
-                ? 'missing-password'
-                : null,
           }
         : {}),
       showReasoningTraces:

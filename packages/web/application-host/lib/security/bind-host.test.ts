@@ -3,10 +3,11 @@ import {
   isLoopbackBindHost,
   isNetworkExposedBindHost,
   normalizeBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
 } from './bind-host.js';
 
 describe('bind host exposure classification', () => {
-  it('allows only proven loopback bind hosts without authentication', () => {
+  it('recognizes loopback bind hosts', () => {
     for (const host of ['localhost', '127.0.0.1', '127.25.1.2', '::1', '[::1]', '::ffff:127.0.0.1']) {
       expect(isLoopbackBindHost(host), host).toBe(true);
       expect(isNetworkExposedBindHost(host), host).toBe(false);
@@ -34,6 +35,14 @@ describe('bind host exposure classification', () => {
       expect(isNetworkExposedBindHost(host), host).toBe(true);
     }
   });
+});
+
+it('accepts the desktop user choice without requiring a password or changing the process environment', () => {
+  const environment = {};
+  expect(isUnsafeUnauthenticatedLanAllowed(environment, true)).toBe(true);
+  expect(environment).toEqual({});
+  expect(isUnsafeUnauthenticatedLanAllowed(environment, false)).toBe(false);
+  expect(isUnsafeUnauthenticatedLanAllowed({ VARIN_ALLOW_UNAUTHENTICATED_LAN: 'true' })).toBe(true);
 });
 
 describe('bind host normalization', () => {

@@ -21,6 +21,8 @@ export interface DesktopRuntimeConfig {
 }
 
 export interface StartWebUiServerOptions {
+  /** The embedding application has an explicit user choice to allow passwordless LAN access. */
+  allowUnauthenticatedLan?: boolean | undefined;
   apiOnly?: boolean | undefined;
   attachSignals?: boolean | undefined;
   /** Electron system-network transport for desktop outbound HTTP(S). */

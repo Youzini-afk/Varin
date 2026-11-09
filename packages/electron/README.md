@@ -14,6 +14,12 @@ Desktop starts the Varin web server in the same Electron main process. There is 
 
 The `main.ts` source imports `@varin/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
+Desktop LAN access and the optional UI password are independent preferences. Enabling LAN access
+binds the embedded Host on all interfaces, including when the password is empty; clearing a password
+does not disable network access. The settings page explains passwordless access before saving.
+Electron passes that explicit choice through `allowUnauthenticatedLan` for this Host startup,
+without changing the process-wide `VARIN_ALLOW_UNAUTHENTICATED_LAN` environment variable.
+
 The embedded Application Host starts the native Rust kernel from `resources/kernel`. Its Agent Catalog
 owns Thread/branch identity, history, queues and accepted execution. Storage, file/materialization,
 PTY/process and fixed-view compute remain Host services; they do not become a second Electron backend
