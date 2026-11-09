@@ -115,6 +115,16 @@ impl Owner {
         grant_id: Option<&str>,
     ) -> Result<Value, KernelError> {
         crate::protocol::validate_method_params(method, &params)?;
+        // Match the production Host-only codec branch, without turning these
+        // caller-owned bytes into a Storage request or inventing another codec.
+        if matches!(method, "text.decode" | "text.serialize") {
+            if grant_id.is_some() {
+                return Err(KernelError::Authorization(
+                    "Text codec requires authenticated Host ownership".into(),
+                ));
+            }
+            return crate::text::request(method, params);
+        }
         if method.starts_with("source.") {
             if method == "source.resource.cancel" {
                 let address: source_resources::SourceResourceControlParams =
@@ -210,6 +220,39 @@ impl Owner {
         self.rpc("source.resource.execute", input, None)
     }
 }
+#[test]
+fn managed_source_fixture_routes_shared_codec_without_storage_grants() {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let root = std::env::temp_dir().join(format!("managed-codec-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let a = Owner::new(root.join("a"), "managed-coordinator", "generation-a", "epoch-a");
+    let b = Owner::new(root.join("b"), "managed-target", "generation-b", "epoch-b");
+    let original = b"\xd6\xd0\xce\xc4\r\n";
+    for owner in [&a, &b] {
+        let params = json!({"bytesBase64":STANDARD.encode(original)});
+        let decoded = owner.rpc("text.decode", params.clone(), None).unwrap();
+        assert_eq!(decoded["content"], "中文\r\n");
+        assert_eq!(decoded["format"]["encoding"], "gbk");
+        let encoded = owner.rpc("text.serialize", json!({
+            "sourceBytesBase64":params["bytesBase64"],"sourceFormat":decoded["format"],
+            "content":"中文!\n","normalizeLineEndings":true
+        }), None).unwrap();
+        assert_eq!(encoded["kind"], "serialized");
+        assert_eq!(STANDARD.decode(encoded["bytesBase64"].as_str().unwrap()).unwrap(), b"\xd6\xd0\xce\xc4!\r\n");
+        let rejected = owner.rpc("text.serialize", json!({
+            "sourceBytesBase64":params["bytesBase64"],"sourceFormat":decoded["format"],
+            "content":"中文😀\n","normalizeLineEndings":true
+        }), None).unwrap();
+        assert_eq!(rejected["kind"], "unrepresentable");
+        assert!(matches!(owner.rpc("text.decode", params, Some("tool-grant")), Err(KernelError::Authorization(_))));
+        assert!(owner.rpc("file.read", json!({"workspaceId":"workspace","rootId":"unregistered","path":"a.txt"}), None).is_err());
+    }
+    drop(a);
+    drop(b);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn managed_source_original_effects_survive_epoch_fence_and_reject_foreign_authority() {
     let root =
