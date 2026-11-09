@@ -7,7 +7,7 @@ import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQuery
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
-import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
+import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelTextPolicy, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
@@ -890,6 +890,10 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null> {
     return readOriginalSource(this.context.client, this.context.identity.workspaceId, branchId, options?.signal);
+  }
+
+  async readTextEncoding(branchId: string, revision: number, options?: { signal?: AbortSignal; root?: string }): Promise<KernelTextPolicy> {
+    return readFixedSourceTextEncoding(this.context.client, this.context.identity.workspaceId, branchId, revision, options?.signal, options?.root);
   }
 
 

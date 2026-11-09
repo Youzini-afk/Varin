@@ -30,38 +30,36 @@ export interface ChildSourceStoreOwners {
 
 /** The selected immutable revision owns its format choices, including unchanged ASCII bytes. */
 async function fixedTextEncoding(store: WorkingStateRootStore, branchId: string, revision: number,
-  root: string | undefined, signal: AbortSignal, fallback?: ChildSourceProvenance): Promise<KernelTextPolicy> {
-  const original = await store.readOriginalSource(branchId, { signal });
-  const policy = originalSourceTextEncoding(original?.provenance ?? fallback);
-  if (revision === 0) return policy;
-  const result = await store.getResult(branchId, revision, { signal });
-  if (!result) return policy;
-  if (result.branchId !== branchId || result.resultRevision !== revision || root !== undefined && result.root !== root) {
-    throw new Error('Child source text format differs from its selected result');
-  }
-  return overlayResultTextEncoding(policy, result.textFormats);
+  root: string | undefined, signal: AbortSignal): Promise<KernelTextPolicy> {
+  return store.readTextEncoding(branchId, revision, { signal, ...(root === undefined ? {} : { root }) });
 }
 
 /** Rebase original source-relative rules exactly once with an already accepted subtree pin. */
 function scopedTextEncoding(policy: KernelTextPolicy, prefix: string): KernelTextPolicy {
-  const files: Record<string, string> = Object.create(null);
-  let inherited: { length: number; encoding: string } | undefined;
   const insensitive = /^[a-z]:/i.test(policy.root ?? '') || policy.root?.startsWith('//');
   const comparablePrefix = insensitive ? prefix.toLowerCase() : prefix;
-  for (const [file, encoding] of Object.entries(policy.files ?? {})) {
-    const comparableFile = insensitive ? file.toLowerCase() : file;
-    const directory = comparableFile.endsWith('/');
-    const rule = comparableFile === './' ? '' : directory ? comparableFile.slice(0, -1) : comparableFile;
-    if (directory && (!rule || comparablePrefix === rule || comparablePrefix.startsWith(`${rule}/`))) {
-      if (!inherited || rule.length > inherited.length) inherited = { length: rule.length, encoding };
-    } else if (comparableFile.startsWith(`${comparablePrefix}/`)) {
-      files[file.slice(prefix.length + 1)] = encoding;
+  const project = <T>(values: Record<string, T> | undefined): Record<string, T> => {
+    const scoped: Record<string, T> = Object.create(null);
+    let inherited: { length: number; value: T } | undefined;
+    for (const [file, value] of Object.entries(values ?? {})) {
+      const comparableFile = insensitive ? file.toLowerCase() : file;
+      const directory = comparableFile.endsWith('/');
+      const rule = comparableFile === './' ? '' : directory ? comparableFile.slice(0, -1) : comparableFile;
+      if (directory && (!rule || comparablePrefix === rule || comparablePrefix.startsWith(`${rule}/`))) {
+        if (!inherited || rule.length > inherited.length) inherited = { length: rule.length, value };
+      } else if (comparableFile.startsWith(`${comparablePrefix}/`)) {
+        scoped[file.slice(prefix.length + 1)] = value;
+      }
     }
-  }
-  if (inherited) files['./'] = inherited.encoding;
+    if (inherited) scoped['./'] = inherited.value;
+    return scoped;
+  };
+  const files = project(policy.files);
+  const choiceRevisions = project(policy.choiceRevisions);
   return { ...(policy.defaultEncoding ? { defaultEncoding: policy.defaultEncoding } : {}),
     ...(policy.root ? { root: `${policy.root.replace(/\\/g, '/').replace(/\/$/, '')}/${prefix}` } : {}),
-    ...(Object.keys(files).length ? { files } : {}) };
+    ...(Object.keys(files).length ? { files } : {}),
+    ...(Object.keys(choiceRevisions).length ? { choiceRevisions } : {}) };
 }
 
 function draftEncoding(provenance: ChildSourceProvenance | undefined, file: string): string | undefined {
@@ -103,8 +101,8 @@ export async function prepareDispatchSourceStore(
     const resources=original?.provenance.resources;
     const selectedPath = handoff.root.kind === 'fixed' ? handoff.source_path?.replace(/\\/g, '/').replace(/\/$/, '') : undefined;
     const prefix = selectedPath && selectedPath !== '.' ? selectedPath : undefined;
-    // getResult validates the original full revision itself. A subtree pin has a
-    // different root, so its root cannot be compared with that full result root.
+    // branch.read validates the original full revision itself. A subtree pin has
+    // a different root, so it cannot be compared with that full revision root.
     const policy = await fixedTextEncoding(store, fixed.source.branch_id, fixed.source.revision, prefix ? undefined : fixed.root, signal);
     const textEncoding = prefix ? scopedTextEncoding(policy, prefix) : policy;
     provenance = { consistency: 'fixed-root', root: fixed.root, textEncoding, ...(resources ? { resources: handoff.source_path && handoff.root.kind !== 'native'
@@ -161,7 +159,7 @@ export async function prepareContinuationSourceStore(
     if (pin.root !== basis.root) throw new Error('Continuation source root changed');
     signal.throwIfAborted();
     const branchId = `child-source:${child.execution_id}`;
-    const textEncoding = await fixedTextEncoding(store, basis.source.branch_id, basis.source.revision, basis.root, signal, basis.provenance);
+    const textEncoding = await fixedTextEncoding(store, basis.source.branch_id, basis.source.revision, basis.root, signal);
     const provenance = { ...basis.provenance, ...('root' in basis.provenance ? { root: basis.root } : {}), textEncoding };
     const branch = await store.createBranchFromPin(basis.source.workspace_id, branchId, pin,
       `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: provenance });

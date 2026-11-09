@@ -535,7 +535,8 @@ impl ResultPublicationTask {
             loop {if self.cancellation.load(Ordering::Acquire){return Err(KernelError::Cancelled);}let count=file.read(&mut buffer)?;if count==0{break;}digest.update(&buffer[..count]);}
             Ok(Some(format!("sha256-{}",hex::encode(digest.finalize()))))
         })?;
-        let text_snapshot = previous.published(&self.branch.head_root,&document,|path|Ok(reader.state(&self.branch.head_root,path)?.object_hash().map(str::to_owned)))?;
+        let mut text_snapshot = previous.published(&self.branch.head_root,&document,|path|Ok(reader.state(&self.branch.head_root,path)?.object_hash().map(str::to_owned)))?;
+        self.text_formats.apply_choice_revisions(&mut text_snapshot,&document)?;
         let payload = serde_json::to_string(&document)?;
         let receipt = json!({"publicationId":self.params["operationId"],"workspaceId":self.branch.workspace_id,"branchId":branch_id,
             "resultRevision":revision,"root":self.branch.head_root,"baseRoot":self.branch.base_root,"recordId":record_id,"createdAt":created_at});

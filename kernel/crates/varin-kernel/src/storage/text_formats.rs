@@ -65,8 +65,32 @@ pub(super) struct WorkingSnapshot(BTreeMap<String, WorkingPath>);
 struct WorkingPath {
     base: Option<(String, Format)>,
     child: Option<(String, Format)>,
+    #[serde(default)]
+    choice_revision: Option<u64>,
 }
 impl WorkingSnapshot {
+    pub(super) fn apply_choice_revisions(
+        &self,
+        snapshot: &mut BranchSnapshot,
+        document: &Value,
+    ) -> Result<(), KernelError> {
+        for (path, selected) in &self.0 {
+            if let (Some(revision), Some((_, format)), Some(actual)) = (
+                selected.choice_revision,
+                selected.child.as_ref(),
+                document["textFormats"][path].get("child"),
+            ) {
+                if serde_json::to_value(format)? == *actual {
+                    let policy = snapshot.policy.get_or_insert_with(|| json!({}));
+                    if !policy["choiceRevisions"].is_object() {
+                        policy["choiceRevisions"] = json!({});
+                    }
+                    policy["choiceRevisions"][path] = json!(revision);
+                }
+            }
+        }
+        Ok(())
+    }
     pub(super) fn attach(
         &self,
         document: &mut Value,
@@ -172,6 +196,7 @@ pub(super) struct CheckpointText {
     working: WorkingSnapshot,
     sequence: u64,
     receipts: Snapshot,
+    receipt_revisions: BTreeMap<String, u64>,
     policy_is_relative: bool,
     pub(super) requested_policy: Option<Value>,
 }
@@ -255,6 +280,7 @@ impl CheckpointText {
             Ok(format!("sha256-{}", hex::encode(hash.finalize())))
         };
         let mut formats = BTreeMap::new();
+        let mut verified_receipts = BTreeMap::new();
         for (path, (hash, format)) in &self.baseline.formats {
             let Some(relative) = relative(path) else {
                 continue;
@@ -301,6 +327,10 @@ impl CheckpointText {
                 continue;
             };
             if raw_hash(&object_hash, byte_length)? == *raw {
+                verified_receipts.insert(
+                    relative.clone(),
+                    self.receipt_revisions.get(path).copied().unwrap_or(0),
+                );
                 formats.insert(relative, (object_hash, format.clone()));
             }
         }
@@ -340,6 +370,45 @@ impl CheckpointText {
                 }
             }
         }
+        // Only a newer explicit choice for this captured source/path replaces
+        // its baseline. Project defaults and other files remain frozen.
+        if !self.policy_is_relative {
+            if let (Some(policy), Some(requested)) = (&mut policy, &self.requested_policy) {
+                if let Some(revisions) = requested["choiceRevisions"].as_object() {
+                    for (path, value) in revisions {
+                        let Some(revision) = value.as_u64() else {
+                            continue;
+                        };
+                        if revision > policy["choiceRevisions"][path].as_u64().unwrap_or(0) {
+                            if !policy["files"].is_object() {
+                                policy["files"] = json!({});
+                            }
+                            if !policy["choiceRevisions"].is_object() {
+                                policy["choiceRevisions"] = json!({});
+                            }
+                            if let Some(encoding) = requested["files"].get(path) {
+                                policy["files"][path] = encoding.clone();
+                            } else {
+                                policy["files"].as_object_mut().unwrap().remove(path);
+                            }
+                            policy["choiceRevisions"][path] = json!(revision);
+                            if verified_receipts.get(path) != Some(&revision) {
+                                formats.remove(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // An uncaptured native source also carries current manual/reset versions
+        // in its selected policy. Older same-byte receipts cannot reverse them.
+        if let Some(policy) = &policy {
+            formats.retain(|path, _| {
+                verified_receipts.get(path).is_none_or(|revision| {
+                    policy["choiceRevisions"][path].as_u64().unwrap_or(0) <= *revision
+                })
+            });
+        }
         if !formats.is_empty() {
             let policy = policy.get_or_insert_with(|| json!({}));
             if !policy["files"].is_object() {
@@ -347,6 +416,12 @@ impl CheckpointText {
             }
             for (path, (_, format)) in &formats {
                 policy["files"][path] = json!(format.encoding);
+                if let Some(revision) = verified_receipts.get(path) {
+                    if !policy["choiceRevisions"].is_object() {
+                        policy["choiceRevisions"] = json!({});
+                    }
+                    policy["choiceRevisions"][path] = json!(revision);
+                }
             }
         }
         Ok(BranchSnapshot {
@@ -737,6 +812,7 @@ impl Storage {
             grant,
         );
         let mut receipts = BTreeMap::new();
+        let mut receipt_revisions = BTreeMap::new();
         if let Some(paths) = self.text_formats.branches.get(&(
             head.workspace_id.clone(),
             branch.into(),
@@ -757,6 +833,14 @@ impl Storage {
                         path.clone(),
                         (receipt.target_hash.clone(), receipt.after.clone()),
                     );
+                    receipt_revisions.insert(
+                        path.clone(),
+                        receipt
+                            .conversion
+                            .as_ref()
+                            .map(|choice| choice.choice_revision)
+                            .unwrap_or(0),
+                    );
                 }
             }
         }
@@ -766,6 +850,7 @@ impl Storage {
             working,
             sequence,
             receipts: Snapshot(Arc::new(receipts)),
+            receipt_revisions,
             policy_is_relative: false,
             requested_policy: None,
         })
@@ -1414,18 +1499,91 @@ impl Storage {
                 .filter(belongs)
                 .find(|receipt| receipt.first_branch_source)
                 .and_then(|receipt| Some((receipt.source_hash.clone()?, receipt.before.clone()?)));
-            let child = history
+            let receipt = history
                 .operations
                 .iter()
                 .rev()
                 .filter_map(|id| self.text_formats.receipts.get(id))
-                .find(belongs)
-                .map(|receipt| (receipt.target_hash.clone(), receipt.after.clone()));
+                .find(belongs);
+            let child = receipt.map(|receipt| (receipt.target_hash.clone(), receipt.after.clone()));
+            let choice_revision = receipt.and_then(|receipt| {
+                receipt
+                    .conversion
+                    .as_ref()
+                    .map(|choice| choice.choice_revision)
+            });
             if base.is_some() || child.is_some() {
-                selected.insert(path.clone(), WorkingPath { base, child });
+                selected.insert(
+                    path.clone(),
+                    WorkingPath {
+                        base,
+                        child,
+                        choice_revision,
+                    },
+                );
             }
         }
         WorkingSnapshot(selected)
+    }
+
+    /// A restore uses exact point metadata for its target and the current
+    /// admitted root's hash-matched fact for its safety image. Neither is part
+    /// of RecoveryState equality or a guessed hash-global interpretation.
+    pub(super) fn restore_text_metadata(
+        &self,
+        grant: &Grant,
+        root: &str,
+        path: &str,
+        safety: &Value,
+        target: &Value,
+        target_format: Option<&Value>,
+        mode: varin_runtime::SourceMode,
+    ) -> Result<Value, KernelError> {
+        let root = self.admitted_file_root(root, grant)?;
+        let source = Source::new(grant, &root);
+        let current = self
+            .text_formats
+            .current_roots
+            .get(&root_key(&source))
+            .and_then(|paths| paths.get(path))
+            .and_then(|key| self.text_formats.current_facts.get(key))
+            .map(|fact| &fact.evidence)
+            .filter(|fact| {
+                (fact.source.canonical_root == root.canonical_root || root.native.is_some())
+                    && safety["objectHash"].as_str() == Some(fact.target_hash.as_str())
+            });
+        let mut metadata = json!({"changed":false});
+        if let Some(current) = current {
+            metadata["safety"] = serde_json::to_value(&current.after)?;
+        }
+        let Some(target_format) = target_format else {
+            return Ok(metadata);
+        };
+        let target_format: Format = serde_json::from_value(target_format.clone())?;
+        let Some(hash) = target["objectHash"].as_str() else {
+            return Ok(metadata);
+        };
+        metadata["target"] = serde_json::to_value(&target_format)?;
+        metadata["changed"] = json!(current.is_none_or(|current| current.after.encoding
+            != target_format.encoding
+            || current.after.bom != target_format.bom
+            || current.after.line_ending != target_format.line_ending
+            || current.after.default_line_ending != target_format.default_line_ending));
+        let mut intent = json!({"__textFormat":target_format,"__nativeGrantId":grant.grant_id,"__nativeEpoch":grant.kernel_epoch,"__textSourceMode":mode});
+        if let Some(current) = current {
+            intent["__textSourceFormat"] = serde_json::to_value(&current.after)?;
+            if let Some(branch) = &current.branch {
+                intent["__textBranchId"] = json!(branch);
+            }
+            if let Some(policy_root) = &current.policy_root {
+                intent["__textPolicyRoot"] = json!(policy_root);
+            }
+            if current.after.encoding != target_format.encoding {
+                intent["__textConversion"] = json!({"sourceEncoding":current.after.encoding,"targetEncoding":target_format.encoding,"rawHash":hash,"choiceRevision":current.conversion.as_ref().map(|choice|choice.choice_revision).unwrap_or(0)});
+            }
+        }
+        metadata["intent"] = intent;
+        Ok(metadata)
     }
 
     pub(super) fn enrich_recovery_text_formats(
@@ -1525,9 +1683,19 @@ mod tests {
             revision: i64,
             encoding: Option<&str>,
         ) -> Value {
+            self.compute_source(
+                actor,
+                json!({"branchId":branch,"revision":revision}),
+                encoding,
+            )
+        }
+        fn compute_source(&mut self, actor: &str, source: Value, encoding: Option<&str>) -> Value {
             let job = Uuid::new_v4().to_string();
-            let mut params = json!({"workspaceId":"workspace","jobId":job,"operation":"read","lane":"foreground","branchId":branch,"revision":revision,
+            let mut params = json!({"workspaceId":"workspace","jobId":job,"operation":"read","lane":"foreground",
                 "paths":["a.txt"],"files":[{"path":"a.txt"}],"textEncoding":{"files":{"a.txt":"gbk"}}});
+            for (key, value) in source.as_object().unwrap() {
+                params[key] = value.clone();
+            }
             if let Some(encoding) = encoding {
                 params["encoding"] = json!(encoding);
             }
@@ -2070,7 +2238,7 @@ mod tests {
         assert_eq!(scoped["textEncoding"]["files"], json!({"a.txt":"utf-8"}));
         let pin = f.invoke(
             "branch.pin",
-            json!({"branchId":"ascii","revision":1,"pinId":"ascii-selected"}),
+            json!({"operationId":"ascii-pin","branchId":"ascii","revision":1,"pinId":"ascii-selected"}),
         );
         f.invoke("branch.fork",json!({"operationId":"fork-result","workspaceId":"workspace","sourceBranchId":"ascii","sourcePinId":pin["pinId"],"branchId":"ascii-child","draftBasePaths":[],"captureScopes":[]}));
         assert_eq!(
@@ -2134,11 +2302,100 @@ mod tests {
     }
 
     #[test]
+    fn ascii_format_only_restore_and_undo_replace_current_fact_across_restart() {
+        let mut f = Fixture::new();
+        fs::write(f.directory.join("files/a.txt"), b"text").unwrap();
+        f.mutation("convert-ascii", "text", "gbk", "utf-8", None, true);
+        let source = json!({"rootId":f.root,"textEncoding":{"files":{"a.txt":"utf-8"}}});
+        assert_eq!(
+            f.compute_source("actor", source.clone(), None)["data"]["format"]["encoding"],
+            "utf-8"
+        );
+        let anchor = JournalAnchor {
+            execution_id: "run:input".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            run_id: "run".into(),
+            entry_id: "input".into(),
+            epoch: 1,
+        };
+        let restored = f
+            .storage
+            .restore_recorded_files(
+                "workspace",
+                &f.root,
+                "thread",
+                "restore-ascii",
+                &super::super::recovery_points::FileRestoreArgs {
+                    point: Some("current:before".into()),
+                    undo: None,
+                    paths: None,
+                    overwrite_paths: None,
+                    blocked_paths: None,
+                },
+                Some(&anchor),
+                varin_runtime::SourceMode::LiveRoot,
+                &f.grant,
+                &mut false,
+            )
+            .unwrap();
+        assert_eq!(restored["status"], "applied", "{restored}");
+        assert_eq!(fs::read(f.directory.join("files/a.txt")).unwrap(), b"text");
+        assert_eq!(
+            f.compute_source("actor", source.clone(), None)["data"]["format"]["encoding"],
+            "gbk"
+        );
+        let candidate = f.invoke(
+            "file.text.conversions",
+            json!({"workspaceId":"workspace","rootId":f.root,"path":"a.txt"}),
+        );
+        assert_eq!(candidate["conversions"][0]["sourceEncoding"], "utf-8");
+        assert_eq!(candidate["conversions"][0]["targetEncoding"], "gbk");
+        assert_eq!(candidate["conversions"][0]["choiceRevision"], 7);
+        f.reopen();
+        assert_eq!(
+            f.compute_source("actor", source.clone(), None)["data"]["format"]["encoding"],
+            "gbk"
+        );
+        let undone = f
+            .storage
+            .restore_recorded_files(
+                "workspace",
+                &f.root,
+                "thread",
+                "undo-ascii",
+                &super::super::recovery_points::FileRestoreArgs {
+                    point: None,
+                    undo: Some("restore-ascii".into()),
+                    paths: None,
+                    overwrite_paths: None,
+                    blocked_paths: None,
+                },
+                Some(&anchor),
+                varin_runtime::SourceMode::LiveRoot,
+                &f.grant,
+                &mut false,
+            )
+            .unwrap();
+        assert_eq!(undone["status"], "applied", "{undone}");
+        assert_eq!(
+            f.compute_source("actor", json!({"rootId":f.root}), None)["data"]["format"]["encoding"],
+            "utf-8"
+        );
+        f.reopen();
+        assert_eq!(
+            f.compute_source("actor", json!({"rootId":f.root}), None)["data"]["format"]["encoding"],
+            "utf-8"
+        );
+    }
+
+    #[test]
     fn checkpoint_fork_freezes_format_before_later_same_hash_publication() {
         use super::super::workspace_session::{Session, StoragePort};
         let mut f = Fixture::new();
         fs::write(f.directory.join("files/a.txt"), b"text").unwrap();
         f.branch("checkpoint-source", b"text");
+        f.branch("uncaptured-source", b"text");
         f.mutation(
             "checkpoint-first",
             "text",
@@ -2187,7 +2444,9 @@ mod tests {
         )));
         let shared = owner.clone();
         let port = StoragePort::new(move |command| {
-            let mut storage = shared.lock().unwrap();
+            let mut storage = shared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             command(Some(&mut storage));
             Ok(())
         });
@@ -2196,33 +2455,69 @@ mod tests {
         // A real dirty native generation changes object identity to a range
         // descriptor even though the logical bytes happen to remain ASCII.
         let node = session.lookup("a.txt").unwrap();
-        session.write(&node, Some(0), b"text").unwrap();
+        session.write(&node, Some(1), b"ex").unwrap();
         let checkpoint = session.checkpoint().unwrap();
-        assert_eq!(later.run(port.clone()).unwrap_or_else(|failure|panic!("{}",failure.error))["status"], "applied");
+        let reset_manual = session
+            .checkpoint()
+            .unwrap()
+            .with_text_policy(Some(crate::text::Policy {
+                files: Some(BTreeMap::new()),
+                choice_revisions: Some(BTreeMap::from([("a.txt".into(), 9)])),
+                ..Default::default()
+            }))
+            .unwrap();
+        let newer_manual = session
+            .checkpoint()
+            .unwrap()
+            .with_text_policy(Some(crate::text::Policy {
+                files: Some(BTreeMap::from([("a.txt".into(), "gbk".into())])),
+                choice_revisions: Some(BTreeMap::from([("a.txt".into(), 8)])),
+                ..Default::default()
+            }))
+            .unwrap();
+        let equal_manual = session
+            .checkpoint()
+            .unwrap()
+            .with_text_policy(Some(crate::text::Policy {
+                files: Some(BTreeMap::from([("a.txt".into(), "gbk".into())])),
+                choice_revisions: Some(BTreeMap::from([("a.txt".into(), 7)])),
+                ..Default::default()
+            }))
+            .unwrap();
+        assert_eq!(
+            later
+                .run(port.clone())
+                .unwrap_or_else(|failure| panic!("{}", failure.error))["status"],
+            "applied"
+        );
+        let later_boundary = session.checkpoint().unwrap();
+        later_boundary
+            .prepare_result(
+                "checkpoint-later-result",
+                f.grant.clone(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap();
         {
-            let mut storage = owner.lock().unwrap();
-            let branch = storage.branch("checkpoint-source").unwrap();
-            let mut invoke = |method: &str, value: Value| {
-                let (grant, params) = storage
-                    .authorize(Some("actor"), "epoch", "host", "generation", method, &value)
-                    .unwrap();
-                storage
-                    .dispatch(method, &params, Some("actor"), &grant)
-                    .unwrap()
-            };
-            invoke(
-                "branch.write.begin",
-                json!({"operationId":"result-prepare:checkpoint-later-result","builderId":"result-prepare:checkpoint-later-result","branchId":"checkpoint-source","expectedWriteRevision":branch.write_revision}),
-            );
-            invoke(
-                "working.result.prepare",
-                json!({"operationId":"result-prepare:checkpoint-later-result","publicationId":"checkpoint-later-result","builderId":"result-prepare:checkpoint-later-result","expectedRoot":branch.head_root}),
-            );
-            invoke(
-                "working.result.publish",
-                json!({"operationId":"checkpoint-later-result","workspaceId":"workspace","branchId":"checkpoint-source","candidateOperationId":"result-prepare:checkpoint-later-result"}),
-            );
+            let mut storage = owner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let value = json!({"operationId":"checkpoint-later-result","workspaceId":"workspace","branchId":"checkpoint-source","candidateOperationId":"result-prepare:checkpoint-later-result"});
+            let (grant, params) = storage
+                .authorize(
+                    Some("actor"),
+                    "epoch",
+                    "host",
+                    "generation",
+                    "working.result.publish",
+                    &value,
+                )
+                .unwrap();
+            storage
+                .dispatch("working.result.publish", &params, Some("actor"), &grant)
+                .unwrap();
         }
+        later_boundary.release().unwrap();
         let fork = checkpoint
             .fork(
                 "checkpoint-fixed",
@@ -2241,6 +2536,116 @@ mod tests {
             fork,
             "original checkpoint replay is unchanged"
         );
+        reset_manual
+            .fork(
+                "checkpoint-reset",
+                "checkpoint-reset-fork",
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        reset_manual.release().unwrap();
+        // A format-only native mutation needs no OS mount byte write, but does
+        // run the real native root/session metadata and committed receipt owners.
+        let uncaptured =
+            Session::open(port.clone(), "uncaptured-source".into(), f.grant.clone()).unwrap();
+        let native_root = owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .register_native_file_root(
+                "uncaptured-source",
+                &uncaptured.identity().to_string(),
+                f.directory.join("files"),
+                "",
+                &f.grant,
+            )
+            .unwrap();
+        let admitted = owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .admitted_file_root(&native_root, &f.grant)
+            .unwrap();
+        let observed = super::super::capture_resources::observe_effect(
+            &admitted,
+            "a.txt",
+            &f.grant,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let mutation = TextMutation::Write(FileWriteArgs {
+            path: "a.txt".into(),
+            read_version: read_version(&native_root, "a.txt", &observed).unwrap(),
+            content: "text".into(),
+            mode: None,
+            source_format: Some(crate::text::decode(b"text", Some("gbk"), None).unwrap().1),
+            target_format: Some(crate::text::TargetFormat {
+                encoding: Some("utf-8".into()),
+                bom: None,
+                line_ending: None,
+            }),
+        });
+        let native_task = owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .prepare_text_mutation(
+                "workspace",
+                &native_root,
+                "uncaptured-conversion",
+                &mutation,
+                &f.grant,
+                None,
+                varin_runtime::SourceMode::NativeWorkspace,
+                None,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap()
+            .with_text_branch(Some("uncaptured-source".into()))
+            .with_text_policy(Some(crate::text::Policy {
+                choice_revisions: Some(BTreeMap::from([("a.txt".into(), 8)])),
+                ..Default::default()
+            }));
+        assert_eq!(
+            native_task
+                .run(port.clone())
+                .unwrap_or_else(|failure| panic!("{}", failure.error))["status"],
+            "applied"
+        );
+        let fallback = uncaptured
+            .checkpoint()
+            .unwrap()
+            .with_text_policy(Some(crate::text::Policy {
+                files: Some(BTreeMap::from([("a.txt".into(), "gbk".into())])),
+                choice_revisions: Some(BTreeMap::from([("a.txt".into(), 9)])),
+                ..Default::default()
+            }))
+            .unwrap();
+        fallback
+            .fork(
+                "checkpoint-fallback",
+                "checkpoint-fallback-fork",
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        fallback.release().unwrap();
+        uncaptured.close().unwrap();
+        drop(uncaptured);
+        drop(admitted);
+        drop(native_task);
+        newer_manual
+            .fork(
+                "checkpoint-manual",
+                "checkpoint-manual-fork",
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        equal_manual
+            .fork(
+                "checkpoint-equal",
+                "checkpoint-equal-fork",
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        newer_manual.release().unwrap();
+        equal_manual.release().unwrap();
         checkpoint.release().unwrap();
         session.close().unwrap();
         drop(node);
@@ -2263,9 +2668,46 @@ mod tests {
             selected["entries"][0]["state"]["objectHash"]
                 .as_str()
                 .unwrap()
-                .starts_with("ranges-sha256-")
+                .starts_with("ranges-sha256-"),
+            "{selected}"
         );
         assert_eq!(selected["textEncoding"]["files"]["a.txt"], "utf-8");
+        let reset = f.invoke_as(
+            "future",
+            "branch.read",
+            json!({"branchId":"checkpoint-reset","revision":0,"includeEntries":false}),
+        );
+        assert!(
+            reset["textEncoding"]["files"].get("a.txt").is_none(),
+            "{reset}"
+        );
+        assert_eq!(reset["textEncoding"]["choiceRevisions"]["a.txt"], 9);
+        let fallback = f.invoke_as(
+            "future",
+            "branch.read",
+            json!({"branchId":"checkpoint-fallback","revision":0,"includeEntries":false}),
+        );
+        assert_eq!(fallback["textEncoding"]["files"]["a.txt"], "gbk");
+        assert_eq!(fallback["textEncoding"]["choiceRevisions"]["a.txt"], 9);
+        assert_eq!(
+            f.compute_read("future", "checkpoint-fallback", 0, None)["data"]["format"]["encoding"],
+            "gbk"
+        );
+        let manual = f.invoke_as(
+            "future",
+            "branch.read",
+            json!({"branchId":"checkpoint-manual","revision":0,"includeEntries":false}),
+        );
+        assert_eq!(manual["textEncoding"]["files"]["a.txt"], "gbk");
+        assert_eq!(manual["textEncoding"]["choiceRevisions"]["a.txt"], 8);
+        assert_eq!(
+            f.invoke_as(
+                "future",
+                "branch.read",
+                json!({"branchId":"checkpoint-equal","revision":0,"includeEntries":false})
+            )["textEncoding"]["files"]["a.txt"],
+            "utf-8"
+        );
         assert_eq!(
             f.invoke_as(
                 "future",
