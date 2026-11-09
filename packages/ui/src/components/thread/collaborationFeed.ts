@@ -31,6 +31,8 @@ export interface CollaborationFeedState {
   currentCursor?: string;
   historyCursor?: string;
   historyLoaded: boolean;
+  loadingMembers: boolean;
+  memberError?: string;
   error?: string;
 }
 const failureText = (error: unknown) =>
@@ -54,6 +56,7 @@ export class CollaborationFeed {
     loadingEarlier: false,
     before: null,
     historyLoaded: false,
+    loadingMembers: false,
   };
   private refreshing = false;
   private dirty = false;
@@ -63,6 +66,7 @@ export class CollaborationFeed {
   private eventCursor: number | null = null;
   private latest = 0;
   private changingMessages = new Set<string>();
+  private memberRequest?: Promise<void>;
   private observation?: Promise<void>;
   constructor(
     private api: ThreadsAPI,
@@ -319,18 +323,20 @@ export class CollaborationFeed {
       this.publish({ loadingEarlier: false });
     }
   };
-  loadMembers = async (scope: "current" | "history") => {
-    try {
-      await this.directory(
-        scope,
-        scope === "current"
-          ? this.value.currentCursor
-          : this.value.historyCursor,
-      );
-    } catch (error) {
-      if (!this.controller.signal.aborted)
-        this.publish({ error: failureText(error) });
-    }
+  loadMembers = (scope: "current" | "history"): Promise<void> => {
+    if (this.memberRequest) return this.memberRequest;
+    if (this.controller.signal.aborted) return Promise.resolve();
+    this.publish({ loadingMembers: true, memberError: undefined });
+    this.memberRequest = this.directory(
+      scope,
+      scope === "current" ? this.value.currentCursor : this.value.historyCursor,
+    ).catch(error => {
+      this.publish({ memberError: failureText(error) });
+    }).finally(() => {
+      this.memberRequest = undefined;
+      this.publish({ loadingMembers: false });
+    });
+    return this.memberRequest;
   };
   resolveMember = async (threadId: string, fresh = false) => {
     const existing = this.members.get(threadId);

@@ -331,6 +331,7 @@ export const dict: Record<I18nKey, string> = {
   'collaboration.members': "查看成員",
   'collaboration.currentMembers': "目前成員",
   'collaboration.moreMembers': "更多成員",
+  'collaboration.noRecipients': '暫無其他可聯絡的任務',
   'collaboration.moreEnded': "查看已結束成員",
   'collaboration.viewMember': "查看 {name} 的對話",
   'collaboration.back': "返回協作",

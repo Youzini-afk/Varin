@@ -464,6 +464,7 @@ export const dict = {
   'collaboration.queue.withdrawing': 'Withdrawing',
   'collaboration.queue.sending': 'Sending',
   'collaboration.recipients': 'Choose recipients',
+  'collaboration.noRecipients': 'No other tasks to contact',
   'collaboration.description': "Team messages, file exchanges and Agent conversations",
   'collaboration.team': "This task’s team",
   'collaboration.you': "You",

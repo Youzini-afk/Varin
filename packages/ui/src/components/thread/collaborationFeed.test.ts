@@ -105,6 +105,32 @@ it('keeps peer messages, prepended history and new pages in one ordered feed, wh
   expect(feed.getSnapshot().messages.map((item) => item.acceptedCursor)).toEqual([1, 2, 3, 4, 5, 6]);
   feed.close();
 });
+it('coalesces member paging and retries the same cursor after a failed page', async () => {
+  const f = fixture();
+  const feed = new CollaborationFeed(f.api, identity);
+  try {
+    await feed.start();
+    const list = vi.spyOn(f.api.family!, 'list');
+    list.mockClear();
+    let resolve!: (page: Awaited<ReturnType<NonNullable<ThreadsAPI['family']>['list']>>) => void;
+    list.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const first = feed.loadMembers('history');
+    expect(feed.loadMembers('history')).toBe(first);
+    expect(list).toHaveBeenCalledOnce();
+    expect(feed.getSnapshot().loadingMembers).toBe(true);
+    resolve({ rootThreadId: 'root', members: [], nextCursor: 'history-next' });
+    await first;
+    expect(feed.getSnapshot()).toMatchObject({ loadingMembers: false, historyLoaded: true, historyCursor: 'history-next' });
+    list.mockRejectedValueOnce(new Error('directory unavailable'));
+    await feed.loadMembers('history');
+    expect(feed.getSnapshot()).toMatchObject({ loadingMembers: false, memberError: 'directory unavailable', historyCursor: 'history-next' });
+    await feed.loadMembers('history');
+    expect(list).toHaveBeenLastCalledWith(identity, { includeSelf: true, scope: 'history', cursor: 'history-next' }, expect.any(AbortSignal));
+    expect(feed.getSnapshot().memberError).toBeUndefined();
+    expect(feed.getSnapshot().historyCursor).toBeUndefined();
+  } finally { feed.close(); }
+});
+
 it('does not publish an old page after its panel closes', async () => {
   const f = fixture();
   const feed = new CollaborationFeed(f.api, identity);

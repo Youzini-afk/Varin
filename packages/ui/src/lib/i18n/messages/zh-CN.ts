@@ -445,6 +445,7 @@ export const dict: Record<I18nKey, string> = {
   'collaboration.members': "查看成员",
   'collaboration.currentMembers': "当前成员",
   'collaboration.moreMembers': "更多成员",
+  'collaboration.noRecipients': '暂无其他可联系的任务',
   'collaboration.moreEnded': "查看已结束成员",
   'collaboration.viewMember': "查看 {name} 的对话",
   'collaboration.back': "返回协作",

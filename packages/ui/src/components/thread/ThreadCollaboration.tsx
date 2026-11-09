@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -36,6 +35,7 @@ import {
   type CollaborationFeedItem,
 } from "./collaborationFeed";
 import { CollaborationComposer } from "./CollaborationComposer";
+import { CollaborationMemberMenu } from './CollaborationMemberMenu';
 import { CollaborationExchangeQueue } from './CollaborationExchangeQueue';
 import { memberBranch } from "./collaborationPresentation";
 import { CollaborationMessage } from "./CollaborationMessage";
@@ -162,6 +162,12 @@ function CollaborationRoomContent({
       !member.detail.current &&
       member.threadId !== state.rootThreadId,
   );
+  const moreMembers = !state.historyLoaded || Boolean(state.historyCursor || state.currentCursor);
+  const loadMembers = React.useCallback(() => {
+    const snapshot = feed.getSnapshot();
+    if (snapshot.currentCursor) void feed.loadMembers('current');
+    else if (!snapshot.historyLoaded || snapshot.historyCursor) void feed.loadMembers('history');
+  }, [feed]);
   const find = (id: string) =>
     state.members.find((member) => member.threadId === id);
   const name = (id: string) => find(id)?.name || find(id)?.agentId || id;
@@ -338,7 +344,7 @@ function CollaborationRoomContent({
     root,
     state.rootThreadId === identity.threadId ? identity.branchId : undefined,
   );
-  const defaultTarget: ThreadIdentity | undefined = defaultBranch
+  const defaultTarget: ThreadIdentity | undefined = defaultBranch && state.rootThreadId !== identity.threadId
     ? {
         runtime: "agent",
         threadId: state.rootThreadId,
@@ -428,36 +434,18 @@ function CollaborationRoomContent({
                       <Icon name="group" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="max-h-[70vh] w-72 overflow-y-auto"
-                  >
+                  <CollaborationMemberMenu align="end" open={memberMenu} count={current.length + ended.length}
+                    more={moreMembers} loading={state.loadingMembers} error={state.memberError} loadMore={loadMembers}>
                     <DropdownMenuLabel>
                       {t("collaboration.currentMembers")}
                     </DropdownMenuLabel>
                     {current.map(memberItem)}
-                    {state.currentCursor && (
-                      <DropdownMenuItem
-                        closeOnClick={false}
-                        onClick={() => void feed.loadMembers("current")}
-                      >
-                        {t("collaboration.moreMembers")}
-                      </DropdownMenuItem>
-                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>
                       {t("chat.family.history")}
                     </DropdownMenuLabel>
                     {ended.map(memberItem)}
-                    {(!state.historyLoaded || state.historyCursor) && (
-                      <DropdownMenuItem
-                        closeOnClick={false}
-                        onClick={() => void feed.loadMembers("history")}
-                      >
-                        {t("collaboration.moreEnded")}
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
+                  </CollaborationMemberMenu>
                 </DropdownMenu>
               </div>
               {/* A member who joins settles in beside the others; the row is not redrawn. */}
@@ -628,13 +616,10 @@ function CollaborationRoomContent({
           defaultTarget={defaultTarget}
           direct={selection?.kind === "member" ? selection.identity : undefined}
           onSent={() => void feed.refresh()}
-          moreMembers={
-            !state.historyLoaded ||
-            Boolean(state.historyCursor || state.currentCursor)
-          }
-          loadMembers={() =>
-            void feed.loadMembers(state.currentCursor ? "current" : "history")
-          }
+          moreMembers={moreMembers}
+          loadingMembers={state.loadingMembers}
+          memberError={state.memberError}
+          loadMembers={loadMembers}
         />
       </div>
     </section>

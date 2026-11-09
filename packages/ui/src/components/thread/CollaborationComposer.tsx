@@ -10,7 +10,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore, type ThreadDraft } from '@/stores/useThreadDraftStore';
 import { useI18n } from '@/lib/i18n';
@@ -19,6 +18,7 @@ import { prepareThreadFiles, removeDraftFile, selectThreadFiles } from '@/lib/ag
 import { composerFileSelections, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { ThreadFileDrafts } from './ThreadAttachments';
+import { CollaborationMemberMenu } from './CollaborationMemberMenu';
 
 export type CollaborationTarget = ThreadIdentity;
 export function CollaborationComposer({
@@ -32,6 +32,8 @@ export function CollaborationComposer({
   onSent,
   loadMembers,
   moreMembers,
+  loadingMembers,
+  memberError,
 }: {
   api: ThreadsAPI;
   identity: ThreadIdentity;
@@ -43,6 +45,8 @@ export function CollaborationComposer({
   onSent(): void;
   loadMembers(): void;
   moreMembers: boolean;
+  loadingMembers?: boolean;
+  memberError?: string;
 }) {
   const { t } = useI18n();
   const draft = useThreadDraftStore((state) => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
@@ -78,6 +82,12 @@ export function CollaborationComposer({
   };
   const selected = (target: CollaborationTarget) =>
     targets.some((current) => current.threadId === target.threadId && current.branchId === target.branchId);
+  const [recipientsOpen, setRecipientsOpen] = React.useState(false);
+  const recipients = members
+    .flatMap(member => (member.detail?.branches ?? []).map((branch, index) => ({ member, branch, index })))
+    .filter(({ member, branch }) => member.threadId !== identity.threadId || branch.branchId !== identity.branchId
+      || selected({ runtime: 'agent', threadId: member.threadId, branchId: branch.branchId }))
+    .sort((a, b) => Number(a.member.threadId === identity.threadId) - Number(b.member.threadId === identity.threadId));
   const send = async () => {
     const current = useThreadDraftStore.getState().drafts[draftKey] ?? draft;
     if (current.collaboration?.sending || !api.messages || (!current.text.trim() && !current.files?.length && !current.selectedAttachments?.length) || !targets.length) return;
@@ -170,7 +180,7 @@ export function CollaborationComposer({
           {direct ? (
             <span className="min-w-0 truncate text-foreground">{memberName(direct.threadId)}</span>
           ) : (
-            <DropdownMenu>
+            <DropdownMenu open={recipientsOpen} onOpenChange={setRecipientsOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -184,9 +194,9 @@ export function CollaborationComposer({
                   <Icon name="arrow-down-s" className="size-3 shrink-0" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="max-h-80 w-64 overflow-y-auto">
-                {members.flatMap((member) =>
-                  (member.detail?.branches ?? []).map((branch, index) => {
+              <CollaborationMemberMenu align="start" side="top" open={recipientsOpen} count={recipients.length}
+                more={moreMembers} loading={loadingMembers} error={memberError} loadMore={loadMembers}>
+                {recipients.map(({ member, branch, index }) => {
                     const target: CollaborationTarget = {
                       runtime: 'agent',
                       threadId: member.threadId,
@@ -216,17 +226,8 @@ export function CollaborationComposer({
                         {selected(target) && <Icon name="check" className="size-4" />}
                       </DropdownMenuItem>
                     );
-                  }),
-                )}
-                {moreMembers && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem closeOnClick={false} onClick={loadMembers}>
-                      {t('collaboration.moreMembers')}
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
+                  })}
+              </CollaborationMemberMenu>
             </DropdownMenu>
           )}
         </div>
