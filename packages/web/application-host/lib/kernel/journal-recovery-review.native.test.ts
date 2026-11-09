@@ -50,7 +50,6 @@ it('real file journal settles a lost receipt after kernel restart without repeat
       if (turn === 1) tool(response, 'file_read', { path: 'source.txt' }, turn);
       else if (turn === 2) {
         const read = observed.at(-1) as { content: { readVersion: string } };
-        sql(catalog, "CREATE TRIGGER lose_native_receipt BEFORE UPDATE OF receipt ON tool_calls WHEN NEW.call_id='call-2' AND NEW.receipt IS NOT NULL BEGIN SELECT RAISE(ABORT,'review lost receipt'); END;");
         tool(response, 'file_write', { path: 'source.txt', readVersion: read.content.readVersion, content: 'written exactly once\n' }, turn);
       } else {
         response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -69,6 +68,9 @@ it('real file journal settles a lost receipt after kernel restart without repeat
     const branch = await actor.readBranch({ branchId: 'source' });
     const published = await actor.publishBranch({ operationId: 'publish-source', branchId: 'source', expectedRoot: branch.root, expectedWriteRevision: branch.writeRevision });
     await runtimeClient.createThread('thread', 'conversation');
+    // Install the fault before submitting work. Creating schema from a model
+    // callback races the live Catalog writer and can fail before fault injection.
+    sql(catalog, "CREATE TRIGGER lose_native_receipt BEFORE UPDATE OF receipt ON tool_calls WHEN NEW.call_id='call-2' AND NEW.receipt IS NOT NULL BEGIN SELECT RAISE(ABORT,'review lost receipt'); END;");
     const run = await runtimeClient.submit({ key: 'input', threadId: 'thread', branchId: 'conversation', expectedHead: null, input: { text: 'write selected file' }, configuration: { providerFamily: 'openai-responses', model: 'fixture', endpoint: `http://127.0.0.1:${address.port}/responses`, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 } });
     await runtimeClient.startFromSource({ runId: run.run_id, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'source', revision: Number(published.revision), mode: 'materialized', tools: ['file_read', 'file_write'] });
     await expect.poll(async () => (await runtimeClient.run(run.run_id)).state, { timeout: 10_000 }).toBe('waiting');
