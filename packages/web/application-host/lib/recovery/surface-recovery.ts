@@ -152,7 +152,10 @@ export const createSurfaceRecovery = (fileStore: RecoveryFileStore, requestSurfa
     const stored = await store(Buffer.from(normalizeEditorLineEndings(content), 'utf8'));
     return { content: stored, baseContent: stored, baseRevision, encoding, bom, ...(baseFormat ? { baseFormat } : {}), normalizeLineEndings: false, edits: [], lineEnding: detectLineEnding(content) };
   };
-  const expectedApplied = (surface: RecoverySurfaceSafety): DocumentSurfaceBinding => ({ ...surface.binding,
+  // Only the document identity survives a restore. In particular, a missing
+  // target has no byte baseline and must not inherit the removed file's format.
+  const expectedApplied = (surface: RecoverySurfaceSafety): DocumentSurfaceBinding => ({
+    resource: surface.binding.resource, documentInstanceId: surface.binding.documentInstanceId,
     baseRevision: surface.target.baseRevision, ...(surface.target.baseFormat ? { baseFormat: surface.target.baseFormat } : {}), ...(surface.target.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: surface.target.normalizeLineEndings }), encoding: surface.target.encoding, bom: surface.target.bom, lineEnding: surface.target.lineEnding,
     localEditRevision: surface.binding.localEditRevision + 1, bufferHash: surface.target.content.objectHash,
   });
