@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { bindDocumentTextCodec } from '../documents/inspect.js';
@@ -26,6 +26,27 @@ it('passes a copied per-file policy for the canonical admitted asset and preserv
   policy.files['AGENTS.md'] = 'gbk';
   expect(await reader.read('alias.md')).toMatchObject({ status: 'ready', content: '\ufeff中文\r\n' });
   expect(decode).toHaveBeenCalledWith(expect.objectContaining({ encoding: 'utf-8', defaultEncoding: 'gbk' }));
+});
+
+it.each(['selected-root', 'ancestor-root', 'unrelated-root'] as const)('keeps %s rules in the canonical namespace of a directory alias', async mode => {
+  const decode = codec();
+  const base = await mkdtemp(path.join(os.tmpdir(), 'varin-resource-root-alias-'));
+  cleanup.push(() => rm(base, { recursive: true, force: true }));
+  const physical = path.join(base, 'physical'), alias = path.join(base, 'alias');
+  await mkdir(path.join(physical, 'child'), { recursive: true });
+  await mkdir(path.join(base, 'unrelated'));
+  await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await writeFile(path.join(physical, 'child', 'AGENTS.md'), '中文');
+  const policyRoot = mode === 'selected-root' ? path.join(alias, 'child')
+    : mode === 'ancestor-root' ? alias : path.join(base, 'unrelated');
+  const policy = { root: policyRoot, files: { [mode === 'ancestor-root' ? 'child/AGENTS.md' : 'AGENTS.md']: 'utf-8' }, defaultEncoding: 'gbk' };
+  const reader = await createAdmittedDirectoryReader({ domainId: 'asset', viewId: 'capture', root: path.join(alias, 'child'), textEncoding: policy });
+  expect(await reader.read('AGENTS.md')).toMatchObject({ status: 'ready', content: '中文' });
+  if (mode === 'unrelated-root') {
+    expect(decode.mock.calls[0]![0]).not.toHaveProperty('encoding');
+    expect(decode.mock.calls[0]![0]).not.toHaveProperty('defaultEncoding');
+  } else expect(decode).toHaveBeenCalledWith(expect.objectContaining({ encoding: 'utf-8', defaultEncoding: 'gbk' }));
+  expect(policy.root).toBe(policyRoot);
 });
 
 it('uses newly admitted same-pin target policy rather than the symlink alias rule', async () => {

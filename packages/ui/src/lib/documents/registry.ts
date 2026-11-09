@@ -47,6 +47,22 @@ export type DocumentListener = (record: DocumentRecord) => void;
 
 const EMPTY_RESOURCE_IDS: ReadonlySet<string> = new Set();
 
+/** Workspace CAS compares JSON DTO values, not object insertion order. Undefined
+ * object fields are absent on the wire; array order and every present field matter. */
+const sameWorkspaceBufferValue = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameWorkspaceBufferValue(value, right[index]));
+  }
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a).filter(key => a[key] !== undefined);
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length
+    && keys.every(key => Object.hasOwn(b, key) && sameWorkspaceBufferValue(a[key], b[key]));
+};
+
 const bufferHash = async (content: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
   return `sha256-${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -1012,7 +1028,7 @@ export class DocumentRegistry {
         const current = this.get(slot.resource);
         if (!slot.buffer) { if (current) throw new Error(`Document was opened after preview: ${slot.resource.resourceId}`); }
         else if (!current || current.connectionGeneration !== this.getGeneration()
-          || JSON.stringify(this.workspaceBuffer(current, slot.resource)) !== JSON.stringify(slot.buffer)) {
+          || !sameWorkspaceBufferValue(this.workspaceBuffer(current, slot.resource), slot.buffer)) {
           throw new Error(`Document changed after preview: ${slot.resource.resourceId}`);
         }
       }

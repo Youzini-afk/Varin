@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
 import type { ContextCheckpoint, ThreadSource } from '@varin/application-client';
 import type { AgentPersonalizationCatalog } from '@varin/protocol';
 import { ThreadAdapter } from './thread-adapter.js';
@@ -16,7 +17,12 @@ import type { InitialContext, ResourceSnapshotParams, Run, InputSubmitParams, Mo
 import { deferred } from './language.test-helper.js';
 
 const cleanup: string[] = [];
-afterEach(async () => { for (const root of cleanup.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+let releaseCodec: () => void;
+beforeEach(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterEach(async () => {
+  try { for (const root of cleanup.splice(0)) await fs.rm(root, { recursive: true, force: true }); }
+  finally { releaseCodec(); }
+});
 const identity = { runtime: 'agent' as const, threadId: 'thread:resources', branchId: 'branch:resources' };
 const request = (id: string): ResourceQuery => ({ runId: 'run', origin: { kind: 'model_step', request_id: 'model-step' }, callId: 'call',
   resourceCheckpointId: 'checkpoint', request: { kind: 'skill', resourceId: id } });

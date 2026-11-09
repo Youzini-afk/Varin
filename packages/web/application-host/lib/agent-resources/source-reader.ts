@@ -244,6 +244,9 @@ export function createDocumentResourceReader(input: {
 export async function createAdmittedDirectoryReader(input: { domainId: string; viewId: string; root: string; textEncoding?: SourceTextEncoding }): Promise<ResourceReader> {
   const root = await canonicalizePathIdentity(input.root, { allowMissing: true });
   const policy = structuredClone(input.textEncoding ?? {});
+  // Rules and resolved files must share one physical namespace, including Windows junctions
+  // and short-path aliases. Canonicalize once without changing the frozen relative rules.
+  if (policy.root) policy.root = await canonicalizePathIdentity(policy.root, { allowMissing: true });
   const rootInfo = async () => {
     try { return await stat(root); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
