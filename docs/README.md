@@ -48,6 +48,7 @@
 
 ## 持续演进的设计
 
+- [文件与终端编码](design/text-encoding.md)：设计提案；GBK／GB2312 项目的无感读改写、原格式保存、统一文件文本能力，以及独立的终端 I/O 合同，尚未实施。
 - [插件中心、公开收录目录与作者发行来源](design/plugin-center-and-marketplace.md)：设计方案；市场维护列表展示资料，安装更新直连作者来源，插件配置与业务状态由插件页面负责。包含公开站点、发行包、账号接入及实施验收设计。
 - [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：独立发送默认、工作详情、电脑与文件空间、设备连接和手机状态胶囊已接入；当前合同见 [Bot](bot.md)、[资源](resources.md)和[工作台](workbench.md)。[交互稿](design/varin-conversation-preview/index.html)保留视觉与布局参考。
 - [外部 Agent 输入框后续演进](design/external-agent-composer.md)：自动准备、空闲回收、能力缓存、默认值、统一工具栏与协议上下文已接入；当前合同见[外部 Agent](external-agents.md)。失败分类和配置变化提示留待后续。
