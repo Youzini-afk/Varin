@@ -61,10 +61,21 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ### 正式版本发布
 
 四种产物在发行时构建 `linux/amd64` 和 `linux/arm64`，不是每次 main push 都发布。
-`Docker Images` 只接受与 package version 匹配的 `v<version>` tag push，或显式选择该 tag 的手动运行。
-先接受精确 tag/SHA/version 并验证生产锁，候选构建与该 SHA 的完整源码、Rust/native 及平台资格并行。
-完整资格与两种真实应用 smoke 全部通过后才允许最终标签推广；计算完成不代表发行合格。
+`Docker Images` 接受与 package version 匹配的 `v<version>` tag push，也可从 main 手动填写 `release_ref`。
+源码固定到该 tag 的完整 SHA，发布工具固定到本次 workflow SHA；工具修复无需移动已发布 tag。
+先接受精确 tag/SHA/version 并验证生产锁，候选构建与该 SHA 的 Linux 容器资格并行：保留源码、依赖审计、
+Rust、Linux native 和生产构建；Windows/macOS/Android 留在普通完整 CI 与各自发行，不阻塞 Linux 镜像。
+适用资格与两种真实应用 smoke 全部通过后才允许最终标签推广；计算完成不代表发行合格。
 每个应用只消费本次对应基础镜像的 immutable digest，不读取浮动 base。
+
+已有成功镜像构建、后续检查或推广失败时，从 main 选择原 tag 和 `resume_run_id`，可选填原
+`resume_run_attempt`。流程核对原 run/workflow、成功的 builder、artifact 摘要和源码，再复用原四个 digest，
+不重建镜像。恢复仍重新运行 Linux 资格与两种应用 smoke；推广逐架构核对应用 source/version、原 build
+身份和实际 base。恢复时不能同时指定新的 base override。例：
+
+```bash
+gh workflow run docker.yml --ref main -f release_ref=v0.9.42 -f resume_run_id=42502840313 -f resume_run_attempt=1
+```
 
 需要保留版本号重发时，先将对应 Git tag 移到修复提交，再手动选择该 tag 并启用 `replace_version`。
 本次验证通过后可替换所选精确版本及其适用的浮动别名，全部 SHA 标签和原 digest 保持原样可用。

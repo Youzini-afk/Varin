@@ -1,0 +1,19 @@
+name: Prepare Windows workspace component
+description: Install the pinned WinFsp component for native workspace acceptance
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v6
+      with:
+        path: packages/electron/resources/workspace-component
+        key: winfsp-${{ runner.arch }}-${{ hashFiles('packages/electron/resources/workspace-component.json') }}
+    - shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        node packages/electron/scripts/prepare-workspace-component.mjs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
+        $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"
+        $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
+        if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }

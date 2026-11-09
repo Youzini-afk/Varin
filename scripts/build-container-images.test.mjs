@@ -20,6 +20,7 @@ test('privileged build input rejects untrusted channels, refs, identities and ov
   }
   const release = { ...input, publication: 'release', sourceSha: tooling, ref: 'refs/tags/v0.9.39' };
   assert.doesNotThrow(() => containerBuildConfig(release));
+  assert.doesNotThrow(() => containerBuildConfig({ ...input, publication: 'release', releaseRef: release.ref }));
   for (const patch of [{ ref: 'refs/heads/main' }, { sourceSha: sha }, { version: '0.9.40' }]) {
     assert.throws(() => containerBuildConfig({ ...release, ...patch }));
   }
@@ -31,7 +32,7 @@ test('shared bake graph retains both platforms, exact source, attestations and d
   assert.deepEqual(runtime.group.default.targets, ['slim_base', 'toolbelt_base']);
   assert.deepEqual(apps.group.default.targets, ['standard_app', 'toolbelt_app']);
   for (const plan of [runtime, apps]) for (const target of Object.values(plan.target)) {
-    assert.equal(target.context, '/source');
+    assert.equal(target.context, path.resolve('/source'));
     assert.deepEqual(target.platforms, ['linux/amd64', 'linux/arm64']);
     assert.deepEqual(target.attest, ['type=provenance,mode=max', 'type=sbom']);
     assert.deepEqual(target.output, ['type=registry']);
@@ -128,7 +129,7 @@ test('successful orchestration passes only observed base digests into the shared
     now: () => (clock += 1000),
     resolveBase(reference, variant) { verified.push([reference, variant]); return reference; },
     async run(args, { logPath }) {
-      assert.ok(args.includes('--allow=fs.read=/source'));
+      assert.ok(args.includes(`--allow=fs.read=${path.resolve('/source')}`));
       assert.ok(!args.some(value => value.includes('fs.read=*')));
       const plan = JSON.parse(fs.readFileSync(args[args.indexOf('--file') + 1], 'utf8'));
       plans.push(plan);

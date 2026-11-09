@@ -21,7 +21,7 @@ test('only release-tag pushes or deliberate manual releases enter the publisher'
 test('candidate computation overlaps quality but final release promotion requires all qualified evidence', () => {
   const quality = release.jobs['source-quality'];
   assert.equal(quality.uses, './.github/workflows/ci.yml');
-  assert.deepEqual(quality.with, { source_sha: '${{ github.sha }}', full: true });
+  assert.deepEqual(quality.with, { source_sha: '${{ needs.candidate.outputs.source_sha }}', full: true, qualification: 'container' });
   const ancestors = (id, visited = new Set()) => {
     assert.ok(!visited.has(id), `Workflow dependency cycle at ${id}`);
     const branch = new Set([...visited, id]);
@@ -122,7 +122,7 @@ test('default local builds follow a published release base, not a retired main a
 test('release callers preserve exact build identities, explicit overrides and immutable output routing', () => {
   const build = release.jobs['build-images'];
   assert.equal(build.uses, './.github/workflows/container-images.yml');
-  assert.equal(build.with.source_sha, '${{ github.sha }}');
+  assert.equal(build.with.source_sha, '${{ needs.candidate.outputs.source_sha }}');
   assert.equal(build.with.tooling_sha, '${{ github.sha }}');
   assert.equal(build.with.publication, 'release');
   assert.equal(build.with.runtime_slim_image, "${{ inputs.runtime_slim_image || '' }}");
@@ -130,12 +130,15 @@ test('release callers preserve exact build identities, explicit overrides and im
   const promotion = release.jobs.promote.steps.find(step => step.run === 'node scripts/docker-release.mjs promote');
   for (const variant of ['standard', 'toolbelt']) {
     const smoke = release.jobs[`smoke-${variant}`];
-    assert.deepEqual(smoke.needs, ['build-images']);
-    assert.equal(smoke.env.IMAGE_REF, '${{ needs.build-images.outputs.' + variant + '_app }}');
+    assert.deepEqual(smoke.needs, ['candidate', 'build-images']);
+    assert.equal(smoke.env.IMAGE_REF, "${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs." + variant + "_app || needs.build-images.outputs." + variant + "_app }}");
     assert.equal(promotion.env['VARIN_' + variant.toUpperCase() + '_APP_IMAGE'], smoke.env.IMAGE_REF);
   }
-  assert.equal(promotion.env.VARIN_SLIM_BASE_IMAGE, '${{ needs.build-images.outputs.slim_base }}');
-  assert.equal(promotion.env.VARIN_TOOLBELT_BASE_IMAGE, '${{ needs.build-images.outputs.toolbelt_base }}');
+  assert.equal(promotion.env.VARIN_SLIM_BASE_IMAGE, "${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.slim_base || needs.build-images.outputs.slim_base }}");
+  assert.equal(promotion.env.VARIN_TOOLBELT_BASE_IMAGE, "${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.toolbelt_base || needs.build-images.outputs.toolbelt_base }}");
+  assert.equal(promotion.env.VARIN_RELEASE_SOURCE_SHA, build.with.source_sha);
+  assert.equal(build.if, "needs.candidate.outputs.mode == 'build'");
+  assert.equal(release.jobs.candidate.permissions.actions, 'read');
 });
 
 test('failed, cancelled or skipped qualification cannot promote already-built release candidates', () => {
@@ -143,9 +146,15 @@ test('failed, cancelled or skipped qualification cannot promote already-built re
   const expression = release.jobs.promote.if.slice(3, -2).replace(/needs\.([\w-]+)/g, 'results["$1"]').replace('!cancelled()', 'true');
   const evaluate = results => Function('results', `return (${expression});`)(results);
   const success = Object.fromEntries(release.jobs.promote.needs.map(name => [name, { result: 'success' }]));
+  success.candidate.outputs = { mode: 'build' };
   assert.equal(evaluate(success), true);
   for (const name of release.jobs.promote.needs) for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
     assert.equal(evaluate({ ...success, [name]: { result } }), false, `${name}: ${result}`);
+  }
+  const resume = { ...success, candidate: { result: 'success', outputs: { mode: 'resume' } }, 'build-images': { result: 'skipped' } };
+  assert.equal(evaluate(resume), true);
+  for (const name of ['candidate', 'source-quality', 'smoke-standard', 'smoke-toolbelt']) {
+    assert.equal(evaluate({ ...resume, [name]: { ...resume[name], result: 'failure' } }), false);
   }
 });
 

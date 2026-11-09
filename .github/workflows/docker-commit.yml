@@ -71,6 +71,7 @@ jobs:
     with:
       source_sha: ${{ needs.accept.outputs.source_sha }}
       full: true
+      qualification: container
 
   build-images:
     name: Build commit image candidates

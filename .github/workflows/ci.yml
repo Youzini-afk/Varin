@@ -21,6 +21,10 @@ on:
       full:
         default: true
         type: boolean
+      qualification:
+        description: Product to qualify; ordinary CI retains every applicable platform
+        default: all
+        type: string
 
 permissions:
   contents: read
@@ -53,6 +57,14 @@ jobs:
         with:
           ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
+      - name: Checkout CI policy from the calling workflow
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tooling
+          sparse-checkout: scripts/ci-scope.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -60,7 +72,8 @@ jobs:
         env:
           CI_FULL: ${{ inputs.full || false }}
           CI_CALLED: ${{ inputs.source_sha != '' }}
-        run: node scripts/ci-scope.mjs
+          CI_QUALIFICATION: ${{ inputs.qualification || 'all' }}
+        run: node .ci-tooling/scripts/ci-scope.mjs
 
   production-preflight:
     name: Production lock preflight
@@ -360,16 +373,6 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@v6
-        id: rust-cache
-        if: needs.changes.outputs.native == 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - id: dependencies
         uses: ./.github/actions/desktop-downloads
       - id: prepare
@@ -400,41 +403,72 @@ jobs:
         run: |
           if [ "$FULL" = true ]; then bun run --cwd packages/web test;
           else bun run --cwd packages/web test:platform; fi
-      - if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && steps.prepare.outcome == 'success' }}
-        id: native-build
-        name: Build native kernel
-        run: node scripts/test-kernel-authority.mjs --build-only
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
-        name: Prepare WinFsp for native workspace acceptance
-        shell: pwsh
-        run: |
-          node packages/electron/scripts/prepare-workspace-component.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
-          $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"
-          $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
-          if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
-        name: Verify native workspace storage and runtime on Windows
-        shell: cmd
-        working-directory: kernel
-        run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-          set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
-          cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
-      # Successful compilation is reusable even if a later native assertion
-      # fails. Save before acceptance: a red teardown must not force another
-      # cold Rust build, and a cache never substitutes for those assertions.
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
-        name: Preserve compiled Windows Rust inputs
-        uses: actions/cache/save@v6
+
+  windows-native-build:
+    name: Build shared Windows kernel
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.windows == 'true' && needs.changes.outputs.native == 'true'
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-build-{0}', github.run_id) }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            kernel/target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+            kernel/target/release
+          key: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+      - run: node scripts/build-products.mjs kernel --export artifacts/shared-kernel
+      - uses: actions/upload-artifact@v7
+        with:
+          name: varin-ci-kernel-windows-x64
+          path: artifacts/shared-kernel/
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: error
+
+  windows-native:
+    name: Windows native resources and teardown
+    runs-on: windows-latest
+    needs: [changes, windows-native-build]
+    if: ${{ !cancelled() && needs.changes.outputs.windows == 'true' && needs.changes.outputs.native == 'true' && needs.windows-native-build.result == 'success' }}
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-native-{0}', github.run_id) }}
+      queue: max
+    env:
+      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
+      VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-win32-x64/varin-kernel.exe
+      VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-win32-x64/varin-kernel.exe
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ./.github/actions/desktop-downloads
+        with:
+          tools: 'false'
+      - run: bun run build:type-dependencies
+      - uses: actions/download-artifact@v8
+        with:
+          name: varin-ci-kernel-windows-x64
+          path: .build-input/kernel
+      - run: node scripts/build-products.mjs kernel
+      - uses: ./.github/actions/workspace-component
+      - if: ${{ !cancelled() && success() }}
         name: Verify Windows native resources and teardown
         shell: bash
         env:
@@ -442,6 +476,57 @@ jobs:
         run: |
           if [ "$FULL" = true ]; then node scripts/test-kernel-authority.mjs;
           else node scripts/test-kernel-authority.mjs --platform; fi
+
+  windows-workspace:
+    name: Windows workspace storage and runtime
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.windows == 'true' && needs.changes.outputs.rust == 'true'
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-workspace-{0}', github.run_id) }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: rust-workspace-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml') }}
+          restore-keys: rust-workspace-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+      - uses: ./.github/actions/workspace-component
+      - name: Compile Windows workspace tests
+        id: compile
+        shell: cmd
+        working-directory: kernel
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
+          cargo test -p varin-kernel --lib workspace --features workspace-mount --locked --no-run
+      - if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled workspace test inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        name: Verify native workspace storage and runtime on Windows
+        shell: cmd
+        working-directory: kernel
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
+          cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
 
   macos-storage:
     name: macOS platform
@@ -613,12 +698,12 @@ jobs:
   source-quality:
     name: Source quality
     runs-on: ubuntu-latest
-    needs: [changes, production-preflight, portable-source, native-build, linux-native, rust-workspace, windows-runtime, macos-storage, production-build, container-check, android-build]
+    needs: [changes, production-preflight, portable-source, native-build, linux-native, rust-workspace, windows-runtime, windows-native-build, windows-native, windows-workspace, macos-storage, production-build, container-check, android-build]
     if: ${{ always() }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24

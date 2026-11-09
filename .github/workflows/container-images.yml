@@ -17,6 +17,9 @@ on:
       publication:
         required: true
         type: string
+      release_ref:
+        default: ''
+        type: string
       runtime_slim_image:
         default: ''
         type: string
@@ -32,6 +35,12 @@ on:
         value: ${{ jobs.build.outputs.slim_base }}
       toolbelt_base:
         value: ${{ jobs.build.outputs.toolbelt_base }}
+      build_run_id:
+        value: ${{ jobs.build.outputs.build_run_id }}
+      build_run_attempt:
+        value: ${{ jobs.build.outputs.build_run_attempt }}
+      build_tooling_sha:
+        value: ${{ jobs.build.outputs.build_tooling_sha }}
 
 permissions:
   contents: read
@@ -46,11 +55,15 @@ jobs:
       toolbelt_app: ${{ steps.build.outputs.toolbelt_app }}
       slim_base: ${{ steps.build.outputs.slim_base }}
       toolbelt_base: ${{ steps.build.outputs.toolbelt_base }}
+      build_run_id: ${{ steps.build.outputs.build_run_id }}
+      build_run_attempt: ${{ steps.build.outputs.build_run_attempt }}
+      build_tooling_sha: ${{ steps.build.outputs.build_tooling_sha }}
     defaults:
       run:
         working-directory: tooling
     env:
       CONTAINER_PUBLICATION: ${{ inputs.publication }}
+      CONTAINER_RELEASE_REF: ${{ inputs.release_ref }}
       CONTAINER_SOURCE_SHA: ${{ inputs.source_sha }}
       CONTAINER_TOOLING_SHA: ${{ inputs.tooling_sha }}
       CONTAINER_SOURCE_VERSION: ${{ inputs.version }}

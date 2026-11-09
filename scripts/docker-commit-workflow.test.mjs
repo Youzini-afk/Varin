@@ -23,7 +23,7 @@ test('commit candidate writes follow admission while final publication requires 
   assert.deepEqual(commit.permissions, { contents: 'read' });
   assert.deepEqual(Object.keys(commit.on.workflow_dispatch.inputs).sort(), ['resume_run_attempt', 'resume_run_id', 'source_sha']);
   assert.equal(commit.jobs['source-quality'].uses, './.github/workflows/ci.yml');
-  assert.deepEqual(commit.jobs['source-quality'].with, { source_sha: source, full: true });
+  assert.deepEqual(commit.jobs['source-quality'].with, { source_sha: source, full: true, qualification: 'container' });
   for (const [id, job] of Object.entries(commit.jobs)) {
     assert.ok(!job.uses || ['./.github/workflows/ci.yml', './.github/workflows/container-images.yml'].includes(job.uses), `Unexpected downstream publication workflow: ${id}`);
     if (job.permissions?.packages !== 'write') continue;

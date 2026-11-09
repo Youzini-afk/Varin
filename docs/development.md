@@ -69,7 +69,9 @@ PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workfl
 基础镜像/公共容器配置改动再验证 toolbelt。不会向 GHCR 发布，手动 `ci.yml` 也只是完整资格检查。
 正式镜像发行由版本匹配的 release tag 进入 `Docker Images`；`Docker Commit Images` 则从 main 手动选择
 精确 main 历史 SHA，独立发布 `commit-<完整 SHA>`，不占版本号、不触发 Desktop/npm/完整 Release。
-两个通道在确切源码准入后，并行运行完整资格检查与候选镜像构建；只有完整资格与两种镜像 smoke 都成功，
+两个通道在确切源码准入后，并行运行 Linux 容器资格检查与候选镜像构建。资格检查保留源码、依赖审计、Rust、
+Linux native 和生产构建；Windows/macOS/Android 由普通完整 CI 与各自发行负责，不阻塞 Linux 镜像。
+只有适用资格与两种镜像 smoke 都成功，
 才记录合格候选并推广同一 digest。发布工具与产品源码分开固定。构建用同一 BuildKit 分两阶段：先同时构建两种
 基础镜像，再按实测 digest 同时组装 standard/toolbelt，共享 Rust/Web 编译，不把普通 CI 的宿主二进制借给容器。
 发布的中间层缓存写入独立 `buildcache-v2` registry 引用，不占用 Actions 的 Rust/Bun 缓存空间；只读验证仅消费
@@ -79,6 +81,10 @@ PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workfl
 再删除 builder、建立全新 builder，并用一个只改 Rust 注释的本地 fixture commit 验证 registry 缓存恢复。
 它要求依赖 cook 全部命中、最终内核重新编译、镜像报告新的 source identity；三组计时均留作 artifact，不发布产品镜像。
 缓存命中只影响计算复用，不能代替资格、来源、产物身份或启动验证。
+Windows 的源码/Host 行为、release 内核构建、native Host 验收和 Rust 工作区测试是独立 job；
+native 验收下载并校验同一已发布内核 artifact，重跑不再次编译。release/debug Cargo 缓存分别保存。
+正式 Docker 发布可从 main 输入 `release_ref`，用当前工具验证原 tag 的源码；`resume_run_id` /
+`resume_run_attempt` 可复用原成功 build 的四个 immutable digest，仍重新运行适用资格和真实容器 smoke。
 main push 与按提交发布均不更新 `latest`。新命名采用 `varin` 标准环境与 `varin-toolbelt` 工具链环境；
 正式版本必须大于 0.9.38，独立 commit 标签允许源码版本仍为 0.9.38，旧精确版本/SHA 不重写。
 推广前核验 companion base 与匿名访问；commit 通道额外执行新 runner 上的匿名 amd64 pull，并保存可核验

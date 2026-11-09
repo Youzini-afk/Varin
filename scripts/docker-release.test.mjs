@@ -77,6 +77,27 @@ test('base overrides resolve once, require real runtime role/variant/platforms, 
   assert.throws(() => resolveRuntimeBase(override, 'toolbelt', fixture.registry), /Both linux/);
 });
 
+test('resumed release promotion verifies the original source and build labels on both application architectures', () => {
+  const fixture = registryFixture();
+  const expected = imagePromotionPlan(candidate, images, [input.ref], { runId: '42', runAttempt: '1', toolingSha: source });
+  for (const item of expected.filter(item => item.role === 'application')) {
+    const repository = item.source.split('@')[0];
+    for (const child of fixture.manifests.get(item.source).manifests) {
+      Object.assign(fixture.configs.get(`${repository}@${child.digest}`).config.Labels, item.labels);
+    }
+  }
+  for (const item of expected.filter(item => item.role === 'application')) {
+    assert.doesNotThrow(() => verifyImage(item.source, item, fixture.registry));
+    const arm = fixture.manifests.get(item.source).manifests.find(child => child.platform.architecture === 'arm64');
+    const labels = fixture.configs.get(`${item.source.split('@')[0]}@${arm.digest}`).config.Labels;
+    labels['io.varin.build.run_id'] = '43';
+    assert.throws(() => promoteImages(expected, 'candidate-99-1', fixture.registry), /build identity/);
+    assert.equal(fixture.formalWrites().length, 0);
+    labels['io.varin.build.run_id'] = '42';
+  }
+  assert.doesNotThrow(() => promoteImages(expected, 'candidate-99-1', fixture.registry));
+});
+
 test('whole-plan preflight finds a last-destination immutable conflict before any release alias changes', () => {
   const fixture = registryFixture();
   fixture.manifests.set(`${prefix}varin-runtime-base:sha-${source}`, { digest: digest('f') });

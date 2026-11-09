@@ -12,7 +12,10 @@ const all = () => Object.fromEntries(surfaces.map(name => [name, true]));
 const prose = /(?:^docs\/|^packages\/docs\/|^\.github\/readme\/|(?:^|\/)(?:README(?:\.[a-z]{2}(?:-[A-Z]{2})?)?|DOCUMENTATION|AGENTS|CHANGELOG)\.md$)/u;
 const hostPlatform = /^packages\/web\/application-host\/(?:index\.ts|lib\/(?:[^/]+$|(?:kernel|storage|recovery|documents|fs|process|terminal|workspace|git|github|mcp|extensions|platform|knowledge|memory|lsp|computer|external-agents|agent-resources|service-credentials|credentials|client-auth|ui-auth|connections|tunnels|relay|structure|language-support|projects)\/))/u;
 
-export function classifyChanges(files, { full = false, called = false } = {}) {
+export function classifyChanges(files, { full = false, called = false, qualification = 'all' } = {}) {
+  if (!['all', 'container'].includes(qualification) || (qualification === 'container' && !called)) {
+    throw new Error('Container qualification requires an explicit reusable CI caller');
+  }
   const result = full || files === null ? all() : empty();
   const enable = (...names) => { for (const name of names) result[name] = true; };
   if (!full && files !== null) for (const file of files) {
@@ -80,6 +83,11 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
   // The release caller validates its actual images after this source/native gate.
   // A reusable CI invocation never recursively calls the container workflow.
   if (called) { result.container = false; result.toolbelt = false; }
+  // Linux image publication owns Linux/native/production qualification. Desktop
+  // and Android evidence remains mandatory in ordinary complete qualification.
+  if (qualification === 'container') {
+    result.windows = false; result.macos = false; result.android = false;
+  }
   return result;
 }
 
@@ -104,6 +112,9 @@ export function requiredJobs(scope) {
     'linux-native': scope.native,
     'rust-workspace': scope.rust,
     'windows-runtime': scope.windows,
+    'windows-native-build': scope.windows && scope.native,
+    'windows-native': scope.windows && scope.native,
+    'windows-workspace': scope.windows && scope.rust,
     'macos-storage': scope.macos,
     'production-build': scope.production,
     'container-check': scope.container,
@@ -134,7 +145,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
     const full = process.env.CI_FULL === 'true' || ['workflow_dispatch', 'schedule'].includes(eventName);
     const scope = classifyChanges(full ? [] : changedPaths({ eventName, event }), {
-      full, called: process.env.CI_CALLED === 'true',
+      full, called: process.env.CI_CALLED === 'true', qualification: process.env.CI_QUALIFICATION || 'all',
     });
     for (const [name, value] of Object.entries(scope)) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
     const summary = Object.entries(requiredJobs(scope)).map(([job, required]) => `- ${job}: ${required ? 'required' : 'not affected'}`).join('\n');

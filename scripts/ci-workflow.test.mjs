@@ -30,14 +30,14 @@ function fixture(t) {
   git('init', '--quiet');
   fs.appendFileSync(path.join(cwd, '.git/info/exclude'), '\n/event.json\n/output\n');
   const base = commit('README.md');
-  const detect = (eventName, { before = base, pullRequestBase = base, full = false, called = false } = {}) => {
+  const detect = (eventName, { before = base, pullRequestBase = base, full = false, called = false, qualification = 'all' } = {}) => {
     const eventPath = path.join(cwd, 'event.json');
     const outputPath = path.join(cwd, 'output');
     fs.writeFileSync(eventPath, JSON.stringify({ before, pull_request: { base: { sha: pullRequestBase } } }));
     fs.writeFileSync(outputPath, '');
     execFileSync(process.execPath, [path.join(root, 'scripts/ci-scope.mjs')], {
       cwd, env: { ...process.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath,
-        GITHUB_OUTPUT: outputPath, GITHUB_STEP_SUMMARY: '', CI_FULL: String(full), CI_CALLED: String(called) },
+        GITHUB_OUTPUT: outputPath, GITHUB_STEP_SUMMARY: '', CI_FULL: String(full), CI_CALLED: String(called), CI_QUALIFICATION: qualification },
     });
     return Object.fromEntries(fs.readFileSync(outputPath, 'utf8').trim().split('\n').map(line => {
       const [name, value] = line.split('='); return [name, value === 'true'];
@@ -61,6 +61,39 @@ test('reusable release quality uses exact source and cannot recurse into contain
   for (const name of surfaces.filter(name => !['container', 'toolbelt'].includes(name))) assert.equal(scope[name], true, name);
   assert.equal(workflow.on.workflow_call.inputs.source_sha.required, true);
   assert.equal(workflow.jobs.changes.outputs.full, '${{ steps.surface.outputs.full }}');
+});
+
+test('container qualification requires Linux source, Rust and production evidence while desktop qualification stays complete', t => {
+  const f = fixture(t);
+  const scope = f.detect('workflow_dispatch', { full: true, called: true, qualification: 'container' });
+  for (const name of ['code', 'native', 'rust', 'production', 'frontend', 'security', 'full']) assert.equal(scope[name], true, name);
+  for (const name of ['windows', 'macos', 'android', 'container', 'toolbelt']) assert.equal(scope[name], false, name);
+  const required = requiredJobs(scope);
+  for (const job of ['portable-source', 'production-preflight', 'native-build', 'linux-native', 'rust-workspace', 'production-build']) assert.equal(required[job], true, job);
+  for (const job of ['windows-runtime', 'windows-native-build', 'windows-native', 'windows-workspace', 'macos-storage', 'android-build']) {
+    assert.equal(required[job], false, job); assert.equal(requiredJobs(all)[job], true, job);
+  }
+  assert.throws(() => classifyChanges([], { full: true, qualification: 'container' }));
+  assert.throws(() => classifyChanges([], { full: true, called: true, qualification: 'unknown' }));
+  const policy = workflow.jobs.changes.steps.find(step => step.with?.path === '.ci-tooling');
+  assert.equal(policy.with.ref, '${{ github.sha }}');
+  assert.equal(workflow.jobs['source-quality'].steps[0].with.ref, '${{ github.sha }}');
+});
+
+test('Windows native retries consume a published kernel independently of source and workspace test jobs', () => {
+  const producer = workflow.jobs['windows-native-build'], native = workflow.jobs['windows-native'];
+  const workspace = workflow.jobs['windows-workspace'], source = workflow.jobs['windows-runtime'];
+  assert.deepEqual(native.needs, ['changes', 'windows-native-build']);
+  assert.equal(workspace.needs, 'changes'); assert.equal(source.needs, 'changes');
+  const artifact = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+  const download = native.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+  assert.equal(download.with.name, artifact.with.name);
+  assert.equal(native.env.VARIN_KERNEL_ARTIFACT, '${{ github.workspace }}/' + download.with.path);
+  assert.ok(native.env.VARIN_TEST_KERNEL_PATH.endsWith('/kernel-win32-x64/varin-kernel.exe'));
+  assert.ok(!native.steps.some(step => step.run?.includes('--build-only') || step.run?.includes('--export')));
+  const restore = workspace.steps.find(step => step.id === 'rust-cache');
+  assert.ok(restore.with.path.includes('kernel/target/debug'));
+  assert.ok(producer.steps.find(step => step.uses?.startsWith('actions/cache@')).with.path.includes('kernel/target/release'));
 });
 
 test('prose and known renderer edits avoid unrelated native/platform products', t => {
@@ -360,7 +393,7 @@ test('release automation can build an older source without borrowing its tool se
 
 test('all heavy Dependabot lanes share one non-cancelling queue, including reusable containers', () => {
   const container = parse(fs.readFileSync(new URL('../.github/workflows/container-check.yml', import.meta.url), 'utf8'));
-  for (const job of [...['portable-source', 'native-build', 'linux-native', 'rust-workspace', 'windows-runtime',
+  for (const job of [...['portable-source', 'native-build', 'linux-native', 'rust-workspace', 'windows-runtime', 'windows-native-build', 'windows-native', 'windows-workspace',
     'macos-storage', 'production-build', 'android-build'].map(name => workflow.jobs[name]), container.jobs.verify]) {
     assert.ok(job.concurrency.group.includes("github.event.pull_request.user.login == 'dependabot[bot]'"));
     assert.ok(job.concurrency.group.includes("'varin-dependabot-background'"));

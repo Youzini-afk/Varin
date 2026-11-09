@@ -21,8 +21,12 @@ export function containerBuildConfig(input) {
   if (input.publication !== 'check') {
     if (input.repository?.toLowerCase() !== repository.toLowerCase()) throw new Error('Untrusted container publication repository');
     if (input.publication === 'release') {
-      if (input.sourceSha !== input.toolingSha || input.sourceSha !== input.githubSha) throw new Error('Release source and tooling must match the selected tag');
-      acceptImageRelease({ eventName: input.eventName, ref: input.ref, sha: input.sourceSha, version: input.version });
+      if (input.toolingSha !== input.githubSha) throw new Error('Release tooling must match its workflow');
+      const mainDispatch = input.eventName === 'workflow_dispatch' && input.ref === 'refs/heads/main' && input.releaseRef;
+      if (!mainDispatch && (input.sourceSha !== input.toolingSha || (input.releaseRef && input.releaseRef !== input.ref))) {
+        throw new Error('Selecting an older release requires explicit main dispatch');
+      }
+      acceptImageRelease({ eventName: input.eventName, ref: input.releaseRef || input.ref, sha: input.sourceSha, version: input.version });
     } else {
       if (input.toolingSha !== input.githubSha) throw new Error('Commit tooling must match the dispatch SHA');
       acceptCommitPublication({ eventName: input.eventName, ref: input.ref, repository: input.repository,
@@ -170,6 +174,7 @@ function environmentConfig(env) {
   return containerBuildConfig({ publication: env.CONTAINER_PUBLICATION, sourceSha: env.CONTAINER_SOURCE_SHA,
     toolingSha: env.CONTAINER_TOOLING_SHA, version, runId: env.GITHUB_RUN_ID || '1', runAttempt: env.GITHUB_RUN_ATTEMPT || '1',
     repository: env.GITHUB_REPOSITORY, githubSha: env.GITHUB_SHA, ref: env.GITHUB_REF, eventName: env.GITHUB_EVENT_NAME,
+    releaseRef: env.CONTAINER_RELEASE_REF,
     sourceDirectory, outputDirectory: env.CONTAINER_OUTPUT_DIR || path.resolve('artifacts/container-build'),
     localCache: env.CONTAINER_LOCAL_CACHE === 'true',
     toolbelt: env.CONTAINER_TOOLBELT === 'true', multiPlatform: env.CONTAINER_MULTI_PLATFORM === 'true',
@@ -202,7 +207,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const registry = createImageRegistry(dockerCommand());
     const result = await buildContainerImages(config, { run: runDocker,
       resolveBase: (reference, variant) => resolveRuntimeBase(reference, variant, registry) });
-    if (process.env.GITHUB_OUTPUT) for (const [key, value] of Object.entries(result.images)) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
+    if (process.env.GITHUB_OUTPUT) for (const [key, value] of Object.entries({ ...result.images,
+      build_run_id: config.runId, build_run_attempt: config.runAttempt, build_tooling_sha: config.toolingSha })) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
+    }
     if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
       `### Container build\n\nSource: ${result.sourceSha}\n\n${result.phases.map(phase =>
         `- ${phase.name}: ${phase.seconds.toFixed(1)}s; ${phase.cachedVertices} cached vertices; ${phase.rustReleaseCompilations} Rust release compilation completions`).join('\n')}\n`);

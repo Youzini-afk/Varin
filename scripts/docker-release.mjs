@@ -74,10 +74,21 @@ export function releaseImageAliases(candidate, releaseRefs) {
   return candidate.aliases;
 }
 
-export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBase, toolbeltBase }, releaseRefs) {
+export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBase, toolbeltBase }, releaseRefs, build) {
   const aliases = releaseImageAliases(candidate, releaseRefs);
-  return imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases,
+  const plan = imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases,
     new Set([candidate.version, `sha-${candidate.sha}`]));
+  if (build) {
+    if (!/^[a-f0-9]{40}$/.test(build.toolingSha ?? '') || !/^[1-9]\d*$/.test(build.runId ?? '')
+      || !/^[1-9]\d*$/.test(build.runAttempt ?? '')) throw new Error('Missing original image build identity');
+    for (const item of plan.filter(item => item.role === 'application')) item.labels = {
+      'org.opencontainers.image.revision': candidate.sha, 'org.opencontainers.image.version': candidate.version,
+      'io.varin.publication.kind': 'release', 'io.varin.build.run_id': build.runId,
+      'io.varin.build.run_attempt': build.runAttempt, 'io.varin.build.tooling_sha': build.toolingSha,
+      'io.varin.image.base': item.variant === 'slim' ? slimBase : toolbeltBase,
+    };
+  }
+  return plan;
 }
 
 // Both publication channels share the artifact/compatibility-name owner. Their
@@ -130,7 +141,7 @@ export function createImageRegistry(runDocker) {
   };
 }
 
-export function verifyImage(image, { role, variant }, registry, options = {}) {
+export function verifyImage(image, { role, variant, labels = {} }, registry, options = {}) {
   const { repository, digest } = pinnedImage(image);
   const manifest = registry.manifest(image, options);
   if (manifest?.digest !== digest || !indexTypes.has(manifest.mediaType) || !Array.isArray(manifest.manifests)) {
@@ -153,6 +164,9 @@ export function verifyImage(image, { role, variant }, registry, options = {}) {
       || config.config?.Labels?.['io.varin.image.variant'] !== variant
       || config.config?.Env?.filter(value => value.startsWith('VARIN_IMAGE_VARIANT=')).at(-1) !== `VARIN_IMAGE_VARIANT=${variant}`) {
       throw new Error(`Expected ${role}/${variant} metadata for linux/${architecture}: ${image}`);
+    }
+    for (const [key, value] of Object.entries(labels)) if (config.config.Labels[key] !== value) {
+      throw new Error(`Image build identity ${key} differs for linux/${architecture}: ${image}`);
     }
   }
   if (platforms.size !== 2) throw new Error(`Both linux/amd64 and linux/arm64 are required: ${image}`);
@@ -255,10 +269,16 @@ export function writeAnonymousDockerConfig(directory, existingDirectory = proces
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = process.argv[2];
   if (!['accept', 'resolve-base', 'promote'].includes(command)) throw new Error('Usage: docker-release.mjs accept|resolve-base <slim|toolbelt>|promote');
-  const candidate = acceptImageRelease({ eventName: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF,
-    sha: process.env.GITHUB_SHA, version: JSON.parse(fs.readFileSync('package.json', 'utf8')).version });
+  const candidate = acceptImageRelease({ eventName: process.env.GITHUB_EVENT_NAME,
+    ref: process.env.VARIN_RELEASE_REF || process.env.GITHUB_REF,
+    sha: process.env.VARIN_RELEASE_SOURCE_SHA || process.env.GITHUB_SHA,
+    version: process.env.VARIN_RELEASE_VERSION || JSON.parse(fs.readFileSync('package.json', 'utf8')).version });
   const checkedOut = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  if (checkedOut !== candidate.sha) throw new Error('Checkout does not match the release candidate SHA');
+  if (checkedOut !== (process.env.VARIN_RELEASE_TOOLING_SHA || candidate.sha)) throw new Error('Checkout does not match publication tooling');
+  for (const file of ['package.json', 'packages/ui/package.json', 'packages/web/package.json', 'packages/electron/package.json']) {
+    const content = execFileSync('git', ['show', `${candidate.sha}:${file}`], { encoding: 'utf8' });
+    if (JSON.parse(content).version !== candidate.version) throw new Error('Accepted source versions changed');
+  }
   const releaseRefs = assertImageReleaseTag(candidate);
   if (command === 'accept') {
     console.log(`Accepted ${candidate.ref} at ${candidate.sha}`);
@@ -268,7 +288,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `image=${image}\n`);
   } else {
     const plan = imagePromotionPlan(candidate, { standardApp: process.env.VARIN_STANDARD_APP_IMAGE, toolbeltApp: process.env.VARIN_TOOLBELT_APP_IMAGE,
-      slimBase: process.env.VARIN_SLIM_BASE_IMAGE, toolbeltBase: process.env.VARIN_TOOLBELT_BASE_IMAGE }, releaseRefs);
+      slimBase: process.env.VARIN_SLIM_BASE_IMAGE, toolbeltBase: process.env.VARIN_TOOLBELT_BASE_IMAGE }, releaseRefs,
+    process.env.VARIN_BUILD_RUN_ID ? { runId: process.env.VARIN_BUILD_RUN_ID,
+      runAttempt: process.env.VARIN_BUILD_RUN_ATTEMPT, toolingSha: process.env.VARIN_BUILD_TOOLING_SHA } : undefined);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-anonymous-registry-'));
     try {
       // Preserve only plugin discovery, never auths/credential helpers from the
