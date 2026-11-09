@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "vitest";
+import { bindDocumentTextCodec } from "../documents/inspect.js";
 import { IntegrationCoordinator } from "../harness/working-state/integration-coordinator.js";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
 import { createKernelClient } from "./kernel-client.js";
@@ -23,6 +24,7 @@ it.skipIf(!hasReleaseKernel)("forks the exact pinned namespace and applies path 
   const workspaceId = "namespace-workspace";
   const client = createKernelClient({ hostId: "namespace-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "namespace-host", storageRoot, resolveWorkspaceRoot: async () => root });
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const context = await adapter.context(workspaceId, "namespace-context");
@@ -54,7 +56,7 @@ it.skipIf(!hasReleaseKernel)("forks the exact pinned namespace and applies path 
       assert.equal((await fs.readdir(storageRoot)).includes("managed"), false);
       await assert.rejects(fs.stat(path.join(root, "src")), { code: "ENOENT" });
     } finally { await pin.release(); }
-  } finally { await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { releaseCodec(); await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
 it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant regardless of construction order", async () => {
@@ -63,6 +65,7 @@ it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant reg
     buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "grant-identity", storageRoot: path.join(root, "storage"),
     resolveWorkspaceRoot: async () => root });
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const first = await adapter.context("workspace", "recovery-maintenance", {
@@ -77,7 +80,7 @@ it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant reg
       const read = await second.client.getBlob(owned.hash, { ownerId: owned.ownerId });
       assert.deepEqual(Buffer.from(read.bytesBase64, "base64"), bytes);
     } finally { await first.client.releaseBlob(owned.ownerId); }
-  } finally { await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { releaseCodec(); await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
 it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the durable integration journal", async () => {
@@ -125,6 +128,7 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     },
   });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
@@ -155,6 +159,7 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
       if (entry?.state.kind === "regular-file") assert.equal((await store.readContent(entry))?.toString("utf8"), "child\n");
     }, "shared");
   } finally {
+    releaseCodec();
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);
     await engine.dispose().catch(() => undefined);
@@ -192,6 +197,7 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
   });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   const surfaceHash = (value: string) => `sha256-${createHash("sha256").update(value, "utf8").digest("hex")}`;
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
@@ -226,6 +232,7 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
     const afterUndo = await kernelRecoveryStore.getOperation(workspaceId, merged.operationId);
     assert.equal(afterUndo?.state, "undone");
   } finally {
+    releaseCodec();
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);
     await engine.dispose().catch(() => undefined);
@@ -243,6 +250,7 @@ it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a c
   const client = createKernelClient({ hostId: "kernel-publish-race-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "kernel-publish-race-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
   adapter.bindFileStore(new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache")));
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter);
@@ -280,6 +288,7 @@ it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a c
     assert.ok(current);
     assert.notEqual(current?.root, result.root);
   } finally {
+    releaseCodec();
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);
     await fs.rm(root, { recursive: true, force: true });
@@ -317,6 +326,7 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
     sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
   });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
+  const releaseCodec = bindDocumentTextCodec(client);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore, async () => documentWorkspaceId);
@@ -368,6 +378,7 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
       assert.ok(entry); assert.equal((await store.readContent(entry))?.toString(), "recipient edit\n");
     });
   } finally {
+    releaseCodec();
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);
     await engine.dispose().catch(() => undefined);

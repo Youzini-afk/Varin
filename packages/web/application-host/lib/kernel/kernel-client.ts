@@ -1356,12 +1356,12 @@ export class KernelClient {
   /** Pure native file representation transforms; no filesystem or grant is introduced. */
   async textDecode(params: import('./protocol.generated.js').KernelTextDecodeParams): Promise<import('./protocol.generated.js').KernelTextDecodeResult> {
     if (!this.handshakeResult) await this.start();
-    return this.requestRaw('text.decode', params);
+    return this.requestRaw('text.decode', params, { allowBootstrap: true });
   }
 
   async textSerialize(params: import('./protocol.generated.js').KernelTextSerializeParams): Promise<import('./protocol.generated.js').KernelTextSerializeResult> {
     if (!this.handshakeResult) await this.start();
-    return this.requestRaw('text.serialize', params);
+    return this.requestRaw('text.serialize', params, { allowBootstrap: true });
   }
 
   async health(options: { deep?: boolean; gcPreview?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {

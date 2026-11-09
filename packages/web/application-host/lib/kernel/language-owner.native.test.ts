@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
+import { createAuthorityTestRuntime } from './authority.test-helper.js';
 import { createLanguageSupervisor } from '../lsp/supervisor.js';
 import type { SourceQueryAccess, SourceQueryOwner } from './source-query.js';
 import { createLanguageOwner } from './language-owner.js';
@@ -48,6 +49,14 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
   const invoke = (overrides: Partial<Query> = {}, signal = new AbortController().signal) => owner(query(overrides), signal);
   const uri = (file: string) => pathToFileURL(path.join(documents.workspaceRoot, file)).href;
   return { documents, peer, spawn, supervisor, owner, validateSource, query, invoke, uri };
+}
+
+async function nativeTextFixture() {
+  const f = await fixture();
+  const native = await createAuthorityTestRuntime({ documents: f.documents.authority,
+    hostId: f.documents.authority.hostId, dataDir: f.documents.dataDir });
+  cleanups.push(() => native.dispose());
+  return f;
 }
 
 describe('live language owner', () => {
@@ -128,7 +137,7 @@ describe('live language owner', () => {
   });
 
   it.each(['utf8-bom', 'utf16le', 'utf16be'] as const)('preserves the Documents encoding and raw-byte evidence contract for %s', async encoding => {
-    const f = await fixture();
+    const f = await nativeTextFixture();
     const content = 'const emoji = "😀"; const value = 1;\r\n';
     const bytes = encoding === 'utf8-bom'
       ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(content)])
@@ -137,18 +146,26 @@ describe('live language owner', () => {
         : Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(content, 'utf16le').swap16()]);
     await fs.writeFile(path.join(f.documents.workspaceRoot, 'main.ts'), bytes);
     const revision = `d1_${createHash('sha256').update(bytes).digest('base64url')}`;
-    if (encoding !== 'utf8-bom') {
-      expect(await f.documents.authority.readSnapshot(f.documents.resource('main.ts'))).toMatchObject({ status: 'unsupported-encoding', revision });
-      expect(await f.invoke({ character: content.indexOf('value') })).toMatchObject({ status: 'unavailable', items: [] });
-      expect(f.spawn).not.toHaveBeenCalled();
-      return;
-    }
+    expect(await f.documents.authority.readSnapshot(f.documents.resource('main.ts'))).toMatchObject({ status: 'ready', revision, content,
+      encoding: encoding === 'utf8-bom' ? 'utf-8' : encoding === 'utf16le' ? 'utf-16le' : 'utf-16be', bom: true });
     const range = testRange(0, content.indexOf('value'), content.indexOf('value') + 5);
     f.peer.handlers.set('textDocument/definition', () => [{ uri: f.uri('main.ts'), range }]);
     expect(await f.invoke({ character: content.indexOf('value') })).toMatchObject({ status: 'ready',
       source: { revision }, items: [{ targetSelectionRange: range }] });
     expect(f.peer.notifications('textDocument/didOpen')[0]!.params).toMatchObject({ textDocument: { text: content } });
     expect(revision).not.toBe(`d1_${createHash('sha256').update(content).digest('base64url')}`);
+  });
+
+  it.each([
+    { kind: 'binary', bytes: Buffer.from([0, 1, 2]) },
+    { kind: 'unsupported-encoding', bytes: Buffer.from([0xff, 0xfe, 0x41]) },
+  ] as const)('keeps native $kind input unavailable to the language provider without losing raw-byte evidence', async ({ kind, bytes }) => {
+    const f = await nativeTextFixture();
+    await fs.writeFile(path.join(f.documents.workspaceRoot, 'main.ts'), bytes);
+    const revision = `d1_${createHash('sha256').update(bytes).digest('base64url')}`;
+    expect(await f.documents.authority.readSnapshot(f.documents.resource('main.ts'))).toMatchObject({ status: kind, revision });
+    expect(await f.invoke()).toMatchObject({ status: 'unavailable', items: [] });
+    expect(f.spawn).not.toHaveBeenCalled();
   });
 
   it('distinguishes genuine zero from discarded locations and leaves ordinary supervisor output unchanged', async () => {
