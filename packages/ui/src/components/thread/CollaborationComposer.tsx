@@ -85,8 +85,6 @@ export function CollaborationComposer({
   const [recipientsOpen, setRecipientsOpen] = React.useState(false);
   const recipients = members
     .flatMap(member => (member.detail?.branches ?? []).map((branch, index) => ({ member, branch, index })))
-    .filter(({ member, branch }) => member.threadId !== identity.threadId || branch.branchId !== identity.branchId
-      || selected({ runtime: 'agent', threadId: member.threadId, branchId: branch.branchId }))
     .sort((a, b) => Number(a.member.threadId === identity.threadId) - Number(b.member.threadId === identity.threadId));
   const send = async () => {
     const current = useThreadDraftStore.getState().drafts[draftKey] ?? draft;

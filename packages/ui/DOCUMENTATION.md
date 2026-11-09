@@ -495,7 +495,9 @@ only after the user asks. Failure/cancellation details and original send receipt
 Member selection mounts one original Thread history/progress reader with a separate viewport key; main
 conversation scroll state stays independent. Completed members are paged through the native history
 directory. User replies and per-recipient send attempts use the original message admission API, with
-drafts and uncertain keys retained in the existing in-memory draft store. File cards read immutable
+drafts and uncertain keys retained in the existing in-memory draft store. The recipient menu pages
+members as it fills and scrolls, keeps the current Agent selectable after other members, and starts
+without a preselected recipient. File cards read immutable
 Integration journal versions on inspection; current working files are never substituted for an old diff.
 
 `HistoryPresentation` projects semantic history into the timeline without replacing its IDs. Model

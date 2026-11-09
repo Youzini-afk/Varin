@@ -28,6 +28,7 @@ vi.mock('@/components/ui/dropdown-menu', () => {
       const bind = React.useCallback((node: HTMLDivElement | null) => {
         if (node) Object.defineProperties(node, {
           clientHeight: { configurable: true, value: 80 },
+          scrollTop: { configurable: true, writable: true, value: 0 },
           scrollHeight: { configurable: true, get: () => node.querySelectorAll('[role="menuitem"]').length * 40 + 24 },
         });
         if (typeof ref === 'function') ref(node);
@@ -72,24 +73,32 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
 
-it('loads other Agents on open, continues on scroll, and keeps selected branches when reopened', async () => {
+it('keeps the Main Agent selectable while paging other Agents and retains selected branches when reopened', async () => {
   fixture.read.mockResolvedValueOnce({ members: [1, 2, 3, 4].map(index => member(`worker-${index}`)), more: true })
     .mockResolvedValueOnce({ members: [member('worker-5')], more: false });
   await act(async () => root.render(<Harness />));
   expect(fixture.read).not.toHaveBeenCalled();
   await act(async () => trigger().click());
   expect(fixture.read).toHaveBeenCalledOnce();
-  expect(menu().textContent).not.toContain('Main Agent');
+  const choices = [...menu().querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(choices.at(-1)?.textContent).toBe('Main Agent');
+  expect(useThreadDraftStore.getState().drafts.recipients?.collaboration?.targets ?? []).toEqual([]);
   expect(menu().textContent).not.toContain('collaboration.moreMembers');
+  await act(async () => choices.at(-1)!.click());
   const worker = [...menu().querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'worker-1')!;
   await act(async () => worker.click());
-  await act(async () => { menu().scrollTop = 100; menu().dispatchEvent(new window.Event('scroll')); });
+  await act(async () => {
+    const list = menu();
+    list.scrollTop = list.scrollHeight - list.clientHeight;
+    list.dispatchEvent(new window.Event('scroll'));
+  });
   expect(fixture.read).toHaveBeenCalledTimes(2);
   expect(menu().textContent).toContain('worker-5');
   await act(async () => trigger().click());
   await act(async () => trigger().click());
   expect(fixture.read).toHaveBeenCalledTimes(2);
   expect(useThreadDraftStore.getState().drafts.recipients.collaboration?.targets).toEqual([
+    identity,
     { runtime: 'agent', threadId: 'worker-1', branchId: 'worker-1-branch' },
   ]);
 });
