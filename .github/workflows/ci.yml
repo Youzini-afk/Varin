@@ -747,5 +747,6 @@ jobs:
           run-id: 42694933043
           github-token: ${{ github.token }}
       - run: node scripts/build-products.mjs kernel
+      - uses: ./.github/actions/workspace-component
       - name: Verify affected Windows native owners
         run: node scripts/test-kernel-authority.mjs --vitest-file=application-host/lib/kernel/kernel-process.native.test.ts --vitest-file=application-host/lib/kernel/child-source-store.native.test.ts --vitest-file=application-host/lib/recovery/dirty-recovery.native.test.ts --vitest-file=test/text-encoding.native.test.ts
