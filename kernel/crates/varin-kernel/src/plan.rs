@@ -152,7 +152,12 @@ fn query(
         )
     };
     let snapshot = read.load().map_err(error)?;
-    if snapshot.call != *call || !snapshot.tools.contains(&schema()) {
+    // Reopened children retain the original declaration, including its prose.
+    // The typed v1 contract above and exact persisted call remain authoritative;
+    // current presentation must not replace or invalidate that original schema.
+    if snapshot.call != *call || !snapshot.tools.iter().any(|selected| {
+        selected.name == TOOL && selected.version == call.schema_version
+    }) {
         return Err(error(
             "plan call is not bound to its original schema and arguments",
         ));

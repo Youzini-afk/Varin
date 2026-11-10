@@ -2213,12 +2213,7 @@ impl Catalog {
             let failure = safe_run_failure(failure);
             event(&tx, run_id, run.revision, "run.failed", serde_json::to_value(&failure)?)?;
         }
-        event(
-            &tx,
-            run_id,
-            run.revision,
-            "execution.committed",
-            json!({"kind":match record {
+        let mut committed = json!({"kind":match record {
                 ExecutionRecord::StateChanged { .. } => "state_changed",
                 ExecutionRecord::ContextPreparationFailed { .. } => "context_preparation_failed",
                 ExecutionRecord::ExecutionFailed { .. } => "execution_failed",
@@ -2232,8 +2227,13 @@ impl Catalog {
                 ExecutionRecord::ToolBatchCommitted { .. } => "tool_batch_committed",
                 ExecutionRecord::PolicyCheckpoint { .. } => "policy_checkpoint",
                 ExecutionRecord::PolicyDecisionConsumed { .. } => "policy_decision_consumed",
-            }}),
-        )?;
+            }});
+        if let ExecutionRecord::ToolBatchCommitted { request_id, .. } = record {
+            // Keep the original commit event attributable even when driver/model
+            // requests complete out of admission order. No result body is copied.
+            committed["request_id"] = json!(request_id);
+        }
+        event(&tx, run_id, run.revision, "execution.committed", committed)?;
         if matches!(
             record,
             ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. } | ExecutionRecord::ExecutionFailed { .. }

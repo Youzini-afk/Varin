@@ -701,7 +701,8 @@ grant_id: "parent".into(),
             .iter()
             .filter(|i| i.source == HistorySource::Agent)
             .count(),
-        if cancel_before_park { 0 } else { 1 }
+        // Cancelling observation does not suppress the independently delivered report.
+        1
     );
     assert_eq!(pins.load(Ordering::SeqCst), 1);
     let database = rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();

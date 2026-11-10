@@ -185,7 +185,12 @@ impl ToolExecutor for Questions {
                     )
                 };
                 let invocation = invocation.load().map_err(error)?;
-                if invocation.call != *call || !invocation.tools.contains(&status_schema()) {
+                // A frozen child keeps its original v1 description. Check the
+                // persisted call and version, not today's schema presentation.
+                if invocation.call != *call || call.schema_version != "1"
+                    || !invocation.tools.iter().any(|selected| {
+                        selected.name == QUESTION_STATUS_TOOL && selected.version == "1"
+                    }) {
                     return Err(error("question status differs from its frozen invocation"));
                 }
                 let question = question.load().map_err(error)?;

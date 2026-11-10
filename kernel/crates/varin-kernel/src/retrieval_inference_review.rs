@@ -104,7 +104,24 @@ fn run_investigation(stop:bool) {
     if !stop {assert_eq!(status["latestAssistantMessage"]["text"],"body.txt:1 contains native retrieval evidence.");}
     let usage=usage.load(&||false).unwrap();let retrieval=usage.rows.iter().find(|row|row.kind=="retrieval").unwrap();
     assert_eq!(retrieval.requests,2);assert_eq!(retrieval.input_tokens.known.as_deref(),Some("200"));
-    runtime.shutdown().unwrap();drop(owner);drop(runtime);std::fs::remove_dir_all(root).unwrap();
+    runtime.shutdown().unwrap();drop(owner);drop(runtime);
+    // A cheap file read has no Operation. Its canonical call metadata must still
+    // describe the latest action after reopening, without opening the result body.
+    let db=Catalog::open(&root).unwrap();
+    let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    let object:String=sql.query_row("SELECT json_extract(receipt,'$.completion.content_ref.content_object') FROM tool_calls WHERE call_id='read-evidence'",[],|row|row.get(0)).unwrap();
+    drop(sql);
+    let result=varin_runtime::content::object_path(&root.join("content"),&object).unwrap();
+    std::fs::write(result,b"unavailable original tool result").unwrap();
+    let reopened=db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
+    assert_eq!(reopened["latestAction"],status["latestAction"]);
+    // Supported older Catalogs retain batch events without the request identity.
+    let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    sql.execute("UPDATE events SET data=json_remove(data,'$.request_id') WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='tool_batch_committed'",[&receipt.run_id]).unwrap();
+    drop(sql);
+    let legacy=db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
+    assert_eq!(legacy["latestAction"],status["latestAction"]);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
