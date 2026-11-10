@@ -322,7 +322,9 @@ describe('unified editor cross-surface journey', () => {
     expect('status' in attached ? attached.status : attached.source).toBe('unsaved-buffer');
     const consumed = consumeEditorContextAttachments(getRuntimeKey(), 'thread-main', workspaceId);
     expect(consumed[0]?.text).toBe('const result = 2;\n');
-    expect(projectEditorContextAttachments('', consumed)).toContain('File tools do not see this buffer on disk');
+    const modelContext = projectEditorContextAttachments('', consumed);
+    expect(modelContext).toContain('Unsaved editor content');
+    expect(modelContext).toContain('file tools read the saved file on disk');
 
     const saved = await documents.save(identity);
     expect(saved.dirty).toBe(false);
