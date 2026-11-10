@@ -1036,7 +1036,11 @@ fn gbk_file_tools_preserve_read_basis_bytes_and_report_real_encoding_failures(){
 #[test]
 fn gbk_live_fixed_pages_batches_and_search_use_one_interpretation(){
     let mut f=Fixture::new();let bytes=b"\xd6\xd0\xce\xc4\r\n\xd0\xc2\xce\xc4\n";fs::write(f.root.join("work/legacy.txt"),bytes).unwrap();
+    // This short fixture is also valid Cyrillic text. Its GBK intent belongs to
+    // the source policy, not an assumption about statistical autodetection.
+    f.executor.binding.text_encoding=Some(crate::text::Policy{root:None,default_encoding:None,files:Some(std::collections::BTreeMap::from([("legacy.txt".into(),"gbk".into())])),choice_revisions:None});
     let live=f.read(json!({"path":"legacy.txt","offset":1,"length":1}));assert_eq!(live["content"]["text"],"中");assert_eq!(live["content"]["nextOffset"],2);
+    assert_eq!(live["content"]["format"]["encoding"],"gbk");
     let batch=f.read(json!({"files":[{"path":"legacy.txt","offset":1,"length":1},{"path":"legacy.txt","offset":3,"length":1},{"path":"legacy.txt","startLine":2,"endLine":2}]}));assert_eq!(batch["files"][0]["result"]["content"]["text"],"中");assert_eq!(batch["files"][1]["result"]["content"]["text"],"文");assert_eq!(batch["files"][2]["result"]["content"]["offset"],6);
     let search=f.call("file_search",json!({"query":"文"}));let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=search else{panic!("{search:?}")};assert_eq!(content.data["records"][0]["data"]["column"],2,"{}",content.data);
     {
@@ -1146,6 +1150,9 @@ fn range_backed_fixed_read_materializes_gbk_edit_and_keeps_external_cas_conflict
     use crate::storage::workspace_session::{Session,StoragePort};
     use sha2::Digest;
     let mut f=Fixture::new();let bytes=b"\xd6\xd0 old\n";
+    // The same bytes can mean Windows-1252 text; this test exercises an owned
+    // GBK interpretation through range storage, materialization and mutation.
+    f.executor.binding.text_encoding=Some(crate::text::Policy{root:None,default_encoding:None,files:Some(std::collections::BTreeMap::from([("legacy.txt".into(),"gbk".into())])),choice_revisions:None});
     {
         let mut storage=f._storage.lock().unwrap();let mut invoke=|method:&str,params:Value|{let(grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();storage.dispatch(method,&params,Some("actor"),&grant).unwrap()};
         invoke("storage.putBlob.begin",json!({"operationId":"range-body","streamId":"range-body","workspaceId":"workspace","byteLength":bytes.len()}));invoke("storage.putBlob.chunk",json!({"streamId":"range-body","sequence":0,"bytesBase64":BASE64.encode(bytes)}));let blob=invoke("storage.putBlob.finish",json!({"operationId":"range-body","streamId":"range-body","workspaceId":"workspace"}));
@@ -1160,12 +1167,15 @@ fn range_backed_fixed_read_materializes_gbk_edit_and_keeps_external_cas_conflict
     assert!(state["entries"][0]["state"]["objectHash"].as_str().unwrap().starts_with("ranges-"));
     f.executor.binding.source_mode=SourceMode::FixedBranch;f.executor.binding.root_id=None;f.executor.binding.live_root=None;f.executor.binding.file_source=Some(FixedFileSource{branch_id:"range-fixed".into(),revision:0});
     let original=f.read(json!({"path":"legacy.txt"}));assert_eq!(original["content"]["text"],"中 new\n");
+    assert_eq!(original["content"]["format"]["encoding"],"gbk");
+    assert_eq!(original["content"]["hash"],state["entries"][0]["state"]["objectHash"]);
     f.executor.binding.source_mode=SourceMode::Materialized;f.executor.binding.materialized_source=f.executor.binding.file_source.take();
     let edited=f.call("file_edit",json!({"path":"legacy.txt","readVersion":original["readVersion"],"edits":[{"oldText":"new","newText":"next"}]}));
     assert!(matches!(edited,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{edited:?}");
     let current=f.read(json!({"path":"legacy.txt"}));assert_eq!(current["content"]["text"],"中 next\n");
     let key=hex::encode(sha2::Sha256::digest(serde_json::to_vec(&json!(["workspace","run"])).unwrap()));
     let physical=f.root.join("store/managed/runs").join(key).join("legacy.txt");
+    assert_eq!(fs::read(&physical).unwrap(),b"\xd6\xd0 next\n");
     fs::write(&physical,b"external").unwrap();let stale=f.call("file_write",json!({"path":"legacy.txt","readVersion":current["readVersion"],"content":"stale"}));
     assert!(!matches!(stale,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{stale:?}");assert_eq!(fs::read(&physical).unwrap(),b"external");
 }

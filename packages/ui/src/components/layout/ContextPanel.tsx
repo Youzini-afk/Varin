@@ -394,7 +394,12 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
   return `${value.slice(0, maxChars - 3)}...`;
 };
 
-export const ContextPanel: React.FC<{ layoutScope?: string; surfaceModes?: readonly ContextPanelMode[] }> = ({ layoutScope, surfaceModes }) => {
+export const ContextPanel: React.FC<{
+  layoutScope?: string;
+  surfaceModes?: readonly ContextPanelMode[];
+  /** Shell-owned selection for a newly opened context. Existing exact tabs stay pinned. */
+  contextOwner?: { identity: ThreadIdentity | null; readOnly: boolean };
+}> = ({ layoutScope, surfaceModes, contextOwner }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -840,7 +845,9 @@ export const ContextPanel: React.FC<{ layoutScope?: string; surfaceModes?: reado
   }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
-        ? <ContextPanelContent active={isOpen} identity={activeTab?.thread} jobRunId={activeTab?.targetPath ?? undefined} readOnly={activeTab?.readOnly} />
+        ? contextOwner && !activeTab.thread
+          ? <div className="p-6 typography-ui-label text-muted-foreground">{t('contextSidebar.empty.openSession')}</div>
+          : <ContextPanelContent active={isOpen} identity={activeTab.thread} jobRunId={activeTab.targetPath ?? undefined} readOnly={activeTab.readOnly} />
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel active={isOpen} source={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'tree'
@@ -907,7 +914,15 @@ export const ContextPanel: React.FC<{ layoutScope?: string; surfaceModes?: reado
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-48">
           {surfaces.map(surface => <DropdownMenuItem key={surface.id} className="gap-2"
-            onSelect={() => useUIStore.getState().openContextSurface(panelKey, surface.mode)}>
+            disabled={surface.mode === 'context' && contextOwner !== undefined && !contextOwner.identity && !tabs.some(tab => tab.mode === 'context' && tab.thread)}
+            onSelect={() => {
+              const state = useUIStore.getState();
+              if (surface.mode === 'context' && contextOwner && !state.contextPanelByDirectory[panelKey]?.tabs.some(tab => tab.mode === 'context' && tab.thread)) {
+                if (contextOwner.identity) state.openContextPanelTab(panelKey, { mode: 'context', thread: contextOwner.identity, readOnly: contextOwner.readOnly });
+                return;
+              }
+              state.openContextSurface(panelKey, surface.mode);
+            }}>
             <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(surface.labelKey)}</span>
             {activeTab && getContextRailMode(activeTab.mode) === surface.mode ? <Icon name="check" className="size-3.5" /> : null}
           </DropdownMenuItem>)}

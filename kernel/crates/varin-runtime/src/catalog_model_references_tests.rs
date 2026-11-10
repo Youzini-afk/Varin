@@ -370,3 +370,18 @@ fn pending_publication_holds_its_future_input_reference_until_original_admission
         .resolve_model_reference(ReferenceKind::File, &reference)
         .is_err());
 }
+
+#[test]
+fn released_main_without_reference_tables_upgrades_and_existing_space_is_never_reallocated() {
+    for retained in [false,true] {
+        let root=Fixture::new();let mut db=root.open();db.create_thread("agent","main").unwrap();
+        let run=submit(&mut db,"main-generation","main");
+        let original=db.register_model_reference(ReferenceKind::File,"owner",&json!({"path":"kept"}),&run.run_id).unwrap();
+        let space=db.model_reference_space().unwrap();let history=db.history("main").unwrap();
+        if !retained {db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;ALTER TABLE external_items DROP COLUMN kind;ALTER TABLE external_items DROP COLUMN tool_status;").unwrap();}
+        db.db.pragma_update(None,"user_version",if retained {90}else{91}).unwrap();drop(db);
+        let db=root.open();assert_eq!(db.history("main").unwrap(),history);assert_eq!(db.execution_reference(&run.run_id).unwrap().sequence,1);
+        if retained {assert_eq!(db.model_reference_space().unwrap(),space);assert_eq!(db.resolve_model_reference(ReferenceKind::File,&original).unwrap().target["path"],"kept");}
+        assert_eq!(db.db.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),FORMAT);
+    }
+}

@@ -504,7 +504,10 @@ export function ScheduledTasksDialog() {
   const tasksContent = <div className="space-y-6">
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : botWorkbench ? 'arrangements.description' : 'tasksHub.followUpsDescription')}</p></div>
-      {createButton}
+      <div className="flex shrink-0 items-center gap-2">
+        {createButton}
+        {!isMobile && <Button variant="ghost" size="icon" aria-label={t('dialog.common.actions.close')} onClick={() => setOpen(false)}><Icon name="close" className="size-4" /></Button>}
+      </div>
     </div>
     {sectionTabs}
     {view === 'scheduled' ? <div className="space-y-5">

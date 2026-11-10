@@ -1401,6 +1401,30 @@ mod tests {
         assert!(decode(b"\x94\x39\xfc\x36", Some("gbk"), None).is_err());
     }
     #[test]
+    fn short_legacy_bytes_keep_detected_and_selected_interpretations_distinct() {
+        // These bytes are valid in both codecs. GBK decodability alone must not
+        // override the detector or the source's explicit/default interpretation.
+        let bytes = b"\xd6\xd0 old\n";
+        for (explicit, default, expected, encoding, source) in [
+            (None, None, "ÖÐ old\n", "windows-1252", "detected"),
+            (Some("windows-1252"), Some("gbk"), "ÖÐ old\n", "windows-1252", "explicit"),
+            (Some("gbk"), Some("windows-1252"), "中 old\n", "gbk", "explicit"),
+            (None, Some("gbk"), "中 old\n", "gbk", "default"),
+        ] {
+            let (text, format) = decode(bytes, explicit, default).unwrap();
+            assert_eq!(text, expected);
+            assert_eq!(format.encoding, encoding);
+            assert_eq!(format.source, source);
+            let params = json!({"encoding":explicit,"defaultEncoding":default});
+            let mut reader = std::io::Cursor::new(bytes);
+            let streamed = stream::probe(&mut reader, &params, &|| Ok(())).unwrap().unwrap();
+            assert_eq!(streamed, format);
+            let page = stream::page(&mut reader, bytes.len() as u64, &params, Ok(streamed), &|| Ok(())).unwrap();
+            assert_eq!(page["text"], expected);
+            assert_eq!(encode(&text, &format).unwrap(), bytes);
+        }
+    }
+    #[test]
     fn strict_gbk_encoder_reports_utf16_position_without_entities_or_replacement() {
         assert_eq!(encode("中文", &gbk()).unwrap(), b"\xd6\xd0\xce\xc4");
         let error = encode("中🙂", &gbk()).unwrap_err();

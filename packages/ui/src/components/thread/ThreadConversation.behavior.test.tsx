@@ -11,12 +11,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
-import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
+import type { ContextCheckpoint, ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, Attachment } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { BotWorkDetail } from '@/workbenches/bot/BotWorkDetail';
 import { BotPanelContext, type BotPanelModel } from '@/workbenches/bot/botPanelModel';
 import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
+import { CommandAutocomplete } from '@/components/chat/CommandAutocomplete';
+import { WorkbenchProfileContext } from '@/lib/workbench/profile-context';
+import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
 import { dict as en } from '@/lib/i18n/messages/en';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
@@ -35,6 +38,7 @@ import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 
 const translations = vi.hoisted(() => ({ dictionary: {} as Record<string, string> }));
+const varinEventListeners = vi.hoisted(() => new Set<(event: import('@/lib/varinEvents').VarinEvent) => void>());
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const endpoint = vi.hoisted(() => ({ generation: 1, hostKey: 'host-a', listeners: new Set<() => void>() }));
 const recoveryService = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined }));
@@ -60,7 +64,7 @@ vi.mock('@varin/application-client', async original => ({
 vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
 // This fixture drives the Thread observer directly; the global Host event transport
 // has its own lifecycle tests and must not open a real connection from linkedom.
-vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: (listener: (event: import('@/lib/varinEvents').VarinEvent) => void) => { varinEventListeners.add(listener); return () => varinEventListeners.delete(listener); } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ ...getRegisteredRuntimeAPIs(), threads: runtimeState.api }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }), { getState: () => ({ currentDirectory: '/workspace/project', setDirectory: () => {} }) }) }));
 vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation?: (active: boolean) => React.ReactNode }) => <div>{renderConversation ? renderConversation(true) : <ChatView />}</div> }));
@@ -81,7 +85,7 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 function ComposerCommandFixture({ actions }: { actions: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>['commandActions'] }) {
   const [selected, setSelected] = React.useState<string>();
   const content = selected && actions?.[selected]?.content;
-  return <>{['schedule', 'tasks'].map(key => <button key={key} type="button" disabled={!actions?.[key] || Boolean(actions[key]?.disabled)} title={actions?.[key]?.disabled}
+  return <>{['schedule', 'tasks', 'context'].map(key => <button key={key} type="button" disabled={!actions?.[key] || Boolean(actions[key]?.disabled)} title={actions?.[key]?.disabled}
     onClick={() => { const action = actions?.[key]; if (action?.run) void action.run(); else setSelected(key); }}>Composer {key}</button>)}
     {typeof content === 'function' ? content(() => setSelected(undefined)) : content}</>;
 }
@@ -119,6 +123,8 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
   <ComposerCommandFixture actions={props.commandActions} />
+  {props.value === '/' && <CommandAutocomplete api={props.api} identity={props.identity} source={props.source} searchQuery="" onClose={() => props.onChange('')}
+    onCommandSelect={command => props.onChange(`/${command.name} `)} />}
 </div> }));
 vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
@@ -298,16 +304,16 @@ const openOverview = async (section: string) => {
 
 // Exercise the real shared sidebar selected by the overview/composer, without the
 // desktop shell's unrelated geometry, editor or terminal surfaces.
-function ConversationWithContext({ api }: { api: ThreadsAPI }) {
-  const panel = useUIStore(state => state.contextPanelByDirectory['/workspace/project']);
+function ConversationWithContext({ api, surface = 'workbench' }: { api: ThreadsAPI; surface?: 'workbench' | 'bot' }) {
+  const panel = useUIStore(state => state.contextPanelByDirectory[surface === 'bot' ? BOT_CONVERSATION_PANEL_SCOPE : '/workspace/project']);
   const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
-  return <><ThreadConversation api={api} identity={identity} preferredModel={null} />
-    {panel?.isOpen && tab?.mode === 'context' && <aside aria-label="Context sidebar"><ContextPanelContent identity={tab.thread} jobRunId={tab.targetPath ?? undefined} readOnly={tab.readOnly} /></aside>}</>;
+  return <WorkbenchProfileContext.Provider value={surface === 'bot' ? 'varin.bot' : 'default'}><ThreadConversation api={api} identity={identity} preferredModel={null} surface={surface} />
+    {panel?.isOpen && tab?.mode === 'context' && <aside aria-label="Context sidebar"><ContextPanelContent identity={tab.thread} jobRunId={tab.targetPath ?? undefined} readOnly={tab.readOnly} /></aside>}</WorkbenchProfileContext.Provider>;
 }
-const renderWithContext = async (api: ThreadsAPI) => {
+const renderWithContext = async (api: ThreadsAPI, surface: 'workbench' | 'bot' = 'workbench') => {
   runtimeState.api = api;
   Object.assign(translations.dictionary, Object.fromEntries(Object.entries(en).filter(([key]) => key.startsWith('contextManager.'))));
-  await act(async () => root.render(<ConversationWithContext api={api} />));
+  await act(async () => root.render(<ConversationWithContext api={api} surface={surface} />));
 };
 const openResources = async () => {
   await openOverview('context');
@@ -1510,6 +1516,57 @@ it('adds a hidden skill command and retains the draft and image through a resour
   expect(composer().closest('form')?.querySelector('img')).toBeNull();
 });
 
+it.each((['workbench', 'bot'] as const).flatMap(surface => (['idle', 'generating', 'waiting'] as const).map(state => ({ surface, state }))))(
+  'refreshes a newly installed skill from the real context panel into the slash consumer in $surface/$state without a Source', async ({ surface, state }) => {
+    const f = fixture(state !== 'idle');
+    if (f.view.activeRun && state !== 'idle') f.view.activeRun.state = state;
+    f.view.thread.bot_id = surface === 'bot' ? 'bot:fixture' : null;
+    if (f.view.launch) f.view.launch.selection.source = null;
+    const saved = resourceCheckpoint();
+    const installed = { ...saved.resources!.snapshot.skills[0]!, id: 'skill:paper-search', name: 'paper-search', origin: 'user' as const, requiresProjectTrust: false };
+    saved.resources!.source = null;
+    saved.resources!.snapshot.scope = { ...saved.resources!.snapshot.scope, mode: surface === 'bot' ? 'bot' : 'agent', projectId: null, sourceIdentity: null, projectRoot: null, cwd: '', projectTrusted: false };
+    saved.resources!.snapshot.skills = [];
+    f.view.context.checkpoint = saved;
+    f.api.resources.skills = vi.fn(async () => {
+      const snapshot = f.view.context.checkpoint!.resources!.snapshot;
+      return { snapshotId: snapshot.id, skills: snapshot.skills.map(skill => ({ resourceId: skill.id, name: skill.name,
+        version: skill.reference.version, origin: skill.origin, description: skill.description, path: skill.reference.path })) };
+    });
+    const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+      const next = structuredClone(f.view.context.checkpoint!);
+      next.id = 'context:new-skill'; next.revision = input.expectedRevision + 1;
+      next.resources!.snapshot.id = 'resources:new-skill'; next.resources!.snapshot.skills.push(installed);
+      f.view.context.checkpoint = next;
+      f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: next.revision, kind: 'context.committed', data: {} });
+      return next;
+    });
+    f.api.resources.refresh = refresh;
+    await renderWithContext(f.api, surface);
+    await edit('[aria-label="Message thread"]', '/');
+    expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(container.querySelector('[role="listbox"]')?.textContent).not.toContain('paper-search');
+    await edit('[aria-label="Message thread"]', '');
+    await act(async () => button('Composer context').click());
+    const disclosure = [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Instructions and skills'))!;
+    expect(disclosure).toBeDefined();
+    await act(async () => disclosure.click());
+    expect(button('Refresh instructions and skills').disabled).toBe(false);
+    await act(async () => button('Refresh instructions and skills').click());
+    expect(refresh).toHaveBeenCalledExactlyOnceWith({ ...identity, expectedRevision: saved.revision });
+    expect(container.querySelector('[aria-label="Instructions and skills"]')?.textContent).toContain('paper-search');
+    await edit('[aria-label="Message thread"]', '/');
+    const option = [...container.querySelectorAll<HTMLElement>('[role="option"]')].find(value => value.textContent?.includes('paper-search'));
+    expect(option).toBeDefined();
+    await act(async () => option!.click());
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('/skill:paper-search ');
+    expect(f.api.resources.skills).toHaveBeenLastCalledWith(identity, {}, expect.any(AbortSignal));
+    expect(saved.resources!.snapshot.skills).toEqual([]);
+    expect(f.cancelRun).not.toHaveBeenCalled();
+    expect(f.submit).not.toHaveBeenCalled();
+    expect(f.enqueue).not.toHaveBeenCalled();
+  });
+
 it('keeps an unrelated request failure when the resource snapshot changes', async () => {
   const f = fixture();
   f.view.context.checkpoint = resourceCheckpoint();
@@ -1631,6 +1688,154 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
   expect(button('Refresh instructions and skills').disabled).toBe(false);
   expect(f.view.activeRun?.state).toBe('generating');
   expect(f.cancelRun).not.toHaveBeenCalled();
+});
+
+it('keeps the current resources refreshable after compaction and returns from historical inspection to the live checkpoint', async () => {
+  const f = fixture();
+  const original = resourceCheckpoint();
+  original.proposal.summary = 'Original compaction summary';
+  const run = { ...initialSnapshot(true).activeRun!, id: 'summary:applied', state: 'completed' as const };
+  f.view.context = { checkpoint: original, jobs: [{ run, job: {
+    compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'model_plan', sourceCutHash: 'cut', planHash: 'plan' },
+    published_revision: original.revision,
+    request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null },
+      key: original.id, branch_id: identity.branchId, through_id: 'history:compacted', expected_revision: original.revision - 1, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null },
+    receipt: { thread_id: 'summary:thread', branch_id: 'summary:branch', run_id: run.id, input_id: 'summary:input', cursor: 2 },
+  } }] };
+  f.api.contextHistory = vi.fn(async () => ({ head: null, previous: null, items: [], checkpoint: structuredClone(original) }));
+  const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = `context:resources:${input.expectedRevision + 1}`; next.revision = input.expectedRevision + 1;
+    next.resources!.snapshot.id = `resources:${next.revision}`;
+    next.resources!.snapshot.skills[0]!.name = 'paper-search';
+    f.view.context.checkpoint = next;
+    return next;
+  });
+  f.api.resources.refresh = refresh;
+  await renderWithContext(f.api);
+  await openResources();
+  await act(async () => button('Refresh instructions and skills').click());
+  const resources = () => container.querySelector('[aria-label="Instructions and skills"]');
+  expect(resources()?.textContent).toContain('resources:4');
+  expect(resources()?.textContent).toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  expect(f.api.contextHistory).not.toHaveBeenCalled();
+
+  // Historical selection reads the original checkpoint, without making it current.
+  window.HTMLElement.prototype.scrollTo = () => {};
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Compaction history'))!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('.context-history button')!.click());
+  expect(resources()?.textContent).toContain('resources:original');
+  expect(resources()?.textContent).not.toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => button('Back to current context').click());
+  expect(resources()?.textContent).toContain('resources:4');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(refresh.mock.calls.map(([input]) => input.expectedRevision)).toEqual([3, 4]);
+  expect(original.resources!.snapshot.skills[0]!.name).toBe('review-code');
+});
+
+it.each(['manual', 'automatic', 'recovery'] as const)('follows the live checkpoint after %s summary publication in the context inspector', async mode => {
+  const f = fixture(true);
+  f.view.historyPage = { head: 'summary-cut', previous: null };
+  f.view.thread.branches[0]!.head = 'summary-cut';
+  f.view.context.checkpoint = resourceCheckpoint();
+  const run = f.view.activeRun!;
+  let attempt = 0;
+  f.api.compact = vi.fn<ThreadsAPI['compact']>(async input => {
+    const id = `summary:manual:${++attempt}`;
+    const state = mode === 'recovery' && attempt === 1 ? 'generating' : mode === 'recovery' && attempt === 2 ? 'failed' : 'completed';
+    const job = { compaction: { producer: { kind: 'builtin' as const, name: 'fold' as const, version: '1' as const }, kind: 'model_plan' as const, sourceCutHash: 'cut', planHash: 'plan' },
+      request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null },
+        key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: 'Prepared prompt', instruction_sources: [], memory_checkpoint: null },
+      receipt: { thread_id: 'summary:thread', branch_id: 'summary:branch', run_id: id, input_id: `summary:input:${attempt}`, cursor: 2 } };
+    f.view.context.jobs.push({ run: { ...run, id, state }, job });
+    return job;
+  });
+  f.api.cancelContext = vi.fn<ThreadsAPI['cancelContext']>(async (_identity, runId) => {
+    const row = f.view.context.jobs.find(row => row.run.id === runId)!;
+    row.run = { ...row.run, state: 'cancelled', cancel_requested: true, revision: row.run.revision + 1 };
+    return row.run;
+  });
+  let published: ContextCheckpoint | undefined;
+  f.api.contextHistory = vi.fn<ThreadsAPI['contextHistory']>(async (_identity, runId) => ({ head: 'summary:output', previous: null,
+    items: [{ id: 'summary:output', parent: null, thread_id: 'summary:thread', run_id: runId, source: 'assistant' as const, provider: null,
+      content: { content: { kind: 'text', text: '{"summary":"Manually prepared summary"}' } } }], checkpoint: published }));
+  const publish = () => {
+    const row = f.view.context.jobs.at(-1)!;
+    published = { ...structuredClone(f.view.context.checkpoint!), id: row.job.request.key, revision: 4,
+      proposal: { ...row.job.request, summary: 'Manually prepared summary' } };
+    row.job.published_revision = published.revision;
+    f.view.context.checkpoint = structuredClone(published);
+    return published;
+  };
+  f.api.publishContext = vi.fn(async () => publish());
+  f.api.resources.refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = `context:resources:${input.expectedRevision + 1}`; next.revision = input.expectedRevision + 1;
+    next.resources!.snapshot.id = `resources:${next.revision}`;
+    next.resources!.snapshot.skills[0]!.name = 'paper-search';
+    f.view.context.checkpoint = next;
+    return next;
+  });
+  await renderWithContext(f.api);
+  await openResources();
+  await act(async () => button('Prepare now').click());
+  expect(f.api.compact).toHaveBeenCalledOnce();
+  if (mode === 'recovery') {
+    await act(async () => button('Stop preparation').click());
+    expect(f.api.cancelContext).toHaveBeenCalledExactlyOnceWith(identity, 'summary:manual:1');
+    await act(async () => button('Prepare again').click());
+    expect(container.textContent).toContain(en['contextManager.failed']);
+    await act(async () => button('Prepare again').click());
+    expect(f.api.compact).toHaveBeenCalledTimes(3);
+  }
+  const runId = f.view.context.jobs.at(-1)!.run.id;
+  expect(container.querySelector('[aria-label="Prepared summary"]')?.textContent).toContain('Manually prepared summary');
+  if (mode === 'automatic') {
+    await act(async () => {
+      publish();
+      f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 4, kind: 'context.committed', data: {} });
+    });
+    expect(f.api.publishContext).not.toHaveBeenCalled();
+  } else {
+    await act(async () => button('Apply early').click());
+    expect(f.api.publishContext).toHaveBeenCalledExactlyOnceWith(identity, runId);
+  }
+  expect(container.querySelector('[aria-label="Active summary"]')?.textContent).toContain('Manually prepared summary');
+  expect(button('Back to current context')).toBeUndefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  const resources = () => container.querySelector('[aria-label="Instructions and skills"]')?.textContent;
+  expect(resources()).toContain('resources:5');
+  expect(resources()).toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(f.api.resources.refresh).toHaveBeenNthCalledWith(2, { ...identity, expectedRevision: 5 });
+
+  // An explicit history visit still pins the original published checkpoint.
+  window.HTMLElement.prototype.scrollTo = () => {};
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Compaction history'))!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('.context-history button')!.click());
+  expect(resources()).toContain('resources:original');
+  expect(resources()).not.toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => button('Back to current context').click());
+  expect(resources()).toContain('resources:6');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+
+  // A timeline job link is also an explicit pin, even as current resources advance.
+  await act(async () => useUIStore.getState().openContextPanelTab('/workspace/project', { mode: 'context', thread: identity, targetPath: runId }));
+  expect(resources()).toContain('resources:original');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => {
+    f.view.context.checkpoint = { ...f.view.context.checkpoint!, id: 'context:external-publication', revision: 7 };
+    f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 7, kind: 'context.committed', data: {} });
+  });
+  expect(resources()).toContain('resources:original');
+  await act(async () => button('Back to current context').click());
+  expect(resources()).toContain('context:external-publication');
+  expect(button('Refresh instructions and skills')).toBeDefined();
 });
 
 it('retries summary generation without duplicating the job and applies its completed checkpoint without hiding history', async () => {
@@ -4258,4 +4463,148 @@ it('does not fork the old scope when the active branch changes while flushing vi
     await act(async () => root.render(<ThreadConversation api={f.api} identity={next} onBranchCreated={() => {}} />));
     await act(async () => finish()); expect(fork).not.toHaveBeenCalled();
   } finally { delete session.flushState; }
+});
+
+it.each([false, true])('projects an active Bot model without feeding inherited defaults back into its draft (different: %s)', async different => {
+  const f = fixture(true);
+  f.view.thread.bot_id = 'bot';
+  f.view.activeRun!.configuration = { providerId: 'fixture-provider', model: 'request-model', catalogModelId: 'fixture-model', thinkingLevel: 'high', modelOptions: { temperature: 0 } };
+  const running: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'high', temperature: 0 };
+  const inherited: ThreadModel = { providerId: different ? 'other-provider' : running.providerId, modelId: different ? 'other-model' : running.modelId, thinkingLevel: 'off', temperature: 0.7 };
+  const ordinary: ThreadIdentity = { runtime: 'agent', threadId: 'ordinary-work', branchId: 'main' };
+  const originalNavigation = useThreadStore.getState();
+  useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: ordinary, selectedDraftKey: null });
+  useThreadDraftStore.getState().patch(threadComposerKey(threadHostKey(), ordinary), { model: inherited });
+  f.api.listModels = async () => [{ ...running, thinkingLevels: ['off', 'high'] }, ...(different ? [inherited] : [])];
+  f.api.selectModel = vi.fn(f.api.selectModel);
+  const key = threadComposerKey(threadHostKey(), identity);
+  const modelChanges: Array<ThreadModel | undefined> = [];
+  const unsubscribe = useThreadDraftStore.subscribe((state, previous) => {
+    if (state.drafts[key]?.model !== previous.drafts[key]?.model) modelChanges.push(state.drafts[key]?.model);
+  });
+  const render = () => <React.StrictMode><ThreadConversation surface="bot" api={f.api} identity={identity}
+    inheritWorkbenchModel preferredModel={{ ...inherited }} /></React.StrictMode>;
+  try {
+    await act(async () => root.render(render()));
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')!.value).toBe(JSON.stringify([running.providerId, running.modelId]));
+    expect(modelChanges).toEqual([running]);
+    await act(async () => root.render(render()));
+    await act(async () => f.emit({ cursor: 1, subject: 'ui-run', revision: 2, kind: 'run.updated', data: {} }));
+    await edit('[aria-label="Message thread"]', 'Queue without rewriting the Run');
+    await submitForm(composerForm());
+    expect(f.enqueue).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.api.enqueue).mock.calls[0]![0]).not.toHaveProperty('model');
+    expect(f.api.selectModel).not.toHaveBeenCalled();
+    expect(modelChanges).toEqual([running]);
+  } finally {
+    unsubscribe();
+    useThreadStore.setState({ hostKey: originalNavigation.hostKey, selectedIdentity: originalNavigation.selectedIdentity, selectedDraftKey: originalNavigation.selectedDraftKey });
+  }
+});
+
+it('waits for the Bot model catalog, uses the entry capture once, and preserves a user choice through catalog changes', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'bot';
+  const ordinary: ThreadIdentity = { runtime: 'agent', threadId: 'ordinary-work', branchId: 'main' };
+  const originalNavigation = useThreadStore.getState();
+  const captured: ThreadModel = { providerId: 'captured-provider', modelId: 'captured-model', thinkingLevel: 'high', temperature: 0 };
+  const fallback: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' };
+  const chosen: ThreadModel = { providerId: 'chosen-provider', modelId: 'chosen-model', thinkingLevel: 'high', temperature: 0 };
+  useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: ordinary, selectedDraftKey: null });
+  const ordinaryKey = threadComposerKey(threadHostKey(), ordinary);
+  useThreadDraftStore.getState().patch(ordinaryKey, { model: captured });
+  let resolveModels!: (models: ThreadModelInfo[]) => void;
+  f.api.listModels = () => new Promise(resolve => { resolveModels = resolve; });
+  const key = threadComposerKey(threadHostKey(), identity);
+  try {
+    await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} inheritWorkbenchModel preferredModel={fallback} />));
+    expect(useThreadDraftStore.getState().drafts[key]?.model?.providerId).toBeFalsy();
+    await act(async () => useThreadDraftStore.getState().patch(ordinaryKey, { model: fallback }));
+    await act(async () => resolveModels([{ ...captured, thinkingLevels: ['off', 'high'] }, fallback, { ...chosen, thinkingLevels: ['off', 'high'] }]));
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(captured);
+    await edit('[aria-label="Registered model"]', JSON.stringify([chosen.providerId, chosen.modelId]), 'change');
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(chosen);
+    f.api.listModels = async () => [fallback, { ...chosen, thinkingLevels: ['off'] }];
+    await act(async () => { for (const listener of varinEventListeners) listener({ type: 'settings-changed', owner: 'agent-settings', ids: ['model-channels'], scope: 'host', revision: 'catalog-2' }); });
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual({ ...chosen, thinkingLevel: 'off' });
+    await edit('[aria-label="Message thread"]', 'Use my chosen model');
+    await submitForm(composerForm());
+    expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: { ...chosen, thinkingLevel: 'off' } }));
+  } finally {
+    useThreadStore.setState({ hostKey: originalNavigation.hostKey, selectedIdentity: originalNavigation.selectedIdentity, selectedDraftKey: originalNavigation.selectedDraftKey });
+  }
+});
+
+it('applies changed Bot defaults atomically without replaying the same preference over idle edits or reopening', async () => {
+  const f = fixture();
+  const preferred: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 };
+  const alternate: ThreadModel = { providerId: 'other-provider', modelId: 'other-model', thinkingLevel: 'off', temperature: 0 };
+  f.api.listModels = async () => [preferred, alternate];
+  const key = threadComposerKey(threadHostKey(), identity);
+  const render = (model: ThreadModel | null) => <ThreadConversation surface="bot" api={f.api} identity={identity} preferredModel={model} />;
+  await act(async () => root.render(render(preferred)));
+  await edit('[aria-label="Registered model"]', JSON.stringify([alternate.providerId, alternate.modelId]), 'change');
+  await act(async () => root.render(render({ ...preferred })));
+  expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(alternate);
+  await act(async () => root.render(null));
+  await act(async () => root.render(render({ ...preferred })));
+  expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(alternate);
+  const models: Array<ThreadModel | undefined> = [];
+  const unsubscribe = useThreadDraftStore.subscribe((state, previous) => {
+    if (state.drafts[key]?.model !== previous.drafts[key]?.model) models.push(state.drafts[key]?.model);
+  });
+  try {
+    const changed = { ...preferred, temperature: 0.5 };
+    await act(async () => root.render(render(changed)));
+    expect(models).toEqual([changed]);
+    await act(async () => root.render(render(null)));
+    expect(models).toEqual([changed, { providerId: '', modelId: '', thinkingLevel: 'off' }]);
+  } finally { unsubscribe(); }
+});
+
+it.each([undefined, null] as const)('keeps an omitted model preference distinct from an explicitly empty one (%s)', async preference => {
+  const f = fixture(true);
+  f.view.activeRun!.configuration = { providerId: 'fixture-provider', model: 'request-id', catalogModelId: 'fixture-model', thinkingLevel: 'off', modelOptions: { temperature: 0 } };
+  await f.cancelRun();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preference} />));
+  const model = useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model;
+  expect(model).toEqual(preference === undefined ? { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 }
+    : { providerId: '', modelId: '', thinkingLevel: 'off' });
+  if (preference === null) {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model?.providerId).toBe('fixture-provider');
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={null} />));
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model?.providerId).toBe('');
+  }
+});
+
+it('inherits the desired Run model on finish and preserves a later idle override across snapshots and reopening', async () => {
+  const f = fixture(true);
+  const original: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 };
+  const desired: ThreadModel = { providerId: 'other-provider', modelId: 'other-model', thinkingLevel: 'off', temperature: 0 };
+  f.view.activeRun!.configuration = { providerId: original.providerId, model: original.modelId, thinkingLevel: original.thinkingLevel, modelOptions: { temperature: 0 } };
+  f.api.listModels = async () => [original, desired];
+  f.api.selectModel = vi.fn(async input => {
+    const selection = { id: input.key, run_id: input.runId, revision: 1, binding_id: 'selected-model', status: 'ready' as const, failure: null, credential_scope: null,
+      configuration: { providerId: input.model.providerId, providerFamily: 'openai-responses', model: 'provider-request-id', catalogModelId: input.model.modelId,
+        thinkingLevel: input.model.thinkingLevel, modelOptions: { temperature: input.model.temperature },
+        endpoint: 'http://localhost/responses', allowAnonymous: true, credentialEnvironment: null, configurationGeneration: 2, maxOutputTokens: 32 } };
+    f.view.modelSelection.desired = selection;
+    return selection;
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={original} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify([desired.providerId, desired.modelId]), 'change');
+  expect(f.api.selectModel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: desired }));
+  await act(async () => {
+    await f.cancelRun();
+    f.emit({ cursor: 1, subject: 'ui-run', revision: 2, kind: 'run.cancelled', data: {} });
+  });
+  await edit('[aria-label="Message thread"]', 'Continue with the selected model');
+  await submitForm(composerForm());
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: desired }));
+  await edit('[aria-label="Registered model"]', JSON.stringify([original.providerId, original.modelId]), 'change');
+  await act(async () => f.emit({ cursor: 2, subject: 'ui-run', revision: 3, kind: 'run.updated', data: {} }));
+  await act(async () => root.render(null));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ ...original }} />));
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model).toEqual(original);
 });

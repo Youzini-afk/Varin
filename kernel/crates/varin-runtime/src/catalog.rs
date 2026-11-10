@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 90;
+pub(crate) const FORMAT: i64 = 92;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -146,7 +146,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
-    if version >= 90 { model_references::check_format(db)?; }
+    if version >= 92 { model_references::check_format(db)?; }
     if version >= 87 { principals::check_format(db)?; }
     else { principals::check_legacy_format(db)?; }
     db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
@@ -256,6 +256,7 @@ fn initialize_metadata(
 /// across model, extension or tool execution is forbidden: all methods are bounded local transactions.
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
 pub struct Catalog {
+    ingress_tool_catalog: Option<activation::IngressToolCatalog>,
     db: Connection,
     content: crate::content::ContentStore,
     resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
@@ -311,6 +312,7 @@ impl Catalog {
         }
         let epoch = initialize_metadata(&mut db, if version == 0 { 0 } else { FORMAT }, &content)?;
         let mut this = Self {
+            ingress_tool_catalog: None,
             db,
             content,
             resource_admission,
@@ -617,6 +619,7 @@ impl Catalog {
                 launches::validate_environment_source(&tx, &run.thread_id, source)?;
             }
             let intent = launch_content::LaunchMetadata {
+                extension_admission: prepared.extension_admission.clone(),
                 dispatch_context_ref: None,
                 policy_generation: 0,
                 policy_target: policy_switch::PolicyTargetMetadata::Default,

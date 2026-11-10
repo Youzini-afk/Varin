@@ -722,6 +722,9 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
     db.admit_followup_registration(p).unwrap();
     let before = db.followup_occurrences("legacy", None).unwrap().occurrences;
     let original = db.capture_followup("legacy").unwrap().load().unwrap();
+    let current_format: i64 = f.raw()
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
     // Build the released 88 representation, retaining the actual old work, queue and receipts.
     f.raw().execute_batch(include_str!("fixtures/catalog-pre-arrangements.sql")).unwrap();
     f.raw().pragma_update(None, "user_version", 88).unwrap();
@@ -739,7 +742,7 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
         f.raw()
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        90
+        current_format
     );
 }
 

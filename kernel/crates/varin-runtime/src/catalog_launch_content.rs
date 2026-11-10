@@ -40,6 +40,8 @@ pub struct LaunchSelectionMetadata {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_admission: Option<launches::ExtensionAdmission>,
     pub dispatch_context_ref: Option<Value>,
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTargetMetadata,
@@ -53,6 +55,30 @@ pub struct LaunchMetadata {
     pub requires_rebind: bool,
 }
 impl LaunchSelectionMetadata {
+    /// A new root round retains the selected names, resolving only its builtin
+    /// declarations against the executable owner's current directory. This never
+    /// updates an accepted Run or reselects its retained Host tool bindings.
+    pub(super) fn refresh_base_tools(
+        &mut self,
+        content: &crate::content::ContentStore,
+        available: &[ToolSchema],
+    ) -> Result<()> {
+        let previous: Vec<ToolSchema> = serde_json::from_value(content.load(&self.base_tools_ref)?)?;
+        let names = previous.iter().map(|tool| tool.name.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut base = available.iter().filter(|tool| {
+            names.contains(tool.name.as_str()) && tool.requirements.as_ref()
+                .is_none_or(|requirements| requirements.accepts(self.source.as_ref()))
+        }).cloned().collect::<Vec<_>>();
+        base.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut tools: Vec<ToolSchema> = serde_json::from_value(content.load(&self.tools_ref)?)?;
+        tools.retain(|tool| !names.contains(tool.name.as_str()));
+        tools.extend(base.iter().cloned());
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        self.base_tools_ref = content.save(&serde_json::to_value(base)?)?;
+        self.tools_ref = content.save(&serde_json::to_value(tools)?)?;
+        Ok(())
+    }
     pub(super) fn rebase_policy_models(
         &mut self,
         content: &crate::content::ContentStore,
@@ -254,6 +280,7 @@ impl LaunchRead {
     }
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
+            extension_admission: self.metadata.extension_admission,
             principal_id: self.principal_id,
             policy_generation: self.metadata.policy_generation,
             policy_target: self.metadata.policy_target.load(&self.content)?,
@@ -380,6 +407,7 @@ enum LaunchChange {
     },
 }
 pub struct PreparedLaunchChange {
+    pub(super) extension_admission: Option<launches::ExtensionAdmission>,
     pub(super) expected: LaunchMetadata,
     pub(super) selection: LaunchSelectionMetadata,
     pub(super) policy_target: super::policy_switch::PolicyTargetMetadata,
@@ -734,6 +762,7 @@ impl LaunchChangePreparation {
             ..
         } = self.read;
         let mut selection = metadata.selection.clone();
+        let mut extension_admission = metadata.extension_admission.clone();
         let mut policy_target = metadata.policy_target.clone();
         let kind = match self.change {
             LaunchChange::Mcp { binding, derivations } => {
@@ -819,7 +848,12 @@ impl LaunchChangePreparation {
                     }
                 }
                 let mut full = metadata.selection.clone().load(&content)?;
-                if !full.extension_bindings.is_empty() && full.extension_bindings != bindings {
+                if let Some(admission) = extension_admission.as_mut().filter(|admission| admission.pending()) {
+                    if self.child_selection.is_some() {
+                        return Err(RuntimeError::Conflict("delegated continuation cannot rediscover extension tools".into()));
+                    }
+                    admission.state = launches::ExtensionAdmissionState::Prepared;
+                } else if (extension_admission.is_some() || !full.extension_bindings.is_empty()) && full.extension_bindings != bindings {
                     return Err(RuntimeError::Conflict(
                         "extension service generation changed".into(),
                     ));
@@ -861,6 +895,7 @@ impl LaunchChangePreparation {
             }
         };
         Ok(PreparedLaunchChange {
+            extension_admission,
             expected: metadata,
             selection,
             policy_target,

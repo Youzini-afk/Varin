@@ -1,8 +1,9 @@
 # Script runtime
 
 `@varin/script-runtime` owns the shared Node REPL evaluator and the private JSONL
-transport for an explicitly selected, Run-owned script environment. It uses only
-Node built-ins at runtime; the `@varin/protocol` dependency supplies generated types.
+transport for an explicitly selected, Run-owned script environment. Node built-ins
+own evaluation and transport; Acorn supplies declaration diagnostics. The
+`@varin/protocol` dependency supplies generated types.
 
 The Application Host owns environment selection, frozen binding identity, cell
 queuing and original nested-tool dispatch. The existing process/guardian owner
@@ -98,6 +99,18 @@ installed package graph and fixes that compiled entry point in the original
 managed-process launch. Run that entry point with Node and
 `--experimental-repl-await`. Evaluation occurs directly in this already-managed
 process; it does not spawn an extra worker or supervisor.
+
+After a local Host restart or release switch, a saved Run can restore its original
+worker from a retained installation. The Host checks the original canonical path
+and JavaScript-tree hash, and requires the same trusted Node executable, Node
+version and REPL flag. It repeats these checks before a newly requested environment
+is launched and uses that original path, never the current release as a substitute.
+This restores a tool binding, not a previous REPL session or its cells; unknown
+effects are not replayed. Missing or modified originals remain unavailable. The
+existing v1 identity does not cover external package dependencies, and recovery
+does not manufacture stronger historical evidence than was originally captured.
+Managed sources continue to require their target Host's own current binding; a
+coordinator cannot authorize an old executable or worker by supplying its path.
 
 All frames are UTF-8 JSON objects followed by `\n`, with `v: 2` and `environmentId`.
 The package root exports the shared frame types, encoder and incremental decoder:

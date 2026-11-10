@@ -495,3 +495,31 @@ fn unreported_counts_leave_cost_unknown_rather_than_zero() {
         (Some(UsageBilling::Metered), 1)
     );
 }
+
+#[test]
+fn responses_cache_write_prices_use_inclusive_input_and_preserve_unknown_counts() {
+    let mut f = Fixture::new();
+    let pricing = price("metered", json!({"inputPerMillion":2.0,"outputPerMillion":10.0,
+        "cacheReadPerMillion":0.1,"cacheWritePerMillion":2.5}));
+    for (index, written) in [Some(7000), Some(0), None].into_iter().enumerate() {
+        let at = NOV_1 + index as i64 * DAY;
+        f.settle(&format!("responses-{index}"), at, "openai-responses", Some(pricing.clone()),
+            usage(Some(12000), Some(4000), written, Some(300)));
+        let rows = f.summary(at as u64, (at + 1) as u64, 0).rows;
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.requests, 1);
+        assert!(row.priced);
+        assert_eq!(row.complete_input_tokens.known.as_deref(), Some("12000"));
+        assert_eq!(row.cached_input_tokens.known.as_deref(), Some("4000"));
+        assert_eq!(row.cache_write_tokens.known, written.map(|n| n.to_string()));
+        assert_eq!(row.current_price_requests, 0);
+        match written {
+            // Each input token belongs to exactly one bucket, not base input plus a write surcharge.
+            Some(7000) => { close(row.cost_usd, 0.0229); assert_eq!(row.cost_unknown_requests, 0); }
+            Some(0) => { close(row.cost_usd, 0.0194); assert_eq!(row.cost_unknown_requests, 0); }
+            None => { close(row.cost_usd, 0.0); assert_eq!(row.cost_unknown_requests, 1); }
+            _ => unreachable!(),
+        }
+    }
+}

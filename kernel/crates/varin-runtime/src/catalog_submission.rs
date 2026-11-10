@@ -53,6 +53,7 @@ pub(super) enum SubmissionOrigin {
     Summary { source_branch_id: String },
 }
 pub struct PreparedSubmission {
+    pub(super) extension_admission: Option<launches::ExtensionAdmission>,
     pub(super) attachments: Vec<super::attachments::Attachment>,
     pub(super) title: Option<String>,
     pub(super) input_id: String,
@@ -275,6 +276,7 @@ impl SubmissionPreparation {
                 .0
                 .clone();
             return Ok(PreparedSubmission {
+                extension_admission: None,
                 attachments: Vec::new(),
                 title: None,
                 input_id: receipt.input_id,
@@ -612,6 +614,7 @@ impl PreparedSubmission {
             .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))
             .transpose()?;
         Ok(Self {
+            extension_admission: None,
             attachments: model_attachments.unwrap_or(super::attachments::input_attachments(&command.input)?),
             title: threads::input_title(&command.input),
             input_id,

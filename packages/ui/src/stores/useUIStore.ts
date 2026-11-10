@@ -530,6 +530,8 @@ interface UIStore {
   isAboutDialogOpen: boolean;
   isVarinDiagnosticsDialogOpen: boolean;
   isSessionCreateDialogOpen: boolean;
+  /** Explicit full-page selections supersede pending conversation navigation. Not persisted. */
+  mainSurfaceSelectionRevision: number;
   isScheduledTasksDialogOpen: boolean;
   scheduledTasksFocus: { identity: ThreadIdentity; followupId?: string; token: number } | null;
   isArchivePageOpen: boolean;
@@ -858,6 +860,7 @@ export const useUIStore = create<UIStore>()(
         isAboutDialogOpen: false,
         isVarinDiagnosticsDialogOpen: false,
         isSessionCreateDialogOpen: false,
+        mainSurfaceSelectionRevision: 0,
         isScheduledTasksDialogOpen: false,
         scheduledTasksFocus: null,
         isArchivePageOpen: false,
@@ -1534,25 +1537,26 @@ export const useUIStore = create<UIStore>()(
         },
 
         openArrangements: (identity, followupId) => {
-          set(state => ({ scheduledTasksFocus: { identity, followupId, token: (state.scheduledTasksFocus?.token ?? 0) + 1 },
+          set(state => ({ mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1,
+            scheduledTasksFocus: { identity, followupId, token: (state.scheduledTasksFocus?.token ?? 0) + 1 },
             isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }));
         },
 
         setScheduledTasksDialogOpen: (open) => {
-          set(open
-            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+          set(state => open
+            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
             : { isScheduledTasksDialogOpen: false, scheduledTasksFocus: null });
         },
 
         setArchivePageOpen: (open) => {
-          set(open
-            ? { isArchivePageOpen: true, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+          set(state => open
+            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, isArchivePageOpen: true, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
             : { isArchivePageOpen: false });
         },
 
         setWorktreesPageProjectId: (projectId) => {
-          set(projectId
-            ? { worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isMultiRunLauncherOpen: false }
+          set(state => projectId
+            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isMultiRunLauncherOpen: false }
             : { worktreesPageProjectId: null });
         },
 
@@ -1563,6 +1567,7 @@ export const useUIStore = create<UIStore>()(
           }
           set({
             isScheduledTasksDialogOpen: false,
+            scheduledTasksFocus: null,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
@@ -2056,30 +2061,32 @@ export const useUIStore = create<UIStore>()(
           set((state) => ({
             isMultiRunLauncherOpen: open,
             multiRunLauncherPrefillPrompt: open ? state.multiRunLauncherPrefillPrompt : '',
-            ...(open ? { isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null } : {}),
+            ...(open ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null } : {}),
           }));
         },
 
         openMultiRunLauncher: () => {
-          set({
+          set(state => ({
+            mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1,
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: '',
             isSessionSwitcherOpen: false,
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
-          });
+          }));
         },
 
         openMultiRunLauncherWithPrompt: (prompt) => {
-          set({
+          set(state => ({
+            mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1,
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: prompt,
             isSessionSwitcherOpen: false,
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
-          });
+          }));
         },
 
         setTimelineDialogOpen: (open) => {

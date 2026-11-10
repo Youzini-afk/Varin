@@ -44,8 +44,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -55,6 +55,11 @@ representation. Do not add parallel old-format execution/read paths or a second 
   owner with Bot-owned arrangements, source receipts, per-arrangement matching watermarks, object routes
   and remote consumers. Existing work follow-ups retain their source Runs and original receipts;
   event delivery reuses native ingress or the real external turn ledger without synthetic Runs.
+  Format 90 adds pending/prepared extension admission only to new automatic roots. Existing launches
+  retain their exact semantics with no marker; the upgrade does not rewrite identities or receipts.
+  Format 91 restores missing Responses cache-write counts from retained raw ModelStep/planning receipts
+  and their matching existing ledger rows, preserving frozen pricing and settlement identity. Missing
+  evidence stays unknown; conversion never creates historical charges or replays execution effects.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.
@@ -75,6 +80,16 @@ representation. Do not add parallel old-format execution/read paths or a second 
 - A model request pins its actual provider/tool/context bindings. Normal retirement permits retained
   exchanges to finish; revocation rejects/cancels them. Recovery uses the saved composition and
   artifact identities instead of silently applying current routing.
+  A new root round activated by Calendar, a message or a follow-up resolves its inherited builtin
+  names against the executable owner's current declarations before admission, just like a new user
+  round. It preserves Agent/source/principal/model ownership and marks extension admission Pending.
+  The original Host discovers the current enabled directory with ordinary new-request semantics;
+  unavailable individual tools are not inherited as mandatory requirements. The existing launch
+  transaction commits the complete resulting directory, including empty, as Prepared before binding
+  or execution. A kernel-only empty directory must use that same explicit preparation owner.
+  Prepared Runs, receipt retries, old launches and delegated continuations keep their exact bindings.
+  Exact restoration does not depend on optional current discovery. Later relevant Host changes retain
+  the ordinary closed-boundary tool-update path, without a new permanent capability ceiling.
 - Branch history has one writer. Background summary, memory and planning work uses separate admitted
   identities. A Wait releases active execution while retaining the dependency/continuation; cancelling
   observation does not cancel the observed Job or withdraw an independent follow-up definition.

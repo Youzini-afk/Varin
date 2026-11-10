@@ -1805,7 +1805,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 86; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 87; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -1915,6 +1915,10 @@ export interface HostServiceComposition {
   schemaVersion: 1;
   root: string;
   nodes: HostCompositionNode[];
+}
+
+export interface ExtensionAdmission {
+  state: 'pending' | 'prepared';
 }
 
 export interface ExtensionToolBinding {
@@ -2144,6 +2148,7 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  extension_admission?: ExtensionAdmission;
   principal_id?: string | null;
   driver_preparable: boolean;
   policy_preparable: boolean;

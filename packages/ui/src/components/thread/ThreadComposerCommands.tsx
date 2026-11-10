@@ -9,7 +9,7 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { createBotSession, openBotConversation } from '@/lib/bots';
-import { openThreadContext } from '@/lib/openThreadContext';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { isDesktopShell } from '@/lib/desktop';
 import type { ComposerCommandAction } from '@/lib/commands/surface-command-types';
 import { ThreadTokenUsage } from './ThreadTokenUsage';
@@ -18,11 +18,12 @@ import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { BotHandoffDialog } from '@/components/sections/bots/BotHandoffDialog';
 
-export function useThreadComposerCommands({ api, identity, snapshot, sourcePath, disabled, onHistory, onFork, refresh, onSources, act }: {
-  api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; sourcePath?: string; disabled?: string;
+export function useThreadComposerCommands({ api, identity, snapshot, sourcePath, disabled, readOnly = false, onHistory, onFork, refresh, onSources, act }: {
+  api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; sourcePath?: string; disabled?: string; readOnly?: boolean;
   onHistory(): void; onFork(head: string): Promise<void>; refresh(): Promise<void>; onSources(): void; act(work: () => Promise<unknown>): Promise<void>;
 }): Record<string, ComposerCommandAction | undefined> {
   const { t } = useI18n();
+  const openThreadContext = useOpenThreadContext();
   const thread = snapshot?.thread;
   const branch = thread?.branches.find(item => item.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
@@ -46,7 +47,7 @@ export function useThreadComposerCommands({ api, identity, snapshot, sourcePath,
     pin: { disabled: nativeDisabled, value: t(thread?.pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin'), run: async () => { verify(); await useThreadStore.getState().updateThread(target.threadId, { pinned: !thread?.pinned }); } },
     archive: { disabled: nativeDisabled, run: () => updateTree('archive') },
     delete: { disabled: nativeDisabled, content: complete => <ComposerActionForm danger description={t(count > 1 ? 'sessions.sidebar.dialogs.deleteSession.withManySubtasks' : count ? 'sessions.sidebar.dialogs.deleteSession.withOneSubtask' : 'sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: thread?.title ?? '', count })} confirm={() => updateTree('delete')} onDone={complete} /> },
-    context: { run: () => { verify(); openThreadContext(target, sourcePath); } },
+    context: { run: () => { verify(); openThreadContext(target, sourcePath, undefined, readOnly); } },
     usage: { content: <ThreadTokenUsage identity={target} /> },
     tasks: api.family ? { run: () => { verify(); useUIStore.getState().openContextPanelTab(useDirectoryStore.getState().currentDirectory, { mode: 'threads' }); } } : undefined,
     goal: snapshot ? { content: <ThreadGoal api={api.goals} identity={target} goals={snapshot.goals} sourceRunId={run?.id} refresh={refresh} /> } : undefined,

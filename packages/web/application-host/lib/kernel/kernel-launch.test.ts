@@ -19,6 +19,9 @@ it('requires the installed manifest and validates the selected executable bytes 
       buildIdentity: 'fixture', sha256: createHash('sha256').update('fixture executable').digest('hex') };
     await fs.promises.writeFile(path.join(root, 'manifest.json'), JSON.stringify(manifest));
     expect(await prepareKernelCommand(options)).toMatchObject({ command: kernelPath, args: [], manifest });
+    await fs.promises.writeFile(path.join(root, 'manifest.json'), JSON.stringify({ ...manifest, protocolVersion: KERNEL_PROTOCOL_VERSION - 1 }));
+    await expect(prepareKernelCommand(options)).rejects.toMatchObject({ code: 'kernel-manifest-mismatch' });
+    await fs.promises.writeFile(path.join(root, 'manifest.json'), JSON.stringify(manifest));
     await fs.promises.writeFile(kernelPath, 'changed executable');
     await expect(prepareKernelCommand(options)).rejects.toMatchObject({ code: 'kernel-manifest-mismatch' });
   } finally { await fs.promises.rm(root, { recursive: true, force: true }); }

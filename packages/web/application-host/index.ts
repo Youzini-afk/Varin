@@ -1789,7 +1789,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     catch (error) { res.status(503).json({ error: error instanceof Error ? error.message : String(error) }); }
   });
   const stopModelDirectory = modelsService.startDirectory(egressRuntime.fetch as typeof globalThis.fetch);
-  const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
+  const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR,
+    documents: await documentsAuthority.createResourceAccess([VARIN_DATA_DIR, path.join(os.homedir(), '.agents')]), settings: modelsService.settings,
     promptTools: (context, signal) => promptToolCatalog(context, signal),
     resolveProjectRoot: async projectId => {
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
@@ -2038,7 +2039,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!officeRuntimeOwner.current) throw new Error('Office tool preparation is unavailable');
     if (!browserRuntimeOwner.current) throw new Error('Browser tool preparation is unavailable');
     let configuration = await computerRuntimeOwner.current.prepareConfiguration(run, required);
-    configuration = await scriptRuntimeOwner.current.prepareConfiguration(configuration, run.source);
+    configuration = await scriptRuntimeOwner.current.prepareConfiguration(configuration, run.source, required);
     configuration = await webRuntimeOwner.current.prepareConfiguration(run, required, configuration);
     configuration = await researchDiscoveryOwner.current.prepareConfiguration(run, required, configuration);
     configuration = await imageRuntimeOwner.current.prepareConfiguration(run, required, configuration);

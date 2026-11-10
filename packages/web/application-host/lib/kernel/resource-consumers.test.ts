@@ -10,6 +10,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { createThreadContext, type ContextPreparer } from './thread-context.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
+import { createThreadSkillInputPreparer } from './thread-skill-input.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createResourceOwner, resourceQueryFailure, type ResourceQuery, type ResourceToolResult } from './resource-owner.js';
 import { ResourceBridge, type PrivateResourceResponse } from './resource-bridge.js';
@@ -397,4 +398,46 @@ it('UI resource requests reach their bound owner, including unavailable client o
   expect(owner).toHaveBeenCalledTimes(3);
   for (const reply of replies) expect(reply.result).toMatchObject({ status: 'unavailable', reason: 'No connected client' });
   bridge.close();
+});
+
+
+it.each(['agent', 'bot'] as const)('discovers a new HOME skill for fresh %s inputs only after explicit resource publication', async mode => {
+  const f = await fixture();
+  const prepare = createThreadContext({ resources: f.resources,
+    personalization: { catalog: async () => ({ revision: 1, prompts: {}, memories: [] }) }, projectForWorkspace: async () => undefined,
+    botForThread: async () => mode === 'bot' ? { id: 'bot:resources', name: 'Resource Bot', instructions: null, revision: 1 } : null });
+  const saved = checkpoint(await prepare.main(identity, null));
+  const original = JSON.stringify(saved);
+  const { adapter, runtime } = adapterFixture(saved, prepare);
+  const input = createThreadSkillInputPreparer(f.resources);
+  const previouslyPrepared = await input(identity, saved.resources, '/skill:example original');
+  expect(previouslyPrepared).toMatchObject({ status: 'ready', skill: { body: 'ORIGINAL SKILL BODY' } });
+  const file = path.join(f.root, 'resource-home', '.agents', 'skills', 'paper-search', 'SKILL.md');
+  const body = (version: string) => `---\nname: paper-search\ndescription: Search papers\ndisable-model-invocation: false\n---\n${version}`;
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, body('PAPER SEARCH ONE'));
+
+  // The same live user reader serves new drafts, without any project/source admission.
+  expect((await adapter.draftSkills()).skills.map(skill => skill.name)).toContain('paper-search');
+  expect((await adapter.skills(identity)).skills.map(skill => skill.name)).not.toContain('paper-search');
+  expect(await input(identity, saved.resources, '/skill:paper-search recent papers')).toMatchObject({ status: 'missing' });
+  expect(runtime.refreshResources).not.toHaveBeenCalled();
+
+  const refreshed = await adapter.refreshResources({ ...identity, expectedRevision: saved.revision });
+  const catalog = await adapter.skills(identity);
+  const installed = catalog.skills.find(skill => skill.name === 'paper-search')!;
+  expect(installed).toMatchObject({ origin: 'user', path: 'skills/paper-search/SKILL.md' });
+  expect(installed.resourceId).toMatch(/^skill:[a-f0-9]{64}$/);
+  expect(catalog.snapshotId).toBe(refreshed.resources!.snapshot.id);
+  const command = '/skill:paper-search';
+  const selected = [{ resourceId: installed.resourceId, version: installed.version, start: 0, end: command.length }];
+  expect(await input(identity, refreshed.resources, command, undefined, selected)).toMatchObject({ status: 'ready', skills: [{ body: 'PAPER SEARCH ONE' }] });
+
+  await fs.writeFile(file, body('PAPER SEARCH TWO'));
+  expect(await input(identity, refreshed.resources, command, undefined, selected)).toMatchObject({ status: 'ready', skills: [{ body: 'PAPER SEARCH ONE' }] });
+  const freshIdentity = { ...identity, threadId: 'thread:fresh', branchId: 'branch:fresh' };
+  const fresh = await prepare.main(freshIdentity, null);
+  expect(await input(freshIdentity, fresh.resources, command)).toMatchObject({ status: 'ready', skill: { body: 'PAPER SEARCH TWO' } });
+  expect(JSON.stringify(saved)).toBe(original);
+  expect(previouslyPrepared).toMatchObject({ status: 'ready', skill: { body: 'ORIGINAL SKILL BODY' } });
 });

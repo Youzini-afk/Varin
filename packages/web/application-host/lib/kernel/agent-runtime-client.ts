@@ -334,7 +334,8 @@ export class AgentRuntimeClient {
       this.run(runId, signal),
       this.launch(runId, signal),
     ]);
-    if (state.scope) {
+    const pending = launch?.extension_admission?.state === 'pending';
+    if (state.scope && !pending) {
       // Ready contributions are candidates until a closed model boundary activates them.
       // Resume the committed directory; RunTools retains the candidate for the next boundary.
       const retained = (launch?.selection.extension_bindings ?? []).map(binding =>
@@ -346,16 +347,26 @@ export class AgentRuntimeClient {
       this.releaseToolComposition(runId);
       state = this.toolComposition(runId);
     }
+    if (state.scope) {
+      // Pending automatic roots need a new complete current directory, not retained
+      // candidates from an earlier Host preparation, including an empty directory.
+      this.releaseToolComposition(runId);
+      state = this.toolComposition(runId);
+    }
     state.mcp = this.kernel.mcpLiveBinding(runId) ?? state.mcp;
     // ContextJobs own a frozen tool-free plan, including pure text runs. Current
     // extension routing cannot add capabilities or block their original recovery.
     if (launch?.selection.policy.name === 'context_compaction') return [];
-    const required = launch?.selection.extension_bindings ?? [];
+    const saved = launch?.selection.extension_bindings ?? [];
+    const required = pending ? [] : saved;
     if (!this.prepareExtensionOwner) {
-      if (required.length)
+      if (saved.length)
         throw new Error(
           'Saved extension tools require their original Host owner',
         );
+      if (pending) await this.kernel.agentRuntimeRequest(
+        'runtime.launch.extensions.prepare', { runId, bindings: [] }, signal,
+      );
       return [];
     }
     const child = await this.childExecutionForRun(runId, signal);
@@ -367,7 +378,8 @@ export class AgentRuntimeClient {
     const projectId = admittedScope?.projectId;
     const scope = await this.prepareExtensionOwner(
       { runId, threadId: run.thread_id, branchId: run.branch_id, source: launch?.selection.source ?? null,
-        workFocus: launch?.selection.agent?.workFocus ?? 'general', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
+        workFocus: launch?.selection.agent?.workFocus ?? 'general', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}),
+        ...(launch?.extension_admission?.state === 'prepared' ? { restoreExact: true } : {}) },
       required,
       AbortSignal.any([signal, state.controller.signal]),
     );
@@ -389,7 +401,7 @@ export class AgentRuntimeClient {
           live,
         );
       }
-      if (initial.length)
+      if (initial.length || pending)
         await this.kernel.agentRuntimeRequest(
           'runtime.launch.extensions.prepare',
           { runId, bindings: initial.map((e) => e.binding) },

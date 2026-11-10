@@ -245,6 +245,10 @@ pub(super) fn admit_external_turn(
 }
 /// Upgrade only small original metadata, ordered by durable admission facts, never history bodies.
 pub(super) fn upgrade(db: &Connection) -> Result<()> {
+    // Preserve a compatible already-published index when merging independent Catalog
+    // generations. Never reset the reference space, execution numbers or high water.
+    let present:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_reference_space')",[],|r|r.get(0))?;
+    if present {return check_format(db);}
     initialize(db)?;
     // Index new external observations at their original owner; historical bodies stay untouched.
     let columns: Vec<String> = db

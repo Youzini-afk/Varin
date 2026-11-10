@@ -527,6 +527,20 @@ impl ExtensionToolBinding {
 }
 pub const WORK_FOCUS_IDS: [&str; 4] = ["general", "code", "research", "office"];
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionAdmissionState { Pending, Prepared }
+/// Only a genuinely new automatic root discovers the current Host tool directory.
+/// Its first preparation commits once; recovery restores that exact commitment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionAdmission {
+    pub state: ExtensionAdmissionState,
+}
+impl ExtensionAdmission {
+    pub(super) fn pending(&self) -> bool { self.state == ExtensionAdmissionState::Pending }
+}
+
 /// The user's Agent configuration for this Run. Tools select from the admitted directory;
 /// they never grant capabilities absent from that directory.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -746,6 +760,8 @@ pub(super) fn validate_policy_models(models: &[PolicyModelCapability]) -> Result
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_admission: Option<ExtensionAdmission>,
     pub principal_id: Option<String>,
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTarget,
@@ -855,6 +871,7 @@ impl Catalog {
             child.recheck(&tx, &run)?;
         }
         if launch.selection == prepared.selection && launch.policy_target == prepared.policy_target
+            && launch.extension_admission == prepared.extension_admission
         {
             drop(tx);
             return self.launch_read(launch);
@@ -891,6 +908,7 @@ impl Catalog {
             ));
         }
         launch.selection = prepared.selection;
+        launch.extension_admission = prepared.extension_admission;
         launch.policy_target = prepared.policy_target;
         launch.revision += 1;
         put(&tx, "run_launches", run_id, &launch)?;
@@ -973,6 +991,9 @@ impl Catalog {
         let previous: Option<LaunchMetadata> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {
             Some(mut intent) => {
+                if bound && intent.extension_admission.as_ref().is_some_and(ExtensionAdmission::pending) {
+                    return Err(RuntimeError::Conflict("current extension directory is not prepared".into()));
+                }
                 if intent.selection != selection {
                     let original = serde_json::to_value(&intent.selection)?;
                     let candidate = serde_json::to_value(&selection)?;
@@ -1001,6 +1022,7 @@ impl Catalog {
             }
             None => {
                 let intent = LaunchMetadata {
+                    extension_admission: None,
                     dispatch_context_ref: None,
                     policy_generation: 0,
                     policy_target: super::policy_switch::PolicyTargetMetadata::Default,
