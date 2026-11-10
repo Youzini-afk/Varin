@@ -205,7 +205,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     contextHistory: (identity, runId, cursor) => post('context/history', { ...identity, runId, ...cursor }),
     cancelContext: (identity, runId) => post('context/cancel', { ...identity, runId }),
     async resumeContext(identity, runId) { await post('context/resume', { ...identity, runId }); },
-    editInput: (inputId, expectedRevision, text, images, skills) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images: imagePayload(images) }), ...(skills === undefined ? {} : { skills }) }),
+    editInput: (inputId, expectedRevision, text, images, skills, quotes) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images: imagePayload(images) }), ...(skills === undefined ? {} : { skills }), ...quotes }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     sendInputNow: (inputId, expectedRevision, expectedRunId) => post('input/send-now', { inputId, expectedRevision, expectedRunId }),
     mediaRead: (input, signal) => post('media/read', input, signal),

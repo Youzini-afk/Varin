@@ -13,7 +13,16 @@ const snapshot = { historyPage: { head: 'original-head', previous: null }, histo
   { id: 'chosen', source: 'user', content: { text: 'Selected context' } }, { id: 'private-unselected', source: 'user', content: { text: 'Unselected conversation' } },
 ] } as unknown as ThreadSnapshot;
 let root: Root, container: HTMLDivElement;
-beforeEach(() => { const { document, window } = parseHTML('<html><body></body></html>'); vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); useThreadDraftStore.setState({ drafts: {} }); });
+beforeEach(() => {
+  const { document, window } = parseHTML('<html><body></body></html>');
+  for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement,
+    Node: window.Node, MutationObserver: window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
+  vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', () => {});
+  vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px' }));
+  Object.assign(document, { getSelection: () => null, hasFocus: () => false });
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  useThreadDraftStore.setState({ drafts: {} });
+});
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 const click = async (label: string) => { const button = [...container.querySelectorAll('button')].find(value => value.textContent === label); expect(button).toBeTruthy(); await act(async () => button!.click()); };
 const choose = async (label: string, value: string) => { const select = container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; await act(async () => { Object.defineProperty(select, 'value', { value, configurable: true }); select.dispatchEvent(new window.Event('change', { bubbles: true })); }); };

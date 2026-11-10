@@ -53,6 +53,7 @@ export * from "./host-connections.js";
 export * from './model-capabilities.js';
 export * from './interactive-ui.js';
 export * from './content-reference.js';
+export * from './content-reference-input.js';
 export * from './external-agents.js';
 export * from './usage.js';
 

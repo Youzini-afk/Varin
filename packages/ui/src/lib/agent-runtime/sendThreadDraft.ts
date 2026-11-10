@@ -1,3 +1,5 @@
+import { prepareQuotedFiles } from '@/lib/agent-runtime/quoteAttachments';
+import { acknowledgeDraftMarkers } from '@/lib/agent-editor/contentReferences';
 import { composerFileSelections } from '@/components/chat/composer/submit/fileSelections';
 import { getRuntimeEndpointGeneration, registerRuntimeEndpointSwitchBlocker, type ThreadIdentity, type ThreadPrepareSource, type ThreadsAPI } from '@varin/application-client';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -7,6 +9,7 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { deliverThreadInput } from './threadInputDelivery';
 import { prepareThreadFiles, attachmentImageReferences } from './fileAttachments';
+import { prepareDraftMarkerImages } from './draftImages';
 
 const sending = new Map<string, Promise<string | undefined>>();
 type Preparation = { input: ThreadPrepareSource; release?: () => Promise<void>; unsubscribe?: () => void };
@@ -67,12 +70,15 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         assertHost();
         const selected = composerFileSelections(request.selectedAttachments, request.referenceScope ?? '');
         const attachments = await prepareThreadFiles(api, identity, draftKey, request.files);
+        const images = await prepareDraftMarkerImages({ images: request.images, markerObjects: request.imageObjects }, api);
         assertHost();
         const materials = read().materials.map(({ snapshotId }) => ({ snapshotId }));
+        const quotedFiles = await prepareQuotedFiles({ contentReferences: request.contentReferences, contentReferenceOccurrences: request.contentReferenceOccurrences, attachments: [...attachments.map(({ ref }) => ({ ref })), ...selected], attachmentImageReferences: { ...request.attachmentImageReferences, ...attachmentImageReferences(request.files, attachments).attachmentImageReferences } }, identity, input => api.attachments.upload(identity, input), api, request.imageObjects);
+        assertHost();
         const input: ThreadPendingInput = { kind: 'submit', status: 'sending', fingerprint: request.key,
-          editorText: request.editorText, fileIds: request.files.map(file => file.id), selectedAttachmentIds: request.selectedAttachments?.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
+          editorText: request.editorText, editorImages: request.images, markerObjectIds: request.markerObjectIds, markerOccurrenceIds: request.markerOccurrenceIds, fileIds: request.files.map(file => file.id), selectedAttachmentIds: request.selectedAttachments?.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
-          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, ...attachmentImageReferences(request.files, attachments), materials, skills: request.skills, references: request.references, attachments: [...attachments.map(({ ref }) => ({ ref })), ...selected],
+          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images, ...quotedFiles, materials, skills: request.skills, references: request.references,
             model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
@@ -82,13 +88,10 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       acknowledgeEditorContextAttachments(original.editorContext ?? [], draftKey);
       for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
       patch(current => ({ firstSend: undefined, pendingInput: undefined, preparedSource: null,
-        firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, files: read().files?.filter(file => request.files.some(selected => selected.id === file.id)) ?? request.files, inputId: acceptedInputId } : undefined,
+        firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, editorText: request.editorText, selectedAttachments: request.selectedAttachments, attachmentImageReferences: request.attachmentImageReferences, contentReferences: request.contentReferences, contentReferenceOccurrences: request.contentReferenceOccurrences, images: original.input.images ?? [], files: read().files?.filter(file => request.files.some(selected => selected.id === file.id)) ?? request.files, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
-        ...(current.text === original.editorText ? { references: [] } : {}),
-        images: current.images.filter(image => !request.images.includes(image)),
-        files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
-        selectedAttachments: current.selectedAttachments?.filter(file => !original.selectedAttachmentIds?.includes(file.id)),
+        ...acknowledgeDraftMarkers(current, original.editorText, original.markerObjectIds, original.markerOccurrenceIds, { images: request.images, fileIds: original.fileIds, selectedAttachmentIds: original.selectedAttachmentIds }),
         materials: current.materials.filter(material => !original.input.materials?.some(item => item.snapshotId === material.snapshotId)),
       }));
       return acceptedInputId;

@@ -1,3 +1,6 @@
+import { queuedQuoteDraft } from './queuedQuoteDraft';
+import { insertDraftMarker } from '@/lib/agent-editor/contentReferences';
+import { EditorView } from '@codemirror/view';
 import { uiSession } from '@/lib/interactive-ui/sessions';
 import * as imageAnnotations from '@/lib/images/annotations';
 import { addEditorContextAttachment, listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -73,10 +76,11 @@ vi.mock('@/apps/mobileWorkspaceShell', () => ({ MobileWorkspaceShell: () => null
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
 vi.mock('@/lib/extensions/workbench-registry', async original => ({ ...await original<typeof import('@/lib/extensions/workbench-registry')>(), useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
 
-vi.mock('@/lib/i18n', () => {
+vi.mock('@/lib/i18n', async original => {
+  const actual = await original<typeof import('@/lib/i18n')>();
   const t = (key: string, values: Record<string, unknown> = {}) => (translations.dictionary[key] ?? ({ 'chat.imageReference.token': '[Image {number}]', 'chat.imageReference.insert': 'Insert reference to image {number}' } as Record<string, string>)[key] ?? key)
     .replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] === undefined ? placeholder : String(values[name]));
-  return { useI18n: () => ({ t }) };
+  return { ...actual, useI18n: () => ({ t }) };
 });
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => <span /> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
@@ -252,6 +256,8 @@ beforeEach(() => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
+  vi.stubGlobal('MutationObserver', window.MutationObserver);
+  Object.assign(document, { getSelection: () => null, hasFocus: () => false });
   vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
   vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px', fontSize: '14px' }));
   window.HTMLElement.prototype.scrollIntoView = () => {};
@@ -270,6 +276,10 @@ const edit = async (selector: string, value: string, event = 'input') => {
   const element = document.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(event, { bubbles: true })); });
 };
+const queueEditor = () => { const dom = container.querySelector<HTMLElement>('.cm-content[aria-label="chat.queuedMessage.edit"]'); return dom ? EditorView.findFromDOM(dom) : null; };
+const editQueue = async (text: string) => act(async () => { const view = queueEditor()!; view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' }); });
+const queueForm = () => queueEditor()!.dom.closest('form')!;
+const emptyQuotes = { contentReferences: [], contentReferenceOccurrences: [] };
 const submitForm = async (form: HTMLFormElement) => { await act(async () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); };
 const button = (text: string) => {
   const labels: Record<string, string> = { 'Resume run': 'chat.run.resume', 'Retry preparation': 'chat.run.retryPreparation', 'Save queued input': 'settings.common.actions.saveChanges', 'Read report': 'chat.children.report', 'Read execution report': 'chat.children.report', 'Stop child subtree': 'harness.threads.stop', 'Cancel queued input': 'chat.queuedMessage.removeAria', 'Restore before this message': 'chat.messageBody.actions.revertAria', 'Restore through this message': 'chat.messageBody.actions.revertAria', 'Branch conversation only': 'chat.messageBody.actions.forkAria', 'Generate context summary': 'thread.message.summarize', 'View image': 'chat.media.view', 'Stop task and children': 'harness.threads.stopAll' };
@@ -607,12 +617,12 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
   expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, mode: 'boundary', text: 'new queued instructions' }));
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
-  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'edited queued text');
-  await submitForm(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!);
-  expect(f.editInput).toHaveBeenCalledWith('queued-existing', 3, 'edited queued text');
+  await editQueue( 'edited queued text');
+  await submitForm(queueForm());
+  expect(f.editInput).toHaveBeenCalledWith('queued-existing', 3, 'edited queued text', undefined, undefined, emptyQuotes);
   await act(async () => { button('Cancel queued input').click(); });
   expect(f.cancelInput).toHaveBeenCalledWith('queued-existing', 4);
-  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
+  expect(queueEditor()).toBeNull();
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(button('Stop run')).toBeUndefined();
@@ -1606,7 +1616,7 @@ it('projects frozen skill metadata separately from original history and editable
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
   const history = container.querySelector('article')!;
-  const queued = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="chat.queuedMessage.edit"]')!;
+  const queued = queueEditor;
   for (const metadata of container.querySelectorAll('[aria-label="Skill materials"]')) {
     expect(metadata.textContent).toContain(invocation.name);
     expect(metadata.textContent).toContain(invocation.reference.version);
@@ -1615,22 +1625,22 @@ it('projects frozen skill metadata separately from original history and editable
   }
   expect(container.querySelectorAll('[aria-label="Skill materials"]')).toHaveLength(2);
   expect(history.textContent).toContain(text);
-  expect(queued().value).toBe(text);
+  expect(queued()!.state.doc.toString()).toBe(text);
   await act(async () => [...history.querySelectorAll('button')].find(value => value.textContent === 'chat.media.view')!.click());
   expect(history.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
   expect(container.textContent).not.toContain(invocation.body);
   expect(container.textContent).not.toContain('Private skill body');
 
   const edited = 'Ordinary queued instructions\nwith exact spacing.  ';
-  await edit('textarea[aria-label="chat.queuedMessage.edit"]', edited);
-  await submitForm(queued().closest('form')!);
-  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('skill-queued', 1, edited);
+  await editQueue( edited);
+  await submitForm(queued()!.dom.closest('form')!);
+  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('skill-queued', 1, edited, undefined, undefined, emptyQuotes);
   expect(queued()).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
-  expect(queued().value).toBe(edited);
-  expect(queued().closest('form')?.querySelector('[aria-label="Skill materials"]')).toBeNull();
-  await act(async () => [...queued().closest('form')!.querySelectorAll('button')].find(value => value.textContent === 'chat.media.view')!.click());
-  expect(queued().closest('form')?.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
+  expect(queued()!.state.doc.toString()).toBe(edited);
+  expect(queued()!.dom.closest('form')?.querySelector('[aria-label="Skill materials"]')).toBeNull();
+  // Queued stored images load their original holder as visible thumbnails.
+  expect(queued()!.dom.closest('form')?.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
   expect(f.api.mediaRead).toHaveBeenLastCalledWith(expect.objectContaining({ holder: { kind: 'input', inputId: 'skill-queued', expectedRevision: 2 }, expectedContentRef: storedImage.content_ref.content_object }), expect.any(AbortSignal));
   expect(history.querySelector('[aria-label="Skill materials"]')).not.toBeNull();
   expect(history.textContent).toContain(text);
@@ -3314,13 +3324,13 @@ it('keeps stored images for a text edit, explicitly removes them with [], and re
   f.api.editInput = editInput;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
-  const form = () => container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!;
-  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'changed text');
+  const form = queueForm;
+  await editQueue('changed text');
   await submitForm(form());
-  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', undefined, undefined, emptyQuotes);
   await act(async () => button('Remove queued images').click());
   await submitForm(form());
-  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', []);
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [], undefined, emptyQuotes);
   const file = new File([Uint8Array.of(1, 2, 3)], 'new.png', { type: 'image/png' });
   const picker = container.querySelector<HTMLInputElement>('[aria-label="Replace queued images"]')!;
   await act(async () => {
@@ -3330,23 +3340,23 @@ it('keeps stored images for a text edit, explicitly removes them with [], and re
   });
   expect(form().querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
   await submitForm(form());
-  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [{ mimeType: 'image/png', data: 'AQID', reference: 1 }]);
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [{ mimeType: 'image/png', data: 'AQID', reference: 1 }], undefined, emptyQuotes);
   expect(JSON.stringify(editInput.mock.calls)).not.toContain(storedImage.content_ref.content_object);
   await act(async () => button('Keep original images').click());
   await submitForm(form());
-  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', undefined, undefined, emptyQuotes);
 });
 
 const beginQueuedImageEdit = async () => {
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
-  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'edited image message');
+  await editQueue('edited image message');
   const picker = container.querySelector<HTMLInputElement>('[aria-label="Replace queued images"]')!;
   await act(async () => {
     Object.defineProperty(picker, 'files', { configurable: true, value: [new File([Uint8Array.of(1, 2, 3)], 'new.png', { type: 'image/png' })] });
     picker.dispatchEvent(new window.Event('change', { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
   });
-  return container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!;
+  return queueForm();
 };
 
 it.each(['unchanged', 'branch', 'host', 'host-roundtrip'] as const)('keeps queued image preparation on its original Host when selection is %s', async selection => {
@@ -3390,8 +3400,8 @@ it.each(['unchanged', 'branch', 'host', 'host-roundtrip'] as const)('keeps queue
   } else {
     expect(dispatchedHosts).toEqual(['host-a']);
   }
-  expect(editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }]);
-  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
+  expect(editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }], undefined, emptyQuotes);
+  expect(queueEditor()).toBeNull();
 });
 
 it('retains the queued image edit after export failure and clears it only after a successful retry', async () => {
@@ -3404,11 +3414,11 @@ it('retains the queued image edit after export failure and clears it only after 
   await submitForm(form);
   expect(f.editInput).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Image export failed');
-  expect(form.querySelector('textarea')!.value).toBe('edited image message');
+  expect(queueEditor()!.state.doc.toString()).toBe('edited image message');
   expect(form.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
   await submitForm(form);
-  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }]);
-  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
+  expect(f.editInput).toHaveBeenCalledExactlyOnceWith('image-queue', 1, 'edited image message', [{ data: 'AQID', mimeType: 'image/png', reference: 1 }], undefined, emptyQuotes);
+  expect(queueEditor()).toBeNull();
   expect(container.textContent).not.toContain('Image export failed');
 });
 
@@ -4369,9 +4379,10 @@ it('trusted interaction sends only its fixed result and preserves composer text 
   await act(async () => { expect(await sendUiResult(action)).toEqual({ status: 'sent', inputId: 'sent' }); });
   expect(submit).toHaveBeenCalledTimes(1);
   expect(submit.mock.calls[0]![0].text).toContain('Use the short hairstyle');
-  expect(submit.mock.calls[0]![0].text).toContain('snapshot:one');
+  expect(submit.mock.calls[0]![0].text).not.toContain('snapshot:one');
+  expect(submit.mock.calls[0]![0].contentReferences).toEqual([{ ...action.reference, number: 1 }]);
   expect(submit.mock.calls[0]![0].text).not.toContain('my unfinished draft');
-  expect(submit.mock.calls[0]![0].images).toEqual([]);
+  expect(submit.mock.calls[0]![0].images).toBeUndefined();
   expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'my unfinished draft', images });
   await act(async () => { await sendUiResult(action); });
   expect(submit).toHaveBeenCalledTimes(1);
@@ -4607,4 +4618,22 @@ it('inherits the desired Run model on finish and preserves a later idle override
   await act(async () => root.render(null));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ ...original }} />));
   expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model).toEqual(original);
+});
+
+it.each([false, true])('materializes a copied queued image through the original owner before native send active=%s', async active => {
+  const f = fixture(active), key = threadComposerKey(threadHostKey(), identity);
+  const source = { ...identity, threadId: 'other-source-thread', branchId: 'other-source-branch' };
+  const queued = { id: 'copied-input', revision: 8, thread_id: source.threadId, branch_id: source.branchId, run_id: 'old-run', mode: 'boundary', state: 'queued', cursor: 1,
+    content: { text: '[Image 4]', attachments: [storedImage], imageReferences: [4], contentReferenceOccurrences: [{ kind: 'image', reference: 4, start: 0, end: 9 }] } } as unknown as import('@varin/protocol').QueuedInput;
+  const retained = queuedQuoteDraft(queued, source).markerObjects[0]!;
+  useThreadDraftStore.getState().patch(key, { text: 'Inspect ', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await insertDraftMarker(key, retained);
+  const text = useThreadDraftStore.getState().drafts[key].text;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await submitForm(composerForm());
+  expect(f.api.mediaRead).toHaveBeenCalledWith({ ...source, holder: { kind: 'input', inputId: 'copied-input', expectedRevision: 8 }, partIndex: 0, chunkIndex: 0,
+    expectedContentRef: storedImage.content_ref.content_object }, expect.any(AbortSignal));
+  const sent = active ? vi.mocked(f.api.enqueue).mock.calls[0]?.[0] : f.submit.mock.calls[0]?.[0];
+  expect(sent).toMatchObject({ ...identity, text, images: [{ mimeType: 'image/png', data: imageData, reference: 1 }], contentReferenceOccurrences: [{ kind: 'image', reference: 1, start: 8, end: text.length }] });
+  expect(useThreadDraftStore.getState().drafts[key].markerObjects).toEqual([]);
 });

@@ -1,3 +1,4 @@
+import { useChatQuoteObject, captureMediaReference, addChatObjectReference } from '@/components/conversation/chatQuoteObjects';
 import { useI18n } from '@/lib/i18n';
 import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { Icon } from '@/components/icon/Icon';
@@ -24,6 +25,8 @@ export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: numb
 function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = false, imageReference }: Scope & { media: StoredMedia; partIndex: number; host: number; thumbnail?: boolean; imageReference?: number }) {
   const { t } = useI18n();
   const figure = React.useRef<HTMLElement | null>(null);
+  const captureReference = React.useCallback(() => captureMediaReference(identity, holder, media, partIndex), [identity, holder, media, partIndex]);
+  const quoteTarget = useChatQuoteObject(api.attachments ? captureReference : undefined);
   const [expanded, setExpanded] = React.useState(false);
   const runtime = React.useContext(RuntimeAPIContext);
   const [saveDirectory, setSaveDirectory] = React.useState('');
@@ -98,7 +101,13 @@ function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = 
       if (host === getRuntimeEndpointGeneration()) setSaveError(error instanceof Error ? error.message : 'Image save failed. The original image is still available.');
     } finally { savingRef.current = false; setSaving(false); }
   };
+  const quote = async () => {
+    if (!api.attachments || host !== getRuntimeEndpointGeneration()) return;
+    try { await addChatObjectReference(identity, captureReference(), { ...api, attachments: api.attachments }); }
+    catch (value) { if (host === getRuntimeEndpointGeneration()) setError(value instanceof Error ? value.message : String(value)); }
+  };
   const actions = <>
+    {api.attachments && <button type="button" className="typography-micro text-muted-foreground hover:text-foreground" onClick={() => void quote()}>{t(image ? 'chat.context.quoteImage' : 'chat.context.quoteFile')}</button>}
     {url && <div className="flex items-center gap-3 typography-micro text-muted-foreground">
       <a href={url} download={saveName} className="inline-flex items-center gap-1 hover:text-foreground"><Icon name="download" className="size-3.5" />{t('chat.media.download')}</a>
       <button type="button" className="hover:text-foreground" onClick={() => { setExpanded(false); clear(); setUrl(undefined); }}>{t('chat.media.close')}</button>
@@ -113,7 +122,7 @@ function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = 
       {saveError && <p role="alert">{saveError}</p>}
     </details>}
   </>;
-  return <figure ref={figure} className={thumbnail ? "tool-viewed-image-media" : "my-2 max-w-full space-y-2"} aria-label="Stored media">
+  return <figure ref={element => { figure.current = element; quoteTarget(element); }} data-chat-quote-object={api.attachments ? true : undefined} className={thumbnail ? "tool-viewed-image-media" : "my-2 max-w-full space-y-2"} aria-label="Stored media">
     {imageReference !== undefined && <figcaption className="typography-micro text-muted-foreground">{t('chat.imageReference.token', { number: imageReference })}</figcaption>}
     {!image && <figcaption className="typography-meta text-muted-foreground">{media.media_type}</figcaption>}
     {error && <p role="alert" className={thumbnail ? "sr-only" : "typography-meta text-destructive"}>{error}</p>}
@@ -123,9 +132,10 @@ function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = 
       }} />
     </button>}
     {!thumbnail && actions}
+    {thumbnail && api.attachments && <button type="button" className="typography-micro text-muted-foreground" onClick={() => void quote()}>{t('chat.context.quoteImage')}</button>}
     {(!url || displayFailed) && !loading && <Button type="button" variant="ghost" size="sm" title={error} onClick={() => void load()}>{t(error ? 'chat.media.retry' : image ? 'chat.media.view' : 'chat.media.read')}</Button>}
     {loading && <span role="status" className="inline-flex items-center gap-2 typography-meta text-muted-foreground"><Icon name="loader-4" className="size-3.5 animate-spin" />{t('chat.media.loading')}</span>}
-    {url && image && expanded && <ConversationImageViewer src={url} identity={identity} sourceId={JSON.stringify([holder,partIndex,media])} label={saveName} onClose={()=>setExpanded(false)} footer={thumbnail?actions:undefined} />}
+    {url && image && expanded && <ConversationImageViewer src={url} identity={identity} sourceId={JSON.stringify([holder,partIndex,media])} sourceReference={{ kind: 'chat', thread: identity, itemId: holder.kind === 'history' ? holder.itemId : undefined, passages: [] }} label={saveName} onClose={()=>setExpanded(false)} footer={thumbnail?actions:undefined} />}
   </figure>;
 }
 

@@ -1,3 +1,4 @@
+import { removeDraftMarker } from '@/lib/agent-editor/contentReferences';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { Attachment, AttachmentSelection } from '@varin/protocol';
 import { historyParts } from '@/lib/agent-runtime/thread-content';
@@ -16,6 +17,10 @@ export function selectComposerFile(draftKey: string, reference: ComposerReferenc
     !(item.host === selected.host && item.sourceKey === selected.sourceKey && JSON.stringify(item.selection) === JSON.stringify(selected.selection))), selected] }));
 }
 export function removeComposerFile(draftKey: string, id: string): void {
+  const draft = useThreadDraftStore.getState().drafts[draftKey];
+  const selected = draft?.selectedAttachments?.find(file => file.id === id);
+  const marker = draft?.markerObjects?.find(object => object.payload.kind === 'attachment-image' && object.payload.attachment.ref === selected?.selection.ref);
+  if (marker) { removeDraftMarker(draftKey, marker.id); return; }
   useThreadDraftStore.getState().patch(draftKey, draft => {
     const selected = draft.selectedAttachments?.find(item => item.id === id);
     return { selectedAttachments: draft.selectedAttachments?.filter(item => item.id !== id), references: draft.references?.filter(item => !selected || !(

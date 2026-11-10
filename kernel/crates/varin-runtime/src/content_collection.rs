@@ -632,12 +632,46 @@ impl UiRetentionRead {
             if manifest.version != 2 { return Err(RuntimeError::Invalid("unsupported content manifest".into())); }
             references.extend(manifest.dependencies.into_iter().map(|content_object| Reference { content_object, ..Default::default() }));
             let bytes = content.load_bytes(&serde_json::to_value(reference)?, &|| false)?;
-            // Media dependencies can be binary. Only persisted textual mentions
-            // are retention hints; neither strings nor hashes become authority.
+            // Frozen quote source fields are explicit retention edges. Read their complete
+            // values rather than depending on JSON string spelling or marker text. These
+            // hints preserve the original UI owner; they never grant resource access.
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                retain_quote_ui_sources(&value, &pattern, &mut retained);
+            }
+            // Media dependencies can be binary. Legacy persisted textual mentions remain
+            // retention hints; neither strings nor hashes become authority.
             if let Ok(text) = std::str::from_utf8(&bytes) {
                 retained.extend(pattern.find_iter(text).map(|matched| matched.as_str().to_owned()));
             }
         }
         Ok(retained.into_iter().collect())
+    }
+}
+
+/// Content envelopes can nest original inputs (history, queue and message receipts).
+/// Only named quote source fields contribute structured UI identities.
+fn retain_quote_ui_sources(value: &Value, pattern: &regex::Regex, retained: &mut std::collections::BTreeSet<String>) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Object(object) => {
+                if let Some(quotes) = object.get("contentReferences").and_then(Value::as_array) {
+                    for quote in quotes {
+                        let source = &quote["source"];
+                        if source["kind"] != "ui" { continue; }
+                        for reference in [quote.get("ref"), source.get("snapshotRef"), source.get("viewRef"), source.get("revisionRef")].into_iter().flatten() {
+                            if let Some(reference) = reference.as_str() {
+                                if pattern.find(reference).is_some_and(|matched| matched.as_str() == reference) {
+                                    retained.insert(reference.to_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+                pending.extend(object.values());
+            }
+            Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
     }
 }

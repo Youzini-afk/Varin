@@ -28,7 +28,7 @@ export interface ImageAnnotationDocument {
   future: ReadonlyArray<readonly ImageMark[]>;
 }
 /** Frontend draft metadata. Transport serializers emit only ImageAttachment's public fields. */
-export interface EditableImageAttachment extends ImageAttachment { annotation?: ImageAnnotationDocument }
+export interface EditableImageAttachment extends ImageAttachment { draftId?: string; annotation?: ImageAnnotationDocument }
 export const imageUrl = (image: ImageAttachment) => `data:${image.mimeType};base64,${image.data}`;
 export const commitMarks = (doc: ImageAnnotationDocument, marks: readonly ImageMark[]): ImageAnnotationDocument =>
   marks === doc.marks ? doc : { ...doc, marks, past: [...doc.past, doc.marks], future: [] };

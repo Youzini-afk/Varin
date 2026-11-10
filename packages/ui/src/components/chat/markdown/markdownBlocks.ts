@@ -3,6 +3,7 @@ import remend from 'remend';
 
 export interface MarkdownBlockSource {
   raw: string;
+  offset: number;
   src: string;
   mode: 'full' | 'live';
   highlight: boolean;
@@ -48,11 +49,11 @@ export class MarkdownBlockStream {
     if (!text) { this.blocks = []; return this.blocks; }
 
     const previous = this.blocks;
-    const source = (raw: string, live: boolean, highlight: boolean, index: number): MarkdownBlockSource => {
+    const source = (raw: string, live: boolean, highlight: boolean, index: number, offset = 0): MarkdownBlockSource => {
       const mode = live ? 'live' : 'full';
       const before = previous[index];
-      if (before?.raw === raw && before.mode === mode && before.highlight === highlight) return before;
-      return { raw, src: live && highlight ? heal(raw) : raw, mode, highlight };
+      if (before?.offset === offset && before?.raw === raw && before.mode === mode && before.highlight === highlight) return before;
+      return { raw, offset, src: live && highlight ? heal(raw) : raw, mode, highlight };
     };
     if (this.hasReferences) {
       this.stable = [];
@@ -84,7 +85,7 @@ export class MarkdownBlockStream {
       const raw = token.raw ?? '';
       if (token.type !== 'space') {
         if (index === last) tailOffset = offset;
-        blocks.push(source(raw, streaming && index === last, !streaming || !(token.type === 'code' && openFence(raw)), blocks.length));
+        blocks.push(source(raw, streaming && index === last, !streaming || !(token.type === 'code' && openFence(raw)), blocks.length, offset));
       }
       offset += raw.length;
     }

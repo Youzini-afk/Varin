@@ -18,7 +18,6 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS } from '../../composerHighlight';
 import { tokenizeComposer, type ComposerLanguageContext } from '../language/tokenize';
-import { imageReferenceRanges } from '@/lib/images/references';
 
 /**
  * Replace the workspace knowledge the tokenizer resolves against. Dispatched
@@ -80,21 +79,6 @@ const decorationField = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
-const imageTokens = StateField.define<DecorationSet>({
-    create: state => imageDecorations(state.doc.toString(), state.field(languageContextField)),
-    update(value, transaction) {
-        return transaction.docChanged || transaction.effects.some(effect => effect.is(setLanguageContext))
-            ? imageDecorations(transaction.newDoc.toString(), transaction.state.field(languageContextField)) : value;
-    },
-    provide: field => [EditorView.decorations.from(field), EditorView.atomicRanges.of(view => view.state.field(field))],
-});
-function imageDecorations(text: string, context: ComposerLanguageContext): DecorationSet {
-    if (context.inputMode !== 'normal' || !context.imageReferences?.length) return Decoration.none;
-    const numbers = new Set(context.imageReferences);
-    return Decoration.set(imageReferenceRanges(text).filter(token => numbers.has(token.number)).map(token =>
-        Decoration.mark({ class: 'cm-image-reference' }).range(token.from, token.to)));
-}
-
 /**
  * The composer language extension. Install once; feed it registry updates with
  * `setLanguageContext`.
@@ -103,7 +87,6 @@ export function composerLanguage(initial: ComposerLanguageContext = EMPTY_CONTEX
     return [
         languageContextField.init(() => initial),
         decorationField,
-        imageTokens,
     ];
 }
 

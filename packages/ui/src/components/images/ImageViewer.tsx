@@ -11,6 +11,7 @@ import type { MarkdownImageAsset, MarkdownImageItem } from '@/components/chat/ma
 
 export interface ImageAnnotationBinding {
   mode:'draft'|'reply'; get(source:string):ImageAnnotationDocument|undefined;
+  quote?(source:string, prepare:()=>Promise<ImageAttachment>, document?:ImageAnnotationDocument):Promise<void>;
   save(source:string,document:ImageAnnotationDocument):void;
   apply(source:string,image:ImageAttachment,document:ImageAnnotationDocument):void|Promise<void>;
 }
@@ -109,7 +110,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
     if(working.current)return;canvas.current?.finishText();commitStyle();working.current=true;setBusy(true);setEditError('');
     try{
       if(binding.current?.mode==='draft')for(const key of dirty.current){const document=documents.current.get(key)!,image=await exportDocument(document);if(host!==getRuntimeEndpointGeneration()||!alive.current)return;await binding.current.apply(key,image,document);}
-      else if(applyReply&&binding.current){const document=documents.current.get(source)??doc;if(document){const image=await exportDocument(document);if(host!==getRuntimeEndpointGeneration()||!alive.current)return;await binding.current.apply(source,image,document);}}
+      else if(applyReply&&binding.current){const document=documents.current.get(source)??doc;if(document){const target=binding.current;if(target.quote)await target.quote(source,()=>exportDocument(document),document);else{const image=await exportDocument(document);if(host!==getRuntimeEndpointGeneration()||!alive.current)return;await target.apply(source,image,document);}}}
       if(alive.current)setOpen(false);
     }catch{if(alive.current)setEditError(t('imageEditor.failed'));}
     finally{working.current=false;if(alive.current)setBusy(false);}
@@ -132,6 +133,17 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
   const selectedMark=doc?.marks.find(mark=>mark.id===selected);
   const step=(delta:number)=>{if(working.current)return;canvas.current?.finishText();canvas.current?.cancelGesture();commitStyle();setIndex(value=>(value+delta+items.length)%items.length);};
   const button=(label:string,icon:React.ComponentProps<typeof Icon>['name'],action:()=>void)=> <button type="button" className="md-image-viewer-action" title={label} aria-label={label} onClick={action}><Icon name={icon} className="size-4"/></button>;
+  const quote=async()=>{
+    if (!loaded || !binding.current?.quote || working.current) return;
+    canvas.current?.finishText(); commitStyle();
+    const capturedSource = source, capturedAsset = loaded, capturedDocument = documents.current.get(source) ?? doc;
+    const capturedBinding = binding.current;
+    working.current = true; setBusy(true); setEditError('');
+    try {
+      await capturedBinding.quote!(capturedSource, () => capturedDocument ? exportDocument(capturedDocument) : readImageSource(capturedAsset.src), capturedDocument);
+    } catch (failure) { if (alive.current) setEditError(failure instanceof Error ? failure.message : t('imageEditor.failed')); }
+    finally { working.current = false; if (alive.current) setBusy(false); }
+  };
   const download=async()=>{
     try{
       canvas.current?.finishText();commitStyle();const document=documents.current.get(source);const image=document?await exportDocument(document):undefined;
@@ -157,6 +169,7 @@ export function ImageViewer({items,initialIndex,load,onClose,annotation,initiall
         {button(t('markdownRenderer.mermaid.actions.zoomInTitle'),'add',()=>changeZoom(zoom*1.25))}
         <button type="button" className="md-image-viewer-action typography-micro" onClick={()=>changeZoom(1/fit)} title={t('chat.images.actualSize')}>1:1</button>
         {loaded&&button(t('chat.media.download'),'download',()=>void download())}
+        {annotation?.quote&&loaded&&<button type="button" className="md-image-viewer-action" disabled={busy} onClick={()=>void quote()}>{t('chat.context.quoteImage')}</button>}
         {annotation&&loaded&&<button type="button" className="md-image-viewer-action image-annotation-entry" disabled={busy} aria-pressed={editing} onClick={()=>{canvas.current?.finishText();if(editing)setEditing(false);else void enterEditing();}}>{t('imageEditor.annotate')}</button>}
         {editing&&doc&&annotation&&<button type="button" className="image-annotation-done" disabled={busy} onClick={()=>void close(annotation.mode==='reply')}>{t(annotation.mode==='reply'?'imageEditor.reply':'imageEditor.done')}</button>}
       </div>

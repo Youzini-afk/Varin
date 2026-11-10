@@ -1,5 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { selectThreadFiles, prepareDraftFiles, updateDraftFileAnnotation, removeDraftFile } from './fileAttachments';
+import { selectThreadFiles, prepareDraftFiles, updateDraftFileAnnotation, removeDraftFile, convertDraftImagesToFiles, attachmentImageReferences } from './fileAttachments';
+import { undo, redo } from '@codemirror/commands';
+import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences, saveComposerState } from '@/lib/agent-editor/contentReferences';
 import { flattenAnnotations, type ImageAnnotationDocument } from '@/lib/images/annotations';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import type { Attachment } from '@varin/protocol';
@@ -10,12 +12,11 @@ beforeEach(() => { endpoint.generation = 1; useThreadDraftStore.setState({ draft
 const descriptor = (ref: string): Attachment => ({ ref: `attachment:${ref}`, filename: 'same.bin', mimeType: 'application/octet-stream', byteLength: 3 });
 it('renumbers file and inline images together after removing an attachment', () => {
   useThreadDraftStore.getState().patch('draft', { text: 'Keep [Image 1]', images: [{ data: 'YQ==', mimeType: 'image/png', reference: 1 }] });
-  const insert = (number: number) => useThreadDraftStore.getState().patch('draft', draft => ({ text: `${draft.text}[Image ${number}]` }));
-  const selected = selectThreadFiles('draft', [new File(['a'], 'one.PNG'), new File(['pdf'], 'report.pdf'), new File(['b'], 'two.png')], insert);
+  const selected = selectThreadFiles('draft', [new File(['a'], 'one.PNG'), new File(['pdf'], 'report.pdf'), new File(['b'], 'two.png')]);
   expect(selected.map(file => file.imageReference)).toEqual([2, undefined, 3]);
   removeDraftFile('draft', selected[0]!.id);
   expect(useThreadDraftStore.getState().drafts.draft.text).toBe('Keep [Image 1][Image 2]');
-  expect(selectThreadFiles('draft', [new File(['c'], 'three.png')], insert)[0]!.imageReference).toBe(3);
+  expect(selectThreadFiles('draft', [new File(['c'], 'three.png')])[0]!.imageReference).toBe(3);
 });
 it('uploads flattened edited pixels under a fresh upload key and reuses that exact upload on retry', async () => {
   const [original] = selectThreadFiles('draft', [new File(['private original'], 'photo.jpg', { type: 'image/jpeg' })]);
@@ -29,6 +30,7 @@ it('uploads flattened edited pixels under a fresh upload key and reuses that exa
   await prepareDraftFiles('draft', [edited], 'owner', upload);
   const sent = (upload.mock.calls[1] as unknown as [typeof edited])[0];
   expect(sent.filename).toBe('photo.png'); expect(await sent.data.text()).toBe('visible pixels');
+  expect(await useThreadDraftStore.getState().drafts.draft.files![0]!.data.text()).toBe('visible pixels');
   expect(sent.uploadKey).toBe(edited.uploadKey); expect(sent.imageReference).toBe(1);
   await prepareDraftFiles('draft', [edited], 'owner', upload);
   expect(upload).toHaveBeenCalledTimes(2);
@@ -82,4 +84,54 @@ it('does not mark a malformed upload receipt ready or discard the original file'
   await expect(prepareDraftFiles('draft', files, 'owner', vi.fn().mockResolvedValue({ filename: 'same.bin' }))).rejects.toThrow('was not retained');
   const selected = useThreadDraftStore.getState().drafts.draft.files![0]!;
   expect(selected.status).toBe('failed'); expect(selected.data).toBe(files[0]!.data); expect(selected.attachment).toBeUndefined();
+});
+
+it('converts bound images to original readable files in one undo step, preserving positions, source and annotated upload', async () => {
+  const key = 'non-vision-draft';
+  useThreadDraftStore.getState().patch(key, { text: 'Literal [Image 1]. Discuss ' });
+  const object = referenceMarkerObject({ ref: 'fixed-image', title: 'Original image', attachment: { ref: 'attachment:unredacted-original' }, attachmentRef: 'attachment:unredacted-original', image: { data: btoa('original pixels'), mimeType: 'image/jpeg' },
+    source: { kind: 'chat', thread: { runtime: 'agent', threadId: 'source', branchId: 'main' }, itemId: 'original-message', passages: [] } });
+  if (object.payload.kind !== 'image') throw new Error('Expected image capture');
+  const annotation: ImageAnnotationDocument = { source: object.payload.image, width: 5, height: 5,
+    marks: [{ id: 'cover', kind: 'cover', from: { x: 0, y: 0 }, to: { x: 5, y: 5 }, color: '#101010', width: 1, fontSize: 12 }], past: [], future: [] };
+  object.payload.image = { ...object.payload.image, annotation };
+  await insertDraftMarker(key, object); await insertDraftMarker(key, object);
+  const before = useThreadDraftStore.getState().drafts[key];
+  const frozen = freezeDraftContentReferences(before);
+  expect(frozen.contentReferences?.[0]).not.toHaveProperty('attachment');
+  expect(frozen.contentReferences?.[0]).not.toHaveProperty('attachmentRef');
+  expect(frozen.contentReferences?.[0]?.source).toEqual(object.payload.contentReference!.source);
+  convertDraftImagesToFiles(key, endpoint.generation);
+  const converted = useThreadDraftStore.getState().drafts[key];
+  expect(converted.text).toBe(before.text);
+  expect(converted.images).toHaveLength(0);
+  expect(converted.files).toHaveLength(1);
+  expect(converted.markerObjects?.[0]?.id).toBe(before.markerObjects?.[0]?.id);
+  expect(converted.markerObjects?.[0]?.number).toBe(before.markerObjects?.[0]?.number);
+  expect(freezeDraftContentReferences(converted)).toEqual(frozen);
+  expect(await converted.files![0]!.data.text()).toBe('original pixels');
+  const applyHistory = (command: typeof undo) => {
+    const state = useThreadDraftStore.getState().drafts[key].editorState!;
+    return command({ state, dispatch: transaction => saveComposerState(key, transaction.state) });
+  };
+  expect(applyHistory(undo)).toBe(true);
+  expect(useThreadDraftStore.getState().drafts[key].images).toEqual(before.images);
+  expect(useThreadDraftStore.getState().drafts[key].files).toHaveLength(0);
+  expect(applyHistory(redo)).toBe(true);
+  const files = useThreadDraftStore.getState().drafts[key].files!;
+  const upload = vi.fn(async file => ({ ...descriptor('file-image'), mimeType: file.mimeType, filename: file.filename }));
+  vi.mocked(flattenAnnotations).mockResolvedValueOnce({ data: btoa('visible annotated pixels'), mimeType: 'image/png' });
+  const attachments = await prepareDraftFiles(key, files, 'original-target', upload);
+  expect(await upload.mock.calls[0]![0].data.text()).toBe('visible annotated pixels');
+  expect(attachmentImageReferences(files, attachments)).toEqual({ attachmentImageReferences: { 'attachment:file-image': 1 } });
+  await prepareDraftFiles(key, files, 'original-target', upload);
+  expect(upload).toHaveBeenCalledOnce();
+});
+
+it('refuses image conversion under a changed Host without mutating the original draft', () => {
+  useThreadDraftStore.getState().patch('original', { images: [{ mimeType: 'image/png', data: 'YQ==', reference: 1 }] });
+  const before = useThreadDraftStore.getState().drafts.original;
+  endpoint.generation = 2;
+  expect(() => convertDraftImagesToFiles('original', 1)).toThrow('Host changed');
+  expect(useThreadDraftStore.getState().drafts.original).toBe(before);
 });

@@ -195,24 +195,23 @@ it('changed policy, revoked owner and cancelled or reopened permissions never di
   }
 }, 45_000);
 
-it('explicit permission rules win, while Smart never infers approval for an unknown MCP effect', async () => {
-  for (const selected of ['allow', 'deny', 'smart'] as const) {
-    let calls = 0;
-    const f = await fixture((_body, response) => { if (++calls === 1) tool(response); else done(response); });
-    f.setPolicy(selected === 'smart' ? { mode: 'smart', rules: [] } : { mode: 'normal', rules: [{ tool: 'fixture_send', decision: selected }] });
-    const identity = await f.api.create(`rule-${selected}`);
-    const receipt = await f.api.submit({ ...identity, key: `rule-${selected}-input`, expectedHead: null, text: 'apply the current exact policy', model });
-    if (selected === 'smart') {
-      await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:'))).toBe(true);
-      expect(f.effects).toEqual([]);
-      const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
-      await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (controlResult(op.result) as { permission: { id: string } }).permission.id, decision: 'deny' });
-    }
-    await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
-    expect(f.effects).toHaveLength(selected === 'allow' ? 1 : 0);
-    const opened = (await f.runtime.events(0, 256)).filter(event => event.kind === 'permission.opened');
-    expect(opened).toHaveLength(selected === 'smart' ? 1 : 0);
+// Each policy gets its own kernel and cleanup boundary, including on assertion failure.
+it.each(['allow', 'deny', 'smart'] as const)('explicit %s policy controls unknown MCP effects without inferring approval', async selected => {
+  let calls = 0;
+  const f = await fixture((_body, response) => { if (++calls === 1) tool(response); else done(response); });
+  f.setPolicy(selected === 'smart' ? { mode: 'smart', rules: [] } : { mode: 'normal', rules: [{ tool: 'fixture_send', decision: selected }] });
+  const identity = await f.api.create(`rule-${selected}`);
+  const receipt = await f.api.submit({ ...identity, key: `rule-${selected}-input`, expectedHead: null, text: 'apply the current exact policy', model });
+  if (selected === 'smart') {
+    await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:'))).toBe(true);
+    expect(f.effects).toEqual([]);
+    const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
+    await f.api.decidePermission({ ...identity, operationId: op.id, permissionId: (controlResult(op.result) as { permission: { id: string } }).permission.id, decision: 'deny' });
   }
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
+  expect(f.effects).toHaveLength(selected === 'allow' ? 1 : 0);
+  const opened = (await f.runtime.events(0, 256)).filter(event => event.kind === 'permission.opened');
+  expect(opened).toHaveLength(selected === 'smart' ? 1 : 0);
 }, 45_000);
 
 function controlResult(result: import('./protocol.generated.js').OperationResult | null): unknown {

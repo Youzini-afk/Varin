@@ -7,11 +7,16 @@ import type { MessageHandoff } from '../conversation/messageHandoff';
 export function useFirstMessagePreview(draftKey: string, hasHistory: boolean, handoff: MessageHandoff) {
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const request = draft.firstSend ?? draft.firstMessageReceipt;
-  const key = request?.key, text = request?.text, images = request?.images, files = request?.files;
+  const prepared = draft.pendingInput && draft.pendingInput.input.key === request?.key ? draft.pendingInput.input : undefined;
+  const key = request?.key, text = request?.editorText, images = prepared?.images ?? request?.images, files = request?.files, contentReferences = request?.contentReferences, contentReferenceOccurrences = request?.contentReferenceOccurrences;
+  const selectedAttachments = request?.selectedAttachments, attachmentImageReferences = request?.attachmentImageReferences;
   const message = React.useMemo<ChatUserMessage | undefined>(() => key ? {
-    role: 'user', timestamp: Date.now(), pendingFiles: files?.map(file => ({ filename: file.filename, byteLength: file.data.size })),
+    role: 'user', timestamp: Date.now(), contentReferences, contentReferenceOccurrences,
+    fileAttachments: [...files?.flatMap(file => file.attachment ? [file.attachment] : []) ?? [], ...selectedAttachments?.flatMap(file => file.attachment ? [file.attachment] : []) ?? []],
+    attachmentImageReferences: { ...attachmentImageReferences, ...Object.fromEntries(files?.flatMap(file => file.attachment && file.imageReference !== undefined ? [[file.attachment.ref, file.imageReference]] : []) ?? []) },
+    pendingImageFiles: files?.flatMap(file => file.mimeType.startsWith('image/') && file.imageReference !== undefined ? [{ data: file.data, filename: file.filename, reference: file.imageReference, annotation: file.annotation }] : []), pendingFiles: files?.map(file => ({ filename: file.filename, byteLength: file.data.size })),
     content: [{ type: 'text', text: text ?? '' }, ...(images ?? []).map(image => ({ type: 'image' as const, ...image }))],
-  } : undefined, [key, text, images, files]);
+  } : undefined, [key, text, images, files, selectedAttachments, attachmentImageReferences, contentReferences, contentReferenceOccurrences]);
   React.useLayoutEffect(() => {
     if (!hasHistory && key && message) handoff.preview(key, message.timestamp);
   }, [handoff, hasHistory, key, message]);

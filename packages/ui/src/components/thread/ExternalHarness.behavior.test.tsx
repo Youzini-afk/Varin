@@ -10,6 +10,7 @@ import { ExternalModelControls, ExternalModeControls, ExternalChoiceValidation, 
 import type { ExternalSessionChoice } from './externalSessionChoice';
 import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
 
 const f = vi.hoisted(() => ({ host: 1, listeners: new Set<() => void>(), api: undefined as ExternalAgentsAPI | undefined,
@@ -22,8 +23,8 @@ vi.mock('@varin/application-client', async original => ({
   createExternalAgentsHttpAPI: () => f.api,
   createModelConnectionsHttpAPI: () => ({ readSettings: async () => ({ global: {}, project: {} }) }),
 }));
-vi.mock('@/lib/i18n', () => { const t = (key: string, values: Record<string, unknown> = {}) =>
-  ((externalAgentEn as Record<string, string>)[key] ?? key).replace(/\{(\w+)\}/g, (_match, name) => String(values[name])); return { useI18n: () => ({ t }) }; });
+vi.mock('@/lib/i18n', async original => { const actual = await original<typeof import('@/lib/i18n')>(); const t = (key: string, values: Record<string, unknown> = {}) =>
+  ((externalAgentEn as Record<string, string>)[key] ?? key).replace(/\{(\w+)\}/g, (_match, name) => String(values[name])); return { ...actual, useI18n: () => ({ t }) }; });
 vi.mock('@/stores/useExternalAgentStore', () => ({ useExternalAgents: () => f.settings,
   useExternalAgentStore: Object.assign(() => null, { getState: () => ({ refresh: f.refresh, select: f.select, setSnapshot: () => {}, clearSnapshot: () => {} }) }) }));
 vi.mock('@/stores/useThreadStore', () => ({ threadHostKey: () => `host:${f.host}` }));
@@ -75,7 +76,6 @@ vi.mock('@/components/conversation/ToolDisclosure', () => ({ ToolDisclosure: ({ 
 vi.mock('@/components/conversation/ActiveEditorSuggestion', () => ({ ActiveEditorSuggestion: () => null }));
 vi.mock('@/components/workbench/EditorContextAttachmentChips', () => ({ EditorContextAttachmentChips: () => null }));
 vi.mock('@/components/chat/composer/ImageAttachmentStrip', () => ({ ImageAttachmentStrip: () => null }));
-vi.mock('@/components/chat/composer/imageAttachments', () => ({ beginImageInsertion: () => ({ append: () => {}, dispose: () => {} }), fileToImageAttachment: vi.fn(), removeDraftImage: vi.fn() }));
 vi.mock('@/lib/openFileInMainEditor', () => ({ openFileInMainEditor: () => false }));
 
 const capabilities = () => ({ resume: true, images: true, files: 'resource_links' as const, steering: false,
@@ -150,6 +150,42 @@ it('prepares before the first request, deduplicates focus and typing, and sends 
   await submit();
   expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', config: { verbosity: 'long' } }));
   expect(f.select).toHaveBeenCalledWith('prepared');
+});
+
+it.each(['draft', 'conversation'] as const)('freezes external %s quote/image relations and preserves a newly inserted occurrence of the same quote on receipt', async surface => {
+  const { api, views } = fixture();
+  const view = views.get('prepared')!; view.connected = true; view.capabilities = capabilities();
+  let accept!: () => void;
+  api.send.mockImplementationOnce((id, key) => new Promise(resolve => { accept = () => resolve({ id: 'accepted-turn', conversationId: id, key, status: 'queued', createdAt: 1, updatedAt: 1 }); }));
+  const key = surface === 'draft' ? 'draft' : `external-draft:${f.host}:prepared`;
+  useThreadDraftStore.getState().patch(key, { text: 'Discuss ' });
+  const source = { kind: 'chat' as const, thread: { runtime: 'agent' as const, threadId: 'actual-source', branchId: 'main' }, itemId: 'source-entry', passages: [{ entryId: 'source-entry', start: 9, text: 'Frozen quotation' }] };
+  const quote = referenceMarkerObject({ ref: 'fixed-quote', title: 'Varin', text: 'Frozen quotation', source });
+  const image = referenceMarkerObject({ ref: 'fixed-image', title: 'Original image', image: { mimeType: 'image/png', data: 'YQ==' }, source });
+  await insertDraftMarker(key, quote); await insertDraftMarker(key, image);
+  const original = useThreadDraftStore.getState().drafts[key];
+  const frozen = freezeDraftContentReferences(original);
+  if (surface === 'draft') { await renderDraft(); await focusComposer(); } else await renderConversation();
+  await submit();
+  expect(api.send).toHaveBeenCalledOnce();
+  expect(api.send.mock.calls[0]![2]).toMatchObject({ text: original.text, ...frozen,
+    images: [{ mimeType: 'image/png', data: 'YQ==', reference: original.images[0]!.reference }] });
+  expect(api.send.mock.calls[0]![2]).not.toHaveProperty('replyTo');
+  await act(async () => {
+    useThreadDraftStore.getState().patch(key, draft => ({ text: `${draft.text} Later: ` }));
+    await insertDraftMarker(key, quote);
+  });
+  const later = useThreadDraftStore.getState().drafts[key].references!.at(-1)!;
+  await act(async () => accept());
+  const destination = `external-draft:${f.host}:prepared`;
+  const remainder = useThreadDraftStore.getState().drafts[destination];
+  expect(remainder.images).toEqual([]);
+  expect(remainder.references).toHaveLength(1);
+  expect(remainder.references![0]!.id).toBe(later.id);
+  expect(remainder.markerObjects?.map(object => object.id)).toEqual([quote.id]);
+  expect(remainder.text).toBe(`Discuss  Later: ${later.text}`);
+  expect(api.send.mock.calls[0]![2].contentReferenceOccurrences).toEqual(frozen.contentReferenceOccurrences);
+  if (surface === 'draft') expect(useThreadDraftStore.getState().drafts.draft?.markerObjects ?? []).toEqual([]);
 });
 
 it('retains the durable ID on connection failure and cleans an empty binding before switching backends with a new create key', async () => {

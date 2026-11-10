@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -7,13 +8,15 @@ import { ThreadRememberForm } from './ThreadRememberForm';
 import { ComposerDirectedInput } from './ComposerDirectedInput';
 import { directedComposerKey, type ComposerRecipient } from './composerWorkflowState';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/i18n', async original => ({ ...await original<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ simple, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { simple?: boolean }) => { void simple; return <textarea {...props} ref={node => { if (node) node.value = String(props.value ?? ''); }} />; } }));
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'source', branchId: 'source-branch' };
 let root: Root; let container: HTMLDivElement;
 beforeEach(() => {
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('MutationObserver', window.MutationObserver); vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', () => {});
+  vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px' })); Object.assign(document, { getSelection: () => null, hasFocus: () => false });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container); useThreadDraftStore.setState({ drafts: {} });
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
@@ -43,7 +46,7 @@ it('recipient changes and cancellation preserve separate ordinary and per-recipi
   const select = vi.fn(); const render = (recipient: ComposerRecipient) => root.render(<ComposerDirectedInput api={api} identity={identity} draftKey="ordinary" recipient={recipient} select={select} onSent={() => {}} />);
   await act(async () => render(first)); await click('collaboration.send');
   const failed = send.mock.calls[0]![1];
-  await act(async () => render(second)); expect(container.querySelector('textarea')?.value).toBe('Second directed draft');
+  await act(async () => render(second)); expect(EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-content')!)?.state.doc.toString()).toBe('Second directed draft');
   await click('composer.contact.cancel'); expect(select).toHaveBeenCalledWith();
   await act(async () => render(first)); await click('chat.messages.retry');
   expect(send.mock.calls[1]![1]).toEqual(failed);

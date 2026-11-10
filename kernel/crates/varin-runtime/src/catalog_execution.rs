@@ -2403,8 +2403,17 @@ pub(super) fn history_input_items(
 pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::execution::ConversationHistory> {
     user_input_items_with_retained_media(id, input, None)
 }
-pub(super) fn user_input_items_with_retained_media(id: &str, input: &Value, previous: Option<&Value>) -> Result<crate::execution::ConversationHistory> {
+pub(super) fn user_input_items_with_retained_media(
+    id: &str,
+    input: &Value,
+    previous: Option<&Value>,
+) -> Result<crate::execution::ConversationHistory> {
     crate::output::validate_user_metadata_with_retained_media(input, previous)?;
+    let projected = if previous.is_some() && input.get("attachments").is_none() {
+        None
+    } else {
+        crate::input_quotes::project(input)?
+    };
     let mut parts = Vec::new();
     if let Some(text) = input.as_str() {
         parts.push(Content::Text { text: text.into() });
@@ -2414,80 +2423,119 @@ pub(super) fn user_input_items_with_retained_media(id: &str, input: &Value, prev
                 "user input must be text or a typed text/attachments object".into(),
             )
         })?;
-        if object
-            .keys()
-            .any(|key| key != "fileAttachments" && key != "text" && key != "userText" && key != "attachments" && key != "imageReferences" && key != "skillInvocations" && key != "skills" && key != "references" && key != "referenceIntent" && key != "sentTime")
-        {
+        if object.keys().any(|key| {
+            key != "fileAttachments"
+                && key != "text"
+                && key != "userText"
+                && key != "attachments"
+                && key != "imageReferences"
+                && key != "skillInvocations"
+                && key != "skills"
+                && key != "references"
+                && key != "referenceIntent"
+                && key != "sentTime"
+                && key != "contentReferences"
+                && key != "contentReferenceOccurrences"
+                && key != "attachmentImageReferences"
+        }) {
             return Err(RuntimeError::Invalid(
                 "unsupported user input field; content was not accepted".into(),
             ));
         }
-        if let Some(text) = object.get("text") {
-            parts.push(Content::Text {
-                text: text
-                    .as_str()
-                    .ok_or_else(|| {
-                        RuntimeError::Invalid("user input text must be a string".into())
-                    })?
-                    .into(),
-            });
-        }
-        for attachment in super::attachments::input_attachments(input)? {
-            parts.push(Content::Output { output: crate::output::OutputBody { model_data: None, data: Value::Null,
-                parts: vec![crate::output::OutputPart::Attachment { attachment }] } });
-        }
-        let image_references = crate::output::image_references(input)?;
-        if let Some(attachments) = object.get("attachments") {
-            for (index, attachment) in attachments
-                .as_array()
-                .ok_or_else(|| RuntimeError::Invalid("attachments must be an array".into()))?
-                .iter().enumerate()
-            {
-                let media: crate::output::ResolvedMedia =
-                    serde_json::from_value(attachment.clone())?;
-                if let Some(references) = &image_references {
-                    let number = references[index];
-                    parts.push(Content::Text { text: format!("Image {number}: [Image {number}] / [图片{number}] / [圖片{number}] refers to the following image in this user message.") });
+        if projected.is_none() {
+            if let Some(text) = object.get("text") {
+                parts.push(Content::Text {
+                    text: text
+                        .as_str()
+                        .ok_or_else(|| {
+                            RuntimeError::Invalid("user input text must be a string".into())
+                        })?
+                        .into(),
+                });
+            }
+            for attachment in super::attachments::input_attachments(input)? {
+                parts.push(Content::Output {
+                    output: crate::output::OutputBody {
+                        model_data: None,
+                        data: Value::Null,
+                        parts: vec![crate::output::OutputPart::Attachment { attachment }],
+                    },
+                });
+            }
+            let image_references = crate::output::image_references(input)?;
+            if let Some(attachments) = object.get("attachments") {
+                for (index, attachment) in attachments
+                    .as_array()
+                    .ok_or_else(|| RuntimeError::Invalid("attachments must be an array".into()))?
+                    .iter()
+                    .enumerate()
+                {
+                    let media: crate::output::ResolvedMedia =
+                        serde_json::from_value(attachment.clone())?;
+                    if let Some(references) = &image_references {
+                        let number = references[index];
+                        parts.push(Content::Text { text: format!("Image {number}: [Image {number}] / [图片{number}] / [圖片{number}] refers to the following image in this user message.") });
+                    }
+                    parts.push(Content::Media { media });
                 }
-                parts.push(Content::Media { media });
             }
         }
     }
-    if parts.is_empty() {
+    if parts.is_empty() && projected.as_ref().is_none_or(Vec::is_empty) {
         return Err(RuntimeError::Invalid("user input has no content".into()));
     }
+    let parts: Vec<_> =
+        projected.unwrap_or_else(|| parts.into_iter().map(|part| (part, false)).collect());
     let last = parts.len() - 1;
     let mut items: crate::execution::ConversationHistory = resources::invocations(input)?
         .iter()
         .map(|entry| entry.project(id).into())
         .collect();
     if let Some(time) = input.get("sentTime") {
-        let time = time.as_str().ok_or_else(|| RuntimeError::Invalid("message sentTime must be a string".into()))?;
-        items.push(ConversationItem {
-            id: format!("{id}:sent-time"),
-            resource_activation: None,
-            provenance: Provenance::EnvironmentFact { event_id: format!("{id}:sent-time") },
-            content: Content::Text { text: format!("Message sent at: {time}") },
-            opaque: None,
-        }.into());
+        let time = time
+            .as_str()
+            .ok_or_else(|| RuntimeError::Invalid("message sentTime must be a string".into()))?;
+        items.push(
+            ConversationItem {
+                id: format!("{id}:sent-time"),
+                resource_activation: None,
+                provenance: Provenance::EnvironmentFact {
+                    event_id: format!("{id}:sent-time"),
+                },
+                content: Content::Text {
+                    text: format!("Message sent at: {time}"),
+                },
+                opaque: None,
+            }
+            .into(),
+        );
     }
     items.extend(
         parts
             .into_iter()
             .enumerate()
-            .map(|(index, content)| ConversationItem {
-                resource_activation: None,
-                id: if index == last {
-                    id.into()
-                } else {
-                    format!("{id}:part:{index}")
-                },
-                provenance: Provenance::UserInstruction {
-                    input_id: id.into(),
-                },
-                content,
-                opaque: None,
-            }.into()),
+            .map(|(index, (content, material))| {
+                ConversationItem {
+                    resource_activation: None,
+                    id: if index == last {
+                        id.into()
+                    } else {
+                        format!("{id}:part:{index}")
+                    },
+                    provenance: if material {
+                        Provenance::ExternalData {
+                            source: "quoted-content".into(),
+                        }
+                    } else {
+                        Provenance::UserInstruction {
+                            input_id: id.into(),
+                        }
+                    },
+                    content,
+                    opaque: None,
+                }
+                .into()
+            }),
     );
     Ok(items)
 }

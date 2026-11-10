@@ -36,7 +36,7 @@ export function markdownImagePlaceholder(href: string, alt: string, title?: stri
 }
 
 /** Consecutive image paragraphs are one gallery; prose always ends the group. */
-const galleryStart = /^<p data-md-image-gallery(?:=""|='')?>/;
+const galleryStart = /^<p\b(?=[^>]*\bdata-md-image-gallery(?:\s|=|>))[^>]*>/;
 export function groupMarkdownImageBlocks<T extends { id: string; html: string }>(blocks: T[]): T[] {
   const result: T[] = [];
   for (const block of blocks) {

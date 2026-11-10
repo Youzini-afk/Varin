@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, ThreadRequestError } from '@varin/application-client';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
-import type { ImageAttachment, NavigationReceipt } from '@varin/protocol';
+import type { NavigationReceipt } from '@varin/protocol';
 import type { WorkspaceCombinedRecoveryApplyInput, WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -9,7 +9,9 @@ import { getWorkspaceRecoveryAPI, requireWorkspaceRecoveryResult } from '@/lib/r
 import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '../recovery/combinedRecoveryResult';
 import { shouldOpenRecoveryDialog } from '../recovery/recoveryPolicy';
 
-type EditorContent = { editorText?: string; editorImages?: ImageAttachment[] };
+export type ThreadRecoveredEditor = Partial<Pick<Awaited<ReturnType<ThreadsAPI['prepareNavigation']>>,
+  'editorText' | 'editorImages' | 'editorContentReferences' | 'editorContentReferenceOccurrences' | 'editorAttachments' | 'editorAttachmentImageReferences'>>;
+type EditorContent = ThreadRecoveredEditor;
 type Navigation = { input: Parameters<ThreadsAPI['navigate']>[0]; editor: EditorContent };
 type Combined = { api: WorkspaceRecoveryAPI; plan: WorkspaceCombinedRecoveryPlan; attempt?: WorkspaceCombinedRecoveryApplyInput };
 
@@ -29,6 +31,9 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
   const [error, setError] = React.useState<string>();
   const [notice, setNotice] = React.useState<string>();
   const [navigation, setNavigation] = React.useState<Navigation>();
+  // Immediate combined recovery can complete before setNavigation commits.
+  // Keep the exact owner-prepared input with that in-flight operation as well.
+  const recoveryEditor = React.useRef<EditorContent | undefined>(undefined);
   const [conversationAlternative, setConversationAlternative] = React.useState<Navigation>();
   const [receipt, setReceipt] = React.useState<NavigationReceipt>();
   const [combined, setCombined] = React.useState<Combined>();
@@ -46,7 +51,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
   const current = () => latest.current === scope && host === getRuntimeEndpointGeneration();
   React.useEffect(() => {
     latest.current = scope;
-    inFlight.current = false; setBusy(false); setError(undefined); setNotice(undefined);
+    inFlight.current = false; recoveryEditor.current = undefined; setBusy(false); setError(undefined); setNotice(undefined);
     setNavigation(undefined); setConversationAlternative(undefined); setReceipt(undefined); setCombined(undefined); setOperation(undefined); setDialogOpen(false);
     return () => { if (latest.current === scope) latest.current = { ...scope }; };
   }, [scope]);
@@ -98,7 +103,8 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     if (result.state === 'complete') {
       setCombined(undefined); setNavigation(undefined); setConversationAlternative(undefined); setReceipt(undefined); setDialogOpen(false);
       setNotice(t(result.undoOf ? 'chat.recovery.combinedUndone' : 'chat.recovery.combinedRestored'));
-      await callback.current(restoreEditor ? result : {});
+      await callback.current(restoreEditor ? { ...result, ...recoveryEditor.current } : {});
+      recoveryEditor.current = undefined;
     } else setError(combinedRecoveryStatus(result));
   };
   const applyCombined = async (intent: Combined, retry = false) => {
@@ -120,6 +126,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     const selection = await api.prepareNavigation({ ...identity, entryId });
     if (!current()) return;
     const intent: Navigation = { input: { ...identity, key: crypto.randomUUID(), expectedHeadId: selection.expectedHeadId, targetHeadId: selection.targetHeadId }, editor: selection };
+    recoveryEditor.current = selection;
     if (preference === 'conversation') { setNavigation(intent); await navigate(intent); return; }
     let planned = false;
     try {
@@ -156,6 +163,7 @@ export function useThreadRecovery({ api, identity, host, disabled, snapshot, onR
     if (unavailable || navigation || combined) return;
     if (undoIncludesFiles && operation) await prepareUndo(operation);
     else if (currentReceipt) {
+      recoveryEditor.current = undefined;
       const intent: Navigation = { input: { ...identity, key: crypto.randomUUID(), expectedHeadId: currentReceipt.headId, targetHeadId: currentReceipt.previousHeadId, undoOf: currentReceipt.key }, editor: {} };
       setNavigation(intent); await navigate(intent);
     }

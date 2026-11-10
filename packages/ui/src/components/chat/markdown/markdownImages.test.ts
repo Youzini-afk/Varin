@@ -27,7 +27,8 @@ test('keeps image groups beside their prose and retains ordinary inline image re
   expect(element.querySelector('[data-md-image-src]')?.getAttribute('data-md-image-src')).toBe('C:/art/old.png');
   expect(element.querySelector('img')?.hasAttribute('src')).toBe(false);
   const blocks = await renderMarkdownBlocks(markdown, false, 'images-test', new MarkdownBlockStream());
-  expect(root(blocks.map(block => block.html).join('')).innerHTML).toBe(element.innerHTML);
+  const withoutSourcePositions = (html: string) => html.replace(/ data-chat-source-(?:start|end)="[0-9]+"/g, '');
+  expect(withoutSourcePositions(root(blocks.map(block => block.html).join('')).innerHTML)).toBe(withoutSourcePositions(element.innerHTML));
 });
 
 test('does not load a URL healed from incomplete streaming Markdown', async () => {

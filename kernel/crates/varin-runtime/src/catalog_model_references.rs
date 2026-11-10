@@ -124,12 +124,38 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     db.prepare("SELECT owner_kind,owner_id,sequence,kind,identity FROM model_executions")?;
     db.prepare("SELECT kind,identity,owner_kind,owner_id,sequence FROM model_execution_aliases")?;
     db.prepare("SELECT operation_id,purpose,original,target FROM model_bound_targets")?;
-    let invalid:bool=db.query_row("SELECT (SELECT count(*) FROM model_reference_space WHERE id=1 AND length(space_id)>0)!=1
-        OR EXISTS(SELECT 1 FROM model_references WHERE id<=0 OR kind NOT IN ('msg','item','file','media','read','proc','env','page','obs','settings','material','followup','forward','job','report') OR length(owner)=0 OR CASE WHEN json_valid(target) THEN json_type(target)!='object' ELSE 1 END)
-        OR EXISTS(SELECT 1 FROM model_agents WHERE owner_kind NOT IN ('thread','external') OR length(owner_id)=0 OR length(agent_code)=0 OR instr(agent_code,'/')>0 OR high_water<0)
-        OR EXISTS(SELECT 1 FROM model_executions e LEFT JOIN model_agents a USING(owner_kind,owner_id) WHERE a.owner_id IS NULL OR e.sequence>a.high_water OR e.sequence<=0)
-        OR EXISTS(SELECT 1 FROM model_execution_aliases a LEFT JOIN model_executions e USING(owner_kind,owner_id,sequence) WHERE e.identity IS NULL)
-        OR EXISTS(SELECT 1 FROM model_reference_holders h LEFT JOIN model_references r ON r.id=h.reference_id WHERE r.id IS NULL OR length(h.holder)=0)",[],|r|r.get(0))?;
+    let invalid: bool = db.query_row(
+        "SELECT (SELECT count(*) FROM model_reference_space)!=1
+        OR (SELECT count(*) FROM model_reference_space WHERE id=1 AND typeof(space_id)='text' AND length(space_id)>0)!=1
+        OR EXISTS(SELECT 1 FROM model_references WHERE typeof(id)!='integer' OR id<=0
+            OR typeof(kind)!='text' OR kind NOT IN ('msg','item','file','media','read','proc','env','page','obs','settings','material','followup','forward','job','report')
+            OR typeof(owner)!='text' OR length(owner)=0 OR typeof(target)!='text'
+            OR CASE WHEN json_valid(target) THEN json_type(target)!='object' ELSE 1 END)
+        OR EXISTS(SELECT 1 FROM model_agents WHERE typeof(owner_kind)!='text' OR owner_kind NOT IN ('thread','external')
+            OR typeof(owner_id)!='text' OR length(owner_id)=0 OR typeof(agent_code)!='text' OR length(agent_code)=0 OR instr(agent_code,'/')>0
+            OR typeof(high_water)!='integer' OR high_water<0)
+        OR EXISTS(SELECT 1 FROM model_executions e LEFT JOIN model_agents a USING(owner_kind,owner_id)
+            WHERE a.owner_id IS NULL OR typeof(e.sequence)!='integer' OR e.sequence>a.high_water OR e.sequence<=0
+            OR typeof(e.kind)!='text' OR e.kind NOT IN ('delegated','native','external_child','external_turn')
+            OR typeof(e.identity)!='text' OR length(e.identity)=0
+            OR (e.owner_kind='thread')!=(e.kind IN ('delegated','native')))
+        OR EXISTS(SELECT 1 FROM model_execution_aliases a LEFT JOIN model_executions e USING(owner_kind,owner_id,sequence)
+            WHERE e.identity IS NULL OR typeof(a.sequence)!='integer'
+            OR typeof(a.kind)!='text' OR a.kind NOT IN ('delegated','native','external_child','external_turn')
+            OR typeof(a.identity)!='text' OR length(a.identity)=0
+            OR (a.owner_kind='thread')!=(a.kind IN ('delegated','native')))
+        OR EXISTS(SELECT 1 FROM model_reference_holders h LEFT JOIN model_references r ON r.id=h.reference_id
+            WHERE r.id IS NULL OR typeof(h.reference_id)!='integer' OR typeof(h.holder)!='text' OR length(h.holder)=0)
+        OR EXISTS(SELECT 1 FROM model_bound_targets WHERE typeof(operation_id)!='text' OR length(operation_id)=0
+            OR typeof(purpose)!='text' OR length(purpose)=0 OR typeof(original)!='text' OR NOT json_valid(original)
+            OR typeof(target)!='text' OR NOT json_valid(target))
+        OR (SELECT count(*) FROM sqlite_sequence WHERE name='model_references')>1
+        OR EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='model_references'
+            AND (typeof(seq)!='integer' OR seq<0 OR seq<coalesce((SELECT max(id) FROM model_references),0)))
+        OR (EXISTS(SELECT 1 FROM model_references) AND NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='model_references'))",
+        [],
+        |row| row.get(0),
+    )?;
     if invalid {
         return Err(RuntimeError::Invalid(
             "invalid model reference index; data was preserved".into(),
@@ -243,19 +269,78 @@ pub(super) fn admit_external_turn(
     }
     Ok(())
 }
+// A published index is indivisible: a missing space row or table must never be
+// interpreted as permission to allocate a replacement namespace.
+fn existing_index(db: &Connection) -> Result<bool> {
+    let (objects, tables): (i64, i64) = db.query_row(
+        "SELECT count(*),coalesce(sum(type='table'),0) FROM sqlite_master WHERE name IN (
+            'model_reference_space','model_references','model_reference_holders',
+            'model_agents','model_executions','model_bound_targets','model_execution_aliases')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if objects == 0 {
+        let residual_lookup: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='model_reference_holder_lookup')",
+            [],
+            |row| row.get(0),
+        )?;
+        if residual_lookup {
+            return Err(RuntimeError::Invalid(
+                "incomplete model reference schema; data was preserved".into(),
+            ));
+        }
+        return Ok(false);
+    }
+    if objects != 7 || tables != 7 {
+        return Err(RuntimeError::Invalid(
+            "incomplete model reference schema; data was preserved".into(),
+        ));
+    }
+    check_format(db)?;
+    Ok(true)
+}
+
+fn external_index_columns(db: &Connection) -> Result<usize> {
+    let columns: Vec<String> = db
+        .prepare("PRAGMA table_info(external_items)")?
+        .query_map([], |row| row.get(1))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(columns
+        .iter()
+        .filter(|name| matches!(name.as_str(), "kind" | "tool_status"))
+        .count())
+}
+
+/// Catalog 92 was published both with quote-only bodies and with the complete
+/// model-reference index. Only those two layouts are valid upgrade sources.
+pub(super) fn check_optional_format(db: &Connection) -> Result<()> {
+    if existing_index(db)? || external_index_columns(db)? == 0 {
+        return Ok(());
+    }
+    Err(RuntimeError::Invalid(
+        "incomplete model reference schema; data was preserved".into(),
+    ))
+}
+
 /// Upgrade only small original metadata, ordered by durable admission facts, never history bodies.
 pub(super) fn upgrade(db: &Connection) -> Result<()> {
     // Preserve a compatible already-published index when merging independent Catalog
     // generations. Never reset the reference space, execution numbers or high water.
-    let present:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_reference_space')",[],|r|r.get(0))?;
-    if present {return check_format(db);}
+    if existing_index(db)? {
+        return Ok(());
+    }
+    let columns = external_index_columns(db)?;
+    if columns == 1 {
+        return Err(RuntimeError::Invalid(
+            "incomplete external model reference columns; data was preserved".into(),
+        ));
+    }
     initialize(db)?;
-    // Index new external observations at their original owner; historical bodies stay untouched.
-    let columns: Vec<String> = db
-        .prepare("PRAGMA table_info(external_items)")?
-        .query_map([], |r| r.get(1))?
-        .collect::<std::result::Result<_, _>>()?;
-    if !columns.iter().any(|name| name == "kind") {
+    // Earlier steps (notably 78 -> 79) use today's external initializer and may
+    // already have added both columns in this same transaction. Stored Catalog 92
+    // is checked more strictly by check_optional_format before opening a writer.
+    if columns == 0 {
         db.execute_batch("ALTER TABLE external_items ADD COLUMN kind TEXT;ALTER TABLE external_items ADD COLUMN tool_status TEXT;")?;
     }
     let conversations: Vec<String> = db
@@ -621,3 +706,7 @@ pub(super) fn collect_unheld(
 #[cfg(test)]
 #[path = "catalog_model_references_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_model_reference_upgrade_tests.rs"]
+mod upgrade_tests;

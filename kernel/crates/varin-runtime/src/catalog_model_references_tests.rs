@@ -223,7 +223,7 @@ fn previous_format_upgrades_metadata_without_rewriting_history() {
         .unwrap();
     let run = submit(&mut db, "legacy", "main");
     let before = db.history("main").unwrap();
-    db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;PRAGMA user_version=89;").unwrap();
+    db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;ALTER TABLE external_items DROP COLUMN kind;ALTER TABLE external_items DROP COLUMN tool_status;PRAGMA user_version=89;").unwrap();
     drop(db);
     let db = root.open();
     assert_eq!(db.history("main").unwrap(), before);

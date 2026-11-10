@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChatTextSourceContext } from './chatTextSourceContext';
 import type { ChatSessionMessageEntry } from './types';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged, conversationContentText, type ChatMemoryPassage } from '@varin/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, type ContentReference, type ChatMemoryPassage } from '@varin/application-client';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { Icon } from '@/components/icon/Icon';
@@ -9,15 +9,14 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useConversationPresentation } from './ConversationContext';
-import { getMarkdownCodeText } from '@/components/chat/markdown/decorate';
-import { readMarkdownImageOriginal } from '@/components/chat/markdown/markdownImages';
-import { captureChatSelection, chatTextSourceOffset, type ChatTextSource as ChatSourceData } from './chatSelection';
+import { captureMarkdownImageReader } from '@/components/chat/markdown/markdownImages';
+import { captureChatSelection, captureChatSourceBlock, chatTextSourceOffset, type ChatTextSource as ChatSourceData } from './chatSelection';
 import { ChatMemoryDialog } from './ChatMemoryDialog';
 import { resolveChatTimelineItem, type ChatTimelineProjection } from './chatTimelineProjection';
 import type { ChatTimelineProps } from './ChatTimelineEntries';
-import { assistantMessagesForTurn } from './usagePresentation';
-import { chatContentText } from './extensionPresentation';
-import { addContentReference } from '@/lib/agent-editor/attachments';
+import { captureAssistantTurn } from './chatQuoteCapture';
+import { captureChatQuoteObject, captureChatQuoteGroup, addChatObjectReference } from './chatQuoteObjects';
+import { addContentReference, beginContentReferenceInsertion } from '@/lib/agent-editor/attachments';
 import { ReferenceNavigationContext } from './ReferenceNavigation';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { ChatFileMenu } from './ChatFileMenu';
@@ -29,19 +28,22 @@ export const CHAT_QUOTE_EVENT = 'varin:chat-quote';
 
 const ChatActionsContext = React.createContext<{
   sources: Map<HTMLElement, ChatSourceData>;
+  resolve(source: ChatSourceData): ChatSourceData;
   more(element: HTMLElement): void;
 } | null>(null);
 
 export { ChatTextSourceContext } from './chatTextSourceContext';
-export const ChatTextSource: React.FC<ChatSourceData & { children: React.ReactNode; role?: string; contentIdentity?: string }> = ({ children, entryId, text, offset, contentIndex, role, contentIdentity }) => {
+export const ChatTextSource: React.FC<ChatSourceData & { children: React.ReactNode; role?: string; contentIdentity?: string }> = ({ children, entryId, text, offset, contentIndex, role, contentIdentity, streaming }) => {
   const context = React.useContext(ChatActionsContext);
+  const resolved = context?.resolve({ entryId, text, offset, contentIndex, role, contentIdentity, streaming }) ?? { entryId, text, offset, contentIndex, role, contentIdentity, streaming };
+  offset = resolved.offset; entryId = resolved.entryId;
   const previous = React.useRef<HTMLDivElement | null>(null);
   const attach = React.useCallback((element: HTMLDivElement | null) => {
     if (previous.current) context?.sources.delete(previous.current);
     previous.current = element;
-    if (element) context?.sources.set(element, { entryId, text, offset, contentIndex, role, contentIdentity });
-  }, [contentIndex, context, entryId, offset, text, role, contentIdentity]);
-  return <ChatTextSourceContext.Provider value={{ entryId, text, offset, contentIndex, role, contentIdentity }}><div ref={attach} className="contents" data-conversation-chat-source data-conversation-source-id={entryId}>{children}</div></ChatTextSourceContext.Provider>;
+    if (element) context?.sources.set(element, { entryId, text, offset, contentIndex, role, contentIdentity, streaming });
+  }, [contentIndex, context, entryId, offset, text, role, contentIdentity, streaming]);
+  return <ChatTextSourceContext.Provider value={{ entryId, text, offset, contentIndex, role, contentIdentity, streaming }}><div ref={attach} className="contents" data-conversation-chat-source data-conversation-source-id={entryId} data-conversation-source-offset={offset}>{children}</div></ChatTextSourceContext.Provider>;
 };
 
 export const ChatMoreButton: React.FC = () => {
@@ -54,7 +56,7 @@ export const ChatMoreButton: React.FC = () => {
 };
 
 interface MenuTarget {
-  kind: 'selection' | 'user' | 'turn' | 'code' | 'link' | 'file' | 'image';
+  kind: 'selection' | 'user' | 'turn' | 'block' | 'code' | 'link' | 'file' | 'image' | 'object' | 'group';
   text: string;
   copyText?: string;
   entry?: ChatSessionMessageEntry;
@@ -66,6 +68,16 @@ interface MenuTarget {
   complete?: boolean;
   runtimeKey: string;
   file?: ChatFileTarget;
+  reference?: ContentReference;
+  references?: ContentReference[];
+  turn?: ReturnType<typeof captureAssistantTurn>;
+  identity: import('@varin/application-client').ThreadIdentity;
+  title?: string;
+  sourceRole?: 'user' | 'assistant' | 'tool';
+  streaming?: boolean;
+  capturedAt: string;
+  readImageOriginal?: ReturnType<typeof captureMarkdownImageReader>;
+
 }
 
 export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
@@ -87,14 +99,20 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
   const [open, setOpen] = React.useState(false);
   const [target, setTarget] = React.useState<MenuTarget | null>(null);
   const targetRef = React.useRef<MenuTarget | null>(null);
+  const capturedEvent = React.useRef<Event | null>(null);
   const [memorySources, setMemorySources] = React.useState<ChatMemoryPassage[] | null>(null);
   const [imagePreview, setImagePreview] = React.useState<string | null>(null);
   const [handingOff, setHandingOff] = React.useState(false);
   const closeMemory = React.useCallback(() => setMemorySources(null), []);
-  const context = React.useMemo(() => ({ sources, more: (element: HTMLElement) => {
+  const context = React.useMemo(() => ({ sources, resolve: (source: ChatSourceData): ChatSourceData => {
+    const entry = props.entries.find(entry => entry.id === source.entryId
+      || entry.type === 'message' && entry.message.role === 'toolResult' && source.entryId === `tool-result:${entry.message.toolCallId}`);
+    const content = entry?.type === 'message' && 'content' in entry.message ? entry.message.content : undefined;
+    return { ...source, entryId: entry?.id ?? source.entryId, offset: chatTextSourceOffset(source, Array.isArray(content) ? content : undefined) };
+  }, more: (element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom }));
-  } }), [sources]);
+  } }), [sources, props.entries]);
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => { setOpen(false); setMemorySources(null); setImagePreview(null); setHandingOff(false); }), []);
   React.useEffect(() => {
     if (!open || !target?.selection || typeof Highlight === 'undefined' || !CSS.highlights) return;
@@ -106,29 +124,50 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const element = node instanceof Element ? node : null;
     const file = element?.closest<HTMLElement>('[data-varin-file-link="true"]');
     if (!element || !root.current?.contains(element)
-      || element.closest('input,textarea,[contenteditable="true"]')
-      || (element.closest('button') && !file && !element.closest('img, [data-chat-more], [data-md-image-src]'))) return null;
+      || element.closest('input,textarea,[contenteditable="true"],[data-interactive-ui],[data-conversation-ui-fragment]')
+      || (element.closest('button') && !file && !element.closest('img, [data-chat-more], [data-md-image-src], [data-chat-quote-object]'))) return null;
     const runtimeKey = getRuntimeKey();
+    const common = { runtimeKey, identity: { ...presentation.identity }, capturedAt: new Date().toISOString() };
+    const resolved = new Map([...sources].map(([sourceElement, source]) => {
+      const entry = props.entries.find(entry => entry.id === source.entryId
+        || entry.type === 'message' && entry.message.role === 'toolResult' && source.entryId === `tool-result:${entry.message.toolCallId}`);
+      const content = entry?.type === 'message' && 'content' in entry.message ? entry.message.content : undefined;
+      return [sourceElement, { ...source, offset: chatTextSourceOffset(source, Array.isArray(content) ? content : undefined), entryId: entry?.id ?? source.entryId }] as const;
+    }));
+    const turnId = element.closest<HTMLElement>('[data-turn-id],[data-turn-entry]')?.getAttribute('data-turn-id')
+      ?? element.closest<HTMLElement>('[data-turn-entry]')?.getAttribute('data-turn-entry');
+    const row = props.projection.items.find(item => item.id === turnId);
+    const item = row && resolveChatTimelineItem(row, props.projection.liveItem);
+    const turnEntries = item?.kind === 'turn' ? item.turn.entries : item?.kind === 'entry' ? [item.entry] : [];
+    const live = item?.kind === 'turn' ? item.turn.liveAssistant : item?.kind === 'live-assistant' ? item.message : undefined;
+    const turn = captureAssistantTurn(turnEntries, live);
+
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0).cloneRange();
       if (root.current.contains(range.commonAncestorContainer)) {
-        const resolved = new Map([...sources].map(([sourceElement, source]) => {
-          const entry = props.entries.find((entry) => entry.id === source.entryId
-            || (entry.type === 'message' && entry.message.role === 'toolResult'
-              && source.entryId === `tool-result:${entry.message.toolCallId}`));
-          const content = entry?.type === 'message' && 'content' in entry.message ? entry.message.content : undefined;
-          const offset = chatTextSourceOffset(source, Array.isArray(content) ? content : undefined);
-          return [sourceElement, { ...source, offset, entryId: entry?.id }] as const;
-        }));
         const captured = captureChatSelection(range, resolved, selection.toString());
-        if (captured.text) return { kind: 'selection', ...captured, selection: range,
-          sourceEntryId: captured.passages[0]?.entryId, runtimeKey };
+        if (captured.text) {
+          const roles = new Set(captured.passages.map(passage => props.entries.find(entry => entry.id === passage.entryId)).flatMap(entry =>
+            entry?.type === 'message' ? [entry.message.role === 'toolResult' ? 'tool' : entry.message.role] : []));
+          const role = roles.size === 1 ? [...roles][0] : undefined;
+          const sourceRole = role === 'user' || role === 'assistant' || role === 'tool' ? role : undefined;
+          return { kind: 'selection', ...captured, selection: range, sourceRole,
+            title: sourceRole === 'user' ? t('chat.context.userSource') : sourceRole === 'assistant' ? 'Varin' : t('chat.context.quoteSelection'),
+            sourceEntryId: captured.passages[0]?.entryId, ...common };
+        }
       }
     }
     const image = element.closest<HTMLImageElement>('img');
-    if (image && file?.tagName !== 'BUTTON') return { kind: 'image', text: '', href: image.currentSrc || image.src, element: image.closest('a') ?? image,
-      sourceEntryId: image.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId, runtimeKey };
+    const imageLink = element.closest<HTMLElement>('[data-md-image-src],[data-md-image-link]');
+    if ((image || imageLink) && file?.tagName !== 'BUTTON') {
+      const imageElement = imageLink ?? image!;
+      return { kind: 'image', text: '', href: image?.currentSrc || image?.src, element: imageElement,
+        readImageOriginal: captureMarkdownImageReader(imageElement),
+        reference: imageElement.closest('[data-attachment-ref],figure[data-chat-quote-object]') ? captureChatQuoteObject(imageElement) || undefined : undefined,
+        sourceEntryId: imageElement.closest<HTMLElement>('[data-conversation-source-id]')?.dataset.conversationSourceId
+          ?? imageElement.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId, ...common };
+    }
     if (file) {
       const path = file.getAttribute('data-varin-file-path') || file.textContent || '';
       const captured = fileTargets.get(file) ?? {
@@ -138,33 +177,26 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
           file.click();
         },
       };
-      return { kind: 'file', text: captured.path, element: file, runtimeKey, file: captured };
+      return { kind: 'file', text: captured.path, element: file, ...common, file: captured };
     }
+    const reference = captureChatQuoteObject(element);
+    if (reference) return { kind: 'object', text: reference.text ?? '', reference, ...common };
+    const references = captureChatQuoteGroup(element);
+    if (references?.length) return { kind: 'group', text: '', references, ...common };
+    const block = captureChatSourceBlock(element, resolved);
+    const source = block?.source;
+    const entry = props.entries.find((row): row is ChatSessionMessageEntry => row.id === source?.entryId && row.type === 'message');
+    const body = block ? { text: block.text, passages: block.passages, sourceEntryId: source?.entryId, entry,
+      sourceRole: source?.role === 'user' || entry?.message.role === 'user' ? 'user' as const : 'assistant' as const,
+      title: source?.role === 'user' || entry?.message.role === 'user' ? t('chat.context.userSource') : 'Varin', streaming: source?.streaming, ...common } : undefined;
     const link = element.closest<HTMLAnchorElement>('a[href]');
-    if (link) return { kind: 'link', text: link.getAttribute('data-md-image-href') ?? link.getAttribute('href') ?? '', href: link.getAttribute('data-md-image-href') ?? link.href, element: link, runtimeKey };
-    const source = [...sources].find(([sourceElement]) => sourceElement.contains(element))?.[1];
-    const code = element.closest('[data-component="markdown-code"],pre')?.querySelector<HTMLElement>('code');
-    if (code) return { kind: 'code', text: getMarkdownCodeText(code), sourceEntryId: source?.entryId, runtimeKey };
-    const entryId = element.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId;
-    const entry = props.entries.find((row): row is ChatSessionMessageEntry => row.id === entryId && row.type === 'message');
-    if (entry?.message.role === 'user') return { kind: 'user', text: chatContentText(entry.message.content), entry, sourceEntryId: entry.id, runtimeKey };
-    const pendingUser = element.closest('[data-conversation-user-message]');
-    if (pendingUser) return { kind: 'user', text: [...sources].filter(([sourceElement]) => pendingUser.contains(sourceElement))
-      .map(([, source]) => source.text).join('\n'), runtimeKey };
-    const turnId = element.closest<HTMLElement>('[data-turn-id],[data-turn-entry]')?.getAttribute('data-turn-id')
-      ?? element.closest<HTMLElement>('[data-turn-entry]')?.getAttribute('data-turn-entry');
-    const row = props.projection.items.find((item) => item.id === turnId);
-    if (!row) return null;
-    const item = resolveChatTimelineItem(row, props.projection.liveItem);
-    if (!item) return null;
-    const entries = item.kind === 'turn' ? item.turn.entries : item.kind === 'entry' ? [item.entry] : [];
-    const live = item.kind === 'turn' ? item.turn.liveAssistant : item.kind === 'live-assistant' ? item.message : undefined;
-    const replies = assistantMessagesForTurn(entries, live);
-    const text = replies.map((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n').trim()).filter(Boolean).join('\n\n');
-    const copyText = replies.map(message => message.content.filter(part => part.type === 'text').map(part => conversationContentText(part.text, { role: 'assistant' })).join('\n').trim()).filter(Boolean).join('\n\n');
-    const last = entries.filter((row): row is ChatSessionMessageEntry => row.type === 'message' && row.message.role === 'assistant'
-      && row.message.content.some((part) => part.type === 'text' && part.text.trim())).at(-1);
-    return text ? { kind: 'turn', text, copyText, entry: last, sourceEntryId: last?.id, runtimeKey } : null;
+    if (link) return { kind: 'link', text: '', ...body, href: link.href, element: link, ...common,
+      turn: source?.role === 'assistant' && turn.text ? turn : undefined };
+    if (body) return { ...body, kind: entry?.message.role === 'user' ? 'user' : block!.kind,
+      turn: source?.role === 'assistant' && turn.text ? turn : undefined };
+    // Chrome has no implicit body target. The only available quote expands the
+    // explicitly named turn; a blank area must never guess the last message.
+    return turn.text ? { kind: 'turn', text: '', turn, ...common } : null;
   };
   const freeze = (eventTarget: EventTarget | null) => {
     const captured = capture(eventTarget);
@@ -183,11 +215,17 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const result = await copyTextToClipboard(value);
     if (!result.ok) throw new Error(result.error);
   };
-  const quote = (value: MenuTarget) => {
-    const sourceLink = value.sourceEntryId ? `${SOURCE_LINK}${encodeURIComponent(props.sessionId)}:${encodeURIComponent(value.sourceEntryId)}` : '';
-    addContentReference(presentation.identity, { ref: `chat-selection:${crypto.randomUUID()}`,
-      title: t('chat.context.source'), text: value.text,
-      source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: value.passages ?? [], href: sourceLink } });
+  const quote = (value: MenuTarget, wholeTurn = false) => {
+    if (value.reference) return addChatObjectReference(value.identity, value.reference, presentation.api);
+    const capture = wholeTurn ? value.turn : value;
+    if (!capture?.text) return;
+    const passages = capture.passages ?? [];
+    const sourceEntryId = wholeTurn ? passages[0]?.entryId : value.sourceEntryId;
+    const sourceLink = sourceEntryId ? `${SOURCE_LINK}${encodeURIComponent(props.sessionId)}:${encodeURIComponent(sourceEntryId)}` : '';
+    addContentReference(value.identity, { ref: `chat-selection:${crypto.randomUUID()}`,
+      title: wholeTurn ? 'Varin' : value.title ?? t('chat.context.source'), text: capture.text,
+      source: { kind: 'chat', thread: value.identity, itemId: sourceEntryId, passages, href: sourceLink,
+        capturedAt: value.capturedAt, streaming: capture.streaming, role: wholeTurn ? 'assistant' : value.sourceRole } });
   };
   const openTarget = (value: MenuTarget) => {
     const figure = value.element?.closest('[data-md-image-src]');
@@ -199,14 +237,24 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     else throw new Error(t('chat.context.sourceUnavailable'));
   };
   const imageAction = async (value: MenuTarget, action: 'copy' | 'save' | 'quote') => {
+    if (action === 'quote' && value.reference) return addChatObjectReference(value.identity, value.reference, presentation.api);
+    const insertion = action === 'quote' ? beginContentReferenceInsertion(value.identity) : undefined;
     const controller = new AbortController();
-    const original = value.element ? await readMarkdownImageOriginal(value.element, controller.signal) : undefined;
+    let original: Awaited<ReturnType<NonNullable<MenuTarget['readImageOriginal']>>> | undefined;
     try {
-      const response = await fetch(original?.src ?? value.href!);
+      original = value.readImageOriginal ? await value.readImageOriginal(controller.signal) : undefined;
+      const src = original?.src ?? value.href;
+      if (!src) throw new Error(t('chat.context.sourceUnavailable'));
+      const response = await fetch(src);
       if (!response.ok) throw new Error(t('chat.context.failed'));
       const blob = await response.blob();
       if (value.runtimeKey !== getRuntimeKey()) return;
-      if (action === 'save') {
+      if (action === 'quote') {
+        const image = await fileToImageAttachment(new File([blob], 'reference', { type: blob.type }));
+        if (value.runtimeKey !== getRuntimeKey()) return;
+        insertion!.add({ ref: `chat-image:${crypto.randomUUID()}`, title: t('chat.context.openImage'), image,
+          source: { kind: 'chat', thread: value.identity, itemId: value.sourceEntryId, passages: [], capturedAt: value.capturedAt } });
+      } else if (action === 'save') {
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url; anchor.download = `image.${blob.type.split('/')[1] || 'png'}`;
@@ -217,24 +265,22 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
         canvas.width = bitmap.width; canvas.height = bitmap.height;
         canvas.getContext('2d')!.drawImage(bitmap, 0, 0); bitmap.close();
         const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error(t('chat.context.failed'))), 'image/png'));
-        if (action === 'quote') {
-          const image = await fileToImageAttachment(new File([png], 'reference.png', { type: 'image/png' }));
-          if (value.runtimeKey !== getRuntimeKey()) return;
-          addContentReference(presentation.identity, { ref: `chat-image:${crypto.randomUUID()}`, title: t('chat.context.openImage'), image,
-            source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: [] } });
-        } else await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+        if (value.runtimeKey !== getRuntimeKey()) return;
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       }
-    } finally { original?.release?.(); }
+    } finally { original?.release?.(); insertion?.dispose(); }
   };
   return <ChatActionsContext.Provider value={context}><ChatFileTargetsContext.Provider value={fileTargets}>
     <ContextMenu open={open} onOpenChange={(next, details) => {
-      if (next && !freeze(details.event.target)) { details.cancel(); return; }
+      if (next && capturedEvent.current !== details.event && !freeze(details.event.target)) { details.cancel(); return; }
       setOpen(next);
+
     }}>
       <ContextMenuTrigger asChild>
         <div ref={root} className="flex min-h-0 flex-1"
           onContextMenuCapture={(event) => {
-            if (event.target instanceof Element && event.target.closest('[data-interactive-ui]')) return;
+            if (event.target instanceof Element && event.target.closest('[data-interactive-ui],[data-conversation-ui-fragment]')) return;
+            capturedEvent.current = event.nativeEvent;
             if (!freeze(event.target)) event.stopPropagation();
           }}
           onClickCapture={(event) => {
@@ -251,17 +297,24 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-48">
-        {target?.kind === 'image' ? <>
-          <ContextMenuItem onClick={() => perform(value => imageAction(value, 'quote'))}>{t('chat.context.quote')}</ContextMenuItem>
+        {target?.kind === 'group' ? target.references?.map((reference, index) => <ContextMenuItem key={reference.ref}
+          onClick={() => perform(value => { if (value.references?.[index]) return addChatObjectReference(value.identity, value.references[index]!, presentation.api); })}>
+          {t('chat.context.quoteTool')} · {index + 1}. {reference.title}
+        </ContextMenuItem>) : target?.kind === 'image' ? <>
+          <ContextMenuItem onClick={() => perform(value => imageAction(value, 'quote'))}>{t('chat.context.quoteImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'copy'))}>{t('chat.context.copyImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'save'))}>{t('chat.context.saveImage')}</ContextMenuItem>
         </> : target?.kind === 'file' && target.file ? <ChatFileMenu target={target.file} /> : target?.kind === 'link' ? <>
           <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openLink')}</ContextMenuItem>
-          <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t('chat.context.copyLink')}</ContextMenuItem>
+          <ContextMenuItem onClick={() => perform((value) => copy(value.href ?? ''))}>{t('chat.context.copyLink')}</ContextMenuItem>
+          {target.text && <ContextMenuItem onClick={() => perform(value => quote(value))}>{t('chat.context.quoteBlock')}</ContextMenuItem>}
+          {target.turn && <ContextMenuItem onClick={() => perform(value => quote(value, true))}>{t('chat.context.quoteTurn')}</ContextMenuItem>}
         </> : target ? <>
-          <ContextMenuItem onClick={() => perform((value) => copy(value.copyText ?? value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
-          <ContextMenuItem onClick={() => perform(quote)}>{t('chat.context.quote')}</ContextMenuItem>
+          {target.text && <ContextMenuItem onClick={() => perform((value) => copy(value.copyText ?? value.text))}>{t(target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>}
+          {(target.text || target.reference) && <ContextMenuItem onClick={() => perform(value => quote(value))}>{t(target.kind === 'selection' ? 'chat.context.quoteSelection' : target.kind === 'code' ? 'chat.context.quoteCode' : target.kind === 'object' ? target.reference?.source.kind === 'tool' ? 'chat.context.quoteTool' : 'chat.context.quoteFile' : 'chat.context.quoteBlock')}</ContextMenuItem>}
+          {target.turn && <><ContextMenuItem onClick={() => perform(value => quote(value, true))}>{t('chat.context.quoteTurn')}</ContextMenuItem>
+            <ContextMenuItem onClick={() => perform(value => copy(value.turn!.text))}>{t('chat.context.copyTurn')}</ContextMenuItem></>}
           {canHandoff && <ContextMenuItem onClick={() => setHandingOff(true)}>{t('bot.handoff.title')}</ContextMenuItem>}
           {target.kind === 'selection' && presentation.memory && presentation.head ? <>
             <ContextMenuSeparator />

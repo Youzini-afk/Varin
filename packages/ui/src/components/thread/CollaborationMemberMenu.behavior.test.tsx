@@ -66,7 +66,10 @@ beforeEach(() => {
   fixture.read.mockReset();
   const { document, window } = parseHTML('<html><body><div id="app"></div></body></html>');
   for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, Element: window.Element,
-    Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
+    Node: window.Node, MutationObserver: window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
+  vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', () => {});
+  vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px' }));
+  Object.assign(document, { getSelection: () => null, hasFocus: () => false });
   container = document.querySelector('#app') as HTMLDivElement;
   root = createRoot(container);
   useThreadDraftStore.setState({ drafts: {} });

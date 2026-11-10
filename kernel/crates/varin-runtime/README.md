@@ -45,8 +45,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -61,8 +61,12 @@ representation. Do not add parallel old-format execution/read paths or a second 
   Format 91 restores missing Responses cache-write counts from retained raw ModelStep/planning receipts
   and their matching existing ledger rows, preserving frozen pricing and settlement identity. Missing
   evidence stays unknown; conversion never creates historical charges or replays execution effects.
-  Format 92 adds Catalog-local typed model references and execution numbering without rewriting
-  original history or receipts. Existing reference spaces are validated and retained rather than reallocated.
+  Format 92 protects frozen quote relations in original input bodies from readers that cannot project
+  them. It does not rewrite historical bodies, resource identities or idempotency receipts.
+  Format 93 adds Catalog-local typed model references and execution numbering. Catalog 92
+  accepts either the quote-only layout with all seven index tables and both external item columns
+  absent, or the complete validated collaboration index. Existing spaces, references and allocation
+  high waters survive unchanged; partial or malformed layouts are rejected before writable recovery.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.
@@ -231,3 +235,16 @@ Use [development guidance](../../../docs/development.md) and repository scripts 
 checks from the behavior changed; documentation-only consolidation does not require a runtime build.
 Keep unresolved external effects, platform limits and unexecuted acceptance explicit rather than
 substituting test counts for coverage.
+
+## Quoted user input
+
+Frozen quote objects and exact original UTF-16 occurrences live in the existing user-input
+ContentStore payload. `input_quotes.rs` validates object/range bindings and performs the single
+ordered native model projection. Selected text is not truncated; repeated occurrences deliver one
+copy per input. Source metadata stays in history, while quoted assistant/tool material retains
+external-data provenance. Images/files keep the existing media dependencies and attachment delivery
+edges. UI snapshots named by structured quote sources remain roots in the original retention graph.
+
+Raw receipt identity can omit prepared resource descriptors, but admission cannot. Queues, User
+messages, history forks and reopen consume the same immutable input. Message/plain-text edits retain
+selected objects and clear stale positions; they preserve original message routing and receipts.

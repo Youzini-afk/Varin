@@ -1,5 +1,10 @@
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
+import { ReferenceNavigationContext, type ReferenceSourceTarget } from './ReferenceNavigation';
+import { findChatSourceElement } from './chatSelection';
+import { chatContentText } from './extensionPresentation';
+import { documentMotionLevel } from '@/lib/motion/preference';
+import { springTiming } from '@/lib/motion/tokens';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   LegendList,
@@ -983,9 +988,14 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     }
   }, [props.sessionId, takeManualOwnership, handleReturnToLatest, t]);
 
-  const revealEntry = async (entryId: string) => {
+  const revealEntry = async (entryId: string, target?: ReferenceSourceTarget, signal?: AbortSignal) => {
         const source = props.entries.find((entry) => entry.id === entryId);
-        const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
+        const toolCallId = target?.toolCallId ?? (source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined);
+        if (target?.text !== undefined) {
+          const text = source?.type === 'message' && (source.message.role === 'user' || source.message.role === 'assistant' || source.message.role === 'toolResult')
+            ? chatContentText(typeof source.message.content === 'string' ? source.message.content : source.message.content.filter(part => part.type === 'text')) : undefined;
+          if (text === undefined || target.start === undefined || text.slice(target.start, target.end) !== target.text) throw new Error(t('chat.quote.sourceUnavailable'));
+        }
         const dialogueBlock = dialogueMessages ? blocks.items.find(block => block.kind === 'dialogue'
           && blockGroupDialogue(block.group, projection, showThinking, props.toolExecutions).some(item => item.id === block.itemId && dialogueContains(item, entryId, toolCallId))) : undefined;
         if (dialogueBlock && !isActivityExpanded(dialogueBlock.id)) {
@@ -1004,38 +1014,91 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           : block.kind === 'entry' && (block.entry.id === entryId || toolCallId !== undefined && block.entry.type === 'message' && block.entry.message.role === 'assistant'
             && block.entry.message.content.some(part => part.type === 'toolCall' && part.id === toolCallId)));
         if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
-        takeManualOwnership();
+        if (!target) takeManualOwnership();
         stopViewportScroll(timelineScroller(listRef.current));
         readingAnchor.current?.clear();
         const list = listRef.current;
         const generation = generationRef.current;
         await list?.scrollToIndex({ index, viewPosition: 0, animated: false });
+        signal?.throwIfAborted();
         if (!list || list !== listRef.current || generation !== generationRef.current
           || projectionSessionRef.current !== props.sessionId) return;
         const container = list.getScrollableNode();
         if (toolCallId) {
+          // Folded tool groups intentionally do not mount their calls. Reveal
+          // the one owning this call before looking for its precise element.
+          const group = [...container?.querySelectorAll<HTMLElement>('[data-chat-tool-call-ids]') ?? []].find(element => {
+            try { const ids: unknown = JSON.parse(element.dataset.chatToolCallIds ?? '[]'); return Array.isArray(ids) && ids.includes(toolCallId); }
+            catch { return false; }
+          });
+          const groupDisclosure = group?.querySelector<HTMLDetailsElement>('details[data-conversation-tool-disclosure]');
+          if (groupDisclosure && !groupDisclosure.open) {
+            groupDisclosure.open = true;
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            signal?.throwIfAborted();
+          }
           const disclosure = container?.querySelector<HTMLDetailsElement>(`details[data-conversation-tool-disclosure="${CSS.escape(`tool:${toolCallId}`)}"]`);
           if (disclosure && !disclosure.open) {
             disclosure.open = true;
             await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
           }
         }
+        signal?.throwIfAborted();
         const selector = toolCallId ? `[data-conversation-source-id="${CSS.escape(`tool-result:${toolCallId}`)}"]`
           : `[data-conversation-entry-id="${CSS.escape(entryId)}"]`;
-        const sourceElement = container?.querySelector<HTMLElement>(selector);
+        const sourceElement = target?.toolCallId
+          ? container?.querySelector<HTMLElement>(`[data-chat-tool-call-id="${CSS.escape(target.toolCallId)}"]`) ?? container?.querySelector<HTMLElement>(selector)
+          : container?.querySelector<HTMLElement>(selector);
         // A quoted tool result can be inside closed disclosures. Open only its
         // ancestors before measuring, so its owning call remains the target.
         for (let parent = sourceElement?.parentElement; parent && parent !== container; parent = parent.parentElement) {
           if (parent instanceof HTMLDetailsElement) parent.open = true;
         }
-        const element = toolCallId ? sourceElement?.firstElementChild : sourceElement;
-        if (!container || !element) return;
+        let element = toolCallId ? sourceElement?.firstElementChild ?? sourceElement : sourceElement;
+        if (container && target?.start !== undefined) element = findChatSourceElement(container, entryId, target.start, target.start + 1);
+        if (target?.viewRef) {
+          const view = sourceElement?.querySelector<HTMLElement>(`[data-chat-view-ref="${CSS.escape(target.viewRef)}"]`);
+          if (!view || target.revisionRef && view.dataset.chatRevisionRef !== target.revisionRef) throw new Error(t('chat.quote.sourceUnavailable'));
+          element = view;
+        }
+        if (!container || !element) { if (target) throw new Error(t('chat.quote.sourceUnavailable')); return; }
         const sticky = element.closest('[data-turn-id]')?.querySelector(':scope > .sticky');
         const inset = sticky && !sticky.contains(element) ? sticky.getBoundingClientRect().height : 0;
         await list.scrollToOffset({ animated: false, offset: Math.max(0,
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - CHAT_TIMELINE_ANCHOR_OFFSET_PX) });
+        signal?.throwIfAborted();
+        if (target && element instanceof HTMLElement) {
+          sourceHighlight.current?.cancel();
+          sourceHighlight.current = element.animate?.([{ backgroundColor: 'var(--primary)' , opacity: 0.75 }, { backgroundColor: 'transparent', opacity: 1 }], {
+            ...springTiming('glide'), duration: documentMotionLevel() === 'off' ? 0 : 1200,
+          });
+        }
   };
   const revealEntryRef = React.useRef(revealEntry); revealEntryRef.current = revealEntry;
+  const sourceHighlight = React.useRef<Animation | undefined>(undefined);
+  const referenceNavigation = React.useContext(ReferenceNavigationContext);
+  const revealSource = React.useCallback(async (target: ReferenceSourceTarget) => {
+    takeManualOwnership();
+    sourceHighlight.current?.cancel();
+    const controller = new AbortController(); navigationAbort.current = controller;
+    const sessionId = props.sessionId;
+    try {
+      if (!projectionRef.current?.visibleEntries.some(entry => entry.id === target.entryId)) {
+        if (!navigationRef.current) throw new Error(t('chat.quote.sourceUnavailable'));
+        await navigationRef.current.ensureItem(target.entryId, controller.signal);
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+      controller.signal.throwIfAborted();
+      if (sessionId !== projectionSessionRef.current) throw new DOMException('Conversation changed', 'AbortError');
+      await revealEntryRef.current(target.entryId, target, controller.signal);
+    } finally { if (navigationAbort.current === controller) navigationAbort.current = undefined; }
+  }, [props.sessionId, takeManualOwnership, t]);
+  React.useLayoutEffect(() => {
+    if (!referenceNavigation) return;
+    referenceNavigation.revealSource = revealSource;
+    return () => { if (referenceNavigation.revealSource === revealSource) delete referenceNavigation.revealSource; };
+  }, [referenceNavigation, revealSource]);
+  React.useEffect(() => () => sourceHighlight.current?.cancel(), []);
   const treeNavigation = useConversationTreeStore(state => state.navigation[props.sessionId]);
   const hasNavigation = Boolean(props.navigation);
   React.useEffect(() => {
@@ -1046,7 +1109,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       await navigationRef.current?.ensureItem(treeNavigation.entryId, controller.signal);
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       if (controller.signal.aborted) return;
-      await revealEntryRef.current(treeNavigation.entryId);
+      await revealEntryRef.current(treeNavigation.entryId, treeNavigation.source, controller.signal);
     })().catch(cause => {
       if (!controller.signal.aborted) toast.error(cause instanceof Error ? cause.message : t('chat.history.unavailable'));
     }).finally(() => {

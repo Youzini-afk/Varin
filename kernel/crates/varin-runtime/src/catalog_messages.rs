@@ -63,12 +63,13 @@ pub struct MessageInput {
     pub text: String,
 }
 impl MessageInput {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> { self.validate_with_content(false) }
+    fn validate_with_content(&self, additional_content: bool) -> Result<()> {
         if let Some(duration) = self.wait.as_ref().and_then(|w| w.timeout_ms) {
             super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?;
         }
         for attachment in &self.attachments { attachment.validate()?; }
-        if (self.text.trim().is_empty() && self.attachments.is_empty()) || self.name.as_deref().is_some_and(|name|name.trim().is_empty()) {
+        if (self.text.trim().is_empty() && self.attachments.is_empty() && !additional_content) || self.name.as_deref().is_some_and(|name|name.trim().is_empty()) {
             return Err(RuntimeError::Invalid("message text or an attachment is required".into()));
         }
         if self.source_agent.as_deref().is_some_and(|s| s.trim().is_empty()) || (self.source_agent.is_some() && self.kind != MessageKind::Request) {
@@ -133,6 +134,10 @@ pub struct MessageView {
     #[serde(flatten)]
     pub summary: MessageSummary,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_references: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_reference_occurrences: Option<Value>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -155,10 +160,13 @@ struct MessageIntent {
     input: MessageInput,
     #[serde(skip_serializing_if="Option::is_none")]
     delivery_data: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_content: Option<Value>,
 }
 
 pub struct MessagePreparation {
     model_identity: Option<Value>,
+    user_content: Option<Value>,
     attachments: Vec<super::attachments::Attachment>,
     attachment_media: Vec<crate::output::ResolvedMedia>,
     delivery_data: Option<Value>,
@@ -450,6 +458,7 @@ impl Catalog {
             "kind":identity.kind,"replyTo":reply,"nextRead":{"tool":"read_thread","arguments":{"ref":reference}}});
         Ok(MessagePreparation {
             model_identity: Some(model_identity),
+            user_content: None,
             attachments: Vec::new(), attachment_media: Vec::new(),
             delivery_data: None,
             key,
@@ -695,6 +704,7 @@ impl MessagePreparation {
     pub fn with_model_identity(mut self, identity: Value) -> Self {self.model_identity=Some(identity);self}
     pub fn identity(&self) -> &MessageIdentity { &self.identity }
     pub fn attachment_key(&self) -> &str { &self.key }
+    pub fn with_user_content(mut self, content: Option<Value>) -> Self { self.user_content = content; self }
     pub fn with_attachments(mut self, attachments: Vec<super::attachments::Attachment>) -> Self { self.attachments=attachments; self }
     /// After the original byte owner localized every file, capture presentation only.
     /// Call while holding Catalog briefly, then run load outside that lock.
@@ -715,7 +725,10 @@ impl MessagePreparation {
     }
     pub(super) fn with_delivery_data(mut self, data: Value) -> Self { self.delivery_data=Some(data); self }
     pub fn load(self) -> Result<PreparedMessage> {
-        self.input.validate()?;
+        if self.user_content.is_some() && !matches!(self.identity.actor, MessageActor::User) {
+            return Err(RuntimeError::Invalid("only explicit User messages accept quote metadata".into()));
+        }
+        self.input.validate_with_content(self.user_content.as_ref().and_then(|value|value.get("contentReferences")).and_then(Value::as_array).is_some_and(|references| !references.is_empty()))?;
         super::attachments::validate_prepared(&self.input.attachments, &self.attachments)?;
         let intent = MessageIntent {
             sender_thread_id: self.identity.sender_thread_id.clone(),
@@ -723,6 +736,7 @@ impl MessagePreparation {
             actor: self.identity.actor.clone(),
             input: self.input.clone(),
             delivery_data: self.delivery_data.clone(),
+            user_content: self.user_content.clone(),
         };
         let intent = self.content.save(&serde_json::to_value(intent)?)?;
         if self
@@ -785,7 +799,23 @@ impl MessagePreparation {
                 display["replyTo"].as_str().unwrap_or("none"),self.input.text)
         } else {envelope};
         let body = match &self.identity.actor {
-            MessageActor::User => super::attachments::incoming_input(&envelope,&self.attachments,&self.attachment_media),
+            MessageActor::User => {
+                let mut body = super::attachments::incoming_input(&envelope, &self.attachments, &self.attachment_media);
+                if let Some(metadata) = &self.user_content {
+                    let metadata = metadata.as_object().ok_or_else(|| RuntimeError::Invalid("message quote metadata must be an object".into()))?;
+                    if metadata.keys().any(|key| !matches!(key.as_str(), "contentReferences" | "contentReferenceOccurrences" | "imageReferences" | "attachmentImageReferences")) {
+                        return Err(RuntimeError::Invalid("unsupported message quote metadata".into()));
+                    }
+                    // Offsets address the original text. Routing remains the original message
+                    // envelope, appended separately rather than shifting those coordinates.
+                    let routing = envelope.strip_suffix(&self.input.text).unwrap_or(&envelope);
+                    body["text"] = json!(format!("{}\n\n{}", self.input.text, routing));
+                    body["userText"] = json!(self.input.text);
+                    for (key, value) in metadata { body[key] = value.clone(); }
+                    crate::output::validate_user_metadata(&body)?;
+                }
+                body
+            },
             MessageActor::Agent { .. } | MessageActor::AgentReport { .. } | MessageActor::WorkReport { .. } => {
                 serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
                     resource_activation: None,
@@ -922,6 +952,8 @@ impl MessageRead {
         Ok(MessageView {
             summary: self.summary,
             text: original.input.text,
+            content_references: original.user_content.as_ref().and_then(|value| value.get("contentReferences")).cloned(),
+            content_reference_occurrences: original.user_content.as_ref().and_then(|value| value.get("contentReferenceOccurrences")).cloned(),
         })
     }
 }

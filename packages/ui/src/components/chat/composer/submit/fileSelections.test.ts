@@ -1,3 +1,5 @@
+import { undo } from '@codemirror/commands';
+import { restoreDraftReferences, saveComposerState } from '@/lib/agent-editor/contentReferences';
 import { beforeEach, expect, test } from 'vitest';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
@@ -38,4 +40,19 @@ test('removing an old-source file never detaches the same path selected from the
   removeComposerFile('draft', reference.id);
   expect(useThreadDraftStore.getState().drafts.draft.references).toEqual([newer]);
   expect(composerFileSelections(useThreadDraftStore.getState().drafts.draft.selectedAttachments, 'replaced')).toEqual([{ path: 'docs/my file.txt' }]);
+});
+
+test('removes a restored image object and all bound positions from its file strip with one undo', () => {
+  useThreadDraftStore.getState().patch('restored', restoreDraftReferences({ identity: { runtime: 'agent', threadId: 'source', branchId: 'main' },
+    editorText: '[Image 3] + [Image 3]', editorAttachments: [{ ref: 'attachment:picture', filename: 'fixed.png', mimeType: 'image/png', byteLength: 3 }], editorAttachmentImageReferences: { 'attachment:picture': 3 },
+    editorContentReferenceOccurrences: [{ kind: 'image', reference: 3, start: 0, end: 9 }, { kind: 'image', reference: 3, start: 12, end: 21 }] }));
+  const before = useThreadDraftStore.getState().drafts.restored;
+  removeComposerFile('restored', before.selectedAttachments![0]!.id);
+  const after = useThreadDraftStore.getState().drafts.restored;
+  expect(after.text).toBe(' + '); expect(after.markerObjects).toEqual([]); expect(after.selectedAttachments).toEqual([]);
+  let state = after.editorState!;
+  expect(undo({ state, dispatch: transaction => { state = transaction.state; } })).toBe(true);
+  saveComposerState('restored', state);
+  const restored = useThreadDraftStore.getState().drafts.restored;
+  expect(restored.text).toBe(before.text); expect(restored.markerObjects).toHaveLength(1); expect(restored.selectedAttachments?.[0]?.selection).toEqual({ ref: 'attachment:picture' });
 });

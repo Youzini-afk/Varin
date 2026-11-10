@@ -7,13 +7,18 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { ChatTurnNavigator } from './ChatTurnNavigator';
 import { ConversationContext, type ConversationPresentation } from './ConversationContext';
 import { projectChatTimeline } from './chatTimelineProjection';
-import type { ChatSessionMessageEntry } from './types';
-import { listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import type { ChatSessionMessageEntry, ChatToolCall } from './types';
+import { resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { renderMarkdownSync } from '@/components/chat/markdown/markdownCore';
+import { bindRenderedMarkdownSource } from '@/components/chat/markdown/sourceBlocks';
+import { ChatToolQuoteGroup } from './ChatToolQuotes';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 
 vi.mock('@/lib/i18n', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: (key: string) => key }),
 }));
+vi.mock('dompurify', () => ({ default: { isSupported: true, addHook() {}, sanitize: (html: string) => html } }));
 vi.mock('@/lib/clipboard', () => ({ copyTextToClipboard: vi.fn(async () => ({ ok: true })) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => true }));
@@ -37,10 +42,20 @@ const answer: ChatSessionMessageEntry = { id: 'answer:original', runId: 'run:1',
 const nextUser: ChatSessionMessageEntry = { ...user, id: 'user:next', runId: 'run:2', parentId: answer.id, message: { role: 'user', content: 'Next request', timestamp: 1 } };
 const entries = [user, answer, nextUser];
 const projection = projectChatTimeline(entries);
+function CapturedMarkdown({ text, offset = 0 }: { text: string; offset?: number }) {
+  return <div ref={node => { if (node) bindRenderedMarkdownSource(node, text, offset); }} dangerouslySetInnerHTML={{ __html: renderMarkdownSync(text) }} />;
+}
+function references(identity: ConversationPresentation['identity']) {
+  return useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.markerObjects?.flatMap(object => {
+    const reference = object.payload.kind === 'quote' ? object.payload.reference : object.payload.contentReference;
+    return reference ? [{ reference }] : [];
+  }) ?? [];
+}
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   resetEditorContextAttachments();
+  useThreadDraftStore.setState({ drafts: {} });
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
   window.getSelection = () => ({ isCollapsed: true, rangeCount: 0 }) as Selection;
@@ -55,7 +70,7 @@ it('keeps the original history identity for right-click quote, fork and recovery
   await act(async () => root.render(<ConversationContext.Provider value={presentation}>
     <ChatContextMenu sessionId="conversation" entries={entries} projection={projection} onFork={fork} onRecover={recover} onRevealEntry={() => {}}>
       <article data-conversation-entry-id={user.id} data-conversation-user-message>
-        <ChatTextSource entryId={user.id} text="Original request" offset={0}><p>Original request</p></ChatTextSource>
+        <ChatTextSource entryId={user.id} text="Original request" offset={0}><CapturedMarkdown text="Original request" /></ChatTextSource>
       </article>
     </ChatContextMenu>
   </ConversationContext.Provider>));
@@ -65,10 +80,10 @@ it('keeps the original history identity for right-click quote, fork and recovery
     expect(action).toBeDefined();
     await act(async () => action!.click());
   };
-  await choose('chat.context.quote');
-  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), presentation.identity));
-  expect(references).toHaveLength(1);
-  expect(references[0]?.reference).toMatchObject({ text: 'Original request', source: {
+  await choose('chat.context.quoteBlock');
+  const captured = references(presentation.identity);
+  expect(captured).toHaveLength(1);
+  expect(captured[0]?.reference).toMatchObject({ text: 'Original request', source: {
     kind: 'chat', thread: presentation.identity, itemId: user.id, href: '#varin-chat-source:conversation:user%3Aoriginal',
   } });
   await choose('chat.messageBody.actions.fork');
@@ -121,20 +136,21 @@ it.each([
   expect(container.querySelector('[role="menu"]')?.textContent.includes('bot.handoff.title')).toBe(available);
 });
 
-it('copies an assistant turn with readable options while preserving raw source for quoting', async () => {
+it('only explicitly quotes the ordered answer prose, excluding interactive source JSON', async () => {
   const raw = 'Before\n\n```varin-ui\n{"type":"choice","label":"Hair","options":["Short","Long"],"action":"Continue"}\n```\n\nAfter';
   const assistant: ChatSessionMessageEntry = { ...answer, message: { ...answer.message, role: 'assistant', content: [{ type: 'text', text: raw }] } } as ChatSessionMessageEntry;
   const entries = [user, assistant], projected = projectChatTimeline(entries), turn = projected.items.find(item => item.kind === 'turn')!;
   const presentation = { identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, head: answer.id, toolExecutions: {} } as unknown as ConversationPresentation;
   await act(async () => root.render(<ConversationContext.Provider value={presentation}><ChatContextMenu sessionId="conversation" entries={entries} projection={projected} onFork={() => {}} onRecover={() => {}} onRevealEntry={() => {}}>
-    <article data-turn-id={turn.id}><ChatTextSource entryId={answer.id} text={raw} offset={0} role="assistant"><p>Visible answer</p></ChatTextSource></article>
+    <article data-turn-id={turn.id}><ChatTextSource entryId={answer.id} text={raw} offset={0} role="assistant"><CapturedMarkdown text="Before" /></ChatTextSource></article>
   </ChatContextMenu></ConversationContext.Provider>));
   await act(async () => container.querySelector('p')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.copyTurn')!.click());
-  expect(copyTextToClipboard).toHaveBeenCalledWith('Before\n\nContinue\n\nHair：\n- Short\n- Long\n\nAfter');
-  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quote')!.click());
-  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), presentation.identity));
-  expect(references.at(-1)?.reference?.text).toBe(raw);
+  expect(copyTextToClipboard).toHaveBeenCalledWith('Before\n\nAfter');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quoteTurn')!.click());
+  const captured = references(presentation.identity);
+  expect(captured.at(-1)?.reference?.text).toBe('Before\n\nAfter');
+  expect(captured.at(-1)?.reference?.source).toMatchObject({ passages: [{ entryId: answer.id, start: 0, text: 'Before' }, { entryId: answer.id, start: raw.lastIndexOf('After'), text: 'After' }] });
 });
 
 it('quotes selected prose with native part identity and exact offsets after interactive content', async () => {
@@ -156,9 +172,48 @@ it('quotes selected prose with native part identity and exact offsets after inte
     intersectsNode: (element: Node) => element === node || element.contains(node), toString: () => 'Repeat', cloneRange: () => range } as unknown as Range;
   window.getSelection = () => ({ isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => 'Repeat' }) as unknown as Selection;
   await act(async () => paragraph.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
-  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quote')!.click());
-  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), presentation.identity));
-  expect(references.at(-1)?.reference).toMatchObject({ text: 'Repeat', source: { kind: 'chat', passages: [
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quoteSelection')!.click());
+  const captured = references(presentation.identity);
+  expect(captured.at(-1)?.reference).toMatchObject({ text: 'Repeat', source: { kind: 'chat', passages: [
     { entryId: answer.id, start: 6 + raw.lastIndexOf('Repeat'), text: 'Repeat' },
   ] } });
+});
+
+it('freezes a clicked paragraph across streaming replacement and virtualization while preserving ordinary link actions', async () => {
+  const presentation = { identity: { runtime: 'agent', threadId: 'frozen-thread', branchId: 'branch' }, toolExecutions: {} } as unknown as ConversationPresentation;
+  const raw = 'First paragraph\n\nDiscuss [this link](https://example.test) now.';
+  const message = { ...answer, message: { ...answer.message, role: 'assistant', content: [{ type: 'text', text: raw }] } } as ChatSessionMessageEntry;
+  const projected = projectChatTimeline([user, message]);
+  const turn = projected.items.find(item => item.kind === 'turn')!;
+  const render = (shown: string | null) => root.render(<ConversationContext.Provider value={presentation}>
+    <ChatContextMenu sessionId="conversation" entries={[user, message]} projection={projected} onRevealEntry={() => {}}>
+      <article data-turn-id={turn.id}>{shown && <ChatTextSource entryId={message.id} text={shown} offset={0} role="assistant" streaming><CapturedMarkdown text={shown} /></ChatTextSource>}</article>
+    </ChatContextMenu></ConversationContext.Provider>);
+  await act(async () => render(raw));
+  await act(async () => container.querySelector('a')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  expect(container.querySelector('[role="menu"]')?.textContent).toContain('chat.context.openLink');
+  await act(async () => render(null));
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'chat.context.quoteBlock')!.click());
+  expect(references(presentation.identity).at(-1)?.reference).toMatchObject({ text: 'Discuss [this link](https://example.test) now.',
+    source: { streaming: true, passages: [{ entryId: answer.id, start: 17, text: 'Discuss [this link](https://example.test) now.' }] } });
+});
+
+it('offers one frozen actual call at a time from a folded tool group and retains unfinished output', async () => {
+  const presentation = { identity: { runtime: 'agent', threadId: 'tool-thread', branchId: 'branch' }, toolExecutions: {}, sourceEntry: () => answer.id } as unknown as ConversationPresentation;
+  const calls: ChatToolCall[] = [{ id: 'call-a', type: 'toolCall' as const, name: 'file_read', arguments: { path: 'a.txt' } }, { id: 'call-b', type: 'toolCall' as const, name: 'process_run', arguments: { command: 'echo hello' } }];
+  const execution = { toolCallId: 'call-b', name: 'process_run', args: calls[1]!.arguments, status: 'running' as const, partialResult: { stdout: 'hello', eof: false, next: { offset: 5 } } };
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}>
+    <ChatContextMenu sessionId="conversation" entries={entries} projection={projection} onRevealEntry={() => {}}>
+      <ChatToolQuoteGroup calls={calls} executionById={{ 'call-b': execution }} resultByCallId={new Map()}><p>Two operations</p></ChatToolQuoteGroup>
+    </ChatContextMenu></ConversationContext.Provider>));
+  await act(async () => container.querySelector('p')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  const options = [...container.querySelectorAll<HTMLButtonElement>('[role="menu"] button')];
+  expect(options).toHaveLength(2);
+  execution.partialResult = { stdout: 'changed later', eof: true, next: { offset: 13 } };
+  await act(async () => options[1]!.click());
+  expect(references(presentation.identity)).toHaveLength(1);
+  expect(references(presentation.identity)[0]?.reference).toMatchObject({ source: { kind: 'tool', toolCallId: 'call-b', status: 'running' } });
+  const text = references(presentation.identity)[0]!.reference.text!;
+  expect(text).toContain('hello'); expect(text).toContain('"eof": false');
+  expect(text).not.toContain('changed later'); expect(text).not.toContain('a.txt');
 });
