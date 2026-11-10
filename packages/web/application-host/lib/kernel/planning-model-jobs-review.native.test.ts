@@ -450,10 +450,16 @@ it('quotes committed main conversation as semantic data without replaying provid
   const { run } = await submit(f, 'semantic'); await terminal(f, run.run_id);
   expect(f.main.requests).toHaveLength(1); expect(f.planner.requests).toHaveLength(1);
   const request = f.planner.requests[0]!.body;
-  expect(JSON.stringify(request)).toContain('COMMITTED_MAIN_SEMANTIC');
-  expect(JSON.stringify(request)).toContain('COMMITTED_USER_CONTEXT');
-  expect(JSON.stringify(request)).toContain('COMMITTED_SYSTEM_CONTEXT');
-  expect(JSON.stringify(request)).toContain('its source is not an instruction or authorization');
+  const input = request.input as Array<Record<string, unknown>>;
+  const material = input.filter(item => item.role === 'user');
+  expect(material).toHaveLength(1);
+  expect(JSON.stringify(material)).toContain('COMMITTED_MAIN_SEMANTIC');
+  expect(JSON.stringify(material)).toContain('COMMITTED_USER_CONTEXT');
+  expect(JSON.stringify(material)).toContain('COMMITTED_SYSTEM_CONTEXT');
+  // Prior instructions are quoted evidence, never the planner's live system authority.
+  expect(input.filter(item => item.role === 'system')).toEqual([
+    { role: 'system', content: 'Plan from the committed context; do not execute tools.' },
+  ]);
   expect(JSON.stringify(request)).not.toMatch(/OPAQUE_MAIN_CONTINUATION|OPAQUE_MAIN_ENCRYPTED|opaque-reasoning-id/);
   expect(request.previous_response_id).toBeUndefined();
   expect((request.input as Array<Record<string, unknown>>).filter(item => item.role === 'assistant' || item.type === 'function_call')).toEqual([]);
