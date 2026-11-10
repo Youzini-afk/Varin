@@ -1796,9 +1796,9 @@ it('keeps large UTF-8 reports as references with bounded Wait preview and exact 
         const reports = (body.input as Array<Record<string, unknown>>).flatMap(item => {
           if (item.role !== 'user' || !Array.isArray(item.content)) return [];
           const text = responsesMetadataText(item.content);
-          if (!text.startsWith('External output data;')) return [];
-          const evidence = JSON.parse(text.slice(text.indexOf('\n') + 1)) as { data: Record<string, unknown>; source: { kind: string } };
-          return evidence.source.kind === 'agent_message' && evidence.data.kind === 'child_report' ? [{ item, metadata: evidence.data }] : [];
+          if (!text.startsWith('{')) return [];
+          const metadata = JSON.parse(text) as Record<string, unknown>;
+          return metadata.kind === 'child_report' && metadata.ref === executionRef ? [{ item, metadata }] : [];
         });
         expect(reports).toHaveLength(1);
         waitPayload = JSON.stringify(reports[0]!.item);
