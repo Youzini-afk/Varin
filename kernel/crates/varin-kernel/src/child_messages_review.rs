@@ -470,6 +470,20 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             assert_eq!(matches!(origin, ToolOrigin::ModelStep { .. }), model);
             let op = db.operation(operation_id).unwrap();
             assert_eq!(op.effect, Effect::Confirmed);
+            let completion=db.capture_call_completion(operation_id).unwrap().load().unwrap();
+            let output=match completion {
+                ToolCompletion::Result{content,..}|ToolCompletion::JobAccepted{content:Some(content),..}=>content,
+                other=>panic!("follow-up acceptance lost its owner projection: {other:?}"),
+            };
+            assert_eq!(output.data["followupId"],value.id);
+            let reference=output.model_data()["followupId"].as_str().expect("follow-up handle");
+            assert!(reference.starts_with("followup:"));
+            assert_eq!(output.model_data()["read"]["arguments"]["followupId"],reference);
+            if wait {assert_eq!(output.model_data()["operationRef"],reference);}
+            if let Some(job)=&job {
+                assert!(output.data["trigger"].to_string().contains(&job.operation_id));
+                assert!(!output.model_data()["trigger"].to_string().contains(&job.operation_id));
+            }
             let view = db.capture_followup(&value.id).unwrap();
             if wait {
                 assert_eq!(op.phase, varin_runtime::OperationPhase::Waiting);

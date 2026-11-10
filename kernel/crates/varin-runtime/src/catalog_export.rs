@@ -485,7 +485,7 @@ mod tests {
                 "export-thread",
                 "main",
                 Some(&selected_id),
-                &[selected_id],
+                &[selected_id.clone()],
                 true,
             )
             .unwrap()

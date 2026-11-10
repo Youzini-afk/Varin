@@ -456,15 +456,31 @@ fn published_gateway_reports_acknowledge_only_successful_outer_history_and_not_s
             ExecutionRecord::ToolDispatched{context:outer.clone(),executor_owner:ExecutorOwner::Kernel}] {
             f.db.commit_execution(&child.parent_run_id,f.db.epoch(),&record).unwrap();
         }
-        let nested_call=ToolCall{call_id:"report".into(),name:collaboration::REPORT_TOOL.into(),schema_version:"1".into(),arguments:json!({"operationId":child.operation_id})};
-        let origin=ToolOrigin::NestedCall{parent_operation_id:outer.operation_id.clone()};
-        let nested=ToolExecutionContext{run_id:child.parent_run_id.clone(),operation_id:origin.operation_id(&nested_call.call_id),origin};
-        for record in [ExecutionRecord::ToolAdmitted{context:nested.clone(),tool:AdmittedTool{contract:contract(&nested_call),call:nested_call}},ExecutionRecord::ToolDispatched{context:nested.clone(),executor_owner:ExecutorOwner::Kernel}] {
-            f.db.commit_execution(&child.parent_run_id,f.db.epoch(),&record).unwrap();
-        }
-        f.db.record_child_report_read(&nested,&child.execution_id).unwrap();
+        // Use the real live nested-call scope. Fabricating a NestedCall context
+        // bypasses the invocation registry and is rightly rejected by admission.
+        let frozen=f.db.capture_tool_invocation(&outer,&call.call_id).unwrap().load().unwrap().frozen;
+        let registry=f.db.nested_tools();
+        let fixture=std::sync::Arc::new(std::sync::Mutex::new(f));
+        let callback_fixture=fixture.clone();
+        let execution_id=child.execution_id.clone();
+        let scope=registry.register(outer.clone(),ExecutorOwner::Kernel,std::sync::Arc::new(frozen),CancellationToken::default(),
+            std::sync::Arc::new(move |context,call| {
+                let mut f=callback_fixture.lock().unwrap();
+                let epoch=f.db.epoch();
+                for record in [ExecutionRecord::ToolAdmitted{context:context.clone(),tool:AdmittedTool{contract:contract(&call),call:(*call).clone()}},
+                    ExecutionRecord::ToolDispatched{context:context.clone(),executor_owner:ExecutorOwner::Kernel}] {
+                    f.db.commit_execution(&context.run_id,epoch,&record).unwrap();
+                }
+                f.db.record_child_report_read(&context,&execution_id).unwrap();
+                let completion=ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:crate::output::OutputBody::text("Original source_unavailable report")};
+                f.db.commit_execution(&context.run_id,epoch,&ExecutionRecord::ToolSettled{context:context.clone(),completion:completion.clone(),executor_stopped:true}).unwrap();
+                Ok(ToolExecutionReceipt{completion,executor_stopped:true})
+            })).unwrap();
+        let nested=registry.invoke(&outer.operation_id,&ExecutorOwner::Kernel,crate::nested_tools::NestedToolInput{
+            call_id:"report".into(),name:collaboration::REPORT_TOOL.into(),arguments:json!({"operationId":child.operation_id})}).unwrap();
+        let mut f=fixture.lock().unwrap();
+        let epoch=f.db.epoch();
         let completion=|outcome| ToolCompletion::Result{outcome,effect:Effect::None,content:crate::output::OutputBody::text("Original source_unavailable report")};
-        f.db.commit_execution(&child.parent_run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:nested.clone(),completion:completion(Outcome::Succeeded),executor_stopped:true}).unwrap();
         if gateway {
             f.db.forward_nested_report_read(&outer.operation_id,&nested.operation_id).unwrap();
             f.db.forward_nested_report_read(&outer.operation_id,&nested.operation_id).unwrap();
@@ -473,12 +489,12 @@ fn published_gateway_reports_acknowledge_only_successful_outer_history_and_not_s
         }
         assert!(f.db.capture_attention_read().load(&||false).unwrap().delivered_reports.is_empty());
         let result=ToolResult{request_id:request.into(),call_id:call.call_id,completion:completion(if succeeded{Outcome::Succeeded}else{Outcome::Failed})};
-        f.db.commit_execution(&child.parent_run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:outer,completion:result.completion.clone(),executor_stopped:true}).unwrap();
-        f.db.commit_execution(&child.parent_run_id,f.db.epoch(),&ExecutionRecord::ToolBatchCommitted{request_id:request.into(),results:vec![result]}).unwrap();
+        f.db.commit_execution(&child.parent_run_id,epoch,&ExecutionRecord::ToolSettled{context:outer,completion:result.completion.clone(),executor_stopped:true}).unwrap();
+        f.db.commit_execution(&child.parent_run_id,epoch,&ExecutionRecord::ToolBatchCommitted{request_id:request.into(),results:vec![result]}).unwrap();
         let queued:inputs::QueuedInputMetadata=record(&f.db.db,"input_queue",&message).unwrap();
         assert_eq!(queued.state,if gateway && succeeded{InputState::Cancelled}else{InputState::Queued});
         assert_eq!(f.db.capture_attention_read().load(&||false).unwrap().delivered_reports.len(),usize::from(gateway&&succeeded));
-        let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+        let root=f.root.clone();drop(f);drop(scope);drop(fixture);std::fs::remove_dir_all(root).unwrap();
     }
 }
 
