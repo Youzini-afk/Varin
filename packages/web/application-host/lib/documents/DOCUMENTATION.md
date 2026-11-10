@@ -202,6 +202,15 @@ and the original drafts, independently of conversation recovery.
 
 Workspace IDs live under `{VARIN_DATA_DIR}/documents/workspaces.json` and are scoped to this application host. Converting a filesystem path into an ID performs the current root-admission check once; later operations use that persisted host registration instead of re-reading mutable project selection settings. Physical document operations still canonicalize the root at use time, reject a changed filesystem identity, enforce resource containment, and fail with `workspace-unavailable` while the root is inaccessible. Loading this registry never touches workspace storage: a deleted or disconnected root keeps its workspace ID and cannot prevent other registrations from loading. Recovery journals live under `{VARIN_DATA_DIR}/document-recovery/{hostId}/...`. Thread source captures are deliberately temporary Host-memory state: explicit release, owner withdrawal or Host restart makes an unconsumed opaque ref unavailable rather than reading current disk as the old draft. A Thread created from one first copies its content into the separately persistent WorkingState store. Another host must not inherit the same-path selections.
 
+Trusted resource management obtains a Host-only `createResourceAccess` port for the data and
+`.agents` domains. It reuses this same registry, coordination and Rust file CAS, including creation
+of the first skill under a previously absent resource directory. The extra admission exists only in
+that port's asynchronous call chain, expires when the operation settles, and is cleared before
+observer notifications; it is not persisted as a permission on a workspace ID. Public
+Documents, Files and project/source resolution retain the deployment boundary, even for IDs created
+by the private port. Resource-management routes accept catalog selections rather than those IDs or
+arbitrary paths. The data directory is backend addressing, not a new generic filesystem grant.
+
 Registry lookups index the current committed document by workspace ID and normalized canonical path. Exact lookups reuse that index; containing-root lookup walks path ancestors, including filesystem roots, instead of scanning and sorting every registered root. Path indexing is lazy so ID-only readers do not normalize the full registry. Concurrent cold readers share one load and can retry a failed load. Registrations remain serialized and publish a new document only after the atomic rename succeeds; duplicate registrations reuse the committed identity without rewriting it. No disk schema or root-admission boundary changes. `node --import tsx scripts/measure-document-registry.mjs` measures cold/warm lookups and concurrent I/O counts on synthetic roots.
 
 Electron reuses this Web host in-process. It does not add a generic filesystem preload IPC.

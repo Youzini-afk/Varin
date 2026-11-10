@@ -1461,3 +1461,126 @@ fn cold_zero_budget_goal_parks_before_any_model_serialization_or_inference() {
     drop(db);
     std::fs::remove_dir_all(f.path).unwrap();
 }
+
+fn extension_for_round(configuration: &str) -> launches::ExtensionToolBinding {
+    use crate::catalog::service_composition::{HostCompositionNode, HostServiceComposition};
+    let mut node = HostCompositionNode {
+        id: String::new(), extension_id: "example.selected".into(), entrypoint_id: "host".into(),
+        extension_version: "1.0.0".into(), artifact_integrity: "artifact-selected".into(),
+        activation_configuration: Value::Null, grants: vec![], dependencies: vec![],
+    };
+    node.id = node.content_identity().unwrap();
+    serde_json::from_value(json!({
+        "providerKey":"example.selected:host:example.read@1", "extensionId":"example.selected",
+        "extensionVersion":"1.0.0", "serviceId":"example.read", "serviceVersion":1,
+        "artifactIntegrity":"artifact-selected", "composition":HostServiceComposition {
+            schema_version:1, root:node.id.clone(), nodes:vec![node],
+        }, "declarationHash":"schema-1", "configurationIdentity":configuration,
+        "tool":{"name":"selected_read","version":"schema-1","description":"Selected reader",
+            "schema":{"type":"object"},"output_schema":null,
+            "metadata":{"service_id":"example.read","service_version":1,"completion":"result","operation":"read"}}
+    })).unwrap()
+}
+
+#[test]
+fn existing_work_new_root_prepares_current_extension_without_rewriting_previous_run() {
+    for prior_empty in [false, true] {
+    for current_directory in ["current", "newly_enabled", "empty"] {
+    let mut f = Fixture::new();
+    let original_binding = extension_for_round("original-release");
+    let mut current_binding = extension_for_round("current-release");
+    if current_directory == "newly_enabled" {
+        current_binding.service_id = "example.new".into();
+        current_binding.provider_key = "example.selected:host:example.new@1".into();
+        current_binding.tool.name = "new_read".into();
+        current_binding.tool.metadata.as_mut().unwrap().service_id = "example.new".into();
+    }
+    let bindings = if current_directory == "empty" { vec![] } else { vec![current_binding.clone()] };
+    let mut selected = if prior_empty { managed_launch() } else { launch() };
+    selected.tools.extend(crate::tool_disclosure::schemas());
+    selected.agent = Some(launches::AgentSelection { profile_id: Some("original-agent".into()), name: None,
+        work_focus: "general".into(), tools: Some(vec!["selected_read".into()]) });
+    if !prior_empty {
+        selected.tools.push(original_binding.tool.clone());
+        selected.extension_bindings.push(original_binding.clone());
+    }
+    let mut cold_definition = definition(false);
+    if prior_empty { select_workspace(&mut cold_definition, &selected); }
+    let d = sync(&mut f.db, &cold_definition);
+    let cold = f.db.run_calendar_now(&d.id, d.revision, "original").unwrap();
+    let prepared = prepare_with_launch(&f.db, &cold, selected.clone()).unwrap();
+    let original_run = f.db.admit_calendar_submission(prepared).unwrap().run_id.unwrap();
+    f.db.bind_launch(&original_run, selected).unwrap();
+    for state in [RunState::Preparing, RunState::Runnable, RunState::Completed] {
+        let run = f.db.run(&original_run).unwrap();
+        f.db.transition_run(&run.id, f.db.epoch(), run.revision, state).unwrap();
+    }
+    let original = f.db.launch_intent(&original_run).unwrap().unwrap();
+    let mut existing = definition(false);
+    existing.task_id = "new-root".into();
+    existing.target = Target::ExistingWork { thread_id:cold.thread_id.clone(), branch_id:cold.branch_id.clone() };
+    let revision = f.db.calendar_project("project").unwrap().revision;
+    let prepared = f.db.prepare_calendar_sync("project".into(), Some(revision), vec![cold_definition, existing])
+        .unwrap().load().unwrap();
+    let existing = f.db.admit_calendar_sync(prepared).unwrap().definitions.into_iter()
+        .find(|definition| definition.task_id == "new-root").unwrap();
+    let occurrence = f.db.run_calendar_now(&existing.id, existing.revision, "automatic-round").unwrap();
+    let db = Mutex::new(f.db);
+    reconcile(&db).unwrap();
+    super::super::activation::reconcile(&db).unwrap();
+    let mut db = db.into_inner().unwrap();
+    let current_run = db.calendar_occurrence(&occurrence.id).unwrap().run_id.unwrap();
+    assert_ne!(current_run, original_run);
+    let pending = db.launch_intent(&current_run).unwrap().unwrap();
+    assert_eq!(pending.extension_admission.as_ref().unwrap().state, launches::ExtensionAdmissionState::Pending);
+    assert!(db.bind_launch(&current_run, pending.selection.clone()).unwrap_err().to_string()
+        .contains("current extension directory is not prepared"));
+    let request: RequestBinding = serde_json::from_value(json!({"resource_activations":[],"resource_checkpoint_id":null,
+        "connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,
+        "configuration_generation":1,"tool_schema_generation":1,"tools":[],"instruction_sources":[],"memory_checkpoint":null,
+        "attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":cold.branch_id,"ancestor_id":null,"leaf_id":null}})).unwrap();
+    assert!(db.prepare_execution(&current_run, request, pending.selection.policy.clone(), Value::Null)
+        .err().unwrap().to_string().contains("current extension directory is not prepared"));
+    let mut invalid = current_binding.clone(); invalid.tool.version = "invalid".into();
+    assert!(db.prepare_extensions_change(&current_run, vec![invalid]).unwrap().load().is_err());
+    assert_eq!(db.launch_intent(&current_run).unwrap().unwrap(), pending);
+    // Crash before the current directory is committed preserves Pending, not another Run.
+    drop(db);
+    let mut db = Catalog::open(&f.path).unwrap();
+    assert_eq!(db.launch_intent(&current_run).unwrap().unwrap().extension_admission, pending.extension_admission);
+    assert_eq!(db.run_calendar_now(&existing.id, existing.revision, "automatic-round").unwrap().run_id.as_deref(), Some(current_run.as_str()));
+    // Current discovery can replace, add or omit old implementations. The previous
+    // prepared directory is not the user's Agent capability restriction.
+    let prepared = db.prepare_extensions_change(&current_run, bindings.clone()).unwrap().load().unwrap();
+    let current = db.admit_launch_change(prepared).unwrap().load().unwrap();
+    assert_eq!(current.selection.extension_bindings, bindings);
+    assert_eq!(current.extension_admission.as_ref().unwrap().state, launches::ExtensionAdmissionState::Prepared);
+    assert_eq!(current.selection.source, original.selection.source);
+    assert_eq!(current.selection.agent, original.selection.agent);
+    assert_eq!(current.principal_id, original.principal_id);
+    assert_eq!(current.selection.connection_identity, original.selection.connection_identity);
+    let allowed = current.selection.agent.as_ref().unwrap().tools.as_deref();
+    assert!(!crate::tool_disclosure::request_tools(&current.selection.tools, false, allowed).iter().any(|tool| tool.name == "new_read"));
+    // Empty is a real committed directory, including for a no-Host execution owner.
+    let bound = db.bind_launch(&current_run, current.selection.clone()).unwrap();
+    drop(db);
+    let mut db = Catalog::open(&f.path).unwrap();
+    let restored = db.launch_intent(&current_run).unwrap().unwrap();
+    assert_eq!(restored.selection, bound.selection);
+    assert_eq!(restored.extension_admission, bound.extension_admission);
+    let history_count = db.history(&cold.branch_id).unwrap().len();
+    let replay = db.run_calendar_now(&existing.id, existing.revision, "automatic-round").unwrap();
+    assert_eq!(replay.id, occurrence.id);
+    assert_eq!(replay.run_id.as_deref(), Some(current_run.as_str()));
+    assert_eq!(db.history(&cold.branch_id).unwrap().len(), history_count);
+    let same = db.prepare_extensions_change(&current_run, bindings).unwrap().load().unwrap();
+    assert_eq!(db.admit_launch_change(same).unwrap().load().unwrap(), restored);
+    assert!(db.prepare_extensions_change(&current_run, vec![extension_for_round("later-release")]).unwrap().load().is_err());
+    let original_after = db.launch_intent(&original_run).unwrap().unwrap();
+    assert_eq!(original_after.selection, original.selection);
+    assert_eq!(original_after.extension_admission, None);
+    drop(db);
+    std::fs::remove_dir_all(f.path).unwrap();
+    }
+    }
+}

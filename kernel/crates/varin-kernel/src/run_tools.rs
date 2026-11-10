@@ -168,6 +168,19 @@ pub(crate) fn builtin_schemas(
         .map(|definition| definition.schema)
         .collect()
 }
+pub(crate) fn ingress_schemas(
+    scope: Option<&varin_runtime::catalog::context::ContextScope>,
+) -> Vec<ToolSchema> {
+    let plan_eligible = scope.is_some_and(|scope| {
+        matches!(scope.mode.as_str(), "agent" | "bot") && scope.thread_role == "main"
+    });
+    builtin_schemas(
+        &crate::tools::ToolKind::all().collect(),
+        plan_eligible,
+        true,
+        scope.is_some_and(|scope| scope.mode == "bot"),
+    )
+}
 pub(crate) fn builtin_definitions(
     enabled: &std::collections::BTreeSet<crate::tools::ToolKind>,
     plan_eligible: bool,

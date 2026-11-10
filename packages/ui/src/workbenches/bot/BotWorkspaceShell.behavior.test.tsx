@@ -10,10 +10,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useBotNavigation, useBotReturn, type BotSession, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { threadSummary } from '@/test/threadFixtures';
 import { useBotLayout } from './botLayout';
-import { BOT_TREE_PANEL_SCOPE } from '@/lib/openConversationTree';
+import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 
 const state = vi.hoisted(() => ({
-  profileId: 'varin.bot',
+  profileId: 'varin.bot', mobile: false,
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
   create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
   fork: vi.fn(), copy: vi.fn(), arrangements: vi.fn(), eventSources: vi.fn(),
@@ -47,14 +48,17 @@ vi.mock('./BotWorkDetail', async () => {
   } };
 });
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
-vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope }: { layoutScope?: string }) => <aside data-conversation-tree={layoutScope} /> }));
+vi.mock('@/components/layout/ContextSidebarTab', () => ({ ContextPanelContent: ({ identity, jobRunId, readOnly }: { identity?: { threadId: string; branchId: string }; jobRunId?: string; readOnly?: boolean }) => <aside data-context-thread={identity?.threadId} data-context-branch={identity?.branchId} data-context-job={jobRunId} data-context-readonly={String(readOnly)} /> }));
+vi.mock('@/components/thread/ConversationTreePanel', () => ({ ConversationTreePanel: () => <aside data-mobile-tree /> }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes, contextOwner }: { layoutScope?: string; surfaceModes?: readonly string[]; contextOwner?: { identity: { threadId: string; branchId: string } | null; readOnly: boolean } }) => <aside data-conversation-tree={layoutScope} data-surface-modes={surfaceModes?.join(',')}
+  data-initial-context-thread={contextOwner?.identity?.threadId} data-initial-context-branch={contextOwner?.identity?.branchId} data-initial-context-readonly={String(contextOwner?.readOnly)} /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
-vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface} /> }));
+vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => { const openThreadContext = useOpenThreadContext(); return <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface}><button onClick={() => openThreadContext({ runtime: 'agent', ...identity }, undefined, undefined, readOnly)}>Open context</button></div>; } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: () => {} }) } }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
-vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
+vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: state.mobile }) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }), getCurrentIntlLocale: () => 'en-US' }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipContent: () => null }));
@@ -172,7 +176,7 @@ describe('Bot workbench', () => {
     root = createRoot(container);
     useBotNavigation.setState({ botId: null, entry: null, archived: undefined });
     useBotLayout.setState({ panelOpen: true, panelWidth: 360, tab: 'overview', seen: {}, activityScope: 'all', memoryScope: 'current', ordinarySidebar: null, sidebarOpen: false });
-    state.profileId = 'varin.bot';
+    state.profileId = 'varin.bot'; state.mobile = false;
     state.list.mockReset().mockResolvedValue([bot('a'), bot('b')]);
     state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` } }));
     state.primary.mockReset().mockResolvedValue({ ...bot('primary'), name: 'Varin' });
@@ -194,7 +198,9 @@ describe('Bot workbench', () => {
     state.openWork.mockReset().mockResolvedValue(undefined);
     state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {} });
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {},
+      mainSurfaceSelectionRevision: 0, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null,
+      isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false });
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -217,12 +223,77 @@ describe('Bot workbench', () => {
     const toggle = container.querySelector<HTMLButtonElement>('[aria-label="chat.tree.title"]')!;
     expect(toggle).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(true);
-    expect(container.querySelector(`[data-conversation-tree="${BOT_TREE_PANEL_SCOPE}"]`)).not.toBeNull();
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(true);
+    expect(container.querySelector(`[data-conversation-tree="${BOT_CONVERSATION_PANEL_SCOPE}"]`)).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(false);
     expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
     expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
+  });
+
+  it('opens Bot context in its visible panel without changing workbench layout or conversation selection', async () => {
+    useUIStore.getState().openContextPanelTab('', { mode: 'file' });
+    const ordinaryPanel = useUIStore.getState().contextPanelByDirectory[''];
+    await render();
+    const identity = useThreadStore.getState().selectedIdentity;
+    await click('Open context');
+    const panel = useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE];
+    expect(panel?.isOpen).toBe(true);
+    const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
+    expect(tab).toMatchObject({ mode: 'context', thread: { runtime: 'agent', threadId: 'entry-a', branchId: 'branch-a' }, readOnly: false });
+    expect(container.querySelector('[data-surface-modes]')?.getAttribute('data-surface-modes')?.split(',')).toContain('context');
+    expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
+    expect(useThreadStore.getState().selectedIdentity).toBe(identity);
+    await click('chat.tree.title');
+    const tree = useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE];
+    expect(tree?.tabs.find(tab => tab.id === tree.activeTabId)?.mode).toBe('tree');
+    await click('Open context');
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.activeTabId).toBe(tab?.id);
+    await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
+  });
+
+  it('opens the exact read-only Bot context in a mobile dialog without a workspace', async () => {
+    state.mobile = true;
+    state.sessions.mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, { archived: true }, true)]);
+    await render();
+    await click('Open context');
+    await settle();
+    const inspector = container.querySelector('[role="dialog"] [data-context-thread]');
+    expect(inspector?.getAttribute('data-context-thread')).toBe('entry-a');
+    expect(inspector?.getAttribute('data-context-branch')).toBe('branch-a');
+    expect(inspector?.getAttribute('data-context-readonly')).toBe('true');
+    expect(container.querySelector('[data-conversation-tree]')).toBeNull();
+    await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
+    expect(container.querySelector('[data-context-thread]')).toBeNull();
+  });
+
+  it('supplies the current archived Bot Thread when the desktop tree first opens the context surface', async () => {
+    state.sessions.mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, { archived: true }, true)]);
+    await render();
+    await click('chat.tree.title');
+    const panel = container.querySelector('[data-conversation-tree]');
+    expect(panel?.getAttribute('data-initial-context-thread')).toBe('entry-a');
+    expect(panel?.getAttribute('data-initial-context-branch')).toBe('branch-a');
+    expect(panel?.getAttribute('data-initial-context-readonly')).toBe('true');
+    expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  });
+
+  it('leaves the panel without a context owner while the Bot entry is unavailable', async () => {
+    state.ensure.mockRejectedValue(new Error('entry unavailable'));
+    useUIStore.getState().openContextPanelTab(BOT_CONVERSATION_PANEL_SCOPE, { mode: 'tree' });
+    await render();
+    expect(container.querySelector('[data-conversation-tree]')?.hasAttribute('data-initial-context-thread')).toBe(false);
+    expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  });
+
+  it('does not open the ordinary Thread from an ownerless saved mobile context tab', async () => {
+    state.mobile = true;
+    useUIStore.getState().openContextPanelTab(BOT_CONVERSATION_PANEL_SCOPE, { mode: 'context' });
+    await render();
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('contextSidebar.empty.openSession');
+    expect(container.querySelector('[data-context-thread]')).toBeNull();
   });
 
   it('keeps a staged candidate inert and leaves the ordinary conversation hidden', async () => {
@@ -307,6 +378,97 @@ describe('Bot workbench', () => {
     expect(container.textContent).not.toContain('New thread');
     expect([...container.querySelectorAll('[data-sidebar-row]')].map(row => row.getAttribute('data-sidebar-row'))).toContain('session:thread:bot:a:fresh:branch:bot:a:fresh');
   });
+
+  it('reveals the selected session or Bot from the schedule page, including repeated selection', async () => {
+    const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip planning' });
+    state.sessions.mockImplementation(async (id: string) => id === 'a'
+      ? [sessionOf('a', 'entry-a', 'branch-a', {}, true), trip]
+      : [sessionOf(id, `entry-${id}`, `branch-${id}`, {}, true)]);
+    await render();
+    const ordinary = useThreadStore.getState().selectedIdentity;
+    for (const target of ['Trip planning', 'Trip planning', 'Bot b', 'Bot a']) {
+      await act(async () => useUIStore.getState().openArrangements(bot('a').entry, 'arrangement'));
+      await click(target);
+      await settle();
+      expect(useUIStore.getState().isScheduledTasksDialogOpen, target).toBe(false);
+      expect(useUIStore.getState().scheduledTasksFocus).toBeNull();
+      expect(useThreadStore.getState().selectedIdentity).toBe(ordinary);
+    }
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+  });
+
+  it('retains the current conversation and schedule page when another Bot cannot open', async () => {
+    await render();
+    const previous = useBotNavigation.getState().entry;
+    state.ensure.mockImplementation(async (id: string) => {
+      if (id === 'b') throw new Error('Bot unavailable');
+      return { bot: bot(id), entry: bot(id).entry, model: null };
+    });
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await click('Bot b');
+    await settle();
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    expect(useBotNavigation.getState().entry).toBe(previous);
+    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
+  });
+
+  it('does not dismiss a newer schedule page when restoring the initial Bot entry finishes', async () => {
+    let finish!: (value: BotEntryResult) => void;
+    state.ensure.mockReturnValue(new Promise<BotEntryResult>(resolve => { finish = resolve; }));
+    await render();
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await act(async () => finish({ bot: bot('a'), entry: bot('a').entry, model: null }));
+    await settle();
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+  });
+
+  it('discards a pending Bot switch after the user reselects the current conversation', async () => {
+    await render();
+    let finish!: (value: BotEntryResult) => void;
+    state.ensure.mockImplementation(async (id: string) => id === 'b'
+      ? new Promise<BotEntryResult>(resolve => { finish = resolve; })
+      : { bot: bot(id), entry: bot(id).entry, model: null });
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await click('Bot b');
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    const current = container.querySelector<HTMLButtonElement>('[data-sidebar-row="session:entry-a:branch-a"]');
+    expect(current).not.toBeNull();
+    await act(async () => current!.click());
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(false);
+    await act(async () => finish({ bot: bot('b'), entry: bot('b').entry, model: null }));
+    await settle();
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+  });
+
+  it.each(['schedule', 'archive', 'worktrees', 'multi-run', 'same-schedule'] as const)(
+    'retains a newer %s page when a previously requested Bot lookup completes', async surface => {
+      await render();
+      if (surface === 'same-schedule') await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+      let finish!: (value: BotEntryResult) => void;
+      state.ensure.mockImplementation(async (id: string) => id === 'b'
+        ? new Promise<BotEntryResult>(resolve => { finish = resolve; })
+        : { bot: bot(id), entry: bot(id).entry, model: null });
+      await click('Bot b');
+      await act(async () => {
+        const ui = useUIStore.getState();
+        if (surface === 'archive') ui.setArchivePageOpen(true);
+        else if (surface === 'worktrees') ui.setWorktreesPageProjectId('project');
+        else if (surface === 'multi-run') ui.openMultiRunLauncherWithPrompt('New work');
+        else ui.setScheduledTasksDialogOpen(true);
+      });
+      const chosen = useUIStore.getState();
+      await act(async () => finish({ bot: bot('b'), entry: bot('b').entry, model: null }));
+      await settle();
+      expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+      expect(useUIStore.getState()).toMatchObject({
+        isScheduledTasksDialogOpen: chosen.isScheduledTasksDialogOpen,
+        isArchivePageOpen: chosen.isArchivePageOpen,
+        worktreesPageProjectId: chosen.worktreesPageProjectId,
+        isMultiRunLauncherOpen: chosen.isMultiRunLauncherOpen,
+      });
+    },
+  );
 
   it('renames and pins the right-clicked session without selecting it or changing the Bot profile', async () => {
     const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip planning', title_mode: 'manual' });

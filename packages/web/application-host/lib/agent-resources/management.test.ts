@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDocumentAuthority } from '../documents/authority.js';
+import { createDocumentAuthority, type DocumentAuthorityOptions } from '../documents/authority.js';
+import { createDocumentRootGuard } from '../documents/allowed-roots.js';
+import { createResourceFilesOwner } from '../workspace/resource-files.js';
 import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
 import { AgentSettingsService } from '../models/settings.js';
 import { createResourceManagement } from './management.js';
@@ -15,16 +17,18 @@ afterEach(async () => {
   finally { releaseCodec(); }
 });
 const skill = (name: string, body = 'Use the native owner.') => `---\nname: ${name}\ndescription: A useful skill\n---\n${body}\n`;
-async function fixture() {
+async function fixture(lockdown = false, authorityOptions: Partial<DocumentAuthorityOptions> = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'native-resource-management-')));
   cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
   const data = path.join(root, 'data'), project = path.join(root, 'project'), userAgents = path.join(root, 'home', '.agents');
   await fs.mkdir(data); await fs.mkdir(project); await fs.mkdir(userAgents, { recursive: true });
   let trusted = true;
   const settings = new AgentSettingsService(data, cwd => trusted && cwd === project);
-  const documents = createDocumentAuthority({ hostId: '11111111-1111-4111-8111-111111111111', dataDir: data, isAllowedRoot: async candidate => candidate === root || candidate.startsWith(`${root}${path.sep}`) });
+  const guard = createDocumentRootGuard({ fsPromises: fs, pathModule: path, workspace: { root: project, lockdown } });
+  const documents = createDocumentAuthority({ hostId: '11111111-1111-4111-8111-111111111111', dataDir: data, isAllowedRoot: guard, isTrusted: guard, ...authorityOptions });
   cleanups.push(() => documents.dispose());
-  const owner = createResourceManagement({ dataDirectory: data, settings, documents, userAgentsDirectory: userAgents, resolveProjectRoot: id => id === 'project-1' ? project : null });
+  const access = lockdown ? await documents.createResourceAccess([data, userAgents]) : documents;
+  const owner = createResourceManagement({ dataDirectory: data, settings, documents: access, userAgentsDirectory: userAgents, resolveProjectRoot: id => id === 'project-1' ? project : null });
   return { root, data, project, userAgents, settings, documents, owner, setTrusted(value: boolean) { trusted = value; } };
 }
 
@@ -209,4 +213,84 @@ it('rechecks original project trust after document observation and before dispat
   await expect(owner.update(target, { id: created.descriptor.id, content: 'never saved', expectedRevision: created.revision, key: 'revoked-update' })).rejects.toMatchObject({ status: 403, code: 'project-trust-revoked' });
   expect(write).not.toHaveBeenCalled();
   expect(await fs.readFile(created.descriptor.filePath, 'utf8')).toBe(skill('revoked'));
+});
+
+
+it('keeps global resource editing available across split deployment roots without granting generic file access', async () => {
+  const { owner, documents, data, project, userAgents, root } = await fixture(true);
+  expect((await owner.prompt({})).original.preamble).toContain('You are Varin');
+  expect((await owner.list({})).resources).toEqual([]);
+  // The first write must create resources/skills through the existing document owner.
+  const created = await owner.create({}, { scope: 'user', name: 'docker', content: skill('docker'), key: 'docker-create' });
+  const listed = await owner.list({});
+  expect(listed.resources).toMatchObject([{ id: created.descriptor.id, name: 'docker', active: true }]);
+  const read = await owner.read({}, created.descriptor.id);
+  const updated = await owner.update({}, { id: read.descriptor.id, expectedRevision: read.revision, content: skill('docker', 'Updated.'), key: 'docker-save' });
+  await expect(owner.update({}, { id: read.descriptor.id, expectedRevision: read.revision, content: 'Stale', key: 'docker-stale' })).rejects.toMatchObject({ code: 'resource-conflict' });
+  const projectSkill = await owner.create({ projectId: 'project-1' }, { scope: 'project', name: 'local', content: skill('local'), key: 'local-create' });
+  expect(projectSkill.descriptor.filePath).toBe(path.join(project, '.varin', 'resources', 'skills', 'local', 'SKILL.md'));
+  const agentSkill = path.join(userAgents, 'skills', 'home', 'SKILL.md');
+  await fs.mkdir(path.dirname(agentSkill), { recursive: true }); await fs.writeFile(agentSkill, skill('home'));
+  expect((await owner.list({})).resources.map(resource => resource.name).sort()).toEqual(['docker', 'home']);
+
+  await fs.writeFile(path.join(data, 'private.txt'), 'Not a resource');
+  const mapping = (await documents.findExactResourceRoot(data, 'directory'))!;
+  expect(mapping).not.toBeNull();
+  // Knowing the private mapping does not turn it into a public Documents capability.
+  await expect(documents.resolveWorkspace({ workspaceId: mapping.workspaceId })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(documents.resolveWorkspace({ path: data })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(documents.read({ workspaceId: mapping.workspaceId, resourceId: 'private.txt' })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(documents.write({ resource: { workspaceId: mapping.workspaceId, resourceId: 'private.txt' }, content: 'Forbidden',
+    encoding: 'utf-8', bom: false, expectedRevision: null, token: { workspaceId: mapping.workspaceId, epoch: 0, owner: { kind: 'test', id: 'public-write' } } })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(documents.read({ workspaceId: mapping.workspaceId, resourceId: 'resources/skills/docker/SKILL.md' })).rejects.toMatchObject({ statusCode: 403 });
+  const files = createResourceFilesOwner(documents, {} as never);
+  await expect(files.request({ command: { kind: 'open', path: data } })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(files.request({ root: data, workspaceId: mapping.workspaceId, command: { kind: 'bytes', path: 'private.txt', offset: 0 } })).rejects.toMatchObject({ statusCode: 403 });
+  // An in-progress private request does not change another request's admission.
+  const [privateRead, publicRead] = await Promise.allSettled([
+    owner.read({}, created.descriptor.id),
+    documents.read({ workspaceId: mapping.workspaceId, resourceId: 'private.txt' }),
+  ]);
+  expect(privateRead.status).toBe('fulfilled'); expect(publicRead.status).toBe('rejected');
+  await expect(documents.ensureResourceRoot(root, 'directory')).rejects.toMatchObject({ statusCode: 403 });
+  expect(await owner.remove({}, { id: created.descriptor.id, expectedRevision: updated.revision, key: 'docker-delete' })).toEqual({ removed: true });
+  await expect(owner.read({}, 'skill:../../private.txt')).rejects.toMatchObject({ code: 'resource-missing' });
+  await expect(owner.read({ path: data } as never, created.descriptor.id)).rejects.toMatchObject({ code: 'resource-invalid' });
+  await expect(owner.update({}, { id: created.descriptor.id, expectedRevision: updated.revision, content: 'Overwrite', key: 'forged-address',
+    resource: { workspaceId: mapping.workspaceId, resourceId: 'private.txt' } } as never)).rejects.toMatchObject({ code: 'resource-invalid' });
+  await expect(owner.create({}, { scope: 'user', name: '../private.txt', content: 'Overwrite', key: 'forged-path' })).rejects.toMatchObject({ code: 'resource-invalid' });
+  expect(await fs.readFile(path.join(data, 'private.txt'), 'utf8')).toBe('Not a resource');
+});
+
+it('does not admit configured resources or symlink targets outside the private resource domains', async () => {
+  const { owner, data, root } = await fixture(true);
+  const outside = path.join(root, 'outside'); await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'SKILL.md'), skill('outside'));
+  await fs.mkdir(path.join(data, 'resources', 'skills'), { recursive: true });
+  await fs.symlink(outside, path.join(data, 'resources', 'skills', 'link'));
+  await fs.writeFile(path.join(data, 'agent-settings.json'), JSON.stringify({ resources: { skills: [outside] } }));
+  const view = await owner.list({});
+  expect(view.resources).toEqual([]);
+  expect(view.diagnostics.some(item => item.message.includes('deployment boundary'))).toBe(true);
+});
+
+
+it('does not transfer the private resource capability into mutation observers', async () => {
+  let observe: () => void = () => {};
+  const { owner, documents, data } = await fixture(true, { onMutation: () => observe() });
+  await fs.writeFile(path.join(data, 'private.txt'), 'Not observer authority');
+  const outcomes: Promise<PromiseSettledResult<unknown>[]>[] = [];
+  observe = () => {
+    outcomes.push(Promise.allSettled([
+      documents.resolveWorkspace({ path: data }),
+      // Detached notification work must not inherit the editor's in-flight admission.
+      Promise.resolve().then(() => documents.resolveWorkspace({ path: data })),
+    ]));
+  };
+  await owner.create({}, { scope: 'user', name: 'observed', content: skill('observed'), key: 'observed-create' });
+  expect(outcomes).toHaveLength(1);
+  for (const result of (await Promise.all(outcomes)).flat()) {
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') expect(result.reason).toMatchObject({ statusCode: 403 });
+  }
 });

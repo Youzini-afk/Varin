@@ -342,6 +342,10 @@ A Workbench Profile switch plays the lattice wave (`components/ui/WorkbenchLatti
 
 Repeated pending choices for the same Profile, workspace, Host generation and navigation callbacks share one preparation, commit and scene. A different navigation intent still supersedes the old request. After the candidate settles, the coordinator releases its own cover even if restoring conversation focus throws. Removing the last scene host settles every unfinished phase and releases its waiters; same-commit effect re-registration retains the current scene. Returning from recovery therefore starts from the authoritative Profile without replaying an abandoned transition.
 
+Explicit successful conversation navigation closes full-page surfaces even when the conversation is
+already selected. Background Bot entry restoration does not navigate or dismiss the current page;
+failed or superseded Bot entry selection retains the previous target and page.
+
 Prepared Shells pass their inactive context into conversation rendering and shared layout effects. Empty-chat initialization creates only a local draft after promotion; it does not call user navigation or select a Profile. Otherwise a staged Agent Shell can observe the still-authoritative Bot Profile, request another switch, cancel its own preparation and repeat indefinitely. Window titles start with `Varin` and use registered project labels, preserving their spelling; execution-directory basenames are not project names, and Bot presentation omits the project label.
 
 Transitions share the motion tokens. Tailwind's defaults are bound to them in `styles/design-system.css`: a bare `transition-*` fades for 160ms on the base out-curve, `ease-out` / `ease-in` are the arrival and exit curves, and `ease-glide` / `ease-snap` / `ease-settle` pair with `duration-(--motion-dur-*)`. Expanding heights and progress use glide, chevrons and press feedback use snap, and only arrivals settle with overshoot. Older CSS reads `--wb-ease` / `--wb-state-duration`, which alias the base curve and the fade. Write the properties that change rather than `transition-all`.
@@ -441,6 +445,16 @@ Opening a new conversation creates only a local composer. Its first explicit sen
 prepares the selected source and uploads staged PDFs. The composer keeps its key across that transition,
 so editor attachments and message handoff stay attached. Creation and uncertain submission retries reuse
 their original keys. Source Host discovery is available before creation and grants no file access.
+
+`useThreadModelSelection` separates the active Run's desired model from its actual sampling model
+and the next-input draft. The picker projects the Run directly while active. Semantic Run/default
+transitions update the complete draft model atomically, including temperature; consumed transitions
+remain with the in-memory draft so repeated snapshots and reopening do not overwrite later idle edits.
+Bot defaults are explicit changes, while an unconfigured Bot captures the workbench selection on entry
+and seeds only an empty draft after the catalog arrives. An omitted preference can inherit the last Run
+or ordinary settings; explicit `null` means no configured selection. Catalog thinking-level changes
+normalize idle choices without selecting another model. Active changes still use `selectModel`, and
+queued input keeps its original model-free contract. These observations never rewrite accepted Runs.
 
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.

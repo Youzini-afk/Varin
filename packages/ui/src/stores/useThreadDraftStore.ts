@@ -94,7 +94,13 @@ export interface ThreadDraft {
   text: string;
   images: import('@/lib/images/annotations').EditableImageAttachment[];
   materials: ThreadMaterialAttachment[];
+  /** Next-input selection. The active picker reads the Run, not this draft. */
   model?: ThreadModel;
+  /** Consumed model transitions survive closing/reopening this in-memory draft. */
+  modelObservation?: {
+    preference?: { inheritWorkbench: boolean; model: ThreadModel | null };
+    run?: { id: string; active: boolean; model: ThreadModel };
+  };
   workFocus?: import('@varin/protocol').WorkFocusId;
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;
@@ -116,6 +122,10 @@ export interface ThreadDraft {
     sending?: boolean;
   };
 }
+export function sameThreadModel(left: ThreadModel | null | undefined, right: ThreadModel | null | undefined): boolean {
+  return left === right || Boolean(left && right && left.providerId === right.providerId && left.modelId === right.modelId
+    && left.thinkingLevel === right.thinkingLevel && Object.is(left.temperature, right.temperature));
+}
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */
 export const useThreadDraftStore = create<{
@@ -134,10 +144,13 @@ export const useThreadDraftStore = create<{
       while (to > from && end > from && draft.text[to - 1] === change.text[end - 1]) { to--; end--; }
       next.interactions = mapInteractionRanges(draft.interactions, ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length));
     }
-    if (change.images) {
+    if (change.images?.some(image => image.reference === undefined)) {
       let reference = Math.max(0, ...(next.files ?? []).map(file => file.imageReference ?? 0), ...change.images.map(image => image.reference ?? 0));
       next.images = change.images.map(image => image.reference === undefined ? { ...image, reference: ++reference } : image);
     }
+    if (sameThreadModel(draft.model, next.model)) next.model = draft.model;
+    // Empty/unchanged updates are observations, not new draft generations.
+    if (state.drafts[key] && Object.keys(next).every(key => Object.is(draft[key as keyof ThreadDraft], next[key as keyof ThreadDraft]))) return state;
     return { drafts: { ...state.drafts, [key]: next } };
   }),
   remove: key => set(state => { const drafts = { ...state.drafts }; delete drafts[key]; return { drafts }; }),

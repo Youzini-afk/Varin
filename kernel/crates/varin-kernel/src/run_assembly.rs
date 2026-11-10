@@ -470,6 +470,12 @@ impl RunAssembly {
                 .selection
                 .tools;
             declarations.retain(|declaration| admitted.contains(&declaration.schema));
+        } else if let Some(launch) = &saved_launch {
+            // Admission owns the names. New rounds can refresh those declarations,
+            // but binding must not add capabilities omitted by the original selection.
+            declarations.retain(|declaration| {
+                launch.selection.tools.iter().any(|tool| tool.name == declaration.schema.name)
+            });
         }
         if !host_authority && !is_context_job { declarations.clear(); }
         if !host_authority && p.mcp_binding.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host MCP servers".into())); }

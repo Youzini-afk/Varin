@@ -8,7 +8,10 @@ struct Fixture {
     reference: Value,
 }
 impl Fixture {
-    fn v89() -> Self {
+    fn v89() -> Self { Self::at_version(89) }
+    fn v90() -> Self { Self::at_version(90) }
+    fn at_version(version: i64) -> Self {
+        assert!(matches!(version, 89 | 90));
         let root = std::env::temp_dir().join(format!("varin-usage-recovery-{}", Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
         catalog.create_thread("thread", "main").unwrap();
@@ -25,7 +28,7 @@ impl Fixture {
                 [encode(&run).unwrap()],
             )
             .unwrap();
-        // Seed the unchanged v89 layout with its historical wire receipts, not a new
+        // Seed the unchanged v89/v90 accounting layout with its historical wire receipts, not a new
         // execution that already contains the repaired provider normalization.
         let mut effect = operation(
             "effect",
@@ -42,7 +45,7 @@ impl Fixture {
             )
             .unwrap();
         catalog.db.execute("INSERT INTO commands(id,intent,receipt) VALUES('original-command','original intent','original receipt')", []).unwrap();
-        catalog.db.pragma_update(None, "user_version", 89).unwrap();
+        catalog.db.pragma_update(None, "user_version", version).unwrap();
         drop(catalog);
         Self { root, reference }
     }
@@ -174,7 +177,15 @@ fn count(db: &Connection, sql: &str) -> i64 {
 
 #[test]
 fn responses_cache_write_upgrade_reopens_v89_and_preserves_original_accounting() {
-    let fixture = Fixture::v89();
+    assert_recovers_original_accounting(Fixture::v89());
+}
+
+#[test]
+fn responses_cache_write_upgrade_reopens_v90_and_preserves_original_accounting() {
+    assert_recovers_original_accounting(Fixture::v90());
+}
+
+fn assert_recovers_original_accounting(fixture: Fixture) {
     let mut expected = Vec::new();
     for (id, family, writes) in [
         ("responses", "openai-responses", 200),
@@ -435,12 +446,21 @@ fn responses_cache_write_upgrade_requires_exact_evidence_and_preserves_known_cou
 
 #[test]
 fn responses_cache_write_upgrade_rolls_back_with_format_and_retries_without_replaying_effects() {
-    let fixture = Fixture::v89();
+    assert_atomic_recovery(Fixture::v89());
+}
+
+#[test]
+fn responses_cache_write_v90_upgrade_rolls_back_without_replaying_effects() {
+    assert_atomic_recovery(Fixture::v90());
+}
+
+fn assert_atomic_recovery(fixture: Fixture) {
     let step = fixture.step("request", "openai-responses", json!(200));
     let planning = fixture.planning("planning", "openai-responses", json!(300));
     fixture.insert("model_steps", "request", &step, true);
     fixture.insert("operations", "planning", &planning, true);
     let raw = fixture.raw();
+    let original_format = count(&raw, "PRAGMA user_version");
     let epoch = count(&raw, "SELECT epoch FROM runtime_meta");
     let identities = ledger_identity(&raw);
     let effect = body(&raw, "operations", "effect");
@@ -453,14 +473,14 @@ fn responses_cache_write_upgrade_rolls_back_with_format_and_retries_without_repl
     assert!(matches!(
         error,
         RuntimeError::Upgrade {
-            from: 89,
+            from,
             to: FORMAT,
             ..
-        }
+        } if from == original_format
     ));
     assert!(error.to_string().contains("fixture cache upgrade failure"));
     let raw = fixture.raw();
-    assert_eq!(count(&raw, "PRAGMA user_version"), 89);
+    assert_eq!(count(&raw, "PRAGMA user_version"), original_format);
     assert_eq!(count(&raw, "SELECT epoch FROM runtime_meta"), epoch);
     assert_eq!(body(&raw, "model_steps", "request"), step);
     assert_eq!(body(&raw, "operations", "planning"), planning);
