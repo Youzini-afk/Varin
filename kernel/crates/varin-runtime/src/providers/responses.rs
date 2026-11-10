@@ -380,7 +380,11 @@ impl StreamState {
                                 output_tokens: usage["output_tokens"].as_u64(),
                                 cached_input_tokens: usage["input_tokens_details"]["cached_tokens"]
                                     .as_u64(),
-                                cache_write_tokens: None,
+                                // Newer Responses models bill cache writes separately. An
+                                // omitted/invalid count on older or compatible endpoints stays
+                                // unknown; it is not evidence that no cache write occurred.
+                                cache_write_tokens: usage["input_tokens_details"]["cache_write_tokens"]
+                                    .as_u64(),
                                 reasoning_tokens: usage["output_tokens_details"]
                                     ["reasoning_tokens"]
                                     .as_u64(),

@@ -2,6 +2,7 @@ use super::*;
 mod stream_contracts;
 mod signed_chat;
 mod request_options;
+mod responses_usage;
 
 #[test]
 fn context_display_uses_protocol_cache_accounting() {
