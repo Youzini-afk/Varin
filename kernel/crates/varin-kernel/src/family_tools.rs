@@ -394,11 +394,18 @@ impl FamilyTools {
         // item/anchor and cursor fields. They cannot consume a ref-only recipe.
         if schema.schema["properties"].get("ref").is_none() { return Ok(()); }
         if call.name == family::THREADS_TOOL {
+            // A directory can be selected without a history reader. Discovery does
+            // not grant that reader, and an older frozen reader has no overview query.
+            let overview_reader = tools.iter().any(|tool| tool.name == family::READ_TOOL
+                && tool.schema["properties"]["query"]["oneOf"].as_array().is_some_and(|variants|
+                    variants.iter().any(|variant| variant["properties"]["kind"]["const"] == "overview")));
             if let Some(members) = page["members"].as_array_mut() {
                 for member in members {
                     *member = json!({"agentId":member["agentId"],"name":member["name"],"description":member["name"],
-                        "state":member["state"],"current":member["current"],"updatedAtMs":member["updatedAtMs"],
-                        "nextRead":{"tool":family::READ_TOOL,"arguments":{"threadId":member["agentId"],"query":{"kind":"overview"}}}});
+                        "state":member["state"],"current":member["current"],"updatedAtMs":member["updatedAtMs"]});
+                    if overview_reader {
+                        member["nextRead"] = json!({"tool":family::READ_TOOL,"arguments":{"threadId":member["agentId"],"query":{"kind":"overview"}}});
+                    }
                 }
             }
             if page["nextCursor"].is_string() {
@@ -435,9 +442,14 @@ impl FamilyTools {
                     if let Some(id) = id {
                         let reference = self.catalog.lock().map_err(error)?.execution_reference(&id).map_err(error)?;
                         execution["ref"] = json!(reference.reference);
-                        execution["nextRead"] = if execution["executionId"].is_string() && !execution["report"].is_null() {
-                            json!({"tool":"child_report","arguments":{"target":reference.reference}})
-                        } else {json!({"tool":family::READ_TOOL,"arguments":{"threadId":reference.reference,"query":{"kind":"recent","limit":20}}})};
+                        // Family access includes peers which are not this caller's
+                        // delegated children. Continue with the admitted family reader,
+                        // not child_report's separate capability/requester authority.
+                        // A preparation-only execution has no original Run to read;
+                        // explicit null also prevents status projection adding a route.
+                        execution["nextRead"] = if execution["runId"].is_string() {
+                            json!({"tool":family::READ_TOOL,"arguments":{"threadId":reference.reference,"query":{"kind":"recent","limit":20}}})
+                        } else {Value::Null};
                     }
                     if let Some(object) = execution.as_object_mut() { object.remove("executionId");object.remove("runId");object.remove("branchId"); }
                 }

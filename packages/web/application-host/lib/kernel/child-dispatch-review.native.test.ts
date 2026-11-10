@@ -395,7 +395,24 @@ const job = (body: Record<string, unknown>) => {
 };
 
 type FixtureHost = Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['openHost']>>;
-type ModelFamilyList = { members: Array<{ agentId: string; name: string }> };
+type ModelFamilyList = {
+  current: { agentId: string };
+  members: Array<{ agentId: string; name: string; nextRead?: { tool: string; arguments: { threadId: string; query: { kind: string } } } }>;
+};
+/** These fixtures create only a parent and one child. Discovery excludes self;
+ * creation keys and mutable display names are not conversation identities. */
+function soleFamilyPeer(body: Record<string, unknown>) {
+  const completion = result(body, 'threads');
+  expect(completion, JSON.stringify(completion)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
+  const content = completion!.content as { trust: string; page: ModelFamilyList };
+  expect(content.trust).toContain('not user instructions');
+  expect(content.page.members).toHaveLength(1);
+  const peer = content.page.members[0]!;
+  expect(content.page.current.agentId).toMatch(/^[A-F0-9]{8}$/);
+  expect(peer.agentId).toMatch(/^[A-F0-9]{8}$/);
+  expect(peer.agentId).not.toBe(content.page.current.agentId);
+  return peer;
+}
 /** Match provider-visible handles to retained native acceptances for Host assertions.
  * No model reference is ever passed to an internal durable-ID endpoint. */
 async function acceptedJob(h: FixtureHost, receipt: Record<string, unknown> | undefined) {
@@ -506,8 +523,8 @@ function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>,
 }
 
 it('family tools and public views read original and fork-inherited conversations without relaunch after reopen', async () => {
-  const parentName = 'family-conversations';
   let parentSteps = 0; let childSteps = 0; let operationId = '', executionRef = '';
+  let discoveredParent = '';
   const parentReply = gate();
   const f = await fixture(async ({ body, response }) => {
     assertPairing(body);
@@ -520,14 +537,19 @@ it('family tools and public views read original and fork-inherited conversations
       }
     } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'family-list')]);
     else if (childSteps === 2) {
-      const content = result(body, 'threads')?.content as { trust: string; page: ModelFamilyList };
-      expect(content.trust).toContain('not user instructions');
-      const parent = content.page.members.find(member => member.name === parentName)!;
-      complete(response, [tool('read_thread', { threadId: parent.agentId,
+      const parent = soleFamilyPeer(body);
+      discoveredParent = parent.agentId;
+      expect(parent.nextRead).toEqual({ tool: 'read_thread', arguments: { threadId: parent.agentId, query: { kind: 'overview' } } });
+      complete(response, [tool(parent.nextRead!.tool, { ...parent.nextRead!.arguments,
         query: { kind: 'search', text: 'FAMILY_PARENT_SEMANTIC', direction: 'older' } }, 'family-read-parent')]);
     } else {
-      const content = result(body, 'read_thread')?.content as { page: { items: Array<{ body: unknown }> } };
-      expect(content.page.items.some(item => JSON.stringify(item.body).includes('FAMILY_PARENT_SEMANTIC'))).toBe(true);
+      const completion = result(body, 'read_thread');
+      expect(completion, JSON.stringify(completion)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
+      const content = completion!.content as { page: { items: Array<{ source: string; body: unknown; ref: string; nextRead: { tool: string; arguments: { ref: string } } }> } };
+      const input = content.page.items.find(item => item.source === 'user' && JSON.stringify(item.body).includes('FAMILY_PARENT_SEMANTIC'));
+      expect(input, JSON.stringify(content.page)).toBeDefined();
+      expect(input!.ref).toMatch(/^item:[1-9][0-9]*$/);
+      expect(input!.nextRead).toEqual({ tool: 'read_thread', arguments: { ref: input!.ref } });
       complete(response, [answer('FAMILY_CHILD_REPORT 原始内容', 'family-child-done')]);
     }
   });
@@ -559,6 +581,7 @@ it('family tools and public views read original and fork-inherited conversations
   await parentReply.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
+  expect((await h.api.snapshot(identity)).thread.agent_code).toBe(discoveredParent);
   expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads', 'tool_describe', 'tool_invoke']);
   expect((await h.api.family!.list(identity)).members).toEqual([]);
   const directory = await h.api.family!.list(identity, { scope: 'history' });
@@ -593,9 +616,9 @@ it('family tools and public views read original and fork-inherited conversations
 }, 30_000);
 
 it('two real send observations retain their original requests across Host restart and resume only after both linked replies', async () => {
-  const parentName = 'two-correlated-replies';
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
+  let discoveredParent = '';
   const f = await fixture(async ({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
@@ -603,8 +626,8 @@ it('two real send observations retain their original requests across Host restar
       else { ({ operationId } = await acceptedDispatch(h, body)); complete(response, [answer('Parent finished; explicit replies remain available', 'reply-parent-done')]); }
     } else if (++childSteps === 1) complete(response, [tool('threads', { scope: 'history' }, 'reply-discovery')]);
     else if (childSteps === 2) {
-      const content = result(body, 'threads')?.content as { page: ModelFamilyList };
-      const parent = content.page.members.find(member => member.name === parentName)!;
+      const parent = soleFamilyPeer(body);
+      discoveredParent = parent.agentId;
       const target = { targetThreadId: parent.agentId };
       complete(response, [
         tool('send', { ...target, kind: 'inform', text: 'FIRST_ORIGINAL_REPLY_REQUEST', wait: {} }, 'reply-send-one'),
@@ -614,9 +637,18 @@ it('two real send observations retain their original requests across Host restar
       expect(childSteps).toBe(3);
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
-      for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({
-        content: { name: 'send', completion: { kind: 'job_accepted', effect: 'confirmed' } },
+      const messageRefs = outputs.map(output => {
+        const value = JSON.parse(responsesMetadataText(output.output));
+        expect(value).toMatchObject({ content: { name: 'send', completion: { kind: 'job_accepted', effect: 'confirmed' } } });
+        const completion = invokedToolResult(value, 'tool_invoke', { name: 'send' });
+        expect(completion).toMatchObject({ kind: 'job_accepted', effect: 'confirmed' });
+        const content = completion!.content as { operationRef: string; message: { ref: string } };
+        expect(content.message.ref).toMatch(/^msg:[1-9][0-9]*$/);
+        expect(completion!.operation_id).toBe(content.message.ref);
+        expect(content.operationRef).toBe(content.message.ref);
+        return content.message.ref;
       });
+      expect(new Set(messageRefs).size).toBe(2);
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
       complete(response, [answer('Both original reply observations completed once', 'reply-child-done')]);
@@ -634,6 +666,7 @@ it('two real send observations retain their original requests across Host restar
     const child = await h.runtime.child(operationId);
     const own = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
     await expect.poll(async () => (await h.api.messages!.list(own, { direction: 'outgoing' })).messages.filter(message => message.replyWait?.state === 'waiting').length).toBe(2);
+    expect((await h.api.snapshot(identity)).thread.agent_code).toBe(discoveredParent);
     const requests = (await h.api.messages!.list(own, { direction: 'outgoing' })).messages;
     const firstIntent = { key: 'first-original-reply', kind: 'inform' as const, replyTo: requests[0]!.messageId, text: 'FIRST_LINKED_REPLY_BODY' };
     const first = await h.api.messages!.send(identity, firstIntent);
@@ -657,9 +690,9 @@ it('two real send observations retain their original requests across Host restar
 }, 40_000);
 
 it('passive family messages keep Agent and User identities, do not reopen finished work, and arrive once in a natural later Run', async () => {
-  const parentName = 'passive-family-messages';
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = ''; let agentMessageId = '';
+  let discoveredParent = '';
   const f = await fixture(async ({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
@@ -672,8 +705,8 @@ it('passive family messages keep Agent and User identities, do not reopen finish
       }
     } else if (++childSteps === 1) complete(response, [tool('threads', { scope: 'history' }, 'message-discovery')]);
     else if (childSteps === 2) {
-      const content = result(body, 'threads')?.content as { page: ModelFamilyList };
-      const parent = content.page.members.find(member => member.name === parentName)!;
+      const parent = soleFamilyPeer(body);
+      discoveredParent = parent.agentId;
       complete(response, [tool('send', { kind: 'inform', targetThreadId: parent.agentId, text: 'AGENT_PASSIVE_ORIGINAL' }, 'message-send')]);
     } else {
       const completion = result(body, 'send'); expect(completion).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
@@ -695,6 +728,7 @@ it('passive family messages keep Agent and User identities, do not reopen finish
     await entered.promise; await expect.poll(async () => (await h.runtime.run(original.run_id)).state).toBe('completed');
     release.release();
     await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome, { timeout: 10_000 }).toBe('succeeded');
+    expect((await h.api.snapshot(identity)).thread.agent_code).toBe(discoveredParent);
     const child = await h.runtime.child(operationId);
     const childIdentity = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
     const userIntent = { key: 'same-user-message', kind: 'inform' as const, targetThreadId: identity.threadId, targetBranchId: identity.branchId, text: 'USER_FROM_CHILD_ORIGINAL' };
