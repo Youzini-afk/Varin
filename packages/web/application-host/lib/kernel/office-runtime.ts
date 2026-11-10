@@ -1,3 +1,4 @@
+import { isModelReference, object } from './model-references.js';
 import { OFFICE_CAPABILITY, OFFICE_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
@@ -22,8 +23,8 @@ import { createToolFamilySettings } from './tool-family-settings.js';
 export { OFFICE_CAPABILITY };
 type WriteInput = { path: string } & (
   | { action: 'create'; content: OfficeCreateContent }
-  | { action: 'replace'; expectedRevision: string; content: OfficeCreateContent }
-  | { action: 'edit'; expectedRevision: string; edits: OfficeEdit[] }
+  | { action: 'replace'; expectedRevision?: string; content: OfficeCreateContent }
+  | { action: 'edit'; expectedRevision?: string; edits: OfficeEdit[] }
 );
 const receipt = (data: unknown, result?: BinaryFileWriteResult): ToolExecutionReceipt => ({
   executor_stopped: result?.executorStopped ?? true,
@@ -60,16 +61,26 @@ export function createOfficeRuntime(options: {
         if (method === 'write') {
           const request = input as unknown as WriteInput;
           let bytes: Buffer, changes: { changedParts?: string[]; requiresRecalculation?: boolean } = {};
+          const originalPath = object(invocation.arguments) ? invocation.arguments.path : undefined;
+          if (request.action === 'create' && isModelReference(originalPath,'file')) throw new Error('Create requires a new output path, not an existing file observation');
+          if (request.action === 'replace' && isModelReference(originalPath,'file')) {
+            const original = new OfficePackage((await sources.readRef!(originalPath,call.signal)).source);
+            if (request.expectedRevision !== undefined && request.expectedRevision !== original.revision) throw new Error('The replacement revision conflicts with its original file observation');
+            request.expectedRevision = original.revision;
+          }
+          if (request.action === 'replace' && !request.expectedRevision) throw new Error('Replacing a path requires expectedRevision from its original read, or a file observation ref');
           if (request.action === 'edit') {
-            const source = await sources.readPath!(request.path, call.signal);
+            if (!request.expectedRevision && !isModelReference(originalPath,'file')) throw new Error('Editing a path requires expectedRevision from its original read, or a file observation ref');
+            const source = isModelReference(originalPath,'file') ? await sources.readRef!(originalPath,call.signal) : await sources.readPath!(request.path, call.signal);
             const document = new OfficePackage(source.source);
+            request.expectedRevision ??= document.revision;
             if (document.revision !== request.expectedRevision) return receipt({ status: 'conflict', path: request.path, revision: document.revision, message: 'The document changed after it was read. Read the current revision before editing.' },
               { status: 'conflict', path: request.path, revision: document.revision, operationId: invocation.operationId, executorStopped: true, fileJournal: true });
             const edited = document.edit(request.edits); bytes = edited.bytes; changes = { changedParts: edited.changedParts, requiresRecalculation: edited.requiresRecalculation };
           } else bytes = await createOfficeFile(request.content, async path => (await sources.readPath!(path, call.signal)).source, call.signal);
           const format = new OfficePackage(bytes).format;
           const written = await options.files.write(invocation, { path: request.path, bytes,
-            expectedRevision: request.action === 'create' ? null : request.expectedRevision }, call.signal);
+            expectedRevision: request.action === 'create' ? null : request.expectedRevision! }, call.signal);
           return receipt({ ...written, ...changes, format }, written);
         }
         const context = await materialContext(invocation, call.signal);

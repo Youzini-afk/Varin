@@ -27,7 +27,7 @@
         "version": 1,
         "tool": {
           "name": "research_submit",
-          "description": "Accept one experiment through the original durable research owner. Returns the exact accepted attempt; preparation and execution continue independently of this Run. Preserve requestId across uncertain retries. Uses this Run\u2019s actual source; fixed revisions are never replaced by a working directory. Explicit specId reuses an existing immutable input.",
+          "description": "Accept one experiment through the original durable research owner. Returns the exact accepted attempt; preparation and execution continue independently of this Run. Preserve requestId across uncertain retries. Uses this Run’s actual source; fixed revisions are never replaced by a working directory. Explicit specId reuses an existing immutable input. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "job",
           "operation": "effect",
           "inputSchema": {
@@ -141,7 +141,38 @@
           "outputSchema": {
             "type": "object"
           },
-          "lifetime": "thread"
+          "lifetime": "thread",
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
+          }
         }
       },
       {
@@ -149,7 +180,7 @@
         "version": 1,
         "tool": {
           "name": "research_wait",
-          "description": "Observe the original accepted experiment through Catalog Wait. Returns a Job handle and parks only this observation. Cancelling the observation does not cancel the experiment. The eventual environment fact reports actual terminal and output-drain evidence; read logs/artifacts separately.",
+          "description": "Observe the original accepted experiment through Catalog Wait. Returns a Job handle and parks only this observation. Cancelling the observation does not cancel the experiment. The eventual environment fact reports actual terminal and output-drain evidence; read logs/artifacts separately. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "job",
           "operation": "effect",
           "inputSchema": {
@@ -168,7 +199,49 @@
           "outputSchema": {
             "type": "object"
           },
-          "lifetime": "thread"
+          "lifetime": "thread",
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
+          }
         }
       },
       {
@@ -176,7 +249,7 @@
         "version": 1,
         "tool": {
           "name": "research_get",
-          "description": "Read authorized original research get facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "description": "Read authorized original research get facts. No workspace, actor, root or permission identity is accepted from tool arguments. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "read",
           "inputSchema": {
@@ -194,6 +267,48 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },
@@ -202,7 +317,7 @@
         "version": 1,
         "tool": {
           "name": "research_cancel",
-          "description": "Request cancellation of an experiment owned by this Thread or its descendants. A received stop request is not proof that the backend has stopped.",
+          "description": "Request cancellation of an experiment owned by this Thread or its descendants. A received stop request is not proof that the backend has stopped. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "effect",
           "inputSchema": {
@@ -220,6 +335,48 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },
@@ -228,7 +385,7 @@
         "version": 1,
         "tool": {
           "name": "research_collect",
-          "description": "Collect outputs of an already stopped experiment through the original artifact/resource owners.",
+          "description": "Collect outputs of an already stopped experiment through the original artifact/resource owners. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "effect",
           "inputSchema": {
@@ -246,6 +403,48 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },
@@ -254,7 +453,7 @@
         "version": 1,
         "tool": {
           "name": "research_list",
-          "description": "Read authorized original research list facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "description": "Read authorized original research list facts. No workspace, actor, root or permission identity is accepted from tool arguments. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "read",
           "inputSchema": {
@@ -286,6 +485,37 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },
@@ -294,7 +524,7 @@
         "version": 1,
         "tool": {
           "name": "research_logs",
-          "description": "Read authorized original research logs facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "description": "Read authorized original research logs facts. No workspace, actor, root or permission identity is accepted from tool arguments. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "read",
           "inputSchema": {
@@ -328,6 +558,48 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },
@@ -336,7 +608,7 @@
         "version": 1,
         "tool": {
           "name": "research_artifact",
-          "description": "Read authorized original research artifact facts. No workspace, actor, root or permission identity is accepted from tool arguments.",
+          "description": "Read authorized original research artifact facts. No workspace, actor, root or permission identity is accepted from tool arguments. Returned attemptId may be a stable job reference; pass it directly to the corresponding research tools.",
           "completion": "result",
           "operation": "read",
           "inputSchema": {
@@ -369,6 +641,48 @@
           },
           "outputSchema": {
             "type": "object"
+          },
+          "references": {
+            "outputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempt",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              },
+              {
+                "path": "/attempts/*",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ],
+            "inputs": [
+              {
+                "path": "",
+                "kind": "job",
+                "owner": "experiments",
+                "reference": "attemptId",
+                "fields": [
+                  "attemptId"
+                ]
+              }
+            ]
           }
         }
       },

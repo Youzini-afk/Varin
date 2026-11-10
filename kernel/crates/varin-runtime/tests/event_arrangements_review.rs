@@ -739,7 +739,7 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
         f.raw()
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        89
+        90
     );
 }
 

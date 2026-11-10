@@ -99,7 +99,11 @@ pub(crate) fn reconcile(
                 || saved["childThreadId"]!=if receiving{child.conversation_id.as_str()}else{run.thread_id.as_str()}
                 || saved["targetThreadId"]!=if receiving{run.thread_id.as_str()}else{child.conversation_id.as_str()}
                 || saved["result"]["workspaceId"]!=source.workspace_id
-                || !peer.is_some_and(|id|id==child.conversation_id||id==child.operation_id)
+                || !peer.is_some_and(|id| {
+                    if id.contains('/') {
+                        matches!(db.resolve_execution_reference(id).map(|reference|reference.target),Ok(varin_runtime::catalog::model_references::ExecutionTarget::External{conversation_id,operation_id:Some(operation_id),..}) if conversation_id==child.conversation_id && operation_id==child.operation_id)
+                    } else {db.resolve_external_agent(id).ok().flatten().as_deref()==Some(child.conversation_id.as_str()) || id==child.operation_id}
+                })
                 || original.source.workspace_id!=source.workspace_id || original.source.resource_owner!=source.resource_owner {
                 return Err(KernelError::Authorization("external exchange journal differs from its original invocation or source".into()));
             }
@@ -113,7 +117,17 @@ pub(crate) fn reconcile(
         let target_launch=db.launch_metadata(&target_run.id).map_err(error)?.and_then(|l|l.selection.source).ok_or_else(||error("exchange target source missing"))?;
         let supplied=if invocation.call.name=="submit_code" {invocation.call.arguments["target"].as_str()}else{invocation.call.arguments["source"].as_str()};
         let other=if invocation.call.name=="submit_code" {&target_run}else{&source_run};
-        let peer=if let Some(supplied)=supplied {db.agent_identity(supplied).map_err(error)?["threadId"].as_str().map(str::to_owned)}else{db.child_task_for_thread(&run.thread_id).map_err(error)?.map(|c|c.parent_thread_id)};
+        let peer=if let Some(supplied)=supplied {
+            if supplied.contains('/') {
+                use varin_runtime::catalog::model_references::ExecutionTarget;
+                match db.resolve_execution_reference(supplied).map_err(error)?.target {
+                    ExecutionTarget::Native{thread_id,branch_id,run_id}
+                    | ExecutionTarget::Delegated{thread_id,branch_id,run_id:Some(run_id),..}
+                        if run_id==other.id && branch_id==other.branch_id => Some(thread_id),
+                    _ => return Err(KernelError::Authorization("Exchange journal differs from its exact execution selector".into())),
+                }
+            } else {db.agent_identity(supplied).map_err(error)?["threadId"].as_str().map(str::to_owned)}
+        }else{db.child_task_for_thread(&run.thread_id).map_err(error)?.map(|c|c.parent_thread_id)};
         if saved["kind"]!="code_exchange" || saved["operationId"]!=operation.id || saved["parentRunId"]!=run.id || saved["parentThreadId"]!=run.thread_id || saved["parentBranchId"]!=run.branch_id
             || saved["callId"]!=invocation.call.call_id || saved["origin"]!=serde_json::to_value(&invocation.origin)?
             || journal_target!=target_launch || saved["childThreadId"]!=source_run.thread_id || saved["targetThreadId"]!=target_run.thread_id

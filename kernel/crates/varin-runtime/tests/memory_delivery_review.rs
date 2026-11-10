@@ -294,6 +294,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         },
         content: Content::Output {
             output: varin_runtime::output::OutputBody {
+                model_data: None,
                 data: json!({"history": projection.history}),
                 parts: vec![],
             },

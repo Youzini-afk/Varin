@@ -317,6 +317,7 @@ fn insert_execution(
     super::source_retention::assert_record_available(db,"delegated_executions",&serde_json::to_value(execution)?)?;
     db.execute("INSERT INTO delegated_executions(id,child_operation_id,command_key,run_id,body) VALUES(?1,?2,?3,?4,?5)",
         params![execution.execution_id,execution.child_operation_id,key,execution.receipt.as_ref().map(|r|&r.run_id),encode(execution)?])?;
+    super::model_references::admit_delegated(db, execution)?;
     Ok(())
 }
 
@@ -1333,8 +1334,16 @@ impl Catalog {
         child_id: &str,
         execution_id: &str,
     ) -> Result<DelegatedExecution> {
-        self.require_child_parent(run_id, child_id)?;
         let execution = self.delegated_execution(execution_id)?;
+        if self.require_child_parent(run_id, child_id).is_err() {
+            let caller=self.run(run_id)?;
+            let requester=super::bot_reports::requester(&self.db,execution_id)?;
+            let relation=relation(&self.db,child_id)?;
+            threads::require_public(&self.db,&relation.child_thread_id)?;
+            if caller.thread_id!=requester.thread_id || caller.branch_id!=requester.branch_id {
+                return Err(RuntimeError::Invalid("execution does not belong to this requesting branch".into()));
+            }
+        }
         if execution.child_operation_id != child_id {
             return Err(RuntimeError::Conflict(
                 "execution belongs to another child".into(),

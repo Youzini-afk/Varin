@@ -56,7 +56,9 @@ function fixture(mode: 'live_root' | 'fixed_branch', hold?: 'file.capture' | 'st
         case 'file.root.register': reply(frame, { rootId: source.live_root!.rootId, canonicalRoot: source.live_root!.canonicalRoot }); break;
         // Fixed document reads have no prepared mutable execution view.
         case 'file.executionView.inspect': reply(frame, null); break;
-        case 'file.capture': reply(frame, { path: 'paper.pdf', stateJson: JSON.stringify(state), ownerId: 'capture-owner' }); break;
+        case 'file.capture': reply(frame, { path: 'paper.pdf', stateJson: JSON.stringify(state), ownerId: 'capture-owner', readVersion:'native-observed-version' }); break;
+        case 'runtime.model_reference.file_state':
+          expect(p).toEqual({source,path:'paper.pdf',state}); reply(frame,{readVersion:'fixed-observed-version'}); break;
         case 'branch.read': reply(frame, { workspaceId: 'workspace', branchId: 'fixed', revision: 7, view: 'revision', root: 'fixed-root',
           entries: p.includeEntries === false ? [] : [{ path: 'paper.pdf', state }] }); break;
         case 'storage.getBlob': reply(frame, { hash: state.objectHash, byteLength: bytes.byteLength, offset: 0, bytesBase64: bytes.toString('base64'), nextOffset: bytes.byteLength, eof: true }); break;
@@ -80,6 +82,7 @@ it('captures the accepted live source without another file tool and preserves th
     const f = fixture(mode);
     const read = await f.documents.tool(f.authority).readPath!('paper.pdf');
     expect(read.source).toEqual(f.bytes);
+    expect(read.fileObservation).toEqual({path:'paper.pdf',readVersion:mode === 'live_root' ? 'native-observed-version' : 'fixed-observed-version'});
     expect(read.sourceUrl).toBe(mode === 'live_root' ? pathToFileURL(resolve('/fixture/source/paper.pdf')).href
       : 'varin-source:///workspaces/workspace/branches/fixed/revisions/7/paper.pdf');
     const get = f.frames.find(value => value.frame.method === 'storage.getBlob')!.frame;

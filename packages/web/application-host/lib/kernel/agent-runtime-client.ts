@@ -2232,6 +2232,9 @@ export class AgentRuntimeClient {
   mediaRead(params: MediaReadParams, signal?: AbortSignal): Promise<MediaReadChunk> {
     return this.kernel.agentRuntimeRequest('runtime.output.media.read', params, signal);
   }
+  exportModelReferences(params: CalendarProtocol.ModelReferenceExportParams, signal?: AbortSignal): Promise<CalendarProtocol.ModelReferenceExport> {
+    return this.kernel.agentRuntimeRequest('runtime.model_reference.export', params, signal);
+  }
   async historyItem(
     reference: HistoryReference,
     signal?: AbortSignal,

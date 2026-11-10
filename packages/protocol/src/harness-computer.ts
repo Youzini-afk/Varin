@@ -426,6 +426,8 @@ export interface ComputerAppDescriptor {
  * only valid against the observation that produced them.
  */
 export interface ComputerObservation {
+  /** Control generation captured with this observation; never refreshed on pagination. */
+  automationEpoch?: string;
   id: string;
   desktopId: string;
   machineId: string;

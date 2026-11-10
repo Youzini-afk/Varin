@@ -207,7 +207,24 @@ fn digest_reader(
     hooks.source_read(phase, length);
     Ok((format!("sha256-{}", hex::encode(digest.finalize())), length))
 }
+/// A text interpretation envelope never changes the raw bytes selected for an
+/// attachment. Compare its underlying original file-state CAS at the Rust owner.
+fn validate_read_version(expected: Option<&str>, root: &str, path: &str, state: &FileState) -> Result<(), KernelError> {
+    if let Some(expected) = expected {
+        let actual = super::file_mutations::read_version(root, path, state)?;
+        if super::file_mutations::read_basis(expected).0 != actual {
+            return Err(KernelError::SnapshotChanged(format!("file reference is stale: {path}")));
+        }
+    }
+    Ok(())
+}
 impl CaptureTask {
+    fn validate_selected_version(&self, path: &str, state: &FileState) -> Result<(), KernelError> {
+        if let CaptureRequest::Single(params) = &self.request {
+            validate_read_version(params.expected_read_version.as_deref(), &self.root.root_id, path, state)?;
+        }
+        Ok(())
+    }
     fn read_source(&self, path: &str) -> Result<HashedEntry, KernelError> {
         let resource = self.resolve(path)?;
         if let Some(prior) = self.reusable.get(path) {
@@ -274,10 +291,11 @@ impl CaptureTask {
             .paths()
             .iter()
             .map(|path| {
-                self.read_source(path)
-                    .map_err(|error| self.capture_error(error))
+                let entry = self.read_source(path).map_err(|error| self.capture_error(error))?;
+                self.validate_selected_version(&entry.path, &entry.state)?;
+                Ok(entry)
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, KernelError>>()?;
         check(&self.cancellation)?;
         Ok(HashedCapture { entries })
     }
@@ -405,6 +423,7 @@ impl CaptureTask {
         let mut rows = Vec::new();
         let mut result = Vec::with_capacity(entries.len());
         for (index, entry) in entries.iter().enumerate() {
+            self.validate_selected_version(&entry.path, &entry.state)?;
             let owner = if let FileState::RegularFile {
                 object_hash,
                 byte_length,
@@ -426,7 +445,8 @@ impl CaptureTask {
             } else {
                 None
             };
-            result.push(json!({"path":entry.path,"stateJson":serde_json::to_string(&entry.state)?,"ownerId":owner}));
+            result.push(json!({"path":entry.path,"stateJson":serde_json::to_string(&entry.state)?,"ownerId":owner,
+                "readVersion":super::file_mutations::read_version(&self.root.root_id,&entry.path,&entry.state)?}));
         }
         let response = if single {
             result.remove(0)
@@ -646,7 +666,15 @@ impl Storage {
             || payload["canonicalRoot"]!=json!(root.canonical_root) || payload["executionWorkspaceId"]!=root.execution_workspace_id {
             return Err(KernelError::Authorization("Capture identity was reused for another selection".into()));
         }
-        Ok(Some(json!({"path":payload["path"],"stateJson":payload["stateJson"],"recordId":record_id,"ownerId":null})))
+        let state: FileState = serde_json::from_str(payload["stateJson"].as_str()
+            .ok_or_else(|| KernelError::Storage("Capture state missing".into()))?)?;
+        // Replay validates the immutable selected state, never today's pathname.
+        let version = payload["readVersion"].as_str().map(str::to_owned)
+            .unwrap_or(super::file_mutations::read_version(&params.root_id, &params.path, &state)?);
+        if params.expected_read_version.as_deref().is_some_and(|expected| super::file_mutations::read_basis(expected).0 != version) {
+            return Err(KernelError::SnapshotChanged(format!("file reference differs from retained capture: {}",params.path)));
+        }
+        Ok(Some(json!({"path":payload["path"],"stateJson":payload["stateJson"],"recordId":record_id,"ownerId":null,"readVersion":version})))
     }
     pub(crate) fn prepare_capture_resolution(
         &self,
@@ -859,7 +887,7 @@ impl Storage {
     ) -> Result<Value, KernelError> {
         self.validate_capture(task, grant)?;
         if let CaptureRequest::Single(params)=&task.request {
-            if let Some(response)=self.retained_capture(&json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"operationId":params.operation_id,"path":params.path,"store":params.store,"retentionRecordId":params.retention_record_id}),grant)? {return Ok(response);}
+            if let Some(response)=self.retained_capture(&json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"operationId":params.operation_id,"path":params.path,"store":params.store,"retentionRecordId":params.retention_record_id,"expectedReadVersion":params.expected_read_version}),grant)? {return Ok(response);}
         }
         let workspace_id = match &task.request {
             CaptureRequest::Single(params) => &params.workspace_id,
@@ -926,7 +954,7 @@ impl Storage {
             }
             if let CaptureRequest::Single(params)=&task.request {
                 if let Some(record_id)=&params.retention_record_id {
-                    let payload=json!({"path":response["path"],"stateJson":response["stateJson"],"operationId":params.operation_id,
+                    let payload=json!({"path":response["path"],"stateJson":response["stateJson"],"readVersion":response["readVersion"],"operationId":params.operation_id,
                         "canonicalRoot":task.root.canonical_root,"executionWorkspaceId":task.root.execution_workspace_id,
                         "managedSource":self.source_authority_for_grant(&grant.grant_id)?.is_some()});
                     self.conn.execute("INSERT INTO domain_records(workspace_id,record_id,record_type,state,thread_id,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'attachment.capture','temporary',?3,1,?4,?5,?5)",
@@ -1012,17 +1040,32 @@ mod retained_capture_tests {
         let grant=storage.load_grant("reader").unwrap();
         let root=storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace}),&grant).unwrap();
         let mut params=json!({"workspaceId":"workspace","rootId":root["rootId"],"operationId":"select-once","path":"selected.bin","store":true,"retentionRecordId":"capture:original"});
+        let admitted = storage.admitted_file_root(root["rootId"].as_str().unwrap(), &grant).unwrap();
+        let observed = observe_effect(&admitted, "selected.bin", &grant, &AtomicBool::new(false)).unwrap();
+        let version = super::super::file_mutations::read_version(&admitted.root_id, "selected.bin", &observed).unwrap();
+        params["expectedReadVersion"] = json!(super::super::file_mutations::text_read_version(&version, "utf-8"));
         let mut task=storage.prepare_capture("file.capture",&params,&grant,Arc::new(AtomicBool::new(false))).unwrap();
         let hashed=task.hash_sources().unwrap();storage.retain_capture_objects(&mut task,&hashed,&grant).unwrap();
         let batch=task.finish_sources(hashed).unwrap();let receipt=storage.publish_capture(&task,batch,&grant).unwrap();
         storage.finish_retained_file_lease(task.lease_id());
         assert!(receipt["ownerId"].is_null());assert_eq!(receipt["recordId"],"capture:original");
+        assert_eq!(receipt["readVersion"], version);
         let owners:i64=storage.conn.query_row("SELECT COUNT(*) FROM object_owners",[],|row|row.get(0)).unwrap();assert_eq!(owners,0);
         let record=storage.domain_record_get(&json!({"workspaceId":"workspace","recordId":"capture:original"}),"reader").unwrap();
         assert_eq!(record["recordType"],"attachment.capture");assert_eq!(record["threadId"],"thread");
         let hash=record["references"][0]["objectHash"].as_str().unwrap().to_owned();
         fs::write(workspace.join("selected.bin"),b"later edited bytes").unwrap();
         assert_eq!(storage.retained_capture(&params,&grant).unwrap(),Some(receipt.clone()));
+        let mut stale = params.clone();
+        stale["operationId"] = json!("new-capture");
+        stale["retentionRecordId"] = json!("capture:new");
+        let stale_task = storage.prepare_capture("file.capture", &stale, &grant, Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(matches!(stale_task.hash_sources(), Err(KernelError::SnapshotChanged(_))), "a new attachment must not silently capture changed bytes");
+        storage.finish_retained_file_lease(stale_task.lease_id());
+        drop(stale_task);
+        let mut wrong = params.clone();
+        wrong["expectedReadVersion"] = json!("text-v1:utf-8:different-version");
+        assert!(storage.retained_capture(&wrong, &grant).is_err(), "receipt replay must not substitute another observed version");
         drop(task);drop(storage);
         let mut storage=Storage::open(&storage_root,"host").unwrap();
         let root=storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace}),&grant).unwrap();params["rootId"]=root["rootId"].clone();

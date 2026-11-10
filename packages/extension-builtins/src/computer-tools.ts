@@ -19,7 +19,7 @@ const action = schema({ kind: { enum: ['click', 'type', 'key', 'scroll', 'drag',
   mouseButton: { enum: ['left', 'right', 'middle'] }, clickMethod: { enum: ['auto', 'accessibility', 'app_post', 'global'] },
   direction: { enum: ['up', 'down', 'left', 'right'] }, pages: number, text: { type: 'string' }, key: string,
   value: { type: 'string' }, action: string, returnState: { enum: ['none', 'tree', 'screenshot'] },
-}, ['kind', 'app']);
+}, ['kind']);
 const declaration = (method: string, operation: 'read' | 'effect', description: string, inputSchema: JsonObject, job = false): VarinExtensionServiceProvision => ({
   id: `varin.computer.${method}`, version: 1,
   tool: { name: `computer_${method}`, description, completion: job ? 'job' : 'result', ...(job ? { lifetime: 'thread' as const } : {}), operation, inputSchema, outputSchema: { type: 'object' },
@@ -47,8 +47,8 @@ export const COMPUTER_TOOL_DECLARATIONS = [
   declaration('control', 'effect', 'Acquire control of a desktop, then take a fresh observation before input. Children require a root grant. Returns the current automationEpoch.', schema(desktop)),
   declaration('observe', 'read', 'Read the selected app window and optionally capture its image. Other windows are omitted by default; includeWindows returns the app window inventory, also available later with the same observationId without rescanning. Use observationId for actions. Take a fresh observation after human handback.', schema({ ...desktop, app: string, window: { anyOf: [number, string] }, includeScreenshot: { type: 'boolean' }, includeWindows: { type: 'boolean' }, observationId: string,
     offset: { type: 'integer', minimum: 0 }, textLimit: { anyOf: [{ type: 'integer', minimum: 1 }, { const: 'max' }] },
-    maxTreeNodes: { type: 'integer', minimum: 1 }, maxTreeDepth: { type: 'integer', minimum: 1 } }, ['app'])),
-  declaration('act', 'effect', 'Act on an assigned desktop using its current automationEpoch and observationId. Verify the result with a new observation. From scripts, forward image parts explicitly with emitImage.', schema({ ...desktop, ...epoch, action }, ['action'])),
+    maxTreeNodes: { type: 'integer', minimum: 1 }, maxTreeDepth: { type: 'integer', minimum: 1 } })),
+  declaration('act', 'effect', 'Act on an assigned desktop using the observation ref in action.observationId; it carries the original desktop, app, window and automation epoch. Direct targets and explicit epoch remain supported. Verify the result with a new observation. From scripts, forward image parts explicitly with emitImage.', schema({ ...desktop, ...epoch, action }, ['action'])),
   declaration('open', 'effect', 'Open exactly one URL, path or application on the assigned desktop’s machine. localhost and file paths refer to that machine. A dispatch receipt does not prove the application finished; never replay unknown input.', schema({ ...desktop, ...epoch, url: string, path: string, command: string, args: { type: 'array', items: { type: 'string' } } })),
   declaration('put', 'effect', 'Write base64 file bytes atomically into the managed desktop user’s home through its original owner. Returns the stored revision. Requires a control assignment; unsupported desktops report unavailable. Re-inspect an unknown result before retrying.', schema({ ...desktop, relativePath: string, contentBase64: { type: 'string' } }, ['relativePath', 'contentBase64'])),
   declaration('install', 'effect', 'Install recipe groups or packages in the assigned managed Linux desktop environment. Requires control. Reported package results retain failures; successful installation does not prove application usability.', schema({ ...desktop, groups: { type: 'array', items: string }, packages: { type: 'array', items: string } })),

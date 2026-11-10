@@ -56,7 +56,11 @@ pub(crate) fn original_invocation(
             .find(|schema| schema.name == call.name)
     }
     .ok_or_else(|| error("attachment capability is not selected"))?;
-    if call.schema_version != schema.version || !invocation.tools.contains(&schema) {
+    // The frozen declaration is authoritative for already admitted calls. New
+    // descriptions or reference inputs must not invalidate their original proof.
+    if !invocation.tools.iter().any(|selected| {
+        selected.name == schema.name && selected.version == call.schema_version
+    }) {
         return Err(error(
             "attachment capability differs from its original frozen schema",
         ));
@@ -186,7 +190,7 @@ fn prepared_response(
             .map_err(|failure| failure.with_details(json!({"attachmentIndex":index})))?;
         if let AttachmentSelection::Ref { reference } = selection {
             let expected = varin_runtime::catalog::attachments::material_attachment_reference(reference);
-            if expected.as_ref().unwrap_or(reference) != &attachment.reference {
+            if !reference.starts_with("file:") && expected.as_ref().unwrap_or(reference) != &attachment.reference {
                 return Err(
                     error("attachment owner changed the selected fixed reference")
                         .with_details(json!({"attachmentIndex":index,"ref":reference})),
@@ -217,6 +221,20 @@ pub(crate) fn prepare(
         selection.validate().map_err(error)?;
     }
     let invocation = authorize_invocation(catalog, context, call)?;
+    // Resolve only declared attachment selectors, retaining the original call.
+    // File observations stay typed until their byte owner captures that version.
+    let selections = {
+        let owner = catalog.lock().map_err(error)?;
+        selections.iter().map(|selection| -> Result<AttachmentSelection,ExecutionError> {
+            if let AttachmentSelection::Ref {reference} = selection {
+                if reference.starts_with("file:") {
+                    let target:crate::resource_references::FileTarget=crate::resource_references::resolve(&owner,varin_runtime::catalog::model_references::ReferenceKind::File,reference)?;
+                    if let crate::resource_references::FileTarget::Attachment {reference}=target {return Ok(AttachmentSelection::Ref {reference});}
+                }
+            }
+            Ok(selection.clone())
+        }).collect::<Result<Vec<_>,_>>()?
+    };
     let checkpoint = invocation
         .frozen
         .resource_checkpoint_id
@@ -241,7 +259,7 @@ pub(crate) fn prepare(
         Some("ready" | "failed" | "missing" | "denied" | "invalid" | "cancelled" | "stale")
     );
     let mut prepared =
-        prepared_response(response, context, selections).map_err(|mut failure| {
+        prepared_response(response, context, &selections).map_err(|mut failure| {
             // The owner may have fixed earlier files before a later selected file failed.
             // Release that original preparation, but retain uncertain/unavailable work.
             if completed {
@@ -249,6 +267,7 @@ pub(crate) fn prepare(
             }
             failure
         })?;
+    catalog.lock().map_err(error)?.project_attachments(&mut prepared.attachments, &context.run_id).map_err(error)?;
     prepared.query = guard.query;
     prepared.bridge = guard.bridge;
     Ok(prepared)
@@ -288,7 +307,7 @@ impl PreparedAttachments {
                 }
                 let returned: Attachment =
                     serde_json::from_value(response["attachment"].clone()).map_err(error)?;
-                if returned != *attachment || response["offset"].as_u64() != Some(offset) {
+                if !returned.same_resource(attachment) || response["offset"].as_u64() != Some(offset) {
                     return Err(error(
                         "attachment image read changed its fixed version or offset",
                     ));

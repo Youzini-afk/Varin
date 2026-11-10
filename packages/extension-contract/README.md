@@ -214,3 +214,20 @@ while different catalogs may present separately identified sources for the same 
 contract (`begin`, `complete`, `refresh`). It has no plugin account/provider registry: plugins own
 connection configuration and provider-specific exchanges. Credential metadata and authorization state
 are safe presentation values; credential values are confined to trusted Host adapters.
+
+Tool declarations may opt into typed model references with `references.inputs` and
+`references.outputs`. Each entry selects an explicit JSON pointer `path` (array `*`
+segments only), a `kind`, an extension-local resource `owner`, the `reference`
+property, and exact target `fields`. Output `omit` defaults to those fields. The
+Host registers the original target in the native Catalog, projects only declared
+positions, and resolves/fixes the input before confirmation and execution. Opaque
+third-party IDs and ordinary strings are never scanned. The declaration is part of
+the pinned service generation; original tool arguments and raw UI receipts remain
+unchanged. A reference does not grant access or bypass the resource owner's checks.
+
+For an accepted Job, an owner-authored model projection may publish `operationRef`
+as its canonical typed operation handle. Transient provider input uses that exact
+field for the Job header; a projection without it retains the original handle.
+This reserved field is not inferred from ordinary extension output or ID-like JSON.
+Typed attachment `modelRef` likewise changes only the transient descriptor's `ref`;
+raw receipts retain the original immutable attachment reference.

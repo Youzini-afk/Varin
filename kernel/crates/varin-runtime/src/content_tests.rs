@@ -321,6 +321,7 @@ fn typed_output_preserves_opaque_json_order_source_and_only_explicit_media_depen
     .unwrap();
     let opaque = json!({"image":encoded,"type":"image","media_type":"image/png","content_ref":"arbitrary caller string"});
     let output = OutputBody {
+        model_data: None,
         data: opaque.clone(),
         parts: vec![
             OutputPart::Text {

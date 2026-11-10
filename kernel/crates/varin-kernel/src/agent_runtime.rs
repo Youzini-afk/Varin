@@ -23,6 +23,8 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInput};
 
+#[path = "agent_model_references.rs"]
+mod model_reference_commands;
 #[path = "agent_computer.rs"]
 mod computer_commands;
 #[path = "agent_external.rs"]
@@ -1179,6 +1181,36 @@ pub(crate) fn spawn(
                             });
                             deferred = true;
                             return Ok(Value::Null);
+                        }
+                        if method == "runtime.model_reference.export" {
+                            let p: ModelReferenceExportParams = serde_json::from_value(params)?;
+                            let read = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_export_model_references(&p.thread_id, &p.branch_id, p.head_id.0.as_deref(), &p.item_ids, p.include_tools)
+                                .map_err(domain)?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let snapshot = read.load().map_err(domain)?;
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    Ok(serde_json::to_value(snapshot)?)
+                                })();
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method.starts_with("runtime.model_reference.") {
+                            return model_reference_commands::execute(runtime.clone(), method, params);
                         }
                         if method.starts_with("runtime.managed_process.") {
                             let runtime = runtime.clone();

@@ -119,9 +119,10 @@ pub(super) fn execute(
                 (op, c, read)
             };
             let original = read.load().map_err(domain)?;
-            if original.intent["call"]["arguments"]["environmentId"].as_str()
-                != Some(p.environment_id.as_str())
-            {
+            let selected = original.intent["call"]["arguments"]["environmentId"].as_str()
+                .ok_or_else(|| KernelError::Authorization("Original script environment is missing".into()))?;
+            let resolved = lock()?.resolve_managed_process_reference(selected).map_err(domain)?;
+            if resolved != p.environment_id {
                 return Err(KernelError::Authorization(
                     "Cell environment differs from its original arguments".into(),
                 ));

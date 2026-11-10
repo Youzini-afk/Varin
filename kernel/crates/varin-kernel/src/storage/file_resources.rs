@@ -741,7 +741,7 @@ impl Storage {
             "pdf"=>"application/pdf","docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","pptx"=>"application/vnd.openxmlformats-officedocument.presentationml.presentation",
             _=>"application/octet-stream"}};
-        let attachment=varin_runtime::catalog::attachments::Attachment{reference:reference.clone(),filename:filename.into(),mime_type:mime.into(),byte_length};
+        let attachment=varin_runtime::catalog::attachments::Attachment{ model_ref: None,reference:reference.clone(),filename:filename.into(),mime_type:mime.into(),byte_length};
         let grant_id=intent.get("__artifactGrantId").or_else(||intent.get("__nativeGrantId")).and_then(Value::as_str)
             .ok_or_else(||KernelError::Storage("File artifact has no original writer grant".into()))?;
         let payload=json!({"attachment":attachment,"contentHash":object_hash,"operationId":operation,"sourceGrantId":grant_id,"managedSource":self.source_authority_for_grant(grant_id)?.is_some()});

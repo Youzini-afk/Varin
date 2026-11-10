@@ -206,10 +206,10 @@ pub(super) fn bounded_output(
     can_read: bool,
     snippet_limit: Option<usize>,
 ) -> Option<OutputBody> {
-    let mut sizes = vec![if output.data.is_null() {
+    let mut sizes = vec![if output.model_data().is_null() {
         0
     } else {
-        json_bytes(&output.data)
+        json_bytes(output.model_data())
     }];
     sizes.extend(output.parts.iter().map(|part| match part {
         OutputPart::Text { text } => text.len(),
@@ -227,7 +227,7 @@ pub(super) fn bounded_output(
         omitted: Vec::new(),
         snippet_limit,
     };
-    let data = projection.value(&output.data, sizes[0], budgets[0], "/data");
+    let data = projection.value(output.model_data(), sizes[0], budgets[0], if output.model_data.is_some() {"/model_data"} else {"/data"});
     let mut parts = output
         .parts
         .iter()
@@ -247,7 +247,9 @@ pub(super) fn bounded_output(
     parts.push(OutputPart::Text { text: json!({"outputPreview":{
         "truncated":true,"originalBytes":original_bytes,"historyItemId":item_id,"omitted":projection.omitted
     }}).to_string() });
-    Some(OutputBody { data, parts })
+    Some(if output.model_data.is_some() {
+        OutputBody {model_data:Some(data),data:output.data.clone(),parts}
+    } else {OutputBody {model_data:None,data,parts}})
 }
 
 pub(super) fn retrieval_preview_limit(call: &ToolCall) -> Option<usize> {

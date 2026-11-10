@@ -1627,6 +1627,7 @@ fn prepared_snapshot_preserves_typed_media_and_opaque_provider_body_through_gc_a
         provenance: Provenance::Assistant,
         content: Content::Output {
             output: OutputBody {
+                model_data: None,
                 data: json!({"signed":[null,"原样",17]}),
                 parts: vec![
                     OutputPart::Text { text: "before media".into() },

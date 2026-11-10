@@ -503,14 +503,50 @@ mod tests {
         gate(&mut db,true,3);
         command(&mut db,json!({"action":"begin","id":delivery.conversation_id,"turnId":delivery.turn_id})).unwrap();
         command(&mut db,json!({"action":"observe","id":delivery.conversation_id,"turnId":delivery.turn_id,"status":"running"})).unwrap();
-        command(&mut db,json!({"action":"item","id":delivery.conversation_id,"turnId":delivery.turn_id,"itemId":"answer","content":{"kind":"assistant","text":"Verified the new evidence","complete":true}})).unwrap();
+        let answer = format!("{}Verified the new evidence", "事实🧪".repeat(20000));
+        command(&mut db,json!({"action":"item","id":delivery.conversation_id,"turnId":delivery.turn_id,"itemId":"first-answer","content":{"kind":"assistant","text":"First original result","complete":true}})).unwrap();
+        command(&mut db,json!({"action":"item","id":delivery.conversation_id,"turnId":delivery.turn_id,"itemId":"answer","content":{"kind":"assistant","text":answer,"complete":true,
+            "attachments":[{"ref":"attachment:external-result","filename":"evidence.csv","mimeType":"text/csv","byteLength":42}]}})).unwrap();
         command(&mut db,json!({"action":"observe","id":delivery.conversation_id,"turnId":delivery.turn_id,"status":"completed"})).unwrap();
         assert_eq!(project(&db.db,&delivery).unwrap().state,"completed");
         assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='bot.work_pending' AND json_extract(data,'$.kind')='external_arrangement_report'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         let owner=Mutex::new(db);
         super::super::super::bot_work_events::deliver(&owner).unwrap();
-        let db=owner.lock().unwrap();
+        let mut db=owner.lock().unwrap();
         assert_eq!(db.db.query_row("SELECT count(*) FROM input_queue WHERE origin='work_event' AND branch_id='main'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(db.db.query_row("SELECT count(*) FROM external_children",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        let (input_id, reference):(String,String)=db.db.query_row("SELECT q.id,c.body FROM input_queue q JOIN input_history_content c ON c.input_id=q.id WHERE q.origin='work_event'",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        let value=db.content.load_history_payload(&serde_json::from_str(&reference).unwrap()).unwrap().0;
+        let item:crate::execution::ConversationItem=serde_json::from_value(value).unwrap();
+        let crate::execution::Content::Output{output}=item.content else {panic!("original report output")};
+        let model=output.model_data.as_ref().unwrap();
+        let execution=db.execution_reference(&delivery.turn_id).unwrap();
+        assert_eq!(model["executionRef"],execution.reference);
+        assert_eq!(model["previewPartial"],true);
+        assert_eq!(output.data["source"]["turnId"],delivery.turn_id);
+        let original=format!("First original result\n\n{answer}");
+        assert_eq!(output.data["report"]["text"],original);
+        assert_eq!(output.data["report"]["items"].as_array().unwrap().len(),2);
+        let text=output.parts.iter().find_map(|part|match part {crate::output::OutputPart::Text{text}=>Some(text.as_str()),_=>None}).unwrap();
+        assert!(text.contains("First original result") && !text.contains("Verified the new evidence"));
+        assert!(!text.contains(&delivery.turn_id));
+        assert!(text.split_once('\n').unwrap().1.len()<=65536);
+        let file=output.parts.iter().find_map(|part|match part {crate::output::OutputPart::Attachment{attachment}=>Some(attachment),_=>None}).unwrap();
+        assert_eq!(file.reference,"attachment:external-result");
+        assert!(file.model_ref.as_ref().unwrap().starts_with("file:"));
+        // Once the original ingress is consumed, its returned read directly pages the
+        // preserved full report through the normal history owner and access checks.
+        use crate::test_submission::InputAdmission;
+        let receipt=db.submit(&SubmitInput{key:"read-report".into(),thread_id:"owner".into(),branch_id:"main".into(),expected_head:None,
+            input:json!({"text":"Read the result"}),configuration:json!({"provider":"test"})}).unwrap();
+        let head=db.head("main").unwrap();let epoch=db.epoch();
+        db.consume_inputs(&receipt.run_id,epoch,head.as_deref()).unwrap();
+        let selected=db.resolve_model_reference(super::super::super::model_references::ReferenceKind::Item,model["read"]["arguments"]["ref"].as_str().unwrap()).unwrap();
+        let args=db.model_history_read_arguments(&receipt.run_id,&selected.target).unwrap();
+        assert_eq!(args["query"]["itemId"],input_id);
+        let page=db.capture_family_read("owner",Some("owner"),Some("main")).unwrap().output(super::super::super::family::OutputRequest{
+            run_id:None,anchor:None,item_id:input_id,pointer:args["query"]["pointer"].as_str().unwrap().into(),offset:None,max_bytes:Some(original.len()+1)},&||false).unwrap();
+        assert_eq!(page["value"],original);
         assert_eq!(db.db.query_row("SELECT count(*) FROM external_children",[],|r|r.get::<_,i64>(0)).unwrap(),0);
     }
     #[test]

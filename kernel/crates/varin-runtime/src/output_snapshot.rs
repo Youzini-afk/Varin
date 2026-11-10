@@ -41,6 +41,8 @@ enum StoredContent<'a> {
 }
 #[derive(Serialize)]
 struct Output<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_data: &'a Option<Value>,
     data: &'a Value,
     parts: Vec<Part<'a>>,
 }
@@ -98,6 +100,7 @@ impl Projection<'_> {
         output: &'a OutputBody,
     ) -> Result<Output<'a>, crate::catalog::RuntimeError> {
         Ok(Output {
+            model_data: &output.model_data,
             data: &output.data,
             parts: output
                 .parts
@@ -237,6 +240,7 @@ mod tests {
             data_base64: STANDARD.encode(b"original media bytes"),
         };
         let output = || OutputBody {
+            model_data: None,
             data: json!({"source":"tool", "payload":"unicode 中文 and quoted \"text\"".repeat(512)}),
             parts: vec![
                 OutputPart::Text {

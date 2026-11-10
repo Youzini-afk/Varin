@@ -45,6 +45,8 @@ impl Catalog {
         revision: u64,
         action: &str,
     ) -> Result<()> {
+        let resolved=self.resolve_message_reference(id)?;
+        let id=resolved.as_str();
         let tx = self.db.transaction()?;
         let mut row = owned_queue(&tx, thread, branch, id, revision)?;
         match action {
@@ -86,6 +88,8 @@ impl Catalog {
         id: &str,
         revision: u64,
     ) -> Result<MessageEditPreparation> {
+        let resolved=self.resolve_message_reference(id)?;
+        let id=resolved.as_str();
         let row = owned_queue(&self.db, thread, branch, id, revision)?;
         if !matches!(message_identity(&row)?.actor, MessageActor::User) {
             return Err(RuntimeError::Invalid(

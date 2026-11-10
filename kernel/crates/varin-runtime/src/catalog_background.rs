@@ -47,6 +47,58 @@ pub(super) fn authorize(
     }
     Ok(())
 }
+/// Copy only the reference index relationships owned by the original selected history.
+/// A copied context is not a SQL history ancestry edge, so its lightweight mappings need
+/// their own receiving holder. This does not retain source Runs, bytes, or resource grants.
+pub(super) fn capture_reference_ids(
+    db: &Connection,
+    parent_run: &str,
+    history: &ConversationHistory,
+) -> Result<Vec<u64>> {
+    if history.is_empty() { return Ok(Vec::new()); }
+    let items = history.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+    let mut query = db.prepare("WITH source_runs(id) AS (
+        SELECT run_id FROM history WHERE id IN (SELECT value FROM json_each(?1))
+        UNION SELECT ?2
+    ), holders(id) AS (
+        SELECT id FROM source_runs
+        UNION SELECT id FROM operations WHERE run_id IN source_runs
+        UNION SELECT id FROM history WHERE run_id IN source_runs
+        UNION SELECT id FROM input_queue WHERE run_id IN source_runs
+        UNION SELECT id FROM delegated_executions WHERE run_id IN source_runs
+        UNION SELECT c.id FROM child_tasks c JOIN runs r ON json_extract(r.body,'$.thread_id')=c.child_thread_id WHERE r.id IN source_runs
+    ) SELECT DISTINCT reference_id FROM model_reference_holders WHERE holder IN holders ORDER BY reference_id")?;
+    let rows = query.query_map(params![encode(&items)?,parent_run], |row| read_number(row,0))?;
+    rows.collect::<std::result::Result<_,_>>().map_err(Into::into)
+}
+
+pub(super) fn retain_reference_ids(db: &Connection, references: &[u64], holder: &str) -> Result<()> {
+    if references.is_empty() { return Ok(()); }
+    let encoded = serde_json::to_string(references)?;
+    let existing: u64 = db.query_row("SELECT count(*) FROM model_references WHERE id IN (SELECT value FROM json_each(?1))",[&encoded],|row|read_number(row,0))?;
+    if existing != references.len() as u64 {
+        return Err(RuntimeError::Conflict("Selected background references were retired during preparation; select the background again".into()));
+    }
+    db.execute("INSERT OR IGNORE INTO model_reference_holders(reference_id,holder) SELECT value,?2 FROM json_each(?1)",params![encoded,holder])?;
+    Ok(())
+}
+
+/// Quoting a completed tool result preserves its raw receipt alongside the same stable
+/// owner-authored projection. Only this typed output envelope is adapted, never body JSON.
+fn quoted_projection(content: &Content) -> Option<Content> {
+    let mut projected = content.clone();
+    let output = match &mut projected {
+        Content::ToolResult { result } => match &mut result.completion {
+            crate::execution::ToolCompletion::Result { content, .. } => content,
+            crate::execution::ToolCompletion::JobAccepted { content: Some(content), .. } => content,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    output.data = output.model_data.take()?;
+    Some(projected)
+}
+
 pub(super) fn load(
     db: &Connection,
     content: &crate::content::ContentStore,
@@ -121,13 +173,17 @@ pub(super) fn load(
                     item.content,
                     Content::ToolCall { .. } | Content::ToolResult { .. }
                 ) {
-                    item.content=Content::Output{output:json!({"quotedHistory":item.content,"reference":reference,"originalRole":hydrated.source}).into()};
+                    let model = quoted_projection(&item.content).map(|content|
+                        json!({"quotedHistory":content,"reference":reference,"originalRole":hydrated.source}));
+                    let mut output: crate::output::OutputBody = json!({"quotedHistory":item.content,"reference":reference,"originalRole":hydrated.source}).into();
+                    output.model_data = model;
+                    item.content = Content::Output { output };
                 }
                 if !attachments.is_empty() {
                     let mut output = match item.content {
                         Content::Output { output } => output,
-                        Content::Text { text } => crate::output::OutputBody { data: Value::Null, parts: vec![crate::output::OutputPart::Text { text }] },
-                        other => crate::output::OutputBody { data: json!({"quotedHistory":other}), parts: Vec::new() },
+                        Content::Text { text } => crate::output::OutputBody { model_data: None, data: Value::Null, parts: vec![crate::output::OutputPart::Text { text }] },
+                        other => crate::output::OutputBody { model_data: None, data: json!({"quotedHistory":other}), parts: Vec::new() },
                     };
                     for attachment in &attachments {
                         if !output.parts.iter().any(|part| matches!(part, crate::output::OutputPart::Attachment { attachment: existing } if existing.reference == attachment.reference)) {

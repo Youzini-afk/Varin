@@ -313,6 +313,7 @@ impl ToolExecutor for Target {
                 Effect::Confirmed
             },
             content: varin_runtime::output::OutputBody {
+                model_data: Some(json!({"ref":"file:81","actual":"fixture_effect"})),
                 data: json!({"actual":"fixture_effect","error":{"code":"opaque_payload_field","message":"Successful content can contain error"}}),
                 parts: vec![varin_runtime::output::OutputPart::Text {
                     text: "target output".into(),
@@ -432,6 +433,9 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
                 &content.data["result"]["actual"],
                 "fixture_effect"
             );
+            assert_eq!(content.model_data()["result"]["ref"], "file:81");
+            assert!(content.model_data().get("operationId").is_none());
+            assert_eq!(content.data["result"]["error"]["code"], "opaque_payload_field");
             assert!(
                 matches!(&content.parts[0],varin_runtime::output::OutputPart::Text{text} if text=="target output")
             );

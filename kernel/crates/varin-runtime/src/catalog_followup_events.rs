@@ -1501,7 +1501,8 @@ impl Catalog {
         schema: crate::execution::ToolSchema,
     ) -> Result<EventToolPreparation> {
         let run = self.run(&c.run_id)?;
-        let value: FollowupToolInput = serde_json::from_value(call.arguments.clone())?;
+        let mut value: FollowupToolInput = serde_json::from_value(call.arguments.clone())?;
+        self.resolve_followup_tool_input(&mut value)?;
         let mut route = None;
         let (input, backlog) = match value {
             FollowupToolInput::Arrange {

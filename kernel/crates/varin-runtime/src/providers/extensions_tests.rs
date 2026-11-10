@@ -431,3 +431,56 @@ fn original_admission_survives_same_artifact_restart_and_durable_identity_can_re
     changed.adapter_identity = Some("different-artifact".into());
     assert!(registry.select(&changed).is_err());
 }
+
+#[test]
+fn brokered_codecs_receive_owner_projection_as_semantic_data_without_raw_ids() {
+    let bridge = Arc::new(Bridge { calls: Mutex::new(vec![]), released: AtomicUsize::new(0), foreign: false });
+    let adapter = BrokeredModelAdapter::new(metadata(), "fixed-generation".into(), "fixed-artifact".into(), BTreeMap::new(), bridge.clone()).unwrap();
+    let provider = adapter.bind(&configuration(), connection(Arc::new(Transport {calls:AtomicUsize::new(0),complete:true}))).unwrap();
+    let mut input = view();
+    Arc::make_mut(&mut input.history[0]).content = Content::Output {output: crate::output::OutputBody {
+        data: json!({"snapshotId":"private-original-snapshot","contentHash":"private-original-hash"}),
+        model_data: Some(json!({"snapshotId":"material:73"})), parts:vec![],
+    }};
+    let serialized = provider.serialize_cancellable(&input,None,&CancellationToken::default()).unwrap();
+    let wire = serialized.to_value().to_string();
+    assert!(wire.contains("material:73"));
+    assert!(!wire.contains("private-original"));
+    let calls=bridge.calls.lock().unwrap();
+    let ModelProtocolCall::Serialize{request,..}=&calls[0].1 else {panic!("expected serializer request")};
+    let Content::Output{output}=&request.history[0].content else {panic!("expected output")};
+    assert_eq!(output.data,json!({"snapshotId":"material:73"}));
+    assert!(output.model_data.is_none());
+    let Content::Output{output}=&input.history[0].content else {panic!("expected original output")};
+    assert_eq!(output.data["snapshotId"],"private-original-snapshot");
+    assert_eq!(output.model_data.as_ref().unwrap()["snapshotId"],"material:73");
+}
+
+#[test]
+fn brokered_job_and_attachment_headers_use_explicit_owner_handles_but_opaque_jobs_keep_their_handle() {
+    for projection in [None,Some(json!({"summary":"Owner did not publish an operation handle"})),Some(json!({"operationRef":"env:73","environmentId":"env:73"}))] {
+        let bridge=Arc::new(Bridge{calls:Mutex::new(vec![]),released:AtomicUsize::new(0),foreign:false});
+        let adapter=BrokeredModelAdapter::new(metadata(),"fixed-generation".into(),"fixed-artifact".into(),BTreeMap::new(),bridge.clone()).unwrap();
+        let provider=adapter.bind(&configuration(),connection(Arc::new(Transport{calls:AtomicUsize::new(0),complete:true}))).unwrap();
+        let mut input=view();
+        Arc::make_mut(&mut input.history[0]).content=Content::ToolResult{result:ToolResult{request_id:"request".into(),call_id:"job".into(),completion:ToolCompletion::JobAccepted{
+            operation_id:"private-job-operation".into(),phase:"running".into(),effect:crate::Effect::None,lifetime:crate::Lifetime::Thread,
+            content:Some(crate::output::OutputBody{data:json!({"internal":"raw-job-body"}),model_data:projection.clone(),parts:vec![crate::output::OutputPart::Attachment{attachment:crate::catalog::attachments::Attachment{
+                reference:"attachment:private-original".into(),model_ref:Some("file:42".into()),filename:"report.pdf".into(),mime_type:"application/pdf".into(),byte_length:7,
+            }}]}),
+        }}};
+        provider.serialize_cancellable(&input,None,&CancellationToken::default()).unwrap();
+        let calls=bridge.calls.lock().unwrap();
+        let ModelProtocolCall::Serialize{request,..}=&calls[0].1 else{panic!("serializer")};
+        let Content::ToolResult{result}=&request.history[0].content else{panic!("result")};
+        let ToolCompletion::JobAccepted{operation_id,content:Some(content),..}=&result.completion else{panic!("accepted")};
+        assert_eq!(operation_id,if projection.as_ref().is_some_and(|value|value.get("operationRef").is_some()){"env:73"}else{"private-job-operation"});
+        let crate::output::OutputPart::Attachment{attachment}=&content.parts[0] else{panic!("attachment")};
+        assert_eq!(attachment.reference,"file:42");assert!(attachment.model_ref.is_none());
+        let Content::ToolResult{result}=&input.history[0].content else{panic!("original")};
+        let ToolCompletion::JobAccepted{operation_id,content:Some(content),..}=&result.completion else{panic!("original job")};
+        assert_eq!(operation_id,"private-job-operation");
+        let crate::output::OutputPart::Attachment{attachment}=&content.parts[0] else{panic!("original attachment")};
+        assert_eq!(attachment.reference,"attachment:private-original");assert_eq!(attachment.model_ref.as_deref(),Some("file:42"));
+    }
+}

@@ -478,18 +478,34 @@ pub(super) fn agent_file_source(db: &Connection, run: &Run) -> Result<launches::
     }
     Ok(source)
 }
+/// Resolve source identity through the original execution registry, without choosing
+/// current work when the caller supplied an exact execution.
+fn agent_source_identity(db:&Connection, identity:&str)->Result<(String,Option<String>)> {
+    if identity.contains('/') {
+        use super::model_references::ExecutionTarget;
+        match super::model_references::resolve_execution_reference(db,identity)?.target {
+            ExecutionTarget::Native{thread_id,run_id,..}
+            | ExecutionTarget::Delegated{thread_id,run_id:Some(run_id),..} => Ok((thread_id,Some(run_id))),
+            _ => Err(RuntimeError::Invalid("Selected execution has no native file source".into())),
+        }
+    } else {Ok((super::threads::resolve(db,identity)?,None))}
+}
 pub(super) fn validate_agent_source(db: &Connection, parent: &Run, source_agent: Option<&str>,
     handoff: Option<&super::collaboration::ChildSourceHandoff>) -> Result<()> {
     let launch: super::launch_content::LaunchMetadata = record(db,"run_launches",&parent.id)?;
     if let Some(identity)=source_agent {
-        let thread=super::threads::resolve(db,identity)?;
+        let (thread,exact_run)=agent_source_identity(db,identity)?;
         if super::scheduling::thread_family(db,&thread)? != super::scheduling::thread_family(db,&parent.thread_id)? {
             return Err(RuntimeError::Conflict("file source is outside this task family".into()));
         }
         let handoff=handoff.ok_or_else(||RuntimeError::Invalid("Agent source handoff missing".into()))?;
         let run:Run=record(db,"runs",handoff.source_run_id.as_deref().ok_or_else(||RuntimeError::Invalid("Agent source Run missing".into()))?)?;
         let parent_source=launch.selection.source.as_ref().ok_or_else(||RuntimeError::Invalid("dispatch requires a file source".into()))?;
-        if run.thread_id!=thread || agent_file_source(db,&run)? != handoff.source
+        let original:super::launch_content::LaunchMetadata=record(db,"run_launches",&run.id)?;
+        // A previously captured live source remains owned by this original Run even
+        // after that Run publishes a fixed result. Never replace the captured source.
+        if run.thread_id!=thread || exact_run.as_ref().is_some_and(|id|id!=&run.id)
+            || (original.selection.source.as_ref()!=Some(&handoff.source) && agent_file_source(db,&run)? != handoff.source)
             || handoff.source.workspace_id!=parent_source.workspace_id || handoff.source.resource_owner!=parent_source.resource_owner {
             return Err(RuntimeError::Conflict("Agent source differs from its original workspace".into()));
         }
@@ -503,11 +519,31 @@ impl Catalog {
         let Some(identity)=&input.source_agent else{return Ok(None)};
         self.agent_source(run_id, identity).map(Some)
     }
+    /// Capture the first admitted source selection once; retries cannot follow the
+    /// same Agent into a later Run or replace its retained source version.
+    pub fn freeze_dispatch_agent_source(&mut self, context:&crate::execution::ToolExecutionContext, input:&DispatchInput)->Result<Option<AgentSourceSelection>> {
+        let Some(identity)=&input.source_agent else {return Ok(None)};
+        let original=json!({"sourceAgent":identity});
+        let value=if let Some(value)=self.model_target(&context.operation_id,"dispatch_source",&original)? {value}
+            else {
+                let selected=self.agent_source(&context.run_id,identity)?;
+                self.freeze_model_target(&context.operation_id,"dispatch_source",&original,&serde_json::to_value(selected)?)?
+            };
+        let selected:AgentSourceSelection=serde_json::from_value(value)?;
+        let parent=self.run(&context.run_id)?;
+        let handoff=super::collaboration::ChildSourceHandoff {retention_pin:None,source_path:None,refresh:None,
+            source_run_id:Some(selected.run_id.clone()),source:selected.source.clone(),operation_id:String::new(),resource_authority:None,
+            root:super::collaboration::ChildSourceRoot::Physical{root:launches::LiveRoot{host_id:String::new(),root_id:String::new(),canonical_root:String::new()}}};
+        validate_agent_source(&self.db,&parent,Some(identity),Some(&handoff))?;
+        Ok(Some(selected))
+    }
     pub fn agent_source(&self, run_id: &str, identity: &str) -> Result<AgentSourceSelection> {
         let parent=self.run(run_id)?;
-        let thread=super::threads::resolve(&self.db,identity)?;
-        let branch=super::threads::branch(&self.db,&thread)?;
-        let run_id:String=self.db.query_row("SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",[branch],|r|r.get(0))?;
+        let (thread,exact_run)=agent_source_identity(&self.db,identity)?;
+        let run_id=if let Some(run)=exact_run {run} else {
+            let branch=super::threads::branch(&self.db,&thread)?;
+            self.db.query_row("SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",[branch],|r|r.get::<_,String>(0))?
+        };
         let source=agent_file_source(&self.db,&self.run(&run_id)?)?;
         let selected=AgentSourceSelection{run_id,source};
         let handoff=super::collaboration::ChildSourceHandoff{ retention_pin: None, source_path: None,refresh:None,source_run_id:Some(selected.run_id.clone()),source:selected.source.clone(),operation_id:String::new(),resource_authority:None,
@@ -1132,6 +1168,8 @@ impl Catalog {
 pub enum TreeCancelTarget {
     Thread { thread_id: String },
     Child { operation_id: String },
+    Execution { execution_id: String },
+    Run { run_id: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -1198,7 +1236,29 @@ impl Catalog {
         use super::collaboration::{ChildCodeResult, ChildReport};
         use std::collections::BTreeSet;
         let tx = self.db.transaction()?;
+        // Exact controls never broaden to the Agent's next admission or other branches.
+        let mut exact_runs = BTreeSet::new();
+        let mut exact_executions = BTreeSet::new();
+        let exact = matches!(target, TreeCancelTarget::Execution { .. } | TreeCancelTarget::Run { .. });
         let root = match &target {
+            TreeCancelTarget::Execution { execution_id } => {
+                let execution=super::delegated::execution(&tx,execution_id)?;
+                let child=super::delegated::relation(&tx,&execution.child_operation_id)?;
+                if let Some(thread)=expected_parent_thread_id {
+                    let requester=super::bot_reports::requester(&tx,execution_id)?;
+                    if thread!=child.parent_thread_id && thread!=requester.thread_id {
+                        return Err(RuntimeError::Invalid("execution does not belong to the expected requesting Thread".into()));
+                    }
+                }
+                exact_executions.insert(execution_id.clone());
+                if let Some(receipt)=execution.receipt {exact_runs.insert(receipt.run_id);}
+                child.child_thread_id
+            },
+            TreeCancelTarget::Run { run_id } => {
+                let run:Run=record(&tx,"runs",run_id)?;
+                if expected_parent_thread_id.is_some() {return Err(RuntimeError::Invalid("parent scope applies only to delegated executions".into()));}
+                exact_runs.insert(run_id.clone());run.thread_id
+            },
             TreeCancelTarget::Thread { thread_id } => {
                 if expected_parent_thread_id.is_some() {
                     return Err(RuntimeError::Invalid(
@@ -1256,9 +1316,23 @@ impl Catalog {
             })
             .collect::<Result<Vec<_>>>()?
         };
+        if exact {
+            // Follow the selected Run's actual dispatch edges, not a mutable Thread family.
+            loop {
+                let before=(exact_runs.len(),exact_executions.len());
+                for child in &children {
+                    if exact_runs.contains(&child.parent_run_id) {
+                        exact_executions.insert(child.operation_id.clone());
+                        let execution=super::delegated::execution(&tx,&child.operation_id)?;
+                        if let Some(receipt)=execution.receipt {exact_runs.insert(receipt.run_id);}
+                    }
+                }
+                if before==(exact_runs.len(),exact_executions.len()){break;}
+            }
+        }
         // Fixed point over the original lineage, with no artificial depth limit. This lock
         // also fences new descendants until their original parent Run is cancelled below.
-        loop {
+        while !exact {
             let before = threads.len();
             for child in &children {
                 if threads.contains(&child.parent_thread_id) {
@@ -1269,13 +1343,15 @@ impl Catalog {
                 break;
             }
         }
-        for thread in &threads {
+        for thread in threads.iter().filter(|_| !exact) {
             super::activation::cancel_thread(&tx, thread)?;
             super::calendar::cancel_thread_pending(&tx, thread)?;
         }
         let children = children
             .into_iter()
-            .filter(|child| threads.contains(&child.child_thread_id))
+            .filter(|child| if exact {
+                exact_executions.iter().any(|execution| super::delegated::execution(&tx,execution).is_ok_and(|e|e.child_operation_id==child.operation_id))
+            } else {threads.contains(&child.child_thread_id)})
             .collect::<Vec<_>>();
         let runs = {
             let mut statement = tx.prepare("SELECT body FROM runs WHERE branch_id IS NOT NULL ORDER BY id")?;
@@ -1285,7 +1361,7 @@ impl Catalog {
         };
         let runs = runs
             .into_iter()
-            .filter(|run| threads.contains(&run.thread_id))
+            .filter(|run| if exact {exact_runs.contains(&run.id)} else {threads.contains(&run.thread_id)})
             .collect::<Vec<_>>();
         let run_ids = runs.iter().map(|run| run.id.clone()).collect::<Vec<_>>();
         for run in &runs {
@@ -1336,7 +1412,9 @@ impl Catalog {
             }
         }
         for child in &children {
-            super::request_cancel_operation_in(&tx, &child.operation_id)?;
+            if !exact || exact_executions.contains(&child.operation_id) {
+                super::request_cancel_operation_in(&tx, &child.operation_id)?;
+            }
             let executions: Vec<super::delegated::DelegatedExecution> = {
                 let mut s = tx
                     .prepare("SELECT body FROM delegated_executions WHERE child_operation_id=?1")?;
@@ -1345,6 +1423,7 @@ impl Catalog {
                     .collect::<Result<_>>()?
             };
             for mut execution in executions {
+                if exact && !exact_executions.contains(&execution.execution_id) {continue;}
                 let selection: Option<String> = tx.query_row(
                     "SELECT id FROM operations WHERE json_extract(body,'$.intent.kind')='delegation_model_selection_v1' AND json_extract(body,'$.intent.executionId')=?1",
                     [&execution.execution_id], |row| row.get(0),

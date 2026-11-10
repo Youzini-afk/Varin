@@ -1169,3 +1169,51 @@ fn range_backed_fixed_read_materializes_gbk_edit_and_keeps_external_cas_conflict
     fs::write(&physical,b"external").unwrap();let stale=f.call("file_write",json!({"path":"legacy.txt","readVersion":current["readVersion"],"content":"stale"}));
     assert!(!matches!(stale,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{stale:?}");assert_eq!(fs::read(&physical).unwrap(),b"external");
 }
+
+#[test]
+fn model_file_references_keep_observed_format_conflicts_and_replayable_pages() {
+    let mut f = Fixture::new();
+    let path = f.root.join("work/observed.txt");
+    let original = [vec![0xff,0xfe], "first\r\nsecond\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect()].concat();
+    fs::write(&path,&original).unwrap();
+    let catalog = Arc::new(Mutex::new(varin_runtime::Catalog::open(f.root.join("catalog")).unwrap()));
+    f.executor.resources.reference_catalog = Some(catalog.clone());
+    let ToolCompletion::Result {content:first,..} = f.call("file_read",json!({"path":"observed.txt","length":16})) else {panic!("file read")};
+    let visible = first.model_data.as_ref().unwrap();
+    let reference = visible["ref"].as_str().unwrap().to_owned();
+    assert!(reference.starts_with("file:"));
+    assert!(visible.get("readVersion").is_none());
+    assert!(first.data["readVersion"].is_string(),"raw receipt stays inspectable");
+    assert_eq!(first.data["content"]["format"]["encoding"],"utf-16le");
+    assert_eq!(first.data["content"]["format"]["bom"],true);
+    let mut other=Fixture::new();
+    fs::write(other.root.join("work/observed.txt"),&original).unwrap();
+    other.executor.resources.reference_catalog=Some(catalog.clone());
+    let ToolCompletion::Result {content:independent,..}=other.call("file_read",json!({"path":"observed.txt","length":16})) else {panic!("independent source read")};
+    assert_ne!(independent.model_data.as_ref().unwrap()["ref"],reference,"same path and bytes in another source are distinct observations");
+    assert_eq!(other.try_call("file_read",json!({"ref":reference})).unwrap_err().code,"reference_source_changed");
+    drop(other);
+    let next=visible["nextRead"]["arguments"].clone();
+    assert!(next["ref"].as_str().unwrap().starts_with("read:"));
+    let ToolCompletion::Result {content:page1,..}=f.call("file_read",next.clone()) else {panic!("continuation")};
+    let ToolCompletion::Result {content:page2,..}=f.call("file_read",next) else {panic!("continuation replay")};
+    assert_eq!(page1.data,page2.data,"continuation is not a consuming cursor");
+    let ToolCompletion::Result {outcome, ..}=f.call("file_edit",json!({"ref":reference,"edits":[{"oldText":"first","newText":"changed"}]})) else {panic!("reference edit")};
+    assert_eq!(outcome,Outcome::Succeeded);
+    let changed = fs::read(&path).unwrap();
+    assert!(changed.starts_with(&[0xff,0xfe]));
+    assert_eq!(String::from_utf16(&changed[2..].chunks_exact(2).map(|pair|u16::from_le_bytes([pair[0],pair[1]])).collect::<Vec<_>>()).unwrap(),"changed\r\nsecond\r\n");
+    assert!(matches!(f.call("file_edit",json!({"ref":reference,"edits":[{"oldText":"changed","newText":"lost update"}]})),ToolCompletion::NotDispatched {..}),"old observation must retain the original CAS version");
+    let ToolCompletion::Result {outcome,content,..}=f.call("file_read",json!({"ref":reference})) else {panic!("stale read")};
+    assert_eq!(outcome,Outcome::Failed);assert_eq!(content.data["status"],"stale");assert!(content.data.get("content").is_none(),"never show newer bytes as the original observed file");
+    let source = f.executor.binding.source_selection().unwrap();
+    let target: crate::resource_references::FileTarget = crate::resource_references::resolve(&catalog.lock().unwrap(),varin_runtime::catalog::model_references::ReferenceKind::File,&reference).unwrap();
+    let crate::resource_references::FileTarget::Observation {source:observed,..}=target else {panic!("file observation")};
+    assert_eq!(observed,source);
+    f.executor.binding.execution_workspace_id="another-workspace".into();
+    assert_eq!(f.try_call("file_read",json!({"ref":reference})).unwrap_err().code,"reference_source_changed");
+    f.executor.resources.reference_catalog=None;drop(catalog);
+    let reopened=varin_runtime::Catalog::open(f.root.join("catalog")).unwrap();
+    let restored:crate::resource_references::FileTarget=crate::resource_references::resolve(&reopened,varin_runtime::catalog::model_references::ReferenceKind::File,&reference).unwrap();
+    assert!(matches!(restored,crate::resource_references::FileTarget::Observation {read_version,..} if read_version == first.data["readVersion"].as_str().unwrap()));
+}

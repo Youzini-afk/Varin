@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 89;
+pub(crate) const FORMAT: i64 = 90;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -146,6 +146,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
+    if version >= 90 { model_references::check_format(db)?; }
     if version >= 87 { principals::check_format(db)?; }
     else { principals::check_legacy_format(db)?; }
     db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
@@ -239,6 +240,7 @@ fn initialize_metadata(
         context_observations::initialize(&tx)?;
         driver::initialize(&tx)?;
         attachments::initialize(&tx)?;
+        model_references::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
@@ -587,6 +589,13 @@ impl Catalog {
             "INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",
             params![run_id, command.branch_id, encode(&run)?],
         )?;
+        match origin {
+            submissions::SubmissionOrigin::Child { operation_id, .. } => model_references::bind_delegated_run(tx, operation_id, &run.id)?,
+            submissions::SubmissionOrigin::ChildContinuation { execution_id, .. } => model_references::bind_delegated_run(tx, execution_id, &run.id)?,
+            submissions::SubmissionOrigin::Ingress { execution_id: Some(execution_id), .. } => model_references::bind_delegated_run(tx, execution_id, &run.id)?,
+            submissions::SubmissionOrigin::Summary { .. } => {},
+            _ => model_references::admit_native(tx, &run)?,
+        }
         tx.execute(
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
@@ -1838,6 +1847,11 @@ mod observe;
 pub mod usage;
 #[path = "catalog_usage_ledger.rs"]
 pub mod usage_ledger;
+#[path = "catalog_model_references.rs"]
+pub mod model_references;
+#[path = "catalog_export.rs"]
+pub mod export;
+
 #[path = "catalog_threads.rs"]
 pub mod threads;
 #[path = "catalog_identity.rs"]

@@ -3,41 +3,39 @@
 use super::*;
 use crate::execution::Content;
 
-fn requests(db: &Connection, run: &str) -> Result<Vec<(inputs::QueuedInputMetadata, String)>> {
-    let mut query = db.prepare("SELECT q.body,b.bot_id FROM input_queue q JOIN bot_thread_bindings b ON b.thread_id=q.sender_thread_id WHERE q.run_id=?1 AND q.state='delivered' AND q.origin='message' AND json_extract(q.body,'$.origin.identity.kind')='request' AND json_extract(q.body,'$.origin.identity.actor.kind')='agent'")?;
-    let rows = query.query_map([run], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    rows.map(|row| {
-        let (body, bot) = row?;
-        Ok((serde_json::from_str(&body)?, bot))
-    })
-    .collect()
+fn requests(db: &Connection, run: &str) -> Result<Vec<inputs::QueuedInputMetadata>> {
+    let mut query = db.prepare("SELECT q.body FROM input_queue q WHERE q.run_id=?1 AND q.state='delivered' AND q.origin='message' AND json_extract(q.body,'$.origin.identity.kind')='request' AND json_extract(q.body,'$.origin.identity.actor.kind')='agent'")?;
+    let rows = query
+        .query_map([run], |row| row.get::<_, String>(0))?
+        .map(|row| Ok(serde_json::from_str(&row?)?))
+        .collect();
+    rows
 }
 
 pub(super) fn directly_requested_by(db: &Connection, run: &Run, bot: &str) -> Result<bool> {
-    Ok(requests(db, &run.id)?
-        .iter()
-        .any(|(_, requester)| requester == bot))
+    for request in requests(db, &run.id)? {
+        let identity = messages::message_identity(&request)?;
+        if super::super::bot::thread_bot(db, &identity.sender_thread_id)?.as_deref() == Some(bot) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn publish_pending(tx: &Transaction<'_>, run: &Run) -> Result<()> {
-    let delegated: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
-        [&run.thread_id],
-        |row| row.get(0),
-    )?;
-    if delegated {
-        return Ok(());
-    }
-    for (request, _) in requests(tx, &run.id)? {
-        event(
-            tx,
-            &request.id,
-            run.revision,
-            "bot.request_report_pending",
-            json!({"messageId":request.id,"runId":run.id}),
-        )?;
+    for request in requests(tx, &run.id)? {
+        // A resumed delegated execution already reports this exact admission. Other
+        // requests delivered into its active Run still retain their own reply route.
+        let delegated: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions WHERE run_id=?1 AND json_extract(body,'$.trigger.kind')='message_request' AND json_extract(body,'$.trigger.message_id')=?2)", params![run.id,request.id], |row|row.get(0))?;
+        if !delegated {
+            event(
+                tx,
+                &request.id,
+                run.revision,
+                "bot.request_report_pending",
+                json!({"messageId":request.id,"runId":run.id}),
+            )?;
+        }
     }
     Ok(())
 }
@@ -46,6 +44,7 @@ struct ReportRead {
     run: Run,
     request: messages::MessageIdentity,
     name: String,
+    execution: model_references::ExecutionReference,
     failure: Option<RunFailure>,
     items: Vec<HistoryItem>,
     content: crate::content::ContentStore,
@@ -55,6 +54,8 @@ struct ReportBody {
     request: messages::MessageIdentity,
     text: String,
     answer: Option<HistoryItem>,
+    execution: model_references::ExecutionReference,
+    partial: bool,
 }
 impl ReportRead {
     fn load(self) -> Result<ReportBody> {
@@ -93,13 +94,21 @@ impl ReportRead {
                 break;
             }
         }
+        // Reuse the existing original-output page budget, preserving UTF-8 boundaries.
+        // The item reference below remains the authority for the complete answer.
+        let mut end = text.len().min(65536);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let partial = end < text.len();
+        text.truncate(end);
         let state = serde_json::to_value(self.run.state)?;
         let mut notice = format!(
-            "Work {} ({}) ended with status {}. Original Run: {}.",
+            "Work {} [{}], execution {}, ended with status {}.",
             self.name,
-            self.run.thread_id,
-            state.as_str().unwrap_or_default(),
-            self.run.id
+            self.execution.agent_id,
+            self.execution.reference,
+            state.as_str().unwrap_or_default()
         );
         if let Some(failure) = self.failure {
             notice.push_str(&format!("\n{}: {}", failure.code, failure.message));
@@ -113,6 +122,8 @@ impl ReportRead {
                 format!("{notice}\n\n{text}")
             },
             answer,
+            execution: self.execution,
+            partial,
         })
     }
 }
@@ -149,6 +160,7 @@ impl Catalog {
         )?;
         let failure = self.run_failure(&run.id)?;
         Ok(ReportRead {
+            execution: self.execution_reference(&run.id)?,
             run,
             request,
             name,
@@ -158,7 +170,10 @@ impl Catalog {
         })
     }
 
-    fn prepare_work_report(&self, body: ReportBody) -> Result<messages::MessagePreparation> {
+    fn prepare_work_report(
+        &mut self,
+        mut body: ReportBody,
+    ) -> Result<messages::MessagePreparation> {
         let messages::MessageActor::Agent {
             run_id: requester, ..
         } = &body.request.actor
@@ -179,6 +194,28 @@ impl Catalog {
             })
             .transpose()?
             .unwrap_or_default();
+        let requester_run = self.run(requester)?;
+        let read = if let Some(answer) = &body.answer {
+            let arguments = json!({"threadId":body.run.thread_id,"branchId":body.run.branch_id,
+                "runId":body.run.id,"query":{"kind":"item","itemId":answer.id}});
+            let target = self.model_history_read_target(family::READ_TOOL, &arguments)?;
+            let reference = self.register_model_reference(
+                model_references::ReferenceKind::Item,
+                "history",
+                &target,
+                &body.run.id,
+            )?;
+            self.retain_model_reference(&reference, requester)?;
+            body.text.push_str(&format!(
+                "\n\nRead the original answer with read_thread ref={reference}."
+            ));
+            json!({"tool":family::READ_TOOL,"arguments":{"ref":reference}})
+        } else {
+            Value::Null
+        };
+        let data = json!({"kind":"work_report","executionRef":body.execution.reference,"agentRef":body.execution.agent_id,
+            "status":body.run.state,"runId":body.run.id,"itemId":body.answer.as_ref().map(|item|&item.id),
+            "read":read,"previewPartial":body.partial});
         self.prepare_message(
             format!("bot-report:run:{}:{}", body.run.id, body.request.message_id),
             body.run.thread_id,
@@ -198,10 +235,14 @@ impl Catalog {
                 source_agent: None,
                 name: None,
                 wait: None,
-                target_thread_id: Some(body.request.sender_thread_id),
+                target_thread_id: Some(body.request.sender_thread_id.clone()),
                 target_branch_id: Some(body.request.sender_branch_id),
                 reply_to: Some(body.request.message_id),
-                kind: if self.run(requester)?.cancel_requested {
+                kind: if requester_run.cancel_requested
+                    || requester_run.state == RunState::Cancelled
+                    || super::super::bot::thread_bot(&self.db, &body.request.sender_thread_id)?
+                        .is_none()
+                {
                     MessageKind::Inform
                 } else {
                     MessageKind::Request
@@ -211,7 +252,12 @@ impl Catalog {
             None,
             None,
         )
-        .map(|preparation| preparation.with_attachments(attachments))
+        .and_then(|preparation| {
+            preparation
+                .with_attachments(attachments)
+                .with_delivery_data(data)
+                .with_model_references(self)
+        })
     }
 }
 

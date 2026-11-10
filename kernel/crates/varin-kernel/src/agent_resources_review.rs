@@ -458,7 +458,9 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         db.lock().unwrap().request_cancel_run(&run).unwrap();
                     }
                 }
-                bridge.receive(json!({"v":1,"kind":"resource-response","id":frame["id"],"kernelEpoch":"epoch","result":{"status":"ready","content":"old"}}));
+                let result=if file_attachment {json!({"status":"ready","attachment":{"ref":"attachment:fixed","filename":"fixed.txt","mimeType":"text/plain","byteLength":10},
+                    "content":{"text":"old","offset":7,"nextOffset":10,"byteLength":10,"eof":true}})} else {json!({"status":"ready","content":"old"})};
+                bridge.receive(json!({"v":1,"kind":"resource-response","id":frame["id"],"kernelEpoch":"epoch","result":result}));
             })
         };
         bound.authorize(&context, &contract, &cancel).unwrap();
@@ -482,7 +484,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             }
         );
         assert_eq!(
-            content.data["content"],
+            if file_attachment && !cancel_before_reply {content.data["content"]["text"].clone()} else {content.data["content"].clone()},
             if cancel_before_reply {
                 Value::Null
             } else {

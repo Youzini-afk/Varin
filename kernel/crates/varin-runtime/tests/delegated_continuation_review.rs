@@ -33,6 +33,7 @@ fn context(child: &ChildTask, key: &str) -> (ContextProposal, PersonalizationBas
 }
 fn first(f: &mut Fixture) -> ChildTask {
     let child = f.accept();
+    let accepted_ref=f.db.execution_reference(&child.execution_id).unwrap();
     f.settle_exchange();
     let mut source = child.source.pin().unwrap().source.clone();
     source.branch_id = Some(format!("child-source:{}", child.execution_id));
@@ -44,8 +45,10 @@ fn first(f: &mut Fixture) -> ChildTask {
     if f.db.bot_for_thread(&child.child_thread_id).unwrap().is_some() {
         basis.mode = "bot".into();
     }
-    f.db.prepare_child(&child.execution_id, source, proposal, basis)
-        .unwrap()
+    let prepared=f.db.prepare_child(&child.execution_id, source, proposal, basis).unwrap();
+    let run_ref=f.db.execution_reference(&prepared.receipt.as_ref().unwrap().run_id).unwrap();
+    assert_eq!(run_ref.reference,accepted_ref.reference,"preparation and its Run share one admitted execution number");
+    prepared
 }
 #[test]
 fn launch_failure_retains_diagnostic_and_successful_rebind_clears_it() {
@@ -544,7 +547,9 @@ fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_
     let mut members=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,Default::default(),&||false).unwrap().members;
     let member=members.remove(0);
     assert_eq!(member.avatar.as_deref(),Some(avatar.as_str()));
-    assert_eq!(member.agent_id,code);assert_eq!(member.task.as_deref(),Some("Continue on the integrated stage"));
+    assert_eq!(member.agent_id,code);assert_eq!(member.task.as_deref(),Some("Continue on the integrated stage"), "UI detail projection retains its original task");
+    let overview=db.capture_family_read(&initial.parent_thread_id,Some(&code),None).unwrap().overview(&||false).unwrap();
+    assert_eq!(overview["task"],"Continue on the integrated stage");
     let files=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,
         varin_runtime::catalog::family::FamilyListQuery {scope:Some("all".into()),file_path:Some("src/feature.ts".into()),..Default::default()},&||false).unwrap();
     assert_eq!(files.members.len(),1);assert_eq!(files.members[0].agent_id,code);

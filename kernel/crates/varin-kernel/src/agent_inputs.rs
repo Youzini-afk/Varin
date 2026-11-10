@@ -276,7 +276,10 @@ pub(super) fn execute(
                 .prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
             let source=varin_runtime::output::OutputSource::Conversation {provenance:varin_runtime::execution::Provenance::UserInstruction {input_id:preparation.identity().message_id.clone()}};
             let media=p.prepared_attachment_media.unwrap_or_default().into_iter().map(|media|varin_runtime::output::ResolvedMedia {media_type:media.media_type,data_base64:media.data_base64,source:source.clone()}).collect();
-            let prepared = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).load().map_err(domain)?;
+            let preparation = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media);
+            let preparation = {let owner=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                preparation.with_model_references(&owner).map_err(domain)?};
+            let prepared = preparation.load().map_err(domain)?;
             let mut owner = catalog
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;

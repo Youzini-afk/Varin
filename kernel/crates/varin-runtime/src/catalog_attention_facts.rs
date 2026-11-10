@@ -32,13 +32,14 @@ pub struct AttentionDeliveredReport {
 pub(super) fn record_report_delivery(tx: &Transaction<'_>, receiving: &Run, execution_id: &str) -> Result<()> {
     let execution = delegated::execution(tx, execution_id)?;
     let relation = delegated::relation(tx, &execution.child_operation_id)?;
-    if receiving.thread_id != relation.parent_thread_id || receiving.branch_id != relation.parent_branch_id { return Ok(()); }
+    let requester = super::bot_reports::requester(tx, execution_id)?;
+    if receiving.thread_id != requester.thread_id || receiving.branch_id != requester.branch_id { return Ok(()); }
     let ready: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.report_ready')", [execution_id], |r| r.get(0))?;
     if !ready { return Ok(()); }
     let recorded: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.report_delivered' AND json_extract(data,'$.receivingRunId')=?2)", params![execution_id, receiving.id], |r| r.get(0))?;
     if recorded { return Ok(()); }
     let fact = AttentionDeliveredReport {
-        parent_thread_id: relation.parent_thread_id, parent_branch_id: relation.parent_branch_id, parent_run_id: relation.parent_run_id,
+        parent_thread_id: requester.thread_id, parent_branch_id: requester.branch_id, parent_run_id: requester.run_id,
         receiving_run_id: receiving.id.clone(), child_operation_id: relation.operation_id, execution_id: execution_id.into(),
         child_thread_id: relation.child_thread_id, child_branch_id: relation.child_branch_id, delivered_cursor: 0,
     };
@@ -106,8 +107,9 @@ pub(super) fn delivered_reports(db: &Connection, branch_ids: &str, cancel: &dyn 
         let relation = delegated::relation(db, &fact.child_operation_id)?;
         let receiver: Run = record(db, "runs", &fact.receiving_run_id)?;
         let execution = delegated::execution(db, &fact.execution_id)?;
-        if relation.parent_run_id == fact.parent_run_id && relation.parent_thread_id == fact.parent_thread_id
-            && relation.parent_branch_id == fact.parent_branch_id && relation.child_thread_id == fact.child_thread_id
+        let requester = super::bot_reports::requester(db, &fact.execution_id)?;
+        if requester.run_id == fact.parent_run_id && requester.thread_id == fact.parent_thread_id
+            && requester.branch_id == fact.parent_branch_id && relation.child_thread_id == fact.child_thread_id
             && relation.child_branch_id == fact.child_branch_id && execution.child_operation_id == fact.child_operation_id
             && receiver.thread_id == fact.parent_thread_id && receiver.branch_id == fact.parent_branch_id {
             fact.delivered_cursor = cursor; reports.push(fact);

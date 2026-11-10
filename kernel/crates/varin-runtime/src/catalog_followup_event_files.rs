@@ -95,7 +95,7 @@ pub(super) fn prepare_files(
             }
             let content_ref: ContentRef = serde_json::from_value(content.save_bytes(&bytes)?)?;
             let identity = encode(&(event_id, &file.file_id))?;
-            let attachment = Attachment {
+            let attachment = Attachment { model_ref: None,
                 reference: format!(
                     "attachment:event_{}",
                     hex::encode(Sha256::digest(identity.as_bytes()))

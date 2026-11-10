@@ -42,6 +42,8 @@ export interface OfficeObject {
 }
 export interface OfficeSection { id: string; name: string; kind: 'document' | 'header' | 'footer' | 'comments' | 'worksheet' | 'slide' | 'notes' }
 export interface OfficeReadResult {
+  /** Original source observation, distinct from the immutable material snapshot. */
+  sourceObservation?: {path:string;readVersion:string};
   status: 'ok';
   format: OfficeFormat;
   revision: string;

@@ -1675,7 +1675,7 @@ impl ContinuationPreparation {
                 }
             },
             content: Content::Output {
-                output: crate::output::OutputBody { data: facts, parts },
+                output: crate::output::OutputBody { model_data: None, data: facts, parts },
             },
             opaque: None,
         };

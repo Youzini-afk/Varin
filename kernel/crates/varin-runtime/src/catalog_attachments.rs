@@ -33,6 +33,9 @@ impl AttachmentSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Attachment {
+    /// Catalog-authored model presentation. The immutable byte-owner reference stays raw.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_ref: Option<String>,
     #[serde(rename = "ref")]
     pub reference: String,
     pub filename: String,
@@ -57,12 +60,64 @@ impl Attachment {
     pub fn is_direct_image(&self) -> bool {
         matches!(self.mime_type.as_str(), "image/png"|"image/jpeg"|"image/webp"|"image/gif")
     }
+    /// Only rendering uses the short address. Never feed this descriptor back to the byte owner.
+    pub fn model_descriptor(&self) -> Self {
+        let mut model = self.clone();
+        if let Some(reference) = model.model_ref.take() { model.reference = reference; }
+        model
+    }
+    pub fn same_resource(&self, other: &Self) -> bool {
+        self.reference == other.reference && self.filename == other.filename
+            && self.mime_type == other.mime_type && self.byte_length == other.byte_length
+    }
     pub fn description(&self) -> String {
-        let mut text=format!("File attachment: {}",serde_json::to_string(self).expect("typed attachment"));
+        let model = self.model_descriptor();
+        let mut text=format!("File attachment: {}",serde_json::to_string(&model).expect("typed attachment"));
         if self.mime_type.starts_with("image/") && !self.is_direct_image() {
             text.push_str(" This format is delivered as a file, not direct model vision input.");
         }
         text
+    }
+}
+
+/// This is the same typed target consumed by native/Host attachment readers. Catalog
+/// only labels an already localized immutable attachment; byte access is checked there.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag="kind", rename_all="snake_case", deny_unknown_fields)]
+pub enum AttachmentReferenceTarget { Attachment { reference: String } }
+impl Catalog {
+    pub fn project_attachments(&self, attachments: &mut [Attachment], holder: &str) -> Result<()> {
+        for attachment in attachments {
+            attachment.validate()?;
+            if attachment.reference.starts_with("file:") {
+                return Err(RuntimeError::Invalid("Localize the original attachment before publishing its descriptor".into()));
+            }
+            attachment.model_ref = Some(self.register_model_reference(super::model_references::ReferenceKind::File,
+                "attachment", &serde_json::to_value(AttachmentReferenceTarget::Attachment {reference:attachment.reference.clone()})?, holder)?);
+        }
+        Ok(())
+    }
+    pub fn project_output_attachments<M>(&self, output: &mut crate::output::OutputBody<M>, holder: &str) -> Result<()> {
+        for part in &mut output.parts {
+            if let crate::output::OutputPart::Attachment {attachment} = part {
+                self.project_attachments(std::slice::from_mut(attachment), holder)?;
+            }
+        }
+        Ok(())
+    }
+    pub fn project_completion_attachments<M>(&self, completion: &mut crate::execution::ToolCompletion<M>, holder: &str) -> Result<()> {
+        match completion {
+            crate::execution::ToolCompletion::Result{content,..}
+            |crate::execution::ToolCompletion::JobAccepted{content:Some(content),..}=>self.project_output_attachments(content,holder),
+            _=>Ok(()),
+        }
+    }
+    pub fn project_item_attachments<M>(&self, item: &mut crate::execution::ConversationItem<M>, holder: &str) -> Result<()> {
+        match &mut item.content {
+            crate::execution::Content::Output{output}=>self.project_output_attachments(output,holder),
+            crate::execution::Content::ToolResult{result}=>self.project_completion_attachments(&mut result.completion,holder),
+            _=>Ok(()),
+        }
     }
 }
 
@@ -328,6 +383,7 @@ pub(super) fn output(
         parts.push(crate::output::OutputPart::Media { media });
     }
     crate::output::OutputBody {
+        model_data: None,
         data: Value::Null,
         parts,
     }

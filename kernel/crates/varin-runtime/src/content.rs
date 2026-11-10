@@ -144,6 +144,11 @@ impl ContentStore {
     pub(crate) fn set_history_read_hook(&self, hook: Option<Arc<dyn Fn(&str) + Send + Sync>>) {
         *self.coordination.history_read_hook.lock().unwrap() = hook;
     }
+    /// Catalog calls this while owning its mutation lock. A prepared publication can
+    /// already own model-reference holders whose input/history rows are not committed.
+    pub(crate) fn publication_active(&self) -> bool {
+        self.coordination.state.lock().unwrap_or_else(|e| e.into_inner()).active > 0
+    }
     pub(crate) fn begin_publication(&self) -> ContentPublication {
         let mut state = self
             .coordination

@@ -7,6 +7,53 @@ use crate::execution::*;
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
+
+/// Only a previously absent projection can be published. The original completion remains
+/// byte-for-byte equivalent after removing this one explicit presentation field.
+fn raw_equivalent_projection(before: &ToolCompletion, after: &ToolCompletion) -> bool {
+    fn body(value: &ToolCompletion) -> Option<&crate::output::OutputBody> {
+        match value { ToolCompletion::Result{content,..}=>Some(content), ToolCompletion::JobAccepted{content,..}=>content.as_ref(), _=>None }
+    }
+    let Some(original)=body(before) else { return false; };
+    let mut raw=after.clone();
+    let projected=match &mut raw {
+        ToolCompletion::Result{content,..}|ToolCompletion::JobAccepted{content:Some(content),..}=>content, _=>return false,
+    };
+    let mut added=false;
+    if original.model_data.is_none() && projected.model_data.is_some() { projected.model_data=None; added=true; }
+    for (old,new) in original.parts.iter().zip(&mut projected.parts) {
+        if let (crate::output::OutputPart::Attachment{attachment:old},crate::output::OutputPart::Attachment{attachment:new})=(old,new) {
+            if old.model_ref.is_none() && new.model_ref.is_some() {new.model_ref=None;added=true;}
+        }
+    }
+    added && &raw==before
+}
+fn publish_model_projection(db:&mut Catalog,context:&ToolExecutionContext,original:&ToolCompletionMetadata,projected:&ToolCompletionMetadata)->Result<()> {
+    let tx=db.db.transaction()?;
+    let mut op:Operation=record(&tx,"operations",&context.operation_id)?;
+    let invocation=ToolIntent::from_operation(&op)?;
+    if op.call_completion.as_ref()!=Some(original) || op.run_id!=context.run_id || invocation.origin()!=&context.origin {
+        return Err(RuntimeError::Conflict("Original receipt changed before model projection publication".into()));
+    }
+    match &context.origin {
+        ToolOrigin::ModelStep{request_id}=>{
+            let committed:bool=tx.query_row("SELECT committed FROM tool_calls WHERE request_id=?1 AND call_id=?2",params![request_id,invocation.call().call_id],|r|r.get(0))?;
+            if committed{return Ok(());}
+            let receipt=ToolReceiptMetadata{request_id:request_id.clone(),call_id:invocation.call().call_id.clone(),completion:projected.clone()};
+            tx.execute("UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2 AND committed=0",params![request_id,invocation.call().call_id,encode(&receipt)?])?;
+        },
+        ToolOrigin::PolicyAction{action_id,node_id}=>{
+            let consumed:bool=tx.query_row("SELECT receipt IS NOT NULL FROM policy_graph_nodes WHERE action_id=?1 AND node_id=?2",params![action_id,node_id],|r|r.get(0))?;
+            if consumed{return Ok(());}
+        },
+        _=>{},
+    }
+    tx.execute("INSERT INTO model_bound_targets(operation_id,purpose,original,target) VALUES(?1,'tool_result_projection',?2,?3)",params![op.id,encode(original)?,encode(projected)?])?;
+    op.call_completion=Some(projected.clone());op.revision+=1;
+    put(&tx,"operations",&op.id,&op)?;
+    tx.commit()?;Ok(())
+}
+
 /// HTTP diagnostics are prepared by the model transport, including credential redaction.
 /// Other executor failures use owner-defined wording instead of arbitrary callback text.
 fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
@@ -101,9 +148,11 @@ impl Persistence for Mutex<Catalog> {
         epoch: u64,
         receipt: ToolExecutionReceipt,
     ) -> std::result::Result<ToolExecutionReceipt, ExecutionError> {
+        let mut completion=receipt.completion;
+        self.lock().map_err(catalog_lock_error)?.project_completion_attachments(&mut completion,&context.run_id).map_err(policy_error)?;
         let record = ExecutionRecord::ToolSettled {
             context: context.clone(),
-            completion: receipt.completion,
+            completion,
             executor_stopped: receipt.executor_stopped,
         };
         let preparation = self
@@ -112,6 +161,19 @@ impl Persistence for Mutex<Catalog> {
             .prepare_execution_bodies(&record)
             .map_err(policy_error)?;
         let prepared = preparation.write(&record).map_err(policy_error)?;
+        // Domain owners can publish their raw acceptance before the tool bridge adds its
+        // stable typed projection. Compare actual bodies outside the Catalog lock; a
+        // projection may refine presentation exactly once, never effect or raw evidence.
+        let original = {
+            let db=self.lock().map_err(catalog_lock_error)?;
+            db.operation(&context.operation_id).map_err(policy_error)?.call_completion.map(|metadata| {
+                (metadata.clone(), result_content::ToolCompletionRead { completion:metadata, content:db.content.clone(), _publication:db.content.begin_publication() })
+            })
+        };
+        let projection = if let (Some((metadata,read)),ExecutionRecord::ToolSettled{completion,..})=(original,&record) {
+            let before=read.load().map_err(policy_error)?;
+            raw_equivalent_projection(&before,completion).then_some(metadata)
+        } else {None};
         let (read, stopped) = {
             let mut db = self.lock().map_err(catalog_lock_error)?;
             let op = db.operation(&context.operation_id).map_err(policy_error)?;
@@ -126,6 +188,12 @@ impl Persistence for Mutex<Catalog> {
                 ));
             }
             fence(&db.run(&context.run_id).map_err(policy_error)?, epoch).map_err(policy_error)?;
+            if let Some(original)=projection.as_ref().filter(|original|op.call_completion.as_ref()==Some(*original)) {
+                if let Some(projected)=prepared.completion.as_ref() {
+                    publish_model_projection(&mut db,context,original,projected).map_err(policy_error)?;
+                }
+            }
+            let op=db.operation(&context.operation_id).map_err(policy_error)?;
             // A trusted domain receipt may already own a different canonical result.
             // The same completion can still refine its original executor-stop evidence.
             if op.call_completion.is_none() || op.call_completion == prepared.completion {
@@ -175,15 +243,6 @@ impl Persistence for Mutex<Catalog> {
             .capture_goal_context(run, epoch)
             .map_err(policy_error)?;
         read.map(|r| r.load()).transpose().map_err(policy_error)
-    }
-    fn teammate_context(&self, run: &str, epoch: u64) -> std::result::Result<Option<ConversationItem>,ExecutionError> {
-        let read = {
-            let catalog=self.lock().map_err(catalog_lock_error)?;
-            let run=catalog.run(run).map_err(policy_error)?;
-            fence(&run,epoch).map_err(policy_error)?;
-            catalog.capture_family_read(&run.thread_id,None,None).map_err(policy_error)?
-        };
-        read.status_context().map_err(policy_error)
     }
     fn goal_boundary(
         &self,
@@ -871,6 +930,7 @@ fn operation_id(request: &str, call: &str) -> String {
 }
 
 pub(super) struct ExecutionBodyPreparation {
+    projected_record: Option<ExecutionRecord>,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
     frozen_request: Option<Value>,
@@ -879,7 +939,6 @@ pub(super) struct ExecutionBodyPreparation {
 }
 pub(super) struct PreparedExecutionBodies {
     driver_request: bool,
-    teammate_deliveries: Vec<(String,u64)>,
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
@@ -901,6 +960,8 @@ pub(super) struct PreparedExecutionBodies {
 }
 impl ExecutionBodyPreparation {
     pub(super) fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
+        let projected_record=self.projected_record;
+        let record=projected_record.as_ref().unwrap_or(record);
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
                 if snapshot.view.binding.resource_activations
@@ -1007,18 +1068,6 @@ impl ExecutionBodyPreparation {
             )?),
             _ => None,
         };
-        let mut teammate_deliveries=Vec::new();
-        if let Some(snapshot)=&snapshot {
-            for item in snapshot.view.history.iter().filter(|item|item.id.starts_with("teammates:")) {
-                if let Content::Text{text}=&item.content {
-                    if let Some((_,json))=text.split_once('\n') {
-                        if let Ok(rows)=serde_json::from_str::<Vec<Value>>(json) {
-                            for row in rows {if let (Some(id),Some(cursor))=(row["executionId"].as_str(),row["reportCursor"].as_u64()){teammate_deliveries.push((id.into(),cursor));}}
-                        }
-                    }
-                }
-            }
-        }
         let mut history = std::collections::HashMap::new();
         for item in history_items(record) {
             let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
@@ -1123,7 +1172,6 @@ impl ExecutionBodyPreparation {
         };
         Ok(PreparedExecutionBodies {
             driver_request,
-            teammate_deliveries,
             _publication: self.publication,
             request,
             tools_ref,
@@ -1174,7 +1222,15 @@ impl Catalog {
             }
             _ => None,
         };
+        // Register only newly published typed output parts. Old history/request snapshots
+        // are never scanned or rewritten when a later request is compiled.
+        let projected_record = if let ExecutionRecord::ToolSettled{context,completion,executor_stopped}=record {
+            let mut projected=completion.clone();
+            self.project_completion_attachments(&mut projected,&context.run_id)?;
+            (projected != *completion).then_some(ExecutionRecord::ToolSettled{context:context.clone(),completion:projected,executor_stopped:*executor_stopped})
+        } else {None};
         Ok(ExecutionBodyPreparation {
+            projected_record,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
             frozen_request,
@@ -1197,7 +1253,6 @@ impl Catalog {
     ) -> Result<()> {
         let PreparedExecutionBodies {
             driver_request,
-            teammate_deliveries,
             _publication,
             request: prepared_request,
             tools_ref,
@@ -1259,19 +1314,6 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
-        if let ExecutionRecord::ModelFinished{request_id,outcome:ModelOutcome::Completed,..}=record {
-            for (execution,cursor) in teammate_deliveries {
-                let delegated=super::delegated::execution(&tx,&execution)?;
-                let relation=super::delegated::relation(&tx,&delegated.child_operation_id)?;
-                let recipient=if let super::delegated::DelegatedTrigger::MessageRequest { message_id, .. }=&delegated.trigger {
-                    let input: super::inputs::QueuedInputMetadata=super::record(&tx,"input_queue",message_id)?;
-                    super::messages::message_identity(&input)?.sender_thread_id.clone()
-                } else { relation.parent_thread_id };
-                if run.thread_id!=recipient { continue; }
-                tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",params![format!("agent-status:{execution}"),sql_number(cursor)?,request_id])?;
-                super::attention_facts::record_report_delivery(&tx, &run, &execution)?;
-            }
-        }
         let referenced_request = match record {
             ExecutionRecord::RequestNotDispatched { request_id, .. }
             | ExecutionRecord::ModelDispatched { request_id }
@@ -2090,6 +2132,10 @@ impl Catalog {
                                 RuntimeError::Invalid("prepared tool history body missing".into())
                             })?,
                     )?;
+                    if matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Succeeded, .. }) {
+                        super::bot_reports::commit_report_reads(&tx, &run, &key,
+                            &format!("{}:result:{}", request_id, result.call_id))?;
+                    }
                 }
             }
             ExecutionRecord::PolicyDecisionConsumed { .. } => {
@@ -2387,7 +2433,7 @@ pub(super) fn user_input_items_with_retained_media(id: &str, input: &Value, prev
             });
         }
         for attachment in super::attachments::input_attachments(input)? {
-            parts.push(Content::Output { output: crate::output::OutputBody { data: Value::Null,
+            parts.push(Content::Output { output: crate::output::OutputBody { model_data: None, data: Value::Null,
                 parts: vec![crate::output::OutputPart::Attachment { attachment }] } });
         }
         let image_references = crate::output::image_references(input)?;

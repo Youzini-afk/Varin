@@ -21,6 +21,8 @@ export interface DocumentReaderContext {
 }
 
 export interface DocumentIngestInput {
+  /** Original native file observation, carried only by trusted source readers. */
+  fileObservation?: {path:string;readVersion:string};
   source: Buffer;
   sourceUrl: string;
   finalUrl?: string;

@@ -269,6 +269,13 @@ Varin Host tool service 的同一 manifest `tool` descriptor 用于发现、激�
 Host 随原 descriptor 固定这些说明和版本，不建立另一张注册表。操作视图保留原共同约束、引用与互斥关系，
 不会替换实际执行 schema。未提供披露描述的扩展仍可按原名称、描述和完整契约被发现；导航分组不授予权限。
 
+工具可在同一 descriptor 声明 `references.inputs/outputs`，用明确 JSON pointer 位置、引用类型、资源 owner、
+reference 字段和原目标字段参与统一短码服务。`*` 只展开声明的数组，不扫描任意 JSON 或猜测第三方 ID。
+Host 通过私有 RPC 使用原 Rust Catalog 注册、解析及冻结目标；扩展 owner 相互隔离，引用不授予访问权限。
+原调用参数、原始输出与 UI 导航键保持不变；可信 adapter 将解析结果另存为 `resolvedArguments`，再执行
+原 schema、权限、确认和 domain proof。Provider 只收到 owner 发布的模型投影，未声明的扩展/MCP 保持原数据。
+Settings、文件、Computer 与 Browser 引用保留原 revision/observation/epoch，不能通过解析刷新过期证据。
+
 Result callback 返回 JSON，可追加有序 text/media part；null/empty 是合法数据。
 非法 output 或 callback failure 保留已受理 part 和失败回执。长得像图片或 receipt 的 JSON 仍只是数据。
 Job declaration 必须声明 thread/environment lifetime，并有可信 domain adapter 持久受理和管理；

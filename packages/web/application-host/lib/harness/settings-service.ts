@@ -62,6 +62,9 @@ export interface SettingsServiceCaller {
   invocation?: import('../kernel/tool-invocation.js').ToolInvocationAuthority;
   /** Original Host permission persistence only; never accepted from model arguments. */
   permissionSettingsRevision?: { before: string; after: string };
+  /** Original owner selection from a trusted reference, never model arguments. */
+  expectedSurface?: {surfaceId:string;connectionId:string};
+  onReferenceTarget?(target:{surfaceId:string;connectionId:string}):void;
   /** Facts from the existing writer call, without a separate verification read. */
   onMutationState?(state: 'started' | 'unchanged' | 'applied'): void;
 }
@@ -166,8 +169,9 @@ export interface ClientSurfaceBridge {
   request(op: {
     type: 'read' | 'apply' | 'present-credential';
     entries: { id: string; itemIndex?: number; values?: Record<string, unknown>; reset?: string[]; expectedRevision?: string }[];
-  }, target: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): Promise<{
+  }, target: Pick<SettingsServiceCaller, 'threadId' | 'branchId' | 'expectedSurface'> & {onDispatch?():void}): Promise<{
     surface: ClientSurfaceInfo;
+    connectionId?: string;
     results: ClientSurfaceFieldResult[];
   }>;
 }
@@ -670,7 +674,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       response = await bridge.request({
         type: 'read',
         entries: [{ id: entry.id }],
-      }, { threadId: caller.threadId, branchId: caller.branchId });
+      }, { threadId: caller.threadId, branchId: caller.branchId, ...(caller.expectedSurface ? {expectedSurface:caller.expectedSurface}:{}) });
     } catch (error) {
       const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
       return {
@@ -694,6 +698,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         reason: result.error ?? 'surface failed to read the value',
       };
     }
+    if (response.connectionId) caller.onReferenceTarget?.({surfaceId:response.surface.id,connectionId:response.connectionId});
     const values = result.values ?? {};
     const paths = Object.keys(values);
     return {
@@ -1590,9 +1595,11 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         ...(write.expectedRevision !== undefined ? { expectedRevision: write.expectedRevision } : {}) });
     }
     if (!entries.length) return { items };
-    entries.forEach(() => caller.onMutationState?.('started'));
-    // Resolve and pin exactly one Surface/connection for the whole owner batch.
-    const response = await bridge.request({ type: 'apply', entries }, caller);
+    let dispatched=false;
+    const onDispatch=()=>{dispatched=true;entries.forEach(() => caller.onMutationState?.('started'));};
+    // The bridge validates the observed connection before reporting dispatch.
+    const response = await bridge.request({ type: 'apply', entries }, {...caller,onDispatch});
+    if (!dispatched) onDispatch();
     const effective: Record<string, unknown> = {};
     for (const entry of entries) {
       const result = response.results.find(result => result.id === entry.id && result.itemIndex === entry.itemIndex);

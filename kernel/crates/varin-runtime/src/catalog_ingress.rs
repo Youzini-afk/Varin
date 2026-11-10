@@ -49,10 +49,17 @@ pub(super) fn delivered(tx: &Transaction<'_>, row: &QueuedInputMetadata) -> Resu
             tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES('bot-external-report',?1,?2,'\"committed\"')",params![sql_number(*event_cursor)?,operation])?;
         }
     }
-    if let InputOrigin::Message { command_key, .. } = &row.origin {
-        if let Some(execution) = command_key.strip_prefix("bot-report:") {
-            let cursor: u64 = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1", [execution], |r| read_number(r,0))?;
-            tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES('bot-report-delivery',?1,?2,'\"committed\"')", params![sql_number(cursor)?, execution])?;
+    if let InputOrigin::Message { command_key, identity, .. } = &row.origin {
+        // Old queued Bot notifications keep their original identity. WorkReport uses
+        // a different original owner and must never be parsed as a child execution.
+        let execution = match &identity.actor {
+            messages::MessageActor::AgentReport { execution_id, .. } => Some(execution_id.as_str()),
+            messages::MessageActor::Agent { .. } => command_key.strip_prefix("bot-report:"),
+            _ => None,
+        };
+        if let (Some(execution), Some(run)) = (execution, row.run_id.as_deref()) {
+            let run: Run = record(tx, "runs", run)?;
+            super::bot_reports::record_history_delivery(tx, &run, execution, &row.id)?;
         }
     }
     match row.origin {
