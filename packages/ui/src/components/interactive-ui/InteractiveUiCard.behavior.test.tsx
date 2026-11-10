@@ -8,10 +8,10 @@ import { InteractiveUiError, getRuntimeEndpointGeneration } from '@varin/applica
 import { UiWorkView, InteractiveUiPanel } from './InteractiveUiCard';
 import { uiSession, flushUiSessions } from '@/lib/interactive-ui/sessions';
 
-const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), state: vi.fn(), observe: vi.fn(), openPanel: vi.fn(), t: (key: string) => key }));
+const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), state: vi.fn(), observe: vi.fn(), select: vi.fn(), quote: vi.fn(), beginQuote: vi.fn(), endQuote: vi.fn(), openPanel: vi.fn(), t: (key: string) => key }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createInteractiveUiHttpAPI: () => api }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: api.t }) }));
-vi.mock('@/lib/desktop', () => ({ invokeDesktop: vi.fn() }));
+vi.mock('@/lib/desktop', () => ({ invokeDesktop: vi.fn(async () => null) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ size: _size, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { size?: string; variant?: string }) => <button {...props} /> }));
@@ -21,7 +21,7 @@ vi.mock('@/components/ui/context-menu', () => ({ ContextMenu: ({ children }: Rea
   ContextMenuTrigger: ({ children }: React.PropsWithChildren) => children, ContextMenuContent: ({ children }: React.PropsWithChildren) => <div role="menu">{children}</div>,
   ContextMenuItem: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>, ContextMenuSeparator: () => <hr /> }));
 vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: {}, threadComposerKey: vi.fn(), threadHostKey: vi.fn() }));
-vi.mock('@/lib/agent-editor/attachments', () => ({ addContentReference: vi.fn() }));
+vi.mock('@/lib/agent-editor/attachments', () => ({ addContentReference: api.quote, beginContentReferenceInsertion: (identity: unknown) => { api.beginQuote(identity); return { add: api.quote, dispose: api.endQuote }; } }));
 vi.mock('@/lib/interactive-ui/work-projection', () => ({ projectUiWork: vi.fn(), releaseUiWork: vi.fn(), restoreUiWork: vi.fn() }));
 vi.mock('@/lib/interactive-ui/modules', () => ({ prepareUiFiles: async (files: Record<string, string>) => files, createUiExport: vi.fn() }));
 
@@ -154,5 +154,46 @@ it('captures live HTML before a fork, drains pending saves and reports persisten
     expect(session.state).toEqual(live);
     api.state.mockRejectedValueOnce(new Error('Storage unavailable'));
     await act(async () => { await expect(flushUiSessions(session.identity, host)).rejects.toThrow('Storage unavailable'); });
+  } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
+});
+
+it.each([false, true])('quotes live iframe context or the actual raster fallback (graphical=%s)', async graphical => {
+  vi.useFakeTimers();
+  const { document, window } = parseHTML('<html><body></body></html>');
+  for (const [key, value] of Object.entries({ document, window, innerWidth: 800, innerHeight: 600, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(key, value);
+  vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: vi.fn() });
+  vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '', fontFamily: 'system-ui', overflowX: 'visible', overflowY: 'visible' }));
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16)); vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  api.quote.mockClear(); api.beginQuote.mockClear(); api.endQuote.mockClear(); api.select.mockReset();
+  api.attach.mockResolvedValue({ viewRef: 'ui-view:quote', token: 'lease' });
+  api.observe.mockImplementation((...args: unknown[]) => new Promise<void>(resolve => (args.at(-1) as AbortSignal).addEventListener('abort', () => resolve(), { once: true })));
+  api.select.mockImplementation(async (_identity, observation, selection) => ({ ref: 'ui-selection:fixed', snapshotRef: 'ui-snapshot:fixed', viewRef: observation.viewRef,
+    source: { ref: 'ui:quote@7' }, title: 'Quoted report', text: selection.text, image: observation.image }));
+  const session = uiSession(`html-quote:${graphical}`, { runtime: 'agent', threadId: 'quote-original', branchId: 'branch' }, getRuntimeEndpointGeneration());
+  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
+  const calls: { type: string; id?: string; raster?: boolean }[] = [];
+  try {
+    await act(async () => root.render(<UiWorkView session={session} source={{ ref: 'ui:quote@7' }} files={{ 'index.html': '<canvas></canvas>' }} entry="index.html" title="Quote" committed />));
+    const frame = container.querySelector('iframe')!;
+    Object.defineProperty(frame, 'getBoundingClientRect', { value: () => ({ left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100, x: 0, y: 0 }) });
+    const channel = /data-channel="([^"]+)"/.exec(frame.getAttribute('srcDoc') ?? frame.getAttribute('srcdoc') ?? frame.srcdoc)![1];
+    const frameWindow = { postMessage: (message: { type: string; id?: string; raster?: boolean }) => {
+      calls.push(message);
+      if (message.type !== 'capture') return;
+      expect(api.beginQuote).toHaveBeenCalledWith(session.identity);
+      post({ type: 'capture', id: message.id, source: { ref: 'ui:quote@7' }, capturedAt: 'fixed-time', viewport: { width: 100, height: 100 },
+        state: { data: { privateState: 'do not quote internals' }, controls: {}, scroll: { x: 0, y: 92 } },
+        ...(graphical ? message.raster ? { image: { mimeType: 'image/png', data: 'ACTUAL_CAPTURE', method: 'dom' } } : {} : { context: { selected: 'Current choice', result: 42 } }) });
+    } };
+    const post = (data: object) => { const event = new window.Event('message'); Object.assign(event, { source: frameWindow, data: { channel, ...data } }); window.dispatchEvent(event); };
+    Object.defineProperty(frame, 'contentWindow', { value: frameWindow });
+    await act(async () => post({ type: 'ready' }));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'chat.context.quoteContent')!.click());
+    expect(api.quote).toHaveBeenCalledTimes(1); expect(api.endQuote).toHaveBeenCalledTimes(1);
+    const quoted = api.quote.mock.calls[0]![0];
+    expect(quoted.source).toMatchObject({ kind: 'ui', thread: session.identity, revisionRef: 'ui:quote@7', snapshotRef: 'ui-snapshot:fixed' });
+    if (graphical) { expect(calls.some(call => call.raster)).toBe(true); expect(quoted.image?.data).toBe('ACTUAL_CAPTURE'); }
+    else { expect(quoted.text).toBe('selected: Current choice\nresult: 42'); expect(quoted.text).not.toContain('privateState'); }
   } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
 });

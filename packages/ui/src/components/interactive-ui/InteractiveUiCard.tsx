@@ -1,5 +1,6 @@
 import React from 'react';
-import { composeUiResult } from '@/lib/interactive-ui/compose';
+import { uiDiscussionText } from '@/lib/interactive-ui/discussion';
+import { composeUiResult, beginUiComposeInsertion } from '@/lib/interactive-ui/compose';
 import { HtmlHostActions } from './HtmlHostActions';
 import { prepareHtmlResult } from '@/lib/interactive-ui/html-actions';
 import { DeclarativeUiContent } from './DeclarativeUiContent';
@@ -11,8 +12,8 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { invokeDesktop } from '@/lib/desktop';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { threadComposerKey, threadHostKey, useThreadStore } from '@/stores/useThreadStore';
-import { addContentReference } from '@/lib/agent-editor/attachments';
+import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
+import { addContentReference, beginContentReferenceInsertion } from '@/lib/agent-editor/attachments';
 import { useOptionalConversationPresentation } from '@/components/conversation/ConversationContext';
 import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from '@/components/conversation/types';
 import { projectUiWork, releaseUiWork, restoreUiWork } from '@/lib/interactive-ui/work-projection';
@@ -45,12 +46,11 @@ export function InteractiveUiCard({ call, ownerCallId, execution, result, cwd, g
   return <UiWorkView session={session} {...session.display} cwd={cwd} />;
 }
 
-function addReference(session: UiSession, selection: UiSelection) {
+function addReference(session: UiSession, selection: UiSelection, insertion?: ReturnType<typeof beginContentReferenceInsertion>) {
   if (session.host !== getRuntimeEndpointGeneration()) return;
-  addContentReference(session.identity, { ref: selection.ref, title: selection.title, text: selection.text, image: selection.image,
-    source: { kind: 'ui', thread: session.identity, itemId: session.sourceEntryId, snapshotRef: selection.snapshotRef, viewRef: selection.viewRef, revisionRef: selection.source.ref, previewCallId: selection.source.preview?.callId, region: selection.region } });
-  const selected = useThreadStore.getState().selectedIdentity;
-  if (selected?.threadId !== session.identity.threadId || selected.branchId !== session.identity.branchId) void useThreadStore.getState().selectThread(session.identity).catch(failure => toast.error(failure.message));
+  const reference = { ref: selection.ref, title: selection.title, text: selection.text, image: selection.image,
+    source: { kind: 'ui' as const, thread: session.identity, itemId: session.sourceEntryId, snapshotRef: selection.snapshotRef, viewRef: selection.viewRef, revisionRef: selection.source.ref, previewCallId: selection.source.preview?.callId, region: selection.region } };
+  if (insertion) insertion.add(reference); else addContentReference(session.identity, reference);
 }
 export function UiWorkView(props: UiWorkViewProps) {
   const { t } = useI18n();
@@ -200,7 +200,7 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
         else if (message.type === 'host-actions') {
           try { setHostActions(normalizeUiHostActions(message.actions)); respond({ status: 'presented' }); } catch (failure) { fail(failure); }
         } else if (typeof message.text !== 'string' || !message.text.trim()) fail(new Error('compose requires readable text'));
-        else void prepareHtmlResult(session, observed(), message.text, message.includeContext === true).then(composeUiResult).then(respond, fail);
+        else { const insertion = beginUiComposeInsertion(session.identity); void prepareHtmlResult(session, observed(), message.text, message.includeContext === true, insertion).then(composeUiResult).then(respond, fail).finally(() => insertion.dispose()); }
       }
       if (message.type === 'selection' || message.type === 'context-menu') {
         setSelectedText(message.text || undefined); textObservation.current = message.text ? observed() : undefined;
@@ -302,8 +302,10 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
   }, [ready, source.ref, source.preview?.callId, api, session, capture, visible, persistState]);
   const citeText = async () => {
     if (!selectedText) return;
-    try { addReference(session, await api.select(session.identity, textObservation.current ?? await capture(), { text: selectedText })); setSelectedText(undefined); }
+    const insertion = beginContentReferenceInsertion(session.identity);
+    try { addReference(session, await api.select(session.identity, textObservation.current ?? await capture(), { text: selectedText }), insertion); setSelectedText(undefined); }
     catch (failure) { toast.error(String((failure as Error).message)); }
+    finally { insertion.dispose(); }
   };
   const startRegion = async () => { try { setRegionImage(await capture(true)); setRectangle(undefined); } catch (failure) { toast.error(String((failure as Error).message)); } };
   const regionPoint = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -314,6 +316,7 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
   };
   const citeRegion = async () => {
     if (!regionImage?.image || !rectangle) return;
+    const insertion = beginContentReferenceInsertion(session.identity);
     try {
       const image = new Image(); image.src = `data:${regionImage.image.mimeType};base64,${regionImage.image.data}`; await image.decode();
       const canvas = document.createElement('canvas');
@@ -322,13 +325,21 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
       canvas.width = Math.round(rectangle.width * sx); canvas.height = Math.round(rectangle.height * sy);
       canvas.getContext('2d')!.drawImage(image, (rectangle.x - bounds.x) * sx, (rectangle.y - bounds.y) * sy, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
       const observation = { ...regionImage, image: { ...regionImage.image, bounds: rectangle, data: canvas.toDataURL('image/png').split(',')[1]! } };
-      addReference(session, await api.select(session.identity, observation, { region: rectangle })); setRegionImage(undefined);
+      addReference(session, await api.select(session.identity, observation, { region: rectangle }), insertion); setRegionImage(undefined);
     } catch (failure) { toast.error(String((failure as Error).message)); }
+    finally { insertion.dispose(); }
   };
   const discuss = async () => {
-    try { const observation = await capture();
-      addReference(session, await api.select(session.identity, observation, { text: JSON.stringify(observation.context ?? observation.state.data ?? observation.state.controls) }));
+    const insertion = beginContentReferenceInsertion(session.identity);
+    try {
+      let observation = await capture();
+      const text = uiDiscussionText(observation);
+      // A graphical work without declared context needs actual pixels, not a
+      // filename or a claimed screenshot. Capture errors remain visible.
+      if (!text) observation = await capture(true);
+      addReference(session, await api.select(session.identity, observation, text ? { text } : {}), insertion);
     } catch (failure) { toast.error(String((failure as Error).message)); }
+    finally { insertion.dispose(); }
   };
   const expand = (view: 'source' | 'preview' = 'preview') => {
     session.panelDirectory = cwd;
@@ -353,7 +364,7 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
     setError(''); setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID());
   };
   React.useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setRegionImage(undefined); }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, []);
-  return <ContextMenu><ContextMenuTrigger asChild><section ref={surface} data-interactive-ui tabIndex={0}
+  return <ContextMenu><ContextMenuTrigger asChild><section ref={surface} data-interactive-ui data-chat-view-ref={session.viewRef} data-chat-revision-ref={source.ref} tabIndex={0}
     className={`relative min-w-0 ${panel ? 'flex h-full min-h-0 flex-col bg-background' : 'my-3'}`} aria-label={title}
     onContextMenu={event => event.stopPropagation()}
     onKeyDown={event => {
@@ -403,7 +414,7 @@ function UiWorkViewContent({ session, source, files, assets = {}, entry, title, 
     <ContextMenuItem onClick={() => expand('source')}>{t('ui.content.source')}</ContextMenuItem>
     <ContextMenuItem onClick={() => expand()}>{t('ui.content.expand')}</ContextMenuItem>
     <ContextMenuItem onClick={() => void startRegion()}>{t('ui.content.region')}</ContextMenuItem>
-    <ContextMenuItem onClick={() => void discuss()}>{t('ui.content.discuss')}</ContextMenuItem>
+    <ContextMenuItem onClick={() => void discuss()}>{t('chat.context.quoteContent')}</ContextMenuItem>
     <ContextMenuSeparator />
     <ContextMenuItem onClick={() => void copyTextToClipboard(files[entry] ?? '')}>{t('ui.content.copy')}</ContextMenuItem>
     <ContextMenuItem onClick={() => void downloadUi(files, assets, entry, title, state.current).catch(failure => toast.error(failure.message))}>{t('ui.content.download')}</ContextMenuItem>

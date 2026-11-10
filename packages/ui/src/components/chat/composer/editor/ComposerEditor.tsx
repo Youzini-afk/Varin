@@ -1,8 +1,8 @@
 import React from 'react';
 import { ComposerClosedError, interactionRanges, interactionHistory, setInteractionRanges, interactionInsertion, type InteractionRange } from './interactionRanges';
-import { composerReferences, referenceHistory, setComposerReferences, addComposerReference, type ComposerReference } from './references';
+import { composerReferences, referenceHistory, setComposerReferences, addComposerReference, composerMarkerObjectId, type ComposerReference } from './references';
 import { history, isolateHistory, historyKeymap, standardKeymap } from '@codemirror/commands';
-import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
+import { ChangeSet, Compartment, EditorState, Prec, StateEffect, Transaction, type Extension, type TransactionSpec } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -12,8 +12,12 @@ import {
 } from '@codemirror/view';
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
-import { composerLanguage, setLanguageContext, readLanguageContext } from './composerLanguage';
+import { composerLanguage, setLanguageContext } from './composerLanguage';
 import { imageReferenceTextChanges } from '@/lib/images/references';
+import { composerMarkerObjects, sameComposerMarkerObjects, setComposerMarkerObjects, markerObjectHistory, atomicMarkerEditing, insertComposerMarker, replaceComposerMarkerObjects, type ComposerMarkerObject } from './markers';
+import { composerMarkerClipboard } from './markerClipboard';
+import { composerMarkerDrag } from './markerDrag';
+import { registerMarkerComposer } from './markerComposerRegistry';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { composerEditorTheme, composerNativeSelectionExtension } from './theme';
 
@@ -29,11 +33,19 @@ export interface ComposerChange {
   insertedText: string;
   references: readonly ComposerReference[];
   interactions: readonly InteractionRange[];
+  markerObjects: readonly ComposerMarkerObject[];
 }
 
+export interface ComposerMarkerInsertion { insertMarker(object: ComposerMarkerObject): Promise<void>; dispose(): void }
+
 export interface ComposerEditorHandle {
+  captureMarkerInsertion(): ComposerMarkerInsertion;
+  insertMarker(object: ComposerMarkerObject): Promise<void>;
+  removeMarkerObject(id: string): void;
+  replaceMarkerObjects(objects: readonly ComposerMarkerObject[], options?: { renumber?: boolean; addToHistory?: boolean }): void;
+  getEditorState(): EditorState | undefined;
   /** A paste destination that follows edits while attachment bytes are being read. */
-  composeInteraction(sourceKey: string, text: string, isCurrent?: () => boolean): Promise<{ updated: boolean }>;
+  composeInteraction(sourceKey: string, text: string, isCurrent?: () => boolean, options?: { position?: number; marker?: ComposerMarkerObject; replaceMarkerId?: string }): Promise<{ updated: boolean }>;
   captureInsertion(): { insertText(text: string): void; dispose(): void };
   blur(): void;
   caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
@@ -50,6 +62,14 @@ export interface ComposerEditorHandle {
 
 interface ComposerEditorProps {
   value: string;
+  draftKey?: string;
+  host?: number;
+  markerObjects?: readonly ComposerMarkerObject[];
+  editorState?: EditorState;
+  onEditorStateChange?(state: EditorState): void;
+  onMarkerActivate?(object: ComposerMarkerObject): void;
+  onMarkerError?(message: string): void;
+  validateMarkerPaste?(objects: readonly ComposerMarkerObject[]): string | undefined;
   references?: readonly ComposerReference[];
   interactions?: readonly InteractionRange[];
   autocomplete?: { id: string; activeId?: string };
@@ -70,6 +90,7 @@ interface ComposerEditorProps {
   'aria-label'?: string;
 }
 
+const historyCompartment = new Compartment();
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 
@@ -115,7 +136,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
     } = props;
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const viewRef = React.useRef<EditorView | null>(null);
-    const insertions = React.useRef(new Set<{ from: number; to: number }>());
+    const insertions = React.useRef(new Set<{ from: number; to: number; marker?: boolean }>());
+    const previousEditorState = React.useRef(props.editorState);
+    const handleRef = React.useRef<ComposerEditorHandle | null>(null);
     const composition = React.useRef(false);
     const knownCursor = React.useRef(false);
     const deferred = React.useRef<Array<{ run(): void; reject(reason: Error): void }>>([]);
@@ -130,20 +153,29 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       const pendingCompositions = deferred.current;
 
       const interceptKeys: KeyBinding[] = [{
-        any: (_view, event) => {
+        any: (view, event) => {
+          const marker = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-composer-marker]') : null;
+          if ((event.key === 'Enter' || event.key === ' ') && marker && view.dom.ownerDocument.activeElement === marker) {
+            const reference = view.state.field(composerReferences).find(item => item.id === marker.dataset.composerReference);
+            const object = reference && view.state.field(composerMarkerObjects).find(item => item.id === composerMarkerObjectId(reference));
+            if (object) { event.preventDefault(); event.stopPropagation(); handlersRef.current.onMarkerActivate?.(object); return true; }
+          }
           if (event.key === 'Enter' && isDeferredSyntheticEvent(event) && lastRealEnterShiftRef.current) {
             Object.defineProperty(event, 'shiftKey', { value: true });
           }
           return handlersRef.current.onKeyDown?.(event) ?? false;
         },
       }];
-      const view = new EditorView({
-        state: EditorState.create({
-          doc: handlersRef.current.value,
-          extensions: [
-            history(),
+      const extensions = [
+            historyCompartment.of(history()),
             composerReferences.init(() => (handlersRef.current.references ?? []).filter(item => item.from >= 0 && item.to <= handlersRef.current.value.length && item.from < item.to && handlersRef.current.value.slice(item.from, item.to) === item.text)),
             referenceHistory,
+            composerMarkerObjects.init(() => handlersRef.current.markerObjects ?? []), markerObjectHistory, atomicMarkerEditing,
+            composerMarkerClipboard({ host: () => handlersRef.current.host, onError: message => handlersRef.current.onMarkerError?.(message), validate: objects => handlersRef.current.validateMarkerPaste?.(objects) }),
+            composerMarkerDrag({ isComposing: () => composition.current, onOpen: reference => {
+              const object = viewRef.current?.state.field(composerMarkerObjects).find(object => object.id === composerMarkerObjectId(reference));
+              if (object) handlersRef.current.onMarkerActivate?.(object);
+            } }),
             interactionRanges.init(() => handlersRef.current.interactions ?? []),
             interactionHistory,
             drawSelection(),
@@ -171,6 +203,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                   insertion.to = Math.max(from, update.changes.mapPos(insertion.to, -1));
                   insertion.from = from;
                 }
+              }
+              const markerChanged = update.startState.field(composerMarkerObjects) !== update.state.field(composerMarkerObjects);
+              if (update.docChanged || markerChanged) {
                 handlers.onChange({
                   value: update.state.doc.toString(),
                   selection,
@@ -178,11 +213,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                   insertedText: update.transactions.map(insertedTextOf).join(''),
                   references: update.state.field(composerReferences),
                   interactions: update.state.field(interactionRanges),
+                  markerObjects: update.state.field(composerMarkerObjects),
                 });
-              } else if (update.selectionSet) {
+              }
+              if (update.selectionSet) {
                 knownCursor.current = true;
                 handlers.onSelectionChange?.(selection);
               }
+              if (update.docChanged || update.selectionSet || markerChanged || update.transactions.some(transaction => transaction.effects.some(effect => effect.is(setComposerReferences) || effect.is(addComposerReference) || effect.is(setInteractionRanges)))) handlers.onEditorStateChange?.(update.state);
             }),
             EditorView.domEventHandlers({
               blur: () => { handlersRef.current.onBlur?.(); return false; },
@@ -204,11 +242,15 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 ? { 'aria-label': handlersRef.current['aria-label'] }
                 : {}),
             }),
-          ] satisfies Extension[],
-        }),
-        parent: host,
-      });
+          ] satisfies Extension[];
+      const restored = handlersRef.current.editorState;
+      knownCursor.current = Boolean(restored);
+      const state = restored && restored.doc.toString() === handlersRef.current.value
+        ? restored.update({ effects: StateEffect.reconfigure.of(extensions), annotations: Transaction.addToHistory.of(false) }).state
+        : EditorState.create({ doc: handlersRef.current.value, extensions });
+      const view = new EditorView({ state, parent: host });
       viewRef.current = view;
+      handlersRef.current.onEditorStateChange?.(view.state);
 
       const trackRealEnterShift = (event: KeyboardEvent) => {
         if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
@@ -225,33 +267,36 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       };
     }, []);
 
-    // A controlled change (a send clearing the draft) lands in the same commit
-    // as the rest of the composer, so no frame paints the old text beside it.
+    // External draft commands enter the same transaction as their object/range changes.
+    // Editor-originated updates already agree and do not produce duplicate undo events.
     React.useLayoutEffect(() => {
       const view = viewRef.current;
       if (!view) return;
       const current = view.state.doc.toString();
-      if (current === value) return;
-      // External append/quote/dictation changes are still local edits: keep unrelated
-      // reference bindings, selection mapping and undo rather than replacing the document.
+      const refsChanged = props.references !== undefined && JSON.stringify(view.state.field(composerReferences)) !== JSON.stringify(props.references);
+      const objectsChanged = props.markerObjects !== undefined && (view.state.field(composerMarkerObjects) !== props.markerObjects)
+        && !sameComposerMarkerObjects(view.state.field(composerMarkerObjects), props.markerObjects);
+      if (current === value && !refsChanged && !objectsChanged) return;
       let from = 0;
       while (from < current.length && from < value.length && current[from] === value[from]) from++;
       let to = current.length, end = value.length;
       while (to > from && end > from && current[to - 1] === value[end - 1]) { to--; end--; }
-      const imageChanges = imageReferenceTextChanges(current, value);
-      const relabeled = imageChanges && JSON.stringify(readLanguageContext(view).imageReferences) !== JSON.stringify(handlersRef.current.languageContext.imageReferences);
-      view.dispatch({ changes: imageChanges ?? { from, to, insert: value.slice(from, end) },
-        ...(relabeled ? { annotations: Transaction.addToHistory.of(false) } : {}) });
-      requestAnimationFrame(() => {
-        if (viewRef.current === view) view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
-      });
-    }, [value]);
+      view.dispatch({ ...(current !== value ? { changes: imageReferenceTextChanges(current, value) ?? { from, to, insert: value.slice(from, end) } } : {}),
+        effects: [...(refsChanged ? [setComposerReferences.of(props.references!)] : []), ...(objectsChanged ? [setComposerMarkerObjects.of(props.markerObjects!)] : [])],
+        annotations: isolateHistory.of('full'), userEvent: 'input.draft', filter: false });
+    }, [value, props.references, props.markerObjects]);
 
     React.useLayoutEffect(() => {
+      const reset = previousEditorState.current !== undefined && props.editorState === undefined;
+      previousEditorState.current = props.editorState;
       const view = viewRef.current;
-      if (!view || props.references === undefined || JSON.stringify(view.state.field(composerReferences)) === JSON.stringify(props.references)) return;
-      view.dispatch({ effects: setComposerReferences.of(props.references), annotations: Transaction.addToHistory.of(false) });
-    }, [props.references, value]);
+      if (!reset || !view) return;
+      // Acceptance/discard ends the prior draft's undo ownership. Keep any new unsent text,
+      // but never revive a sent object after its resource holder has been released.
+      view.dispatch({ effects: historyCompartment.reconfigure([]), annotations: Transaction.addToHistory.of(false) });
+      view.dispatch({ effects: historyCompartment.reconfigure(history()), annotations: Transaction.addToHistory.of(false) });
+      handlersRef.current.onEditorStateChange?.(view.state);
+    }, [props.editorState]);
 
     React.useLayoutEffect(() => {
       viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });
@@ -314,19 +359,82 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       }
     }, [props.interactions, value]);
 
-    React.useImperativeHandle(ref, (): ComposerEditorHandle => ({
-      composeInteraction(sourceKey, text, isCurrent) {
+    React.useImperativeHandle(ref, (): ComposerEditorHandle => (handleRef.current = {
+      getEditorState: () => viewRef.current?.state,
+      captureMarkerInsertion() {
+        const view = viewRef.current;
+        const at = view ? (knownCursor.current ? view.state.selection.main.head : view.state.doc.length) : 0;
+        const insertion = { from: at, to: at, marker: true };
+        insertions.current.add(insertion);
+        let active = true;
+        return {
+          dispose() { active = false; insertions.current.delete(insertion); },
+          insertMarker(object) {
+            return new Promise<void>((resolve, reject) => {
+              const run = () => {
+                if (!active) { reject(new Error('Insertion cancelled')); return; }
+                if (!view || viewRef.current !== view) { reject(new ComposerClosedError(insertion.from)); return; }
+                const from = insertion.from;
+                const selection = view.state.selection.main;
+                const spec = insertComposerMarker(view.state, object, from);
+                if (selection.head !== from) delete spec.selection;
+                view.dispatch(spec);
+                const marker = view.state.field(composerReferences).find(reference => reference.from === from && composerMarkerObjectId(reference) === object.id);
+                insertion.from = insertion.to = marker?.to ?? insertion.from;
+                resolve();
+              };
+              if (composition.current || viewRef.current?.composing) deferred.current.push({ run, reject: reason => reject(reason instanceof ComposerClosedError ? new ComposerClosedError(insertion.from) : reason) });
+              else run();
+            });
+          },
+        };
+      },
+      async insertMarker(object) {
+        const anchor = handleRef.current!.captureMarkerInsertion();
+        try { await anchor.insertMarker(object); } finally { anchor.dispose(); }
+      },
+      replaceMarkerObjects(objects, options) {
+        const view = viewRef.current;
+        if (!view) return;
+        const spec = replaceComposerMarkerObjects(view.state, objects, options);
+        if (spec) view.dispatch({ ...spec, ...(options?.addToHistory === false ? { annotations: Transaction.addToHistory.of(false) } : {}) });
+      },
+      removeMarkerObject(id) {
+        const view = viewRef.current;
+        if (!view) return;
+        const spec = replaceComposerMarkerObjects(view.state, view.state.field(composerMarkerObjects).filter(object => object.id !== id));
+        if (spec) view.dispatch(spec);
+      },
+      composeInteraction(sourceKey, text, isCurrent, options) {
+        const original = viewRef.current;
+        const position = options?.position ?? (original ? knownCursor.current ? original.state.selection.main.head : original.state.doc.length : 0);
+        const anchor = { from: position, to: position };
+        insertions.current.add(anchor);
         return new Promise((resolve, reject) => {
+          const fail = (reason: Error) => { insertions.current.delete(anchor); reject(reason instanceof ComposerClosedError ? new ComposerClosedError(anchor.from) : reason); };
           const run = () => {
             const view = viewRef.current;
-            if (!view) { reject(new Error('Composer closed')); return; }
-            if (isCurrent && !isCurrent()) { reject(new Error('Interaction source changed')); return; }
-            const insertion = interactionInsertion(view.state.doc.toString(), view.state.field(interactionRanges), sourceKey, text,
-              knownCursor.current ? view.state.selection.main.head : view.state.doc.length);
-            view.dispatch(insertion.spec);
+            if (!view || view !== original) { fail(new ComposerClosedError(anchor.from)); return; }
+            if (isCurrent && !isCurrent()) { fail(new Error('Interaction source changed')); return; }
+            const insertion = interactionInsertion(view.state.doc.toString(), view.state.field(interactionRanges), sourceKey, text, anchor.from);
+            let next = view.state;
+            let changes = ChangeSet.empty(next.doc.length);
+            const apply = (spec: TransactionSpec | null) => {
+              if (!spec) return;
+              const transaction = next.update(spec); changes = changes.compose(transaction.changes); next = transaction.state;
+            };
+            apply(insertion.spec);
+            if (options?.marker) {
+              if (insertion.updated && options.replaceMarkerId) apply(replaceComposerMarkerObjects(next, next.field(composerMarkerObjects).filter(object => object.id !== options.replaceMarkerId)));
+              const range = next.field(interactionRanges).find(range => range.sourceKey === sourceKey);
+              apply(insertComposerMarker(next, options.marker, range?.to ?? next.doc.length));
+            }
+            insertions.current.delete(anchor);
+            view.dispatch({ changes, selection: next.selection, effects: [setComposerReferences.of(next.field(composerReferences)), setComposerMarkerObjects.of(next.field(composerMarkerObjects)), setInteractionRanges.of(next.field(interactionRanges))],
+              annotations: isolateHistory.of('full'), userEvent: 'input.interaction', filter: false });
             resolve({ updated: insertion.updated });
           };
-          if (composition.current || viewRef.current?.composing) deferred.current.push({ run, reject });
+          if (composition.current || viewRef.current?.composing) deferred.current.push({ run, reject: fail });
           else run();
         });
       },
@@ -400,6 +508,8 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         });
       },
     }), []);
+
+    React.useLayoutEffect(() => props.draftKey && handleRef.current ? registerMarkerComposer(props.draftKey, handleRef.current) : undefined, [props.draftKey]);
 
     return (
       <div

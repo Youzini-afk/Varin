@@ -1,11 +1,11 @@
 import React from 'react';
-import type { ThreadIdentity } from '@varin/application-client';
+import type { ThreadIdentity, ContentReference } from '@varin/application-client';
 import { ImageViewer } from './ImageViewer';
 import { useImageReply } from './useImageReply';
 import { useI18n } from '@/lib/i18n';
 
-export function ConversationImageViewer({src,sourceId,label,identity,onClose,footer}: {src:string;sourceId?:string;label?:string;identity?:ThreadIdentity;onClose():void;footer?:React.ReactNode}) {
-  const annotation=useImageReply(identity),load=React.useCallback(async()=>({src}),[src]);
+export function ConversationImageViewer({src,sourceId,label,identity,sourceReference,onClose,footer}: {src:string;sourceId?:string;label?:string;identity?:ThreadIdentity;sourceReference?:ContentReference['source'];onClose():void;footer?:React.ReactNode}) {
+  const annotation=useImageReply(identity, 'image', sourceReference),load=React.useCallback(async()=>({src}),[src]);
   return <ImageViewer items={[{source:sourceId??src,label:label??''}]} initialIndex={0} load={load} onClose={onClose} annotation={annotation} footer={footer}/>;
 }
 export function ConversationImage({src,sourceId,label,reference}: {src:string;sourceId:string;label:string;reference?:number}) {

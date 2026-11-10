@@ -11,11 +11,15 @@ import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInApps
 import { AppIcon } from '@/components/desktop/OpenInAppButton';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import { useOptionalConversationPresentation } from './ConversationContext';
+import { captureFileQuote } from './captureFileQuote';
+import { beginContentReferenceInsertion } from '@/lib/agent-editor/attachments';
 import type { ChatFileResource, ChatFileTarget } from './chatFileTargets';
 
 export function ChatFileMenu({ target }: { target: ChatFileTarget }) {
   const { t } = useI18n();
   const { documents, files } = useRuntimeAPIs();
+  const conversation = useOptionalConversationPresentation();
   const availableApps = useOpenInAppsStore(state => state.availableApps);
   const selectedAppId = useOpenInAppsStore(state => state.selectedAppId);
   const initialize = useOpenInAppsStore(state => state.initialize);
@@ -52,6 +56,13 @@ export function ChatFileMenu({ target }: { target: ChatFileTarget }) {
   };
   const inset = 'pl-8';
   return <>
+    {conversation && <ContextMenuItem className={inset} onClick={() => run(async () => {
+      const insertion = beginContentReferenceInsertion(conversation.identity);
+      try {
+        const reference = await captureFileQuote(target, conversation.identity, files, conversation.api.attachments);
+        assertCurrent(); insertion.add(reference);
+      } finally { insertion.dispose(); }
+    })}>{t('chat.context.quoteFile')}</ContextMenuItem>}
     <ContextMenuItem className={inset} onClick={() => run(target.open)}>{t('chat.context.openFile')}</ContextMenuItem>
     {local && preferred && <ContextMenuItem onClick={() => run(() => openExternal(preferred))}>
       <AppIcon label={preferred.label} iconDataUrl={preferred.iconDataUrl} />{t('openInApp.actions.openInAria', { app: preferred.label })}

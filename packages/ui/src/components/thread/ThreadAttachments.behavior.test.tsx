@@ -16,7 +16,7 @@ vi.mock('@/components/images/ImageViewer', () => ({ ImageViewer: ({ annotation }
   viewer.binding = annotation;
   return <div role="dialog">image editor</div>;
 } }));
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/i18n', async original => ({ ...await original<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => null }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p> }));
@@ -50,7 +50,7 @@ it('keeps unsent file cards compact and opens image annotation in the draft befo
   await act(async () => { viewer.binding!.save(files[0]!.id, doc); render(); });
   expect(viewer.binding!.get(files[0]!.id)).toBe(doc);
   await act(async () => viewer.binding!.apply(files[0]!.id, { data: btoa('edited'), mimeType: 'image/png' }, doc));
-  const updated = useThreadDraftStore.getState().drafts['new-draft'].files![0]!;
+  const updated = useThreadDraftStore.getState().drafts['new-draft'].files!.find(file => file.id === files[0]!.id)!;
   expect(await updated.data.text()).toBe('edited'); expect(updated.imageReference).toBe(1);
 });
 it('keeps the file available outside a collapsed message, reads original bytes only for an action and copies its reference', async () => {

@@ -26,6 +26,8 @@ export interface ChatTextContent {
 }
 
 export interface ChatImageContent {
+  /** Optimistic local input only; durable history uses already flattened pixels. */
+  annotation?: import('@/lib/images/annotations').ImageAnnotationDocument;
   data: string;
   mimeType: string;
   type: "image";
@@ -55,6 +57,13 @@ export type ChatUserContent = ChatTextContent | ChatImageContent;
 export type ChatAssistantContent = ChatTextContent | ChatThinkingContent | ChatToolCall;
 
 export interface ChatUserMessage {
+  contentReferences?: import('@varin/application-client').ContentReference[];
+  contentReferenceOccurrences?: import('@varin/application-client').ContentReferenceOccurrence[];
+  /** Input-owned frozen assets, independent of whether the source still exists. */
+  fileAttachments?: import('@varin/protocol').Attachment[];
+  imageParts?: Array<{ media: StoredMedia; partIndex: number; reference?: number }>;
+  attachmentImageReferences?: Record<string, number>;
+  pendingImageFiles?: Array<{ data: Blob; filename: string; reference: number; annotation?: import('@/lib/images/annotations').ImageAnnotationDocument }>;
   pendingFiles?: Array<{ filename: string; byteLength: number }>;
   content: string | ChatUserContent[];
   role: "user";

@@ -1,4 +1,5 @@
 import { marked, type Tokens } from 'marked';
+import { indexMarkdownSource, sourceBlockRenderer, withMarkdownSource } from './sourceBlocks';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
@@ -81,16 +82,18 @@ const parser = marked.use({
   breaks: false,
   extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
+    ...sourceBlockRenderer,
     image({ href, text, title }) {
       if (href === 'streamdown:incomplete-image') return '';
       return markdownImagePlaceholder(href, text, title);
     },
-    paragraph({ tokens }) {
+    paragraph(token) {
+      const { tokens } = token;
       const imageOnly = tokens.some(token => token.type === 'image' || token.type === 'link') && tokens.every(token =>
         token.type === 'image' || (token.type === 'link' && (isImageHref((token as Tokens.Link).href)
           || (token as Tokens.Link).tokens?.every(child => child.type === 'image')))
         || token.type === 'br' || (token.type === 'text' && !token.raw.trim()));
-      return `<p${imageOnly ? ' data-md-image-gallery' : ''}>${this.parser.parseInline(tokens)}</p>\n`;
+      return withMarkdownSource(`<p${imageOnly ? ' data-md-image-gallery' : ''}>${this.parser.parseInline(tokens)}</p>\n`, token);
     },
     // Model output is untrusted. Markdown constructs still render normally,
     // while raw HTML remains visible text instead of becoming application DOM.
@@ -159,7 +162,7 @@ const renderMathExpressions = (html: string): string => {
 // Syntax highlighting (Shiki via @pierre/diffs shared highlighter)
 // ---------------------------------------------------------------------------
 
-const CODE_BLOCK_RE = /<pre><code(?:\s+class="language-([^"]*)")?>([\s\S]*?)<\/code><\/pre>/g;
+const CODE_BLOCK_RE = /<pre([^>]*)><code(?:\s+class="language-([^"]*)")?>([\s\S]*?)<\/code><\/pre>/g;
 
 // Skip syntax highlighting for very large blocks — tokenizing thousands of
 // lines blocks the main thread. Plain (escaped) code is shown instead.
@@ -187,7 +190,7 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
 
   let result = html;
   for (const match of matches) {
-    const [full, rawLang, escapedCode] = match;
+    const [full, sourceAttributes, rawLang, escapedCode] = match;
     const requested = (rawLang || 'text').toLowerCase();
     // Leave mermaid fences untouched so the decorate pass can render them as
     // diagrams (highlighting would strip the `language-mermaid` class).
@@ -206,7 +209,7 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
     const highlighted = await highlightCodeInWorker(code, requested);
     if (highlighted) {
       // Stamp the language so the decorate pass can show a header label.
-      const stamped = highlighted.replace(/^<pre/, `<pre data-md-lang="${requested}"`);
+      const stamped = highlighted.replace(/^<pre/, `<pre${sourceAttributes} data-md-lang="${requested}"`);
       result = result.replace(full, () => stamped);
     }
   }
@@ -271,8 +274,13 @@ const touch = (key: string, entry: { hash: string; html: string }): void => {
   if (oldest) htmlCache.delete(oldest);
 };
 
+const parseSource = (text: string): string => {
+  const tokens = parser.lexer(text);
+  indexMarkdownSource(tokens, text);
+  return parser.parser(tokens);
+};
 const parseBlock = async (block: MarkdownBlockSource): Promise<string> => {
-  const parsed = await Promise.resolve(parser.parse(block.src));
+  const parsed = parseSource(block.src);
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
   return sanitize(highlighted);
@@ -289,7 +297,7 @@ const parseBlock = async (block: MarkdownBlockSource): Promise<string> => {
  */
 export const renderMarkdownSync = (text: string): string => {
   if (!text) return '';
-  const parsed = parser.parse(text) as string;
+  const parsed = parseSource(text);
   const withMath = renderMathExpressions(parsed);
   return sanitize(withMath);
 };
@@ -300,6 +308,8 @@ export type RenderedBlock = {
   // block) to re-morph; unchanged leading blocks are skipped entirely.
   id: string;
   html: string;
+  source: string;
+  offset: number;
 };
 
 // Weak ownership: stable blocks and in-flight parses are reused without adding
@@ -335,14 +345,14 @@ export const renderMarkdownBlocks = async (
       const cached = htmlCache.get(key);
       if (cached && cached.hash === contentHash) {
         touch(key, cached);
-        const result = Promise.resolve({ id, html: cached.html });
+        const result = Promise.resolve({ id, html: cached.html, source: block.raw, offset: block.offset });
         renderedSources.set(block, { coloured: coloured?.length, result });
         return result;
       }
       const result = (async () => {
-        const html = fence && coloured ? sanitize(renderOpenFence(fence, coloured)) : await parseBlock(block);
+        const html = fence && coloured ? sanitize(renderOpenFence(fence, coloured).replace(/^<pre/u, `<pre data-chat-source-start="0" data-chat-source-end="${block.raw.length}" data-chat-source-kind="code"`)) : await parseBlock(block);
         touch(key, { hash: contentHash, html });
-        return { id, html };
+        return { id, html, source: block.raw, offset: block.offset };
       })();
       renderedSources.set(block, { coloured: coloured?.length, result });
       return result;

@@ -59,6 +59,7 @@ import {
   type ChatSortedTurnProjection,
 } from './chatSortedTurnProjection';
 import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
+import { ChatToolQuote, ChatToolQuoteGroup } from './ChatToolQuotes';
 import { ChatFileChangePreview, ChatFileChangePreviewScope } from './ChatFileChangePreview';
 import { createFileChangeProjector, fileChangePhase, fileChangeStreamLength, isFileChangeTool, paceFileChangeCall } from './fileChangePreview';
 import { usePacedLength } from '@/components/chat/usePacedText';
@@ -72,6 +73,8 @@ import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
 import { ChatThinkingBlock } from './ChatThinkingBlock';
 import { ToolTargetScope } from './ToolTargetScope';
 import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
+import { bindRenderedMarkdownSource } from '@/components/chat/markdown/sourceBlocks';
+import { ChatUserReferences } from './ChatUserReferences';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
 import { ChatScriptCard } from './ChatScriptCard';
@@ -173,7 +176,7 @@ const ChatUserContentView: React.FC<{
         part.type === 'text' ? (
           <ChatTextSource key={`${messageId}:text:${index}`} entryId={messageId} text={part.text}
             offset={parts.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
-            {plain ? <div className="markdown-content whitespace-pre-wrap break-words">{part.text}</div> : <MarkdownRenderer
+            {plain ? <div ref={element => { if (element) bindRenderedMarkdownSource(element, part.text, 0, 0, true); }} data-chat-source-start={0} data-chat-source-end={part.text.length} className="markdown-content whitespace-pre-wrap break-words">{part.text}</div> : <MarkdownRenderer
               content={part.text}
               messageId={`${messageId}:text:${index}`}
               variant={variant}
@@ -335,7 +338,7 @@ const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status']; gener
   </span>;
 };
 
-const ChatToolCard: React.FC<{
+const ChatToolCardBody: React.FC<{
   call: ChatToolCall;
   cwd: string;
   generating?: boolean;
@@ -548,6 +551,12 @@ const ChatToolCard: React.FC<{
   );
 };
 
+const ChatToolCard: React.FC<React.ComponentProps<typeof ChatToolCardBody>> = props => (
+  <ChatToolQuote call={props.call} executionById={props.executionById} execution={props.execution} result={props.result} generating={props.generating}>
+    <ChatToolCardBody {...props} />
+  </ChatToolQuote>
+);
+
 const ChatReadOnlyToolGroup: React.FC<{
   calls: ChatToolCall[];
   generatingCallIds?: ReadonlySet<string>;
@@ -574,7 +583,7 @@ const ChatReadOnlyToolGroup: React.FC<{
     .map((kind) => t(`chat.timeline.tools.${kind}`, { count: counts[kind] }))
     .join(' · ');
   return (
-    <ChatToolDisclosure disclosureId={`group:${calls[0]!.id}`}
+    <ChatToolQuoteGroup calls={calls} executionById={executionById} resultByCallId={resultByCallId} generatingCallIds={generatingCallIds}><ChatToolDisclosure disclosureId={`group:${calls[0]!.id}`}
       initiallyExpanded={calls.some((call) => disclosureChoices?.get(`tool:${call.id}`))}
       className="group/tools my-1">
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
@@ -604,7 +613,7 @@ const ChatReadOnlyToolGroup: React.FC<{
           />
         ))}
       </div>
-    </ChatToolDisclosure>
+    </ChatToolDisclosure></ChatToolQuoteGroup>
   );
 };
 
@@ -687,7 +696,7 @@ const AssistantMessage: React.FC<{
     }
       if (content.type === 'text') {
         rendered.push(
-          <ChatTextSource role="assistant" contentIdentity={content.id} contentIndex={content.contentIndex ?? index} key={`${entryId}:text:${index}`} entryId={entryId} text={content.text}
+          <ChatTextSource role="assistant" streaming={streaming} contentIdentity={content.id} contentIndex={content.contentIndex ?? index} key={`${entryId}:text:${index}`} entryId={entryId} text={content.text}
             offset={message.content.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
             <MarkdownRenderer
               content={content.text}
@@ -731,7 +740,7 @@ export const ChatDialogueBlock: React.FC<{
     if (part.kind === 'entry') return <ChatTimelineEntryList cwd={cwd} sessionId={sessionId} entries={[part.entry]}
       toolExecutions={executions} projectedResultByCallId={results} part="body" presentationMode="live" extensionPresentation={extensionPresentation} />;
     return <div className="min-w-0" data-conversation-entry-id={part.sourceId} data-conversation-message-role="assistant">
-      {part.kind === 'text' ? <ChatTextSource role="assistant" contentIdentity={part.content.id} entryId={part.sourceId} text={part.content.text} offset={part.offset} contentIndex={part.contentIndex}>
+      {part.kind === 'text' ? <ChatTextSource role="assistant" streaming={part.streaming} contentIdentity={part.content.id} entryId={part.sourceId} text={part.content.text} offset={part.offset} contentIndex={part.contentIndex}>
         <MarkdownRenderer content={part.content.text} messageId={part.id} isStreaming={part.streaming} enableFileReferences={!preview} />
       </ChatTextSource> : part.kind === 'tool' ? <ChatToolCard call={part.call} cwd={cwd} generating={part.streaming}
         execution={executions[part.call.id]} executionById={executions} result={results.get(part.call.id)} />
@@ -842,7 +851,7 @@ export const ChatSortedActivityGroup: React.FC<{
                     streaming={item.streaming} label={hiddenThinkingLabel} />
                 ) : (
                   <div className="conversation-activity-prose" data-conversation-activity-kind="justification">
-                    <ChatTextSource role="assistant" contentIdentity={item.content.id} entryId={item.sourceId} text={item.content.text} offset={0}
+                    <ChatTextSource role="assistant" streaming={item.streaming} contentIdentity={item.content.id} entryId={item.sourceId} text={item.content.text} offset={0}
                       contentIndex={item.content.type === 'text' ? item.content.contentIndex ?? Number(item.id.slice(item.id.lastIndexOf(':') + 1)) : undefined}>
                       <MarkdownRenderer
                         content={item.content.text}
@@ -900,7 +909,9 @@ export const ChatTurnUserMessage: React.FC<{
   return (
     <article id={entry ? `conversation-entry-${entry.id}` : undefined} data-conversation-user-message data-conversation-message-role="user" data-conversation-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
       <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
-        <ChatCollapsibleUserContent><ChatUserContentView content={message.content} messageId={messageId} plain={plain} /></ChatCollapsibleUserContent>
+        {message.contentReferences?.length || message.contentReferenceOccurrences?.length
+          ? <ChatUserReferences message={message} messageId={messageId} plain={plain} />
+          : <ChatCollapsibleUserContent><ChatUserContentView content={message.content} messageId={messageId} plain={plain} /></ChatCollapsibleUserContent>}
         {message.pendingFiles?.map((file, index) => <p key={index} className="mt-2 break-words typography-meta">{file.filename} · {attachmentSize(file.byteLength)}</p>)}
       </div>
       {status ? (

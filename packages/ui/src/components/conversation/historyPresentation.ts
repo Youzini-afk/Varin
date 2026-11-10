@@ -1,6 +1,7 @@
 import type { JsonValue, Operation, OutputBody } from '@varin/protocol';
 import type { ThreadSnapshot, ThreadHistoryItem as HistoryItem, ThreadRunUsage } from '@varin/application-client';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, ChatUserContent } from './types';
+import { inputParts } from '@/lib/agent-runtime/thread-content';
 import { presentInvocation, invocationData, invocationGateway, operationStatus } from './toolInvocation';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -139,7 +140,13 @@ export class HistoryPresentation {
           const text = typeof item.content === 'string' ? item.content : typeof envelope.userText === 'string' ? envelope.userText : typeof envelope.text === 'string' ? envelope.text : '';
           entry = typeof object(envelope.questionAnswer).operationId === 'string'
             ? { ...base, type: 'custom_message', customType: 'question-answer', display: true, content: text, details: json(envelope.questionAnswer) }
-            : { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
+            : { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0,
+              ...(Array.isArray(envelope.contentReferences) ? { contentReferences: envelope.contentReferences as import('@varin/application-client').ContentReference[] } : {}),
+              ...(Array.isArray(envelope.contentReferenceOccurrences) ? { contentReferenceOccurrences: envelope.contentReferenceOccurrences as import('@varin/application-client').ContentReferenceOccurrence[] } : {}),
+              ...(envelope.attachmentImageReferences && typeof envelope.attachmentImageReferences === 'object' ? { attachmentImageReferences: envelope.attachmentImageReferences as Record<string, number> } : {}),
+              fileAttachments: inputParts(item.content).flatMap(part => part.kind === 'attachment' ? [part.attachment] : []),
+              imageParts: inputParts(item.content).flatMap(part => part.kind === 'media' ? [{ media: part.media, partIndex: part.partIndex, reference: part.imageReference }] : []),
+            } };
         } else if (item.source !== 'assistant' && (content.kind === 'text' || content.kind === 'reasoning_summary')) {
           const sender = object(envelope.provenance).thread_id;
           entry = { ...base, type: 'custom_message', customType: item.source === 'agent' ? 'thread-message' : item.source, display: true, content: String(content.text ?? ''),

@@ -1,5 +1,6 @@
 import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
+import { bindRenderedMarkdownSource } from '@/components/chat/markdown/sourceBlocks';
 import { captureChatSelection, chatTextSourceOffset, type ChatTextSource } from './chatSelection';
 
 // Linkedom supplies the actual rendered tree/walker; its missing Range intersection
@@ -45,4 +46,44 @@ it('resolves native part indices and identities independently of visible-array p
   expect(chatTextSourceOffset({ text: 'Second', offset: 0, contentIndex: 1, contentIdentity: 'three' }, content)).toBe(6);
   expect(chatTextSourceOffset({ text: 'First', offset: 0, contentIndex: 0, contentIdentity: 'one' }, content)).toBe(0);
   expect(chatTextSourceOffset({ text: 'Detached', offset: 42, contentIndex: 99 }, content)).toBe(42);
+});
+it('preserves cross-message order, line breaks and literal nested markers without recursively expanding them', () => {
+  const { document, window } = parseHTML('<html><body><main><article id="one"><p>Selected <b>first</b></p></article><article id="two"><p><button data-bound-reference="quote">[引用点1]</button> next</p></article></main></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('Node', window.Node); vi.stubGlobal('NodeFilter', { SHOW_TEXT: 4 });
+  const one = document.querySelector<HTMLElement>('#one')!, two = document.querySelector<HTMLElement>('#two')!;
+  const first = one.querySelector('p')!.firstChild!, last = two.querySelector('p')!.lastChild!;
+  const range = { startContainer: first, startOffset: 3, endContainer: last, endOffset: last.textContent!.length,
+    intersectsNode: () => true, toString: () => 'ected first\n\n[引用点1] next' } as unknown as Range;
+  const captured = captureChatSelection(range, new Map([[one, { entryId: 'first', text: 'Selected **first**', offset: 12 }], [two, { entryId: 'second', text: '[引用点1] next', offset: 0 }]]));
+  expect(captured.text).toBe('ected first\n\n[引用点1] next');
+  expect(captured.complete).toBe(true);
+  expect(captured.passages).toEqual([{ entryId: 'first', start: 15, text: 'ected **first' }, { entryId: 'second', start: 0, text: '[引用点1] next' }]);
+});
+it('maps selected text after CRLF Markdown boundaries to original source offsets', () => {
+  const text = 'Before\r\n\r\nAfter';
+  const captured = selection('<p>Before</p><p id="after">After</p>', { entryId: 'crlf', text, offset: 0 }, ['#after']);
+  expect(captured.passages).toEqual([{ entryId: 'crlf', start: 10, text: 'After' }]);
+});
+
+it('selects exact repeated painted blocks even when streaming source has already changed', () => {
+  const { document, window } = parseHTML('<html><body><article><section id="one"><p>repeat</p></section><section id="two"><p>repeat</p></section></article></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('Node', window.Node); vi.stubGlobal('NodeFilter', { SHOW_TEXT: 4 });
+  const article = document.querySelector('article')!, one = document.querySelector('#one')!, two = document.querySelector('#two')!;
+  const painted = 'repeat\r\n\r\nrepeat';
+  bindRenderedMarkdownSource(one, painted, 13, 0); bindRenderedMarkdownSource(two, painted, 13, 8);
+  const node = two.querySelector('p')!.firstChild!;
+  const range = { startContainer: node, startOffset: 0, endContainer: node, endOffset: 6,
+    intersectsNode: (target: Node) => target === node || target.contains(node), toString: () => 'repeat' } as unknown as Range;
+  const frozen = captureChatSelection(range, new Map([[article, { entryId: 'streaming', offset: 20, text: 'new source no longer contains either painted block' }]]));
+  article.remove();
+  expect(frozen).toEqual({ text: 'repeat', complete: true, passages: [{ entryId: 'streaming', start: 43, text: 'repeat' }] });
+});
+
+it('preserves literal Markdown and CRLF offsets in a plain user source', () => {
+  const { document, window } = parseHTML('<html><body><article><p>**literal**</p></article></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('Node', window.Node); vi.stubGlobal('NodeFilter', { SHOW_TEXT: 4 });
+  const article = document.querySelector('article')!, block = document.querySelector('p')!, node = block.firstChild!;
+  bindRenderedMarkdownSource(block, '**literal**', 4, 0, true);
+  const range = { startContainer: node, startOffset: 0, endContainer: node, endOffset: 11, intersectsNode: () => true, toString: () => '**literal**' } as unknown as Range;
+  expect(captureChatSelection(range, new Map([[article, { entryId: 'user', offset: 0, role: 'user', text: '\r\n\r\n**literal**' }]]))).toEqual({ text: '**literal**', complete: true, passages: [{ entryId: 'user', start: 4, text: '**literal**' }] });
 });

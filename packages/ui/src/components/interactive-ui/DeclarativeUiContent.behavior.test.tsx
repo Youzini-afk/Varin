@@ -13,8 +13,10 @@ const clipboard = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/clipboard', () => ({ copyTextToClipboard: clipboard }));
 const compose = vi.hoisted(() => vi.fn());
 const send = vi.hoisted(() => vi.fn());
+const quote = vi.hoisted(() => ({ add: vi.fn(), begin: vi.fn(), dispose: vi.fn() }));
+vi.mock('@/lib/agent-editor/attachments', () => ({ beginContentReferenceInsertion: (identity: unknown) => { quote.begin(identity); return { add: quote.add, dispose: quote.dispose }; } }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createInteractiveUiHttpAPI: () => api }));
-vi.mock('@/lib/interactive-ui/compose', () => ({ composeUiResult: compose, sendUiResult: send }));
+vi.mock('@/lib/interactive-ui/compose', () => ({ composeUiResult: compose, sendUiResult: send, beginUiComposeInsertion: () => ({ dispose: vi.fn() }) }));
 vi.mock('@/lib/i18n', () => { const t = (key: string) => key; return { useI18n: () => ({ t }) }; });
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ SimpleMarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p> }));
 vi.mock('./EmbeddedUiContent', () => ({ EmbeddedUiContent: () => null }));
@@ -232,4 +234,19 @@ it('blocks dirty durable views without a lease but does not block untouched or p
   await choose(0);
   await expect(flushUiSessions(presentation.identity, getRuntimeEndpointGeneration())).resolves.toBeUndefined();
   expect(api.state).not.toHaveBeenCalled();
+});
+
+it('quotes the current choice and selected tab without invoking a compose/send action', async () => {
+  await render(choice); await choose(1);
+  const quoteButton = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('chat.context.quoteContent'))!;
+  await act(async () => quoteButton().click());
+  expect(quote.begin).toHaveBeenCalledWith(presentation.identity);
+  expect(quote.add).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('Hair：Long'), source: expect.objectContaining({ kind: 'ui', snapshotRef: 'ui-snapshot:test' }) }));
+  expect(compose).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  await render({ type: 'tabs', label: 'Plans', tabs: [{ key: 'a', label: 'A', content: 'First plan' }, { key: 'b', label: 'B', content: 'Second plan' }] });
+  await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.click());
+  await act(async () => quoteButton().click());
+  expect(quote.add.mock.lastCall?.[0].text).toContain('Second plan');
+  expect(quote.add.mock.lastCall?.[0].text).not.toContain('First plan');
+  expect(quote.dispose).toHaveBeenCalledTimes(2);
 });

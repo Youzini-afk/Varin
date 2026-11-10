@@ -89,6 +89,8 @@ export function CollaborationConversation({
             historyReady={history.ready}
             historyReset={history.reset}
             runUsage={history.usage}
+            navigation={{ runs: history.runs, ensureItem: historyWindow.ensureItem, readPreview: historyWindow.readRunPreview,
+              error: history.navigationError, retry: historyWindow.retryNavigation }}
             earlierHistory={{
               available: Boolean(history.previous),
               loading: history.loading,

@@ -7,12 +7,15 @@ import { useI18n } from '@/lib/i18n';
 import { resolveMarkdownImageSource } from './imageSources';
 import { MarkdownImageRegistry, type MarkdownImageAsset, type MarkdownImageItem } from './markdownImages';
 import { ImageViewer } from '@/components/images/ImageViewer';
+import { ChatTextSourceContext } from '@/components/conversation/chatTextSourceContext';
 import { useImageReply } from '@/components/images/useImageReply';
 
 export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement | null>, onChange?: (reason: 'structural') => void) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
-  const annotation = useImageReply();
+  const textSource = React.useContext(ChatTextSourceContext);
+  const provenance = React.useMemo(() => conversation ? { kind: 'chat' as const, thread: conversation.identity, itemId: textSource?.entryId, passages: [] } : undefined, [conversation, textSource?.entryId]);
+  const annotation = useImageReply(undefined, 'image', provenance);
   const preview = React.useContext(ConversationPreviewContext);
   const navigationDirectory = useEffectiveDirectory() ?? '';
   const directory = conversation ? conversation.fileDirectory ?? '' : navigationDirectory;

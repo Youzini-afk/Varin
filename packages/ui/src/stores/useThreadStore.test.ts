@@ -12,6 +12,7 @@ import { bindThreadStore, threadHostKey, threadIdentityKey, threadComposerKey, u
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from './useThreadDraftStore';
 import { selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
 import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
+import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread-a', branchId: 'main-a' };
 const summary = (patch: Partial<ThreadSummary> = {}): ThreadSummary => ({
   thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'A', revision: 1, created_at_ms: 1, updated_at_ms: 1,
@@ -142,6 +143,45 @@ it('sends a first input only once, preserves later typing, and retries unknown a
   expect(submit.mock.calls.map(call => call[0])).toEqual([expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' }),
     expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' })]);
   expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'Follow-up being typed', firstSend: undefined, pendingInput: undefined });
+});
+
+it('freezes native first-send quote relations and original image numbers while preserving later occurrences on receipt', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const key = useThreadStore.getState().openDraft();
+  useThreadDraftStore.getState().patch(key, { text: 'Discuss ' });
+  const source = { kind: 'chat' as const, thread: identity, itemId: 'quoted-entry', passages: [{ entryId: 'quoted-entry', start: 6, text: 'Original passage' }] };
+  const quote = referenceMarkerObject({ ref: 'fixed-text', title: 'Varin', text: 'Original passage', source });
+  await insertDraftMarker(key, quote);
+  selectThreadFiles(key, [new File(['original file pixels'], 'source.png', { type: 'image/png' })]);
+  const image = referenceMarkerObject({ ref: 'fixed-image', title: 'Image', image: { data: 'YQ==', mimeType: 'image/png' }, source });
+  if (image.payload.kind !== 'image') throw new Error('Expected image');
+  // A cleared annotation document restores its source, not the previously
+  // exported thumbnail. Exercise the actual export cache without a canvas mock.
+  image.payload.image.annotation = { source: { data: 'Yg==', mimeType: 'image/png' }, width: 1, height: 1, marks: [], past: [], future: [] };
+  await insertDraftMarker(key, image);
+  const draft = useThreadDraftStore.getState().drafts[key];
+  const frozen = freezeDraftContentReferences(draft);
+  const accepted = deferred<Awaited<ReturnType<ThreadsAPI['submit']>>>();
+  const submit = vi.fn<ThreadsAPI['submit']>(() => accepted.promise); f.api.submit = submit;
+  f.api.attachments = { read: vi.fn(), upload: vi.fn(async (_identity, file) => ({ ref: 'attachment:original-pixels', filename: file.filename, mimeType: file.mimeType, byteLength: file.data.size })) };
+  const request = { key: 'first-quoted-input', text: draft.text, editorText: draft.text, images: draft.images, files: draft.files!, ...frozen,
+    markerObjectIds: draft.markerObjects?.map(object => object.id), markerOccurrenceIds: draft.references?.map(occurrence => occurrence.id),
+    model: { providerId: 'account', modelId: 'model' }, editorContext: [], inlineContext: [], status: 'sending' as const };
+  const sending = sendThreadDraft(f.api, key, request);
+  await settle();
+  expect(submit).toHaveBeenCalledWith(expect.objectContaining({ ...frozen, text: draft.text,
+    images: [expect.objectContaining({ reference: 2, data: 'Yg==' })], attachmentImageReferences: { 'attachment:original-pixels': 1 } }));
+  useThreadDraftStore.getState().patch(key, current => ({ text: `${current.text} Later: ` }));
+  await insertDraftMarker(key, quote);
+  const later = useThreadDraftStore.getState().drafts[key].references!.at(-1)!;
+  accepted.resolve({ run_id: 'run', input_id: 'accepted-quoted-input', thread_id: identity.threadId, branch_id: identity.branchId, cursor: 1 }); await sending;
+  const remainder = useThreadDraftStore.getState().drafts[key];
+  expect(remainder.references?.map(reference => reference.id)).toEqual([later.id]);
+  expect(remainder.text).toBe(`Discuss  Later: ${later.text}`);
+  expect(remainder.images).toEqual([]); expect(remainder.files).toEqual([]);
+  expect(remainder.firstMessageReceipt).toMatchObject({ editorText: draft.text, ...frozen, images: [expect.objectContaining({ reference: 2, data: 'Yg==' })],
+    files: [expect.objectContaining({ imageReference: 1, attachment: expect.objectContaining({ ref: 'attachment:original-pixels' }) })] });
+  expect(submit).toHaveBeenCalledOnce();
 });
 
 

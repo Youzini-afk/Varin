@@ -11,14 +11,18 @@ import { useTimelineViewStore } from './timelineViewStore';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { assistant } from './historyPresentation';
+import { ReferenceNavigationContext, type ReferenceNavigation } from './ReferenceNavigation';
+import { bindRenderedMarkdownSource } from '@/components/chat/markdown/sourceBlocks';
+import type { ChatSessionEntry } from './types';
 import type { ChatTimelineBlock } from './chatTimelineBlocks';
+import { ToolDisclosure } from './ToolDisclosure';
 
 type ViewportProps = LegendListProps<ChatTimelineBlock>;
 const viewport = vi.hoisted(() => ({
   props: null as ViewportProps | null,
   initial: [] as ViewportProps['initialScrollIndex'][],
   writes: [] as number[],
-  height: 600, content: 2000, top: 1500,
+  height: 600, content: 2000, top: 1500, nodes: null as React.ReactNode,
 }));
 vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: ViewportProps, ref) => {
   const node = React.useRef<HTMLDivElement>(null);
@@ -39,7 +43,7 @@ vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: V
     });
     props.onLoad?.({ elapsedTimeInMs: 0 });
   }, []);
-  return <div ref={node} onWheelCapture={props.onWheelCapture}>{props.ListFooterComponent as React.ReactNode}</div>;
+  return <div ref={node} onWheelCapture={props.onWheelCapture}>{viewport.nodes}{props.ListFooterComponent as React.ReactNode}</div>;
 }) }));
 // Exercise the real entry preparation and scroll controller with controlled
 // viewport measurements. Rendering message cards is covered by their suites.
@@ -75,16 +79,18 @@ beforeEach(() => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element);
+  vi.stubGlobal('HTMLDetailsElement', window.HTMLDetailsElement ?? window.HTMLElement);
+  vi.stubGlobal('CSS', { escape: (value: string) => value.replace(/["\\]/g, '\\$&') });
   vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   frames = new Map(); nextFrame = 0; time = 0;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   vi.spyOn(window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    return { height: this.hasAttribute('data-conversation-timeline-end-space') ? 300 : 600 } as DOMRect;
+    return { top: 0, bottom: 600, height: this.hasAttribute('data-conversation-timeline-end-space') ? 300 : 600 } as DOMRect;
   });
   viewport.props = null; viewport.initial = []; viewport.writes = [];
-  viewport.height = 600; viewport.content = 2000; viewport.top = 1500;
+  viewport.height = 600; viewport.content = 2000; viewport.top = 1500; viewport.nodes = null;
   useTimelineViewStore.setState({ views: {} });
   useUIStore.setState({ chatRenderMode: 'live', promptNavigatorEnabled: false, motionPreference: 'full' });
   mount = document.createElement('div'); document.body.append(mount); root = createRoot(mount);
@@ -206,4 +212,65 @@ it('cancels a long return before relocation when the reader takes over', async (
   await act(async () => finish()); frame(); frame();
   expect(viewport.top).toBe(300);
   expect(useTimelineViewStore.getState().views['end-fixture']?.scrollMode).toBe('free-scrolling');
+});
+
+
+it('loads an explicitly quoted source only on navigation and rejects a changed saved passage', async () => {
+  const identity = { runtime: 'agent' as const, threadId: 'quote-source', branchId: 'main' };
+  const navigation: ReferenceNavigation = { identity };
+  const text = 'First paragraph.\n\nExact quoted second paragraph.';
+  const original: ChatSessionEntry = { id: 'old-source', parentId: null, timestamp: '', runId: 'older-run', type: 'message', message: assistant('old-source', [{ type: 'text', text }], {}) };
+  let entries: ChatSessionEntry[] = [];
+  const ensureItem = vi.fn(async () => { entries = [original]; render(); });
+  const render = () => root.render(<ReferenceNavigationContext.Provider value={navigation}>
+    <ChatTimeline sessionId="quote-navigation" cwd="/workspace" entries={entries} toolExecutions={{}}
+      navigation={{ runs: [], ensureItem, readPreview: async () => '', retry: async () => {} }} />
+  </ReferenceNavigationContext.Provider>);
+  viewport.nodes = <article data-conversation-entry-id="old-source"><div data-conversation-source-id="old-source" data-conversation-source-offset="0">
+    <p ref={element => { if (element) bindRenderedMarkdownSource(element, text); }} data-chat-source-start="18" data-chat-source-end={text.length}>Exact quoted second paragraph.</p>
+  </div></article>;
+  await act(async () => render());
+  expect(ensureItem).not.toHaveBeenCalled();
+  let located: Promise<void>;
+  await act(async () => { located = navigation.revealSource!({ entryId: 'old-source', start: 18, end: text.length, text: 'Exact quoted second paragraph.' }); });
+  frame();
+  await act(async () => await located!);
+  expect(ensureItem).toHaveBeenCalledExactlyOnceWith('old-source', expect.any(AbortSignal));
+  expect(viewport.writes.at(-1)).toBeGreaterThanOrEqual(0);
+  await expect(navigation.revealSource!({ entryId: 'old-source', start: 18, end: text.length, text: 'Different later content.' })).rejects.toThrow();
+  expect(ensureItem).toHaveBeenCalledTimes(1);
+});
+
+it('opens only the owning folded tool group before revealing its exact quoted call', async () => {
+  const identity = { runtime: 'agent' as const, threadId: 'quote-tools', branchId: 'main' };
+  const navigation: ReferenceNavigation = { identity };
+  const calls = ['first-call', 'quoted-call'].map(id => ({ type: 'toolCall' as const, id, name: 'file_read', arguments: { path: `${id}.txt` } }));
+  const entry: ChatSessionEntry = { id: 'tool-message', parentId: null, timestamp: '', runId: 'tool-run', type: 'message', message: assistant('tool-message', calls, {}) };
+  const highlight = vi.fn(() => ({ cancel() {} }) as Animation);
+  viewport.nodes = <article data-conversation-entry-id={entry.id}>
+    <div data-chat-tool-call-ids={JSON.stringify(calls.map(call => call.id))}>
+      <ToolDisclosure id="group:first-call"><summary>Read two files</summary>
+        {calls.map(call => <div key={call.id} data-chat-tool-call-id={call.id}><p ref={node => { if (node && call.id === 'quoted-call') node.animate = highlight; }}>{call.id}</p></div>)}
+      </ToolDisclosure>
+    </div>
+    <details data-conversation-tool-disclosure="unrelated"><summary>Other calls</summary></details>
+  </article>;
+  await act(async () => root.render(<ReferenceNavigationContext.Provider value={navigation}>
+    <ChatTimeline sessionId="quote-tools" cwd="/workspace" entries={[entry]} toolExecutions={{}} />
+  </ReferenceNavigationContext.Provider>));
+  expect(mount.querySelector('[data-chat-tool-call-id="quoted-call"]')).toBeNull();
+  const disclosure = mount.querySelector<HTMLDetailsElement>('[data-conversation-tool-disclosure="group:first-call"]')!;
+  // linkedom has no native details toggle. Supply that platform event while the
+  // real ToolDisclosure still owns the lazy child mount and expansion state.
+  Object.defineProperty(disclosure, 'open', { configurable: true, get() { return this.hasAttribute('open'); }, set(value: boolean) {
+    this.toggleAttribute('open', value); this.dispatchEvent(new window.Event('toggle'));
+  } });
+  let located: Promise<void>;
+  await act(async () => { located = navigation.revealSource!({ entryId: entry.id, toolCallId: 'quoted-call' }); });
+  frame();
+  await act(async () => await located!);
+  expect(disclosure.open).toBe(true);
+  expect(mount.querySelector('[data-chat-tool-call-id="quoted-call"]')?.textContent).toBe('quoted-call');
+  expect(highlight).toHaveBeenCalledOnce();
+  expect(mount.querySelector('[data-conversation-tool-disclosure="unrelated"]')?.hasAttribute('open')).toBe(false);
 });
