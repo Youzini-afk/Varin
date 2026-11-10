@@ -77,7 +77,8 @@ vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
-import { listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { threadSummary } from '@/test/threadFixtures';
 import { ThreadMaterials } from './ThreadMaterials';
@@ -478,11 +479,13 @@ it('adds a real Research ArtifactRow region and citation to its enclosing Thread
   const f = artifactConversationFixture(); await f.open();
   await editComposer('Keep my question'); await selectPdfRegion(); await click('harness.pdf.askAboutSelection');
   const text = container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value;
-  expect(text).toBe('Keep my question');
-  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), identity));
+  expect(text).toBe('Keep my question[Image 1]');
+  const draft = useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]!;
+  const references = freezeDraftContentReferences(draft).contentReferences;
   expect(references).toHaveLength(1);
-  expect(references[0]?.reference).toMatchObject({ title: 'Original experiment.pdf',
-    image: { data: 'AQID', mimeType: 'image/png' }, source: { kind: 'document', snapshotId: 'snapshot-artifact', sourceHash: 'hash-a', page: 1 } });
+  expect(references![0]).toMatchObject({ title: 'Original experiment.pdf', imageReference: 1,
+    source: { kind: 'document', snapshotId: 'snapshot-artifact', sourceHash: 'hash-a', page: 1 } });
+  expect(draft.images).toEqual([expect.objectContaining({ data: 'AQID', mimeType: 'image/png', reference: 1 })]);
   expect(f.materials.read.mock.calls.at(-1)?.[1]).toMatchObject({ snapshotId: 'snapshot-artifact', view: 'page-image',
     page: 1, region: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 } });
   expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -493,9 +496,10 @@ it('adds a real Research ArtifactRow region and citation to its enclosing Thread
   });
   await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle(); });
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: expect.stringContaining(text),
-    images: [{ data: 'AQID', mimeType: 'image/png' }] }));
-  expect(f.submit.mock.calls[0]![0].text).toContain('snapshot-artifact');
-  expect(f.submit.mock.calls[0]![0].text).toContain('hash-a');
+    images: [{ data: 'AQID', mimeType: 'image/png', reference: 1 }],
+    contentReferences: [expect.objectContaining({ source: expect.objectContaining({ snapshotId: 'snapshot-artifact', sourceHash: 'hash-a' }) })],
+    contentReferenceOccurrences: [{ kind: 'image', reference: 1, start: 'Keep my question'.length, end: text.length }] }));
+  expect(f.submit.mock.calls[0]![0].text).toBe(text);
   expect(mocks.addRegion).not.toHaveBeenCalled(); expect(mocks.runtimeFetch).not.toHaveBeenCalled();
 });
 
