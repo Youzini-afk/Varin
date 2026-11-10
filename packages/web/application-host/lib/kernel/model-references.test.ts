@@ -176,8 +176,8 @@ it('does not let an author-controlled builtin name select a trusted resource own
 it('projects original search source snapshots and nested continuation without copying hidden hashes', async()=>{
   const {refs}=port();
   const raw={items:[{results:[{source:{snapshot:{snapshotId:'observed',contentHash:'internal',document:{kind:'pdf',sourceSnapshotId:'original',source:{contentHash:'bytes-hash',byteLength:7}}}},nextRead:{snapshotId:'observed'}}]}]};
-  const output=await projectHostToolData(refs,call('websearch',{}),declaration('web'),raw) as Record<string,any>;
-  const hit=output.items[0].results[0];expect(hit.source.snapshot.snapshotId).toMatch(/^material:/);
+  const output=await projectHostToolData(refs,call('websearch',{}),declaration('web'),raw) as {items:Array<{results:Array<{source:typeof raw.items[0]['results'][0]['source'];nextRead:{tool:string;arguments:Record<string,unknown>}}>}>};
+  const hit=output.items[0]!.results[0]!;expect(hit.source.snapshot.snapshotId).toMatch(/^material:/);
   expect(hit.source.snapshot.contentHash).toBeUndefined();expect(hit.source.snapshot.document.source.contentHash).toBeUndefined();
   expect(hit.source.snapshot.document.sourceSnapshotId).toMatch(/^material:/);
   expect(hit.nextRead.tool).toBe('webfetch');
