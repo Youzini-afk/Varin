@@ -48,7 +48,7 @@ export function getSettingsActionContracts(entry: SettingsCatalogEntry): Record<
   let contracts: Record<string, SettingsActionContract>;
   switch (entry.actionRef?.domain) {
     case 'service:web-search': {
-      const provider = { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng'] };
+      const provider = { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng', 'anysearch'] };
       const fields = { name: string, description: { type: 'string' }, enabled: { type: 'boolean' }, endpoint: nullableString };
       contracts = {
         list: read(),

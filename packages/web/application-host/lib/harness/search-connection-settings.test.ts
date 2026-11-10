@@ -61,6 +61,19 @@ it('allows selection preferences on the anonymous route and preserves them when 
   expect(added.connections).toHaveLength(1);
 });
 
+it('lets Agent settings add and test an anonymous AnySearch connection using the same saved route', async () => {
+  const f = await fixture();
+  const added = await f.call('add', { expectedRevision: (await f.owner.list()).revision,
+    connection: { provider: 'anysearch', name: 'General search', description: 'General web lookup' } });
+  expect(added).toMatchObject({ status: 'applied', mutation: 'applied' });
+  const saved = await f.owner.list();
+  const connection = saved.configuration!.connections![0]!;
+  expect(saved.connections[0]).toMatchObject({ available: true, credentialConfigured: false });
+  expect(connection).toMatchObject({ provider: 'anysearch', description: 'General web lookup' });
+  f.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { results: [] } }), { headers: { 'Content-Type': 'application/json' } }));
+  expect(await f.owner.test(connection.id)).toMatchObject({ providerId: 'configured-anysearch', status: 'empty', resultCount: 0 });
+});
+
 it('opens a private UI request and saves through the authenticated credential route without exposing the key to actions', async () => {
   const f = await fixture(); const added = await f.add('Research');
   const result = await f.call('enter-credential', { id: added.connectionId });

@@ -87,6 +87,7 @@ const DEFAULT_ENDPOINTS: Record<Exclude<HarnessWebSearchSettings["provider"], "s
   exa: "https://api.exa.ai/search",
   tavily: "https://api.tavily.com/search",
   jina: "https://s.jina.ai/",
+  anysearch: "https://api.anysearch.com/v1/search",
 };
 
 const DEFAULT_EXA_MCP_ENDPOINT = "https://mcp.exa.ai/mcp";
@@ -170,7 +171,8 @@ const normalizeResults = (values: unknown[], contentKind: SearchContentKind = "u
       || text(value.content)
       || highlights.join(" … ")
       || excerpts.join(" … ")
-      || text(value.text);
+      || text(value.text)
+      || text(value.snippet);
     const publishedAt = text(value.publishedAt)
       || text(value.publishedDate)
       || text(value.published_date)
@@ -565,10 +567,41 @@ const searxngProvider = (settings: HarnessWebSearchSettings, runtime: SearchProv
   },
 });
 
+/** AnySearch's general search API. Its excerpts are not a fetched page body.
+ * The API supports a language preference and cn/intl zones, not exact locale filters. */
+const anysearchProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
+  id: "configured-anysearch",
+  capabilities: { pagination: false, domains: "post-filter", recency: "unsupported", language: "guidance", region: "guidance", excerpts: true },
+  search: async (query, options) => {
+    const zone = options.region?.toLowerCase();
+    const supportedZone = zone === "cn" || zone === "intl";
+    const payload = await responseJson(await runtime.fetch(endpointFor(settings), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) },
+      body: JSON.stringify({ query, max_results: Math.max(1, Math.min(options.limit ?? 10, 10)),
+        ...(options.language ? { language: options.language } : {}), ...(supportedZone ? { zone } : {}) }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    }), "AnySearch");
+    if (payload.code !== undefined && payload.code !== 0) {
+      const code = payload.code;
+      const kind = code === 401 || code === 403 ? "authentication" : code === 429 ? "rate-limited" : "protocol";
+      throw new SearchProviderError({ kind, message: `AnySearch search returned ${kind === "authentication" ? "an authentication error" : kind === "rate-limited" ? "a rate limit error" : "an API error"}${typeof code === "number" ? ` (code ${code})` : ""}` });
+    }
+    const results = requireResults(isRecord(payload.data) ? payload.data.results : undefined, "AnySearch");
+    const normalized = normalizeResults(results, "provider-excerpt");
+    if (results.length && !normalized.length) throw new SearchProviderError({ kind: "protocol", message: "AnySearch search returned malformed results" });
+    const notices = [
+      ...(options.region && !supportedZone ? [`AnySearch supports only cn/intl zone preferences; region ${options.region} was not applied.`] : []),
+      ...((options.limit ?? 10) > 10 ? ["AnySearch returns at most 10 results per search and does not expose pagination."] : []),
+    ];
+    return { results: normalized, ...(notices.length ? { notices } : {}) };
+  },
+});
+
 export const parseSearchProviderSettings = (value: unknown): HarnessWebSearchSettings | null => {
   if (!isRecord(value)) return null;
   const provider = value.provider;
-  if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng") return null;
+  if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng" && provider !== "anysearch") return null;
   if (("endpoint" in value && value.endpoint !== undefined && typeof value.endpoint !== "string")
     || ("credentialRef" in value && value.credentialRef !== undefined && typeof value.credentialRef !== "string")) return null;
   const endpoint = text(value.endpoint);
@@ -600,6 +633,7 @@ export const createConfiguredSearchProvider = (
   if (settings.provider === "exa") return exaProvider(settings, runtime);
   if (settings.provider === "tavily") return tavilyProvider(settings, runtime);
   if (settings.provider === "jina") return jinaProvider(settings, runtime);
+  if (settings.provider === "anysearch") return anysearchProvider(settings, runtime);
   return searxngProvider(settings, runtime);
 };
 
@@ -612,7 +646,8 @@ export const searchFilterApplication = (provider: SearchProvider, options: Searc
   if (options.recency) applied.push({ field: "recency", method: capability.recency === "native" ? "native" : capability.recency === "guidance" ? "guidance" : "unsupported",
     basis: provider.id.includes("exa") ? "published" : "provider-defined" });
   for (const field of ["language", "region"] as const) {
-    if (options[field]) applied.push({ field, method: capability[field] ?? "unsupported" });
+    if (options[field]) applied.push({ field, method: field === "region" && provider.id === "configured-anysearch"
+      && !["cn", "intl"].includes(options.region!.toLowerCase()) ? "unsupported" : capability[field] ?? "unsupported" });
   }
   return applied;
 };
@@ -645,7 +680,7 @@ export const resolveConfiguredSearchProvider = (input: {
     const provider = createConfiguredSearchProvider(connection, { apiKey, fetch: runtime.fetch, now: runtime.now });
     let failure: WebSearchFailure | undefined;
     if (!connection.enabled) failure = { kind: "disabled", message: "search connection is disabled" };
-    else if (connection.provider !== "searxng" && !apiKey) failure = { kind: "not-configured", message: connection.credentialRef ? `search credential is unavailable: ${connection.credentialRef}` : `search credential reference is required for ${connection.provider}` };
+    else if (connection.provider !== "searxng" && connection.provider !== "anysearch" && !apiKey) failure = { kind: "not-configured", message: connection.credentialRef ? `search credential is unavailable: ${connection.credentialRef}` : `search credential reference is required for ${connection.provider}` };
     else {
       try { endpointFor(connection); }
       catch (error) { failure = { kind: "not-configured", message: conciseFailure(error, "invalid search endpoint") }; }

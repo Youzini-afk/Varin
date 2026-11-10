@@ -1159,7 +1159,7 @@ export const settingsDict = {
   'settings.page.harness.web.search.endpoint.description': 'Base URL of your SearXNG instance with JSON search enabled.',
   'settings.page.harness.web.search.endpointRequired': 'A SearXNG endpoint is required.',
   'settings.page.harness.web.search.apiKey': 'API key',
-  'settings.page.harness.web.search.apiKey.description': "Stored in the Host’s service credential store. Optional for an unauthenticated SearXNG instance.",
+  'settings.page.harness.web.search.apiKey.description': "Stored in the Host’s service credential store. Optional for AnySearch anonymous search or an unauthenticated SearXNG instance.",
   'settings.page.harness.web.search.apiKeyRequired': 'This search provider requires an API key.',
   'settings.page.harness.web.search.configured': 'Credential configured',
   'settings.page.harness.web.search.notConfigured': 'Credential not configured',

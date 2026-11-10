@@ -449,13 +449,13 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
       note: '{connections: [{id,name,provider,enabled,description?,endpoint?,credentialRef?}], defaultConnectionId?, fallbackConnectionIds: string[], enabled?, smartSelection?}. JSON writes replace this entire configuration. Prefer harness.web.search.connections actions to edit one connection, enter credentials privately or test it. Credential references identify Host-owned secrets; reads never return secret material.' },
     apply: 'next-run',
     ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web',
-      keywords: ['brave', 'tavily', 'exa', 'jina', 'searxng', 'API key', 'search'] },
+      keywords: ['brave', 'tavily', 'exa', 'jina', 'searxng', 'anysearch', 'API key', 'search'] },
   },
   {
     id: 'harness.web.search.connections', category: 'web', owner: 'action',
     actionRef: { domain: 'service:web-search', verbs: ['list', 'add', 'patch', 'remove', 'route', 'restore-default', 'test', 'credential-status', 'enter-credential', 'remove-credential'],
       note: 'Manage one search connection without replacing unrelated settings. Read list for revision, exact IDs and credential status. enter-credential opens private user input on the authenticated interface for this conversation; it returns a queryable/cancellable operation, never the key. A real test uses only the selected connection.' },
-    ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web', keywords: ['search connection', 'search provider', 'API key', 'brave', 'exa', 'tavily', 'jina', 'searxng', '搜索连接', '搜索提供商'] },
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web', keywords: ['search connection', 'search provider', 'API key', 'brave', 'exa', 'tavily', 'jina', 'searxng', 'anysearch', '搜索连接', '搜索提供商'] },
   },
   {
     id: 'harness.web.render', category: 'web', owner: 'agent-settings',

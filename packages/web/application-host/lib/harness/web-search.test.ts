@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mintSearchCursor } from "@varin/protocol";
 import {
   createConfiguredSearchProvider,
+  searchFilterApplication,
   createWebSearchService,
   filterByDomainPolicy,
   parseSearchProviderSettings,
@@ -23,6 +24,42 @@ const mcpResponse = (result: unknown, status = 200): Response => jsonResponse({
 }, status);
 
 describe("configured web search providers", () => {
+  it("routes AnySearch anonymous and keyed searches through the shared service without treating snippets as page content", async () => {
+    const fetch = vi.fn(async (_url: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ code: 0, data: {
+      results: [{ title: "AnySearch result", url: "https://docs.example/guide", snippet: "Search excerpt" }], metadata: { total_results: 1 },
+    } }));
+    const settings = { connections: [{ id: "any", name: "AnySearch", provider: "anysearch", enabled: true }], defaultConnectionId: "any", fallbackConnectionIds: [] };
+    const provider = resolveConfiguredSearchProvider({ settings, auth: {}, fetch });
+    expect(provider).toMatchObject({ connections: [{ id: "any", available: true, providerId: "configured-anysearch" }] });
+    const service = createWebSearchService(async () => provider);
+    try {
+      const result = await service.handle({ query: "query", language: "zh-CN", region: "cn", limit: 4 }, context);
+      expect(result.items[0]).toMatchObject({ connectionId: "any", providerId: "configured-anysearch", status: "ok",
+        results: [{ title: "AnySearch result", url: "https://docs.example/guide", snippet: "Search excerpt", contentKind: "provider-excerpt" }] });
+      expect(fetch.mock.calls[0]?.[0]).toBe("https://api.anysearch.com/v1/search");
+      expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).has("authorization")).toBe(false);
+      expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({ query: "query", language: "zh-CN", zone: "cn", max_results: 4 });
+    } finally { await service.dispose(); }
+    const keyed = createConfiguredSearchProvider({ provider: "anysearch", endpoint: "http://search.example/v1/search" }, { apiKey: "private-key", fetch });
+    await keyed.search("q", { region: "US", limit: 20 });
+    expect(new Headers(fetch.mock.calls.at(-1)?.[1]?.headers).get("authorization")).toBe("Bearer private-key");
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({ query: "q", max_results: 10 });
+    expect(searchFilterApplication(keyed, { region: "US", recency: "week" })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "region", method: "unsupported" }), expect.objectContaining({ field: "recency", method: "unsupported" }),
+    ]));
+  });
+
+  it("classifies AnySearch authentication, rate and malformed replies without exposing upstream credentials", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ message: "private-key" }, 401));
+    const provider = createConfiguredSearchProvider({ provider: "anysearch" }, { fetch });
+    await expect(provider.search("q", {})).rejects.toMatchObject({ failure: { kind: "authentication", httpStatus: 401 } });
+    fetch.mockResolvedValueOnce(jsonResponse({ message: "private-key" }, 429));
+    await expect(provider.search("q", {})).rejects.toMatchObject({ failure: { kind: "rate-limited", httpStatus: 429 } });
+    fetch.mockResolvedValueOnce(jsonResponse({ code: 429, message: "private-key", data: {} }));
+    await expect(provider.search("q", {})).rejects.toMatchObject({ failure: { kind: "rate-limited", message: "AnySearch search returned a rate limit error (code 429)" } });
+    fetch.mockResolvedValueOnce(jsonResponse({ code: 0, data: { results: [{ title: "Missing URL" }] } }));
+    await expect(provider.search("q", {})).rejects.toMatchObject({ failure: { kind: "protocol" } });
+  });
   it("calls Brave with its documented header, freshness, and result shape", async () => {
     const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({
       web: { results: [{ title: "Brave result", url: "https://docs.example/a", description: "snippet" }] },

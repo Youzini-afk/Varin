@@ -1167,7 +1167,7 @@ export const settingsDict = {
 'settings.page.harness.web.search.endpoint.description': '已启用 JSON 搜索的 SearXNG 实例基础 URL。',
 'settings.page.harness.web.search.endpointRequired': '必须填写 SearXNG 端点。',
 'settings.page.harness.web.search.apiKey': 'API Key',
-'settings.page.harness.web.search.apiKey.description': "保存在 Host 的服务凭据存储中。无身份验证的 SearXNG 实例可留空。",
+'settings.page.harness.web.search.apiKey.description': "保存在 Host 的服务凭据存储中。AnySearch 匿名搜索和无身份验证的 SearXNG 实例可留空。",
 'settings.page.harness.web.search.apiKeyRequired': '这个搜索提供商需要 API Key。',
 'settings.page.harness.web.search.configured': '凭据已配置',
 'settings.page.harness.web.search.notConfigured': '凭据未配置',

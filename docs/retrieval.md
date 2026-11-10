@@ -209,7 +209,10 @@ Agent 通过设置工具的 `harness.web.search.connections` 动作管理这些�
 
 连接测试只运行已保存的连接，用其原凭据 owner 和 Host egress，显示实际测试时间及错误。
 配置完整性不冒充连通性。匿名入口有供应商免费使用边界；独立连接用于用户自己的账号和自托管实例。
-当前集成 Exa、Parallel 匿名入口及 Brave、Exa、Tavily、Jina、SearXNG 适配器，不把普通模型对话当作联网渠道。
+当前集成 Exa、Parallel 匿名入口及 Brave、Exa、Tavily、Jina、SearXNG、AnySearch 适配器，不把普通模型对话当作联网渠道。
+AnySearch 使用普通 HTTP 搜索接口，API Key 可选；没有 Key 时使用供应商的匿名额度。支持语言偏好与 `cn` / `intl`
+区域偏好，单次最多返回供应商允许的 10 条结果；域名由结果过滤，时间和其他地区条件会明确标为未应用。
+结果保留实际连接及供应商身份，搜索摘录仍是摘录，后续原网页读取继续使用 `webfetch`。
 
 ### 原文、问题与获取完整性
 

@@ -61,9 +61,9 @@ const schemas: Record<string, Schema> = {
   'harness.fastDecision': object({ default: fastBinding, purposes: object(Object.fromEntries(FAST_DECISION_PURPOSES.map(key => [key, { anyOf: [fastBinding, { const: 'off' }] }]))) }),
   'harness.web.sourcePreferences': object({ preferredDomains: strings, excludedDomains: strings }),
   'harness.web.search': { anyOf: [
-    object({ provider: { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng'] }, endpoint: nonempty, credentialRef: nonempty }, ['provider']),
+    object({ provider: { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng', 'anysearch'] }, endpoint: nonempty, credentialRef: nonempty }, ['provider']),
     object({ connections: { type: 'array', items: object({ id: { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' }, name: nonempty, enabled: boolean,
-      provider: { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng'] }, endpoint: nonempty, credentialRef: nonempty, description: { type: 'string' } }, ['id', 'name', 'enabled', 'provider']) },
+      provider: { enum: ['brave', 'exa', 'tavily', 'jina', 'searxng', 'anysearch'] }, endpoint: nonempty, credentialRef: nonempty, description: { type: 'string' } }, ['id', 'name', 'enabled', 'provider']) },
       defaultConnectionId: nonempty, fallbackConnectionIds: { type: 'array', uniqueItems: true, items: nonempty }, enabled: boolean, smartSelection: boolean }, ['connections', 'fallbackConnectionIds']),
   ] },
   'harness.documentReading': object({ doclingCommand: string, tesseractCommand: string, ocrLanguage: string }),

@@ -268,7 +268,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       group: "harness",
       icon: "global",
       id: "varin.builtin.harness.page.web",
-      keywords: ["harness", "web", "search", "brave", "exa", "tavily", "jina", "searxng", "domains", "browser"],
+      keywords: ["harness", "web", "search", "brave", "exa", "tavily", "jina", "searxng", "anysearch", "domains", "browser"],
       kind: "single",
       order: 6,
       slug: "harness-web",

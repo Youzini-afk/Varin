@@ -13,8 +13,8 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 import './search-connections.css';
 import { useSearchCredentialRequests } from '@/stores/useSearchCredentialRequests';
 
-const providers = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const;
-const providerName = (provider: HarnessWebSearchProvider) => provider === 'searxng' ? 'SearXNG' : provider[0]!.toUpperCase() + provider.slice(1);
+const providers = ['brave', 'exa', 'tavily', 'jina', 'searxng', 'anysearch'] as const;
+const providerName = (provider: HarnessWebSearchProvider) => provider === 'searxng' ? 'SearXNG' : provider === 'anysearch' ? 'AnySearch' : provider[0]!.toUpperCase() + provider.slice(1);
 
 function ConnectionDisclosure({ connection, initiallyOpen, onEnabledChange, onRemove, children }: React.PropsWithChildren<{
   connection: HarnessWebSearchConnection;

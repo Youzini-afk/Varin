@@ -5,7 +5,7 @@ import { resolveSearchCredential } from "./web-search.js";
 import { createSearchConnectionAccess, type SearchConnectionSettings } from './search-connection-settings.js';
 import { ModelConfigurationError } from '../models/configuration.js';
 
-const PROVIDERS = new Set<HarnessWebSearchProvider>(["brave", "exa", "tavily", "jina", "searxng"]);
+const PROVIDERS = new Set<HarnessWebSearchProvider>(["brave", "exa", "tavily", "jina", "searxng", "anysearch"]);
 const noAuth: RequestHandler = (_request, _response, next) => next();
 
 export const webSearchCredentialRef = (provider: HarnessWebSearchProvider): string => `varin-web-search-${provider}`;

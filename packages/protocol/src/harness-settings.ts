@@ -88,13 +88,13 @@ export function resolveHarnessCodeRetrievalSettings(value: unknown): HarnessCode
   return { decision };
 }
 
-export type HarnessWebSearchProvider = "brave" | "exa" | "tavily" | "jina" | "searxng";
+export type HarnessWebSearchProvider = "brave" | "exa" | "tavily" | "jina" | "searxng" | "anysearch";
 
 export interface HarnessWebSearchSettings {
   provider: HarnessWebSearchProvider;
   /** Required for SearXNG; optional override for hosted providers. */
   endpoint?: string;
-  /** Host credential reference. SearXNG may omit it for an unauthenticated instance. */
+  /** Host credential reference. Optional for AnySearch anonymous search or unauthenticated SearXNG. */
   credentialRef?: string;
 }
 
@@ -131,7 +131,7 @@ export function parseHarnessWebSearchSettings(value: unknown): HarnessWebSearchC
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
     const item = entry as Record<string, unknown>;
     const provider = item.provider;
-    if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng") return null;
+    if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng" && provider !== "anysearch") return null;
     if (["endpoint", "credentialRef"].some(key => item[key] !== undefined && typeof item[key] !== "string")) return null;
     const endpoint = typeof item.endpoint === "string" ? item.endpoint.trim() : "";
     const credentialRef = typeof item.credentialRef === "string" ? item.credentialRef.trim() : "";
