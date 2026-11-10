@@ -581,6 +581,15 @@ fn durable_wait_requires_actual_stop_and_cancel_only_closes_observation() {
         f.db.operation(&second).unwrap().outcome,
         Some(Outcome::Succeeded)
     );
+    let history = f.db.execution_history("branch").unwrap();
+    let observed = history.iter().find_map(|item| match &item.content {
+        Content::Output { output } if output.model_data()["observationCancelled"] == false => Some(output),
+        _ => None,
+    }).expect("original stopped Job observation");
+    assert_eq!(observed.model_data()["receipt"], json!({"attempt":"completed"}));
+    assert_eq!(observed.model_data()["executorStopped"], true);
+    assert!(observed.model_data()["jobId"].as_str().unwrap().starts_with("job:"));
+    assert_eq!(observed.data["operationId"], b.operation_id);
     let count = f.db.history("branch").unwrap().len();
     f.db.deliver_process_waits().unwrap();
     assert_eq!(f.db.history("branch").unwrap().len(), count);
