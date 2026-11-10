@@ -1,3 +1,4 @@
+import { createHostModelReferences, resolveFileReference } from './model-references.js';
 /** Adapters into the original Run source and Experiment owners for PDF ingestion. */
 import path from 'node:path';
 import type { ThreadAttachmentOwner } from './thread-attachments.js';
@@ -65,6 +66,7 @@ const regularFile = (state: KernelBranchState | undefined): Extract<KernelBranch
 export async function readSourceDocument(input: {
   client: Pick<KernelScopedClient, 'readBranch' | 'fileCapture' | 'getBlob' | 'releaseBlob'>; source: LaunchSource; physicalRoot: LiveRoot | null;
   operationId: string; path: string; signal?: AbortSignal;
+  fileVersion?(path: string, state: KernelBranchState, rootId?: string): Promise<string>;
 }): Promise<DocumentIngestInput> {
   const { client, source, physicalRoot, signal } = input;
   const hostPrefix = source.resource_owner.kind === 'managed_host' ? `/hosts/${encodeURIComponent(source.resource_owner.hostId)}` : '';
@@ -79,7 +81,8 @@ export async function readSourceDocument(input: {
       const state = regularFile(entry?.state), resourcePath = entry!.path;
       const bytes = await sourceBytes(client, state, { branchId, revision, path: resourcePath }, signal);
       return { source: bytes, sourceUrl: `${provenance}/branches/${encodeURIComponent(branchId)}/revisions/${revision}/${resourcePath.split('/').map(encodeURIComponent).join('/')}`,
-        title: path.posix.basename(resourcePath), contentType: contentType(resourcePath) };
+        title: path.posix.basename(resourcePath), contentType: contentType(resourcePath),
+        ...(input.fileVersion ? {fileObservation:{path:resourcePath,readVersion:await input.fileVersion(resourcePath,state)}}:{}) };
     }
     if (!physicalRoot) throw new HarnessServiceError('unavailable', 'The original physical document source is unavailable');
     const captured = await client.fileCapture({ operationId: `document-source:${input.operationId}`,
@@ -92,7 +95,8 @@ export async function readSourceDocument(input: {
     return { source: bytes, sourceUrl: source.resource_owner.kind === 'managed_host'
       ? `${provenance}/roots/${encodeURIComponent(physicalRoot.rootId)}/${captured.path.split('/').map(encodeURIComponent).join('/')}`
       : pathToFileURL(path.resolve(physicalRoot.canonicalRoot, captured.path)).href,
-      title: path.posix.basename(captured.path), contentType: contentType(captured.path) };
+      title: path.posix.basename(captured.path), contentType: contentType(captured.path),
+      ...(typeof captured.readVersion === 'string' ? {fileObservation:{path:captured.path,readVersion:captured.readVersion}}:{}) };
   } finally { if (ownerId) await client.releaseBlob(ownerId); }
 }
 
@@ -118,7 +122,7 @@ export function createDocumentSources(options: {
         signal?.throwIfAborted();
         const bytes = Buffer.from(document.bytesBase64, 'base64');
         if (bytes.byteLength !== document.byteLength) throw new HarnessServiceError('unavailable', 'The original document bytes are incomplete');
-        return { source: bytes, sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
+        return { source: bytes, sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType, ...(document.fileObservation ? {fileObservation:document.fileObservation}:{}) };
       }, signal);
     }
     const source = await admitRunSourceAuthority(options.kernel, options.runtime,
@@ -127,6 +131,7 @@ export function createDocumentSources(options: {
     try {
       if (source.kind !== 'local') throw new HarnessServiceError('forbidden', 'The document resource owner changed');
       return await readSourceDocument({ client: source.client, source: authority.source, operationId: authority.operationId,
+        fileVersion: async (path,state,rootId) => (await options.kernel.agentRuntimeRequest<{readVersion:string},'runtime.model_reference.file_state'>('runtime.model_reference.file_state',{source:authority.source!,path,state,...(rootId ? {rootId}:{})},signal)).readVersion,
         physicalRoot: source.rootId && source.canonicalRoot ? { hostId: source.toolBinding.liveRoot?.hostId ?? options.kernel.handshake!.hostId,
           rootId: source.rootId, canonicalRoot: source.canonicalRoot } : null, path: inputPath, ...(signal ? { signal } : {}) });
     } finally { await source.release(); }
@@ -147,10 +152,22 @@ export function createDocumentSources(options: {
         if (!attachments) throw new HarnessServiceError('unavailable', 'The original attachment owner is unavailable');
         const run = await options.runtime.run(authority.runId, signal);
         if (run.thread_id !== authority.threadId) throw new HarnessServiceError('forbidden', 'The attachment invocation belongs to another Thread');
-        const original = await attachments.read({ runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id }, ref, signal);
+        const identity = {runtime:'agent' as const,threadId:run.thread_id,branchId:run.branch_id};
+        let fileObservation: DocumentIngestInput['fileObservation'];
+        if (ref.startsWith('file:')) {
+          const target = await resolveFileReference(createHostModelReferences(options.kernel),ref,signal);
+          if (target.kind === 'observation') {
+            if (!isDeepStrictEqual(target.source,authority.source)) throw new HarnessServiceError('conflict','This file observation belongs to a different source');
+            fileObservation = {path:target.path,readVersion:target.readVersion};
+            const prepared = await attachments.prepareForRun(authority,ref,signal);
+            if (!prepared[0]) throw new HarnessServiceError('unavailable','The original file capture is unavailable');
+            ref = prepared[0].ref;
+          } else ref = target.reference;
+        }
+        const original = await attachments.read(identity, ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of original.stream) chunks.push(chunk);
-        return { source: Buffer.concat(chunks), sourceUrl: original.attachment.ref, contentType: original.attachment.mimeType, title: original.attachment.filename };
+        return { source: Buffer.concat(chunks), sourceUrl: original.attachment.ref, contentType: original.attachment.mimeType, title: original.attachment.filename, ...(fileObservation ? {fileObservation}:{}) };
       }, readPath: (path, signal) => readPath(authority, path, signal),
         readArtifact: async (artifact, signal) => {
           const { scope, owner } = await research.toolScope(authority, signal);

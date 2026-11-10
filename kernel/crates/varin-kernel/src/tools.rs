@@ -24,6 +24,8 @@ mod reconciliation;
 mod retrieval;
 #[path = "tools_read.rs"]
 mod read;
+#[path = "tools_references.rs"]
+pub(crate) mod references;
 use discovery::FileQueryArgs;
 use retrieval::RetrievalQueryArgs;
 use crate::storage::recovery_points::{RecoveryPointsArgs, FileRestoreArgs};
@@ -92,7 +94,7 @@ impl ToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::FileRead => {
-                "Read an immutable attachment by ref, or a bounded decoded text range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Return readVersion and content.format as sourceFormat unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
+                "Read an immutable attachment by ref, or a bounded decoded text range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Use the returned file ref directly for reads, file_write and file_edit; it fixes the source, observed version and text format. nextRead continues the same observation. Paths and explicit readVersion/sourceFormat remain available."
             }
             Self::FileList => "List files and directories with pagination. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
             Self::FileSearch => "Search file text and return bounded matches. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
@@ -309,6 +311,8 @@ impl ToolBinding {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FileReadArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_read_version: Option<String>,
     encoding: Option<String>,
     raw: Option<bool>,
     path: String,
@@ -935,6 +939,7 @@ pub(crate) fn fixed_read_fixture(
             },
             binding,
             operation: ResourceOperation::FileRead(FileReadArgs {
+                expected_read_version:None,
                 encoding:None,raw:None,
                 path: path.into(),
                 offset: if lines { 0 } else { 1 },
@@ -982,6 +987,7 @@ pub(crate) struct KernelResourceClient {
     controls: crate::process::ProcessControlRegistry,
     admission_control: Option<Arc<AdmissionControl>>,
     journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
+    reference_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
     environment_stops: Arc<std::sync::Mutex<BTreeSet<String>>>,
     source_bridge: Option<crate::host_query::OwnerChannel>,
     source_journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
@@ -1002,6 +1008,7 @@ impl KernelResourceClient {
             controls,
             admission_control: None,
             journal_catalog: None,
+            reference_catalog: None,
             environment_stops: Default::default(),
             source_bridge: None,
             source_journal: None,
@@ -1043,10 +1050,15 @@ impl KernelResourceClient {
         }
         Ok(result["value"].clone())
     }
+    pub(crate) fn with_reference_catalog(mut self, catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>) -> Self {
+        self.reference_catalog = Some(catalog);
+        self
+    }
     pub(crate) fn with_journal_catalog(
         mut self,
         catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>,
     ) -> Self {
+        self.reference_catalog = Some(catalog.clone());
         self.journal_catalog = Some(catalog);
         self
     }
@@ -1943,7 +1955,7 @@ impl KernelToolExecutor {
                 output_schema: None,
                 metadata: None,
                 name: kind.name().into(),
-                version: "1".into(),
+                version: "2".into(),
                 schema: tool_schema(*kind),
             })
             .collect()
@@ -1961,7 +1973,7 @@ impl KernelToolExecutor {
                 "tool execution identity does not match bound Run",
             ));
         }
-        if call.schema_version != "1" {
+        if !matches!(call.schema_version.as_str(), "1" | "2") {
             return Err(ExecutionError::new(
                 "stale_tool_schema",
                 "tool schema version is not bound",
@@ -1972,7 +1984,7 @@ impl KernelToolExecutor {
             .ok_or_else(|| {
                 ExecutionError::new("tool_not_bound", "tool is not selected in this Run")
             })?;
-        let mut arguments = call.arguments.clone();
+        let mut arguments = self.resolve_resource_arguments(kind, &call.arguments)?;
         let mut selected_shell = None;
         if kind == ToolKind::ProcessSpawn {
             let inherit=arguments.get("env").is_none();
@@ -2162,7 +2174,7 @@ impl KernelToolExecutor {
         };
         ToolContract {
             name: call.name.clone(),
-            schema_version: "1".into(),
+            schema_version: call.schema_version.clone(),
             read_only,
             completion: if job {
                 CompletionKind::Job
@@ -2264,7 +2276,10 @@ impl KernelToolExecutor {
             .iter()
             .find(|schema| schema.name == call.name)
             .expect("selected tool");
-        if !request.tools.iter().any(|schema| schema == expected) {
+        if !request.tools.iter().any(|schema| schema == expected ||
+            // Already frozen v1 requests keep their original declaration. The
+            // resource parser/owner still validates the same legacy arguments.
+            (call.schema_version == "1" && schema.name == call.name && schema.version == "1")) {
             return Err(ExecutionError::new(
                 "stale_tool_schema",
                 "tool does not match the frozen request schema",
@@ -2411,7 +2426,13 @@ impl KernelToolExecutor {
         } else {
             None
         };
-        self.resources.source_query(json!({"kind":"tool","phase":phase,"binding":self.binding,"context":context,"call":call,"journal":journal}),cancel)
+        let mut resolved_call = call.clone();
+        if let Some(kind) = ToolKind::from_name(&call.name) {
+            resolved_call.arguments = self.resolve_resource_arguments(kind, &call.arguments)?;
+        }
+        // The coordinator invocation retains `call` exactly. This private source
+        // admission carries its already selected original resource target.
+        self.resources.source_query(json!({"kind":"tool","phase":phase,"binding":self.binding,"context":context,"call":resolved_call,"journal":journal}),cancel)
     }
     fn plan_operation(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolPreparation {
         if self.physical_file(&operation) {
@@ -2531,6 +2552,22 @@ impl KernelToolExecutor {
             })
     }
     fn execute_operation(
+        &self, context: &ToolExecutionContext, call: &ToolCall, operation: ResourceOperation,
+        contract: &ToolContract, cancel: &CancellationToken,
+    ) -> ToolCompletion {
+        let selected = operation.clone();
+        let mut completion = self.execute_operation_raw(context, call, operation, contract, cancel);
+        if let Err(error) = self.project_resource_completion(context, call, &selected, &mut completion) {
+            // A reference failure never makes an already-dispatched effect retryable.
+            if contract.read_only { return ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content: json!({"error":error}).into() }; }
+            match &mut completion {
+                ToolCompletion::Result { content, .. } | ToolCompletion::JobAccepted { content: Some(content), .. } => { content.data["referenceError"] = json!(error); }
+                _ => (),
+            }
+        }
+        completion
+    }
+    fn execute_operation_raw(
         &self,
         context: &ToolExecutionContext,
         call: &ToolCall,
@@ -2569,6 +2606,7 @@ impl KernelToolExecutor {
         let spawn_args = if let ResourceOperation::ProcessSpawn(args) = &operation { Some(args.clone()) } else { None };
         let output_options = if let ResourceOperation::ProcessRead(args) = &operation { Some((args.mode.clone(),args.encoding.clone())) } else { None };
         let spawn = spawn_args.is_some();
+        let expected_read_version = if let ResourceOperation::FileRead(args) = &operation { args.expected_read_version.clone() } else { None };
         let read = matches!(operation, ResourceOperation::FileRead(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let restore = matches!(operation, ResourceOperation::FileRestore(_));
@@ -2591,6 +2629,10 @@ impl KernelToolExecutor {
             )
         };
         match result {
+            Ok(result) if read && expected_read_version.as_ref().is_some_and(|version| result["readVersion"].as_str() != Some(version)) => ToolCompletion::Result {
+                outcome: Outcome::Failed, effect: Effect::None,
+                content: json!({"status":"stale","path":result["path"],"error":ExecutionError::new("file_version_conflict", "The observed file has changed. Read its path again before choosing new edits or content."),"read":{"tool":"file_read","arguments":{"path":result["path"]}}}).into(),
+            },
             Ok(mut result) if spawn => {
                 if let Some(args) = &spawn_args {
                     if result["processId"].as_str() == Some(&context.operation_id) && !matches!(result["status"].as_str(),Some("unknown"|"failed")) {
@@ -2689,7 +2731,7 @@ impl KernelToolExecutor {
                 content: {
                     let parts=result.get("attachment").cloned().and_then(|attachment|serde_json::from_value(attachment).ok())
                         .map(|attachment|vec![varin_runtime::output::OutputPart::Attachment{attachment}]).unwrap_or_default();
-                    varin_runtime::output::OutputBody{data:result,parts}
+                    varin_runtime::output::OutputBody{model_data: None,data:result,parts}
                 },
             } },
             Ok(mut result) => { if let Some((mode,encoding)) = output_options { crate::process::text::project(&mut result, &mode, encoding.as_deref()); } ToolCompletion::Result {
@@ -2819,8 +2861,17 @@ impl PreparedToolCall for KernelCall {
                 .executor
                 .remote_tool("execute", context, &self.call, cancel)
                 .and_then(|value| {
-                    serde_json::from_value(value["result"].clone())
-                        .map_err(|e| ExecutionError::new("source_receipt", e.to_string()))
+                    let mut receipt: varin_runtime::execution::ToolExecutionReceipt = serde_json::from_value(value["result"].clone())
+                        .map_err(|e| ExecutionError::new("source_receipt", e.to_string()))?;
+                    // Remote owners return raw receipts; only the coordinating
+                    // Catalog assigns references in this conversation's space.
+                    if let Err(error) = self.executor.project_resource_completion(context, &self.call, &self.operation, &mut receipt.completion) {
+                        match &mut receipt.completion {
+                            ToolCompletion::Result { content, .. } | ToolCompletion::JobAccepted { content: Some(content), .. } => content.data["referenceError"] = json!(error),
+                            _ => (),
+                        }
+                    }
+                    Ok(receipt)
                 })
                 .unwrap_or_else(|error| varin_runtime::execution::ToolExecutionReceipt {
                     completion: ToolCompletion::Result {
@@ -2872,21 +2923,21 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"point":{"type":"string","description":"Recovery point reference, or current:before."},"undo":{"type":"string","description":"Operation ID of the restore to undo."},"paths":{"type":"array","items":{"type":"string"}},"overwritePaths":{"type":"array","items":{"type":"string"},"description":"Restore these files even if their current content differs from the recorded changes."}}), vec![],
         ),
         ToolKind::FileWrite => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."},"content":{"type":"string"},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),
+            json!({"ref":{"type":"string","description":"Exact file observation from file_read; supplies its source, version and text format."},"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."},"content":{"type":"string"},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),
                 "mode":{"type":"string","enum":["create","replace"],"description":"create requires an absent target; replace requires an existing file and readVersion. Omit to write against the observed state (or create when no version is supplied)."}}),
-            vec!["path", "content"],
+            vec!["content"],
         ),
         ToolKind::FileEdit => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
-            vec!["path", "readVersion", "edits"],
+            json!({"ref":{"type":"string","description":"Exact file observation from file_read; supplies its source, version and text format."},"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
+            vec!["edits"],
         ),
         ToolKind::FileRead => return read::schema(),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
-            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte watermark. Text includes characters whose final source byte follows this cursor; sourceRanges may begin before it."},"maxBytes":{"type":"integer","minimum":1,"description":"Raw byte page budget. A partial character may produce no text until a later page completes that channel."},
+            json!({"ref":{"type":"string","description":"Immutable process output continuation from nextRead."},"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte watermark. Text includes characters whose final source byte follows this cursor; sourceRanges may begin before it."},"maxBytes":{"type":"integer","minimum":1,"description":"Raw byte page budget. A partial character may produce no text until a later page completes that channel."},
                 "mode":{"type":"string","enum":["text","raw","screen"],"default":"text","description":"screen reads the current PTY viewport (cursor and maxBytes do not paginate it); text reads log pages without ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
                 "encoding":{"type":"string","description":"Text encoding override, such as utf-8, gbk, shift_jis or utf-16le. Auto uses BOM/UTF-8, then the actual Windows source Host's codepage hint."}}),
-            vec!["processId"],
+            vec![],
         ),
         ToolKind::ProcessWrite => (
             json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"Unicode input encoded with this process inputEncoding default, or the per-write encoding override. Unrepresentable characters fail before input is sent."},"encoding":{"type":"string","description":"Override only this input write, for example gbk or utf-8. auto uses UTF-8; output encoding never selects input encoding."},"submit":{"type":"boolean","default":false,"description":"Normalize text line breaks to this process input.lineEnding, then append a final Enter if absent. Empty text sends Enter."},"eof":{"type":"boolean"}}),
@@ -3775,6 +3826,7 @@ impl ResourceOperation {
                 start_line,
                 end_line,
             } => Self::FileRead(FileReadArgs {
+                expected_read_version: None,
                 encoding,raw,
                 path,
                 offset,
@@ -3875,6 +3927,7 @@ mod child_lifecycle_context_tests {
         let resources=KernelResourceClient::new(|_|panic!("unauthorized action reached resource owner"), |_|Ok(()),Default::default());
         let context=ResourceExecutionContext {run_id:"child-run".into(),operation_id:"child".into(),origin:None};
         let result=resources.call_resource(&binding(),&context,ResourceOperation::FileRead(FileReadArgs {
+            expected_read_version: None,
             encoding:None,raw:None,
             path:"secret".into(),offset:0,length:None,start_line:None,end_line:None,unit:None,
         }),false,&CancellationToken::default());

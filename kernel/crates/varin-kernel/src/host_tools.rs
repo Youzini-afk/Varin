@@ -459,6 +459,7 @@ fn admit_host_completion(
                 outcome,
                 effect,
                 content: OutputBody {
+                    model_data: content.model_data,
                     data: content.data,
                     parts,
                 },
@@ -1303,6 +1304,7 @@ mod tests {
             outcome: Outcome::Succeeded,
             effect: Effect::Confirmed,
             content: OutputBody {
+                model_data: None,
                 data: json!({"receipt":"original confirmed effect","opaque":{"image":"ordinary JSON"}}),
                 parts: vec![
                     OutputPart::Text {

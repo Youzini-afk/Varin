@@ -16,6 +16,7 @@ function fixture(items = [item(1), item(2), item(3)]) {
     }),
     historyItem: vi.fn(async (reference: HistoryReference) => items.find(value => value.id === reference.id)!),
     mediaRead: vi.fn(),
+    exportModelReferences: vi.fn(async () => ({ spaceId: 'space:1', references: [], executions: [], bindings: [] })),
   } as unknown as ThreadExportOwners['runtime'];
   return { runtime };
 }
@@ -26,7 +27,7 @@ describe('conversation export', () => {
     const owners = fixture(); const stream = exportThreadConversation(owners, selection);
     await stream.next();
     expect(owners.runtime.historyItem).not.toHaveBeenCalled();
-    const prefix = '{"version":1,"selection":'+JSON.stringify({threadId:'thread:1',branchId:'branch:1',headId:'item:3',firstItemId:null,lastItemId:'item:3'})+',"messages":[';
+    const prefix = '{"version":2,"selection":'+JSON.stringify({threadId:'thread:1',branchId:'branch:1',headId:'item:3',firstItemId:null,lastItemId:'item:3'})+',"messages":[';
     const text = prefix + await collect(stream), parsed = JSON.parse(text);
     expect(parsed.messages.map((value: { text: string }) => value.text)).toEqual(['message 1', 'message 2', 'message 3']);
     expect(text).not.toContain('provider-secret'); expect(text).not.toContain('credentials');
@@ -51,7 +52,7 @@ describe('conversation export', () => {
     const attachment = { ref: 'attachment:file', filename: 'notes [final].txt', mimeType: 'text/plain', byteLength: 6 };
     const owners = { ...fixture([item(3, 'user', { text: 'file', fileAttachments: [attachment] })]), attachments: { read: vi.fn(async () => ({ attachment, stream: (async function* () { yield Buffer.from('a'); yield Buffer.from('bcde'); yield Buffer.from('f'); })() })) } };
     const parsed = JSON.parse(await collect(exportThreadConversation(owners, { ...selection, includeAttachments: true })));
-    expect(parsed.messages[0].attachments[0]).toEqual({ filename: attachment.filename, mimeType: 'text/plain', byteLength: 6, dataBase64: Buffer.from('abcdef').toString('base64') });
+    expect(parsed.messages[0].attachments[0]).toEqual({ filename: attachment.filename, mimeType: 'text/plain', byteLength: 6, attachment, dataBase64: Buffer.from('abcdef').toString('base64') });
     expect(owners.attachments.read).toHaveBeenCalledWith(expect.objectContaining(identity), attachment.ref, undefined);
   });
   it('never exports provider-only/compaction records and only includes requested tool semantics', () => {
@@ -89,4 +90,43 @@ it('keeps invalid and outer-fenced examples intact and never joins separate nati
   expect(exportPublicMessage(item(1, 'assistant', { content: { kind: 'text', text } }), false, 'markdown')?.text).toBe(text);
   const output = { content: { kind: 'output', output: { parts: [{ kind: 'text', text: '```varin-ui\n{"type":"choice","options":["A"]}' }, { kind: 'text', text: '```' }] } } };
   expect(exportPublicMessage(item(1, 'assistant', output), false, 'markdown')?.text).toContain('varin-ui');
+});
+
+
+it('exports only emitted JSON items and keeps original receipts beside typed reference associations', async () => {
+  const call = { id: 'call:original', name: 'read', arguments: '{"path":"file:7"}' };
+  const raw = { path: '/source/original.txt', readVersion: 'original-version' };
+  const modelData = { ref: 'file:7', content: 'selected content' };
+  const items = [
+    item(1, 'user', { text: 'visible text includes file:999 but is never parsed for mappings' }),
+    item(2, 'assistant', { content: { kind: 'tool_call', call } }),
+    item(3, 'tool', { content: { kind: 'tool_result', result: { completion: { kind: 'result', content: { data: raw, model_data: modelData, parts: [] } } } } }),
+  ];
+  const owners = fixture(items);
+  const snapshot = { spaceId: 'original-space', references: [{ reference: 'file:7', spaceId: 'original-space', kind: 'file' as const, owner: 'original-owner', target: raw }], executions: [], bindings: [{ itemId: 'item:2', operationId: 'op:original', purpose: 'read-file', original: call.arguments, target: raw }] };
+  vi.mocked(owners.runtime.exportModelReferences).mockResolvedValue(snapshot);
+  const full = JSON.parse(await collect(exportThreadConversation(owners, { ...selection, includeTools: true })));
+  expect(full.version).toBe(2);
+  expect(full.messages[1].details).toEqual(call);
+  expect(full.messages[2]).toMatchObject({ details: { data: raw }, modelData });
+  expect(full.modelReferences).toEqual(snapshot);
+  expect(owners.runtime.exportModelReferences).toHaveBeenLastCalledWith({ threadId: identity.threadId, branchId: identity.branchId, headId: selection.headId, itemIds: ['item:1', 'item:2', 'item:3'], includeTools: true }, undefined);
+  await collect(exportThreadConversation(owners, selection));
+  expect(owners.runtime.exportModelReferences).toHaveBeenLastCalledWith(expect.objectContaining({ itemIds: ['item:1'], includeTools: false }), undefined);
+  await collect(exportThreadConversation(owners, { ...selection, firstItemId: 'item:3', lastItemId: 'item:3', includeTools: true }));
+  expect(owners.runtime.exportModelReferences).toHaveBeenLastCalledWith(expect.objectContaining({ itemIds: ['item:3'], includeTools: true }), undefined);
+  owners.runtime.exportModelReferences = vi.fn();
+  await collect(exportThreadConversation(owners, { ...selection, format: 'markdown' }));
+  expect(owners.runtime.exportModelReferences).not.toHaveBeenCalled();
+});
+
+it('preserves the typed original attachment descriptor without reading bytes, and excludes hidden output metadata', async () => {
+  const attachment = { ref: 'attachment:immutable', modelRef: 'file:8', filename: 'original.txt', mimeType: 'text/plain', byteLength: 5 };
+  const owners = fixture([item(3, 'assistant', { content: { kind: 'output', output: { data: { internal: 'original' }, model_data: { ref: 'settings:9' }, parts: [{ kind: 'attachment', attachment }] } } })]);
+  const parsed = JSON.parse(await collect(exportThreadConversation(owners, selection)));
+  expect(parsed.messages[0].attachments[0]).toMatchObject({ attachment });
+  expect(parsed.messages[0]).not.toHaveProperty('details');
+  expect(parsed.messages[0]).not.toHaveProperty('modelData');
+  expect(owners.runtime.exportModelReferences).toHaveBeenCalledWith(expect.objectContaining({ itemIds: ['item:3'], includeTools: false }), undefined);
+  expect(owners.runtime.mediaRead).not.toHaveBeenCalled();
 });

@@ -678,14 +678,26 @@ impl Call {
                         Value::Null.into(),
                     ),
                 };
+                if outcome == Outcome::Succeeded {
+                    self.owner.catalog.lock().map_err(error)?.forward_nested_report_read(
+                        &context.operation_id, &receipt.operation_id).map_err(error)?;
+                }
+                let mut model = output.model_data.as_ref().map(|projected| json!({"name":args.name,"completion":completion,"result":projected}));
+                // The wrapper's internal operation is useful to UI/debugging, not
+                // another target models must copy beside the target owner's refs.
+                if output.model_data.as_ref().is_some_and(|data|data.get("operationRef").is_some()) {
+                    if let Some(completion) = model.as_mut().and_then(|model| model["completion"].as_object_mut()) { completion.remove("operationId"); }
+                }
                 let mut data = json!({"name":args.name,"operationId":receipt.operation_id,"completion":completion,"result":output.data});
                 if let Some(error) = failure {
                     data["error"] = json!(error);
+                    if let Some(model) = model.as_mut() { model["error"] = json!(error); }
                 }
                 Ok(ToolCompletion::Result {
                     outcome,
                     effect: Effect::None,
                     content: varin_runtime::output::OutputBody {
+                        model_data: model,
                         data,
                         parts: output.parts,
                     },

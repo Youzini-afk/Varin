@@ -1,6 +1,5 @@
 //! Internal investigations are background Jobs; their answers use the original input queue.
 use super::*;
-use crate::execution::{Content, ConversationItem};
 
 pub const CONTROL_TOOL: &str = "retrieval_control";
 
@@ -50,23 +49,6 @@ pub struct RetrievalStatusRead {
     _publication: crate::content::ContentPublication,
 }
 
-fn assistant_text(content: Content<crate::output::StoredMedia>) -> Option<String> {
-    let text = match content {
-        Content::Text { text } => text,
-        Content::Output { output } => output
-            .parts
-            .into_iter()
-            .filter_map(|part| match part {
-                crate::output::OutputPart::Text { text } => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => return None,
-    };
-    (!text.trim().is_empty()).then_some(text)
-}
-
 /// Activity describes the actual invocation without copying file bodies or tool output.
 fn activity_arguments(arguments: &Value) -> Value {
     let mut selected = serde_json::Map::new();
@@ -86,6 +68,9 @@ fn activity_arguments(arguments: &Value) -> Value {
         "unit",
         "action",
         "condition",
+        "question",
+        "prompt",
+        "target",
     ] {
         if let Some(value) = arguments.get(key) {
             selected.insert(key.into(), value.clone());
@@ -115,6 +100,51 @@ fn activity(
         (call.name.as_str(), &call.arguments)
     };
     json!({"operationId":operation_id,"callId":call.call_id,"tool":tool,"state":state,"outcome":outcome,"arguments":activity_arguments(arguments)})
+}
+
+/// Locate the original assistant text and tool operations using small Catalog metadata first.
+/// Tool-result bodies are never decoded to find activity, and parallel operations stay parallel.
+pub(super) fn execution_progress(
+    db: &Connection,
+    content: &crate::content::ContentStore,
+    run: &Run,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Value> {
+    let metadata: Option<String> = db.query_row(
+        "SELECT body FROM history WHERE run_id=?1 AND json_extract(body,'$.source')='assistant' AND json_extract(body,'$.content.history_text.chars')>0 ORDER BY rowid DESC LIMIT 1",
+        [&run.id], |row| row.get(0),
+    ).optional()?;
+    let latest_message = metadata.map(|raw| -> Result<Value> {
+        let item: HistoryItem = serde_json::from_str(&raw)?;
+        let text = content.history_text_preview(&item.content, 4096)?
+            .ok_or_else(|| RuntimeError::Invalid("Assistant history text index is missing".into()))?;
+        Ok(json!({"itemId":item.id,"text":text}))
+    }).transpose()?;
+    let mut actions = Vec::new();
+    let mut recent = None;
+    let mut statement = db.prepare("SELECT body FROM operations WHERE run_id=?1 ORDER BY (json_extract(body,'$.phase')!='terminal') DESC,rowid DESC")?;
+    for row in statement.query_map([&run.id], |row| row.get::<_, String>(0))? {
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+        let operation: Operation = serde_json::from_str(&row?)?;
+        // JobAccepted acknowledges admission, not executor completion. The original
+        // operation remains live until its owner commits a terminal phase.
+        let active = operation.phase != OperationPhase::Terminal;
+        if !active && (!actions.is_empty() || recent.is_some()) { break; }
+        let Ok(intent) = tool_content::ToolIntent::from_operation(&operation) else { continue; };
+        let call = intent.call().clone().load(content)?;
+        let mut value = activity(&call, json!(operation.phase), json!(operation.outcome), Some(&operation.id));
+        if let Some(wait) = &operation.waiting_on { value["waitingOn"] = json!(wait); }
+        if active { actions.push(value); } else { recent = Some(value); }
+    }
+    let mut waits = Vec::new();
+    let mut statement = db.prepare("SELECT body FROM waits WHERE run_id=?1 AND coalesce(json_extract(body,'$.cancelled'),0)=0 AND json_extract(body,'$.trigger_cursor') IS NULL ORDER BY rowid")?;
+    for row in statement.query_map([&run.id], |row| row.get::<_, String>(0))? {
+        let wait: Wait = serde_json::from_str(&row?)?;
+        waits.push(json!({"kind":wait.kind,"subject":wait.subject,"deadlineAtMs":wait.deadline_at_ms}));
+    }
+    Ok(json!({"latestAssistantMessage":latest_message,"actions":actions,
+        "latestAction":if actions.len()==1 { actions.first().cloned() } else { recent },
+        "waiting":{"reason":run.waiting_on,"items":waits}}))
 }
 
 impl RetrievalStatusRead {
@@ -165,96 +195,46 @@ impl RetrievalStatusRead {
             "SELECT json_extract(data,'$.atMs') FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1",
             [&self.operation_id], |row| row.get::<_,Option<i64>>(0)?.map(|_|read_number(row,0)).transpose()).optional()?.flatten();
         let now = observations::wall_time_ms()?;
-        let mut latest_message = None;
-        let mut latest_action = None;
+        let mut progress = json!({});
         let mut run_state = None;
         if let Some(receipt) = &child.receipt {
             let run: Run = record(&db, "runs", &receipt.run_id)?;
             run_state = Some(run.state);
-            let mut rows =
-                db.prepare("SELECT body FROM history WHERE run_id=?1 ORDER BY rowid DESC")?;
-            let mut results = std::collections::BTreeMap::new();
-            for row in rows.query_map([&run.id], |row| row.get::<_, String>(0))? {
-                let metadata: HistoryItem = serde_json::from_str(&row?)?;
-                if !matches!(
-                    metadata.source,
-                    HistorySource::Assistant | HistorySource::Tool
-                ) {
-                    continue;
-                }
-                let (body, _) = self
-                    .content
-                    .load_stored_history_payload(&metadata.content, &|| false)?;
-                let message: ConversationItem<crate::output::StoredMedia> =
-                    serde_json::from_value(body)?;
-                match message.content {
-                    Content::ToolResult { result } => {
-                        let (state, outcome) = match result.completion {
-                            crate::execution::ToolCompletion::Result { outcome, .. } => {
-                                (json!("terminal"), json!(outcome))
-                            }
-                            crate::execution::ToolCompletion::NotDispatched { .. } => {
-                                (json!("terminal"), json!(Outcome::Failed))
-                            }
-                            crate::execution::ToolCompletion::JobAccepted { .. } => {
-                                (json!("running"), Value::Null)
-                            }
-                        };
-                        results.insert(result.call_id, (state, outcome));
-                    }
-                    Content::ToolCall { call } if latest_action.is_none() => {
-                        let (state, outcome) = results
-                            .remove(&call.call_id)
-                            .unwrap_or((json!("running"), Value::Null));
-                        latest_action = Some(activity(&call, state, outcome, None));
-                    }
-                    content
-                        if metadata.source == HistorySource::Assistant
-                            && latest_message.is_none() =>
-                    {
-                        if let Some(text) = assistant_text(content) {
-                            latest_message = Some(json!({"itemId":metadata.id,"text":text}));
-                        }
-                    }
-                    _ => {}
-                }
-                if latest_action.is_some() && latest_message.is_some() {
-                    break;
-                }
-            }
-            let mut rows = db.prepare("SELECT body FROM operations WHERE run_id=?1 ORDER BY (json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.call_completion') IS NULL) DESC,rowid DESC")?;
-            for row in rows.query_map([&run.id], |row| row.get::<_, String>(0))? {
-                let action: Operation = serde_json::from_str(&row?)?;
-                if latest_action.is_some()
-                    && (action.phase == OperationPhase::Terminal
-                        || action.call_completion.is_some())
-                {
-                    break;
-                }
-                let Ok(intent) = tool_content::ToolIntent::from_operation(&action) else {
-                    continue;
-                };
-                let call = intent.call().clone().load(&self.content)?;
-                latest_action = Some(activity(
-                    &call,
-                    json!(action.phase),
-                    json!(action.outcome),
-                    Some(&action.id),
-                ));
-                break;
-            }
+            progress = execution_progress(&db, &self.content, &run, &|| false)?;
         }
         Ok(
             json!({"operationId":operation.id,"state":state,"runState":run_state,
             "acceptedAtMs":accepted_at,"elapsedMs":accepted_at.map(|at| completed_at.unwrap_or(now).saturating_sub(at)),
             "stopRequested":operation.cancel_requested,"stopConfirmed":stopped,
-            "latestAssistantMessage":latest_message,"latestAction":latest_action,
+            "latestAssistantMessage":progress["latestAssistantMessage"],"latestAction":progress["latestAction"],
+            "actions":progress["actions"],"waiting":progress["waiting"],
             "detail":child.report.and_then(|report| report.detail)}),
         )
     }
 }
 
+pub struct ExecutionProgressRead {
+    database: std::path::PathBuf,
+    content: crate::content::ContentStore,
+    run_id: String,
+    _publication: crate::content::ContentPublication,
+}
+impl ExecutionProgressRead {
+    pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<Value> {
+        let mut db = Connection::open_with_flags(&self.database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let tx = db.transaction()?;
+        let run: Run = record(&tx,"runs",&self.run_id)?;
+        execution_progress(&tx,&self.content,&run,cancelled)
+    }
+}
 impl Catalog {
+    pub fn capture_execution_progress(&self, run_id: &str) -> Result<ExecutionProgressRead> {
+        self.run(run_id)?;
+        Ok(ExecutionProgressRead { database: self.db.path().ok_or_else(||RuntimeError::Invalid("Catalog has no database".into()))?.into(),
+            content:self.content.clone(),run_id:run_id.into(),_publication:self.content.begin_publication() })
+    }
+
     pub fn require_retrieval_parent(
         &self,
         run_id: &str,

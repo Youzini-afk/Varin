@@ -49,6 +49,7 @@ mod storage;
 mod storage_schema;
 mod source_resources;
 mod tools;
+mod resource_references;
 mod transport;
 mod text;
 mod workspace_resources;

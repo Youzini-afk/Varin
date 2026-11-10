@@ -19,7 +19,9 @@ it('publishes original builtin contracts and valid operation addresses through t
     for (const content of [{ format: 'docx', blocks: [{ kind: 'paragraph', text: 'A document' }] }, { format: 'xlsx', sheets: [{ name: 'Data', rows: [[1]] }] }, { format: 'pptx', slides: [{ objects: [] }] }]) {
         expect(validate({ action: 'create', path: `file.${content.format}`, content })).toBe(true);
         expect(validate({ action: 'replace', path: `file.${content.format}`, expectedRevision: 'original', content })).toBe(true);
-        expect(validate({ action: 'replace', path: `file.${content.format}`, content })).toBe(false);
+        // Typed file observations inherit the guard in the owning Office adapter;
+        // raw paths without expectedRevision are rejected there before writing.
+        expect(validate({ action: 'replace', path: 'file:17', content })).toBe(true);
     }
     expect(validate({ action: 'create', path: 'invalid.docx', content: { format: 'docx', sheets: [] } })).toBe(false);
 });

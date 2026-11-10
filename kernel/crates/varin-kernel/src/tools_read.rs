@@ -56,13 +56,16 @@ pub(super) fn schema() -> Value {
         "unit":{"type":"object","additionalProperties":false,"anyOf":[{"required":["line"]},{"required":["symbol"]}],
             "description":"Read a complete syntax unit, for example {path: 'file.ts', unit: {symbol: 'functionName'}} or unit: {line: 24}. symbol belongs inside unit and is an exact declaration name, not a filename. Multiple matches return candidates; add unit.line to disambiguate. offset/length page within the selected unit; continue with nextRead. Uncovered lines return source context and nearby units; incomplete/unavailable structure returns plain context with its reason.",
             "properties":{"line":{"type":"integer","minimum":1},"symbol":{"type":"string","minLength":1},"revision":{"type":"string","description":"Retain the returned revision when continuing a unit."}}}});
-    let single = json!({"type":"object","additionalProperties":false,"properties":properties,"required":["path"]});
+    let mut reference_properties = properties.clone();
+    reference_properties.as_object_mut().unwrap().remove("path");
+    reference_properties["ref"] = json!({"type":"string","minLength":1,"description":"A fixed file observation, delivered attachment, or immutable nextRead continuation."});
+    let reference_read = json!({"type":"object","additionalProperties":false,"properties":reference_properties,"required":["ref"]});
+    let single = json!({"oneOf":[{"type":"object","additionalProperties":false,"properties":properties,"required":["path"]},reference_read]});
     let mut properties = properties;
     properties["files"] = json!({"type":"array","minItems":1,"items":single,"description":"Read multiple files or ranges. Results retain input order, versions and individual errors."});
     let path_reads = json!({"type":"object","additionalProperties":false,"properties":properties,
         "oneOf":[{"required":["path"],"not":{"required":["files"]}},{"required":["files"],"not":{"anyOf":[{"required":["path"]},{"required":["offset"]},{"required":["length"]},{"required":["startLine"]},{"required":["endLine"]},{"required":["unit"]}]}}]});
-    json!({"type":"object","oneOf":[path_reads,{"type":"object","additionalProperties":false,
-        "properties":{"ref":{"type":"string","minLength":1},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0,"default":65536}},"required":["ref"]}]})
+    json!({"type":"object","oneOf":[path_reads,reference_read]})
 }
 
 impl KernelToolExecutor {

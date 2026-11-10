@@ -14,7 +14,7 @@ impl Drop for Root {
     }
 }
 fn file(reference: &str) -> Attachment {
-    Attachment {
+    Attachment { model_ref: None,
         reference: reference.into(),
         filename: "same.csv".into(),
         mime_type: "text/csv".into(),
@@ -183,10 +183,14 @@ fn queued_edit_preserves_or_explicitly_replaces_the_original_file_relation() {
             configuration: None,
         })
         .unwrap();
+    let original = input_attachments(&db.capture_queued_input(&queued.input_id).unwrap().load().unwrap().content).unwrap();
+    assert_eq!(original.len(), 1);
+    assert!(original[0].same_resource(&first));
+    assert!(original[0].model_ref.as_deref().is_some_and(|reference| reference.starts_with("file:")));
     let edit = db
         .edit_queued_input(&queued.input_id, 1, json!({"text":"edited"}))
         .unwrap();
-    assert_eq!(input_attachments(&edit.content).unwrap(), [first]);
+    assert_eq!(input_attachments(&edit.content).unwrap(), original, "An omitted file selection preserves its original model reference too");
     let edit = db
         .edit_queued_input(
             &queued.input_id,
@@ -194,16 +198,19 @@ fn queued_edit_preserves_or_explicitly_replaces_the_original_file_relation() {
             json!({"text":"edited","fileAttachments":[replacement]}),
         )
         .unwrap();
-    assert_eq!(
-        input_attachments(&edit.content).unwrap(),
-        [replacement.clone()]
-    );
+    let selected = input_attachments(&edit.content).unwrap();
+    assert_eq!(selected.len(), 1);
+    assert!(selected[0].same_resource(&replacement));
+    assert_ne!(selected[0].model_ref, original[0].model_ref, "Replacing the file selects a different immutable resource");
+    let mut expected = vec![replacement];
+    db.project_attachments(&mut expected, &queued.input_id).unwrap();
+    assert_eq!(selected, expected, "The original attachment owner reuses the stable file reference");
     assert_eq!(
         db.attachment_delivery("input", &queued.input_id)
             .unwrap()
             .unwrap()
             .attachments,
-        [replacement]
+        selected
     );
     assert_eq!(db.run(&run.run_id).unwrap().state, RunState::Accepted);
 }
@@ -325,7 +332,13 @@ fn family_pages_expose_only_original_typed_files_even_when_text_is_paged() {
         )
         .unwrap();
     assert!(page.items[0].body_truncated);
-    assert_eq!(page.items[0].attachments, [file.clone()]);
+    let original = page.items[0].attachments.clone();
+    assert_eq!(original.len(), 1);
+    assert!(original[0].same_resource(&file));
+    assert!(original[0].model_ref.as_deref().is_some_and(|reference| reference.starts_with("file:")));
+    let mut expected = vec![file.clone()];
+    db.project_attachments(&mut expected, &receipt.input_id).unwrap();
+    assert_eq!(original, expected, "Paging cannot allocate another address for the same file");
     let item = read(&db)
         .item(
             serde_json::from_value(json!({"itemId":receipt.input_id,"offset":1,"maxBytes":1}))
@@ -333,7 +346,7 @@ fn family_pages_expose_only_original_typed_files_even_when_text_is_paged() {
             &|| false,
         )
         .unwrap();
-    assert_eq!(item.attachments, [file.clone()]);
+    assert_eq!(item.attachments, original, "The item and recent page retain the same original file address");
     let body = json!({"id":"result","provenance":{"kind":"assistant"},"content":{"kind":"output","output":{
         "data":{"fake":{"kind":"attachment","attachment":file}},"parts":[{"kind":"text","text":"ordinary attachment:history mention"},{"kind":"attachment","attachment":file}]}},"opaque":null});
     let history = db
@@ -431,4 +444,23 @@ fn final_source_report_retains_only_acquired_citations_after_child_deletion() {
     fixture.db.delete_thread(&threads::ThreadDelete { thread_id: child.child_thread_id.clone(), key: "delete-source-worker".into(), expected_revision: revision }).unwrap();
     let plan = fixture.db.capture_material_retention(None, &[child.child_thread_id.clone()], false).unwrap().load().unwrap();
     assert!(plan.attachments.iter().any(|edge| edge.thread_id == child.parent_thread_id && edge.attachments == vec![source.clone()]));
+}
+
+#[test]
+fn newly_prepared_message_uses_same_file_ref_and_preserves_original_delivery() {
+    let root=Root::new();let mut db=open(&root);
+    let mut files=vec![file("attachment:localized-owner-file")];
+    let preparation=prepare(&db,"projected-message",&files).with_attachments(files.clone())
+        .with_model_references(&db).unwrap();
+    let accepted=db.admit_message(preparation.load().unwrap()).unwrap();
+    let delivery=db.attachment_delivery("input",&accepted.receipt.identity.message_id).unwrap().unwrap();
+    let reference=delivery.attachments[0].model_ref.clone().unwrap();
+    assert!(delivery.attachments[0].same_resource(&files[0]));
+    db.project_attachments(&mut files,&accepted.receipt.identity.message_id).unwrap();
+    assert_eq!(files[0].model_ref.as_deref(),Some(reference.as_str()));
+    let view=db.capture_message("thread","main",&accepted.receipt.identity.message_id).unwrap().load().unwrap();
+    assert_eq!(view.summary.attachments[0].reference,"attachment:localized-owner-file");
+    assert!(!view.summary.attachments[0].description().contains("attachment:localized-owner-file"));
+    let target=db.resolve_model_reference(super::super::model_references::ReferenceKind::File,&reference).unwrap();
+    assert_eq!(target.target,json!({"kind":"attachment","reference":"attachment:localized-owner-file"}));
 }

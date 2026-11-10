@@ -495,6 +495,13 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
             .collect();
         assert_eq!(reports.len(), 1);
         let item: ConversationItem = serde_json::from_value(reports[0].content.clone()).unwrap();
+        let Content::Output{output}=&item.content else {panic!("wait reports use typed output with an original preview")};
+        let projected=output.model_data.as_ref().unwrap();
+        let execution=f.db.execution_reference(&child.execution_id).unwrap().reference;
+        assert_eq!(projected["ref"],execution);
+        assert_eq!(projected["read"]["arguments"]["target"],execution);
+        assert!(projected["report"].is_null() && projected["operationId"].is_null());
+        assert!(output.parts.iter().all(|part|match part {varin_runtime::output::OutputPart::Text{text}=>!text.contains(&child.child_thread_id) && !text.contains("next_offset"),_=>true}));
         assert_eq!(
             item.provenance,
             Provenance::AgentMessage {
@@ -1956,17 +1963,18 @@ fn collaboration_reply_keeps_multipart_final_output_and_leaves_earlier_work_in_m
     let run = child.receipt.as_ref().unwrap().run_id.clone();
     let epoch = f.db.epoch();
     f.db.commit_execution(&run, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
-    let file=varin_runtime::catalog::attachments::Attachment {
+    let file=varin_runtime::catalog::attachments::Attachment { model_ref: None,
         reference:"attachment:child-report".into(), filename:"report.csv".into(), mime_type:"text/csv".into(), byte_length:42,
     };
     let output: [(HistorySource, Content<ResolvedMedia>); 4] = [
-        (HistorySource::Assistant, Content::Output {output:OutputBody {data:serde_json::Value::Null,parts:vec![
+        (HistorySource::Assistant, Content::Output {output:OutputBody {model_data: None,data:serde_json::Value::Null,parts:vec![
             OutputPart::Text { text:"Earlier progress before reading".into() },
-            OutputPart::Attachment {attachment:varin_runtime::catalog::attachments::Attachment {reference:"attachment:earlier-work".into(),..file.clone()}},
+            OutputPart::Attachment {attachment:varin_runtime::catalog::attachments::Attachment { model_ref: None,reference:"attachment:earlier-work".into(),..file.clone()}},
         ]}}),
         (HistorySource::Tool, Content::Text { text: "Original file evidence".into() }),
         (HistorySource::Assistant, Content::Text { text: "Final answer, first part".into() }),
         (HistorySource::Assistant, Content::Output { output: OutputBody {
+            model_data: None,
             data: serde_json::Value::Null, parts: vec![OutputPart::Text { text: "Final answer, second part".into() }, OutputPart::Attachment {attachment:file.clone()}],
         } }),
     ];
@@ -2220,7 +2228,7 @@ fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
 fn explicit_attachment_dispatch_commits_fixed_files_with_task_and_survives_restart() {
     use varin_runtime::catalog::attachments::{Attachment,AttachmentSelection};
     use varin_runtime::catalog::collaboration::ChildSourceHandoff;
-    let file=Attachment {reference:"attachment:dispatch-file".into(),filename:"source.csv".into(),mime_type:"text/csv".into(),byte_length:12};
+    let file=Attachment { model_ref: None,reference:"attachment:dispatch-file".into(),filename:"source.csv".into(),mime_type:"text/csv".into(),byte_length:12};
     let mut f=Fixture::new_with_attachments(vec![AttachmentSelection::Ref{reference:file.reference.clone()}]);
     let prepare=|f:&Fixture| {
         let selected=f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap().resolve_with_attachments(&f.input,&[file.clone()]).unwrap();
@@ -2306,7 +2314,7 @@ fn failed_attachment_preparations_retain_exact_remote_call_until_safe_owner_clea
             assert_eq!(original.attachments.len(), 1); assert_eq!(original.attachments[0].reference, reference);
             assert_eq!(original.attachments[0].path, "fixed.csv");
             assert_eq!(original.source, f.db.launch_intent(&run.id).unwrap().unwrap().selection.source.unwrap());
-            let file = Attachment { reference: reference.clone(), filename: "fixed.csv".into(), mime_type: "text/csv".into(), byte_length: 7 };
+            let file = Attachment { model_ref: None, reference: reference.clone(), filename: "fixed.csv".into(), mime_type: "text/csv".into(), byte_length: 7 };
             let message = serde_json::from_value(json!({"kind":"inform","targetThreadId":run.thread_id,"attachments":[{"ref":reference}]})).unwrap();
             let prepared = f.db.prepare_user_message("retained-file".into(), run.thread_id.clone(), run.branch_id.clone(), message).unwrap()
                 .with_attachments(vec![file]).load().unwrap();

@@ -1,5 +1,6 @@
 /** Selected changes use immutable WorkingResults and the existing Integration journal. */
 import { isDeepStrictEqual } from 'node:util';
+import { createHostModelReferences } from './model-references.js';
 import { randomUUID } from 'node:crypto';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { CODE_EXCHANGE_CAPABILITY, CODE_EXCHANGE_TOOL_DECLARATIONS } from '@varin/extension-builtins';
@@ -113,18 +114,52 @@ export async function codeBaseline(runtime:Pick<AgentRuntimeClient,'childExecuti
   throw baselineUnavailable(source,target);
 }
 
-async function participant(runtime: AgentRuntimeClient, caller: string, identity: string, signal: AbortSignal,
-  own?: { runId: string; branchId: string }): Promise<Participant> {
-  const page = await runtime.familyList({ callerThreadId: caller, includeSelf: true, scope: 'all', query: identity }, signal);
-  const member = page.members.find(m => m.threadId === identity || m.agentId?.toUpperCase() === identity.toUpperCase());
-  if (!member) throw new Error(`Agent ${identity} is outside this task family`);
-  const branch = own ? member.branches.find(b => b.branchId === own.branchId) : member.branches[0];
-  const runId = own?.runId ?? branch?.activeRunId ?? branch?.latestRun?.runId;
-  if (!branch || !runId) throw new Error(`Agent ${identity} has not prepared its file source`);
-  const launch = await runtime.launch(runId, signal);
-  const source = member.sourceRunId===runId && member.source?.mode==='fixed_branch' ? member.source : launch?.selection.source;
-  if (!launch || !source) throw new Error(`Agent ${identity} has no file source`);
-  return { member, runId, branchId: branch.branchId, launch, source };
+type ParticipantSelection = { threadId:string; runId:string; branchId:string; source:LaunchSource };
+type ExchangeSelection = { self:ParticipantSelection } & ({kind:'native';peer:ParticipantSelection}|{kind:'external';peer:ExternalChild});
+async function participant(runtime: AgentRuntimeClient, caller: string, selected: ParticipantSelection, signal: AbortSignal): Promise<Participant> {
+  const page = await runtime.familyList({ callerThreadId: caller, includeSelf: true, scope: 'all', query: selected.threadId }, signal);
+  const member = page.members.find(m => m.threadId === selected.threadId);
+  if (!member) throw new Error('The original Agent is outside this task family');
+  const run = await runtime.run(selected.runId,signal);
+  if (run.thread_id !== selected.threadId || run.branch_id !== selected.branchId) throw new Error('The original file source changed its invocation identity');
+  const launch = await runtime.launch(selected.runId, signal);
+  if (!launch) throw new Error('The original Agent file source is unavailable');
+  // A moved current branch or later Run never replaces this accepted participant.
+  return { member, runId:selected.runId, branchId:selected.branchId, launch, source:selected.source };
+}
+
+/** Resolve through the native owner once, then retain concrete sources before
+ * any capture or integration. Recovery never selects a peer's newer Run first. */
+export async function resolveCodeExchangeParticipants(owners:Pick<CodeExchangeOwners,'kernel'|'runtime'>, authority:ToolInvocationAuthority,
+  method:string, input:{source?:string;target?:string}, signal:AbortSignal):Promise<{self:Participant;peer?:Participant;external?:ExternalChild}> {
+  const references=createHostModelReferences(owners.kernel), purpose='code-exchange.participants';
+  let selected=await references.target(authority.operationId,purpose,authority.arguments,signal) as ExchangeSelection|null;
+  if (!selected) {
+    const run=await owners.runtime.run(authority.runId,signal);
+    if (!authority.source) throw new Error('The original code exchange has no file source');
+    const selfSelection={threadId:authority.threadId,runId:authority.runId,branchId:run.branch_id,source:authority.source};
+    const self=await participant(owners.runtime,authority.threadId,selfSelection,signal);
+    const peerId=(method==='submit'?input.target:input.source)??self.member.parentThreadId;
+    if (!peerId) throw Object.assign(new Error(method==='submit'
+      ? 'This is a root Agent with no parent to submit to. Set target to a related Agent from threads, or keep the work in this task.'
+      : 'This Agent has no parent to update from. Set source to a related Agent from threads.'),{code:method==='submit'?'target_required':'source_required'});
+    const external=await owners.kernel.agentRuntimeRequest<ExternalChild|null,'runtime.external.command'>('runtime.external.command',
+      {command:{action:'child_target',runId:authority.runId,target:peerId}},signal);
+    if (external) selected={kind:'external',self:selfSelection,peer:external};
+    else {
+      // This owner resolves both bare Agent and exact ABC/1 selectors, validates
+      // family/Source access, and retains a published fixed result when appropriate.
+      const original=await owners.kernel.agentRuntimeRequest<import('./protocol.generated.js').ModelAgentSource,'runtime.model_reference.agent_source'>(
+        'runtime.model_reference.agent_source',{runId:authority.runId,identity:peerId},signal);
+      const peer=await owners.runtime.run(original.run_id,signal);
+      selected={kind:'native',self:selfSelection,peer:{threadId:peer.thread_id,branchId:peer.branch_id,runId:original.run_id,source:original.source}};
+      await participant(owners.runtime,authority.threadId,selected.peer,signal);
+    }
+    selected=await references.freeze(authority.operationId,purpose,authority.arguments,selected,signal) as ExchangeSelection;
+  }
+  const self=await participant(owners.runtime,authority.threadId,selected.self,signal);
+  if (selected.kind==='external') return {self,external:selected.peer};
+  return {self,peer:await participant(owners.runtime,authority.threadId,selected.peer,signal)};
 }
 
 /** Caller-scoped writes target the related Agent's original concrete workspace. */
@@ -300,21 +335,14 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
       let integration: IntegrationPlanInput & { operationId: string } | undefined;
       let dispatched = false;
       try {
-        const run = await owners.runtime.run(authority.runId, context.signal);
-        const self = await participant(owners.runtime, authority.threadId, authority.threadId, context.signal,
-          { runId: authority.runId, branchId: run.branch_id });
-        const peerId = (method === 'submit' ? input.target : input.source) ?? self.member.parentThreadId;
-        if (!peerId) throw Object.assign(new Error(method === 'submit'
-          ? 'This is a root Agent with no parent to submit to. Set target to a related Agent from threads, or keep the work in this task.'
-          : 'This Agent has no parent to update from. Set source to a related Agent from threads.'), { code: method === 'submit' ? 'target_required' : 'source_required' });
-        const external = await owners.kernel.agentRuntimeRequest<ExternalChild | null, 'runtime.external.command'>('runtime.external.command', { command: { action: 'child_target', runId: authority.runId, target: peerId } }, context.signal);
+        const {self,peer,external}=await resolveCodeExchangeParticipants(owners,authority,method,input,context.signal);
         if (external) return exchangeExternalCode(owners, authority, self, external, method === 'submit' ? 'send' : 'receive', input.files, context.signal,
           input.afterCurrent ? { defer: result => {
             if (!owners.queue) throw new Error('File exchange queue is unavailable');
-            return owners.queue.enqueue(authority, run.branch_id, { kind: 'external', self, child: external,
+            return owners.queue.enqueue(authority, self.branchId, { kind: 'external', self, child: external,
               direction: method === 'submit' ? 'send' : 'receive', result });
           } } : {});
-        const peer = await participant(owners.runtime, authority.threadId, peerId, context.signal);
+        if (!peer) throw new Error('The original code exchange participant is unavailable');
         const [source, target] = method === 'submit' ? [self, peer] : [peer, self];
         if (source.member.threadId === target.member.threadId) throw new Error('Select another Agent');
         if (source.source.workspace_id !== target.source.workspace_id
@@ -333,10 +361,10 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         let merged:Awaited<ReturnType<IntegrationCoordinator['mergeResult']>>;
         const defer = input.afterCurrent ? async (result: WorkingResult) => {
           if (!owners.queue) throw new Error('File exchange queue is unavailable');
-          return owners.queue.enqueue(authority, run.branch_id, { kind: 'native', source, target, result });
+          return owners.queue.enqueue(authority, self.branchId, { kind: 'native', source, target, result });
         } : undefined;
         if(source.source.resource_owner.kind==='managed_host') {
-          const exchange = await exchangeManagedCode(owners,authority,run.branch_id,source,target,input.files,context.signal,()=>{dispatched=true;}, defer ? { defer } : {});
+          const exchange = await exchangeManagedCode(owners,authority,self.branchId,source,target,input.files,context.signal,()=>{dispatched=true;}, defer ? { defer } : {});
           if (exchange.queued) return exchange.queued;
           result = exchange.result; merged = exchange.merged!;
         } else {
@@ -359,7 +387,7 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
           ...(input.files ? { files: input.files } : {}), acknowledged, signal: context.signal });
         if (!result.root) throw new Error('The source snapshot has no immutable root');
         if (defer) return await defer(result);
-        integration = codeIntegration(authority,run.branch_id,source,target,result,targetScope,context.signal);
+        integration = codeIntegration(authority,self.branchId,source,target,result,targetScope,context.signal);
         dispatched = true;
         merged = await owners.coordinator.mergeResult(integration);
         }

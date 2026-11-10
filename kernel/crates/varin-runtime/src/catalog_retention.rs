@@ -388,6 +388,7 @@ impl Catalog {
             removed += tx.execute(&format!("DELETE FROM {} WHERE rowid IN (SELECT row_id FROM thread_gc_rows WHERE table_name=?1)", quoted(table)), [table])?;
         }
         attachments::retire(&tx)?;
+        model_references::collect_unheld(&tx, &self.content)?;
         // Heads are not SQL foreign keys. Only retired branches can have lost their final head.
         tx.execute("UPDATE branches SET head=NULL,active_run=NULL WHERE thread_id IN (SELECT id FROM thread_gc_threads) AND head IS NOT NULL AND NOT EXISTS(SELECT 1 FROM history WHERE id=branches.head)", [])?;
         tx.execute("UPDATE branches SET head=NULL WHERE id IN (SELECT id FROM thread_gc_branches) AND head IS NOT NULL AND EXISTS(SELECT 1 FROM events WHERE subject=branches.id AND kind='branch.deleted')", [])?;

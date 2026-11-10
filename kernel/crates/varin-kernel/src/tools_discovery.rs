@@ -616,5 +616,5 @@ pub(super) fn schema(search: bool) -> Value {
         }
         schema["oneOf"] = json!([{"required":["query"],"not":{"required":["queries"]}},{"required":["queries"],"not":{"required":["query"]}}]);
     }
-    schema
+    json!({"type":"object","oneOf":[schema,{"type":"object","additionalProperties":false,"properties":{"ref":{"type":"string","description":"Continue with the immutable reference from nextRead."}},"required":["ref"]}]})
 }

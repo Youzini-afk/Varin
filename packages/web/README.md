@@ -30,6 +30,27 @@ node artifacts/cloud-runtime/packages/web/bin/cli.js serve --foreground
 The canonical cloud builder compiles the Application Host, shared packages and Web UI, stages the
 Rust executable, and creates the production dependency layout and lockfile.
 
+## Model references and invocation evidence
+
+The Application Host adapts declared resource fields through the native Catalog's private
+`runtime.model_reference.*` methods. It does not maintain a TypeScript alias registry.
+Original `HostToolCall.arguments` remain the accepted evidence; typed resolution is frozen
+before permissions/effects and carried separately in `resolvedArguments`. Domain adapters
+verify those exact resolved arguments without rewriting the original invocation.
+
+Owner-authored `OutputBody.model_data` is model presentation only. Original `data`, attachment
+parts and navigation keys stay available to UI and recovery. Settings revisions, file read
+versions and browser/Computer observations retain their original consistency evidence.
+Observed file references reach the attachment owner for conditional capture before Office,
+material ingestion or browser upload; replay retains the original captured bytes. Extension
+reference metadata selects explicit positions and never scans opaque third-party payloads.
+
+Structured conversation export (JSON version 2) retains original data and attachment descriptors
+alongside the recorded model projection. Its `modelReferences` snapshot carries the original
+reference space, owner targets and invocation bindings for exactly the emitted history cut.
+Hidden tool records and unrelated references held by the same Run do not enter that snapshot.
+This is archival association metadata, not an importer or a new authority to access those targets.
+
 ## Type and test boundaries
 
 `bun run --cwd packages/web type-check` prepares shared runtime dependencies and emits/checks the

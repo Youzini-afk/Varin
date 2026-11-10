@@ -227,10 +227,14 @@ impl Fixture {
             bridge.receive(json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":EPOCH,"ok":true}));
             pending.join().unwrap()
         });
-        assert!(matches!(
-            completion.completion,
-            ToolCompletion::JobAccepted { .. }
-        ));
+        let ToolCompletion::JobAccepted{operation_id,content:Some(output),..}=&completion.completion else {panic!("canonical acceptance must include its original owner projection")};
+        assert_eq!(operation_id,&f.context.operation_id);
+        assert_eq!(output.data["operationId"],f.context.operation_id);
+        let projected=output.model_data.as_ref().expect("canonical model projection");
+        let execution=projected["executionRef"].as_str().unwrap().to_owned();
+        assert_eq!(projected["operationRef"],execution);
+        assert_eq!(projected["read"]["arguments"]["target"],execution);
+        assert!(projected["operationId"].is_null() && projected["threadId"].is_null());
         drop(directory);
         f.db = Arc::try_unwrap(catalog).ok().unwrap().into_inner().unwrap();
         if parent_policy {
@@ -239,6 +243,14 @@ impl Fixture {
             f.settle_exchange();
         }
         let child = f.db.child_task(&f.context.operation_id).unwrap();
+        assert_eq!(f.db.execution_reference(&child.execution_id).unwrap().reference,execution);
+        let canonical=f.db.capture_call_completion(&f.context.operation_id).unwrap().load().unwrap();
+        assert_eq!(canonical,completion.completion,"settlement must keep the original projected domain acceptance");
+        if !parent_policy {
+            let persisted=f.db.history(&child.parent_branch_id).unwrap().into_iter().filter_map(|item|serde_json::from_value::<ConversationItem>(item.content).ok())
+                .find_map(|item|if let Content::ToolResult{result}=item.content {Some(result.completion)}else{None}).unwrap();
+            assert_eq!(persisted,canonical,"actual tool result history must carry the canonical projection");
+        }
         assert_eq!(
             child.source,
             varin_runtime::catalog::collaboration::ChildSource::Absent

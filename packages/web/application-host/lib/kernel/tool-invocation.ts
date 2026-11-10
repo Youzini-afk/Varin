@@ -28,6 +28,10 @@ export interface ToolInvocationAuthority {
   readonly configurationIdentity?: string | null;
   readonly permissionSettingsRevision?: PermissionSettingsRevision;
   readonly arguments: unknown;
+  /** Catalog-frozen typed resolution; original model arguments above never change. */
+  readonly resolvedArguments?: unknown;
+  /** Private original client connection selected by a settings observation. */
+  readonly settingsSurface?: {surfaceId:string;connectionId:string};
 }
 interface Registration {
   authority: ToolInvocationAuthority;
@@ -184,7 +188,7 @@ export function runToolDomainCall(
   execute: (authority: ToolInvocationAuthority) => Promise<ToolExecutionReceipt>,
 ): Promise<JsonValue> {
   const authority = requireToolInvocation(context);
-  if (authority.operation !== input.operation || authority.toolName !== input.toolName || !isDeepStrictEqual(authority.arguments, input.arguments)) {
+  if (authority.operation !== input.operation || authority.toolName !== input.toolName || !isDeepStrictEqual(authority.resolvedArguments ?? authority.arguments, input.arguments)) {
     throw new Error('tool_domain_call_changed');
   }
   const registration = registrations.get(context.invocation!)!;

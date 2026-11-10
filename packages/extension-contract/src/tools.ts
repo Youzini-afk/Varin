@@ -20,7 +20,7 @@ export function parseVarinToolJson(value: unknown, path = "tool value"): JsonVal
 export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensionToolDeclaration {
   const declaration = parseVarinToolJson(value, "tool");
   if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) throw new Error("tool must be an object");
-  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "confirmation", "examples", "source", "requirements", "disclosure"]);
+  const keys = new Set(["name", "description", "inputSchema", "outputSchema", "completion", "lifetime", "operation", "confirmation", "examples", "source", "requirements", "disclosure", "references"]);
   for (const key of Object.keys(declaration)) if (!keys.has(key)) throw new Error(`Unknown tool declaration field: ${key}`);
   for (const key of ["name", "description"] as const) {
     if (typeof declaration[key] !== "string" || !declaration[key].trim()) throw new Error(`tool.${key} must be a non-empty string`);
@@ -43,6 +43,26 @@ export function parseVarinExtensionToolDeclaration(value: unknown): VarinExtensi
     if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)
       || !['source', 'physical', 'live'].includes(String(requirement.source)) || typeof requirement.process !== 'boolean'
       || Object.keys(requirement).some(key => key !== 'source' && key !== 'process')) throw new Error('tool.requirements must declare source and process dependencies');
+  }
+  if (declaration.references !== undefined) {
+    const refs = declaration.references;
+    const record = (v: unknown): v is Record<string, JsonValue> => !!v && typeof v === 'object' && !Array.isArray(v);
+    const field = (v: unknown): v is string => typeof v === 'string' && !!v && !['__proto__', 'prototype', 'constructor'].includes(v);
+    if (!record(refs) || Object.keys(refs).some(key => !['inputs', 'outputs'].includes(key))) throw new Error('tool.references must declare inputs and/or outputs');
+    for (const direction of ['inputs', 'outputs']) {
+      const positions = refs[direction];
+      if (positions === undefined) continue;
+      if (!Array.isArray(positions)) throw new Error('tool.references positions must be an array');
+      for (const position of positions) {
+        if (!record(position) || Object.keys(position).some(key => !['path', 'kind', 'owner', 'reference', 'fields', 'omit'].includes(key))
+          || typeof position.path !== 'string' || position.path !== '' && !position.path.startsWith('/')
+          || position.path.split('/').slice(1).some(segment => !field(segment.replace(/~1/g, '/').replace(/~0/g, '~')) || /~(?![01])/.test(segment))
+          || !['message','item','file','media','read','process','script','page','observation','settings','material','followup','forward','job','report'].includes(String(position.kind))
+          || !field(position.owner) || !field(position.reference)
+          || !Array.isArray(position.fields) || !position.fields.length || !position.fields.every(field)
+          || position.omit !== undefined && (!Array.isArray(position.omit) || !position.omit.every(field))) throw new Error('Invalid typed tool reference position');
+      }
+    }
   }
   if (declaration.source !== undefined) parseVarinContractSource(declaration.source);
   if (declaration.disclosure !== undefined) {

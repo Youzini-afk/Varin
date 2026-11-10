@@ -53,6 +53,21 @@ pub(crate) fn declaration(
     )
 }
 struct RetrievalControl(ControlCommands);
+impl RetrievalControl {
+    fn selected(&self, context:&ToolExecutionContext,call:&ToolCall)->Result<(Input,Option<String>),ExecutionError> {
+        let mut input=input(call)?;
+        let catalog=self.0.runtime.catalog();let db=catalog.lock().map_err(error)?;
+        let exact=if input.operation_id.contains('/') {
+            match db.resolve_execution_reference(&input.operation_id).map_err(error)?.target {
+                varin_runtime::catalog::model_references::ExecutionTarget::Delegated{operation_id,execution_id,..}=>{input.operation_id=operation_id;Some(execution_id)},
+                _=>return Err(error("This is not an internal retrieval execution")),
+            }
+        }else{None};
+        let child=db.require_retrieval_parent(&context.run_id,&input.operation_id).map_err(error)?;
+        if exact.as_ref().is_some_and(|id|id!=&child.execution_id) {return Err(error("Retrieval control cannot retarget another execution"));}
+        Ok((input,exact))
+    }
+}
 impl ToolExecutor for RetrievalControl {
     fn plan(
         &self,
@@ -114,13 +129,7 @@ impl ToolExecutor for RetrievalControl {
         if cancel.is_cancelled() {
             return Err(error("Retrieval observation cancelled before admission"));
         }
-        self.0
-            .runtime
-            .catalog()
-            .lock()
-            .map_err(error)?
-            .require_retrieval_parent(&context.run_id, &input(call)?.operation_id)
-            .map_err(error)?;
+        self.selected(context,call)?;
         Ok(())
     }
     fn execute(
@@ -132,7 +141,7 @@ impl ToolExecutor for RetrievalControl {
     ) -> ToolCompletion {
         let executed = (|| {
             self.authorize(context, call, contract, cancel)?;
-            let input = input(call)?;
+            let (input,exact) = self.selected(context,call)?;
             let catalog = self.0.runtime.catalog();
             match input.action {
                 Action::Status => {
@@ -148,24 +157,17 @@ impl ToolExecutor for RetrievalControl {
                     })
                 }
                 Action::Wait => {
-                    let read = catalog
-                        .lock()
-                        .map_err(error)?
-                        .prepare_child_wait_registration(context, &input.operation_id)
-                        .map_err(error)?;
+                    let read = {let db=catalog.lock().map_err(error)?;
+                        if let Some(execution)=&exact {db.prepare_delegated_wait_registration(context,&input.operation_id,execution)}
+                        else {db.prepare_child_wait_registration(context,&input.operation_id)}.map_err(error)?};
                     let prepared = read.load().map_err(error)?;
                     catalog
                         .lock()
                         .map_err(error)?
                         .register_child_wait(prepared)
                         .map_err(error)?;
-                    Ok(ToolCompletion::JobAccepted {
-                        operation_id: context.operation_id.clone(),
-                        phase: "awaiting_child".into(),
-                        effect: Effect::None,
-                        lifetime: Lifetime::Thread,
-                        content: None,
-                    })
+                    let read=catalog.lock().map_err(error)?.capture_call_completion(&context.operation_id).map_err(error)?;
+                    read.load().map_err(error)
                 }
                 Action::Stop => {
                     let parent_thread = catalog
@@ -176,9 +178,8 @@ impl ToolExecutor for RetrievalControl {
                         .thread_id;
                     self.0
                         .admit_tree_cancel(
-                            varin_runtime::catalog::dispatch::TreeCancelTarget::Child {
-                                operation_id: input.operation_id.clone(),
-                            },
+                            if let Some(execution)=&exact {varin_runtime::catalog::dispatch::TreeCancelTarget::Execution {execution_id:execution.clone()}}
+                            else {varin_runtime::catalog::dispatch::TreeCancelTarget::Child {operation_id:input.operation_id.clone()}},
                             Some(&parent_thread),
                         )
                         .map_err(error)?;

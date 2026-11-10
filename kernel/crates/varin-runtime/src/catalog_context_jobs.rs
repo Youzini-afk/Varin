@@ -1371,6 +1371,8 @@ impl ContextJobPreparation {
             nodes,
         };
         let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            input_id: None,
+            model_attachments: None,
             inherited_context: None,
             input_preparation: None,
             command: SubmitInput {

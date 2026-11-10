@@ -213,9 +213,9 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           // A retained selection is immutable: validate its original Source
           // authority without looking up a mutable path again on retry.
           await validateReceiptAuthority();
-          const saved = JSON.parse(previous.payloadJson) as { attachment: { ref: string; filename: string; mimeType: string; byteLength: number }; contentHash: string; operationId: string; path: string; captureId: string };
+          const saved = JSON.parse(previous.payloadJson) as { attachment: { ref: string; filename: string; mimeType: string; byteLength: number }; contentHash: string; operationId: string; path: string; captureId: string; expectedReadVersion?:string };
           if (previous.recordType !== 'attachment.file' || previous.state === 'released' || previous.threadId !== scope.scope.threadId || previous.runId !== scope.scope.runId
-            || saved.attachment.ref !== operation.ref || saved.operationId !== operation.operationId || saved.path !== operation.path || saved.captureId !== captureId
+            || saved.attachment.ref !== operation.ref || saved.operationId !== operation.operationId || saved.path !== operation.path || saved.captureId !== captureId || saved.expectedReadVersion !== operation.expectedReadVersion
             || !previous.references.some(item => item.slot === 'source' && item.objectHash === saved.contentHash)) throw new Error('Original attachment capture identity changed');
           if (await client.getRecord(workspaceId, retainedId)) await releaseCapture();
           const staleIntent = `attachment.managed-capture-intent:${captureId}`;
@@ -243,6 +243,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           const relative = root ? path.relative(root, selectedPath) : null;
           const within = relative !== null && !!relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
           if (!within) {
+            if (operation.expectedReadVersion) throw new Error('The original file observation requires its admitted source root');
             await validateReceiptAuthority();
             const captureScope = `managed:${captureId}`;
             const key = JSON.stringify(['absolute', captureScope, operation.operationId, operation.ref]);
@@ -262,7 +263,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
               const attachment = { ref: operation.ref, filename: captured.filename, mimeType: captured.mimeType, byteLength: captured.byteLength };
               await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
                 recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
-                payloadJson: JSON.stringify({ attachment, contentHash: object.hash, operationId: operation.operationId, path: operation.path, captureId }),
+                payloadJson: JSON.stringify({ attachment, contentHash: object.hash, operationId: operation.operationId, path: operation.path, captureId, ...(operation.expectedReadVersion ? {expectedReadVersion:operation.expectedReadVersion}:{}) }),
                 ownerIds: [object.ownerId], references: [{ slot: 'source', objectHash: object.hash }] }, active);
               committed = true;
               result = { attachment, contentHash: object.hash };
@@ -283,11 +284,12 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           sourcePath = read.entries[0]?.path ?? sourcePath;
         } else {
           if (retained && retained.state !== 'released') {
-            const saved = JSON.parse(retained.payloadJson) as { path: string; stateJson: string; operationId: string; executionWorkspaceId: string; canonicalRoot: string };
+            const saved = JSON.parse(retained.payloadJson) as { path: string; stateJson: string; operationId: string; executionWorkspaceId: string; canonicalRoot: string; readVersion?:string };
             if (retained.recordType !== 'attachment.capture' || retained.threadId !== scope.scope.threadId || saved.path !== selectedPath
               || saved.operationId !== `attachment-capture:${captureId}` || saved.executionWorkspaceId !== scope.source.execution_workspace_id
               || scope.physicalRoot && saved.canonicalRoot !== scope.physicalRoot.canonicalRoot) throw new Error('Original retained attachment selection changed');
             state = JSON.parse(saved.stateJson) as import('./protocol.generated.js').KernelBranchState;
+            if (operation.expectedReadVersion) await options.kernel.agentRuntimeRequest('runtime.model_reference.file_state',{source:scope.source,path:saved.path,state,rootId:scope.physicalRoot?.rootId ?? null,...(saved.readVersion ? {readVersion:saved.readVersion}:{}),expectedReadVersion:operation.expectedReadVersion},active);
             if (state.kind === 'regular-file') {
               const hash = state.objectHash;
               if (!retained.references.some(item => item.slot === 'source' && item.objectHash === hash)) throw new Error('Original retained attachment content is unavailable');
@@ -296,18 +298,19 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           } else {
             if (!scope.physicalRoot) throw new Error('Original attachment execution root is unavailable');
             const result = await client.fileCapture({ operationId: `attachment-capture:${captureId}`, workspaceId, rootId: scope.physicalRoot.rootId,
-              path: selectedPath, store: true, retentionRecordId: retainedId }, active);
+              path: selectedPath, store: true, retentionRecordId: retainedId, ...(operation.expectedReadVersion ? {expectedReadVersion:operation.expectedReadVersion}:{}) }, active);
             if (typeof result.stateJson !== 'string' || typeof result.recordId !== 'string') throw new Error('Original attachment capture was not retained');
             state = JSON.parse(result.stateJson) as import('./protocol.generated.js').KernelBranchState;
             if (typeof result.path === 'string') sourcePath = result.path;
           }
         }
+        if (scope.source.mode === 'fixed_branch' && operation.expectedReadVersion) await options.kernel.agentRuntimeRequest('runtime.model_reference.file_state',{source:scope.source,path:sourcePath,state,expectedReadVersion:operation.expectedReadVersion},active);
         if (state.kind !== 'regular-file') throw new Error(`Selected attachment is ${state.kind}, not a regular file`);
         const name = path.posix.basename(sourcePath.replaceAll('\\', '/'));
         const attachment = { ref: operation.ref, filename: name, mimeType: attachmentMimeType(name), byteLength: state.byteLength };
         await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
           recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
-          payloadJson: JSON.stringify({ attachment, contentHash: state.objectHash, operationId: operation.operationId, path: operation.path, captureId }),
+          payloadJson: JSON.stringify({ attachment, contentHash: state.objectHash, operationId: operation.operationId, path: operation.path, captureId, ...(operation.expectedReadVersion ? {expectedReadVersion:operation.expectedReadVersion}:{}) }),
           ownerIds: [], references: [{ slot: 'source', objectHash: state.objectHash }] }, active);
         if (scope.source.mode !== 'fixed_branch') await releaseCapture();
         if (await client.getRecord(workspaceId, intentId)) await client.releaseRecord(`attachment-intent-release:${captureId}`, workspaceId, intentId);
@@ -454,10 +457,11 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         if (scope.scope.kind !== 'run') throw new Error('Document ingestion requires its actual coordinator Run');
         await owner.sources.validate(query, active);
         const document = await readSourceDocument({ client: options.kernel.scoped(scope.grant), source: scope.source,
-          physicalRoot: scope.physicalRoot, operationId: operation.operationId, path: operation.path, signal: active });
+          physicalRoot: scope.physicalRoot, operationId: operation.operationId, path: operation.path, signal: active,
+          fileVersion: async (path,state,rootId) => (await options.kernel.agentRuntimeRequest<{readVersion:string},'runtime.model_reference.file_state'>('runtime.model_reference.file_state',{source:scope.source,path,state,...(rootId ? {rootId}:{})},active)).readVersion });
         await owner.sources.validate(query, active);
         return { bytesBase64: document.source.toString('base64'), byteLength: document.source.byteLength,
-          sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
+          sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType, ...(document.fileObservation ? {fileObservation:document.fileObservation}:{}) };
       }
       case 'binary_write': {
         await owner.sources.validate(query, active);

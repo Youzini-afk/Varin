@@ -403,7 +403,7 @@ pub(super) fn initialize_new(tx: &Transaction<'_>) -> Result<()> {
     tx.execute_batch("CREATE TABLE external_settings(id TEXT PRIMARY KEY,body TEXT NOT NULL);
         CREATE TABLE external_conversations(id TEXT PRIMARY KEY,body TEXT NOT NULL);
         CREATE TABLE external_turns(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES external_conversations(id),request_key TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(conversation_id,request_key));
-        CREATE TABLE external_items(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES external_conversations(id),turn_id TEXT NOT NULL REFERENCES external_turns(id),native_id TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(turn_id,native_id));
+        CREATE TABLE external_items(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES external_conversations(id),turn_id TEXT NOT NULL REFERENCES external_turns(id),native_id TEXT NOT NULL,body TEXT NOT NULL,kind TEXT,tool_status TEXT,UNIQUE(turn_id,native_id));
         CREATE INDEX external_items_conversation ON external_items(conversation_id);
         CREATE TABLE external_commands(id TEXT PRIMARY KEY,intent TEXT NOT NULL,receipt TEXT NOT NULL);
         CREATE TABLE external_children(id TEXT PRIMARY KEY,body TEXT NOT NULL);
@@ -594,6 +594,7 @@ pub(super) fn admit_turn(tx: &Transaction<'_>, id: &str, key: &str, input_ref: &
     let turn_id=format!("external-turn:{}",Uuid::new_v4());
     let turn=json!({"id":turn_id,"conversationId":id,"key":key,"status":"queued","inputRef":input_ref,"createdAt":now(),"updatedAt":now(),"epoch":epoch});
     tx.execute("INSERT INTO external_turns VALUES(?1,?2,?3,?4)",params![turn_id,id,key,encode(&turn)?])?;
+    super::model_references::admit_external_turn(tx,id,&turn_id,key)?;
     touch(tx,&mut c)?;
     Ok(turn)
 }
@@ -797,6 +798,7 @@ impl Catalog {
                     "INSERT INTO external_conversations VALUES(?1,?2)",
                     params![id, encode(&v)?],
                 )?;
+                super::model_references::admit_external_agent(&tx,&id)?;
                 event(
                     &tx,
                     &id,
@@ -1098,7 +1100,7 @@ impl Catalog {
                 id,
                 turn_id,
                 item_id,
-                ..
+                content,
             } => {
                 required(&item_id)?;
                 let mut v = conversation(&tx, &id)?;
@@ -1110,7 +1112,7 @@ impl Catalog {
                         "external item belongs to a settled or stale turn".into(),
                     ));
                 }
-                tx.execute("INSERT INTO external_items(id,conversation_id,turn_id,native_id,body) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(turn_id,native_id) DO UPDATE SET body=excluded.body",params![format!("{turn_id}:{item_id}"),id,turn_id,item_id,encode(&p.body.unwrap())?])?;
+                tx.execute("INSERT INTO external_items(id,conversation_id,turn_id,native_id,body,kind,tool_status) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(turn_id,native_id) DO UPDATE SET body=excluded.body,kind=excluded.kind,tool_status=excluded.tool_status",params![format!("{turn_id}:{item_id}"),id,turn_id,item_id,encode(&p.body.unwrap())?,content["kind"].as_str(),content["tool"]["status"].as_str()])?;
                 touch(&tx, &mut v)?;
                 Value::Null
             }
@@ -1165,5 +1167,74 @@ impl Catalog {
         tx.execute("UPDATE external_conversations SET body=json_set(json_remove(body,'$.activeTurn'),'$.needsReview',json('true')) WHERE json_type(body,'$.activeTurn') IS NOT NULL",[])?;
         tx.commit()?;
         Ok(())
+    }
+}
+
+/// Original external conversation overview: no native Run or synthetic child relationship.
+pub struct ExternalOverviewRead {
+    overview:Value,
+    items:Vec<(Value,Option<String>,Option<String>)>,
+    content:crate::content::ContentStore,
+    _publication:crate::content::ContentPublication,
+}
+impl ExternalOverviewRead {
+    pub fn load(mut self)->Result<Value> {
+        let mut latest_assistant=None;let mut active=Vec::new();let mut recent_action=None;
+        for (reference,kind,status) in self.items {
+            // New observations have an original metadata index; only selected bodies hydrate.
+            let known=kind.as_deref();
+            let running=matches!(status.as_deref(),Some("running"|"pending"|"waiting"|"in_progress"));
+            if known==Some("assistant") && latest_assistant.is_some(){continue;}
+            if known==Some("tool") && !running && recent_action.is_some(){continue;}
+            if known.is_some() && !matches!(known,Some("assistant"|"tool")){continue;}
+            let item=self.content.load(&reference)?;
+            if latest_assistant.is_none() && item["kind"]=="assistant" {latest_assistant=Some(item["text"].clone());}
+            if item["kind"]=="tool" {
+                let action=json!({"name":item["tool"]["name"],"status":item["tool"]["status"],"path":item["tool"]["path"],"command":item["tool"]["command"]});
+                if matches!(item["tool"]["status"].as_str(),Some("running"|"pending"|"waiting"|"in_progress")){active.push(action.clone());}
+                if recent_action.is_none(){recent_action=Some(action);}
+            }
+        }
+        self.overview["latestAssistantMessage"]=json!(latest_assistant);
+        self.overview["actions"]=if active.is_empty(){json!(recent_action.into_iter().collect::<Vec<_>>())}else{json!(active)};
+        Ok(self.overview)
+    }
+}
+impl Catalog {
+    pub fn resolve_external_agent(&self,identity:&str)->Result<Option<String>> {
+        if identity.contains('/') {
+            return match self.resolve_execution_reference(identity) {
+                Ok(super::model_references::ExecutionReference{target:super::model_references::ExecutionTarget::External{conversation_id,..},..})=>Ok(Some(conversation_id)),
+                Ok(_)=>Ok(None),Err(RuntimeError::NotFound(_))=>Ok(None),Err(error)=>Err(error),
+            };
+        }
+        Ok(self.db.query_row("SELECT id FROM external_conversations WHERE id=?1 OR id=(SELECT owner_id FROM model_agents WHERE owner_kind='external' AND agent_code=?2 COLLATE NOCASE)",params![identity,identity.to_uppercase()],|r|r.get(0)).optional()?)
+    }
+    pub fn capture_external_conversation_overview(&self,caller_run:&str,identity:&str)->Result<ExternalOverviewRead> {
+        let caller=self.run(caller_run)?;
+        let id=self.resolve_external_agent(identity)?.ok_or_else(||RuntimeError::NotFound("External Agent".into()))?;
+        let conversation=conversation(&self.db,&id)?;
+        let root=super::scheduling::thread_family(&self.db,&caller.thread_id)?;
+        let readable:bool=self.db.query_row("WITH RECURSIVE family(id) AS (SELECT ?5 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT EXISTS(SELECT 1 FROM bot_thread_bindings WHERE thread_id=?1) AND ?2 IS ?3 OR EXISTS(SELECT 1 FROM external_children c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id WHERE json_extract(c.body,'$.conversation_id')=?4)",params![caller.thread_id,caller.principal_id,conversation["principalId"].as_str(),id,root],|r|r.get(0))?;
+        if !readable {return Err(RuntimeError::Invalid("External conversation is outside this Agent's readable work".into()));}
+        let exact=if identity.contains('/') {Some(self.resolve_execution_reference(identity)?)}else{None};
+        let selected_turn=exact.as_ref().and_then(|e|match &e.target{super::model_references::ExecutionTarget::External{turn_id,..}=>turn_id.clone(),_=>None});
+        let turns:Vec<Value>=if let Some(turn_id)=selected_turn.as_deref(){vec![turn(&self.db,&id,turn_id)?]}else{
+            let mut query=self.db.prepare("SELECT body FROM external_turns WHERE conversation_id=?1 AND (json_extract(body,'$.status') NOT IN ('completed','failed','cancelled','interrupted') OR rowid=(SELECT max(rowid) FROM external_turns WHERE conversation_id=?1)) ORDER BY rowid DESC")?;
+            let rows=query.query_map([&id],|r|r.get::<_,String>(0))?;rows.map(|row|Ok(serde_json::from_str(&row?)?)).collect::<Result<_>>()?
+        };
+        let mut executions=Vec::new();
+        for turn in &turns {
+            let reference=self.execution_reference(turn["id"].as_str().ok_or_else(||RuntimeError::Invalid("External turn identity is missing".into()))?)?;
+            executions.push(json!({"ref":reference.reference,"state":turn["status"],"waitingOn":followups::external::turn_hold(&self.db,turn)?,"error":turn["error"]}));
+        }
+        if turns.is_empty() {
+            if let Some(reference)=&exact {executions.push(json!({"ref":reference.reference,"state":"preparing"}));}
+        }
+        let turn_ids=turns.iter().filter_map(|t|t["id"].as_str()).collect::<Vec<_>>();
+        let items={let mut query=self.db.prepare("SELECT body,kind,tool_status FROM external_items WHERE conversation_id=?1 AND (?2 IS NULL OR turn_id IN(SELECT value FROM json_each(?2))) AND (kind IS NULL OR kind IN('assistant','tool')) ORDER BY rowid DESC")?;
+            let rows=query.query_map(params![id,if turn_ids.is_empty(){None}else{Some(encode(&turn_ids)?)}],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
+            rows.map(|row|{let (reference,kind,status)=row?;Ok((serde_json::from_str(&reference)?,kind,status))}).collect::<Result<Vec<_>>>()?};
+        Ok(ExternalOverviewRead{overview:json!({"agentId":self.external_agent_reference(&id)?,"name":conversation["title"],"harness":conversation["harness"],"state":executions.first().map(|e|e["state"].clone()).unwrap_or(json!("idle")),"executions":executions,"read":{"tool":super::family::READ_TOOL,"arguments":{"threadId":identity,"query":{"kind":"overview"}}}}),items,content:self.content.clone(),_publication:self.content.begin_publication()})
     }
 }

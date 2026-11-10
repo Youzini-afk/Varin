@@ -153,12 +153,13 @@ export function createBinaryFileOwner(options: { kernel: KernelClient; runtime: 
 export async function writeManagedBinary(kernel: KernelClient, scope: ManagedSourceLocalScope,
   request: Extract<import('../harness/managed-remote-types.js').SourceServiceOperation, { kind: 'binary_write' }>, signal?: AbortSignal): Promise<BinaryFileWriteResult> {
   const { invocation, journal } = request;
+  const resolvedArguments = invocation.resolvedArguments ?? invocation.arguments;
   if (scope.scope.kind !== 'run' || scope.scope.runId !== invocation.runId || scope.scope.threadId !== invocation.threadId
     || !isDeepStrictEqual(scope.source, invocation.source) || !scope.physicalRoot
     || invocation.operation !== 'effect' || invocation.operationId !== toolOperationId(invocation.origin, invocation.callId)
     || journal.runId !== invocation.runId || journal.threadId !== invocation.threadId
     || !['office_write', 'office_export', 'browser_files'].includes(invocation.toolName)
-    || !object(invocation.arguments) || invocation.arguments.path !== request.path
+    || !object(resolvedArguments) || resolvedArguments.path !== request.path
     || !scope.principal.capabilities.includes('filesystem:write')) throw new Error('The file write differs from its original admitted operation');
   const bytes = Buffer.from(request.bytesBase64, 'base64');
   if (bytes.byteLength !== request.byteLength) throw new Error('The transferred file content is incomplete');

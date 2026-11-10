@@ -657,3 +657,59 @@ fn ui_retention_includes_dispatch_and_selected_inherited_context() {
         assert!(retained.iter().any(|value| value == reference), "missing {reference}: {retained:?}");
     }
 }
+
+#[test]
+fn copied_background_keeps_typed_references_after_the_source_conversation_is_retired() {
+    use crate::catalog::model_references::ReferenceKind;
+    use crate::execution::{Content, ConversationItem, Provenance, ToolCompletion, ToolResult};
+    use crate::output::OutputBody;
+    let mut f = Fixture::new_in_bot();
+    f.db.create_thread("background-source", "background-source-main").unwrap();
+    let original = f.db.submit(&SubmitInput {
+        key: "background-source-input".into(), thread_id: "background-source".into(),
+        branch_id: "background-source-main".into(), expected_head: None,
+        input: json!({"text":"Read the original file"}), configuration: json!({}),
+    }).unwrap();
+    let target = json!({"kind":"observation","path":"original.txt","readVersion":"original-version","source":{"originalOwner":"source-b"}});
+    let reference = f.db.register_model_reference(ReferenceKind::File,"original-storage-owner",&target,&original.run_id).unwrap();
+    let unrelated = f.db.register_model_reference(ReferenceKind::File,"unpublished-owner",&json!({"path":"not-in-background"}),"unpublished").unwrap();
+    let output: OutputBody = OutputBody {
+        data: json!({"readVersion":"private-read-state","source":{"rootId":"private-root"},"text":"File contents"}),
+        model_data: Some(json!({"ref":reference,"path":"original.txt","text":"File contents; literal file:999999 is ordinary prose"})),
+        parts: Vec::new(),
+    };
+    let result = ConversationItem { resource_activation: None, id:"original-file-read".into(),
+        provenance: Provenance::ToolData {call_id:"read".into()}, opaque: None,
+        content: Content::ToolResult {result: ToolResult {request_id:"original-request".into(),call_id:"read".into(),
+            completion:ToolCompletion::Result {outcome:Outcome::Succeeded,effect:Effect::None,content:output.clone()}}},
+    };
+    let source_item = f.db.append_history(&original.run_id,f.db.epoch(),Some(&original.input_id),HistorySource::Tool,json!(result),None).unwrap();
+    f.command.input.background = vec![background::BackgroundReference {
+        thread_id:"background-source".into(),branch_id:"background-source-main".into(),
+        head_id:source_item.id.clone(),item_ids:vec![source_item.id.clone()],
+    }];
+    let child = f.accept();
+    let copied = f.db.content.load_items(&child.inherited_context.as_ref().unwrap().items,&||false).unwrap();
+    let Content::Output {output: quoted} = &copied[0].content else {panic!("selected result must remain quoted source data")};
+    assert_eq!(quoted.data["quotedHistory"]["result"]["completion"]["content"],json!(output));
+    let shown = quoted.model_data.as_ref().expect("quoted owner projection");
+    assert_eq!(shown["quotedHistory"]["result"]["completion"]["content"]["data"]["ref"],reference);
+    assert!(!shown.to_string().contains("private-read-state"));
+    assert!(shown.to_string().contains("literal file:999999 is ordinary prose"));
+    assert!(matches!(copied[0].provenance,Provenance::ExternalData{..}));
+    let source_run = f.db.run(&original.run_id).unwrap();
+    let source_run = f.db.transition_run(&source_run.id,f.db.epoch(),source_run.revision,RunState::Runnable).unwrap();
+    f.db.transition_run(&source_run.id,f.db.epoch(),source_run.revision,RunState::Completed).unwrap();
+    f.db.delete_thread(&threads::ThreadDelete {thread_id:"background-source".into(),key:"delete-background-source".into(),
+        expected_revision:f.db.inspect_thread("background-source").unwrap()["revision"].as_u64().unwrap()}).unwrap();
+    assert!(f.db.retire_deleted_threads(&[original.run_id.clone()]).unwrap().0>0);
+    assert!(matches!(f.db.run(&original.run_id),Err(RuntimeError::NotFound(_))),"copied references must not pin the source Run or its assets");
+    assert_eq!(f.db.resolve_model_reference(ReferenceKind::File,&reference).unwrap().target,target);
+    assert!(f.db.resolve_model_reference(ReferenceKind::File,&unrelated).is_err(),"unpublished references are not retained by scanning body strings");
+    f.reopen();
+    let child = f.db.child_task(&child.operation_id).unwrap();
+    let reopened = f.db.content.load_items(&child.inherited_context.unwrap().items,&||false).unwrap();
+    assert_eq!(copied,reopened);
+    assert_eq!(f.db.resolve_model_reference(ReferenceKind::File,&reference).unwrap().target,target);
+    assert!(f.db.resolve_model_reference(ReferenceKind::File,"file:999999").is_err());
+}

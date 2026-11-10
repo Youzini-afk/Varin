@@ -360,7 +360,7 @@ impl PreparedToolCall for ResourceCall {
             let parts: Vec<varin_runtime::output::OutputPart<varin_runtime::output::IncomingMedia>> = result.as_object_mut()
                 .and_then(|object| object.remove("outputParts"))
                 .map(serde_json::from_value).transpose().map_err(failed)?.unwrap_or_default();
-            varin_runtime::output::OutputBody { data: result, parts }.map_media(|media| media.admit(
+            varin_runtime::output::OutputBody { model_data: None, data: result, parts }.map_media(|media| media.admit(
                 varin_runtime::output::OutputSource::Tool { context: context.clone() }
             )).map_err(failed)
         })();

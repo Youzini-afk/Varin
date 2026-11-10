@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 85;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 87;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -226,6 +226,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.sendNow", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.model_reference.export",
     "runtime.driver.finish",
     "runtime.driver.wait",
     "runtime.driver.context",
@@ -266,6 +267,59 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceExportParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) item_ids: Vec<String>,
+    pub(crate) include_tools: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAgentSourceParams {
+    pub(crate) run_id: String,
+    pub(crate) identity: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceFileStateParams {
+    pub(crate) read_version: Option<String>,
+    pub(crate) source: LaunchSource,
+    pub(crate) path: String,
+    pub(crate) root_id: Option<RequiredNullable<String>>,
+    pub(crate) state: PathState,
+    pub(crate) expected_read_version: Option<RequiredNullable<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceRegisterParams {
+    pub(crate) kind: varin_runtime::catalog::model_references::ReferenceKind,
+    pub(crate) owner: String,
+    pub(crate) target: Value,
+    pub(crate) holder: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceResolveParams {
+    pub(crate) kind: varin_runtime::catalog::model_references::ReferenceKind,
+    pub(crate) reference: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceTargetParams {
+    pub(crate) operation_id: String,
+    pub(crate) purpose: String,
+    pub(crate) original: Value,
+    pub(crate) target: Option<Value>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2229,6 +2283,7 @@ pub(crate) struct KernelFileLeaseReleaseParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelFileCaptureParams {
+    pub(crate) expected_read_version: Option<String>,
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) root_id: String,
@@ -3540,6 +3595,56 @@ pub(crate) type SourceEffectReceiptParams = crate::source_resources::SourceEffec
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceExport {
+    pub(crate) space_id: String,
+    pub(crate) references: Vec<varin_runtime::catalog::model_references::ModelReference>,
+    pub(crate) executions: Vec<varin_runtime::catalog::model_references::ExecutionReference>,
+    pub(crate) bindings: Vec<varin_runtime::catalog::export::ExportModelBinding>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceExportBinding {
+    pub(crate) item_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) purpose: String,
+    pub(crate) original: Value,
+    pub(crate) target: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelExecutionReference {
+    pub(crate) reference: String,
+    pub(crate) agent_id: String,
+    pub(crate) sequence: i64,
+    pub(crate) target: varin_runtime::catalog::model_references::ExecutionTarget,
+}
+
+pub(crate) type ModelExecutionTarget = varin_runtime::catalog::model_references::ExecutionTarget;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAgentSource {
+    #[serde(rename = "run_id")]
+    pub(crate) run_id: String,
+    pub(crate) source: LaunchSource,
+}
+
+pub(crate) type ModelReferenceKind = varin_runtime::catalog::model_references::ReferenceKind;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelReferenceRecord {
+    pub(crate) reference: String,
+    pub(crate) space_id: String,
+    pub(crate) kind: varin_runtime::catalog::model_references::ReferenceKind,
+    pub(crate) owner: String,
+    pub(crate) target: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct UserChildDispatchCatalog {
     pub(crate) run_id: String,
     pub(crate) head_id: RequiredNullable<String>,
@@ -3719,6 +3824,27 @@ pub(crate) struct HostToolErrorMarker {
 }
 
 pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAction;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LaunchSource {
+    #[serde(rename = "native_scope")]
+    pub(crate) native_scope: Option<String>,
+    #[serde(rename = "environment_run_id")]
+    pub(crate) environment_run_id: Option<RequiredNullable<String>>,
+    #[serde(rename = "workspace_id")]
+    pub(crate) workspace_id: String,
+    #[serde(rename = "execution_workspace_id")]
+    pub(crate) execution_workspace_id: String,
+    #[serde(rename = "branch_id")]
+    pub(crate) branch_id: RequiredNullable<String>,
+    pub(crate) revision: RequiredNullable<i64>,
+    pub(crate) mode: varin_runtime::SourceMode,
+    #[serde(rename = "live_root")]
+    pub(crate) live_root: RequiredNullable<LiveRoot>,
+    #[serde(rename = "resource_owner")]
+    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3930,27 +4056,6 @@ pub(crate) struct AgentPolicyBinding {
     pub(crate) reference: String,
     pub(crate) generation: i64,
     pub(crate) artifact: varin_runtime::catalog::policy_switch::AgentPolicyArtifactBinding,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LaunchSource {
-    #[serde(rename = "native_scope")]
-    pub(crate) native_scope: Option<String>,
-    #[serde(rename = "environment_run_id")]
-    pub(crate) environment_run_id: Option<RequiredNullable<String>>,
-    #[serde(rename = "workspace_id")]
-    pub(crate) workspace_id: String,
-    #[serde(rename = "execution_workspace_id")]
-    pub(crate) execution_workspace_id: String,
-    #[serde(rename = "branch_id")]
-    pub(crate) branch_id: RequiredNullable<String>,
-    pub(crate) revision: RequiredNullable<i64>,
-    pub(crate) mode: varin_runtime::SourceMode,
-    #[serde(rename = "live_root")]
-    pub(crate) live_root: RequiredNullable<LiveRoot>,
-    #[serde(rename = "resource_owner")]
-    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4193,6 +4298,14 @@ pub(crate) struct KernelReviewFinding {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LiveRoot {
+    pub(crate) host_id: String,
+    pub(crate) canonical_root: String,
+    pub(crate) root_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MemorySnapshot {
     pub(crate) revision: i64,
     pub(crate) memories: Vec<Value>,
@@ -4211,14 +4324,6 @@ pub(crate) struct ContextComposition {
 pub(crate) struct SystemSection {
     pub(crate) name: String,
     pub(crate) content: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LiveRoot {
-    pub(crate) host_id: String,
-    pub(crate) canonical_root: String,
-    pub(crate) root_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4292,6 +4397,36 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.model_reference.export" => {
+            serde_json::from_value::<ModelReferenceExportParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_reference.agent_source" => {
+            serde_json::from_value::<ModelAgentSourceParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_reference.file_state" => {
+            serde_json::from_value::<ModelReferenceFileStateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_reference.register" => {
+            serde_json::from_value::<ModelReferenceRegisterParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_reference.resolve" => {
+            serde_json::from_value::<ModelReferenceResolveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.model_reference.target" => {
+            serde_json::from_value::<ModelReferenceTargetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "text.encodings" => serde_json::from_value::<KernelTextEncodingsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

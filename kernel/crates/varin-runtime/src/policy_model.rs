@@ -616,6 +616,7 @@ fn quote_context(history: &[std::sync::Arc<ConversationItem>]) -> Result<OutputB
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(OutputBody {
+        model_data: None,
         data: serde_json::to_value(QuotedContext { history: quoted })
             .map_err(|e| ExecutionError::new("policy_context", e.to_string()))?,
         parts,

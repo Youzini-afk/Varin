@@ -213,6 +213,7 @@ pub(super) fn execute(
             };
             let body = preparation
                 .write_output(&varin_runtime::output::OutputBody {
+                    model_data: None,
                     data: p.content,
                     parts: vec![],
                 })

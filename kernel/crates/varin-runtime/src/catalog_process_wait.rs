@@ -265,6 +265,36 @@ impl Catalog {
         }))
     }
 
+    /// Resolve only the declared managed-process field. The original Operation,
+    /// branch/source relation and process owner still authorize every action.
+    /// One original managed/Host operation keeps the same short identity in every producer.
+    pub fn operation_model_reference(&self, operation: &str, holder: &str) -> Result<String> {
+        use super::model_references::ReferenceKind;
+        let original=self.operation(operation)?;
+        let (kind,owner)=if let Some(managed)=&original.managed_process {
+            super::managed_process::require_process(&original)?;
+            let source=self.launch_metadata(&original.run_id)?.and_then(|launch|launch.selection.source)
+                .ok_or_else(||RuntimeError::NotFound("Original managed process source is unavailable".into()))?;
+            (if managed.is_environment(){ReferenceKind::Script}else{ReferenceKind::Process},serde_json::to_string(&source.resource_owner)?)
+        } else if let Some(job)=&original.host_job {
+            if matches!(job.binding.subject, super::host_jobs::HostJobSubject::EnvironmentForward{..}) {
+                (ReferenceKind::Forward,"host.forward".to_owned())
+            } else {(ReferenceKind::Job,serde_json::to_string(&job.binding.execution_owner)?)}
+        } else {return Err(RuntimeError::Invalid("Operation has no managed resource owner".into()));};
+        self.register_model_reference(kind,&owner,&json!({"operationId":operation}),holder)
+    }
+    pub fn resolve_managed_process_reference(&self, reference: &str) -> Result<String> {
+        use super::model_references::ReferenceKind;
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all="camelCase",deny_unknown_fields)]
+        struct Target { operation_id: String }
+        let kind = if reference.starts_with("proc:") {ReferenceKind::Process}
+            else if reference.starts_with("env:") {ReferenceKind::Script}
+            else {return Ok(reference.into())};
+        let target: Target = serde_json::from_value(self.resolve_model_reference(kind,reference)?.target)?;
+        Ok(target.operation_id)
+    }
+
     /// Wait and original tool receipt commit together. The caller has checked the real process
     /// observation capability before entering this short transaction.
     pub fn wait_for_process(
@@ -281,14 +311,22 @@ impl Catalog {
                 "follow-up process delegation is read-only, not a new process wait".into(),
             ));
         }
+        let original = self.operation(&context.operation_id)?;
+        let original_intent = super::tool_content::ToolIntent::from_operation(&original)?;
+        let call = original_intent.call().clone().load(&self.content)?;
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all="camelCase",deny_unknown_fields)]
+        struct Selection { process_id:String }
+        let selected:Selection=serde_json::from_value(call.arguments)?;
+        let resolved=self.resolve_managed_process_reference(&selected.process_id)?;
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &context.run_id)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
         let admitted = super::tool_content::ToolIntent::from_operation(&op)?;
         if op.run_id != context.run_id
             || admitted.origin() != &context.origin
-            || admitted.call().arguments_ref
-                != crate::content::ContentStore::reference(&json!({"processId":process_id}))?
+            || admitted != original_intent
+            || resolved != process_id
         {
             return Err(RuntimeError::Conflict(
                 "process wait origin or target changed".into(),

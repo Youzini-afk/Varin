@@ -13,7 +13,7 @@ const bodyText = (result: OfficeReadResult): string => (result.objects ?? []).ma
 
 export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 'put' | 'read'>; pdf: DocumentReader; renderer: OfficeRenderer }) {
   const load = async (input: Pick<OfficeReadRequest, 'path' | 'snapshotId' | 'ref'>, context: DocumentReaderContext,
-    sources: DocumentMaterialSources, captured?: DocumentIngestInput): Promise<{ package: OfficePackage; bytes: Buffer; snapshot: WebSnapshotRef }> => {
+    sources: DocumentMaterialSources, captured?: DocumentIngestInput): Promise<{ package: OfficePackage; bytes: Buffer; snapshot: WebSnapshotRef; fileObservation?: DocumentIngestInput['fileObservation'] }> => {
     context.signal?.throwIfAborted();
     if (!captured && [input.path, input.snapshotId, input.ref].filter(Boolean).length !== 1) throw new Error('Choose exactly one Office ref, path or snapshotId');
     let source = captured;
@@ -38,7 +38,7 @@ export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 
       document: { kind: document.format, parser: 'ooxml', ...(document.format === 'pptx' ? { pageCount: document.sections().length } : {}) } },
       Buffer.from(body), context.authority, { source: { bytes: source.source, contentType: OFFICE_MIME[document.format] } });
     context.signal?.throwIfAborted();
-    return { package: document, bytes: source.source, snapshot };
+    return { package: document, bytes: source.source, snapshot, ...(source.fileObservation ? {fileObservation:source.fileObservation}:{}) };
   };
   const render = async (input: { ref?: string; path?: string; snapshotId?: string; page?: number; scale?: number }, context: DocumentReaderContext, sources: DocumentMaterialSources,
     captured?: DocumentIngestInput): Promise<FetchResult> => {
@@ -55,7 +55,7 @@ export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 
     render,
     async read(input: OfficeReadRequest, context: DocumentReaderContext, sources: DocumentMaterialSources, captured?: DocumentIngestInput): Promise<OfficeReadResult> {
       const original = await load(input, context, sources, captured);
-      return { ...original.package.read(input), snapshotId: original.snapshot.snapshotId, ...(original.snapshot.title ? { title: original.snapshot.title } : {}) };
+      return { ...original.package.read(input), snapshotId: original.snapshot.snapshotId, ...(original.fileObservation ? {sourceObservation:original.fileObservation}:{}), ...(original.snapshot.title ? { title: original.snapshot.title } : {}) };
     },
     /** The ordinary document entry also recognizes Office material without changing PDF behavior. */
     async document(input: DocumentReadRequest, context: DocumentReaderContext, captured?: DocumentIngestInput): Promise<FetchResult | undefined> {

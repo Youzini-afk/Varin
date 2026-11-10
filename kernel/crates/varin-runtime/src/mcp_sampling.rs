@@ -412,6 +412,7 @@ pub fn request_view(
             message.role,
             Content::Output {
                 output: OutputBody {
+                    model_data: None,
                     data: Value::Null,
                     parts,
                 },

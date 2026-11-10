@@ -2,14 +2,14 @@ import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { conversationContentText, type ThreadExportSelection, type ThreadIdentity } from '@varin/application-client';
-import type { HistoryItem, HistoryReference, StoredMedia } from '@varin/protocol';
+import type { Attachment, HistoryItem, HistoryReference, StoredMedia } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 
-interface FileAttachment { ref: string; filename: string; mimeType: string; byteLength: number }
+type FileAttachment = Attachment;
 interface ExportAttachment { filename: string; mimeType: string; byteLength?: number; media?: StoredMedia; partIndex?: number; file?: FileAttachment }
-interface PublicMessage { text: string; details?: unknown; attachments: ExportAttachment[] }
+interface PublicMessage { text: string; details?: unknown; modelData?: unknown; attachments: ExportAttachment[] }
 export interface ThreadExportOwners {
-  runtime: Pick<AgentRuntimeClient, 'thread' | 'historyPage' | 'historyItem' | 'mediaRead'>;
+  runtime: Pick<AgentRuntimeClient, 'thread' | 'historyPage' | 'historyItem' | 'mediaRead' | 'exportModelReferences'>;
   attachments?: { read(identity: ThreadIdentity, ref: string, signal?: AbortSignal): Promise<{ attachment: FileAttachment; stream: AsyncIterable<Uint8Array> }> };
 }
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -22,11 +22,12 @@ export function exportPublicMessage(item: HistoryItem, includeTools: boolean, fo
   if (item.source === 'compaction' || item.source === 'tool' && !includeTools) return null;
   const result: PublicMessage = { text: '', attachments: [] };
   const addMedia = (value: unknown, partIndex: number) => { if (media(value)) result.attachments.push({ filename: `media-${partIndex + 1}.${value.media_type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin'}`, mimeType: value.media_type, media: value, partIndex }); };
-  const addFile = (value: unknown) => { if (file(value)) result.attachments.push({ filename: value.filename, mimeType: value.mimeType, byteLength: value.byteLength, file: value }); };
+  const addFile = (value: unknown) => { if (file(value)) result.attachments.push({ filename: value.filename, mimeType: value.mimeType, byteLength: value.byteLength, file: { ref: value.ref, filename: value.filename, mimeType: value.mimeType, byteLength: value.byteLength, ...(typeof value.modelRef === 'string' ? { modelRef: value.modelRef } : {}) } }); };
   const readable = (text: string) => format === 'markdown' && item.source === 'assistant' ? conversationContentText(text, { role: 'assistant' }) : text;
   const output = (value: unknown, assistantBody = false) => {
     const body = object(value);
     if (includeTools && body.data !== undefined) result.details = body.data;
+    if (includeTools && body.model_data !== undefined) result.modelData = body.model_data;
     if (Array.isArray(body.parts)) body.parts.forEach((part, index) => {
       const entry = object(part);
       if (entry.kind === 'text' && typeof entry.text === 'string') result.text += `${result.text ? '\n' : ''}${assistantBody ? readable(entry.text) : entry.text}`;
@@ -92,8 +93,9 @@ export async function* exportThreadConversation(owners: ThreadExportOwners, sele
     if (!foundLast || !foundFirst || !selection.headId && (selection.firstItemId || selection.lastItemId)) throw new Error('Selected messages do not belong to the pinned history range');
     const encode = (value: string) => Buffer.from(value, 'utf8');
     const metadata = { threadId: selection.threadId, branchId: selection.branchId, headId: selection.headId, firstItemId: selection.firstItemId ?? null, lastItemId: selection.lastItemId ?? selection.headId };
-    yield encode(selection.format === 'json' ? `{"version":1,"selection":${JSON.stringify(metadata)},"messages":[` : `# Conversation\n\nThread: ${selection.threadId}\nBranch: ${selection.branchId}\nHistory: ${selection.headId ?? '(empty)'}\n\n`);
+    yield encode(selection.format === 'json' ? `{"version":2,"selection":${JSON.stringify(metadata)},"messages":[` : `# Conversation\n\nThread: ${selection.threadId}\nBranch: ${selection.branchId}\nHistory: ${selection.headId ?? '(empty)'}\n\n`);
     let first = true;
+    const exportedItemIds: string[] = [];
     for (const page of pages.reverse()) {
       signal?.throwIfAborted();
       const buffer = Buffer.alloc(page.bytes); await spool.read(buffer, 0, buffer.length, page.offset);
@@ -102,7 +104,10 @@ export async function* exportThreadConversation(owners: ThreadExportOwners, sele
         if (reference.source === 'compaction' || reference.source === 'tool' && !selection.includeTools) continue;
         const item = await owners.runtime.historyItem(reference, signal);
         const message = exportPublicMessage(item, selection.includeTools, selection.format); if (!message) continue;
-        const record = { id: item.id, source: item.source, runId: item.run_id, text: message.text, ...(message.details !== undefined ? { details: message.details } : {}) };
+        const record = { id: item.id, source: item.source, runId: item.run_id, text: message.text,
+          ...(message.details !== undefined ? { details: message.details } : {}),
+          ...(message.modelData !== undefined ? { modelData: message.modelData } : {}) };
+        if (selection.format === 'json') exportedItemIds.push(item.id);
         if (selection.format === 'json') yield encode(`${first ? '' : ','}\n${JSON.stringify(record).slice(0, -1)},"attachments":[`);
         else {
           yield encode(`## ${item.source}\n\n${message.text}\n\n`);
@@ -110,7 +115,8 @@ export async function* exportThreadConversation(owners: ThreadExportOwners, sele
         }
         first = false;
         for (const [index, attachment] of message.attachments.entries()) {
-          const info = { filename: attachment.filename, mimeType: attachment.mimeType, ...(attachment.byteLength !== undefined ? { byteLength: attachment.byteLength } : {}) };
+          const info = { filename: attachment.filename, mimeType: attachment.mimeType, ...(attachment.byteLength !== undefined ? { byteLength: attachment.byteLength } : {}),
+            ...(attachment.file ? { attachment: attachment.file } : attachment.media ? { media: attachment.media } : {}) };
           if (selection.format === 'json') yield encode(`${index ? ',' : ''}${JSON.stringify(info).slice(0, -1)}${selection.includeAttachments ? ',"dataBase64":"' : '}'}`);
           else yield encode(selection.includeAttachments ? `[${attachment.filename.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')}](data:${attachment.mimeType.replace(/[^a-z0-9.+/-]/gi, '')};base64,` : `Attachment: ${attachment.filename}\n\n`);
           if (!selection.includeAttachments) continue;
@@ -121,7 +127,16 @@ export async function* exportThreadConversation(owners: ThreadExportOwners, sele
         if (selection.format === 'json') yield encode(']}');
       }
     }
-    yield encode(selection.format === 'json' ? '\n]}\n' : '');
+    if (selection.format === 'json') {
+      signal?.throwIfAborted();
+      // Snapshot only the public records emitted above. In particular, an assistant
+      // tool_call hidden by includeTools must not expose its invocation bindings.
+      const modelReferences = await owners.runtime.exportModelReferences({
+        threadId: selection.threadId, branchId: selection.branchId, headId: selection.headId,
+        itemIds: exportedItemIds, includeTools: selection.includeTools,
+      }, signal);
+      yield encode(`\n],"modelReferences":${JSON.stringify(modelReferences)}}\n`);
+    }
   } finally { await spool.close(); await rm(directory, { recursive: true, force: true }); }
 }
 async function readFile(owners: ThreadExportOwners, identity: ThreadIdentity, file: FileAttachment, signal?: AbortSignal) {

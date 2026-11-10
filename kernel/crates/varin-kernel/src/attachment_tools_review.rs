@@ -17,7 +17,7 @@ fn context() -> ToolExecutionContext {
     }
 }
 fn attachment(reference: &str, mime: &str, len: u64) -> Attachment {
-    Attachment {
+    Attachment { model_ref: None,
         reference: reference.into(),
         filename: "original.bin".into(),
         mime_type: mime.into(),

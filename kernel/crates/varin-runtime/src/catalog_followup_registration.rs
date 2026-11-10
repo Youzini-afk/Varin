@@ -394,6 +394,8 @@ impl FollowupRegistration {
     deny_unknown_fields
 )]
 pub enum FollowupToolInput {
+    /// An immutable owner-authored read selection, not a mutable cursor.
+    Read { #[serde(rename = "ref")] reference: String },
     Sources,
     Arrange {
         followup_id: Option<String>,
@@ -482,6 +484,7 @@ pub struct FollowupRegistrationPreparation {
     id: String,
     run: Run,
     input: FollowupRegistration,
+    original_input: FollowupRegistration,
     actor: FollowupActor,
     epoch: u64,
     existing: Option<Value>,
@@ -520,6 +523,84 @@ pub(super) fn key(id: &str) -> String {
     format!("followup-register:{id}")
 }
 impl Catalog {
+    pub fn resolve_followup_reference(&self, reference:&str)->Result<String> {
+        if !reference.strip_prefix("followup:").is_some_and(|number| !number.is_empty() && number.bytes().all(|v|v.is_ascii_digit())) {return Ok(reference.into());}
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all="camelCase",deny_unknown_fields)]
+        struct Target {followup_id:String}
+        let target:Target=serde_json::from_value(self.resolve_model_reference(super::super::model_references::ReferenceKind::Followup,reference)?.target)?;
+        Ok(target.followup_id)
+    }
+    pub fn resolve_followup_tool_input(&self, input:&mut FollowupToolInput)->Result<()> {
+        if let FollowupToolInput::Read {reference} = input {
+            let selected = self.resolve_model_reference(super::super::model_references::ReferenceKind::Read, reference)?;
+            if selected.owner != "catalog-followup" { return Err(RuntimeError::Invalid("Read reference belongs to another owner".into())); }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct ReadTarget { tool: String, source: Option<launches::SourceSelection>, arguments: FollowupToolInput }
+            let target: ReadTarget = serde_json::from_value(selected.target)?;
+            if target.tool != TOOL || target.source.is_some() || !matches!(target.arguments,
+                FollowupToolInput::Get{..}|FollowupToolInput::Occurrence{..}|FollowupToolInput::Occurrences{..}) {
+                return Err(RuntimeError::Invalid("Read reference is not a follow-up read selection".into()));
+            }
+            *input = target.arguments;
+        }
+        let id=match input {
+            FollowupToolInput::Arrange {followup_id,..}=>followup_id.as_mut(),
+            FollowupToolInput::Get {followup_id} | FollowupToolInput::Control {followup_id,..}
+            | FollowupToolInput::Occurrence {followup_id,..} | FollowupToolInput::Occurrences {followup_id,..}
+            | FollowupToolInput::Route {followup_id,..} | FollowupToolInput::Backlog {followup_id,..}=>Some(followup_id),
+            _=>None,
+        };
+        if let Some(id)=id {*id=self.resolve_followup_reference(id)?;}
+        if let FollowupToolInput::Occurrence {followup_id,occurrence_id} = input {
+            if occurrence_id.starts_with("obs:") {
+                let selected = self.resolve_model_reference(super::super::model_references::ReferenceKind::Observation, occurrence_id)?;
+                if selected.owner != "catalog-followup" { return Err(RuntimeError::Invalid("Observation belongs to another owner".into())); }
+                #[derive(Deserialize)]
+                #[serde(rename_all="camelCase",deny_unknown_fields)]
+                struct Target {followup_id:String,occurrence_id:String}
+                let target:Target = serde_json::from_value(selected.target)?;
+                if target.followup_id != *followup_id {return Err(RuntimeError::Conflict("Occurrence belongs to another follow-up".into()));}
+                *occurrence_id = target.occurrence_id;
+            }
+        }
+        Ok(())
+    }
+    pub fn resolve_followup_job_reference(&self, reference:&str)->Result<String> {
+        let kind=if reference.starts_with("job:") {super::super::model_references::ReferenceKind::Job}
+            else if reference.starts_with("forward:") {super::super::model_references::ReferenceKind::Forward}
+            else {return Ok(reference.into());};
+        #[derive(Deserialize)]
+        #[serde(rename_all="camelCase",deny_unknown_fields)]
+        struct Target {operation_id:String}
+        let selected = self.resolve_model_reference(kind,reference)?;
+        let target:Target = serde_json::from_value(selected.target)?;
+        Ok(target.operation_id)
+    }
+
+    fn resolve_followup_process_references(&self, trigger:&mut FollowupRegistrationTrigger) -> Result<()> {
+        fn leaf(catalog:&Catalog, source:&mut FollowupRegistrationSource)->Result<()> {
+            match source {
+                FollowupRegistrationSource::ProcessStopped {operation_id} => *operation_id=catalog.resolve_managed_process_reference(operation_id)?,
+                FollowupRegistrationSource::JobStopped {operation_id} | FollowupRegistrationSource::Artifact {operation_id,..}
+                | FollowupRegistrationSource::Collection {operation_id} | FollowupRegistrationSource::LogLiteral {operation_id,..}
+                | FollowupRegistrationSource::LogEnd {operation_id,..} => *operation_id=catalog.resolve_followup_job_reference(operation_id)?,
+                _=>(),
+            }
+            Ok(())
+        }
+        match trigger {
+            FollowupRegistrationTrigger::ProcessStopped {operation_id} => *operation_id=self.resolve_managed_process_reference(operation_id)?,
+            FollowupRegistrationTrigger::JobStopped {operation_id} | FollowupRegistrationTrigger::Artifact {operation_id,..}
+            | FollowupRegistrationTrigger::Collection {operation_id} | FollowupRegistrationTrigger::LogLiteral {operation_id,..}
+            | FollowupRegistrationTrigger::LogEnd {operation_id,..} => *operation_id=self.resolve_followup_job_reference(operation_id)?,
+            FollowupRegistrationTrigger::Any {sources} | FollowupRegistrationTrigger::All {sources} => for source in sources {leaf(self,source)?;},
+            _=>(),
+        }
+        Ok(())
+    }
+
     pub fn prepare_followup_registration(
         &self,
         key: &str,
@@ -585,7 +666,11 @@ impl Catalog {
             .optional()?;
         let accepted = optional_record::<Definition>(&self.db, "followups", &id)?.is_some();
         let pending_files = self.pending_file_registration(&id)?;
+        let original_input = input.clone();
+        let mut input = input;
+        self.resolve_followup_process_references(&mut input.trigger)?;
         Ok(FollowupRegistrationPreparation {
+            original_input,
             accepted,
             pending_files,
             id,
@@ -785,7 +870,7 @@ impl FollowupRegistrationPreparation {
             .invocation
             .map(|(r, c, s)| {
                 let parsed: FollowupToolInput = serde_json::from_value(c.arguments.clone())?;
-                if parsed.registration().as_ref() != Some(&self.input) {
+                if parsed.registration().as_ref() != Some(&self.original_input) {
                     return Err(RuntimeError::Conflict(
                         "follow-up registration changed original arguments".into(),
                     ));
@@ -802,7 +887,7 @@ impl FollowupRegistrationPreparation {
         self.input.trigger.normalize_paths()?;
         let instruction = self.content.save(&json!(self.input.instruction))?;
         let completion=invocation.as_ref().map(|_|->Result<_>{
-            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: None,}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()}).into()}};
+            let completion=if self.input.wait.is_some(){ToolCompletion::JobAccepted{operation_id:self.operation.as_ref().expect("operation").id.clone(),phase:"awaiting_followup".into(),effect:Effect::Confirmed,lifetime:Lifetime::Thread, content: Some(json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()}).into()),}}else{ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,content:json!({"accepted":true,"followupId":self.id,"threadId":self.run.thread_id,"branchId":self.run.branch_id,"trigger":self.input.trigger.trigger()}).into()}};
             let metadata=result_content::ToolCompletionMetadata::write(&self.content,&completion)?;Ok((completion,metadata))
         }).transpose()?;
         Ok(PreparedFollowupRegistration {
@@ -944,7 +1029,7 @@ impl FollowupToolRead {
         if i.call != self.call
             || self.call.name != TOOL
             || self.call.schema_version != self.schema.version
-            || !i.tools.contains(&self.schema)
+            || !i.tools.iter().any(|tool|tool.name==self.call.name && tool.version==self.call.schema_version)
         {
             return Err(RuntimeError::Conflict(
                 "follow-up read was not selected by this invocation".into(),
@@ -1049,6 +1134,7 @@ impl Catalog {
 }
 pub struct FollowupControlPreparation {
     id: String,
+    original_id: String,
     revision: u64,
     action: FollowupControlAction,
     definition: Definition,
@@ -1083,6 +1169,8 @@ impl Catalog {
         revision: u64,
         action: FollowupControlAction,
     ) -> Result<FollowupControlPreparation> {
+        let original_id=call.arguments["followupId"].as_str().ok_or_else(||RuntimeError::Invalid("followupId required".into()))?.to_owned();
+        if self.resolve_followup_reference(&original_id)? != id {return Err(RuntimeError::Conflict("Follow-up target differs from the original selection".into()));}
         let run = self.run(&c.run_id)?;
         let d: Definition = record(&self.db, "followups", id)?;
         if !events::tool_owns(&self.db, &d, &run.thread_id, &run.branch_id)? {
@@ -1091,6 +1179,7 @@ impl Catalog {
             ));
         }
         Ok(FollowupControlPreparation {
+            original_id,
             id: id.into(),
             revision,
             action,
@@ -1142,7 +1231,7 @@ impl FollowupControlPreparation {
         let parsed: FollowupToolInput = serde_json::from_value(call.arguments.clone())?;
         if parsed
             != (FollowupToolInput::Control {
-                followup_id: self.id.clone(),
+                followup_id: self.original_id.clone(),
                 expected_revision: self.revision,
                 control: self.action,
             })

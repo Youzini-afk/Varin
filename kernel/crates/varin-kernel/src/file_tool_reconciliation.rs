@@ -22,7 +22,7 @@ pub(crate) fn recovered_output(file: &Value, operation_id: &str) -> Result<varin
         data["attachment"] = value.clone();
         parts.push(varin_runtime::output::OutputPart::Attachment { attachment });
     }
-    Ok(varin_runtime::output::OutputBody { data, parts })
+    Ok(varin_runtime::output::OutputBody { model_data: None, data, parts })
 }
 
 pub(crate) fn reconcile(runtime: &RunSupervisor, resources: &KernelResourceClient, binding: Option<&ToolBinding>,

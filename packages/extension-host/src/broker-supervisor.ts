@@ -456,7 +456,7 @@ export class BrokeredHostSupervisor {
   readonly #anchors = new Map<string, HostCompositionLease>();
   readonly #ownerGrants = new Map<string, {
     owner: HostServiceOwnerIdentity; artifactIntegrity: string; grants: VarinExtensionCapabilityGrant[];
-    desiredRevision: number; slot: 'candidate' | 'selected'; broker: BrokeredHostTransport; native: boolean;
+    desiredRevision: number; slot: 'candidate' | 'selected'; broker: BrokeredHostTransport; native: boolean; builtin: boolean;
   }>();
   readonly #epochs = new Map<string, number>();
   readonly #restartWork = new Map<string, Promise<void>>();
@@ -596,6 +596,11 @@ export class BrokeredHostSupervisor {
   getRetainedArtifactIdentity(owner: HostServiceOwnerIdentity): string | undefined {
     const retained = this.#ownerGrants.get(ownerStorageKey(owner));
     return retained?.owner.extensionVersion === owner.extensionVersion ? retained.artifactIntegrity : undefined;
+  }
+  /** Package provenance belongs to the original retained generation, never its name. */
+  isRetainedBuiltin(owner: HostServiceOwnerIdentity): boolean {
+    const retained = this.#ownerGrants.get(ownerStorageKey(owner));
+    return retained?.owner.extensionVersion === owner.extensionVersion && retained.builtin;
   }
   /** Trusted capability consumers read the calling generation, including a draining retained one. */
   getRetainedManifest(owner: HostServiceOwnerIdentity): VarinExtensionManifest | undefined {
@@ -1311,7 +1316,7 @@ export class BrokeredHostSupervisor {
           },
         });
       this.#ownerDependencies.set(ownerStorageKey(owner), { bindings: composition.dependencies, pins: composition.dependencyPins });
-      this.#ownerGrants.set(ownerStorageKey(owner), { owner, artifactIntegrity: selection.integrity, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native" });
+      this.#ownerGrants.set(ownerStorageKey(owner), { owner, artifactIntegrity: selection.integrity, grants, desiredRevision: entry.desired.revision, slot: selection.slot, broker, native: selection.manifest.entrypoints?.host?.mode === "native", builtin: (selection.slot === "candidate" ? entry.candidate?.source : entry.source)?.kind === "builtin" });
       const cancelPreparation = () => broker.forceTerminate();
       controller.signal.addEventListener("abort", cancelPreparation, { once: true });
       if (controller.signal.aborted) cancelPreparation();

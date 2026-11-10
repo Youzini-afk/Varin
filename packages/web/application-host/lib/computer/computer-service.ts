@@ -1945,7 +1945,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       rememberObservation(observation);
       return observationPage(observation, params);
     }
-    const generation = laneGeneration(id);
+    const generation = laneGeneration(id), observedEpoch = modelEpoch(id);
     return enqueue(id, "observe", async () => {
       params.signal?.throwIfAborted();
       const { driver, desktop } = await driverFor(id);
@@ -1966,7 +1966,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       finish(response.ok && Boolean(response.snapshot), isObject(response.snapshot?.app) ? asString(response.snapshot.app.name) : undefined);
       params.signal?.throwIfAborted();
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
-      const observation = observationOf(response.snapshot, desktop);
+      const observation = { ...observationOf(response.snapshot, desktop), automationEpoch: observedEpoch };
       if (generation === laneGeneration(id) && !laneFor(id).transitioning) {
         rememberObservation(observation);
         if (laneFor(id).control.owner === "agent" && automation.isController(id)) laneFor(id).needsObservation = false;
@@ -2192,6 +2192,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the desktop after handback before resuming input");
     };
     let submitted = false;
+    const observedEpoch = modelEpoch(id);
     try {
       assertAdmission();
       const { response, desktop } = await enqueue(id, "action", async () => {
@@ -2248,7 +2249,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }
       }
       if (response.snapshot && laneGeneration(id) === generation) {
-        const observation = observationOf(response.snapshot, desktop);
+        const observation = { ...observationOf(response.snapshot, desktop), automationEpoch: observedEpoch };
         rememberObservation(observation);
         result.observation = observationPage(observation, { includeScreenshot: action.returnState === 'screenshot' });
       }

@@ -1,3 +1,14 @@
+-- Remove post-89 reference metadata as well; this fixture represents a released
+-- pre-89 Catalog, not a current database with only its version label changed.
+DROP TABLE model_reference_holders;
+DROP TABLE model_references;
+DROP TABLE model_reference_space;
+DROP TABLE model_execution_aliases;
+DROP TABLE model_executions;
+DROP TABLE model_agents;
+DROP TABLE model_bound_targets;
+ALTER TABLE external_items DROP COLUMN kind;
+ALTER TABLE external_items DROP COLUMN tool_status;
 -- Remove the arrangement domain before reconstructing a pre-89 Catalog fixture.
 -- The caller separately restores older domains and writes the historical format marker.
 DROP TABLE followup_event_file_refs;

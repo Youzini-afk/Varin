@@ -148,9 +148,16 @@ worker retains only its latest compiled prefix under exact epoch/Run/branch/chec
 new steps hydrate the new suffix, while current memory/Goal/policy evidence is freshly projected.
 Navigation, changed checkpoints and worker exit discard the derived cache.
 
-The current-teammates projection is appended last and omitted when empty. It is temporary request data;
-only the exact request snapshot retains it. Delivery acknowledgements consume reports actually included in
-the organizer's completed model exchange. The same indexed lifecycle facts drive current/history UI pages.
+Collaboration messages and original reports append through the existing input/history owner. The engine
+never enumerates teammates at each model step. Report delivery is acknowledged by the actual receiving
+history transaction, not by parsing prompt text or observing a directory. Ordinary idle Agents are not
+started by passive reports; Bot continuation keeps its existing policy. Old delivery facts retain their meaning.
+
+[Model references](src/catalog_model_references.rs) persist small typed original-owner/selection mappings
+and per-Agent admission sequences. They contain no resource bytes and grant no access. Fixed file reads
+retain the original source/version/format; accepted controls retain their selected execution across retries.
+OutputBody keeps the original data and an optional stable model_data projection. Providers consume that
+projection without rewriting historical bodies or introducing another receipt authority.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped
