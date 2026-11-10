@@ -2239,7 +2239,8 @@ export class AgentRuntimeClient {
       if (bytes.length !== total) throw new Error('Original completion media is incomplete');
       parts.push({ kind: 'media', media: { media_type: part.media.media_type, data_base64: bytes.toString('base64') } });
     }
-    return { ...completion, content: { data: body.data, parts } };
+    // This private owner round-trip changes media representation, not the frozen receipt.
+    return { ...completion, content: { ...body, parts } };
   }
   mediaRead(params: MediaReadParams, signal?: AbortSignal): Promise<MediaReadChunk> {
     return this.kernel.agentRuntimeRequest('runtime.output.media.read', params, signal);
