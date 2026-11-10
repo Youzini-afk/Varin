@@ -200,7 +200,7 @@ fn hybrid_file_read_can_be_selected_without_granting_a_source() {
 
 #[test]
 fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch() {
-    use varin_runtime::catalog::{calendar, context::ContextProposal, launches::LaunchSelection};
+    use varin_runtime::catalog::{calendar, context::ContextProposal, launches::{ExtensionAdmissionState, LaunchSelection}};
     use varin_runtime::{Catalog, RunState, SubmitInput};
 
     let fixed_branch = serde_json::from_value(json!({
@@ -288,6 +288,21 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
             catalog.run(occurrence.run_id.as_ref().unwrap()).unwrap()
         };
         assert_ne!(run.id, previous.run_id);
+        // The production Host commits current extension discovery before run.start.
+        // This kernel-only fixture has no extension tools, but empty is still an
+        // explicit preparation result, not permission for assembly to skip Pending.
+        let preparation = {
+            let owner = runtime.catalog();
+            let mut catalog = owner.lock().unwrap();
+            let pending = catalog.launch_intent(&run.id).unwrap().unwrap();
+            assert_eq!(pending.extension_admission.unwrap().state, ExtensionAdmissionState::Pending);
+            assert!(catalog.bind_launch(&run.id, pending.selection).unwrap_err().to_string()
+                .contains("current extension directory is not prepared"));
+            catalog.prepare_extensions_change(&run.id, vec![]).unwrap()
+        };
+        let prepared = preparation.load().unwrap();
+        let read = runtime.catalog().lock().unwrap().admit_launch_change(prepared).unwrap();
+        assert_eq!(read.load().unwrap().extension_admission.unwrap().state, ExtensionAdmissionState::Prepared);
         let (assembly, _frames) = assembly(runtime.clone());
         let mut params = json!({"runId":run.id});
         if let Some(source) = &source {
