@@ -2039,7 +2039,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!officeRuntimeOwner.current) throw new Error('Office tool preparation is unavailable');
     if (!browserRuntimeOwner.current) throw new Error('Browser tool preparation is unavailable');
     let configuration = await computerRuntimeOwner.current.prepareConfiguration(run, required);
-    configuration = await scriptRuntimeOwner.current.prepareConfiguration(configuration, run.source);
+    configuration = await scriptRuntimeOwner.current.prepareConfiguration(configuration, run.source, required);
     configuration = await webRuntimeOwner.current.prepareConfiguration(run, required, configuration);
     configuration = await researchDiscoveryOwner.current.prepareConfiguration(run, required, configuration);
     configuration = await imageRuntimeOwner.current.prepareConfiguration(run, required, configuration);
