@@ -3,10 +3,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
+import { queuedQuoteDraft } from './queuedQuoteDraft';
 import { CollaborationComposer } from './CollaborationComposer';
 import { selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/i18n', async original => ({ ...await original<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: (key: string) => key }) }));
+// Delivery tests exercise the composer port; pointer/IME/history live in real editor tests.
+vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEditor: React.forwardRef((props: { value: string; editable?: boolean; onChange(change: { value: string; references: never[]; interactions: never[]; markerObjects: never[] }): void }, ref) => {
+  React.useImperativeHandle(ref, () => ({ focus() {} }));
+  return <textarea value={props.value} disabled={props.editable === false} onChange={event => props.onChange({ value: event.target.value, references: [], interactions: [], markerObjects: [] })} />;
+}) }));
 const rootIdentity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
 const target: ThreadIdentity = { runtime: 'agent', threadId: 'worker', branchId: 'worktree-branch' };
 let root: Root;
@@ -139,4 +146,62 @@ it('rejects a source change during upload before sending paths, while retaining 
   expect(useThreadDraftStore.getState().drafts['scope-change']).toMatchObject({ selectedAttachments: [{ id: 'path' }], files: [{ attachment: { ref: 'attachment:uploaded-original' } }], collaboration: { sending: false } });
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="collaboration.send"]')!.click());
   expect(upload).toHaveBeenCalledTimes(1); expect(send).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('preserves newly inserted quote occurrences and fixed image numbers when collaboration receipt follows retry=%s', async retry => {
+  const key = 'quoted-collaboration';
+  let accept!: () => void;
+  const send = vi.fn<NonNullable<ThreadsAPI['messages']>['send']>();
+  if (retry) send.mockRejectedValueOnce(new Error('response lost'));
+  send.mockImplementationOnce(() => new Promise(resolve => { accept = () => resolve({ messageId: 'accepted-quote' } as never); }));
+  const upload = vi.fn<ThreadsAPI['attachments']['upload']>().mockResolvedValue({ ref: 'attachment:original-image', filename: 'image.png', mimeType: 'image/png', byteLength: 1 });
+  const api = { messages: { send }, attachments: { upload } } as unknown as ThreadsAPI;
+  useThreadDraftStore.getState().patch(key, { text: 'Discuss ', collaboration: { targets: [target] } });
+  const source = { kind: 'chat' as const, thread: rootIdentity, itemId: 'actual-source', passages: [{ entryId: 'actual-source', start: 3, text: 'Fixed paragraph' }] };
+  const quote = referenceMarkerObject({ ref: 'original-quote', title: 'Varin', text: 'Fixed paragraph', source });
+  const image = referenceMarkerObject({ ref: 'original-image', title: 'Image', image: { mimeType: 'image/png', data: 'YQ==' }, source });
+  await insertDraftMarker(key, quote); await insertDraftMarker(key, image);
+  const original = useThreadDraftStore.getState().drafts[key];
+  const frozen = freezeDraftContentReferences(original);
+  await act(async () => root.render(<CollaborationComposer api={api} identity={rootIdentity} draftKey={key} members={[]} onSent={() => {}} moreMembers={false} loadMembers={() => {}} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="collaboration.send"]')!.click());
+  expect(send.mock.calls[0]![1]).toMatchObject({ text: original.text, ...frozen, attachments: [{ ref: 'attachment:original-image' }], attachmentImageReferences: { 'attachment:original-image': 1 } });
+  await act(async () => {
+    useThreadDraftStore.getState().patch(key, draft => ({ text: `${draft.text} Later: ` }));
+    await insertDraftMarker(key, quote);
+  });
+  const later = useThreadDraftStore.getState().drafts[key].references!.at(-1)!;
+  if (retry) {
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="chat.messages.retry"]')!.click());
+    expect(send.mock.calls[1]![1]).toEqual(send.mock.calls[0]![1]);
+  }
+  await act(async () => accept());
+  const remainder = useThreadDraftStore.getState().drafts[key];
+  expect(remainder.text).toBe(`Discuss  Later: ${later.text}`);
+  expect(remainder.references?.map(value => value.id)).toEqual([later.id]);
+  expect(remainder.markerObjects?.map(value => value.id)).toEqual([quote.id]);
+  expect(remainder.images).toEqual([]);
+  expect(upload).toHaveBeenCalledOnce();
+});
+
+it('transfers copied retained media through its original reader and the collaboration sender attachment owner', async () => {
+  const key = 'copied-queued-collaboration';
+  const media = { media_type: 'image/png', content_ref: { content_object: 'fixed-media' }, source: { kind: 'operation' as const, operation_id: 'capture' } };
+  const source = { ...rootIdentity, threadId: 'original-source', branchId: 'source-branch' };
+  const input = { id: 'original-queued-input', revision: 2, thread_id: source.threadId, branch_id: source.branchId, run_id: 'run', mode: 'boundary', state: 'queued', cursor: 1,
+    content: { text: '[Image 6]', imageReferences: [6], attachments: [media], contentReferenceOccurrences: [{ kind: 'image', reference: 6, start: 0, end: 9 }] } } as unknown as import('@varin/protocol').QueuedInput;
+  useThreadDraftStore.getState().patch(key, { text: 'Compare ', collaboration: { targets: [target] } });
+  await insertDraftMarker(key, queuedQuoteDraft(input, source).markerObjects[0]!);
+  const text = useThreadDraftStore.getState().drafts[key].text;
+  const mediaRead = vi.fn<ThreadsAPI['mediaRead']>(async request => ({ media, partIndex: request.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: 3, bytesBase64: 'AQID' }));
+  const upload = vi.fn<ThreadsAPI['attachments']['upload']>().mockResolvedValue({ ref: 'attachment:collaboration-image', filename: 'image.png', mimeType: 'image/png', byteLength: 3 });
+  const send = vi.fn<NonNullable<ThreadsAPI['messages']>['send']>().mockResolvedValue({ messageId: 'accepted' } as never);
+  const api = { mediaRead, attachments: { upload }, messages: { send } } as unknown as ThreadsAPI;
+  await act(async () => root.render(<CollaborationComposer api={api} identity={rootIdentity} draftKey={key} members={[]} onSent={() => {}} moreMembers={false} loadMembers={() => {}} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="collaboration.send"]')!.click());
+  expect(mediaRead).toHaveBeenCalledWith({ ...source, holder: { kind: 'input', inputId: input.id, expectedRevision: 2 }, partIndex: 0, chunkIndex: 0, expectedContentRef: 'fixed-media' }, expect.any(AbortSignal));
+  expect(upload).toHaveBeenCalledWith(rootIdentity, expect.objectContaining({ mimeType: 'image/png' }));
+  expect([...new Uint8Array(await upload.mock.calls[0]![1].data.arrayBuffer())]).toEqual([1, 2, 3]);
+  expect(send).toHaveBeenCalledWith(rootIdentity, expect.objectContaining({ text, attachments: [{ ref: 'attachment:collaboration-image' }], attachmentImageReferences: { 'attachment:collaboration-image': 1 },
+    targetThreadId: target.threadId, targetBranchId: target.branchId, contentReferenceOccurrences: [{ kind: 'image', reference: 1, start: 8, end: text.length }] }));
 });

@@ -1,3 +1,4 @@
+import { prepareQuoteSelections } from '../kernel/thread-quotes.js';
 import { parseAttachmentImageReferences } from '../kernel/thread-images.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, stat } from 'node:fs/promises';
@@ -916,7 +917,7 @@ export class ExternalAgentsService {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
     if (
-      Object.keys(input).some((key) => !['text', 'images', 'attachments', 'attachmentImageReferences', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
+      typeof input.text !== 'string' || Object.keys(input).some((key) => !['text', 'images', 'attachments', 'attachmentImageReferences', 'model', 'thinking', 'mode', 'config', 'contentReferences', 'contentReferenceOccurrences'].includes(key)) ||
       (input.config !== undefined && (!input.config || typeof input.config !== 'object' || Array.isArray(input.config) || Object.values(input.config).some((v) => typeof v !== 'string'))) ||
       ['model', 'thinking', 'mode'].some(
         (key) =>
@@ -934,9 +935,11 @@ export class ExternalAgentsService {
           )))
     )
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
+    const quoted = prepareQuoteSelections(input);
+    input = { ...input, ...quoted.quotes, ...(quoted.images === undefined ? {} : { images: quoted.images }), ...(quoted.attachments.length ? { attachments: quoted.attachments } : {}) };
     parseAttachmentImageReferences(input.attachmentImageReferences);
     const selections = parseExternalAttachmentSelections(input.attachments);
-    if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length && !selections?.length))
+    if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length && !selections?.length && !input.contentReferences?.length))
       throw new ExternalAgentError('empty_input', 'Enter a message');
     const snapshot = await this.read(id);
     const previous = snapshot.turns.find((turn) => turn.key === key);
@@ -948,6 +951,7 @@ export class ExternalAgentsService {
         original: true,
       });
       const original = { ...saved, ...(_attachmentSelections !== undefined ? { attachments: _attachmentSelections } : frozenAttachments !== undefined ? { attachments: frozenAttachments } : {}) };
+      if (original.contentReferences) original.contentReferences = original.contentReferences.map(({ attachmentRef: _prepared, ...reference }) => reference);
       if (!isDeepStrictEqual(original, input))
         throw new ExternalAgentError(
           'input_changed',
@@ -971,7 +975,7 @@ export class ExternalAgentsService {
       signal.throwIfAborted();
       const receipt = await this.command<ExternalTurn>({
         action: 'admit', id, key,
-        input: { ...input, ...(prepared ? { attachments: prepared, _attachmentSelections: selections } : {}), _launch: { command: config.command, args: config.args } },
+        input: { ...input, ...quoted.bind(prepared ?? []), ...(prepared ? { attachments: prepared, _attachmentSelections: selections } : {}), _launch: { command: config.command, args: config.args } },
       });
       this.notify(id, true);
       this.advance(id);
@@ -1134,6 +1138,9 @@ export class ExternalAgentsService {
           ...(input.senderThreadId ? { senderThreadId: input.senderThreadId } : {}),
           ...(input.images?.length ? { images: input.images } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          ...(input.contentReferences === undefined ? {} : { contentReferences: input.contentReferences }),
+          ...(input.contentReferenceOccurrences === undefined ? {} : { contentReferenceOccurrences: input.contentReferenceOccurrences }),
+          ...(input.attachmentImageReferences === undefined ? {} : { attachmentImageReferences: input.attachmentImageReferences }),
         });
         await flush();
         if ((await this.read(id)).turns.find((t) => t.id === turn.id)?.status === 'stopping')

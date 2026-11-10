@@ -23,7 +23,7 @@ it('retains restored numbers and starts numbering afresh after an accepted draft
   const insertion = beginImageInsertion('draft', null, number => `[Image ${number}]`);
   insertion.append({ mimeType: 'image/png', data: 'Yg==' });
   expect(useThreadDraftStore.getState().drafts.draft.images.map(image => image.reference)).toEqual([5, 6]);
-  store.patch('draft', { text: '', images: [] });
+  store.patch('draft', { text: '', images: [], markerObjects: [], references: [], editorState: undefined });
   insertion.append({ mimeType: 'image/png', data: 'Yg==' });
   expect(useThreadDraftStore.getState().drafts.draft.text).toBe('[Image 1]');
 });

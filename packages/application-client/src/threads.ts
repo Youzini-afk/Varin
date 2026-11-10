@@ -1,3 +1,4 @@
+import type { ContentReferenceInput } from './content-reference.js';
 import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, ContextCompactionCandidate, ContextCompactionProducer, SourceFailureCode, SourceResourceOwner } from '@varin/protocol';
 import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
@@ -167,7 +168,7 @@ export type ThreadObjectReference =
   | { kind: 'thread'; threadId: string; branchId: string; start: number; end: number }
   | { kind: 'directory'; path: string; start: number; end: number };
 export interface ThreadSkillCatalog { snapshotId: string; skills: ThreadSkillCandidate[] }
-export interface ThreadSubmit extends ThreadIdentity {
+export interface ThreadSubmit extends ThreadIdentity, ContentReferenceInput {
   clientTime?: import('@varin/protocol').MessageTimeObservation;
   key: string;
   expectedHead: string | null;
@@ -297,11 +298,11 @@ export interface ThreadMessagesAPI {
   control(identity: ThreadIdentity, request: { messageId: string; expectedRevision: number; action: 'send_now' | 'cancel' | 'edit'; text?: string }, signal?: AbortSignal): Promise<MessageView>;
   /** Original family messages, including peer exchanges; reading never activates a participant. */
   feed(identity: ThreadIdentity, request: Omit<MessageFeedParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessageFeedPage>;
-  send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia'>, signal?: AbortSignal): Promise<MessageReceipt>;
+  send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia' | 'imageReferences' | 'contentReferences' | 'contentReferenceOccurrences'> & ContentReferenceInput, signal?: AbortSignal): Promise<MessageReceipt>;
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
-export interface ThreadChildContinuation extends ThreadIdentity {
+export interface ThreadChildContinuation extends ThreadIdentity, ContentReferenceInput {
   clientTime?: import('@varin/protocol').MessageTimeObservation;
   sourceAgent?: string;
   name?: string;
@@ -602,7 +603,7 @@ export interface ThreadsAPI {
   sources: ThreadSourcesAPI;
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
-  prepareNavigation(input: ThreadIdentity & { entryId: string }): Promise<import("@varin/protocol").NavigationSelection & { editorImages?: ImageAttachment[] }>;
+  prepareNavigation(input: ThreadIdentity & { entryId: string }): Promise<import("@varin/protocol").NavigationSelection & { editorImages?: ImageAttachment[]; editorContentReferences?: import('./content-reference.js').ContentReference[]; editorContentReferenceOccurrences?: import('./content-reference.js').ContentReferenceOccurrence[]; editorAttachments?: import('@varin/protocol').Attachment[]; editorAttachmentImageReferences?: Record<string, number> }>;
   recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ resourceOwner: SourceResourceOwner; workspaceId: string; mode: ThreadSource['mode']; runId: string } | null>;
   navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }): Promise<import("@varin/protocol").NavigationReceipt>;
   navigationReceipt(input: ThreadIdentity & { key: string }): Promise<import("@varin/protocol").NavigationReceipt | null>;
@@ -613,8 +614,8 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
-  editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], skills?: ThreadSkillSelection[]): Promise<QueuedInput>;
+  enqueue(input: ThreadIdentity & ContentReferenceInput & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
+  editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], skills?: ThreadSkillSelection[], quotes?: ContentReferenceInput): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */

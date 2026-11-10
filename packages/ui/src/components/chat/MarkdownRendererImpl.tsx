@@ -1,8 +1,10 @@
 import React from 'react';
 import { usePacedText } from './usePacedText';
+import { BoundReferenceContext, decorateBoundReferences } from '@/components/conversation/chatBoundReferenceMarkers';
 import { MarkdownInk } from './markdownInk';
 import { usePdfMaterialLinkInteractions } from '@/components/materials/usePdfMaterialLinkInteractions';
 import morphdom from 'morphdom';
+import { bindRenderedMarkdownSource } from './markdown/sourceBlocks';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 // Keep KaTeX and its fonts in the same lazy boundary as the full Markdown
 // renderer. Importing the stylesheet from TypeScript lets Vite resolve its
@@ -147,6 +149,7 @@ export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
 interface MarkdownRendererProps {
   content: string;
+  sourceOffset?: number;
   part?: MarkdownPartIdentity;
   messageId: string;
   isAnimated?: boolean;
@@ -791,8 +794,10 @@ const useMorphdomMarkdown = ({
   onContentChange,
   ink,
   images,
+  sourceOffset = 0,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  sourceOffset?: number;
   text: string;
   streaming: boolean;
   cacheKey: string;
@@ -803,6 +808,7 @@ const useMorphdomMarkdown = ({
   ink?: MarkdownInk;
   images: Pick<ReturnType<typeof useMarkdownImages>, 'labels' | 'refresh'>;
 }) => {
+  const boundReferences = React.useContext(BoundReferenceContext);
   const onContentChangeRef = React.useRef(onContentChange);
   const { labels: imageLabels, refresh: refreshImages } = images;
   onContentChangeRef.current = onContentChange;
@@ -842,6 +848,7 @@ const useMorphdomMarkdown = ({
       // HTML body — the wrapper exists only for per-block reconciliation.
       block.style.display = 'contents';
       block.innerHTML = renderMarkdownSync(text);
+      bindRenderedMarkdownSource(block, text, sourceOffset);
       // Decorate synchronously too: wrap code blocks in their framed card,
       // mark inline code, build table controls, etc. The async pass re-decorates
       // its own DOM before morphing, so without this the first paint shows bare
@@ -850,12 +857,13 @@ const useMorphdomMarkdown = ({
       decorateMarkdownImages(block, imageLabels);
       decorateMarkdown(block, ctx);
       target.appendChild(block);
+      decorateBoundReferences(target, text, boundReferences, sourceOffset);
       refreshImages();
       if (shouldRefreshMermaidViewers(block)) {
         refreshMermaidViewers();
       }
     }
-  }, [containerRef, text, ctx, refreshMermaidViewers, imageLabels, refreshImages]);
+  }, [containerRef, text, sourceOffset, ctx, refreshMermaidViewers, imageLabels, refreshImages, boundReferences]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -898,6 +906,7 @@ const useMorphdomMarkdown = ({
           target.appendChild(el);
           changed = true;
         }
+        bindRenderedMarkdownSource(el, text, sourceOffset, block.offset);
         if (el.getAttribute('data-md-id') === block.id) return;
 
         const temp = document.createElement('div');
@@ -933,6 +942,7 @@ const useMorphdomMarkdown = ({
       if (removedMermaidBlock) {
         refreshMermaidViewers();
       }
+      decorateBoundReferences(target, text, boundReferences, sourceOffset);
       if (changed) refreshImages();
 
       if (changed && inking) ink!.update(target, streaming, undefined, changedBlocks);
@@ -944,7 +954,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, blockStream, ctx, refreshMermaidViewers, ink, fenceRevision, imageLabels, refreshImages]);
+  }, [containerRef, text, sourceOffset, streaming, cacheKey, blockStream, ctx, refreshMermaidViewers, ink, fenceRevision, imageLabels, refreshImages, boundReferences]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -981,6 +991,7 @@ const markdownContentClassName = (variant: MarkdownVariant): string =>
 
 const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   content,
+  sourceOffset = 0,
   part,
   messageId,
   isAnimated = true,
@@ -1028,6 +1039,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useMorphdomMarkdown({
     containerRef,
     text: paced.text,
+    sourceOffset,
     streaming: live,
     cacheKey,
     syntaxVars,
@@ -1057,6 +1069,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 
 const MarkdownTextRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
   return prev.content === next.content
+    && prev.sourceOffset === next.sourceOffset
     && prev.isStreaming === next.isStreaming
     && prev.disableStreamAnimation === next.disableStreamAnimation
     && prev.variant === next.variant
@@ -1072,7 +1085,7 @@ const MarkdownTextRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
 
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = (props) => (
   <ConversationContent content={props.content} messageId={props.messageId} variant={props.variant} isStreaming={props.isStreaming}
-    renderMarkdown={(text, start, streaming) => <MarkdownTextRenderer {...props} content={text} part={{ id: `${props.part?.id ?? props.messageId}:${start}` }} isStreaming={streaming} />} />
+    renderMarkdown={(text, start, streaming) => <MarkdownTextRenderer {...props} content={text} sourceOffset={start} part={{ id: `${props.part?.id ?? props.messageId}:${start}` }} isStreaming={streaming} />} />
 );
 
 const SimpleMarkdownRendererImpl: React.FC<{

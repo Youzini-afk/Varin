@@ -277,6 +277,7 @@ test('keeps an old interactive selection as source evidence rather than overridi
   })]);
   expect(text.startsWith('Actually, use long hair')).toBe(true);
   expect(text).toContain('Short hair');
-  expect(text).toContain('not an additional user instruction');
-  expect(text).toContain('may differ from this earlier selection');
+  expect(text).not.toContain('ui:hair@snapshot:short');
+  expect(text).not.toContain('revisionRef');
+  expect(text).not.toContain('Source:');
 });

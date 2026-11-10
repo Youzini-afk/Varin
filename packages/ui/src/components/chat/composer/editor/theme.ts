@@ -82,7 +82,10 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     },
 };
 
-export const composerEditorTheme = EditorView.theme(COMPOSER_EDITOR_THEME_SPEC);
+export const composerEditorTheme = EditorView.theme({ ...COMPOSER_EDITOR_THEME_SPEC,
+    '.cm-bound-marker': { color: 'var(--primary)', backgroundColor: 'color-mix(in srgb, var(--primary) 9%, transparent)', borderRadius: '3px', whiteSpace: 'nowrap', display: 'inline-block', cursor: 'pointer' },
+    '.cm-bound-marker:focus-visible': { outline: '2px solid var(--primary)', outlineOffset: '1px' },
+});
 
 /**
  * Every device keeps `drawSelection()` but shows the NATIVE selection through

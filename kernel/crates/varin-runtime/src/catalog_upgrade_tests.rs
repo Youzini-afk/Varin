@@ -708,6 +708,13 @@ fn catalog_upgrade_v90_preserves_prepared_extension_admission_and_receipts() {
     }));
 }
 
+#[test]
+fn catalog_upgrade_v91_preserves_prepared_extension_admission_and_receipts() {
+    assert_preserves_original_launch(91, Some(launches::ExtensionAdmission {
+        state: launches::ExtensionAdmissionState::Prepared,
+    }));
+}
+
 fn assert_preserves_original_launch(from: i64, admission: Option<launches::ExtensionAdmission>) {
     // Build the released layout by its actual earlier converters, not by relabelling
     // a new launch with the new admission marker as historical data.

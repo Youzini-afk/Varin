@@ -4633,6 +4633,20 @@ export const dict = {
   "bot.memory.cancelled": "Organization cancelled",
   "bot.memory.restore": "Restore this understanding",
   "bot.memory.clearHistory": "Delete this historical text",
+  "chat.quote.sourceUnavailable": "The original source is unavailable. This saved quote is unchanged.",
+  "chat.quote.insertMarker": "Insert marker",
+  "chat.quote.capturedWhileRunning": "Captured while the source was still running.",
+  "chat.context.quoteSelection": "Quote selected text",
+  "chat.context.quoteBlock": "Quote this block",
+  "chat.context.quoteCode": "Quote code",
+  "chat.context.quoteTurn": "Quote this answer",
+  "chat.context.quoteImage": "Quote image",
+  "chat.context.quoteFile": "Quote file",
+  "chat.context.quoteTool": "Quote this call",
+  "chat.context.quoteContent": "Quote current content",
+  "chat.context.userSource": "User message",
+  'chat.model.useImagesAsFiles': "Use images as readable files",
+  'chat.model.imagesAsFilesNotice': "This model cannot view images. Image files will be attached for file access, without direct visual input.",
 } as const;
 
 export type I18nKey = keyof typeof dict;

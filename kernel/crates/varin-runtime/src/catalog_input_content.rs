@@ -254,6 +254,9 @@ impl InputEditPreparation {
             if let Some(files) = previous.content.get("fileAttachments") {
                 if stored.is_string() { stored=json!({"text":stored}); }
                 stored["fileAttachments"] = files.clone();
+                if self.value.get("attachments").is_none() {
+                    if let Some(references) = previous.content.get("attachmentImageReferences") { stored["attachmentImageReferences"] = references.clone(); }
+                }
             }
         }
         if let Some(files)=self.model_attachments {stored["fileAttachments"]=serde_json::to_value(files)?;}

@@ -1,8 +1,12 @@
+import { ChangeSet } from '@codemirror/state';
+import { findMarkerComposer } from '@/components/chat/composer/editor/markerComposerRegistry';
+import { ComposerClosedError } from '@/components/chat/composer/editor/interactionRanges';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import type { EditorContextAttachment } from './types';
 import type { ThreadIdentity, ContentReference } from '@varin/application-client';
 import { threadComposerKey } from '@/stores/useThreadStore';
-import { formatMessage, useI18nStore } from '@/lib/i18n';
+import { insertDraftMarker, insertDraftMarkerAt, referenceMarkerObject, removeDraftMarker } from './contentReferences';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { releaseUiSelection } from '@/lib/interactive-ui/selection-lifetime';
 
 const listeners = new Set<() => void>();
@@ -11,10 +15,13 @@ let revision = 0;
 const ordinals = new Map<string, number>();
 export function addContentReference(identity: ThreadIdentity, reference: ContentReference) {
   const runtimeKey = getRuntimeKey(), threadKey = threadComposerKey(runtimeKey, identity);
-  const ordinal = (ordinals.get(threadKey) ?? 0) + 1; ordinals.set(threadKey, ordinal);
-  return addEditorContextAttachment({ id: crypto.randomUUID(), runtimeKey, threadKey, workspaceId: '', resourceId: reference.ref,
-    label: formatMessage(useI18nStore.getState().dictionary, 'ui.content.reference', { number: ordinal }), documentInstanceId: null, documentRevision: null, localEditRevision: 0,
-    source: 'saved', kind: 'reference', reference, ordinal, ...(reference.text === undefined ? {} : { text: reference.text }) });
+  const object = referenceMarkerObject(reference);
+  void insertDraftMarker(threadKey, object).catch(error => {
+    useThreadDraftStore.getState().patch(threadKey, { sendError: error instanceof Error ? error.message : String(error) });
+  });
+  // Keep the old action receipt shape while all capture entry points share the draft owner.
+  return { id: object.id, runtimeKey, threadKey };
+
 }
 
 const emit = (): void => {
@@ -85,6 +92,7 @@ export const addEditorContextAttachment = (
 };
 
 export const removeEditorContextAttachment = (id: string, runtimeKey: string, threadKey: string): void => {
+  if (runtimeKey === getRuntimeKey() && useThreadDraftStore.getState().drafts[threadKey]?.markerObjects?.some(object => object.id === id)) { removeDraftMarker(threadKey, id); return; }
   const previous = attachments;
   const next = attachments.filter((item) => (
     item.id !== id || item.runtimeKey !== runtimeKey || item.threadKey !== threadKey
@@ -138,3 +146,37 @@ export const acknowledgeEditorContextAttachments = (captured: readonly EditorCon
   attachments = remaining; releaseRemoved(captured);
   if (changed) emit();
 };
+
+/** Freeze the original draft and mapped caret before asynchronous source capture. */
+export function beginContentReferenceInsertion(identity: ThreadIdentity) {
+  const runtimeKey = getRuntimeKey(), threadKey = threadComposerKey(runtimeKey, identity);
+  useThreadDraftStore.getState().patch(threadKey, {});
+  const handle = findMarkerComposer(threadKey);
+  const anchor = handle?.captureMarkerInsertion();
+  const initial = useThreadDraftStore.getState().drafts[threadKey];
+  let cursor = initial?.editorState?.selection.main.head ?? initial?.text.length ?? 0;
+  let active = true, transferred = false;
+  const unsubscribe = useThreadDraftStore.subscribe((state, previous) => {
+    const before = previous.drafts[threadKey]?.text ?? '', after = state.drafts[threadKey]?.text ?? '';
+    if (before === after) return;
+    let from = 0, to = before.length, end = after.length;
+    while (from < to && from < end && before[from] === after[from]) from++;
+    while (to > from && end > from && before[to - 1] === after[end - 1]) { to--; end--; }
+    cursor = ChangeSet.of({ from, to, insert: after.slice(from, end) }, before.length).mapPos(cursor, 1);
+  });
+  const release = () => { active = false; anchor?.dispose(); unsubscribe(); };
+  return {
+    dispose() { if (!transferred) release(); },
+    add(reference: ContentReference) {
+      if (!active || runtimeKey !== getRuntimeKey()) { release(); return { status: 'wrong-runtime' as const }; }
+      transferred = true;
+      const object = referenceMarkerObject(reference);
+      const work = anchor ? anchor.insertMarker(object) : Promise.resolve(insertDraftMarkerAt(threadKey, object, cursor));
+      void work.catch(error => {
+        if (error instanceof ComposerClosedError && runtimeKey === getRuntimeKey()) return insertDraftMarkerAt(threadKey, object, cursor);
+        useThreadDraftStore.getState().patch(threadKey, { sendError: error instanceof Error ? error.message : String(error) });
+      }).finally(release);
+      return { id: object.id, runtimeKey, threadKey };
+    },
+  };
+}

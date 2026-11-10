@@ -31,23 +31,26 @@ vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocom
 vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEditor: React.forwardRef<ComposerEditorHandle, NonNullable<typeof editor.props>>((props, ref) => {
   editor.props = props;
   React.useImperativeHandle(ref, () => ({
+    getEditorState: () => undefined,
+    captureMarkerInsertion: () => ({ insertMarker: async () => {}, dispose: () => {} }),
+    insertMarker: async () => {}, removeMarkerObject: () => {}, replaceMarkerObjects: () => {},
     composeInteraction: async () => ({ updated: false }),
     captureInsertion: () => ({ insertText: () => {}, dispose: () => {} }),
     insertReference: (from, to, text, reference) => {
       const insert = `${text} `;
       editor.selection = { start: from + insert.length, end: from + insert.length };
       props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection,
-        references: [{ ...reference, from, to: from + text.length, text }], interactions: [], fromPaste: false, insertedText: insert });
+        references: [{ ...reference, from, to: from + text.length, text }], interactions: [], markerObjects: [], fromPaste: false, insertedText: insert });
     }, getValue: () => props.value, getSelection: () => editor.selection,
     insertText: text => {
       const next = props.value.slice(0, editor.selection.start) + text + props.value.slice(editor.selection.end);
       const position = editor.selection.start + text.length; editor.selection = { start: position, end: position };
-      props.onChange({ value: next, selection: editor.selection, references: [], interactions: [], fromPaste: false, insertedText: text });
-    }, focus: () => {}, blur: () => {}, isFocused: () => true, caretCoords: () => null, replaceRange: (from, to, insert) => { editor.selection = { start: from + insert.length, end: from + insert.length }; props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection, references: [], interactions: [], fromPaste: false, insertedText: insert }); }, selectAll: () => {},
+      props.onChange({ value: next, selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: text });
+    }, focus: () => {}, blur: () => {}, isFocused: () => true, caretCoords: () => null, replaceRange: (from, to, insert) => { editor.selection = { start: from + insert.length, end: from + insert.length }; props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: insert }); }, selectAll: () => {},
     setSelection: (start, end = start) => { editor.selection = { start, end }; },
   }));
   return <textarea aria-label="editor" value={props.value} placeholder={props.suggestion ?? props.placeholder}
-    onInput={event => props.onChange({ value: event.currentTarget.value, selection: editor.selection, references: [], interactions: [], fromPaste: false, insertedText: '' })} />;
+    onInput={event => props.onChange({ value: event.currentTarget.value, selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: '' })} />;
 }) }));
 
 let root: Root; let container: HTMLDivElement;
@@ -102,7 +105,7 @@ it('keeps the suggestion out of the draft until Tab accepts it', async () => {
   expect(await key('Tab')).toBe(false);
   await act(async () => {
     editor.selection = { start: 0, end: 0 };
-    editor.props!.onChange({ value: '', selection: editor.selection, references: [], interactions: [], fromPaste: false, insertedText: '' });
+    editor.props!.onChange({ value: '', selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: '' });
   });
   expect(editor.props!.suggestion).toBe('好，继续完善吧');
   expect(await key('Tab')).toBe(true);
@@ -136,7 +139,7 @@ it.each(['/tre', '@file'])('preserves both hints and gives the %s menu Tab prior
   await act(async () => root.render(<Harness />));
   expect(container.textContent).toContain('chat.composer.hint');
   expect(container.textContent).toContain('chat.suggestion.acceptAndSendHint');
-  await act(async () => editor.props!.onChange({ value, selection: { start: value.length, end: value.length }, references: [], interactions: [], fromPaste: false, insertedText: value }));
+  await act(async () => editor.props!.onChange({ value, selection: { start: value.length, end: value.length }, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: value }));
   expect(container.textContent).not.toContain('chat.suggestion.insertHint');
   await key('Tab'); expect(editor.menuKey).toHaveBeenCalledWith('Tab'); expect(editor.props!.value).toBe(value);
 });
@@ -154,7 +157,7 @@ function command(name = 'compact'): WorkbenchCommandRegistration {
 }
 async function type(value: string, position = value.length, references: readonly ComposerReference[] = []) {
   editor.selection = { start: position, end: position };
-  await act(async () => editor.props!.onChange({ value, selection: editor.selection, references, interactions: [], fromPaste: false, insertedText: value }));
+  await act(async () => editor.props!.onChange({ value, selection: editor.selection, references, interactions: [], markerObjects: [], fromPaste: false, insertedText: value }));
 }
 it('a selected application action consumes only its fragment, while Tab only completes it', async () => {
   editor.registrations = [command()]; const execute = vi.fn();

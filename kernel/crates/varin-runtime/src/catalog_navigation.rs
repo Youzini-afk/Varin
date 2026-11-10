@@ -384,7 +384,7 @@ impl NavigationRead {
             editor_text: if before {
                 selected
                     .content
-                    .get("text")
+                    .get("userText").or_else(|| selected.content.get("text"))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             } else {

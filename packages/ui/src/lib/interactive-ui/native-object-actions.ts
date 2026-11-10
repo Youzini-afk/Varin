@@ -1,5 +1,9 @@
 import { nativeObjectLabel as t } from './native-object-labels';
 import React from 'react';
+import { getRuntimeKey } from '@varin/application-client';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { workspacePathFromResourceId } from '@/lib/documents/path';
+import { captureFileQuote } from '@/components/conversation/captureFileQuote';
 import { getRuntimeEndpointGeneration, type ContentReference } from '@varin/application-client';
 import { useOptionalConversationPresentation } from '@/components/conversation/ConversationContext';
 import { MaterialLinkContext } from '@/components/materials/MaterialLinkContext';
@@ -27,6 +31,7 @@ export function useNativeObjectOpener() {
   }, [conversation, material]);
 }
 export function useNativeObjectActions() {
+  const apis = React.useContext(RuntimeAPIContext);
   const open = useNativeObjectOpener();
   const conversation = useOptionalConversationPresentation();
   const reference = React.useCallback(async (ref: string): Promise<ContentReference> => {
@@ -37,13 +42,22 @@ export function useNativeObjectActions() {
       usage: useThreadContextUsageStore.getState().views[contextUsageKey(conversation.identity)]?.usage });
     if (object.kind === 'unavailable') throw new Error(object.title);
     // Only a resolved file owner may confer a readable file reference; paths alone are not evidence.
-    if (object.kind === 'file') await conversation.fileTarget(object.callId, object.path);
+    if (object.kind === 'file') {
+      if (!apis) throw new Error(t('ui.native.ownerUnavailable'));
+      return captureFileQuote({ path: object.path, runtimeKey: getRuntimeKey(),
+        open: () => conversation.openFile(object.callId, object.path),
+        resolve: async () => {
+          const target = await conversation.fileTarget(object.callId, object.path);
+          return { path: workspacePathFromResourceId(target.root, target.resourceId), directory: target.root,
+            resource: { workspaceId: target.workspaceId, resourceId: target.resourceId } };
+        } }, conversation.identity, apis.files, conversation.api.attachments);
+    }
     if (host !== getRuntimeEndpointGeneration()) throw new Error(t('ui.native.connectionChanged'));
     const capturedAt = new Date().toISOString();
     const state = 'state' in object ? object.state : undefined;
     return { ref: `object-selection:${crypto.randomUUID()}`, title: object.title,
-      text: [object.title, state, ref, t('ui.native.frozenAt', { time: capturedAt })].filter(Boolean).join('\n'),
+      text: [object.title, state].filter(Boolean).join('\n'),
       source: { kind: 'object', thread: { ...conversation.identity }, objectRef: ref, capturedAt, ...(state ? { state } : {}) } };
-  }, [conversation]);
+  }, [apis, conversation]);
   return { open, reference };
 }

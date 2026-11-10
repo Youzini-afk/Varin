@@ -7,6 +7,7 @@ export interface TreeNavigation {
   kind: 'reveal' | 'recover';
   entryId: string;
   runId: string;
+  source?: import('@/components/conversation/ReferenceNavigation').ReferenceSourceTarget;
 }
 interface TreeView {
   expanded: Record<string, boolean>;

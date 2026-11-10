@@ -1,3 +1,6 @@
+import { prepareQuotedFiles } from '@/lib/agent-runtime/quoteAttachments';
+import { freezeDraftContentReferences, insertDraftMarker, acknowledgeDraftMarkers, draftAttachmentImageReferences } from '@/lib/agent-editor/contentReferences';
+import { DraftContentReferences } from './DraftContentReferences';
 import { draftImageReferences } from '@/lib/images/references';
 import { externalAttachmentSupported } from './externalAttachments';
 import { selectComposerFile, removeComposerFile } from '@/components/chat/composer/submit/fileSelections';
@@ -24,7 +27,7 @@ import type { ComposerEditorHandle } from '@/components/chat/composer/editor/Com
 import { removeDraftFile, attachmentImageReferences, selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadFileDrafts } from './ThreadAttachments';
 import { removeDraftImage, updateDraftImage } from '@/components/chat/composer/imageAttachments';
-import { prepareAnnotatedImages } from '@/lib/images/annotations';
+import { prepareDraftMarkerImages, hasDraftInlineImages, convertDraftMarkerImagesToFiles } from '@/lib/agent-runtime/draftImages';
 import { ActiveEditorSuggestion } from '@/components/conversation/ActiveEditorSuggestion';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -148,7 +151,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     const drafts = items.filter(item => item.sessionKey === draftKey); return drafts.length ? [{ key, drafts }] : [];
   });
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
-  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.selectedAttachments?.length || editorContext.length || inlineDrafts.length);
+  const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.selectedAttachments?.length || editorContext.length || inlineDrafts.length || draft.markerObjects?.length);
   const acceptsImages = draft.harnessId ? capabilities?.images : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
   const sending = externalBusy || draft.firstSend?.status === 'sending';
   const locked = externalBusy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
@@ -161,9 +164,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const insertImageReference = (number: number) => {
-    const token = t('chat.imageReference.token', { number });
-    if (editor.current) editor.current.insertText(token);
-    else useThreadDraftStore.getState().patch(draftKey, current => ({ text: current.text + token }));
+    const object = useThreadDraftStore.getState().drafts[draftKey]?.markerObjects?.find(object => object.kind === 'image' && object.number === number);
+    if (object) void insertDraftMarker(draftKey, object);
   };
   const addFiles = async (files: File[]) => {
     const latest = useThreadDraftStore.getState().drafts[draftKey];
@@ -175,7 +177,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     try {
       for (const file of files) {
         if (!current()) return;
-        selectThreadFiles(draftKey, [file], insertImageReference);
+        selectThreadFiles(draftKey, [file]);
       }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (current()) { reading.current = null; setReadingFiles(false); } }
@@ -185,8 +187,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     void preparation.change({ sourceSelection, workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined });
   };
   const ignorePrepared = React.useCallback(() => {}, []);
-  const unsupportedReferences = Boolean(draft.harnessId && (draft.selectedAttachments?.length || draft.references?.some(reference => reference.target.kind !== 'draft-file' && !(reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity) && draft.text.slice(reference.from, reference.to) === reference.text)));
-  const sendDisabled = sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !sourcePath : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
+  const unsupportedReferences = Boolean(draft.harnessId && (draft.selectedAttachments?.length || draft.references?.some(reference => reference.target.kind !== 'draft-file' && reference.target.kind !== 'quote' && reference.target.kind !== 'image' && !(reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity) && draft.text.slice(reference.from, reference.to) === reference.text)));
+  const sendDisabled = sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !sourcePath : !model?.providerId || !model.modelId) || acceptsImages === false && hasDraftInlineImages(draft);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -213,26 +215,29 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             if (!ready || !current()) return;
             if (!ready.connected || !ready.capabilities || ready.capabilitiesSource === 'cached' || ready.conversation.needsReview) throw new Error(t(ready.conversation.needsReview ? 'external.review' : 'external.prepareHint'));
             const conversation = ready.conversation;
-            if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
+            if (hasDraftInlineImages(draft) && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
             if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
             const attachments = draft.externalInput ? [] : await prepareDraftFiles(draftKey, draft.files ?? [], `external:${conversation.id}`,
               (file, signal) => externalApi.uploadAttachment(conversation.id, { key: file.uploadKey ?? file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
             if (!current()) return;
-            const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-              images: (await prepareAnnotatedImages(draft.images)).map(image => ({ data: image.data, mimeType: image.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...attachmentImageReferences(draft.files ?? [], attachments), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
+            const quotedFiles = draft.externalInput ? {} : await prepareQuotedFiles({ ...freezeDraftContentReferences(draft), attachments: attachments.map(({ ref }) => ({ ref })), attachmentImageReferences: { ...draftAttachmentImageReferences(draft), ...attachmentImageReferences(draft.files ?? [], attachments).attachmentImageReferences } }, undefined, input => externalApi.uploadAttachment(conversation.id, input), api, draft.markerObjects);
             if (!current()) return;
-            patch({ externalInput: request });
+            const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), ...quotedFiles,
+              images: (await prepareDraftMarkerImages(draft, api)).map(image => ({ data: image.data, mimeType: image.mimeType, reference: image.reference })), ...externalSessionInput(normalizeExternalSessionChoice(externalChoice, ready.capabilities), ready.capabilities) };
+            if (!current()) return;
+            const captured = draft.externalInputSnapshot ?? { editorText: draft.text, markerObjectIds: draft.markerObjects?.map(object => object.id), markerOccurrenceIds: draft.references?.map(reference => reference.id), images: draft.images, fileIds: draft.files?.map(file => file.id) };
+            patch({ externalInput: request, externalInputSnapshot: captured });
             await externalApi.send(conversation.id, request.key, request);
             if (!current()) return;
             await useExternalAgentStore.getState().refresh();
             if (current()) {
               const current = useThreadDraftStore.getState().drafts[draftKey];
               useThreadDraftStore.getState().patch(`external-draft:${owner}:${conversation.id}`, { externalModels: current?.externalModels, externalOptions: current?.externalOptions,
-                ...(current?.text !== draft.text ? { text: current?.text ?? '' } : {}), ...(current?.images !== draft.images ? { images: current?.images ?? [] } : {}) });
+                ...(current ? acknowledgeDraftMarkers(current, captured.editorText, captured.markerObjectIds, captured.markerOccurrenceIds, captured) : {}) });
               useExternalAgentStore.getState().select(conversation.id); useThreadDraftStore.getState().remove(draftKey);
             }
           })().catch(error => { if (current()) {
-            if (error instanceof ExternalAgentError && error.status >= 400 && error.status < 500 && error.code !== 'host_changed' && error.code !== 'input_changed') patch({ externalInput: undefined });
+            if (error instanceof ExternalAgentError && error.status >= 400 && error.status < 500 && error.code !== 'host_changed' && error.code !== 'input_changed') patch({ externalInput: undefined, externalInputSnapshot: undefined });
             setExternalFailure(error);
           } }).finally(() => { if (current()) { externalSending.current = false; setExternalBusy(false); } });
           return;
@@ -240,9 +245,9 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         try {
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
-          ...composerInputReferences(draft.text, draft.references, referenceScope), editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-          images: draft.images, files: draft.files ?? [], selectedAttachments: draft.selectedAttachments, referenceScope, model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
-          editorContext, inlineContext,
+          ...composerInputReferences(draft.text, draft.references, referenceScope), editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), ...freezeDraftContentReferences(draft),
+          images: draft.images, imageObjects: draft.markerObjects, files: draft.files ?? [], selectedAttachments: draft.selectedAttachments, referenceScope, model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
+          attachmentImageReferences: draftAttachmentImageReferences(draft), editorContext, inlineContext, markerObjectIds: draft.markerObjects?.map(object => object.id), markerOccurrenceIds: draft.references?.filter(reference => reference.target.kind === 'quote' || reference.target.kind === 'image').map(reference => reference.id),
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
         };
         tapHaptic();
@@ -254,6 +259,12 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       }}>
         {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || (!draft.harnessId && modelError) || draft.firstSend?.error || draft.sendError}</p>}
         {unsupportedReferences && <p role="alert" className="chat-input-column text-sm text-destructive">{t('composer.references.external')}</p>}
+        {!draft.harnessId && hasDraftInlineImages(draft) && acceptsImages === false && <div className="chat-input-column space-y-1">
+          <p role="alert" className="text-sm text-destructive">{t('chat.model.imagesUnsupported')}</p>
+          <button type="button" className="text-sm text-primary underline" disabled={locked}
+            onClick={() => { void convertDraftMarkerImagesToFiles(draftKey, generation, api).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>{t('chat.model.useImagesAsFiles')}</button>
+        </div>}
+        {!draft.harnessId && acceptsImages === false && draft.files?.some(file => file.imageReference !== undefined) && <p role="status" className="chat-input-column text-sm text-muted-foreground">{t('chat.model.imagesAsFilesNotice')}</p>}
         {draft.harnessId && <div className="chat-input-column space-y-3">
           {Boolean(preparation.snapshot?.turns.length) && <Button type="button" variant="outline" disabled={sending} onClick={() => {
             const id = preparation.snapshot!.conversation.id;
@@ -287,12 +298,12 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
           <div className="space-y-2 px-3 empty:hidden">
             {sourcePath && <ActiveEditorSuggestion threadKey={draftKey} />}
-            <EditorContextAttachmentChips threadKey={draftKey} />
+            <EditorContextAttachmentChips threadKey={draftKey} /><DraftContentReferences draftKey={draftKey} locked={locked} />
             {inlineDrafts.map(item => <Button key={item.id} type="button" size="sm" variant="outline" disabled={locked}
               onClick={() => { for (const bucket of inlineContext) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, [item]); }}>{item.fileLabel} · {item.startLine}–{item.endLine} ×</Button>)}
             <ImageAttachmentStrip key={draftKey} images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
               onUpdate={locked ? undefined : (index,image)=>updateDraftImage(draftKey,index,image)}
-              onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
+              onReference={locked ? undefined : insertImageReference}
               onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
             <ComposerSelectedFiles files={draft.selectedAttachments} locked={sending} onRemove={id => removeComposerFile(draftKey, id)} />
           <ThreadFileDrafts draftKey={draftKey} onReference={insertImageReference} files={draft.files} locked={locked} onRemove={id => removeDraftFile(draftKey, id)} />

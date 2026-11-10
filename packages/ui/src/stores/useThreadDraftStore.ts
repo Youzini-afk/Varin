@@ -1,19 +1,24 @@
 import { create } from 'zustand';
-import { ChangeSet } from '@codemirror/state';
+import { ChangeSet, type EditorState } from '@codemirror/state';
+import { mapComposerReferences } from '@/components/chat/composer/editor/references';
+import type { ComposerMarkerObject } from '@/components/chat/composer/editor/markers';
 import { mapInteractionRanges, type InteractionRange } from '@/components/chat/composer/editor/interactionRanges';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { Attachment, ImageAttachment } from '@varin/protocol';
-import type { ThreadAgentChoice, ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
+import type { ContentReference, ContentReferenceInput, ThreadAgentChoice, ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
 
 export type ThreadPendingInput = {
   fingerprint: string;
   editorText: string;
+  editorImages?: readonly ImageAttachment[];
   fileIds?: readonly string[];
   selectedAttachmentIds?: readonly string[];
   goalObjective?: string;
   goalBudget?: number;
   editorContext?: readonly EditorContextAttachment[];
+  markerObjectIds?: readonly string[];
+  markerOccurrenceIds?: readonly string[];
   inlineContext?: ReadonlyArray<{ key: string; drafts: readonly InlineCommentDraft[] }>;
   preparedSource?: ThreadPreparedSource | null;
   status: 'sending' | 'unknown';
@@ -52,7 +57,11 @@ export interface DraftSourceSelection {
   captureScopes: string[];
 }
 export interface DraftSelectedAttachment { id: string; host: number; filename: string; selection: import('@varin/protocol').AttachmentSelection; sourceKey?: string; attachment?: Attachment }
-export interface ThreadFirstSend {
+export interface ThreadFirstSend extends ContentReferenceInput {
+  imageObjects?: readonly ComposerMarkerObject[];
+  attachmentImageReferences?: Record<string, number>;
+  markerObjectIds?: readonly string[];
+  markerOccurrenceIds?: readonly string[];
   selectedAttachments?: readonly DraftSelectedAttachment[];
   referenceScope?: string;
   skills?: import('@varin/application-client').ThreadSkillSelection[];
@@ -74,6 +83,11 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  /** Bound content and media objects share this draft's CodeMirror history. */
+  markerObjects?: readonly ComposerMarkerObject[];
+  editorState?: EditorState;
+  /** Retain captures reachable through undo until this draft/history is released. */
+  retainedContentReferences?: readonly ContentReference[];
   /** Unsent edits of historical images, owned by this conversation's local draft. */
   imageAnnotations?: Record<string, import('@/lib/images/annotations').ImageAnnotationDocument>;
   /** Latest explicit action per source; retry snapshots share this draft's in-memory lifetime. */
@@ -89,6 +103,7 @@ export interface ThreadDraft {
   externalPreparationKey?: string;
   externalConversationHost?: number;
   externalInput?: import('@varin/application-client').ExternalInput & { key: string };
+  externalInputSnapshot?: { editorText: string; markerObjectIds?: readonly string[]; markerOccurrenceIds?: readonly string[]; images: readonly ImageAttachment[]; fileIds?: readonly string[] };
   externalModels?: Record<string, string>;
   externalOptions?: Record<string, { thinking?: string; mode?: string; config?: Record<string, string> }>;
   text: string;
@@ -110,7 +125,7 @@ export interface ThreadDraft {
   files?: DraftFileAttachment[];
   firstSend?: ThreadFirstSend;
   /** Paint the accepted first input until its native history snapshot arrives. */
-  firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'images' | 'files'> & { inputId: string };
+  firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'editorText' | 'images' | 'files' | 'selectedAttachments' | 'attachmentImageReferences' | 'contentReferences' | 'contentReferenceOccurrences'> & { inputId: string };
   sendError?: string;
   sourceSelection?: DraftSourceSelection;
   /** Unsent collaboration input and exact per-recipient attempts, retained in memory only. */
@@ -118,6 +133,9 @@ export interface ThreadDraft {
     afterCurrent?: boolean;
     targets: ThreadIdentity[];
     reply?: import('@varin/protocol').MessageFeedEntry;
+    /** A receipt consumes the original editor batch, even after uncertain retry. */
+    snapshot?: { editorText: string; markerObjectIds?: readonly string[]; markerOccurrenceIds?: readonly string[];
+      images: readonly ImageAttachment[]; fileIds?: readonly string[]; selectedAttachmentIds?: readonly string[] };
     attempts?: Array<{ request: Parameters<NonNullable<ThreadsAPI['messages']>['send']>[1]; receipt?: import('@varin/protocol').MessageReceipt; error?: string }>;
     sending?: boolean;
   };
@@ -138,11 +156,21 @@ export const useThreadDraftStore = create<{
     const draft = state.drafts[key] ?? EMPTY_THREAD_DRAFT;
     const change = typeof patch === 'function' ? patch(draft) : patch;
     const next = { ...draft, ...change };
-    if (typeof change.text === 'string' && change.text !== draft.text && change.interactions === undefined && draft.interactions?.length) {
+    if (typeof change.text === 'string' && change.text !== draft.text) {
       let from = 0, to = draft.text.length, end = change.text.length;
       while (from < to && from < end && draft.text[from] === change.text[from]) from++;
       while (to > from && end > from && draft.text[to - 1] === change.text[end - 1]) { to--; end--; }
-      next.interactions = mapInteractionRanges(draft.interactions, ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length));
+      const changes = ChangeSet.of({ from, to, insert: change.text.slice(from, end) }, draft.text.length);
+      if (change.interactions === undefined && draft.interactions?.length) next.interactions = mapInteractionRanges(draft.interactions, changes);
+      if (change.references === undefined && draft.references?.length) next.references = mapComposerReferences(draft.references, changes);
+    }
+    if (change.markerObjects && change.markerObjects !== draft.markerObjects && change.retainedContentReferences === undefined) {
+      const retained = new Map((draft.retainedContentReferences ?? []).map(reference => [reference.ref, reference]));
+      for (const object of change.markerObjects) {
+        const reference = object.payload.kind === 'quote' ? object.payload.reference : object.payload.contentReference;
+        if (reference) retained.set(reference.ref, reference);
+      }
+      next.retainedContentReferences = [...retained.values()];
     }
     if (change.images?.some(image => image.reference === undefined)) {
       let reference = Math.max(0, ...(next.files ?? []).map(file => file.imageReference ?? 0), ...change.images.map(image => image.reference ?? 0));

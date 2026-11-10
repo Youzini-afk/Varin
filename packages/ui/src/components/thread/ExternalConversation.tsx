@@ -1,3 +1,7 @@
+import { prepareQuotedFiles } from '@/lib/agent-runtime/quoteAttachments';
+import { ChatUserReferences } from '@/components/conversation/ChatUserReferences';
+import { freezeDraftContentReferences, acknowledgeDraftMarkers, insertDraftMarker, draftAttachmentImageReferences } from '@/lib/agent-editor/contentReferences';
+import { DraftContentReferences } from './DraftContentReferences';
 import { externalFollowupState } from '@/lib/followupPresentation';
 import { draftImageReferences } from '@/lib/images/references';
 import { externalAttachmentSupported } from './externalAttachments';
@@ -26,11 +30,11 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ChatThinkingBlock } from '@/components/conversation/ChatThinkingBlock';
 import { ToolDisclosure, ToolDisclosureScope, ToolStatus } from '@/components/conversation/ToolDisclosure';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
-import { prepareAnnotatedImages } from '@/lib/images/annotations';
+import { prepareDraftMarkerImages, hasDraftInlineImages } from '@/lib/agent-runtime/draftImages';
 import { ConversationImageViewer } from '@/components/images/ConversationImage';
 import { ImageReplyDraftContext } from '@/components/images/useImageReply';
 import {
-  removeDraftImage,
+  removeDraftImage, updateDraftImage,
 } from '@/components/chat/composer/imageAttachments';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -183,7 +187,7 @@ const Item = React.memo(function Item({
     <div
       className={item.kind === 'user' ? 'ml-auto w-fit max-w-full rounded-2xl bg-muted px-4 py-3' : 'py-2'}
     >
-      {item.images?.length ? (
+      {!(item.kind === 'user' && (item.contentReferences?.length || item.contentReferenceOccurrences?.length)) && item.images?.length ? (
         <div className="mb-3 flex flex-wrap gap-2">
           {item.images.map((value, index) => (
             <button
@@ -191,28 +195,30 @@ const Item = React.memo(function Item({
               type="button"
               className="relative overflow-hidden rounded-lg border border-border"
               onClick={() => setImage({src:`data:${value.mimeType};base64,${value.data}`,index})}
-              aria-label={t('chat.imageReference.token', { number: index + 1 })}
+              aria-label={t('chat.imageReference.token', { number: value.reference ?? index + 1 })}
             >
               <img
                 src={`data:${value.mimeType};base64,${value.data}`}
                 className="size-24 object-cover"
-                alt={t('chat.imageReference.token', { number: index + 1 })}
+                alt={t('chat.imageReference.token', { number: value.reference ?? index + 1 })}
               />
               <span className="absolute bottom-1 right-1 rounded bg-background/80 px-1 typography-micro text-muted-foreground">
-                {index + 1}
+                {value.reference ?? index + 1}
               </span>
             </button>
           ))}
         </div>
       ) : null}
-      <MarkdownRenderer
+      {item.kind === 'user' && (item.contentReferences?.length || item.contentReferenceOccurrences?.length) ? <ChatUserReferences message={{ role: 'user', timestamp: 0,
+        content: [{ type: 'text', text: item.text }, ...(item.images ?? []).map(image => ({ type: 'image' as const, ...image }))], contentReferences: item.contentReferences,
+        contentReferenceOccurrences: item.contentReferenceOccurrences, fileAttachments: item.attachments, attachmentImageReferences: item.attachmentImageReferences }} messageId={item.id} plain={false} readAttachment={readAttachment} /> : <MarkdownRenderer
         content={item.text}
         messageId={item.id}
         isStreaming={active && !item.complete && item.kind === 'assistant'}
         variant={item.kind === 'notice' ? 'tool' : 'assistant'}
-      />
+      />}
       <ThreadAttachments attachments={item.attachments} read={readAttachment} />
-      {image&&<ConversationImageViewer src={image.src} sourceId={`${item.id}:image:${image.index}`} label={t('chat.imageReference.token',{number:image.index+1})} onClose={()=>setImage(undefined)}/>}
+      {image&&<ConversationImageViewer src={image.src} sourceId={`${item.id}:image:${image.index}`} label={t('chat.imageReference.token',{number:item.images?.[image.index]?.reference??image.index+1})} onClose={()=>setImage(undefined)}/>}
     </div>
   );
 });
@@ -567,11 +573,10 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
   React.useEffect(() => {
     if (!draft.externalInput || !snapshot?.turns.some((turn) => turn.key === draft.externalInput!.key))
       return;
-    useThreadDraftStore.getState().patch(key, current => ({ externalInput: undefined,
-      text: current.text === draft.externalInput!.text ? '' : current.text,
-      files: current.files?.filter(file => !draft.externalInput!.attachments?.some(selected => 'ref' in selected && selected.ref === file.attachment?.ref)),
+    useThreadDraftStore.getState().patch(key, current => ({ externalInput: undefined, externalInputSnapshot: undefined,
+      ...acknowledgeDraftMarkers(current, draft.externalInputSnapshot?.editorText ?? draft.externalInput!.text, draft.externalInputSnapshot?.markerObjectIds, draft.externalInputSnapshot?.markerOccurrenceIds, draft.externalInputSnapshot),
     }));
-  }, [snapshot?.turns, draft.externalInput, key]);
+  }, [snapshot?.turns, draft.externalInput, draft.externalInputSnapshot, key]);
   const act = async (operation: () => Promise<unknown>, refresh = false) => {
     if (acting.current || !isCurrent()) return;
     acting.current = true;
@@ -587,14 +592,13 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
     }
   };
   const insertImageReference = (number: number) => {
-    const token = t('chat.imageReference.token', { number });
-    if (editor.current) editor.current.insertText(token);
-    else useThreadDraftStore.getState().patch(key, current => ({ text: current.text + token }));
+    const object = useThreadDraftStore.getState().drafts[key]?.markerObjects?.find(object => object.kind === 'image' && object.number === number);
+    if (object) void insertDraftMarker(key, object);
   };
   const addFiles = (files: File[]) => {
     if (!isCurrent() || acting.current || draft.externalInput) return;
     if (files.some(file => !externalAttachmentSupported(snapshot?.capabilities ?? (snapshot ? settings?.capabilityCache?.[snapshot.conversation.configurationId]?.capabilities : undefined), file))) { setFailure(new Error(t('external.filesUnsupported'))); return; }
-    selectThreadFiles(key, files, insertImageReference);
+    selectThreadFiles(key, files);
   };
   if (!snapshot)
     return (
@@ -684,7 +688,7 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                           const request = draft.externalInput!;
                           await api.send(id, request.key, request);
                           if (!isCurrent()) return;
-                          patch({ externalInput: undefined, text: draft.text === request.text ? '' : draft.text, files: draft.files?.filter(file => !request.attachments?.some(selected => 'ref' in selected && selected.ref === file.attachment?.ref)) });
+                          patch({ externalInput: undefined, externalInputSnapshot: undefined, ...acknowledgeDraftMarkers(useThreadDraftStore.getState().drafts[key], draft.externalInputSnapshot?.editorText ?? request.text, draft.externalInputSnapshot?.markerObjectIds, draft.externalInputSnapshot?.markerOccurrenceIds, draft.externalInputSnapshot) });
                         })
                       }
                     >
@@ -726,21 +730,24 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (acting.current || pending || unresolvedInput || c.needsReview || capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length && !draft.files?.length)) return;
+                  if (acting.current || pending || unresolvedInput || c.needsReview || capabilities?.images === false && hasDraftInlineImages(draft) || (!draft.text.trim() && !draft.images.length && !draft.files?.length && !draft.markerObjects?.length)) return;
                   const originalText = draft.text, originalImages = draft.images, originalFiles = draft.files;
                   void act(async () => {
                     const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
                     if (!ready.connected || !ready.capabilities || ready.capabilitiesSource === 'cached' || ready.conversation.needsReview) throw new Error(t(ready.conversation.needsReview ? 'external.review' : 'external.prepareHint'));
-                    if (draft.images.length && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
+                    if (hasDraftInlineImages(draft) && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
                     if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
                     const attachments = draft.externalInput ? [] : await prepareDraftFiles(key, draft.files ?? [], `external:${id}`,
                       (file, signal) => api.uploadAttachment(id, { key: file.uploadKey ?? file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
                     if (!isCurrent()) return;
-                    const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text,
-                      images: (await prepareAnnotatedImages(draft.images)).map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })), ...attachmentImageReferences(draft.files ?? [], attachments),
+                    const quotedFiles = draft.externalInput ? {} : await prepareQuotedFiles({ ...freezeDraftContentReferences(draft), attachments: attachments.map(({ ref }) => ({ ref })), attachmentImageReferences: { ...draftAttachmentImageReferences(draft), ...attachmentImageReferences(draft.files ?? [], attachments).attachmentImageReferences } }, undefined, input => api.uploadAttachment(id, input), undefined, draft.markerObjects);
+                    if (!isCurrent()) return;
+                    const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text, ...quotedFiles,
+                      images: (await prepareDraftMarkerImages(draft)).map(v => ({ data: v.data, mimeType: v.mimeType, reference: v.reference })),
                       ...externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities) };
                     if (!isCurrent()) return;
-                    patch({ externalInput: request });
+                    const captured = draft.externalInputSnapshot ?? { editorText: originalText, markerObjectIds: draft.markerObjects?.map(object => object.id), markerOccurrenceIds: draft.references?.map(reference => reference.id), images: originalImages, fileIds: originalFiles?.map(file => file.id) };
+                    patch({ externalInput: request, externalInputSnapshot: captured });
                     try {
                       await api.send(id, request.key, request);
                     } catch (error) {
@@ -751,16 +758,14 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                         error.code !== 'host_changed' &&
                         error.code !== 'input_changed'
                       )
-                        patch({ externalInput: undefined });
+                        patch({ externalInput: undefined, externalInputSnapshot: undefined });
                       throw error;
                     }
                     if (!isCurrent()) return;
                     const current = useThreadDraftStore.getState().drafts[key];
                     patch({
-                      ...(current?.text === originalText ? { text: '' } : {}),
-                      ...(current?.images === originalImages ? { images: [] } : {}),
-                      files: current?.files?.filter(file => !originalFiles?.some(original => original.id === file.id)),
-                      externalInput: undefined,
+                      ...(current ? acknowledgeDraftMarkers(current, captured.editorText, captured.markerObjectIds, captured.markerOccurrenceIds, captured) : {}),
+                      externalInput: undefined, externalInputSnapshot: undefined,
                     });
                     follow.current = true;
                     await useExternalAgentStore.getState().refresh();
@@ -811,7 +816,7 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                   modelDisabled={pending}
                   attachmentDisabled={pending || unresolvedInput}
                   imageDisabled={!capabilities?.images}
-                  sendDisabled={pending || unresolvedInput || Boolean(c.needsReview) || capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length && !draft.files?.length)}
+                  sendDisabled={pending || unresolvedInput || Boolean(c.needsReview) || capabilities?.images === false && hasDraftInlineImages(draft) || (!draft.text.trim() && !draft.images.length && !draft.files?.length && !draft.markerObjects?.length)}
                   pending={pending}
                   active={Boolean(active)}
                   retrying={false}
@@ -820,22 +825,21 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                   onAttachPdfs={() => fileInput.current?.click()}
                   onStop={active ? () => void act(() => api.stop(id, active.id)) : undefined}
                   onGoal={() => {}}
-                  hasInput={Boolean(draft.text.trim() || draft.images.length || draft.files?.length)}
+                  hasInput={Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.markerObjects?.length)}
                   onWorkspace={() => setDetails(true)}
                   workspaceLabel={c.cwd.split(/[\\/]/).at(-1) ?? c.cwd}
                   workspacePath={c.cwd}
                   imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(file => file.filename) ?? []}
                   skills={[]}
                 >
+                  <DraftContentReferences draftKey={key} locked={pending || unresolvedInput} />
                   <ThreadFileDrafts draftKey={key} onReference={insertImageReference} files={draft.files} locked={pending || unresolvedInput} onRemove={id => removeDraftFile(key, id)} />
                   <ImageAttachmentStrip
                     key={key}
                     images={draft.images}
-                    onUpdate={pending || unresolvedInput ? undefined : (index,image)=>patch({images:draft.images.map((current,i)=>i===index?image:current)})}
+                    onUpdate={pending || unresolvedInput ? undefined : (index,image)=>updateDraftImage(key,index,image)}
                     onRemove={(index) => removeDraftImage(key, index)}
-                    onReference={(number) =>
-                      editor.current?.insertText(t('chat.imageReference.token', { number }))
-                    }
+                    onReference={insertImageReference}
                   />
                 </ThreadComposer>
               </form>

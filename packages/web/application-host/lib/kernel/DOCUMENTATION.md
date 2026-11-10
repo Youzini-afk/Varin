@@ -320,3 +320,17 @@ attempts never reuse released tokens. Cancellation and tree Stop cover this stag
 creating an empty child Thread. User child edges do not inherit an old parent Goal. Bot reports use
 an AgentReport actor bound to the real child execution, including pre-Run failure, and remain Agent
 data through the original durable message ingress. Original tool dispatch/report behavior is retained.
+
+## Frozen quote admission
+
+`thread-quotes.ts` validates/copies original UTF-16 quote ranges and joins captured media/files to
+existing input owners. `ThreadAdapter` parses skills and object selections on that original draft;
+Rust `input_quotes.rs` alone expands native quote content for model requests. Stored history keeps
+compact text, frozen source metadata and occurrence ranges. Provider adapters never receive the
+navigation objects. User-directed messages preserve their separate recipient and `replyTo` contract.
+
+Receipt lookup compares original selectors before reading current sources. Prepared file identities
+and auto-rendered image media do not change that intent. Queue promotion uses the accepted body;
+plain-text edits preserve objects while discarding obsolete ranges. Recovery exposes the original
+file/image binding so restoring a file-backed image does not duplicate its visual payload. A
+text-only model can receive the original image file with an explicit non-visual notice.

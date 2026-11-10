@@ -243,7 +243,7 @@ it('public threads HTTP input editing/cancellation and Run cancellation affect t
 
 
 const imageFixture = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=' };
-it('production HTTP numbered image attachments reach provider image content and survive a kernel reopen', async () => {
+it('production HTTP frozen quotes and positioned images reach providers and survive a kernel reopen', async () => {
   const f = await fixture(false, true);
   const identity = await f.api.create('http-image-thread');
   // Pasted images use the retained-file path, including the composer's image-number map.
@@ -252,13 +252,22 @@ it('production HTTP numbered image attachments reach provider image content and 
     prepare: async () => [attachment],
     read: async () => ({ attachment, stream: (async function* () { yield Buffer.from(imageFixture.data, 'base64'); })() }),
   } as unknown as Parameters<ThreadAdapter['bindAttachments']>[0]);
-  const receipt = await f.api.submit({ ...identity, key: 'http-image-input', expectedHead: null, text: '[图片1] 看看这张图片', images: [],
+  const text = '[引用点1] 再看 [图片1] 最后 [引用点1]';
+  const contentReferences = [{ ref: 'private-quote-id', title: '引用点1', number: 1, label: 'Varin', text: 'selected original paragraph', source: { kind: 'chat' as const, thread: identity, itemId: 'private-source-item', passages: [{ entryId: 'private-source-item', start: 0, text: 'selected original paragraph' }] } }];
+  const contentReferenceOccurrences = [{ kind: 'content' as const, ref: 'private-quote-id', start: 0, end: 6 }, { kind: 'image' as const, reference: 1, start: text.indexOf('[图片1]'), end: text.indexOf('[图片1]') + 5 }, { kind: 'content' as const, ref: 'private-quote-id', start: text.lastIndexOf('[引用点1]'), end: text.length }];
+  const receipt = await f.api.submit({ ...identity, key: 'http-image-input', expectedHead: null, text, images: [], contentReferences, contentReferenceOccurrences,
     attachments: [{ ref: attachment.ref }], attachmentImageReferences: { [attachment.ref]: 1 }, model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const imageUrl = `data:${imageFixture.mimeType};base64,${imageFixture.data}`;
   expect(JSON.stringify(f.requests[0]?.body.input)).toContain('input_image');
   expect(JSON.stringify(f.requests[0]?.body.input)).toContain(imageUrl);
+  const wire = JSON.stringify(f.requests[0]?.body.input);
+  expect(wire.match(/selected original paragraph/g)).toHaveLength(1);
+  expect(wire).not.toContain('private-quote-id'); expect(wire).not.toContain('private-source-item');
+  expect(wire.indexOf('selected original paragraph')).toBeLessThan(wire.indexOf(imageUrl));
+  expect(wire.slice(wire.indexOf(imageUrl))).toContain('最后');
   const item = (await f.api.snapshot(identity)).history.find(item => item.source === 'user')!;
+  expect(item.content).toMatchObject({ text, contentReferences, contentReferenceOccurrences });
   expect(inlineImages(item.content)).toEqual([]);
   expect(await readImage(f.api, identity, { kind: 'history', itemId: item.id }, item.content)).toEqual(Buffer.from(imageFixture.data, 'base64'));
   await f.closeKernel();
