@@ -90,7 +90,7 @@ function contribution(
     },
   };
 }
-function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
+function setup(initial: ExtensionToolLease[] = [], failRegistration = 0, withExtensionOwner = true) {
   const run: Run = {
     id: 'run',
     thread_id: 'thread',
@@ -268,6 +268,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
         case 'runtime.launch.extensions.prepare':
           launch.selection.extension_bindings =
             params.bindings as LaunchIntent['selection']['extension_bindings'];
+          if (launch.extension_admission) launch.extension_admission.state = 'prepared';
           return structuredClone(launch);
         case 'runtime.run.start':
           if (startGate) await startGate;
@@ -308,7 +309,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     undefined,
     undefined,
     undefined,
-    preparer,
+    withExtensionOwner ? preparer : undefined,
     async (id, signal) => {
       signal?.throwIfAborted();
       expect(['workspace', 'execution']).toContain(id);
@@ -712,4 +713,77 @@ it('ordinary service routing uses the admitted Run scope instead of a later acti
       ),
     ).toBe(false);
   }
+});
+
+it.each([false, true])('automatic root prepares the complete current directory once, then restores it exactly (credentials: %s)', async credentials => {
+  const old = contribution('previous', 'old', []), current = contribution('newly-enabled', 'current', []), f = setup([current]);
+  f.launch.selection.extension_bindings = [old.binding];
+  f.launch.extension_admission = { state: 'pending' };
+  const start = () => credentials
+    ? f.runtime.startRunWithCredentialOwner('run', {} as ExistingHostCredentialOwner)
+    : f.runtime.startRun('run');
+  await start();
+  expect(f.preparedBindings).toEqual([[]]);
+  expect(f.preparedScopes[0]!.restoreExact).toBeUndefined();
+  const prepareIndex = f.requests.findIndex(request => request.method === 'runtime.launch.extensions.prepare');
+  expect(f.requests[prepareIndex]!.params.bindings).toEqual([current.binding]);
+  expect(prepareIndex).toBeLessThan(f.requests.findIndex(request => request.method === 'runtime.run.start'));
+  expect(f.launch.extension_admission).toEqual({ state: 'prepared' });
+  f.loseExtensionOwners();
+  await start();
+  expect(f.preparedBindings).toEqual([[], [current.binding]]);
+  expect(f.preparedScopes[1]!.restoreExact).toBe(true);
+  const added = contribution('added', 'current', []);
+  await f.publish('added@1', added);
+  f.prepareExtensions([current, added]); f.loseExtensionOwners();
+  await start();
+  expect(f.preparedBindings[2]).toEqual([added.binding, current.binding]);
+});
+
+it('pending admission discards a prior empty scope and commits the newly enabled current directory', async () => {
+  const f = setup();
+  await f.runtime.startRun('run');
+  const current = contribution('newly-enabled', 'current', []);
+  f.prepareExtensions([current]);
+  f.launch.extension_admission = { state: 'pending' };
+  await f.runtime.startRun('run');
+  expect(f.closeScope).toHaveBeenCalledOnce();
+  expect(f.preparedBindings).toEqual([[], []]);
+  expect(f.preparedScopes[1]!.restoreExact).toBeUndefined();
+  expect(f.requests.filter(request => request.method === 'runtime.launch.extensions.prepare').map(request => request.params.bindings)).toEqual([[current.binding]]);
+});
+
+it.each([false, true])('an automatic empty current directory commits before start, with or without an extension owner (%s)', async withOwner => {
+  const f = setup([], 0, withOwner);
+  f.launch.extension_admission = { state: 'pending' };
+  await f.runtime.startRun('run');
+  const commit = f.requests.findIndex(request => request.method === 'runtime.launch.extensions.prepare');
+  expect(f.requests[commit]!.params.bindings).toEqual([]);
+  expect(commit).toBeLessThan(f.requests.findIndex(request => request.method === 'runtime.run.start'));
+  // A reconstructed Host must request explicit empty restoration, not fresh discovery.
+  if (withOwner) f.release();
+  const restored = setup([], 0, withOwner);
+  restored.launch.extension_admission = { state: 'prepared' };
+  await restored.runtime.startRun('run');
+  expect(restored.preparedScopes.map(value => value.restoreExact)).toEqual(withOwner ? [true] : []);
+  expect(restored.requests.some(request => request.method === 'runtime.launch.extensions.prepare')).toBe(false);
+});
+
+it.each(['pending', 'prepared'] as const)('a nonempty %s directory cannot silently disappear without its Host owner', async state => {
+  const f = setup([], 0, false);
+  f.launch.extension_admission = { state };
+  f.launch.selection.extension_bindings = [contribution('previous', 'old', []).binding];
+  await expect(f.runtime.startRun('run')).rejects.toThrow('Saved extension tools require their original Host owner');
+  expect(f.requests.some(request => request.method === 'runtime.launch.extensions.prepare' || request.method === 'runtime.run.start')).toBe(false);
+});
+
+it('automatic current-snapshot preparation failure does not commit or start the Run', async () => {
+  const old = contribution('previous', 'old', []), f = setup();
+  f.launch.selection.extension_bindings = [old.binding];
+  f.launch.extension_admission = { state: 'pending' };
+  f.prepareExtensions([], new Error('current settings snapshot unavailable'));
+  await expect(f.runtime.startRun('run')).rejects.toThrow('current settings snapshot unavailable');
+  expect(f.preparedBindings).toEqual([[]]);
+  expect(f.launch.selection.extension_bindings).toEqual([old.binding]);
+  expect(f.requests.some(request => request.method === 'runtime.launch.extensions.prepare' || request.method === 'runtime.run.start')).toBe(false);
 });

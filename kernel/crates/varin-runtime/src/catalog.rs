@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 89;
+pub(crate) const FORMAT: i64 = 90;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -610,6 +610,7 @@ impl Catalog {
                 launches::validate_environment_source(&tx, &run.thread_id, source)?;
             }
             let intent = launch_content::LaunchMetadata {
+                extension_admission: prepared.extension_admission.clone(),
                 dispatch_context_ref: None,
                 policy_generation: 0,
                 policy_target: policy_switch::PolicyTargetMetadata::Default,

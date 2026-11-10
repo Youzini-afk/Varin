@@ -653,7 +653,11 @@ impl RequestActivationPreparation {
                     }
                 }
                 let intent=content.save(&json!({"input_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
+                let extension_admission = launches::ExtensionAdmission {
+                    state: launches::ExtensionAdmissionState::Pending,
+                };
                 let submission = submissions::PreparedSubmission {
+                    extension_admission: Some(extension_admission),
                     attachments: Vec::new(),
                     title: None,
                     input_id: row.id.clone(),

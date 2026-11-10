@@ -40,6 +40,8 @@ pub struct LaunchSelectionMetadata {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_admission: Option<launches::ExtensionAdmission>,
     pub dispatch_context_ref: Option<Value>,
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTargetMetadata,
@@ -278,6 +280,7 @@ impl LaunchRead {
     }
     pub fn load(self) -> Result<LaunchIntent> {
         Ok(LaunchIntent {
+            extension_admission: self.metadata.extension_admission,
             principal_id: self.principal_id,
             policy_generation: self.metadata.policy_generation,
             policy_target: self.metadata.policy_target.load(&self.content)?,
@@ -404,6 +407,7 @@ enum LaunchChange {
     },
 }
 pub struct PreparedLaunchChange {
+    pub(super) extension_admission: Option<launches::ExtensionAdmission>,
     pub(super) expected: LaunchMetadata,
     pub(super) selection: LaunchSelectionMetadata,
     pub(super) policy_target: super::policy_switch::PolicyTargetMetadata,
@@ -758,6 +762,7 @@ impl LaunchChangePreparation {
             ..
         } = self.read;
         let mut selection = metadata.selection.clone();
+        let mut extension_admission = metadata.extension_admission.clone();
         let mut policy_target = metadata.policy_target.clone();
         let kind = match self.change {
             LaunchChange::Mcp { binding, derivations } => {
@@ -843,7 +848,12 @@ impl LaunchChangePreparation {
                     }
                 }
                 let mut full = metadata.selection.clone().load(&content)?;
-                if !full.extension_bindings.is_empty() && full.extension_bindings != bindings {
+                if let Some(admission) = extension_admission.as_mut().filter(|admission| admission.pending()) {
+                    if self.child_selection.is_some() {
+                        return Err(RuntimeError::Conflict("delegated continuation cannot rediscover extension tools".into()));
+                    }
+                    admission.state = launches::ExtensionAdmissionState::Prepared;
+                } else if (extension_admission.is_some() || !full.extension_bindings.is_empty()) && full.extension_bindings != bindings {
                     return Err(RuntimeError::Conflict(
                         "extension service generation changed".into(),
                     ));
@@ -885,6 +895,7 @@ impl LaunchChangePreparation {
             }
         };
         Ok(PreparedLaunchChange {
+            extension_admission,
             expected: metadata,
             selection,
             policy_target,
