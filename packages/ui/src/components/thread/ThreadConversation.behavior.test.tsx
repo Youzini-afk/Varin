@@ -1736,6 +1736,108 @@ it('keeps the current resources refreshable after compaction and returns from hi
   expect(original.resources!.snapshot.skills[0]!.name).toBe('review-code');
 });
 
+it.each(['manual', 'automatic', 'recovery'] as const)('follows the live checkpoint after %s summary publication in the context inspector', async mode => {
+  const f = fixture(true);
+  f.view.historyPage = { head: 'summary-cut', previous: null };
+  f.view.thread.branches[0]!.head = 'summary-cut';
+  f.view.context.checkpoint = resourceCheckpoint();
+  const run = f.view.activeRun!;
+  let attempt = 0;
+  f.api.compact = vi.fn<ThreadsAPI['compact']>(async input => {
+    const id = `summary:manual:${++attempt}`;
+    const state = mode === 'recovery' && attempt === 1 ? 'generating' : mode === 'recovery' && attempt === 2 ? 'failed' : 'completed';
+    const job = { compaction: { producer: { kind: 'builtin' as const, name: 'fold' as const, version: '1' as const }, kind: 'model_plan' as const, sourceCutHash: 'cut', planHash: 'plan' },
+      request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null },
+        key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: 'Prepared prompt', instruction_sources: [], memory_checkpoint: null },
+      receipt: { thread_id: 'summary:thread', branch_id: 'summary:branch', run_id: id, input_id: `summary:input:${attempt}`, cursor: 2 } };
+    f.view.context.jobs.push({ run: { ...run, id, state }, job });
+    return job;
+  });
+  f.api.cancelContext = vi.fn<ThreadsAPI['cancelContext']>(async (_identity, runId) => {
+    const row = f.view.context.jobs.find(row => row.run.id === runId)!;
+    row.run = { ...row.run, state: 'cancelled', cancel_requested: true, revision: row.run.revision + 1 };
+    return row.run;
+  });
+  let published: ContextCheckpoint | undefined;
+  f.api.contextHistory = vi.fn<ThreadsAPI['contextHistory']>(async (_identity, runId) => ({ head: 'summary:output', previous: null,
+    items: [{ id: 'summary:output', parent: null, thread_id: 'summary:thread', run_id: runId, source: 'assistant' as const, provider: null,
+      content: { content: { kind: 'text', text: '{"summary":"Manually prepared summary"}' } } }], checkpoint: published }));
+  const publish = () => {
+    const row = f.view.context.jobs.at(-1)!;
+    published = { ...structuredClone(f.view.context.checkpoint!), id: row.job.request.key, revision: 4,
+      proposal: { ...row.job.request, summary: 'Manually prepared summary' } };
+    row.job.published_revision = published.revision;
+    f.view.context.checkpoint = structuredClone(published);
+    return published;
+  };
+  f.api.publishContext = vi.fn(async () => publish());
+  f.api.resources.refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = `context:resources:${input.expectedRevision + 1}`; next.revision = input.expectedRevision + 1;
+    next.resources!.snapshot.id = `resources:${next.revision}`;
+    next.resources!.snapshot.skills[0]!.name = 'paper-search';
+    f.view.context.checkpoint = next;
+    return next;
+  });
+  await renderWithContext(f.api);
+  await openResources();
+  await act(async () => button('Prepare now').click());
+  expect(f.api.compact).toHaveBeenCalledOnce();
+  if (mode === 'recovery') {
+    await act(async () => button('Stop preparation').click());
+    expect(f.api.cancelContext).toHaveBeenCalledExactlyOnceWith(identity, 'summary:manual:1');
+    await act(async () => button('Prepare again').click());
+    expect(container.textContent).toContain(en['contextManager.failed']);
+    await act(async () => button('Prepare again').click());
+    expect(f.api.compact).toHaveBeenCalledTimes(3);
+  }
+  const runId = f.view.context.jobs.at(-1)!.run.id;
+  expect(container.querySelector('[aria-label="Prepared summary"]')?.textContent).toContain('Manually prepared summary');
+  if (mode === 'automatic') {
+    await act(async () => {
+      publish();
+      f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 4, kind: 'context.committed', data: {} });
+    });
+    expect(f.api.publishContext).not.toHaveBeenCalled();
+  } else {
+    await act(async () => button('Apply early').click());
+    expect(f.api.publishContext).toHaveBeenCalledExactlyOnceWith(identity, runId);
+  }
+  expect(container.querySelector('[aria-label="Active summary"]')?.textContent).toContain('Manually prepared summary');
+  expect(button('Back to current context')).toBeUndefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  const resources = () => container.querySelector('[aria-label="Instructions and skills"]')?.textContent;
+  expect(resources()).toContain('resources:5');
+  expect(resources()).toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(f.api.resources.refresh).toHaveBeenNthCalledWith(2, { ...identity, expectedRevision: 5 });
+
+  // An explicit history visit still pins the original published checkpoint.
+  window.HTMLElement.prototype.scrollTo = () => {};
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Compaction history'))!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('.context-history button')!.click());
+  expect(resources()).toContain('resources:original');
+  expect(resources()).not.toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => button('Back to current context').click());
+  expect(resources()).toContain('resources:6');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+
+  // A timeline job link is also an explicit pin, even as current resources advance.
+  await act(async () => useUIStore.getState().openContextPanelTab('/workspace/project', { mode: 'context', thread: identity, targetPath: runId }));
+  expect(resources()).toContain('resources:original');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => {
+    f.view.context.checkpoint = { ...f.view.context.checkpoint!, id: 'context:external-publication', revision: 7 };
+    f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 7, kind: 'context.committed', data: {} });
+  });
+  expect(resources()).toContain('resources:original');
+  await act(async () => button('Back to current context').click());
+  expect(resources()).toContain('context:external-publication');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+});
+
 it('retries summary generation without duplicating the job and applies its completed checkpoint without hiding history', async () => {
   const f = fixture();
   f.view.history = [{ id: 'summary-cut', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'original full message' }, provider: null }];
