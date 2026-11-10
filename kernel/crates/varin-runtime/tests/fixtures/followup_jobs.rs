@@ -632,7 +632,7 @@ fn job_terminal_keeps_new_acceptance_details_and_each_media_source_once() {
     other_media.source = OutputSource::Operation { operation_id: "another-original-object".into() };
     let terminal = OutputBody { model_data: None,
         data: json!({"source":{"id":"business-id","revision":"business-version"},"result":{"value":0}}),
-        parts: vec![shared, OutputPart::Media { media }, OutputPart::Text { text: "final-only detail".into() }, OutputPart::Media { media: other_media }] };
+        parts: vec![shared, OutputPart::Media { media }, OutputPart::Text { text: "acceptance-only detail".into() }, OutputPart::Text { text: "final-only detail".into() }, OutputPart::Media { media: other_media }] };
     let op = f.db.operation(&binding.operation_id).unwrap();
     let ExecutorOwner::External { epoch, .. } = &binding.execution_owner else { panic!() };
     let prepared = f.db.prepare_result_content().write_external_receipt(ExternalReceipt {

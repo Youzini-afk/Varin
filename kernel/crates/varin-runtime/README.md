@@ -209,7 +209,15 @@ Numeric versions stay intact, conflicting encodings remain unmatched, and explic
 take precedence. The original provider request model is unchanged. Unmatched models use the o200k reference.
 No model-specific vocabularies or parallel encoding tables are bundled. Immutable request fragments cache counts; changed
 tokenizer bindings invalidate calibration/reuse identities. Summary input uses its own model tokenizer;
-retained material uses the frozen conversation tokenizer.
+retained material uses the frozen conversation tokenizer. New summary sources contain readable text and
+actual ordered media, with frozen source/part, retention-group and verified history-read relationships
+kept separately. UTF-8 ranges address that fixed text, not serialized conversation records; each
+fragment carries its prepared role, group cost and existing `summary_read` target. User quotes remain
+evidence while sharing their original message's retention group. The continuation estimate covers the
+complete original exchange's common provider view, including actions, arguments, statuses and all
+visible parts, without counting hidden receipts or auxiliary quotation headings. Original records,
+media owners and read permissions remain unchanged. Already-frozen recipes retain their earlier
+quotation bytes, ranges, group assignments and cost interpretation when reopened.
 Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;
 forking or navigation that discards the summary also discards its selection.
 Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related

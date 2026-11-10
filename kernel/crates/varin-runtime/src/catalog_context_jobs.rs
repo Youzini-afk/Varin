@@ -66,6 +66,10 @@ struct ContextJobRecipe {
     request: ContextJobRequest,
     source: SummarySource,
     sources: Value,
+    /// Small structured relationships and fixed headings, separate from media-aware bodies.
+    /// Absence preserves already-frozen source and batch presentation on recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_materials: Option<std::collections::BTreeMap<String, ContextCompactionMaterial>>,
     compaction: ContextCompactionCandidate,
     plan_hash: String,
     model_budget: ContextCompactionModelBudget,
@@ -851,19 +855,21 @@ impl ContextJobRead {
                 .load_items(&recipe.sources, &|| false)?
                 .into_iter()
                 .map(|item| {
-                    (
+                    Ok((
                         item.id.clone(),
                         ContextCompactionSource {
                             source_id: item.id.clone(),
+                            material: recipe.source_materials.as_ref().map(|materials| materials.get(&item.id)
+                                .cloned().ok_or_else(|| RuntimeError::Invalid("frozen summary material mapping missing".into()))).transpose()?,
                             item: std::sync::Arc::unwrap_or_clone(item),
                         },
-                    )
+                    ))
                 })
-                .collect()
+                .collect::<Result<_>>()?
         };
         Ok(ContextJobCompiler {
             originals: recipe.originals.as_ref().map(|reference| self.content.load_items(reference, &|| false)
-                .map(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer.clone()))).transpose()?,
+                .map(|items| recipe.originals(items))).transpose()?,
             recent: self.content.load_items(&recipe.recent,&||false)?,
             recipe,
             sources,
@@ -963,7 +969,9 @@ impl ContextJobCompiler {
                     })?;
                     let text = crate::context_material::summary_text(&self.content,
                         output.body.as_ref().ok_or_else(|| RuntimeError::Invalid("summary output missing".into()))?)?;
-                    let text = self.originals.as_ref().map(|originals| originals.carry(&text)).transpose()?.unwrap_or(text);
+                    let text = self.originals.as_ref().map(|originals| if recipe.source_materials.is_some() {
+                        originals.carry_readable(&text)
+                    } else { originals.carry(&text) }).transpose()?.unwrap_or(text);
                     ConversationItem {
                         resource_activation: None,
                         id: format!("context-job:{}:node-output:{node_id}", recipe.request.key),
@@ -1060,6 +1068,18 @@ struct FrozenSummarySource {
     resource_activations: Vec<resources::ResourceActivation>,
 }
 impl ContextJobRecipe {
+    fn originals(&self, items: crate::execution::ConversationHistory) -> crate::context_retention::Originals {
+        if self.source_materials.is_some() {
+            crate::context_retention::Originals::with_history_origins(items, self.continuation_tokenizer.clone(), &self.history_origins())
+        } else {
+            crate::context_retention::Originals::new(items, self.continuation_tokenizer.clone())
+        }
+    }
+    fn history_origins(&self) -> std::collections::BTreeMap<String, String> {
+        self.source_materials.iter().flat_map(|materials| materials.values()).filter_map(|material| {
+            material.history_item_id.as_ref().map(|id| (material.original_item_id.clone(), id.clone()))
+        }).collect()
+    }
     fn metadata(&self) -> ContextCompactionMetadata {
         ContextCompactionMetadata {
             producer: self.compaction.producer.clone(),
@@ -1159,7 +1179,37 @@ impl ContextJobPreparation {
         let mut history = active_checkpoint.as_ref().filter(|_| !rebuild).and_then(|checkpoint| checkpoint.retained.as_ref())
             .map(|retained| self.content.load_items(&retained.items, &|| false)).transpose()?.unwrap_or_default();
         if rebuild { history.extend(super::memory_exclusion::initial_background(&database, &self.content, &self.request.branch_id)?); }
-        history.extend(hydrate_source(&self.content, source)?);
+        let mut history_origins = std::collections::BTreeMap::new();
+        for item in source {
+            let id = item.id.clone();
+            let parts = hydrate_source(&self.content, vec![item])?;
+            history_origins.extend(parts.iter().map(|part| (part.id.clone(), id.clone())));
+            history.extend(parts);
+        }
+        // A preceding checkpoint can retain projected parts without the original history
+        // envelope. Resolve only actual, anchored owner records and verify their projection;
+        // an ID spelling is a lookup candidate, never proof of an original or read authority.
+        let mut checked = std::collections::BTreeSet::new();
+        for item in &history {
+            if history_origins.contains_key(&item.id) { continue; }
+            let mut candidates = vec![item.id.as_str()];
+            if let Provenance::UserInstruction { input_id } = &item.provenance {
+                candidates.push(input_id);
+            }
+            if let Some((parent, part)) = item.id.rsplit_once(":part:") {
+                if part.parse::<usize>().is_ok() { candidates.push(parent); }
+            }
+            for candidate in candidates {
+                if !checked.insert(candidate.to_owned()) { continue; }
+                let body: Option<String> = database.query_row("SELECT body FROM history WHERE id=?1", [candidate], |row| row.get(0)).optional()?;
+                let Some(body) = body else { continue; };
+                let anchored: bool = database.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)", params![self.request.through_id, candidate], |row| row.get(0))?;
+                if !anchored { continue; }
+                let original: HistoryItem = serde_json::from_str(&body)?;
+                let parts = hydrate_source(&self.content, vec![original])?;
+                history_origins.extend(parts.iter().map(|part| (part.id.clone(), candidate.to_owned())));
+            }
+        }
         super::memory_exclusion::filter(memory_state.as_ref(), &mut history)?;
         if let Some(basis) = self
             .request
@@ -1224,7 +1274,12 @@ impl ContextJobPreparation {
             history.insert(0, prior.into());
         }
         let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
-        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer.clone()).annotate(&mut sources);
+        for source in &mut sources {
+            if let Some(material) = &mut source.material {
+                material.history_item_id = history_origins.get(&material.original_item_id).cloned();
+            }
+        }
+        crate::context_retention::Originals::with_history_origins(originals.clone(), self.continuation_tokenizer.clone(), &history_origins).annotate(&mut sources);
         let model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
         let continuation_budget_tokens = if let Some(tokens) = self.request.summary_recipe.continuation_budget_tokens {
             Some(tokens)
@@ -1304,6 +1359,10 @@ impl ContextJobPreparation {
                 ));
             }
             let plan_hash = crate::context_material::hash(&compaction)?;
+            let source_materials = frozen.preview.sources.iter().map(|source| {
+                Ok((source.source_id.clone(), source.material.clone()
+                    .ok_or_else(|| RuntimeError::Invalid("new summary material mapping missing".into()))?))
+            }).collect::<Result<_>>()?;
             let sources = self.content.save_items(
                 &frozen
                     .preview
@@ -1320,6 +1379,7 @@ impl ContextJobPreparation {
                 request: self.request.clone(),
                 source: self.source.clone(),
                 sources,
+                source_materials: Some(source_materials),
                 compaction,
                 plan_hash,
                 model_budget: frozen.preview.model_budget,
@@ -1489,12 +1549,12 @@ impl ContextJobPublication {
         } else { crate::context_retention::Selection::parse(&summary)? };
         let retained = recipe.originals.as_ref().map(|reference| -> Result<_> {
             let counter = recipe.continuation_tokenizer.clone();
-            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter.clone());
+            let originals = recipe.originals(self.content.load_items(reference, &|| false)?);
             let items = originals.select_with_sources(&selection.retain, &selection.summary)?;
             crate::execution::validate_history_pairs(&items)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
             let estimated_tokens = counter.count(&selection.summary)
-                + items.iter().map(|item| counter.item(item)).sum::<u64>();
+                + items.iter().map(|item| if recipe.source_materials.is_some() { counter.model_item(item) } else { counter.item(item) }).sum::<u64>();
             Ok(crate::context_retention::RetainedContext { items: self.content.save_items(&items)?,
                 estimated_tokens, budget_tokens: recipe.continuation_budget_tokens })
         }).transpose()?;
@@ -1703,4 +1763,65 @@ pub(super) fn record_step(
         ],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use crate::test_submission::InputAdmission;
+
+    #[test]
+    fn reopened_legacy_recipe_keeps_its_frozen_quotation_and_range_contract() {
+        struct Fixture(std::path::PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        for excerpt in [false, true] {
+            let root = Fixture(std::env::temp_dir().join(format!("legacy-summary-{}", uuid::Uuid::new_v4())));
+            let mut db = Catalog::open(&root.0).unwrap();
+            db.create_thread("thread", "main").unwrap();
+            let source = db.submit(&SubmitInput { key:"input".into(), thread_id:"thread".into(), branch_id:"main".into(), expected_head:None,
+                input:json!({"text":"Original 中文"}), configuration:json!({}) }).unwrap();
+            let launch: launches::LaunchSelection = serde_json::from_value(json!({
+                "child_dispatch":null,"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture",
+                "configuration_generation":1,"tool_schema_generation":0,"tools":[],"policy":{"name":"context_compaction","version":"4"},"source":null,
+            })).unwrap();
+            let job = db.create_context_job(ContextJobRequest { compaction:None, summary_recipe:ContextSummaryRecipe::manual(), owner_run_id:None,
+                personalization:None,key:"legacy".into(),branch_id:"main".into(),through_id:source.input_id,expected_revision:0,
+                effective_system_prompt:"Continue".into(),instruction_sources:vec![],memory_checkpoint:None }, launch, json!({})).unwrap();
+            let read = db.capture_context_job(&job.receipt.run_id).unwrap();
+            let mut recipe = read.recipe().unwrap();
+            let mut sources = db.content.load_items(&recipe.sources, &||false).unwrap();
+            let frozen_text = json!({"retention":{"retainId":"r1","estimatedTokens":123},"material":{"id":"original","content":{"kind":"text","text":"Original 中文"}}}).to_string();
+            std::sync::Arc::make_mut(&mut sources[0]).content = Content::Text { text:frozen_text.clone() };
+            recipe.sources = db.content.save_items(&sources).unwrap();
+            recipe.source_materials = None;
+            if excerpt {
+                let ContextCompactionPlan::ModelPlan { nodes, .. } = &mut recipe.compaction.plan else { panic!("model plan") };
+                let ContextCompactionInput::Source { range, .. } = &mut nodes[0].inputs[0] else { panic!("source input") };
+                *range = Some(ContextCompactionRange { start:0, end:frozen_text.len() as u64 });
+            }
+            recipe.plan_hash = crate::context_material::hash(&recipe.compaction).unwrap();
+            // An on-disk legacy recipe has no material mapping. The original ContentStore
+            // owns both its fixed body and source references; no live history is re-quoted.
+            let dependencies = [&recipe.sources, &recipe.recent, recipe.originals.as_ref().unwrap()].into_iter()
+                .map(|reference|reference["content_object"].as_str().unwrap().to_owned()).collect();
+            let reference = db.content.save_with_dependencies(&recipe, dependencies).unwrap();
+            db.db.execute("UPDATE context_jobs SET recipe=?1,plan_hash=?2 WHERE run_id=?3",params![encode(&reference).unwrap(),recipe.plan_hash,job.receipt.run_id]).unwrap();
+            drop(read);
+            drop(db);
+            let db = Catalog::open(&root.0).unwrap();
+            let compiler = db.capture_context_job(&job.receipt.run_id).unwrap().compiler().unwrap();
+            assert!(compiler.recipe.source_materials.is_none());
+            let node = compiler.plan().nodes()[0].id.clone();
+            let context = compiler.compile_node(&node, &[]).unwrap();
+            let Content::Text { text } = &context.history[1].content else { panic!("frozen quoted text") };
+            if excerpt {
+                let parsed:Value = serde_json::from_str(text).unwrap();
+                assert_eq!(parsed["quotedSourceFragment"], frozen_text);
+                assert_eq!(parsed["retention"]["estimatedTokens"], 123);
+            } else { assert_eq!(text, &frozen_text); }
+            assert!(compiler.recipe.history_origins().is_empty());
+        }
+    }
 }

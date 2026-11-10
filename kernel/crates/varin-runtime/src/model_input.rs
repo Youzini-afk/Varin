@@ -38,8 +38,29 @@ pub(crate) fn acceptance_details(mut acceptance: OutputBody, terminal: &OutputBo
     differences(&mut model_data, terminal.model_data());
     differences(&mut acceptance.data, &terminal.data);
     acceptance.model_data = (model_data != acceptance.data).then_some(model_data);
+    if !acceptance.parts.is_empty()
+        && terminal.parts.windows(acceptance.parts.len()).any(|parts| parts == acceptance.parts)
+    {
+        acceptance.parts.clear();
+    }
     acceptance
-        .parts
-        .retain(|part| !terminal.parts.contains(part));
-    acceptance
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::{OutputSource, ResolvedMedia};
+    use serde_json::json;
+
+    #[test]
+    fn matching_caption_stays_with_each_distinct_image() {
+        let parts = |identity: &str| vec![OutputPart::Text { text: "Red series = baseline".into() },
+            OutputPart::Media { media: ResolvedMedia { media_type: "image/png".into(), data_base64: "same-pixels".into(),
+                source: OutputSource::Operation { operation_id: identity.into() } } }];
+        let accepted = OutputBody { data: json!({"accepted":true}), model_data: None, parts: parts("before") };
+        let terminal = OutputBody { data: json!({"result":"changed"}), model_data: None, parts: parts("after") };
+        let retained = acceptance_details(accepted.clone(), &terminal);
+        assert_eq!(retained.parts, accepted.parts);
+        assert!(acceptance_details(terminal.clone(), &terminal).parts.is_empty());
+    }
 }

@@ -345,6 +345,25 @@ impl TokenCounter {
         }
     }
 
+    /// Text carried by the original complete item through the shared provider view.
+    /// This is independent of a compaction quotation's headings and excerpts. Media and
+    /// provider-only continuation remain explicitly unmeasured, as in `item` above.
+    pub(crate) fn model_item(&self, item: &ConversationItem) -> u64 {
+        use crate::providers::{ProviderPart, completion_parts, evidence_parts};
+        let parts = match &item.content {
+            Content::Text { text } | Content::ReasoningSummary { text } => return self.count(text),
+            Content::Media { .. } | Content::ProviderOnly => return 0,
+            Content::ToolCall { call } => return self.count(&call.name)
+                .saturating_add(self.count(&serde_json::to_string(&call.arguments).expect("tool arguments"))),
+            Content::ToolResult { result } => completion_parts(&result.completion),
+            Content::Output { output } => evidence_parts(output, &item.provenance),
+        };
+        parts.iter().fold(0u64, |total, part| total.saturating_add(match part {
+            ProviderPart::Text { text } => self.count(text),
+            ProviderPart::Media { .. } => 0,
+        }))
+    }
+
     pub(crate) fn json(&self, value: &Value) -> u64 {
         // Count text leaves and envelope pieces independently so cached fragments and a
         // recovered request use the same accounting, regardless of serialization layout.

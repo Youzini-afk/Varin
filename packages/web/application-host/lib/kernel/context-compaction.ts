@@ -6,7 +6,7 @@ import {
   canonicalServiceComposition, type JsonValue, type VarinContextCompactionInput,
 } from '@varin/extension-contract';
 import { waitWithSignal } from '../cancellation.js';
-import type { ContextCompactionCandidate } from './protocol.generated.js';
+import type { ContextCompactionCandidate, ContextCompactionPreview } from './protocol.generated.js';
 
 export interface ContextCompactionScope { threadId: string; projectId?: string; workspaceId?: string }
 export interface ContextCompactionLease {
@@ -19,12 +19,19 @@ export interface ContextCompactionLease {
 export interface ContextCompactionOwner {
   selected(scope: ContextCompactionScope, signal: AbortSignal): Promise<boolean>;
   /** Hold the returned lease through native ContextJob.create; release on either outcome. */
-  prepare(scope: ContextCompactionScope, input: VarinContextCompactionInput, signal: AbortSignal): Promise<ContextCompactionLease | undefined>;
+  prepare(scope: ContextCompactionScope, input: ContextCompactionPreview, signal: AbortSignal): Promise<ContextCompactionLease | undefined>;
 }
 const hash = (value: unknown) => createHash('sha256').update(canonicalServiceComposition(value)).digest('hex');
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
   return value;
+}
+/** The v1 algorithm contract has exact source keys. Native source mappings and retention
+ * metadata stay with their owner; source bodies and their UTF-8 range coordinates are unchanged. */
+export function contextCompactionServiceInput(input: ContextCompactionPreview): VarinContextCompactionInput {
+  return parseVarinContextCompactionInput({ ...input,
+    sources: input.sources.map(({ sourceId, item }) => ({ sourceId, item })),
+  });
 }
 /** Short-lived preparation pin, not a plugin-owned task ledger. No accepted work calls back here. */
 export function createContextCompaction(runtime: ApplicationExtensionRuntime): ContextCompactionOwner {
@@ -52,7 +59,7 @@ export function createContextCompaction(runtime: ApplicationExtensionRuntime): C
       const current = await selection(scope, signal);
       // Re-read original routing for this actual attempt. Installing a provider never opts in.
       if (!current.selected) return undefined;
-      const input = freeze(parseVarinContextCompactionInput(rawInput));
+      const input = freeze(contextCompactionServiceInput(rawInput));
       const binding = await runtime.prepareService({ serviceId: VARIN_CONTEXT_COMPACTION_SERVICE_ID,
         version: VARIN_CONTEXT_COMPACTION_VERSION, method: 'describe', args: [], routing: routingScope(scope) },
       { expectedRoutingRevision: current.routing.document.revision, signal });

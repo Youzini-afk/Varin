@@ -3342,3 +3342,16 @@ fn bounded_job_output_never_truncates_its_operational_reference() {
         assert!(wire.contains("job:47"), "budget {budget}");
     }
 }
+
+#[test]
+fn completion_material_uses_owner_error_without_changing_original_receipt() {
+    let original = json!({"error":{"code":"internal_failure","message":"private receipt message","details":{"receiptId":"private-epoch"}}});
+    let visible = json!({"error":{"code":"build_failed","message":"Readable build failure","details":{"exitCode":1}}});
+    let completion = ToolCompletion::Result { outcome: crate::Outcome::Failed, effect: crate::Effect::Partial,
+        content: OutputBody { data: original.clone(), model_data: Some(visible.clone()), parts: vec![] } };
+    let text = completion_text(&completion);
+    assert!(text.contains("Readable build failure") && text.contains("build_failed"));
+    assert!(!text.contains("private receipt message") && !text.contains("private-epoch") && !text.contains("internal_failure"));
+    assert_eq!(completion.error().unwrap().details, Some(original["error"]["details"].clone()));
+    assert_eq!(completion.model_error().unwrap().details, Some(visible["error"]["details"].clone()));
+}

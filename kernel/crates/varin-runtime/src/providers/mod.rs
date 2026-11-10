@@ -639,7 +639,7 @@ impl serde::Serialize for CompletionData<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut data = serializer.serialize_map(None)?;
-        if let Some(error) = self.0.error() { data.serialize_entry("error", &error)?; }
+        if let Some(error) = self.0.model_error() { data.serialize_entry("error", &error)?; }
         // Keep the sorted key order of the original JSON Value in textual receipts.
         match self.0 {
             ToolCompletion::NotDispatched { reason, .. } => {
