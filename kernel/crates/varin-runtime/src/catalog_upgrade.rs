@@ -11,7 +11,8 @@ struct Upgrade {
 const UPGRADES: &[Upgrade] = &[
     // Frozen quote relations live in the original input bodies. Older readers must not
     // silently omit their model projection; historical bodies and receipts stay unchanged.
-    Upgrade { from: 90, to: 91, convert: |_, _| Ok(()) },
+    Upgrade { from: 91, to: 92, convert: |_, _| Ok(()) },
+    Upgrade { from: 90, to: 91, convert: |tx, _| usage_ledger::upgrade_responses_cache_writes(tx) },
     // Existing launches have no extension admission marker and keep their exact semantics.
     // Only newly admitted automatic roots use the field; old readers must reject it.
     Upgrade { from: 89, to: 90, convert: |_, _| Ok(()) },
@@ -67,7 +68,7 @@ pub(super) fn supports(mut version: i64) -> bool {
 /// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
 /// valid asset or, worse, relabel a different layout without running its converter.
 pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
-    if matches!(version, 81 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91) {
+    if matches!(version, 81 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91 | 92) {
         return context_observations::check_format(db);
     }
     let present: bool = db.query_row(
@@ -86,7 +87,7 @@ pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> 
 /// Environment queue entries (including Zone2 captures) intentionally have a
 /// different representation and are not evidence of a missing history index.
 pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
-    if !matches!(version, 82 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91) {
+    if !matches!(version, 82 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91 | 92) {
         return Ok(());
     }
     let missing: bool = db.query_row(

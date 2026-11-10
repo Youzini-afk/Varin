@@ -182,6 +182,11 @@ at binding, before credentials or a potentially billable request are dispatched.
 Responses retains terminal usage before reporting `response.failed` or rejecting incomplete tool
 output. Known incomplete text/refusal endings can complete as length/content-filter results; an
 incomplete tool batch cannot become executable calls. Received raw usage stays with the failed request.
+All three Responses families retain an explicit `input_tokens_details.cache_write_tokens` count,
+including zero, from completed, incomplete and failed terminal responses. Missing or invalid counts
+remain unknown on older and compatible endpoints. The complete raw receipt preserves cache-lifetime
+details; the usage ledger applies the request's configured cache-write price rather than inferring a
+price from those details.
 
 Azure requires the complete endpoint, deployment and API version selected by the Host. It validates
 or appends the API-version query and uses deployment as the request model. Resource defaults and

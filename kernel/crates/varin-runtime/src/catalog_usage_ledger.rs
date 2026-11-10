@@ -11,6 +11,13 @@ use crate::types::ModelSessionConfiguration;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "catalog_usage_recovery.rs"]
+mod recovery;
+
+pub(super) fn upgrade_responses_cache_writes(tx: &Transaction<'_>) -> Result<()> {
+    recovery::upgrade_responses_cache_writes(tx)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PricingCurrency {
     #[serde(rename = "USD")]

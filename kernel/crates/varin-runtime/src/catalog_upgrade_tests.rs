@@ -698,6 +698,24 @@ fn catalog_upgrade_v83_fixes_historical_default_driver_without_rewriting_effects
 
 #[test]
 fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission() {
+    assert_preserves_original_launch(89, None);
+}
+
+#[test]
+fn catalog_upgrade_v90_preserves_prepared_extension_admission_and_receipts() {
+    assert_preserves_original_launch(90, Some(launches::ExtensionAdmission {
+        state: launches::ExtensionAdmissionState::Prepared,
+    }));
+}
+
+#[test]
+fn catalog_upgrade_v91_preserves_prepared_extension_admission_and_receipts() {
+    assert_preserves_original_launch(91, Some(launches::ExtensionAdmission {
+        state: launches::ExtensionAdmissionState::Prepared,
+    }));
+}
+
+fn assert_preserves_original_launch(from: i64, admission: Option<launches::ExtensionAdmission>) {
     // Build the released layout by its actual earlier converters, not by relabelling
     // a new launch with the new admission marker as historical data.
     let fixture = Fixture::v83();
@@ -705,7 +723,7 @@ fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission
     let mut raw = fixture.raw();
     let tx = raw.transaction().unwrap();
     let mut version = 83;
-    while version < 89 {
+    while version < from {
         let step = UPGRADES.iter().find(|step| step.from == version).unwrap();
         (step.convert)(&tx, &[]).unwrap();
         version = step.to;
@@ -717,9 +735,12 @@ fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission
         "tool_schema_generation":1,"tools":[],"policy":{"name":"default","version":"1"},"source":null
     })).unwrap();
     let selected = launch_content::LaunchSelectionMetadata::stage(&content, selection.clone()).unwrap();
-    let launch = json!({"dispatch_context_ref":null,"policy_generation":0,"policy_target":{"kind":"default"},
+    let mut launch = json!({"dispatch_context_ref":null,"policy_generation":0,"policy_target":{"kind":"default"},
         "preparation_failure":null,"run_id":"run","revision":4,"selection":selected,
         "bound_epoch":17,"requires_rebind":false});
+    if let Some(admission) = &admission {
+        launch["extension_admission"] = serde_json::to_value(admission).unwrap();
+    }
     let original_launch = encode(&launch).unwrap();
     tx.execute("INSERT INTO run_launches(id,body) VALUES('run',?1)", [&original_launch]).unwrap();
     tx.commit().unwrap();
@@ -729,10 +750,10 @@ fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission
     let original_model: String = raw.query_row("SELECT body FROM model_steps WHERE id='settled'", [], |row|row.get(0)).unwrap();
     let original_bodies = fixture.bodies();
     // A crash in the same upgrade transaction cannot advance the marker or change a receipt.
-    assert!(apply_before_commit(&mut raw, 89, &content, |_| Err(RuntimeError::Invalid("injected precommit interruption".into()))).is_err());
-    assert_eq!(inspect_catalog_format(&raw).unwrap(), 89);
+    assert!(apply_before_commit(&mut raw, from, &content, |_| Err(RuntimeError::Invalid("injected precommit interruption".into()))).is_err());
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), from);
     assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
-    apply(&mut raw, 89, &content).unwrap();
+    apply(&mut raw, from, &content).unwrap();
     assert_eq!(inspect_catalog_format(&raw).unwrap(), FORMAT);
     assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
     assert_eq!(raw.query_row("SELECT intent,receipt FROM commands WHERE id='original-command'", [], |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).unwrap(), original_receipt);
@@ -745,6 +766,6 @@ fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission
     // Inspect the original owner metadata without manufacturing that missing identity.
     let restored = catalog.launch_metadata("run").unwrap().unwrap();
     assert_eq!(restored.selection.clone().load(&catalog.content).unwrap(), selection);
-    assert_eq!(restored.extension_admission, None);
+    assert_eq!(restored.extension_admission, admission);
     assert_eq!(restored.revision, 4);
 }
