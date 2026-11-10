@@ -120,6 +120,10 @@ fn explicit_normal_narrowing_keeps_frozen_extensions_and_checks_exact_owning_sch
     let (resolved, full) = crate::collaboration::resolve_selection(&selected, &all).unwrap();
     assert_eq!(resolved.extension_bindings, selected.extension_bindings);
     assert!(full.contains(&selected.extension_bindings[0].tool));
+    let mut selected = selected;
+    selected.extension_bindings[0].tool.description.push_str(" changed Host declaration");
+    assert!(crate::collaboration::resolve_selection(&selected, &all).is_err(),
+        "native compatibility cannot replace a changed original Host binding");
     let root = f.root.clone();
     drop(selected);
     drop(f);

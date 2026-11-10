@@ -109,6 +109,12 @@ impl ProcessWaitTools {
         Ok(args)
     }
     fn project_completion(&self, c:&ToolExecutionContext, call:&ToolCall, completion:&mut ToolCompletion) -> Result<(),ExecutionError> {
+        let tools=crate::collaboration::original_tools(&self.catalog,c,call)?;
+        if tools.iter().any(|schema|schema.name=="process_read" && schema.schema["properties"].get("ref").is_none()) {
+            // Keep the original processId/cursor contract for already admitted
+            // readers. A new implementation version does not expand that schema.
+            return Ok(());
+        }
         let resolved = self.arguments(call)?;
         let id = resolved["processId"].as_str().ok_or_else(||error("processId required"))?.to_owned();
         let mut catalog = self.catalog.lock().map_err(error)?;

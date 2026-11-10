@@ -82,6 +82,18 @@ fn retrieval_failure(failure: ExecutionError) -> ExecutionError {
     details["cause"] = json!({"code": failure.code, "message": failure.message});
     ExecutionError::new("retrieval_preparation_failed", failure.message).with_details(details)
 }
+/// Read the admitted invocation's real declarations outside the Catalog lock. Bound
+/// implementation schemas may be newer; they are not the model's consumer contract.
+pub(crate) fn original_tools(catalog: &Arc<Mutex<Catalog>>, context: &ToolExecutionContext,
+    call: &ToolCall) -> Result<Arc<Vec<ToolSchema>>, ExecutionError>
+{
+    let read = catalog.lock().map_err(error)?.capture_tool_invocation(context, &call.call_id).map_err(error)?;
+    let original = read.load().map_err(error)?;
+    if original.context != *context || original.call != *call {
+        return Err(error("collaboration output differs from its original invocation"));
+    }
+    Ok(original.tools)
+}
 pub(crate) fn is_tool(name: &str) -> bool {
     matches!(
         name,
@@ -684,6 +696,8 @@ impl ToolExecutor for CollaborationTools {
                 })();
                 return delivery.map_err(|mut failure| { attachments.release_failed(&self.catalog, &mut failure); failure });
             }
+            let original_tools = original_tools(&self.catalog, c, call)?;
+            let model_contract = collaboration::ModelContract::from_tools(&original_tools);
             let original: ChildHandle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
             if call.name == collaboration::STATUS_TOOL {
                 if let Some(target) = original.target.as_deref().filter(|target| !target.contains('/')) {
@@ -705,7 +719,8 @@ impl ToolExecutor for CollaborationTools {
                             }
                         }
                     }
-                    let model=status_for_model(&overview);
+                    let mut model=status_for_model(&overview);
+                    if !model_contract.report { model.as_object_mut().expect("overview").remove("nextRead"); }
                     let mut content:varin_runtime::output::OutputBody=overview.into();content.model_data=Some(model);
                     return Ok(ToolCompletion::Result {outcome:Outcome::Succeeded,effect:Effect::None,content});
                 }
@@ -716,7 +731,9 @@ impl ToolExecutor for CollaborationTools {
                 if handle.execution_id.as_ref().is_some_and(|id| child.turn_id.as_ref()!=Some(id)) { return Err(error("External executionId must identify this dispatch's actual turn")); }
                 drop(db);
                 if call.name == collaboration::WAIT_TOOL {
-                    self.catalog.lock().map_err(error)?.register_external_child_wait(c,&handle.operation_id).map_err(error)?;
+                    let preparation = self.catalog.lock().map_err(error)?.prepare_external_child_wait(c,&handle.operation_id).map_err(error)?;
+                    let prepared = preparation.load().map_err(error)?;
+                    self.catalog.lock().map_err(error)?.register_external_child_wait(prepared).map_err(error)?;
                     return accepted(&self.catalog,c,"awaiting_external_agent");
                 }
                 let read=self.catalog.lock().map_err(error)?.capture_external_child(&c.run_id,&handle.operation_id).map_err(error)?.ok_or_else(||error("External report disappeared"))?;
@@ -735,13 +752,14 @@ impl ToolExecutor for CollaborationTools {
                         next.item_id=child.report.as_ref().and_then(|report|report["items"].as_array()).and_then(|items|items.iter().position(|item|item["itemId"]==content["page"]["itemId"]).and_then(|index|items.get(index+1))).and_then(|item|item["itemId"].as_str()).map(str::to_owned);
                         next.offset=Some(0);
                     }
-                    if next.item_id.is_some() {
+                    if next.item_id.is_some() && !model_contract.preserve_original {
                         let reference=self.catalog.lock().map_err(error)?.register_model_reference(ReferenceKind::Report,"child_report",&serde_json::to_value(next).map_err(error)?,&c.run_id).map_err(error)?;
                         content["nextRead"]=json!({"tool":collaboration::REPORT_TOOL,"arguments":{"ref":reference}});
                     }
                 }
                 let mut model=status_for_model(&content);
-                if !is_execution {model["read"]=json!({"tool":collaboration::REPORT_TOOL,"arguments":{"ref":reference}});if model["nextRead"]["arguments"]["target"].is_string(){model["nextRead"]=model["read"].clone();}if let Some(object)=model.as_object_mut(){object.remove("executionRef");}}
+                if !model_contract.report { model.as_object_mut().expect("status").remove("nextRead"); }
+                if !is_execution && model_contract.report {model["read"]=json!({"tool":collaboration::REPORT_TOOL,"arguments":{"ref":reference}});if model["nextRead"]["arguments"]["target"].is_string(){model["nextRead"]=model["read"].clone();}if let Some(object)=model.as_object_mut(){object.remove("executionRef");}}
                 if let Some(report)=model.get_mut("report").and_then(Value::as_object_mut) {
                     report.remove("conversationId");report.remove("turnId");
                     if let Some(Value::Array(items))=report.remove("items") {report.insert("parts".into(),json!(items.len()));}
@@ -751,7 +769,8 @@ impl ToolExecutor for CollaborationTools {
                 if !report_files.is_empty(){model["attachments"]=json!(report_files.iter().map(|file|file.model_descriptor()).collect::<Vec<_>>());}
                 if let Some(object)=model.as_object_mut(){for key in ["operationId","conversationId"]{object.remove(key);}}
                 if let Some(page)=model.get_mut("page").and_then(Value::as_object_mut){page.remove("itemId");page.remove("next_offset");}
-                let mut output:varin_runtime::output::OutputBody=content.into();output.model_data=Some(model);
+                let mut output:varin_runtime::output::OutputBody=content.into();
+                if !model_contract.preserve_original { output.model_data=Some(model); }
                 output.parts.extend(report_files.into_iter().map(|attachment|varin_runtime::output::OutputPart::Attachment{attachment}));
                 return Ok(ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:output});
             }
@@ -806,7 +825,7 @@ impl ToolExecutor for CollaborationTools {
                         .and_then(|index|report.history_ids.get(index+1)).cloned());
                     next.offset = Some(0);
                 }
-                let next_read = if next.item_id.is_some() {
+                let next_read = if next.item_id.is_some() && !model_contract.preserve_original {
                     let reference = self.catalog.lock().map_err(error)?.register_model_reference(ReferenceKind::Report,"child_report",
                         &serde_json::to_value(&next).map_err(error)?,&c.run_id).map_err(error)?;
                     Some(json!({"tool":collaboration::REPORT_TOOL,"arguments":{"ref":reference}}))
@@ -818,7 +837,8 @@ impl ToolExecutor for CollaborationTools {
                 let reference=self.catalog.lock().map_err(error)?.register_model_reference(ReferenceKind::Report,"child_report",&serde_json::to_value(current).map_err(error)?,&c.run_id).map_err(error)?;
                 let mut model=content.clone();model["page"]["ref"]=json!(reference);
                 if let Some(page)=model["page"].as_object_mut(){for key in ["execution_id","operation_id","item_id","next_offset"]{page.remove(key);}}
-                let mut output:varin_runtime::output::OutputBody=content.into();output.model_data=Some(model);
+                let mut output:varin_runtime::output::OutputBody=content.into();
+                if !model_contract.preserve_original { output.model_data=Some(model); }
                 return Ok(ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,
@@ -872,8 +892,10 @@ impl ToolExecutor for CollaborationTools {
                 let mut content = content;
                 content["ref"] = json!(reference);
                 if let Some(progress) = progress { content["progress"] = progress.load(&||cancel.is_cancelled()).map_err(error)?; }
-                let model=status_for_model(&content);
-                let mut output:varin_runtime::output::OutputBody=content.into();output.model_data=Some(model);
+                let mut model=status_for_model(&content);
+                if !model_contract.report { model.as_object_mut().expect("status").remove("nextRead"); }
+                let mut output:varin_runtime::output::OutputBody=content.into();
+                if !model_contract.preserve_original { output.model_data=Some(model); }
                 Ok(ToolCompletion::Result {
                     outcome: Outcome::Succeeded,
                     effect: Effect::None,

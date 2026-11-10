@@ -117,3 +117,7 @@ revocation, Run termination, restart and kernel epoch fences use the existing br
 operation owner. A dispatched request of uncertain outcome is not automatically replayed. Missing
 usage is not zero cost. This example does not promise model quality, exactly-once remote billing,
 or a general writable Agent planner.
+
+The read graph declares the current native `file_read` schema version 2. Committed
+`read_result` output retains its original `data` and provenance; model references are
+a separate presentation and must not replace policy evidence or source authority.

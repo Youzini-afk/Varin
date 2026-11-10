@@ -70,10 +70,17 @@ impl MessageTools {
         let sender=db.agent_identity(&identity.sender_thread_id).map_err(error)?;
         let recipient=db.agent_identity(&identity.target_thread_id).map_err(error)?;
         let reply=identity.reply_to.as_deref().map(|id|db.message_reference(id,&identity.message_id).map_err(error)).transpose()?;
-        Ok(preparation.with_model_identity(json!({"ref":reference,
+        let mut display=json!({"ref":reference,
             "sender":format!("{} [{}]",sender["name"].as_str().unwrap_or("Agent"),sender["agentId"].as_str().unwrap_or("")),
             "recipient":format!("{} [{}]",recipient["name"].as_str().unwrap_or("Agent"),recipient["agentId"].as_str().unwrap_or("")),
-            "kind":identity.kind,"replyTo":reply,"nextRead":{"tool":"read_thread","arguments":{"ref":reference}}})))
+            "kind":identity.kind,"replyTo":reply});
+        if let Some(reader)=frozen.tools.iter().find(|schema|schema.name=="read_thread") {
+            let arguments=if reader.schema["properties"].get("ref").is_some() { json!({"ref":reference}) }
+                else { json!({"threadId":identity.target_thread_id,"branchId":identity.target_branch_id,
+                    "query":{"kind":"recent","limit":20}}) };
+            display["nextRead"]=json!({"tool":"read_thread","arguments":arguments});
+        }
+        Ok(preparation.with_model_identity(display))
     }
 }
 impl ToolExecutor for MessageTools {

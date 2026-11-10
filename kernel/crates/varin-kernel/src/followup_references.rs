@@ -109,6 +109,14 @@ impl FollowupTools {
             ToolCompletion::Result {outcome:Outcome::Succeeded,content,..}|ToolCompletion::JobAccepted{content:Some(content),..}=>content,
             _=>return Ok(()),
         };
+        let tools=crate::collaboration::original_tools(&self.catalog,c,call)?;
+        let schema=tools.iter().find(|schema|schema.name==call.name && schema.version==call.schema_version)
+            .ok_or_else(||error("The original follow-up declaration is missing"))?;
+        let reference_reads=schema.schema["oneOf"].as_array().is_some_and(|variants|variants.iter().any(|variant|
+            variant["properties"]["action"]["const"]=="read" && variant["properties"].get("ref").is_some()));
+        // Existing v10 registrations retain their original IDs and after cursor;
+        // their frozen action union does not admit the new read/ref continuation.
+        if !reference_reads { return Ok(()); }
         let selected=input(&self.catalog,call)?;
         let mut projected=content.data.clone();
         let mut catalog=self.catalog.lock().map_err(error)?;

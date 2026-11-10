@@ -248,6 +248,7 @@ impl Catalog {
             return Ok(p.completion);
         }
         self.validate_external_message_admission(&p)?;
+        let model_contract = collaboration::ModelContract::from_tools(&p.invocation.tools);
         let Prepared {
             preparation: a,
             input_ref,
@@ -299,13 +300,16 @@ impl Catalog {
             params![child.operation_id, encode(&child)?],
         )?;
         super::model_references::admit_external_child(&tx,&child)?;
-        let model=if let Some(model)=inform_model {model} else {
+        let model=if model_contract.preserve_original { None } else if let Some(mut model)=inform_model {
+            if !model_contract.report { model.as_object_mut().expect("model").remove("read"); }
+            Some(model)
+        } else {
             let reference=super::model_references::execution_reference(&tx,&child.operation_id)?;
-            super::collaboration::acceptance_model(&reference,&child.name,"queued",false)
+            super::collaboration::acceptance_model(&reference,&child.name,"queued",false,model_contract)
         };
         match &mut completion {
-            ToolCompletion::Result{content,..}=>content.model_data=Some(model),
-            ToolCompletion::JobAccepted{content,effect,..}=>{*effect=Effect::None;if let Some(content)=content {content.model_data=Some(model)}},
+            ToolCompletion::Result{content,..}=>content.model_data=model,
+            ToolCompletion::JobAccepted{content,effect,..}=>{*effect=Effect::None;if let Some(content)=content {content.model_data=model}},
             _=>{},
         }
         let metadata=super::result_content::ToolCompletionMetadata::write(&self.content,&completion)?;

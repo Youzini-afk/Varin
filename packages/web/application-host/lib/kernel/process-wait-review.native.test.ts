@@ -1,3 +1,4 @@
+import { originalProcessOperationId } from './model-reference.test-helper.js';
 import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
@@ -264,12 +265,12 @@ function batch(response: ServerResponse, calls: Array<{ name: string; args: Reco
 }
 
 it.each(['none', 'original', 'current'] as const)('durable wait resumes with exact Run/source authority; revoked grant: %s', async revoked => {
-  let serial = 0; let processId = ''; let readResult = ''; let foreign = false; let foreignResult = '';
+  let serial = 0; let processId = ''; let processRef = ''; let readResult = ''; let foreign = false; let foreignResult = '';
   const f = await fixture(async (body, response) => {
     const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
     const output = outputs.at(-1);
     if (foreign) {
-      if (!output) tool(response, 'wait_process', { processId }, 90);
+      if (!output) tool(response, 'wait_process', { processId: processRef }, 90);
       else {
         foreignResult = responsesMetadataText(output.output);
         const grant = f.grants.findLast(grant => grant.grantId.startsWith('source:'))!;
@@ -290,8 +291,8 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       tool(response, 'process_spawn', { cwd: '', command: process.execPath,
         args: ['-e', `const fs=require('node:fs');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('process-wait-real-output');}},10);`], mode: 'pipe' }, 1);
     } else if (serial === 2) {
-      processId = (JSON.parse(responsesMetadataText(output?.output)) as { operation_id: string }).operation_id;
-      batch(response, [{ name: 'wait_process', args: { processId }, id: 'wait-2' },
+      processRef = (JSON.parse(responsesMetadataText(output?.output)) as { operation_id: string }).operation_id; processId = await originalProcessOperationId(f.kernel, processRef);
+      batch(response, [{ name: 'wait_process', args: { processId: processRef }, id: 'wait-2' },
         { name: 'file_read', args: { path: 'source.txt' }, id: 'read-peer-2' }]);
     } else if (serial === 3) {
       expect(responsesMetadataText(outputs.find(item => item.call_id === 'read-peer-2')?.output)).toContain('parallel read completed');
@@ -311,15 +312,15 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
         const originalRead = await f.kernel.scoped(processGrants[0]!).processRead({ ...identity, cursor: 0 });
         expect(JSON.stringify(originalRead)).toContain(Buffer.from('process-wait-real-output').toString('base64'));
       } else await f.kernel.revokeGrant(processGrants[revoked === 'original' ? 0 : 1]!.grantId);
-      tool(response, 'process_read', { processId, cursor: 0 }, 3);
+      tool(response, 'process_read', { processId: processRef, cursor: 0 }, 3);
     } else if (serial === 4) {
       readResult = responsesMetadataText(output?.output);
       // New observation registration must obey the same explicit revoke as reads.
-      if (revoked !== 'none') tool(response, 'wait_process', { processId }, 4);
+      if (revoked !== 'none') tool(response, 'wait_process', { processId: processRef }, 4);
       else tool(response, 'tool_describe', { name: 'process_resize' }, 4);
     } else if (serial === 5 && revoked === 'none') {
       const described = JSON.parse(responsesMetadataText(output?.output));
-      tool(response, 'tool_invoke', { name: described.content.name, arguments: { processId, cols: 100, rows: 30 } }, 5);
+      tool(response, 'tool_invoke', { name: described.content.name, arguments: { processId: processRef, cols: 100, rows: 30 } }, 5);
     } else {
       if (revoked === 'none') expect(JSON.parse(responsesMetadataText(output?.output))).toMatchObject({ kind: 'result', outcome: 'failed',
         error: { code: 'process_exited', message: expect.stringContaining('The process has exited') },
@@ -513,16 +514,16 @@ it('samples a registered machine condition without opening resources and resumes
 }, 60_000);
 
 it('reopens a parked wait after kernel shutdown and delivers the original stopped process fact without respawn', async () => {
-  let turn = 0; let processId = ''; let output = '';
-  const f = await fixture((_body, response) => {
+  let turn = 0; let processId = ''; let processRef = ''; let output = '';
+  const f = await fixture(async (_body, response) => {
     turn++;
     if (turn === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
       args: ['-e', `const fs=require('node:fs');fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('reopened-process-output');}},10);`], mode: 'pipe' }, 1);
     else if (turn === 2) {
       const last = (_body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-      processId = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id;
-      tool(response, 'wait_process', { processId }, 2);
-    } else if (turn === 3) tool(response, 'process_read', { processId, cursor: 0 }, 3);
+      processRef = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id; processId = await originalProcessOperationId(f.kernel, processRef);
+      tool(response, 'wait_process', { processId: processRef }, 2);
+    } else if (turn === 3) tool(response, 'process_read', { processId: processRef, cursor: 0 }, 3);
     else {
       output = JSON.stringify(_body.input); done(response);
     }
@@ -605,14 +606,14 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
 }, 60_000);
 
 it('rebuilds only Host continuation service while its kernel keeps the original process alive', async () => {
-  let turn = 0; let processId = ''; let readResult = '';
-  const f = await fixture((body, response) => {
+  let turn = 0; let processId = ''; let processRef = ''; let readResult = '';
+  const f = await fixture(async (body, response) => {
     turn++;
     const last = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
     if (turn === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
       args: ['-e', `const fs=require('node:fs');fs.appendFileSync(${JSON.stringify(path.join(f.root, 'spawn-count'))},'1');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(path.join(f.root, 'release-process'))})){clearInterval(timer);process.stdout.write('host-service-recovered-output');}},10);`], mode: 'pipe' }, 1);
-    else if (turn === 2) { processId = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id; tool(response, 'wait_process', { processId }, 2); }
-    else if (turn === 3) tool(response, 'process_read', { processId, cursor: 0 }, 3);
+    else if (turn === 2) { processRef = (JSON.parse(responsesMetadataText(last?.output)) as { operation_id: string }).operation_id; processId = await originalProcessOperationId(f.kernel, processRef); tool(response, 'wait_process', { processId: processRef }, 2); }
+    else if (turn === 3) tool(response, 'process_read', { processId: processRef, cursor: 0 }, 3);
     else { readResult = responsesMetadataText(last?.output); done(response); }
   });
   const identity = await f.api.create('host-service-process-wait');
@@ -650,9 +651,9 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
 
 it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-up without the Host pump, then cold-prepares and reads the original long-lived process output', async triggerKind => {
   const waitsForStop = triggerKind === 'process_stopped' || triggerKind === 'all';
-  let turn = 0; let processId = ''; let readResult = ''; let finishSource: (() => void) | undefined;
+  let turn = 0; let processId = ''; let processRef = ''; let readResult = ''; let finishSource: (() => void) | undefined;
   const failures: unknown[] = [];
-  const f = await fixture((body, response) => {
+  const f = await fixture(async (body, response) => {
     try {
       turn++;
       const last = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
@@ -661,13 +662,13 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
       else if (turn === 2) {
         const accepted = JSON.parse(responsesMetadataText(last?.output)) as { kind: string; operation_id: string };
         expect(accepted.kind).toBe('job_accepted');
-        processId = accepted.operation_id;
+        processRef = accepted.operation_id; processId = await originalProcessOperationId(f.kernel, processRef);
         // Keep the source Run active until the real management API has recorded authorization.
         finishSource = () => { if (!response.writableEnded) done(response); };
       } else if (turn === 3) {
         expect(JSON.stringify(body.input)).toContain('Read the original process output');
-        expect(JSON.stringify(body.input)).toContain(processId);
-        tool(response, 'process_read', { processId, cursor: 0 }, 3);
+        expect(JSON.stringify(body.input)).toContain(processRef);
+        tool(response, 'process_read', { processId: processRef, cursor: 0 }, 3);
       } else {
         expect(turn).toBe(4);
         readResult = responsesMetadataText(last?.output); done(response);
@@ -691,7 +692,7 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
     const stopped = { kind: 'process_stopped' as const, operationId: processId };
     const trigger = triggerKind === 'at' ? at : triggerKind === 'process_stopped' ? stopped : { kind: triggerKind, sources: [at, stopped] };
     const command = { ...identity, key: 'continue-process-once', runId: source.run_id, trigger,
-      instruction: `Read the original process output for ${processId}; do not restart it.` };
+      instruction: `Read the original process output for ${processRef}; do not restart it.` };
     const registered = await f.api.followups.register(command);
     if (waitsForStop) { expect(registered.wait.state).toBe('waiting'); expect(registered.occurrence).toBeNull(); }
     expect(await f.api.followups.register(command)).toMatchObject({ id: registered.id, registered_at_ms: registered.registered_at_ms, trigger: registered.trigger });

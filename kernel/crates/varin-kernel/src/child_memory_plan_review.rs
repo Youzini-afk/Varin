@@ -260,12 +260,34 @@ fn execute(
     owner: &mut OwnerReplies,
     uncertain: bool,
 ) {
-    f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
-    let mut start = f.start(0);
-    start.provider = Arc::new(ModelCalls {
+    let provider = Arc::new(ModelCalls {
         calls: calls.clone(),
         next: AtomicUsize::new(0),
     });
+    execute_with_provider(f, model, calls, owner, uncertain, provider);
+}
+fn execute_with_provider(
+    f: &Fixture,
+    model: bool,
+    calls: Vec<ToolCall>,
+    owner: &mut OwnerReplies,
+    uncertain: bool,
+    provider: Arc<dyn ModelProvider>,
+) {
+    execute_with_provider_frames(f, model, calls, owner, uncertain, provider, &mut |_, _| false);
+}
+fn execute_with_provider_frames(
+    f: &Fixture,
+    model: bool,
+    calls: Vec<ToolCall>,
+    owner: &mut OwnerReplies,
+    uncertain: bool,
+    provider: Arc<dyn ModelProvider>,
+    frame_handler: &mut dyn FnMut(&Fixture, &Value) -> bool,
+) {
+    f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
+    let mut start = f.start(0);
+    start.provider = provider;
     let input = f
         .catalog()
         .lock()
@@ -305,7 +327,7 @@ fn execute(
             }
             continue;
         }
-        if f.ordinary_frame(&frame) || (uncertain && frame["kind"] == "plan-cancel") {
+        if frame_handler(f, &frame) || f.ordinary_frame(&frame) || (uncertain && frame["kind"] == "plan-cancel") {
             continue;
         }
         assert_eq!(frame["kind"], "agent-policy-request", "{frame}");
@@ -355,6 +377,10 @@ fn execute(
         }
     );
 }
+
+#[path = "child_file_references_review.rs"]
+mod file_references;
+
 #[test]
 fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_separate() {
     for model in [false, true] {
@@ -993,3 +1019,6 @@ fn bot_plan_reconcile_separates_stopped_executor_from_unknown_effect() {
         f.finish();
     }
 }
+
+#[path = "child_collaboration_references_review.rs"]
+mod collaboration_references;

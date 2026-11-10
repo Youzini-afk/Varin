@@ -8,14 +8,58 @@ pub const DISPATCH_TOOL: &str = "dispatch";
 pub const STATUS_TOOL: &str = "child_status";
 pub const REPORT_TOOL: &str = "child_report";
 pub const WAIT_TOOL: &str = "wait_child";
-/// Presentation of an actual admitted execution; the underlying receipt remains intact.
-pub(super) fn acceptance_model(reference:&super::model_references::ExecutionReference,name:&str,state:&str,retrieval:bool)->Value {
-    let target=&reference.reference;
-    let read=if retrieval {json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"status"}})}
-        else {json!({"tool":STATUS_TOOL,"arguments":{"target":target}})};
-    let wait=if retrieval {json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"wait"}})}
-        else {json!({"tool":WAIT_TOOL,"arguments":{"target":target}})};
-    json!({"accepted":true,"agentId":reference.agent_id,"name":name,"executionRef":target,"ref":target,"operationRef":target,"state":state,"read":read,"wait":wait})
+/// Output compatibility belongs to the original reader declarations, not their version:
+/// the target/ref forms were added without changing the collaboration versions. Missing
+/// readers are not legacy readers and must not become newly advertised capabilities.
+#[derive(Clone, Copy, Default)]
+pub struct ModelContract {
+    pub preserve_original: bool,
+    status: bool,
+    wait: bool,
+    pub report: bool,
+}
+impl ModelContract {
+    pub fn from_tools(tools: &[crate::execution::ToolSchema]) -> Self {
+        let mut contract = Self::default();
+        for tool in tools {
+            let selector = match tool.name.as_str() {
+                STATUS_TOOL => { contract.status = true; "target" }
+                WAIT_TOOL => { contract.wait = true; "target" }
+                REPORT_TOOL => { contract.report = true; "ref" }
+                _ => continue,
+            };
+            // Recognize only the explicit collaboration selector alternatives. A
+            // same-name/string property alone does not make a frozen declaration
+            // accept a selector-only call (old report requires operationId+itemId).
+            let selector_only = tool.schema["properties"][selector]["type"] == "string"
+                && tool.schema.get("required").and_then(Value::as_array).is_none_or(Vec::is_empty)
+                && tool.schema["anyOf"].as_array().is_some_and(|alternatives|
+                    alternatives.iter().any(|alternative| alternative["required"] == json!([selector])));
+            contract.preserve_original |= !selector_only;
+        }
+        contract
+    }
+    pub fn retain_declared_readers(&self, value: &mut Value) {
+        if let Some(object) = value.as_object_mut() {
+            if !self.status { object.remove("read"); }
+            if !self.wait { object.remove("wait"); }
+        }
+    }
+}
+/// Presentation is fixed before publishing the original receipt. Older readers retain
+/// the existing raw OutputBody; no stored call or schema is rewritten to consume refs.
+pub(super) fn acceptance_model(reference: &super::model_references::ExecutionReference, name: &str,
+    state: &str, retrieval: bool, contract: ModelContract) -> Option<Value>
+{
+    if contract.preserve_original && !retrieval { return None; }
+    let target = &reference.reference;
+    let read = if retrieval { json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"status"}}) }
+        else { json!({"tool":STATUS_TOOL,"arguments":{"target":target}}) };
+    let wait = if retrieval { json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"wait"}}) }
+        else { json!({"tool":WAIT_TOOL,"arguments":{"target":target}}) };
+    let mut model = json!({"accepted":true,"agentId":reference.agent_id,"name":name,"executionRef":target,"ref":target,"operationRef":target,"state":state,"read":read,"wait":wait});
+    if !retrieval { contract.retain_declared_readers(&mut model); }
+    Some(model)
 }
 
 
@@ -640,7 +684,7 @@ impl Catalog {
                 "control":{"tool":"retrieval_control","actions":["status","wait","stop"]},
                 "delivery":"The final answer is delivered automatically. Continue other work, inspect status, wait, or stop this investigation."})
         } else {json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id})}.into();
-        output.model_data=Some(acceptance_model(&reference,&child.name,"preparing",prepared.internal_retrieval));
+        output.model_data=acceptance_model(&reference,&child.name,"preparing",prepared.internal_retrieval,prepared.model_contract);
         let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
             operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
             content:Some(output),
@@ -1379,7 +1423,7 @@ impl Catalog {
         op.handed_off = true;
         op.revision += 1;
         let reference=super::model_references::execution_reference(&tx,&child.execution_id)?;
-        let output=crate::output::OutputBody {data:Value::Null,parts:Vec::new(),model_data:Some(acceptance_model(&reference,&child.name,"waiting",prepared.tool_name==super::retrieval::CONTROL_TOOL))};
+        let output=crate::output::OutputBody {data:json!({"operationId":child.operation_id,"state":"waiting"}),parts:Vec::new(),model_data:acceptance_model(&reference,&child.name,"waiting",prepared.tool_name==super::retrieval::CONTROL_TOOL,prepared.model_contract)};
         let content_ref=Some(self.content.save_output(&output)?);
         super::result_content::publish_job_acceptance_content(&tx, &mut op, &admitted, "awaiting_child",content_ref)?;
         put(&tx, "operations", &op.id, &op)?;

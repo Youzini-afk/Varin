@@ -18,6 +18,7 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) model_contract: collaboration::ModelContract,
     pub(super) attachments: Vec<super::attachments::Attachment>,
     pub(super) attachment_input_ref: Option<Value>,
     pub(super) model_selection_required: bool,
@@ -158,7 +159,9 @@ impl ChildAdmissionPreparation {
             Some(self.content.save_user_history(&format!("child-input:{}",self.context.operation_id),
                 &super::attachments::incoming_input(&self.input.task,&self.attachments,&self.attachment_media))?)
         };
+        let parent_tools: Vec<crate::execution::ToolSchema> = serde_json::from_value(self.content.load(&self.launch.parent_tools_ref)?)?;
         Ok(PreparedChildAdmission {
+            model_contract: collaboration::ModelContract::from_tools(&parent_tools),
             attachments: self.attachments,
             attachment_input_ref,
             model_selection_required: resolved.profile.model_selection_required,
@@ -530,6 +533,7 @@ impl ChildReportRead {
 
 /// The wait target is checked against the admitted argument body outside Catalog's lock.
 pub struct ChildWaitRegistrationPreparation {
+    invocation: super::tool_content::ToolInvocationRead,
     context: ToolExecutionContext,
     child_operation_id: String,
     execution_id: Option<String>,
@@ -539,6 +543,7 @@ pub struct ChildWaitRegistrationPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildWaitRegistration {
+    pub(super) model_contract: collaboration::ModelContract,
     pub(super) tool_name: String,
     pub(super) context: ToolExecutionContext,
     pub(super) child_operation_id: String,
@@ -570,7 +575,9 @@ impl ChildWaitRegistrationPreparation {
                 "child wait differs from its admitted call".into(),
             ));
         }
+        let original = self.invocation.load()?;
         Ok(PreparedChildWaitRegistration {
+            model_contract: collaboration::ModelContract::from_tools(&original.tools),
             tool_name: admitted.call.name,
             context: self.context,
             child_operation_id: self.child_operation_id,
@@ -591,6 +598,7 @@ impl Catalog {
         let reference = self.execution_reference(execution_id)?;
         let child = super::delegated::relation(&self.db, child_operation_id)?;
         Ok(ChildWaitRegistrationPreparation {
+            invocation: self.capture_tool_invocation(context, super::tool_content::ToolIntent::from_operation(&self.operation(&context.operation_id)?)?.call().call_id.as_str())?,
             context: context.clone(), child_operation_id: child_operation_id.into(), execution_id: Some(execution_id.into()),
             target_spellings: vec![reference.reference, reference.agent_id, child.child_thread_id, execution_id.into()],
             operation: self.operation(&context.operation_id)?, content: self.content.clone(), publication: self.content.begin_publication(),
@@ -602,6 +610,7 @@ impl Catalog {
         child_operation_id: &str,
     ) -> Result<ChildWaitRegistrationPreparation> {
         Ok(ChildWaitRegistrationPreparation {
+            invocation: self.capture_tool_invocation(context, super::tool_content::ToolIntent::from_operation(&self.operation(&context.operation_id)?)?.call().call_id.as_str())?,
             context: context.clone(),
             child_operation_id: child_operation_id.into(),
             execution_id: None,

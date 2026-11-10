@@ -62,6 +62,10 @@ impl KernelToolExecutor {
         Ok(args)
     }
     pub(super) fn project_resource_completion(&self, context: &ToolExecutionContext, call: &ToolCall, operation: &ResourceOperation, completion: &mut ToolCompletion) -> Result<(),ExecutionError> {
+        // Frozen native v1 declarations still require explicit versions/cursors and
+        // do not declare the new mutation/continuation refs. Keep their original
+        // result contract, selected by the untouched call rather than today's schema.
+        if call.schema_version == "1" { return Ok(()); }
         let Some(catalog) = &self.resources.reference_catalog else { return Ok(()); };
         if let ResourceOperation::FileReadBatch(files) = operation {
             if let ToolCompletion::Result {content,..} = completion {

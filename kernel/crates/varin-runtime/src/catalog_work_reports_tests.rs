@@ -5,6 +5,9 @@ mod child_fixture;
 #[path = "../tests/fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
+#[path = "../../varin-kernel/src/fixtures/query_schemas_v93.rs"]
+#[allow(dead_code)]
+mod original_readers;
 
 fn send_schema() -> ToolSchema {
     ToolSchema {
@@ -66,6 +69,7 @@ fn existing_work_replies_to_the_requesting_bot_session_once_after_restart_and_re
         let configuration = f.db.run(&f.context.run_id).unwrap().configuration;
         let mut launch = f.launch.clone();
         launch.tools.push(send_schema());
+        launch.tools.push(original_readers::family_schemas().into_iter().find(|tool| tool.name == family::READ_TOOL).unwrap());
         launch.tool_schema_generation += 1;
         let caller =
             f.db.submit_with_launch(
@@ -190,9 +194,21 @@ fn existing_work_replies_to_the_requesting_bot_session_once_after_restart_and_re
         );
         assert!(reply.text.len() < 68000, "automatic work reports use the existing page budget");
         assert!(!reply.text.contains(&work.run_id), "model notice does not duplicate internal Run IDs");
-        let reference=reply.text.split("read_thread ref=").nth(1).unwrap().trim_end_matches('.');
-        let target=db.resolve_model_reference(model_references::ReferenceKind::Item,reference).unwrap();
-        assert_eq!(target.target["arguments"]["runId"],work.run_id);
+        assert!(!reply.text.contains("read_thread ref="), "ordinary report text must not teach a frozen reader an undeclared selector");
+        let body: String = db.db.query_row("SELECT body FROM input_history_content WHERE input_id=?1",[&id],|row|row.get(0)).unwrap();
+        let reference: Value = serde_json::from_str(&body).unwrap();
+        let (body, _) = db.content.load_history_payload(&reference).unwrap();
+        let item: ConversationItem = serde_json::from_value(body).unwrap();
+        let Content::Output { output } = item.content else { panic!("typed work report") };
+        assert!(output.model_data.is_none(), "the actual requester has the original operation/query reader");
+        let arguments = &output.model_data()["read"]["arguments"];
+        assert_eq!(arguments["runId"],work.run_id);
+        assert_eq!(arguments["query"]["kind"],"item");
+        assert!(arguments.get("ref").is_none());
+        let read = db.capture_family_read("request-session",arguments["threadId"].as_str(),arguments["branchId"].as_str()).unwrap();
+        let page = read.item(family::ItemRequest {run_id:arguments["runId"].as_str().map(str::to_owned),anchor:None,
+            item_id:arguments["query"]["itemId"].as_str().unwrap().into(),offset:None,max_bytes:None},&||false).unwrap();
+        assert!(page.text.contains("The actual result from the reused conversation."));
         assert!(reply.text.contains(&db.execution_reference(&work.run_id).unwrap().reference));
         let original = db
             .capture_message(

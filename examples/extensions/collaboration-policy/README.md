@@ -44,12 +44,13 @@ and installing it do not.
 
 ## Sequence and ownership
 
-1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 8.
+1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 9.
    Policy inputs do not advertise tool schemas, so the example selects this supported contract
    explicitly; core rejects unavailable versions rather than silently upgrading a call.
    The core commits the real policy-action/node origin, independent child Thread, source pin and
-   preparation owner. `job_accepted.operation_id` identifies the original dispatch operation.
-2. Keep that handle and submit a separate `file_read(source.txt)` graph. It can finish while
+   preparation owner. The policy receipt's `job_accepted.operation_id` identifies the original dispatch
+   operation, not the model-facing Agent/execution reference.
+2. Keep that handle and submit a separate `file_read(source.txt)` graph with native schema version 2. It can finish while
    child preparation is blocked. Its committed evidence stays a core-owned reference.
 3. Submit `wait_child` for the original child handle. This returns another `job_accepted` for
    the observation call. Neither acceptance receipt says the child has finished.

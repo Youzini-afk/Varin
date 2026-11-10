@@ -13,10 +13,18 @@ use varin_runtime::{catalog::{dispatch::*, messages::MessageInput, model_referen
 
 #[test]
 fn external_send_acceptance_replays_its_original_projection_before_tool_settlement() {
+    for legacy in [false,true] {
     for inform in [false,true] {
         for policy in [false,true] {
             let mut f=child_dispatch::Fixture::new();
             let mut launch=f.db.launch_intent(&f.context.run_id).unwrap().unwrap().selection;
+            // New send-only callers have no reader recipe. The old branch freezes
+            // the actual published readers, rather than mutating a version number.
+            launch.tools.retain(|schema| schema.name != "wait_child");
+            if legacy {
+                let readers: Vec<ToolSchema> = serde_json::from_str(include_str!("fixtures/collaboration_readers_main.json")).unwrap();
+                launch.tools.extend(readers);
+            }
             launch.tools.push(ToolSchema{requirements:None,name:"send".into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None});
             launch.child_dispatch.as_mut().unwrap().presets.push(ChildPreset{
                 work_focus:vec![],external:Some(ExternalChildBinding{configuration_id:"codex".into(),harness:"codex".into(),model:None,
@@ -37,6 +45,11 @@ fn external_send_acceptance_replays_its_original_projection_before_tool_settleme
             let preset=selected.external_preset(&dispatch).unwrap().unwrap();
             let prepared=f.db.prepare_external_child(&context,&dispatch,&selected,&preset,None).unwrap().load().unwrap();
             let child=f.db.accept_external_child(prepared).unwrap();
+            let acceptance=f.db.capture_call_completion(&context.operation_id).unwrap().load().unwrap();
+            let ToolCompletion::JobAccepted{content:Some(output),..}=acceptance else {panic!("external dispatch acceptance")};
+            assert_eq!(output.model_data.is_none(),legacy);
+            if legacy { assert_eq!(output.model_data()["operationId"],child.operation_id); }
+            else { assert!(output.model_data()["read"].is_null() && output.model_data()["wait"].is_null()); }
             f.settle_policy_call(&context,"preparing_external_agent");
             let command=serde_json::from_value(json!({"action":"create","id":child.conversation_id,"key":"external-conversation","configurationId":"codex","harness":"codex","title":"External worker","cwd":"/workspace"})).unwrap();
             let prepared=f.db.prepare_external(command).load().unwrap();f.db.execute_external(prepared).unwrap().load().unwrap();
@@ -51,7 +64,12 @@ fn external_send_acceptance_replays_its_original_projection_before_tool_settleme
             let ToolCompletion::Result{content,..}=&completion else {panic!("non-wait send acceptance")};
             assert_eq!(content.data["operationId"],context.operation_id);
             assert_eq!(content.data["conversationId"],child.conversation_id);
+            if legacy {
+                assert!(content.model_data.is_none());
+                assert_eq!(content.model_data()["operationId"],context.operation_id);
+            } else {
             let model=content.model_data.as_ref().unwrap();
+            assert!(model["read"].is_null() && model["wait"].is_null(),"send-only caller must not gain undeclared reader recipes");
             assert!(!model.to_string().contains(&context.operation_id));
             assert!(!model.to_string().contains(&child.conversation_id));
             if inform {
@@ -64,8 +82,19 @@ fn external_send_acceptance_replays_its_original_projection_before_tool_settleme
                 let reference=f.db.execution_reference(&context.operation_id).unwrap();
                 assert!(model.to_string().contains(&reference.reference));
             }
+            }
             let prepared=f.db.prepare_external_message(&context,call,input).unwrap().load().unwrap();
             assert_eq!(f.db.admit_external_message(prepared).unwrap(),completion);
+            if legacy && !inform {
+                tool_invocations::settle_call(&mut f.db,&context,completion.clone());
+                let wait_context=f.admit_policy_call(ToolCall{call_id:"legacy-external-wait".into(),name:"wait_child".into(),schema_version:"1".into(),
+                    arguments:json!({"operationId":content.model_data()["operationId"]})});
+                let prepared=f.db.prepare_external_child_wait(&wait_context,&context.operation_id).unwrap().load().unwrap();
+                f.db.register_external_child_wait(prepared).unwrap();
+                let ToolCompletion::JobAccepted{content:Some(output),..}=f.db.capture_call_completion(&wait_context.operation_id).unwrap().load().unwrap() else {panic!("external wait acceptance")};
+                assert!(output.model_data.is_none());
+                assert_eq!(output.model_data()["operationId"],context.operation_id);
+            }
             let root=f.root.clone();drop(f.db);
             let db=Catalog::open(&root).unwrap();
             assert_eq!(db.capture_call_completion(&context.operation_id).unwrap().load().unwrap(),completion);
@@ -76,4 +105,5 @@ fn external_send_acceptance_replays_its_original_projection_before_tool_settleme
             drop(raw);drop(db);std::fs::remove_dir_all(root).unwrap();
         }
     }
+}
 }

@@ -18,10 +18,7 @@ pub(super) fn retain(
             // not arbitrary name-matched MCP or extension declarations. Equal versions
             // retain the built-in contract even when its descriptions/schema presentation
             // changed. Native resource owners additionally support frozen v1 arguments.
-            let compatible = original.version == declaration.schema.version
-                || (original.version == "1"
-                    && declaration.schema.version == "2"
-                    && crate::tools::ToolKind::all().any(|kind| kind.name() == original.name));
+            let compatible = crate::child_capabilities::supports_frozen_builtin(original, &declaration.schema);
             if !compatible {
                 return None;
             }
