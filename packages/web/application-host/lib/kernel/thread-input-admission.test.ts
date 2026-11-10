@@ -16,10 +16,12 @@ function fixture() {
   const credentialOwner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => undefined }, providerId: 'provider', providerFamily: 'fixture',
     currentScope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), endpoint: configuration.endpoint, allowAnonymous: true });
   const runtime = {
+    inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),
     thread: vi.fn(async () => ({ thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, active_run_id: 'run', latest_run: { id: 'run', configuration } }] })),
     submit: vi.fn(async () => ({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 })),
   };
   const queued = {
+    enqueueReceipt: vi.fn(async () => null), childExecutions: vi.fn(async () => []),
     modelSelections: vi.fn(async () => ({ desired: null, active: null })), launch: vi.fn(async () => null), run: vi.fn(async () => ({ id: 'run', configuration })),
     enqueue: vi.fn(async () => ({ input_id: 'queued', run_id: 'run', mode: 'boundary' as const, cursor: 2 })),
     childForThread: vi.fn(async () => ({ child_branch_id: identity.branchId, operation_id: 'child' })),
@@ -96,7 +98,7 @@ it('only accepts original method-matched transport evidence after entering nativ
   for (const [failure, admission] of [
     [new KernelRequestError({ code: 'unavailable', message: 'not dispatched' }, 'runtime.input.submit', 'not_dispatched'), 'not_started'],
     [new KernelRequestError({ code: 'unavailable', message: 'different request' }, 'runtime.thread.inspect', 'not_dispatched'), undefined],
-    [new KernelRequestError({ code: 'operation-error', message: 'operation error: conflict: changed head' }, 'runtime.input.submit', 'response'), undefined],
+    [new KernelRequestError({ code: 'operation-error', message: 'operation error: conflict: changed head' }, 'runtime.input.submit', 'response'), 'not_started'],
     [new KernelClientError({ code: 'kernel-frame-too-large', message: 'unclassified write failure' }), undefined],
     [new Error('reply lost'), undefined],
   ] as const) {
@@ -104,6 +106,18 @@ it('only accepts original method-matched transport evidence after entering nativ
     try { await f.api.submit(input); throw new Error('expected failure'); }
     catch (error) { expect(error).toBeInstanceOf(ThreadRequestError); expect((error as ThreadRequestError).admission).toBe(admission); }
   }
+});
+it('recovers an accepted native receipt after an explicit failure, and keeps a failed receipt observation unknown', async () => {
+  const f = fixture();
+  const failure = new KernelRequestError({ code: 'operation-error', message: 'native reply failed' }, 'runtime.input.submit', 'response');
+  const receipt = { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 };
+  f.runtime.submit.mockRejectedValueOnce(failure);
+  f.runtime.inputReceipt.mockResolvedValueOnce(receipt);
+  await expect(f.api.submit(input)).resolves.toEqual(receipt);
+  expect(f.runtime.submit).toHaveBeenCalledOnce();
+  f.runtime.submit.mockRejectedValueOnce(failure);
+  f.runtime.inputReceipt.mockRejectedValueOnce(new Error('receipt unavailable'));
+  await expect(f.api.submit(input)).rejects.toMatchObject({ admission: undefined });
 });
 it('keeps context preparation conflicts as conflicts before input admission', async () => {
   const f = fixture();

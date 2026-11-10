@@ -243,10 +243,17 @@ it('public threads HTTP input editing/cancellation and Run cancellation affect t
 
 
 const imageFixture = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=' };
-it('production HTTP image-only input reaches provider image content and survives a kernel reopen', async () => {
+it('production HTTP numbered image attachments reach provider image content and survive a kernel reopen', async () => {
   const f = await fixture(false, true);
   const identity = await f.api.create('http-image-thread');
-  const receipt = await f.api.submit({ ...identity, key: 'http-image-input', expectedHead: null, text: '', images: [imageFixture], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  // Pasted images use the retained-file path, including the composer's image-number map.
+  const attachment = { ref: 'attachment:pasted-image', filename: 'image.png', mimeType: imageFixture.mimeType, byteLength: Buffer.from(imageFixture.data, 'base64').length };
+  f.adapter.bindAttachments({
+    prepare: async () => [attachment],
+    read: async () => ({ attachment, stream: (async function* () { yield Buffer.from(imageFixture.data, 'base64'); })() }),
+  } as unknown as Parameters<ThreadAdapter['bindAttachments']>[0]);
+  const receipt = await f.api.submit({ ...identity, key: 'http-image-input', expectedHead: null, text: '[图片1] 看看这张图片', images: [],
+    attachments: [{ ref: attachment.ref }], attachmentImageReferences: { [attachment.ref]: 1 }, model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const imageUrl = `data:${imageFixture.mimeType};base64,${imageFixture.data}`;
   expect(JSON.stringify(f.requests[0]?.body.input)).toContain('input_image');

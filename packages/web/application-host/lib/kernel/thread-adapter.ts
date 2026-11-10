@@ -46,13 +46,31 @@ export interface ThreadModelAuthority {
   rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope): Promise<ExistingHostCredentialOwner>;
 }
 
-/** This boundary has not invoked native generation admission. Do not infer that from error codes. */
+/** The original owner has established that this input was not accepted. */
 export class ThreadPreAdmissionError extends Error {
   readonly code: string;
   constructor(readonly reason: unknown, fallbackCode = 'mcp_sampling_model_selection_failed') {
     super('Thread request preparation failed before admission');
     this.code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
       ? reason.code : fallbackCode;
+  }
+}
+
+class ThreadInputRejectedError extends ThreadPreAdmissionError {
+  override readonly code = 'thread-input-rejected';
+}
+
+/** After a completed native failure, use its original receipt to distinguish rejection
+ * from a committed input. A failed receipt read leaves delivery unknown. */
+async function admitThreadInput<T>(method: string, submit: () => Promise<T>, receipt: () => Promise<T | null>): Promise<T> {
+  try { return await submit(); }
+  catch (error) {
+    if (error instanceof KernelRequestError && error.method === method && error.settlement === 'response') {
+      const accepted = await receipt().catch(() => undefined);
+      if (accepted === null) throw new ThreadInputRejectedError(error);
+      if (accepted !== undefined) return accepted;
+    }
+    throw error;
   }
 }
 
@@ -105,7 +123,7 @@ export class ThreadAdapter {
     const skills = parseThreadSkills(input.skills, input.text);
     const references = parseThreadObjectReferences(input.references, input.text);
     const text = references?.length && !options.rawReferences ? await createThreadObjectInputPreparer({ runtime: this.runtime, admitSource: this.admitSource })({ ...input, references }, signal) : input.text;
-    const explicit = { ...(input.attachmentImageReferences ? { attachmentImageReferences: input.attachmentImageReferences } : {}), ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
+    const explicit = { ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
       ...(selected?.length ? { materials: selected } : {}), ...(attachmentSelections.length ? { attachmentSelections, originalImageCount: input.images?.length ?? 0 } : {}) } } : {}) };
     const metadata = { ...(text === input.text ? {} : { userText: input.text }), ...explicit, ...(sentTime ? { sentTime } : {}) };
     if (options.rawReferences) return { ...threadInput(input.text, input.images), ...explicit, ...(sentTime ? { sentTime } : {}) };
@@ -597,7 +615,10 @@ export class ThreadAdapter {
       // Acceptance freezes explicit skill material at this checkpoint. The existing
       // collaboration owner still owns deferred source/configuration preparation and launch.
       admissionStarted = true;
-      return await this.runtime.acceptChildContinuation({ ...command, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
+      return await admitThreadInput('runtime.child.continuation.accept',
+        () => this.runtime.acceptChildContinuation({ ...command, ...(inputPreparation ? { inputPreparation } : {}) }, signal),
+        async () => (await this.runtime.childExecutions(child.operation_id, signal))
+          .find(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key) ?? null);
     } catch (error) {
       if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.child.continuation.accept' && error.settlement === 'not_dispatched') {
         throw new ThreadPreAdmissionError(error, 'thread-request-failed');
@@ -1089,7 +1110,9 @@ export class ThreadAdapter {
         // The same Rust transaction accepts input, a new or replaced resource context, and the
         // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
         admissionStarted = true;
-        const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
+        const receipt = await admitThreadInput('runtime.input.submit',
+          () => this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) }),
+          () => this.runtime.inputReceipt(command));
         this.titles?.schedule(thread, input.branchId);
         // The shared launch owner closes the initial context-refresh gap before preparation.
         void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
@@ -1162,7 +1185,9 @@ export class ThreadAdapter {
           }
         }
         admissionStarted = true;
-        const receipt = await this.runtime.enqueue({ ...command, ...(inputPreparation ? { inputPreparation } : {}) });
+        const receipt = await admitThreadInput('runtime.input.enqueue',
+          () => this.runtime.enqueue({ ...command, ...(inputPreparation ? { inputPreparation } : {}) }),
+          () => this.runtime.enqueueReceipt(command));
         // Context is synchronized by the Run's request preparation. An accepted input receipt
         // must not wait for extension/MCP startup, source materialization or credential rebinding.
         await this.continueQueuedLaunch(receipt.run_id, previousId, credentialOwner);

@@ -6,6 +6,9 @@ import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from
 export class ThreadRequestError extends Error {
   constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', readonly detail?: string) {
     super(code === 'extension-host-unavailable' ? 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.'
+      : code === 'thread-input-rejected' ? 'This message was not accepted. You can edit it and try again.'
+      : code === 'model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'
+      : code === 'http-body-too-large' ? 'The message exceeds this server’s request size limit. Reduce its attachments or adjust the server limit.'
       : (code === 'workspace_backend_unavailable' || code.startsWith('resource-')) && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }

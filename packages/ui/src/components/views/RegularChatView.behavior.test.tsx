@@ -19,7 +19,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot-entry', branchId: 'main' }, threads: ['bot-entry', 'bot-work', 'ordinary-thread'].map(thread_id => ({ thread_id, bot_id: thread_id.startsWith('bot-') ? 'bot' : null })) as ThreadSummary[] });
+  useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot-entry', branchId: 'main' }, threads: ['bot-entry', 'bot-work', 'ordinary-thread'].map(thread_id => ({ thread_id, bot_id: thread_id.startsWith('bot-') ? 'bot' : null, parent_thread_id: thread_id === 'bot-work' ? 'bot-entry' : null })) as ThreadSummary[] });
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -27,13 +27,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('does not mount a Bot entry or work conversation in an ordinary shell', async () => {
+it('keeps Bot sessions in their shell and renders their delegated work in the ordinary workbench', async () => {
   await act(async () => { root.render(<RegularChatView active />); });
   expect(container.querySelector('[data-testid="chat-view"]')).toBeNull();
 
   useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot-work', branchId: 'main' } });
   await act(async () => { root.render(<RegularChatView active />); });
-  expect(container.querySelector('[data-testid="chat-view"]')).toBeNull();
+  expect(container.querySelector('[data-testid="chat-view"]')).not.toBeNull();
 
   useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'ordinary-thread', branchId: 'main' } });
   await act(async () => { root.render(<RegularChatView active />); });
