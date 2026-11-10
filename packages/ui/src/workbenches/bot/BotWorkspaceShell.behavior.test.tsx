@@ -50,7 +50,8 @@ vi.mock('./BotWorkDetail', async () => {
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
 vi.mock('@/components/layout/ContextSidebarTab', () => ({ ContextPanelContent: ({ identity, jobRunId, readOnly }: { identity?: { threadId: string; branchId: string }; jobRunId?: string; readOnly?: boolean }) => <aside data-context-thread={identity?.threadId} data-context-branch={identity?.branchId} data-context-job={jobRunId} data-context-readonly={String(readOnly)} /> }));
 vi.mock('@/components/thread/ConversationTreePanel', () => ({ ConversationTreePanel: () => <aside data-mobile-tree /> }));
-vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes }: { layoutScope?: string; surfaceModes?: readonly string[] }) => <aside data-conversation-tree={layoutScope} data-surface-modes={surfaceModes?.join(',')} /> }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes, contextOwner }: { layoutScope?: string; surfaceModes?: readonly string[]; contextOwner?: { identity: { threadId: string; branchId: string } | null; readOnly: boolean } }) => <aside data-conversation-tree={layoutScope} data-surface-modes={surfaceModes?.join(',')}
+  data-initial-context-thread={contextOwner?.identity?.threadId} data-initial-context-branch={contextOwner?.identity?.branchId} data-initial-context-readonly={String(contextOwner?.readOnly)} /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -265,6 +266,33 @@ describe('Bot workbench', () => {
     expect(inspector?.getAttribute('data-context-readonly')).toBe('true');
     expect(container.querySelector('[data-conversation-tree]')).toBeNull();
     await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
+    expect(container.querySelector('[data-context-thread]')).toBeNull();
+  });
+
+  it('supplies the current archived Bot Thread when the desktop tree first opens the context surface', async () => {
+    state.sessions.mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, { archived: true }, true)]);
+    await render();
+    await click('chat.tree.title');
+    const panel = container.querySelector('[data-conversation-tree]');
+    expect(panel?.getAttribute('data-initial-context-thread')).toBe('entry-a');
+    expect(panel?.getAttribute('data-initial-context-branch')).toBe('branch-a');
+    expect(panel?.getAttribute('data-initial-context-readonly')).toBe('true');
+    expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  });
+
+  it('leaves the panel without a context owner while the Bot entry is unavailable', async () => {
+    state.ensure.mockRejectedValue(new Error('entry unavailable'));
+    useUIStore.getState().openContextPanelTab(BOT_CONVERSATION_PANEL_SCOPE, { mode: 'tree' });
+    await render();
+    expect(container.querySelector('[data-conversation-tree]')?.hasAttribute('data-initial-context-thread')).toBe(false);
+    expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  });
+
+  it('does not open the ordinary Thread from an ownerless saved mobile context tab', async () => {
+    state.mobile = true;
+    useUIStore.getState().openContextPanelTab(BOT_CONVERSATION_PANEL_SCOPE, { mode: 'context' });
+    await render();
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('contextSidebar.empty.openSession');
     expect(container.querySelector('[data-context-thread]')).toBeNull();
   });
 

@@ -776,7 +776,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     {isMobile && <Dialog open={Boolean(conversationTab)} onOpenChange={open => { if (!open) closeConversationPanel(); }}>
       <DialogContent className="flex h-[85dvh] max-w-full flex-col gap-0 p-0"><DialogHeader className="px-4 py-3"><DialogTitle>{t(treeTab ? 'chat.tree.title' : 'contextPanel.mode.context')}</DialogTitle></DialogHeader>
         <div className="min-h-0 flex-1"><React.Suspense fallback={null}>{conversationTab?.mode === 'context'
-          ? <ContextPanelContent active identity={conversationTab.thread} jobRunId={conversationTab.targetPath ?? undefined} readOnly={conversationTab.readOnly} />
+          ? conversationTab.thread
+            ? <ContextPanelContent active identity={conversationTab.thread} jobRunId={conversationTab.targetPath ?? undefined} readOnly={conversationTab.readOnly} />
+            : <p className="p-6 typography-ui-label text-muted-foreground">{t('contextSidebar.empty.openSession')}</p>
           : <ConversationTreePanel active={Boolean(treeTab)} />}</React.Suspense></div>
       </DialogContent>
     </Dialog>}
@@ -788,7 +790,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     : <><BotPanel model={panelModel} open={!conversationTab && panelVisible && panelModel !== null} floating={floating}
       workspace={Boolean(spaces.activeKey)} expanded={Boolean(spaces.activeKey) && spaceExpanded}
       onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!conversationTab && panelVisible)}</BotPanel>
-      {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_CONVERSATION_PANEL_SCOPE} surfaceModes={CONVERSATION_SURFACES} /></React.Suspense>}</>;
+      {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_CONVERSATION_PANEL_SCOPE} surfaceModes={CONVERSATION_SURFACES}
+        contextOwner={{ identity: ownsConversation ? selectedEntry : null, readOnly: readOnly || conversationArchived }} /></React.Suspense>}</>;
 
   return <BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelFocus={spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
