@@ -1096,7 +1096,7 @@ it.each([
     }
     const receipt = result(body) as { content?: { ref?: string } } | undefined;
     if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'read')]);
-    else if (childSteps === 2) complete(response, [tool('file_write', { path: receipt!.content!.ref!, content: 'SHARED_CHILD_WRITE' }, 'write')]);
+    else if (childSteps === 2) complete(response, [tool('file_write', { ref: receipt!.content!.ref!, content: 'SHARED_CHILD_WRITE' }, 'write')]);
     else { expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' }); complete(response, [answer('Wrote the shared file', 'child-done')]); }
   });
   // The fixture's capture owner fails if any directory inventory is attempted.
@@ -1287,10 +1287,10 @@ it.each([undefined, 'selected'] as const)('the shipped worker preset writes a pr
       complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-original')]);
     } else if (childSteps === 2) {
       expect(receipt?.content?.ref).toMatch(/^file:[1-9][0-9]*$/);
-      complete(response, [tool('file_write', { path: receipt!.content!.ref!, content: 'alpha\nbeta\n' }, 'child-write')]);
+      complete(response, [tool('file_write', { ref: receipt!.content!.ref!, content: 'alpha\nbeta\n' }, 'child-write')]);
     } else if (childSteps === 3) {
       expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
-      complete(response, [tool('file_edit', { path: receipt!.content!.ref!, edits: [{ oldText: 'beta', newText: 'gamma' }] }, 'child-edit')]);
+      complete(response, [tool('file_edit', { ref: receipt!.content!.ref!, edits: [{ oldText: 'beta', newText: 'gamma' }] }, 'child-edit')]);
     } else if (childSteps === 4) {
       expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
       complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-final')]);
@@ -2516,8 +2516,11 @@ it.for(['user_continuation', 'message_request'] as const)('%s continues a comple
       complete(response, [tool('file_read', { path: 'source.txt' }, `read-${step}`)]);
     } else if (step === 2 || step === 5) {
       expect(receipt?.content?.content?.text).toBe(step === 2 ? 'fixed child source before parent changes' : 'FIRST_RUN_FILES');
-      complete(response, [tool('file_write', { path: receipt!.content!.ref!, content: step === 2 ? 'FIRST_RUN_FILES' : 'SECOND_RUN_FILES' }, `write-${step}`)]);
-    } else if (step === 3 || step === 6) complete(response, [answer(step === 3 ? 'FIRST_RUN_REPORT' : 'SECOND_RUN_REPORT', `child-report-${step}`)]);
+      complete(response, [tool('file_write', { ref: receipt!.content!.ref!, content: step === 2 ? 'FIRST_RUN_FILES' : 'SECOND_RUN_FILES' }, `write-${step}`)]);
+    } else if (step === 3 || step === 6) {
+      expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      complete(response, [answer(step === 3 ? 'FIRST_RUN_REPORT' : 'SECOND_RUN_REPORT', `child-report-${step}`)]);
+    }
     else throw new Error('An original child Run was unexpectedly replayed');
   });
   const h = await f.openHost();
@@ -2654,7 +2657,7 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
       expect(read.content.content.text).toBe('fixed child source before parent changes');
       if (mode === 'cancel') {
         response.on('close', leafClosed.release); leafEntered.release();
-      } else complete(response, [tool('file_write', { path: read.content.ref,
+      } else complete(response, [tool('file_write', { ref: read.content.ref,
         content: 'Grandchild private result' }, 'leaf-write')]);
     } else {
       expect(result(body)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
