@@ -19,6 +19,8 @@ export type EditorContextAttachment = {
   threadKey: string;
   workspaceId: string;
   resourceId: string;
+  /** Readable project/source captured with the material; not a runtime locator. */
+  sourceLabel?: string;
   label: string;
   documentInstanceId: string | null;
   documentRevision: string | null;

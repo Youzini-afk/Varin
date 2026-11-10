@@ -79,7 +79,9 @@ describe('editor context attachments', () => {
 describe('unsaved attachment projection', () => {
   test('saved attachments do not include buffer text and unsaved ones say disk cannot see them', () => {
     const saved = projectEditorContextAttachments('Please review', [attachment()]);
-    expect(saved).toContain('The admitted source determines file access');
+    expect(saved).toContain('Attached saved file');
+    expect(saved).toContain('src/a.ts');
+    expect(saved).not.toMatch(/revision|rev-1|document-a/);
     expect(saved).not.toContain('const value');
     const unsaved = projectEditorContextAttachments('', [attachment({
       source: 'unsaved-buffer',
@@ -87,11 +89,11 @@ describe('unsaved attachment projection', () => {
       text: 'const value = 1;',
       languageId: 'typescript',
     })]);
-    expect(unsaved).toContain('File tools do not see this buffer on disk');
+    expect(unsaved).toContain('Unsaved editor content; file tools read the saved file on disk');
     expect(unsaved).toContain('const value = 1;');
   });
 
-  test('test failure and stack citations are text only and do not imply process capability', () => {
+  test('test failures and stack frames retain their material and location', () => {
     const projected = projectEditorContextAttachments('', [
       attachment({
         kind: 'test-failure',
@@ -110,10 +112,37 @@ describe('unsaved attachment projection', () => {
       }),
     ]);
     expect(projected).toContain('Attached test failure');
-    expect(projected).toContain('does not grant process, debug, or test-runner capability');
+    expect(projected).toContain('Error: expected 2, got 3\n    at fail.test.js:1:1');
     expect(projected).toContain('Attached stack frame');
-    expect(projected).toContain('does not grant process or debugger capability');
+    expect(projected).toContain('app.js');
+    expect(projected).toContain('1:1-1:1');
+    expect(projected).not.toContain('does not grant');
   });
+  test('equal paths from different captured projects include readable sources', () => {
+    const projected = projectEditorContextAttachments('', [
+      attachment({ sourceLabel: '/work/project-a', workspaceId: 'a' }),
+      attachment({ sourceLabel: '/work/project-b', workspaceId: 'b' }),
+    ]);
+    expect(projected).toContain('- Source: /work/project-a');
+    expect(projected).toContain('- Source: /work/project-b');
+    expect(projectEditorContextAttachments('', [attachment({ sourceLabel: '/work/project-a' })])).not.toContain('- Source:');
+  });
+
+  test('unsaved diff and diagnostic preserve Unicode, ranges and original fence contents', () => {
+    const patch = '@@ -1 +1 @@\n-旧值\n+新值 ```';
+    const projected = projectEditorContextAttachments('Keep my comment', [
+      attachment({ kind: 'diff', source: 'unsaved-buffer', patch }),
+      attachment({ kind: 'diagnostic', diagnosticMessage: 'Type mismatch', text: 'const x = `原文`;',
+        range: { startLine: 3, startColumn: 2, endLine: 4, endColumn: 8 } }),
+    ]);
+    expect(projected).toContain(patch);
+    expect(projected).toContain('Unsaved editor content');
+    expect(projected).toContain('3:2-4:8');
+    expect(projected).toContain('const x = `原文`;');
+    expect(projected.startsWith('Keep my comment')).toBe(true);
+    expect(projected).not.toContain('rev-1');
+  });
+
 });
 
 describe('agent file change hints', () => {

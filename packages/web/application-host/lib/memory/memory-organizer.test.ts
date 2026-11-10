@@ -261,16 +261,28 @@ describe("memory organizer (BC2)", () => {
   it('lets maintenance obtain additional memory evidence before deciding its joint change', async () => {
     const service = memory();
     const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
-    const first = (await service.remember(owner, { content: 'Blue accents' })).item;
+    const first = (await service.remember(owner, { content: 'Blue accents', nature: 'preference',
+      source: { kind: 'user-message', key: 'private-source-key', proposalKey: 'private-proposal-key', runId: 'private-run' } })).item;
     const second = (await service.remember(owner, { content: 'Neutral backgrounds' })).item;
     let round = 0;
     organizeText = () => ++round === 1
-      ? JSON.stringify({ read: { ids: [second.id] }, note: 'Reviewing interface preferences' })
+      ? JSON.stringify({ read: { ids: [first.id, second.id] }, note: 'Reviewing interface preferences' })
       : JSON.stringify({ retire: [first.id, second.id], outputs: [{ content: 'Blue accents with neutral backgrounds', sources: [first.id, second.id] }], reason: 'Combined after reading both' });
     const instance = organizer(service);
     const job = await instance.maintain('bot:ws-1', [first.id], 'Review interface preferences', 'read-more');
     await wait(async () => (await instance.maintenanceStatus('bot:ws-1', job.key))[0]?.status === 'formed');
-    expect(calls.filter(call => call.method === 'generate')).toHaveLength(2);
+    const prompts = calls.filter(call => call.method === 'generate').map(call => JSON.parse(String(call.params.prompt)));
+    expect(prompts).toHaveLength(2);
+    const initial = prompts[0].memories.find((row: { id: number }) => row.id === second.id);
+    const read = prompts[1].readResult.memories.find((row: { id: number }) => row.id === second.id);
+    expect(read).toMatchObject({ id: second.id, content: 'Neutral backgrounds', status: 'accepted', createdAt: second.createdAt });
+    if (initial) expect(read).toEqual(initial);
+    expect(prompts[1].readResult.memories.find((row: { id: number }) => row.id === first.id))
+      .toEqual(prompts[0].memories.find((row: { id: number }) => row.id === first.id));
+    expect(prompts[0].memories[0].source).toEqual({ kind: 'user-message' });
+    expect(JSON.stringify(prompts)).not.toMatch(/private-source-key|private-proposal-key|private-run/);
+    for (const prompt of prompts) expect(JSON.stringify(prompt)).not.toMatch(/recallCount|recalledAt|revision|proposalKey/);
+    expect(prompts[1].earlierInputs.every((row: { fullyRead: boolean }) => row.fullyRead)).toBe(true);
     expect((await service.list(owner, { activeOnly: true })).map(row => row.content)).toEqual(['Blue accents with neutral backgrounds']);
     expect([...inferenceWorks.values()].every(work => work.consumed)).toBe(true);
   });

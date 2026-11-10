@@ -3,6 +3,7 @@ import { getDocumentRegistry } from '@/lib/documents/session';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { addEditorContextAttachment } from './attachments';
 import { sliceDocumentRange } from './range';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { EditorContextAttachment, EditorContextAttachmentKind, EditorContextRange } from './types';
 
 const fileNameOf = (resourceId: string): string => resourceId.split('/').pop() || resourceId;
@@ -16,6 +17,7 @@ export const attachEditorContext = (input: {
   diagnosticMessage?: string;
   patch?: string;
   label?: string;
+  sourceLabel?: string;
   text?: string;
 }): EditorContextAttachment | { status: 'wrong-runtime' } | { status: 'missing-document' } => {
   const runtimeKey = getRuntimeKey();
@@ -30,12 +32,16 @@ export const attachEditorContext = (input: {
     if (!record) return { status: 'missing-document' };
     text = input.range ? sliceDocumentRange(record.buffer, input.range) : record.buffer;
   }
+  const project = useProjectsStore.getState().projects.find(project => project.id === input.workspaceId
+    || project.versionedWorkspace?.workspaceId === input.workspaceId || project.versionedWorkspace?.executionWorkspaceId === input.workspaceId);
+  const sourceLabel = input.sourceLabel ?? (project ? project.label ? `${project.label} (${project.path})` : project.path : undefined);
   const attachment: EditorContextAttachment = {
     id: crypto.randomUUID(),
     runtimeKey,
     threadKey: input.threadKey,
     workspaceId: input.workspaceId,
     resourceId: input.resourceId,
+    ...(sourceLabel ? { sourceLabel } : {}),
     label: input.label ?? fileNameOf(input.resourceId),
     documentInstanceId: record?.documentInstanceId ?? null,
     documentRevision: record?.baseRevision ?? null,

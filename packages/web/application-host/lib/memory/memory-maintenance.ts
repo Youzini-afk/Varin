@@ -3,8 +3,9 @@ import { estimateMemoryOrganizerInputTokens, memoryOrganizerOutputReservation, t
 import { KnowledgeMutationError, MEMORY_NATURES, type Knowledge, type KnowledgeMaintenanceInput, type KnowledgeStore, type OrganizerProgress } from '../knowledge/store.js';
 import type { MemoryInference, MemoryInferenceBinding, MemoryWork } from './memory-inference.js';
 import type { MemoryOwner, MemoryService } from './memory-service.js';
-import { memoryExpected, memoryVersion } from './memory-maintenance-state.js';
+import { memoryExpected, maintenanceVersion } from './memory-maintenance-state.js';
 import { sourceRevision } from './memory-sources.js';
+import { memoryMaintenanceMaterial, memoryMaintenanceSource, memoryReadPrompt, textBoundary } from './memory-maintenance-material.js';
 
 const SYSTEM = [
   'Memory helps future conversations and work continue from an existing understanding. Consider the supplied memories and their context; preserve or adjust their expression and relationships when useful. Keep their scope, uncertainty and independent details.',
@@ -90,7 +91,7 @@ export function createMemoryMaintenance(deps: {
         if (current?.maintenance?.cancelled || !await deps.allowed(scopeId, job.maintenance!.mode === 'automatic', recipe.owner)) throw new Error('Memory maintenance is suspended or cancelled');
         for (const row of recipe.inputs) {
           const current = await store.getKnowledge(row.id);
-          if (!current || current.forgottenAt !== undefined || JSON.stringify(memoryExpected(current)) !== JSON.stringify(memoryExpected(row))) throw new KnowledgeMutationError('conflict', `Memory ${row.id} changed during maintenance`);
+          if (!current || current.forgottenAt !== undefined || maintenanceVersion(current) !== maintenanceVersion(row)) throw new KnowledgeMutationError('conflict', `Memory ${row.id} changed during maintenance`);
         }
       };
       await assertCurrent();
@@ -115,28 +116,35 @@ export function createMemoryMaintenance(deps: {
           for (const id of ids) {
             const row = await store.getKnowledge(Number(id));
             if (!row || row.scope !== recipe.owner.scope || row.forgottenAt !== undefined || row.historyCleared) throw new Error('Requested memory is unavailable');
-            fetched.push(row); memories.set(row.id, row);
+            const frozen = memories.get(row.id) ?? row;
+            fetched.push(frozen); memories.set(row.id, frozen);
           }
           if (typeof read.query === 'string' && read.query.trim()) {
             for (const hit of await deps.memory.search(recipe.owner, read.query, Math.max(1, recipe.inputTokens))) {
               const row = await store.getKnowledge(hit.node.id);
-              if (row && row.forgottenAt === undefined) { fetched.push(row); memories.set(row.id, row); }
+              if (row && row.scope === recipe.owner.scope && row.forgottenAt === undefined && !row.historyCleared) {
+                const frozen = memories.get(row.id) ?? row;
+                if (!fetched.some(existing => existing.id === row.id)) fetched.push(frozen);
+                memories.set(row.id, frozen);
+              }
             }
           }
           const sources = Number.isSafeInteger(read.sourceId) ? await deps.memory.readSource(recipe.owner, Number(read.sourceId), scopeId.slice(4)) : [];
           const offset = Number.isSafeInteger(read.offset) && Number(read.offset) >= 0 ? Number(read.offset) : 0;
           const readKey = JSON.stringify({ ...read, offset: 0 });
-          const buffer = recipe.readBuffer?.key === readKey ? recipe.readBuffer : { key: readKey, body: JSON.stringify({ memories: fetched, sources }), ids: fetched.map(row => row.id), through: 0 };
+          const buffer = recipe.readBuffer?.key === readKey ? recipe.readBuffer : { key: readKey, body: JSON.stringify({ memories: fetched.map(memoryMaintenanceMaterial), sources: sources.map(memoryMaintenanceSource) }), ids: fetched.map(row => row.id), through: 0 };
           const body = buffer.body;
+          if (!textBoundary(body, offset)) throw new Error('Read offset splits a Unicode character');
           if (offset > body.length) throw new Error(`Read offset exceeds this result; valid range is 0..${body.length}`);
           const unread = new Set(recipe.unread ?? []);
           for (const id of buffer.ids) if (!recipe.inputs.some(row => row.id === id) || recipe.unread?.includes(id)) unread.add(id);
           const base = { reason: job.maintenance!.reason, previousUnderstanding: typeof envelope.note === 'string' ? envelope.note : '',
-            earlierInputs: recipe.inputs.map(row => ({ id: row.id, revision: memoryVersion(row), fullyRead: !unread.has(row.id) })) };
+            earlierInputs: recipe.inputs.map(row => ({ id: row.id, fullyRead: !unread.has(row.id) })) };
           let length = body.length - offset;
           let prompt = '';
           while (length >= 0) {
-            prompt = JSON.stringify({ ...base, readResult: body.slice(offset, offset + length), offset, nextOffset: offset + length < body.length ? offset + length : null });
+            if (!textBoundary(body, offset + length)) length -= 1;
+            prompt = memoryReadPrompt(base, body, offset, length);
             if (estimateMemoryOrganizerInputTokens(recipe.system, prompt) <= recipe.inputTokens) break;
             if (!length) throw new Error('Memory read context cannot fit this model; shorten the carried note');
             length = Math.floor(length / 2);
@@ -231,7 +239,7 @@ export function createMemoryMaintenance(deps: {
         const selected: Knowledge[] = [];
         const unread: number[] = [];
         let initialPrompt: string | null = null;
-        const promptFor = (items: Knowledge[]) => JSON.stringify({ reason: job.maintenance!.reason, memories: items.map(row => ({ ...row, revision: memoryVersion(row) })) });
+        const promptFor = (items: Knowledge[]) => JSON.stringify({ reason: job.maintenance!.reason, memories: items.map(memoryMaintenanceMaterial) });
         for (const row of candidates.values()) {
           if (estimateMemoryOrganizerInputTokens(SYSTEM, promptFor([...selected, row])) <= budget) selected.push(row);
           else if (!selected.length) {
@@ -239,7 +247,8 @@ export function createMemoryMaintenance(deps: {
             let length = row.content.length;
             do {
               length = Math.floor(length / 2);
-              initialPrompt = JSON.stringify({ reason: job.maintenance!.reason, memories: [{ id: row.id, content: row.content.slice(0, length), complete: false }],
+              if (!textBoundary(row.content, length)) length -= 1;
+              initialPrompt = JSON.stringify({ reason: job.maintenance!.reason, memories: [{ ...memoryMaintenanceMaterial(row), content: row.content.slice(0, length), complete: false }],
                 nextRead: { ids: [row.id], offset: 0 }, instruction: 'This account is an excerpt. Read the remaining content before retiring it.' });
               if (!length && estimateMemoryOrganizerInputTokens(SYSTEM, initialPrompt) > budget) throw new Error('The selected model cannot fit the memory maintenance contract');
             } while (estimateMemoryOrganizerInputTokens(SYSTEM, initialPrompt) > budget);
@@ -247,7 +256,7 @@ export function createMemoryMaintenance(deps: {
           }
         }
         if (!selected.length) { await store.putOrganizerProgress({ ...job, status: 'reviewed-empty', updatedAt: Date.now() }); continue; }
-        const workKey = `maintenance:${sourceRevision(JSON.stringify([job.key, job.sourceKey, selected.map(row => [row.id, memoryVersion(row)])]))}`;
+        const workKey = `maintenance:${sourceRevision(JSON.stringify([job.key, job.sourceKey, selected.map(row => [row.id, maintenanceVersion(row)])]))}`;
         const work = await inference.admit({ key: workKey, scopeId, mode: job.maintenance!.mode, spans: [], recipe: {
           kind: 'maintenance' as const, binding: await inference.bind(selection, outputTokens), owner, inputs: selected, job, system: SYSTEM, prompt: initialPrompt ?? promptFor(selected), inputTokens: budget, unread,
         } });

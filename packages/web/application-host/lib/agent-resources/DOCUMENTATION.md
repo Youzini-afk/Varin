@@ -279,3 +279,7 @@ It covers selection, progressive metadata, frozen body reuse, source-relative ne
 and package rules, untrusted config exclusion, canonical bundle containment, same-pin relative links,
 cancellation independence, serializable snapshots and missing capture coverage. Its pinned fixture is
 not a real Rust IPC run, and no Host-wide or paid-model validation is implied.
+
+Model-visible skill discovery includes the resource read entry, name, description and origin. Version
+hashes remain with the captured directory and explicit activation owner; they are not extra model inputs.
+Ordinary reads use the frozen current directory, and historical activations retain their original version.
