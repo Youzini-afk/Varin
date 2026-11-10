@@ -8,6 +8,7 @@ import type { ThreadHistoryItem, ThreadsAPI } from '@varin/application-client';
 import { ConversationTimeline } from './ConversationTimeline';
 import { useTimelineViewStore } from './timelineViewStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 
 // Exercise both shipped /react exports, not a copy of the measurement algorithm.
 const require = createRequire(import.meta.url);
@@ -213,3 +214,79 @@ it('keeps the real conversation timeline mounted through hidden streaming update
   expect(mount.textContent).toContain('Prompt');
   expect(mount.textContent).toContain('Streaming revision 5');
 });
+
+// Parent commits deliberately replace callback/identity objects just as a live
+// conversation projection can. That invalidates extraData, but must not create
+// another source of parent/store updates once the external input has stopped.
+it.each(['live', 'sorted', 'dialogue'] as const)(
+  'settles repeated parent publications, entry resets and resize receipts in %s mode',
+  async chatRenderMode => {
+    useUIStore.setState({ chatRenderMode });
+    // Linkedom does not supply viewport/scroll metrics. Keep these receipts
+    // consistent with the injected rectangles and the list's actual spacer.
+    const positions = new WeakMap<HTMLElement, number>();
+    Object.defineProperties(window.HTMLElement.prototype, {
+      clientHeight: { configurable: true, get(this: HTMLElement) { return this.getBoundingClientRect().height; } },
+      clientWidth: { configurable: true, get(this: HTMLElement) { return this.getBoundingClientRect().width; } },
+      scrollHeight: { configurable: true, get(this: HTMLElement): number {
+        const content = this.classList.contains('legend-list-content-container') ? this
+          : this.querySelector<HTMLElement>(':scope > .legend-list-content-container');
+        return content ? [...content.children].reduce((height, child) => height
+          + (Number.parseFloat((child as HTMLElement).style.height) || child.getBoundingClientRect().height), 0)
+          : this.getBoundingClientRect().height;
+      } },
+      scrollWidth: { configurable: true, get(this: HTMLElement) { return this.clientWidth; } },
+      scrollTop: { configurable: true, get(this: HTMLElement) { return positions.get(this) ?? 0; },
+        set(this: HTMLElement, value: number) { positions.set(this, value); } },
+      scrollLeft: { configurable: true, get() { return 0; } },
+    });
+    window.HTMLElement.prototype.scrollTo = function (options?: ScrollToOptions | number) {
+      if (typeof options !== 'object' || options.top === undefined || this.scrollTop === options.top) return;
+      this.scrollTop = options.top;
+      queueMicrotask(() => { if (this.isConnected) this.dispatchEvent(new window.Event('scroll')); });
+    };
+    const identity = { runtime: 'agent' as const, threadId: `feedback-${chatRenderMode}`, branchId: 'main' };
+    const key = threadComposerKey(threadHostKey(), identity);
+    const history: ThreadHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
+      id: `feedback-${i}`, parent: i ? `feedback-${i - 1}` : null, thread_id: identity.threadId,
+      run_id: `run-${Math.floor(i / 2)}`, source: i % 2 ? 'assistant' : 'user', provider: null,
+      content: i % 2 ? { content: { kind: 'text', text: `Saved response ${i}` } } : `Saved prompt ${i}`,
+    }));
+    const api = {} as ThreadsAPI;
+    let commits = 0;
+    const publications = vi.fn();
+    const boundViewport = vi.fn();
+    const unsubscribe = useTimelineViewStore.subscribe(publications);
+    const onRender = () => { commits++; };
+    const render = (revision: number, reset = 0) => <React.Profiler id="feedback" onRender={onRender}>
+      <ConversationTimeline api={api} identity={{ ...identity }} history={history} historyReady historyReset={reset}
+        readOnly onScrollContainerChange={boundViewport} progress={[{ type: 'text', text: `Latest response ${revision}` }]}
+        working cwd="/synthetic" onQuote={() => {}} onFork={() => {}} onRecover={() => {}}
+        footer={<span>Footer {revision}</span>} />
+    </React.Profiler>;
+    try {
+      await act(async () => root.render(render(0))); await settle();
+      expect(useTimelineViewStore.getState().views[key]?.entry.epoch).toBe(1);
+      // Each group covers visible output, a mounted hidden scene, and restoration.
+      for (let revision = 1; revision <= 60; revision++) {
+        hidden = revision % 6 === 2 || revision % 6 === 3;
+        await act(async () => root.render(render(revision)));
+        await notifyResize(); await frame();
+      }
+      hidden = false;
+      await act(async () => root.render(render(61, 1))); await notifyResize();
+      // Let the real paced-text owner reveal its finite backlog after remount.
+      for (let index = 0; index < 100; index++) await frame();
+      expect(useTimelineViewStore.getState().views[key]?.entry.epoch).toBe(2);
+      expect(mount.querySelector('[data-conversation-block]')).not.toBeNull();
+      expect(boundViewport.mock.calls.filter(([element]) => element)).toHaveLength(2);
+      expect(mount.textContent).toContain('Footer 61');
+      const settled = { commits, publications: publications.mock.calls.length };
+      await settle(); await settle();
+      expect({ commits, publications: publications.mock.calls.length }).toEqual(settled);
+      // Equivalent layout receipts do not advance view state or React commits.
+      await notifyResize(); await settle();
+      expect({ commits, publications: publications.mock.calls.length }).toEqual(settled);
+    } finally { unsubscribe(); }
+  },
+);
