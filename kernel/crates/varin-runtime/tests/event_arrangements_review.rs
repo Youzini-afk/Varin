@@ -1470,3 +1470,26 @@ fn ordinary_target_tool_edits_its_existing_bot_arrangement_without_claiming_a_bo
     assert_eq!(restored.external_conversation_id, None);
     assert_eq!(restored.thread_id, "ordinary");
 }
+
+#[test]
+fn identical_event_text_from_distinct_identities_is_not_deduplicated() {
+    let f = Fixture::new(); let mut db = f.open(); setup(&mut db);
+    let run = start_event_run(&mut db);
+    arrange(&mut db, "watch", EventTiming::Immediate);
+    let mut first = incoming("message-a", None);
+    let mut second = incoming("message-b", None);
+    first.content = varin_runtime::output::OutputBody::text("same business text");
+    second.content = first.content.clone();
+    receive(&mut db, vec![first, second], None, Some("a")).unwrap();
+    deliver(&mut db);
+    let batch = consume_events(&mut db, &run.run_id);
+    let text = serde_json::to_string(&batch.items).unwrap();
+    assert_eq!(text.matches("same business text").count(), 2);
+    assert!(!text.contains("account-connection"));
+    assert!(!text.contains("registeredBy"));
+    assert!(text.contains("message-a") && text.contains("message-b"));
+    let varin_runtime::execution::Content::Output { output } = &batch.items[0].content else { panic!() };
+    assert_eq!(output.data["events"].as_array().unwrap().len(), 2);
+    assert_eq!(output.data["events"][0]["source"]["extensionId"], "mail");
+    assert_eq!(output.parts.iter().filter(|part| matches!(part, varin_runtime::output::OutputPart::Text { text } if text.starts_with("External event"))).count(), 2);
+}

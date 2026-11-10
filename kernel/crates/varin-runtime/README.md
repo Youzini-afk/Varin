@@ -160,6 +160,17 @@ and per-Agent admission sequences. They contain no resource bytes and grant no a
 retain the original source/version/format; accepted controls retain their selected execution across retries.
 OutputBody keeps the original data and an optional stable model_data projection. Providers consume that
 projection without rewriting historical bodies or introducing another receipt authority.
+The shared provider composition includes non-null business data and ordered text/media once; empty
+objects, false and zero remain meaningful. Source types retain role/permission boundaries without printing
+internal provenance chains beside every result or image. Output previews address the frozen raw or
+model_data field before adapters receive their semantic view, so continuation reads select the same bytes.
+
+Follow-up preparation captures original operation/follow-up references under the publication guard,
+then hydrates result bodies off-lock. Process and Host Job data remain separate from their text/media;
+a final Job result supersedes only identical acceptance details from that same original Job. Event inputs
+show useful source/object/sender/time facts once. Identity, transport cursors, receipt epochs and scheduling
+controls remain in the original Catalog records. Existing consumption-boundary event sharing and ordered
+state replacement still use those original identities, never text similarity or image hashes.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped

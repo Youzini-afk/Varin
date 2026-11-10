@@ -62,3 +62,76 @@ pub fn project_tool_followups(value: &mut Value) {
         }
     }
 }
+
+/// The continuation needs the triggering fact, not the proof/receipt used to accept it.
+/// Only Varin's closed evidence shapes are projected; nested business payloads stay intact.
+pub(super) fn continuation_evidence(evidence: &super::TriggerEvidence) -> super::Result<Value> {
+    fn project(value: &Value) -> Value {
+        let kind = value["kind"].as_str().unwrap_or_default();
+        let keys: &[&str] = match kind {
+            "plugin_events" => return Value::Null, // The event material supplies this once.
+            "metric" => &["fact"],
+            "file" => &["condition", "path", "state", "gap", "observed_at_ms"],
+            "at" => &["at_ms", "observed_at_ms"],
+            "log_literal" => &["stream", "start_offset", "end_offset", "published_bytes"],
+            "log_end" => &["stream", "published_bytes"],
+            "artifact" => &["fact", "gap"],
+            "collection" => &["outcome", "counts", "gap"],
+            "process_stopped" | "job_stopped" | "run_completed" | "goal_requested" => &[],
+            "any" | "all" => {
+                let sources = value["sources"].as_array().into_iter().flatten().map(|source| {
+                    json!({"source_index":source["source_index"],"evidence":project(&source["evidence"])})
+                }).collect::<Vec<_>>();
+                return json!({"kind":kind,"sources":sources});
+            }
+            _ => return value.clone(),
+        };
+        let mut result = json!({"kind":kind});
+        for key in keys { if let Some(value) = value.get(*key) { result[*key] = value.clone(); } }
+        if kind == "file" { project_tool_file_state(&mut result["state"]); }
+        if matches!(kind, "log_literal" | "log_end" | "artifact" | "collection") {
+            result["operationId"] = value["binding"]["operationId"].clone();
+        }
+        result
+    }
+    Ok(project(&serde_json::to_value(evidence)?))
+}
+
+pub(super) fn capture_continuation_references(
+    catalog: &super::Catalog, evidence: &super::TriggerEvidence, holder: &str,
+    references: &mut std::collections::BTreeMap<String, String>,
+) -> super::Result<()> {
+    use super::TriggerEvidence as E;
+    let binding = match evidence {
+        E::LogLiteral { binding, .. } | E::LogEnd { binding, .. }
+        | E::Artifact { binding, .. } | E::Collection { binding, .. } | E::JobStopped { binding, .. } => Some(binding),
+        E::Any { sources } | E::All { sources } => {
+            for source in sources {
+                let leaf: E = serde_json::from_value(serde_json::to_value(&source.evidence)?)?;
+                capture_continuation_references(catalog, &leaf, holder, references)?;
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(binding) = binding {
+        references.insert(binding.operation_id.clone(), catalog.operation_model_reference(&binding.operation_id, holder)?);
+    }
+    Ok(())
+}
+
+pub(super) fn reference_continuation_evidence(evidence: &mut Value, references: &std::collections::BTreeMap<String, String>) {
+    match evidence["kind"].as_str() {
+        Some("any" | "all") => {
+            if let Some(sources) = evidence["sources"].as_array_mut() {
+                for source in sources { reference_continuation_evidence(&mut source["evidence"], references); }
+            }
+        }
+        Some("log_literal" | "log_end" | "artifact" | "collection") => {
+            if let Some(reference) = evidence["operationId"].as_str().and_then(|id| references.get(id)) {
+                evidence["operationId"] = json!(reference);
+            }
+        }
+        _ => (),
+    }
+}

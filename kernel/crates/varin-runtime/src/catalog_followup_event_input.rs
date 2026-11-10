@@ -9,6 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EventMaterial {
     instruction_ref: Option<Value>,
+    #[serde(default)]
+    arrangement_id: Option<String>,
+    #[serde(default)]
+    trigger: Option<Value>,
     prefix_parts: usize,
     events: Vec<(Value, Value)>,
 }
@@ -118,15 +122,36 @@ fn state_key(input: &Input, metadata: &Value) -> Result<Option<String>> {
     // Filtered arrangements have distinct intentions and may see different state cuts.
     // A later event selected by another arrangement cannot erase this one's evidence.
     Ok(Some(encode(&(
-        output.data.get("followupId"),
+        input.material.arrangement_id.as_deref().or_else(|| output.data["followupId"].as_str()),
         &input.material.instruction_ref,
-        output.data.get("trigger"),
+        input.material.trigger.as_ref().or_else(|| output.data.get("trigger")),
         &metadata["source"],
         &metadata["objectId"],
         &metadata["senderId"],
         &state["key"],
     ))?))
 }
+/// One source description beside its own ordered content. Operational event/object/sender
+/// keys remain usable; transport identity, routing, de-duplication and revision stay in metadata.
+pub(super) fn append_event(parts: &mut Vec<OutputPart>, metadata: &Value, body: crate::output::OutputBody, number: usize) -> (Value, Value) {
+    let source = &metadata["source"];
+    let mut fact = json!({"event":number});
+    let mut origin = serde_json::Map::new();
+    for key in ["extensionId", "sourceId", "accountId"] {
+        if let Some(value) = source.get(key).filter(|v| !v.is_null()) { origin.insert(key.into(), value.clone()); }
+    }
+    if !origin.is_empty() { fact["source"] = Value::Object(origin); }
+    for key in ["eventId", "objectId", "senderId", "occurredAtMs", "attributes"] {
+        if let Some(value) = metadata.get(key).filter(|v| !v.is_null()) { fact[key] = value.clone(); }
+    }
+    if let Some(value) = metadata.get("state").and_then(|state| state.get("value")) { fact["state"] = value.clone(); }
+    let (data, model_data) = crate::model_input::append_output(parts, body, format!("External event {number}:"));
+    let mut model_fact = fact.clone();
+    if !data.is_null() { fact["data"] = data; }
+    if !model_data.is_null() { model_fact["data"] = model_data; }
+    (fact, model_fact)
+}
+
 fn project_group(
     content: &ContentStore,
     inputs: &mut [Option<Input>],
@@ -163,8 +188,7 @@ fn project_group(
         for event in ordered {
             if previous != Some(&event["state"]["value"]) {
                 transitions.push(
-                    json!({"id":event["id"],"sequence":event["state"]["sequence"],
-                    "value":event["state"]["value"],"occurredAtMs":event["occurredAtMs"]}),
+                    json!({"value":event["state"]["value"],"occurredAtMs":event["occurredAtMs"]}),
                 );
                 previous = Some(&event["state"]["value"]);
             }
@@ -182,7 +206,15 @@ fn project_group(
                 .or_insert(index);
         }
     }
-    let mut shown: BTreeMap<String, String> = BTreeMap::new();
+    // Local display numbers never become durable identity or authority.
+    let mut numbers = BTreeMap::new();
+    for input in inputs.iter().flatten() {
+        for (metadata, _) in &input.material.events {
+            let next = numbers.len() + 1;
+            numbers.entry(event_id(metadata)?.to_owned()).or_insert(next);
+        }
+    }
+    let mut shown = BTreeSet::new();
     for (index, entry) in inputs.iter_mut().enumerate() {
         let input = entry.take().unwrap();
         let mut dependency_indices = BTreeSet::from([index]);
@@ -193,32 +225,37 @@ fn project_group(
             ));
         };
         let mut facts = Vec::new();
+        let mut model_facts = Vec::new();
         for (metadata, reference) in &input.material.events {
             let id = event_id(metadata)?;
             let state_key = state_key(&input, metadata)?.map(|key| (key, id.to_owned()));
             if let Some(latest) = state_key.as_ref().and_then(|key| superseded.get(key)) {
                 dependency_indices.insert(owners[latest]);
-                facts.push(json!({"id":id,"supersededBy":latest}));
+                let fact = json!({"event":numbers[id],"supersededByEvent":numbers[latest]});
+                model_facts.push(fact.clone());
+                facts.push(fact);
                 continue;
             }
-            let mut fact = if let Some(first) = shown.get(id) {
+            let (mut fact, mut model_fact) = if shown.contains(id) {
                 dependency_indices.insert(owners[id]);
-                json!({"id":id,"sharedWith":first})
+                let fact = json!({"sharedEvent":numbers[id]});
+                (fact.clone(), fact)
             } else {
                 let body = content.load_output(reference)?;
-                output.parts.push(OutputPart::Text {
-                    text: format!("External event: {metadata}"),
-                });
-                output.parts.extend(body.parts);
-                shown.insert(id.into(), item.id.clone());
-                json!({"source":metadata,"data":body.data})
+                shown.insert(id.to_owned());
+                append_event(&mut output.parts, metadata, body, numbers[id])
             };
             if let Some(transitions) = state_key.as_ref().and_then(|key| changes.get(key)) {
                 fact["stateChanges"] = json!(transitions);
+                model_fact["stateChanges"] = json!(transitions);
             }
             facts.push(fact);
+            model_facts.push(model_fact);
         }
+        let mut model_data = output.model_data().clone();
         output.data["events"] = json!(facts);
+        model_data["events"] = json!(model_facts);
+        output.model_data = (model_data != output.data).then_some(model_data);
         let dependencies = dependency_indices
             .into_iter()
             .filter_map(|index| {

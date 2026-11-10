@@ -27,7 +27,6 @@ fn pi_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError> 
                     &["image/png", "image/jpeg", "image/webp", "image/gif"],
                     FAMILY,
                 )?;
-                blocks.push(json!({"type":"text","text":media_label(media)}));
                 blocks.push(
                     json!({"type":"image","mimeType":media.media_type,"data":media.data_base64}),
                 );

@@ -110,7 +110,6 @@ fn anthropic_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, Execution
                         "Anthropic media type is unsupported",
                     ));
                 };
-                blocks.push(json!({"type":"text","text":media_label(media)}));
                 blocks.push(json!({"type":kind,"source":{"type":"base64","media_type":media.media_type,"data":media.data_base64}}));
             }
         }

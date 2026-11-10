@@ -93,7 +93,6 @@ fn google_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionErr
                     ],
                     FAMILY,
                 )?;
-                blocks.push(json!({"text":media_label(media)}));
                 blocks.push(
                     json!({"inlineData":{"mimeType":media.media_type,"data":media.data_base64}}),
                 );
