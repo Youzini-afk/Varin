@@ -413,6 +413,30 @@ function soleFamilyPeer(body: Record<string, unknown>) {
   expect(peer.agentId).not.toBe(content.page.current.agentId);
   return peer;
 }
+/** Completion reports share message ingress with explicit sends, but keep their
+ * own original execution actor. An ordinary parent receives them passively. */
+async function queuedCompletionReport(h: FixtureHost, parent: ThreadIdentity, child: import('./protocol.generated.js').ChildTask) {
+  const executions = await h.runtime.childExecutions(child.operation_id);
+  expect(executions).toHaveLength(1);
+  const execution = executions[0]!;
+  expect(execution).toMatchObject({ child_operation_id: child.operation_id, trigger: { kind: 'dispatch' }, receipt: child.receipt, report: child.report });
+  let messages: import('@varin/protocol').MessageSummary[] = [];
+  // Publishing the original report and admitting its notification are separate
+  // owner commits. Observe the notification before checking its queued state.
+  await expect.poll(async () => {
+    messages = (await h.api.messages!.list(parent, { direction: 'incoming' })).messages;
+    return messages.filter(message => message.actor.kind === 'agent_report').length;
+  }).toBe(1);
+  const report = messages.find(message => message.actor.kind === 'agent_report')!;
+  expect(report).toMatchObject({
+    actor: { kind: 'agent_report', operationId: child.operation_id, executionId: execution.execution_id },
+    senderThreadId: child.child_thread_id, senderBranchId: child.child_branch_id,
+    targetThreadId: parent.threadId, targetBranchId: parent.branchId,
+    kind: 'inform', activation: { state: 'passive' }, replyWait: null, replyTo: null,
+    state: 'queued', deliveredRunId: null, deliveredCursor: null,
+  });
+  return { report, messages, execution };
+}
 /** Match provider-visible handles to retained native acceptances for Host assertions.
  * No model reference is ever passed to an internal durable-ID endpoint. */
 async function acceptedJob(h: FixtureHost, receipt: Record<string, unknown> | undefined) {
@@ -668,6 +692,11 @@ it('two real send observations retain their original requests across Host restar
     await expect.poll(async () => (await h.api.messages!.list(own, { direction: 'outgoing' })).messages.filter(message => message.replyWait?.state === 'waiting').length).toBe(2);
     expect((await h.api.snapshot(identity)).thread.agent_code).toBe(discoveredParent);
     const requests = (await h.api.messages!.list(own, { direction: 'outgoing' })).messages;
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request).toMatchObject({
+      actor: { kind: 'agent', runId: child.receipt!.run_id }, kind: 'inform',
+      targetThreadId: identity.threadId, targetBranchId: identity.branchId, replyWait: { state: 'waiting' },
+    });
     const firstIntent = { key: 'first-original-reply', kind: 'inform' as const, replyTo: requests[0]!.messageId, text: 'FIRST_LINKED_REPLY_BODY' };
     const first = await h.api.messages!.send(identity, firstIntent);
     await expect.poll(async () => (await h.api.messages!.get(own, requests[0]!.messageId)).replyWait).toMatchObject({ state: 'replied', replyMessageId: first.messageId, delivered: true });
@@ -684,8 +713,32 @@ it('two real send observations retain their original requests across Host restar
     expect(snapshot.history.filter(item => item.id === first.messageId)).toHaveLength(1);
     expect(snapshot.history.filter(item => item.id === second.messageId)).toHaveLength(1);
     for (const message of requests) expect((await reopened.api.messages!.get(own, message.messageId)).replyWait).toMatchObject({ state: 'replied', delivered: true });
-    expect((await reopened.api.messages!.list(own, { direction: 'outgoing' })).messages.map(message => message.messageId)).toEqual(requests.map(message => message.messageId));
+    const settled = await reopened.runtime.child(operationId);
+    const { report, messages, execution } = await queuedCompletionReport(reopened, identity, settled);
+    const expectedMessages = [...requests.map(message => message.messageId), report.messageId].sort();
+    expect(messages.map(message => message.messageId).sort()).toEqual(expectedMessages);
+    const outgoing = (await reopened.api.messages!.list(own, { direction: 'outgoing' })).messages;
+    expect(outgoing.map(message => message.messageId).sort()).toEqual(expectedMessages);
+    expect(outgoing.filter(message => message.actor.kind === 'agent').map(message => message.messageId)).toEqual(requests.map(message => message.messageId));
+    const originalReport = await reopened.api.messages!.get(identity, report.messageId);
+    expect(originalReport.text).toContain('Both original reply observations completed once');
+    const parentBefore = await reopened.api.snapshot(identity);
+    expect(parentBefore.history.some(item => item.id === report.messageId)).toBe(false);
+    expect((await reopened.runtime.run(initial.run_id)).state).toBe('completed');
     expect(parentSteps).toBe(2); expect(childSteps).toBe(3); expect(reopened.errors).toEqual([]);
+    await reopened.close();
+    const recovered = await f.openHost();
+    expect((await recovered.api.messages!.list(own, { direction: 'outgoing' })).messages).toEqual(outgoing);
+    expect((await recovered.api.messages!.list(identity, { direction: 'incoming' })).messages.map(message => message.messageId).sort()).toEqual(expectedMessages);
+    expect(await recovered.api.messages!.get(identity, report.messageId)).toEqual(originalReport);
+    expect((await recovered.api.snapshot(identity)).history).toEqual(parentBefore.history);
+    const recoveredChildHistory = (await recovered.api.snapshot(own)).history;
+    for (const reply of [first, second]) expect(recoveredChildHistory.filter(item => item.id === reply.messageId)).toHaveLength(1);
+    for (const request of requests) expect((await recovered.api.messages!.get(own, request.messageId)).replyWait).toMatchObject({ state: 'replied', delivered: true });
+    expect((await recovered.runtime.childExecutions(operationId)).map(value => value.execution_id)).toEqual([execution.execution_id]);
+    expect((await recovered.runtime.child(operationId)).receipt).toEqual(child.receipt);
+    expect((await recovered.runtime.run(initial.run_id)).state).toBe('completed');
+    expect(parentSteps).toBe(2); expect(childSteps).toBe(3); expect(recovered.errors).toEqual([]);
   } finally { release.release(); }
 }, 40_000);
 
@@ -701,6 +754,8 @@ it('passive family messages keep Agent and User identities, do not reopen finish
       else {
         expect(JSON.stringify(body.input)).toContain('AGENT_PASSIVE_ORIGINAL');
         expect(JSON.stringify(body.input)).toContain('USER_FROM_CHILD_ORIGINAL');
+        expect((body.input as Array<Record<string, unknown>>).filter(item => item.role === 'user'
+          && JSON.stringify(item).includes('Child completed independently'))).toHaveLength(1);
         complete(response, [answer('Natural new Run processed retained information', 'message-parent-next')]);
       }
     } else if (++childSteps === 1) complete(response, [tool('threads', { scope: 'history' }, 'message-discovery')]);
@@ -734,9 +789,13 @@ it('passive family messages keep Agent and User identities, do not reopen finish
     const userIntent = { key: 'same-user-message', kind: 'inform' as const, targetThreadId: identity.threadId, targetBranchId: identity.branchId, text: 'USER_FROM_CHILD_ORIGINAL' };
     const accepted = await h.api.messages!.send(childIdentity, userIntent);
     expect(await h.api.messages!.send(childIdentity, userIntent)).toEqual(accepted);
-    const inbox = await h.api.messages!.list(identity, { direction: 'incoming' }); expect(inbox.messages).toHaveLength(2);
-    expect(inbox.messages.find(message => message.messageId === agentMessageId)).toMatchObject({ actor: { kind: 'agent', runId: child.receipt!.run_id }, state: 'queued', deliveredRunId: null });
-    expect(inbox.messages.find(message => message.messageId === accepted.messageId)).toMatchObject({ actor: { kind: 'user' }, senderThreadId: child.child_thread_id, state: 'queued' });
+    const { report, messages, execution } = await queuedCompletionReport(h, identity, child);
+    const expectedMessages = [agentMessageId, accepted.messageId, report.messageId].sort();
+    expect(messages.map(message => message.messageId).sort()).toEqual(expectedMessages);
+    expect(messages.find(message => message.messageId === agentMessageId)).toMatchObject({ actor: { kind: 'agent', runId: child.receipt!.run_id }, kind: 'inform', activation: { state: 'passive' }, state: 'queued', deliveredRunId: null });
+    expect(messages.find(message => message.messageId === accepted.messageId)).toMatchObject({ actor: { kind: 'user' }, kind: 'inform', activation: { state: 'passive' }, senderThreadId: child.child_thread_id, state: 'queued' });
+    expect((await h.api.messages!.get(identity, report.messageId)).text).toContain('Child completed independently');
+    expect((await h.api.snapshot(identity)).history.some(item => item.id === report.messageId)).toBe(false);
     expect(parentSteps).toBe(2); expect(childSteps).toBe(3); expect((await h.runtime.run(original.run_id)).state).toBe('completed');
     const reply = await h.api.messages!.send(identity, { key: 'reply-to-original-agent', kind: 'inform', replyTo: agentMessageId, text: 'USER_REPLY_AFTER_CHILD_FINISHED' });
     expect(reply).toMatchObject({ targetThreadId: child.child_thread_id, targetBranchId: child.child_branch_id, actor: { kind: 'user' } });
@@ -746,12 +805,25 @@ it('passive family messages keep Agent and User identities, do not reopen finish
     const history = (await h.api.snapshot(identity)).history;
     expect(history.filter(item => item.id === agentMessageId)).toMatchObject([{ source: 'agent', run_id: next.run_id }]);
     expect(history.filter(item => item.id === accepted.messageId)).toMatchObject([{ source: 'user', run_id: next.run_id }]);
+    expect(history.filter(item => item.id === report.messageId)).toMatchObject([{ source: 'agent', run_id: next.run_id,
+      content: { provenance: { kind: 'agent_message', thread_id: child.child_thread_id }, content: { kind: 'output', output: {
+        data: { kind: 'child_report', operationId, executionId: execution.execution_id, report: child.report },
+      } } },
+    }]);
+    const deliveredReport = await h.api.messages!.get(identity, report.messageId);
+    expect(deliveredReport).toMatchObject({ actor: report.actor, kind: 'inform', activation: { state: 'passive' }, state: 'delivered', deliveredRunId: next.run_id });
+    expect((await h.api.messages!.list(identity, { direction: 'incoming' })).messages.map(message => message.messageId).sort()).toEqual(expectedMessages);
     expect((await h.api.messages!.get(childIdentity, reply.messageId)).state).toBe('queued');
     await h.close(); const reopened = await f.openHost();
     expect(await reopened.api.messages!.send(childIdentity, userIntent)).toEqual(accepted);
     expect((await reopened.api.messages!.get(identity, agentMessageId)).deliveredRunId).toBe(next.run_id);
+    expect(await reopened.api.messages!.get(identity, report.messageId)).toEqual(deliveredReport);
+    expect((await reopened.api.messages!.list(identity, { direction: 'incoming' })).messages.map(message => message.messageId).sort()).toEqual(expectedMessages);
+    const recoveredHistory = (await reopened.api.snapshot(identity)).history;
+    for (const messageId of expectedMessages) expect(recoveredHistory.filter(item => item.id === messageId)).toHaveLength(1);
     expect((await reopened.api.messages!.get(childIdentity, reply.messageId)).state).toBe('queued');
     expect((await reopened.runtime.child(operationId)).receipt).toEqual(child.receipt);
+    expect((await reopened.runtime.childExecutions(operationId)).map(value => value.execution_id)).toEqual([execution.execution_id]);
     expect(parentSteps).toBe(3); expect(childSteps).toBe(3); expect(reopened.errors).toEqual([]);
   } finally { release.release(); }
 }, 30_000);
