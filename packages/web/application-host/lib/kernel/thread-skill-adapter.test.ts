@@ -438,3 +438,17 @@ it('preserves original quotes through queue promotion and text-only queue edits'
   await f.adapter.editInput(f.queued.id, 1, 'rewritten without markers');
   expect(f.runtime.editInput.mock.calls[0]![0].content).toMatchObject({ text: 'rewritten without markers', contentReferences, contentReferenceOccurrences: [] });
 });
+
+it('preserves edited image quote bytes while retaining the original file without another image', async () => {
+  const f = await fixture();
+  const file = { ref: 'attachment:original', filename: 'image.png', mimeType: 'image/png', byteLength: 8 };
+  const prepare = vi.fn(async () => [file]), read = vi.fn();
+  f.adapter.bindAttachments({ prepare, read } as unknown as import('./thread-attachments.js').ThreadAttachmentOwner);
+  await f.adapter.submit({ ...identity, key: 'quoted-image', expectedHead: null, model, text: 'Look [Image 7]',
+    images: [{ mimeType: 'image/png', data: 'ZWRpdGVk', reference: 7 }],
+    contentReferences: [{ ref: 'q', title: 'image', imageReference: 7, attachment: { ref: file.ref }, source: { kind: 'chat', thread: identity, passages: [] } }],
+    contentReferenceOccurrences: [{ kind: 'image', reference: 7, start: 5, end: 14 }] });
+  expect(f.runtime.submit.mock.calls[0]![0].input).toMatchObject({ attachments: [{ media_type: 'image/png', data_base64: 'ZWRpdGVk' }],
+    imageReferences: [7], fileAttachments: [file], attachmentImageReferences: { [file.ref]: 7 } });
+  expect(read).not.toHaveBeenCalled();
+});

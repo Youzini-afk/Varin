@@ -17,10 +17,10 @@ impl Drop for Fixture {
 }
 fn input() -> Value {
     json!({"text":"前 [引用点1] 中 [图片7] 后 [引用点1]",
-        "contentReferences":[{"ref":"private-quote-uuid","number":1,"title":"引用点1","label":"Varin","text":"原始选区\n保留 JSON: {\"id\":\"user-selected-id\"}",
+        "contentReferences":[{"ref":"ui-selection:frozen","number":1,"title":"引用点1","label":"Varin","text":"原始选区\n保留 JSON: {\"id\":\"user-selected-id\"}",
             "source":{"kind":"ui","snapshotRef":"ui-snapshot:original","itemId":"private-source-entry","thread":{"runtime":"agent","threadId":"source-thread","branchId":"source-branch"}}},
             {"ref":"private-image-source","title":"图片7","imageReference":7,"source":{"kind":"object","objectRef":"private-object","thread":{"runtime":"agent","threadId":"source-thread","branchId":"source-branch"},"capturedAt":"fixed"}}],
-        "contentReferenceOccurrences":[{"kind":"content","ref":"private-quote-uuid","start":2,"end":8},{"kind":"image","reference":7,"start":11,"end":16},{"kind":"content","ref":"private-quote-uuid","start":19,"end":25}],
+        "contentReferenceOccurrences":[{"kind":"content","ref":"ui-selection:frozen","start":2,"end":8},{"kind":"image","reference":7,"start":11,"end":16},{"kind":"content","ref":"ui-selection:frozen","start":19,"end":25}],
         "attachments":[{"media_type":"image/png","data_base64":"cGljdHVyZQ=="}],"imageReferences":[7]})
 }
 fn message_body(db: &Catalog, id: &str) -> Value {
@@ -93,6 +93,7 @@ fn frozen_quotes_survive_queue_delivery_reopen_and_keep_source_out_of_model() {
         refs.contains(&"ui-snapshot:original".into()),
         "structured UI source retains its original snapshot without body text"
     );
+    assert!(refs.contains(&"ui-selection:frozen".into()), "accepted input retains the original UI selection owner");
     let mut changed = command.clone();
     changed.input["contentReferences"][0]["text"] = json!("changed after enqueue");
     assert!(db.enqueue_input(&changed).is_err());
@@ -114,7 +115,7 @@ fn frozen_quotes_survive_queue_delivery_reopen_and_keep_source_out_of_model() {
     assert_eq!(projected.matches("原始选区").count(), 1);
     assert!(projected.contains("user-selected-id"));
     for private in [
-        "private-quote-uuid",
+        "ui-selection:frozen",
         "private-source-entry",
         "private-image-source",
         "source-thread",
@@ -163,7 +164,7 @@ fn frozen_quotes_survive_queue_delivery_reopen_and_keep_source_out_of_model() {
 fn quote_ranges_use_original_utf16_and_cannot_claim_plain_text_or_other_selectors() {
     let mut value = input();
     crate::output::admit_user_input("input", &value).unwrap();
-    value["contentReferenceOccurrences"][0]["start"] = json!(3);
+    value["contentReferenceOccurrences"][0]["start"] = json!(9);
     assert!(crate::output::admit_user_input("input", &value).is_err());
     value = input();
     value["references"] = json!([{"kind":"directory","path":"docs","start":2,"end":8}]);
@@ -310,4 +311,60 @@ fn directed_message_quotes_keep_routing_and_survive_plain_text_queue_edit() {
     let body = message_body(&db, &receipt.identity.message_id);
     assert_eq!(body["userText"], "new user wording");
     assert!(body["text"].as_str().unwrap().contains("Task message"));
+}
+
+#[test]
+fn localized_quote_labels_bind_explicit_ranges_without_inferring_plain_text() {
+    for label in ["[Reference 1]", "[引用点 1]", "[引用点1]", "[Référence 1]"] {
+        let prefix = "🦊 ";
+        let text = format!("{prefix}{label} then {label}");
+        let start = prefix.encode_utf16().count();
+        let end = start + label.encode_utf16().count();
+        let mut input = json!({"text":text,"contentReferences":[{"ref":"source","title":"quote","text":"selected bytes","source":{"kind":"chat","passages":[]}}],
+            "contentReferenceOccurrences":[{"kind":"content","ref":"source","start":start,"end":end}]});
+        let admitted = crate::output::admit_user_input("localized", &input).unwrap();
+        let items = execution_persistence::user_input_items("localized", &admitted).unwrap();
+        let projected = super::quote_tests::text(&items);
+        assert_eq!(projected.matches("selected bytes").count(), 1);
+        assert!(
+            projected.ends_with(&format!(" then {label}")),
+            "unbound display text stays inert"
+        );
+        input["contentReferenceOccurrences"][0]["start"] = json!(1);
+        assert!(crate::output::admit_user_input("split-emoji", &input).is_err());
+    }
+    let mut input = input();
+    input["text"] = json!("前 [引用点1] 中 [Bild7] 后 [引用点1]");
+    // Same UTF-16 width as the old image token is not required; adjust all explicit ranges.
+    input["contentReferenceOccurrences"][1]["end"] = json!(18);
+    input["contentReferenceOccurrences"][2]["start"] = json!(21);
+    input["contentReferenceOccurrences"][2]["end"] = json!(27);
+    crate::output::admit_user_input("localized-image", &input).unwrap();
+}
+
+#[test]
+fn pure_image_quotes_keep_original_file_without_empty_text_quote_or_duplicate_media() {
+    let file = json!({"ref":"attachment:image","filename":"source.png","mimeType":"image/png","byteLength":7});
+    let value = json!({"text":"Look [Image 7] now", "contentReferences":[{"ref":"image-source","title":"image","imageReference":7,
+        "attachment":{"ref":"attachment:image"},"attachmentRef":"attachment:image","source":{"kind":"chat","passages":[]}}],
+        "contentReferenceOccurrences":[{"kind":"image","reference":7,"start":5,"end":14}],
+        "attachments":[{"media_type":"image/png","data_base64":"cGljdHVyZQ=="}],"imageReferences":[7],
+        "fileAttachments":[file],"attachmentImageReferences":{"attachment:image":7}});
+    let admitted = crate::output::admit_user_input("image-file", &value).unwrap();
+    let items = execution_persistence::user_input_items("image-file", &admitted).unwrap();
+    assert_eq!(text(&items), "Look [图片7] now");
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| matches!(item.content, Content::Media { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| matches!(item.content, Content::Output { .. }))
+            .count(),
+        1
+    );
 }

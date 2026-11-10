@@ -26,6 +26,7 @@ export interface AcceptedExternalInput extends Omit<ExternalInput, 'attachments'
   attachments?: Attachment[];
   /** Runtime-composed preceding informs do not move the original stored user ranges. */
   _quoteTextOffset?: number;
+  _quoteTextLength?: number;
   /** Original selectors are only for comparing a retry of the same public input. */
   _attachmentSelections?: AttachmentSelection[];
 }
@@ -51,10 +52,21 @@ export async function prepareHarnessInput(
   owner?: ExternalAttachmentOwner,
   signal?: AbortSignal,
 ): Promise<HarnessInput> {
-  const { attachments = [], _attachmentSelections: _selections, attachmentImageReferences, contentReferences: _contentReferences, contentReferenceOccurrences: _contentReferenceOccurrences, _quoteTextOffset = 0, ...original } = input;
-  const plain = { ...original, text: projectContentReferenceText(original.text, { ...input, ...(input.contentReferenceOccurrences ? { contentReferenceOccurrences: input.contentReferenceOccurrences.map(occurrence => ({ ...occurrence, start: occurrence.start + _quoteTextOffset, end: occurrence.end + _quoteTextOffset })) } : {}) }) };
+  const { attachments = [], _attachmentSelections: _selections, attachmentImageReferences, contentReferences: _contentReferences, contentReferenceOccurrences: _contentReferenceOccurrences, _quoteTextOffset = 0, _quoteTextLength, ...original } = input;
+  const end = _quoteTextLength === undefined ? original.text.length : _quoteTextOffset + _quoteTextLength;
+  const projected = projectContentReferenceText(original.text.slice(_quoteTextOffset, end), input);
+  const plain = { ...original, text: original.text.slice(0, _quoteTextOffset) + projected + original.text.slice(end) };
   if (!attachments.length && !input.images?.some(image => image.reference !== undefined)) return plain;
   if (attachments.length && !owner) throw new ExternalAgentError('attachments_unavailable', 'The original attachment owner is unavailable');
+  const boundImages = { ...attachmentImageReferences };
+  for (const quote of input.contentReferences ?? []) if (quote.attachmentRef && quote.imageReference !== undefined) {
+    const existing = boundImages[quote.attachmentRef];
+    if (existing !== undefined && existing !== quote.imageReference) {
+      if (input.images?.some(image => image.reference === quote.imageReference)) continue;
+      throw new ExternalAgentError('invalid_input', 'Quoted image disagrees with the original file binding');
+    }
+    boundImages[quote.attachmentRef] = quote.imageReference;
+  }
   const images = [...(input.images ?? [])];
   const files: NonNullable<HarnessInput['files']> = [];
   const imageLabels: string[] = [];
@@ -63,6 +75,8 @@ export async function prepareHarnessInput(
     // These are the image formats accepted by the existing native adapter protocols. Other
     // formats remain original files; lack of a model parser never prevents file delivery.
     if (capabilities.images && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+      const reference = boundImages[attachment.ref];
+      if (reference !== undefined && images.some(image => image.reference === reference)) continue;
       const original = await owner!.readExternal(conversation, attachment.ref, signal);
       if (original.attachment.ref !== attachment.ref || original.attachment.byteLength !== attachment.byteLength || original.attachment.mimeType !== attachment.mimeType)
         throw new ExternalAgentError('attachment_changed', `The retained descriptor for ${attachment.filename} changed`);
@@ -70,18 +84,19 @@ export async function prepareHarnessInput(
       let length = 0;
       for await (const chunk of original.stream) { signal?.throwIfAborted(); chunks.push(Buffer.from(chunk)); length += chunk.byteLength; }
       if (length !== attachment.byteLength) throw new ExternalAgentError('attachment_incomplete', `The original image ${attachment.filename} is incomplete`);
-      const reference = attachmentImageReferences?.[attachment.ref];
       images.push({ data: Buffer.concat(chunks).toString('base64'), mimeType: attachment.mimeType, ...(reference === undefined ? {} : { reference }) });
     } else {
       if (!capabilities.files) throw new ExternalAgentError('attachment_unsupported', `This Agent cannot receive ${attachment.filename}: neither a supported native block nor an execution-host file path is available`);
       const prepared = await owner!.externalPath(conversation, attachment.ref, signal);
       if (!path.isAbsolute(prepared.path) || !prepared.kernelEpoch) throw new ExternalAgentError('attachment_path_unavailable', `No current execution-host path is available for ${attachment.filename}`);
       files.push({ attachment, path: prepared.path });
-      const reference = attachmentImageReferences?.[attachment.ref];
+      const reference = boundImages[attachment.ref];
       if (reference !== undefined) imageLabels.push(`[Image ${reference}] / [图片${reference}]: ${JSON.stringify(attachment.filename)}`);
     }
   }
-  const order = [...new Set((input.contentReferenceOccurrences ?? []).filter(occurrence => occurrence.kind === 'image').sort((a, b) => a.start - b.start).map(occurrence => occurrence.reference))];
+  const orderedReferences = (input.contentReferenceOccurrences ?? []).slice().sort((a, b) => a.start - b.start)
+    .map(occurrence => occurrence.kind === 'image' ? occurrence.reference : input.contentReferences?.find(reference => reference.ref === occurrence.ref)?.imageReference);
+  const order = [...new Set([...orderedReferences, ...(input.contentReferences ?? []).map(reference => reference.imageReference)].filter((reference): reference is number => reference !== undefined))];
   if (order.length) images.sort((a, b) => {
     const left = a.reference === undefined ? -1 : order.indexOf(a.reference), right = b.reference === undefined ? -1 : order.indexOf(b.reference);
     return (left < 0 ? order.length : left) - (right < 0 ? order.length : right);

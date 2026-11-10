@@ -137,19 +137,24 @@ export class ThreadAdapter {
     if (options.rawReferences) return { ...threadInput(input.text, inputImages), ...(hasQuotes ? { text: input.text } : {}), ...quoteSelection.quotes, ...explicit, ...(sentTime ? { sentTime } : {}) };
     if (this.attachments && attachmentSelections.length) {
       const fileAttachments = await this.attachments.prepare(input, attachmentSelections, `user-input:${input.key}`, input.threadId, signal);
+      const quotes = quoteSelection.bind(fileAttachments);
       const images = [...inputImages ?? []];
       const attachmentImageReferences: Record<string, number> = {};
       let nextImageReference = Math.max(0, ...images.map(image => image.reference ?? 0), ...Object.values(input.attachmentImageReferences ?? {}));
       for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
-        const reference = input.attachmentImageReferences?.[attachment.ref] ?? ++nextImageReference;
+        const quotedNumber = quotes.contentReferences?.find(quote => quote.attachmentRef === attachment.ref && quote.imageReference !== undefined)?.imageReference;
+        const explicitNumber = input.attachmentImageReferences?.[attachment.ref];
+        if (quotedNumber !== undefined && explicitNumber !== undefined && quotedNumber !== explicitNumber) throw new Error('Quoted image disagrees with the original file binding');
+        const reference = quotedNumber ?? explicitNumber ?? ++nextImageReference;
+        nextImageReference = Math.max(nextImageReference, reference);
         attachmentImageReferences[attachment.ref] = reference;
-        if (options.acceptsImages === false) continue;
+        if (options.acceptsImages === false || images.some(image => image.reference === reference)) continue;
         const source = await this.attachments.read(input, attachment.ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of source.stream) chunks.push(chunk);
         images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64'), reference });
       }
-      return { ...threadInput(text, images.length ? images : inputImages), fileAttachments, ...metadata, ...(Object.keys(attachmentImageReferences).length ? { attachmentImageReferences } : {}), ...quoteSelection.bind(fileAttachments) };
+      return { ...threadInput(text, images.length ? images : inputImages), fileAttachments, ...metadata, ...(Object.keys(attachmentImageReferences).length ? { attachmentImageReferences } : {}), ...quotes };
     }
     if (attachments.length) throw new Error('Thread attachment admission is unavailable');
     if (!selected?.length) return { ...threadInput(text, inputImages), ...metadata, ...quoteSelection.bind([]) };
@@ -542,6 +547,7 @@ export class ThreadAdapter {
     const preparedAttachments = await this.attachments.prepare(identity, selections, `user-message:${request.key}`, targetThreadId, signal);
     let dispatched = false;
     try {
+      const quotes = quoteSelection.bind(preparedAttachments);
       const preparedAttachmentMedia = [];
       const imageReferences: number[] = [];
       const attachmentImageReferences: Record<string, number> = {};
@@ -551,11 +557,15 @@ export class ThreadAdapter {
         const chunks: Uint8Array[] = [];
         for await (const chunk of original.stream) chunks.push(chunk);
         preparedAttachmentMedia.push({ media_type: attachment.mimeType, data_base64: Buffer.concat(chunks).toString('base64') });
-        const number = request.attachmentImageReferences?.[attachment.ref] ?? ++nextImageReference;
+        const quotedNumber = quotes.contentReferences?.find(quote => quote.attachmentRef === attachment.ref && quote.imageReference !== undefined)?.imageReference;
+        const explicitNumber = request.attachmentImageReferences?.[attachment.ref];
+        if (quotedNumber !== undefined && explicitNumber !== undefined && quotedNumber !== explicitNumber) throw new Error('Quoted image disagrees with the original file binding');
+        const number = quotedNumber ?? explicitNumber ?? ++nextImageReference;
+        nextImageReference = Math.max(nextImageReference, number);
         imageReferences.push(number); attachmentImageReferences[attachment.ref] = number;
       }
       dispatched = true;
-      return await this.runtime.sendMessage({ ...request, attachments: selections, ...quoteSelection.bind(preparedAttachments), ...(imageReferences.length ? { imageReferences, attachmentImageReferences } : {}), preparedAttachments, preparedAttachmentMedia, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+      return await this.runtime.sendMessage({ ...request, attachments: selections, ...quotes, ...(imageReferences.length ? { imageReferences, attachmentImageReferences } : {}), preparedAttachments, preparedAttachmentMedia, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
     } catch (error) {
       if (!dispatched || error instanceof KernelRequestError) {
         try { await this.attachments.releaseUnpublished(identity, `user-message:${request.key}`, targetThreadId, preparedAttachments.map(item => item.ref)); }

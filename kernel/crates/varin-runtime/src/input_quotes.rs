@@ -130,7 +130,9 @@ fn validate_inner(input: &Value, previous: Option<&Value>, prepared: bool) -> Re
             || reference.title.trim().is_empty()
             || number == 0
             || ids.insert(reference.id.as_str(), number).is_some()
-            || (reference.image_reference.is_none() && !numbers.insert(number))
+            || ((reference.image_reference.is_none()
+                || reference.text.as_ref().is_some_and(|text| !text.is_empty()))
+                && !numbers.insert(number))
         {
             return Err(invalid(
                 "quote objects require unique identities and positive message-local numbers",
@@ -192,31 +194,25 @@ fn validate_inner(input: &Value, previous: Option<&Value>, prepared: bool) -> Re
             ));
         }
         // Validate both edges, including a leading low/trailing high surrogate outside the range.
-        let token = String::from_utf16(&units[start..next])
+        String::from_utf16(&units[start..next])
             .map_err(|_| invalid("quote occurrence splits a UTF-16 character"))?;
         if String::from_utf16(&units[..start]).is_err()
             || String::from_utf16(&units[next..]).is_err()
         {
             return Err(invalid("quote occurrence splits a UTF-16 character"));
         }
+        // The explicit relation binds this range. Display labels are localized and
+        // may change; recognizing their spelling would confuse presentation with
+        // identity. Unbound marker-shaped text remains ordinary user text.
         let valid = match occurrence {
-            Occurrence::Content { id, .. } => ids
-                .get(id.as_str())
-                .is_some_and(|number| token == marker(*number)),
+            Occurrence::Content { id, .. } => ids.contains_key(id.as_str()),
             Occurrence::Image { reference, .. } => {
-                reference > 0
-                    && (!prepared || images.contains(&reference))
-                    && [
-                        image_marker(reference),
-                        format!("[Image {reference}]"),
-                        format!("[圖片{reference}]"),
-                    ]
-                    .contains(&token)
+                reference > 0 && (!prepared || images.contains(&reference))
             }
         };
         if !valid {
             return Err(invalid(
-                "quote occurrence does not match its bound object and visible marker",
+                "quote occurrence does not identify its bound object",
             ));
         }
         ranges.push((start, next));
@@ -410,7 +406,6 @@ impl Projection<'_> {
             for (index, reference) in self.references.iter().enumerate() {
                 if reference.image_reference == Some(number)
                     && reference.text.as_ref().is_none_or(String::is_empty)
-                    && reference.attachment_ref.is_none()
                 {
                     self.seen_quotes.insert(index);
                 }
@@ -422,14 +417,25 @@ impl Projection<'_> {
         let reference = &self.references[index];
         let number = reference.number.unwrap_or(index as u64 + 1);
         if !self.seen_quotes.insert(index) {
-            self.text(marker(number), false);
+            self.text(
+                if reference.text.as_ref().is_none_or(String::is_empty) {
+                    reference
+                        .image_reference
+                        .map(image_marker)
+                        .unwrap_or_else(|| marker(number))
+                } else {
+                    marker(number)
+                },
+                false,
+            );
             return Ok(());
         }
-        if reference.text.as_ref().is_none_or(String::is_empty)
-            && reference.attachment_ref.is_none()
-        {
+        if reference.text.as_ref().is_none_or(String::is_empty) {
             if let Some(image) = reference.image_reference {
-                return self.image(image);
+                self.image(image)?;
+                // The file remains independently retained and is emitted by the common
+                // attachment pass. It does not turn a pure image into an empty text quote.
+                return Ok(());
             }
         }
         let label = reference.label.as_deref().unwrap_or_else(|| {
