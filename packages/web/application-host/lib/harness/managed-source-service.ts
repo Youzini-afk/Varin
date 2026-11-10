@@ -1,3 +1,4 @@
+import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
 /** The target Host admits its own Source resources. Catalog execution facts stay
  * with the coordinator; this adapter stores neither operations nor grants. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -132,6 +133,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     ...('environmentRunId' in input.source && typeof input.source.environmentRunId === 'string'
       ? { environment_run_id: input.source.environmentRunId } : {}) });
   const project = (authority: SourceAuthorityResult, selected: ManagedSourceCapabilities): ManagedSourceBinding => ({
+    ...(authority.toolBinding?.textEncoding ? { textEncoding: authority.toolBinding.textEncoding } : {}),
     authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch, executionOwner: authority.executionOwner,
     source: authority.source, physicalRoot: authority.physicalRoot, capabilities: selected,
     ...(authority.toolBinding?.executionEnvironment ? { executionEnvironment: authority.toolBinding.executionEnvironment } : {}),
@@ -146,6 +148,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     return kernel.sourceRequest<SourceAuthorityResult>('source.authority.inspect', address(principal, input), signal);
   };
   const localScope = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult): ManagedSourceLocalScope => ({
+    ...(authority.toolBinding?.textEncoding ? { textEncoding: authority.toolBinding.textEncoding } : {}),
     operationId: authority.operationId,
     principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
     scope: authority.scope, source: authority.source, grant: kernel.sourceAuthorityGrant(authority), physicalRoot: authority.physicalRoot,
@@ -487,7 +490,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           physicalRoot={hostId:options.hostId,rootId:native.rootId,canonicalRoot:native.path};
         }
         const fixed = { branchId: source.branch_id!, revision: source.revision! };
+        const textEncoding = opened.toolBinding?.textEncoding ?? (input.scope.kind === 'source_read' || resultOnly
+          ? undefined : await resolveSourceTextPolicy(kernel, actor, source, physicalRoot, signal));
         const toolBinding: SourceToolBinding | null = input.scope.kind === 'source_read' ? null : {
+          ...(textEncoding ? { textEncoding } : {}),
           executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()),
           resourceOwner: source.resource_owner, grantId: opened.grantId, runId: input.scope.runId, threadId: input.scope.threadId,
           workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, sourceMode: source.mode,

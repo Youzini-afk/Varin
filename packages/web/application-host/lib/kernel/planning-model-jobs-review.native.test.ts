@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createKernelClient } from './kernel-client.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createAgentPolicy } from './agent-policy.js';
 import { createModelAuthority } from './model-authority.js';
 import { createPolicyModelPreparer } from './policy-models.js';
@@ -119,7 +120,8 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
     return mutable.settings;
   } });
   const kernel = createKernelClient({ hostId: 'planning-host-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
-  cleanups.push(() => kernel.close());
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); });
   let closed = false;
   const workspace = path.join(root, 'workspace');
   const documents = options.source || options.memory ? createDocumentAuthority({ hostId: 'planning-host-review', dataDir: path.join(root, 'documents'),
@@ -186,7 +188,10 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
       if (branch.active_run_id) await runtime.cancelRun(branch.active_run_id);
     }
   });
-  const closeKernel = async () => { if (closed) return; await storage?.dispose(); await documents?.dispose(); await kernel.close(); closed = true; };
+  const closeKernel = async () => { if (closed) return;
+    try { await storage?.dispose(); await documents?.dispose(); }
+    finally { releaseCodec(); await kernel.close(); closed = true; }
+  };
   return { closeKernel, memoryControl, personalization, prepareContext, root, workspace, documents, main, planner, models, prepareModels, mutable, scope, mainScope, fakeSecrets, authReads, catalogReads,
     kernel, extensions, runtime, adapter, decisions, pins: () => pins, launchErrors, api: createThreadsHttpAPI() };
 }

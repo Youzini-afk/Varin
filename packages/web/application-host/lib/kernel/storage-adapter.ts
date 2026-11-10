@@ -1,12 +1,13 @@
-import { parseSourceDraftProvenance } from '../harness/working-state/source-drafts.js';
+import { parseSourceProvenance, readOriginalSource, originalSourceTextEncoding, readFixedSourceTextEncoding } from './source-provenance.js';
+import { isDocumentTextFormat } from '../documents/inspect.js';
 import { SourceAdmissionError, sourceReadError } from './source-admission-error.js';
-import { parseSourceResourceCapture, type ResourceSourceReadInput, type ResourceSourceReadView } from "./thread-resource-scope.js";
+import type { ResourceSourceReadInput, ResourceSourceReadView } from "./thread-resource-scope.js";
 import { runKernelCompute } from "./compute-runner.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
-import type { ChildSourceProvenance, KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
+import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelTextPolicy, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
@@ -169,48 +170,6 @@ const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
 
-const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
-  const source = asRecord(value);
-  const resources = source.resources === undefined ? undefined : parseSourceResourceCapture(source.resources);
-  if (source.captureIdentity !== undefined && (typeof source.captureIdentity !== "string" || !/^[0-9a-f]{64}$/.test(source.captureIdentity))) {
-    throw new Error("Working source capture identity is malformed");
-  }
-  const drafts = source.drafts === undefined ? undefined : parseSourceDraftProvenance(source.drafts);
-  if (drafts && source.contentMode !== "fixed-draft-baseline") throw new Error("Working source draft mode is inconsistent");
-  if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
-    let selection:Extract<ChildSourceProvenance,{consistency:'fixed-root'}>['selection'];
-    if(source.selection!==undefined){
-      const raw=asRecord(source.selection);
-      if(Object.keys(raw).some(key=>!['captureIdentity','contentMode','captureScopes','omittedDraftPaths','drafts'].includes(key))
-        ||typeof raw.captureIdentity!=='string'||!/^[0-9a-f]{64}$/.test(raw.captureIdentity)
-        ||!['saved-files','fixed-draft-baseline'].includes(String(raw.contentMode))
-        ||!Array.isArray(raw.captureScopes)||!raw.captureScopes.every(item=>typeof item==='string')
-        ||!Array.isArray(raw.omittedDraftPaths)||!raw.omittedDraftPaths.every(item=>typeof item==='string'))throw new Error('Workspace snapshot selection is malformed');
-      const drafts=raw.drafts===undefined?undefined:parseSourceDraftProvenance(raw.drafts);
-      if(drafts&&raw.contentMode!=='fixed-draft-baseline')throw new Error('Workspace draft snapshot mode is inconsistent');
-      selection={captureIdentity:raw.captureIdentity,contentMode:raw.contentMode as 'saved-files'|'fixed-draft-baseline',captureScopes:raw.captureScopes as string[],omittedDraftPaths:raw.omittedDraftPaths as string[],...(drafts?{drafts}:{})};
-    }
-    return { consistency: source.consistency, root: source.root, ...(selection?{selection}:{}),...(resources ? { resources } : {}) };
-  }
-  if (source.consistency === 'refreshed-root' && typeof source.root === 'string' && source.root
-    && typeof source.previousRoot === 'string' && typeof source.incomingRoot === 'string'
-    && typeof asRecord(source.incoming).run_id === 'string' && asRecord(source.incoming).source
-    && Array.isArray(source.conflicts) && source.conflicts.every((p): p is string => typeof p === 'string')) {
-    return { consistency: 'refreshed-root', root: source.root, previousRoot: source.previousRoot,
-      incomingRoot: source.incomingRoot, incoming: source.incoming as Extract<ChildSourceProvenance, { consistency: 'refreshed-root' }>['incoming'],
-      conflicts: source.conflicts, ...(resources ? { resources } : {}) };
-  }
-  if ((source.consistency === "stable-capture" || source.consistency === "git-base-with-overlay")
-    && (source.contentMode === "saved-files" || source.contentMode === "fixed-draft-baseline")
-    && Array.isArray(source.captureScopes) && source.captureScopes.every((item): item is string => typeof item === "string")
-    && Array.isArray(source.omittedDraftPaths) && source.omittedDraftPaths.every((item): item is string => typeof item === "string")) {
-    return { consistency: source.consistency, contentMode: source.contentMode,
-      captureScopes: [...source.captureScopes], omittedDraftPaths: [...source.omittedDraftPaths],
-      ...(source.captureIdentity === undefined ? {} : { captureIdentity: source.captureIdentity as string }),
-      ...(drafts ? { drafts } : {}), ...(resources ? { resources } : {}) };
-  }
-  throw new Error("Working source provenance body is malformed");
-};
 
 const parsePendingFileOperation = (value: unknown): KernelPendingFileOperation => {
   const record = asRecord(value);
@@ -516,6 +475,18 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     };
     const baseStates = storedStates("baseStates");
     const pathStates = storedStates("pathStates");
+    const textFormats: NonNullable<WorkingResult['textFormats']> = {};
+    if (document.textFormats !== undefined) {
+      const formats = asRecord(document.textFormats);
+      for (const [file, value] of Object.entries(formats)) {
+        if (!file || file === '.' || file.includes('\\') || normalizeEntryPath(file) !== file) throw new Error('Working result text format path is malformed');
+        const format = asRecord(value);
+        if ((format.base !== undefined && !isDocumentTextFormat(format.base))
+          || (format.child !== undefined && !isDocumentTextFormat(format.child))) throw new Error('Working result text format is malformed');
+        textFormats[file] = { ...(isDocumentTextFormat(format.base) ? { base: format.base } : {}),
+          ...(isDocumentTextFormat(format.child) ? { child: format.child } : {}) };
+      }
+    }
     const fixed = await this.selected(branchId, changedPaths, revision, options?.signal);
     if (!fixed || fixed.branchId !== branchId || fixed.workspaceId !== this.context.identity.workspaceId
       || fixed.view !== "revision" || fixed.revision !== revision || fixed.root !== document.root) {
@@ -531,6 +502,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const stats = asRecord(document.diffStats);
     if (stats.files !== changedPaths.length || typeof stats.insertions !== "number" || typeof stats.deletions !== "number") throw new Error("Working result has malformed diff stats");
     return { resultRevision: revision, branchId, ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
+      ...(Object.keys(textFormats).length ? { textFormats } : {}),
       changedPaths, baseStates, pathStates, diffStats: { files: changedPaths.length, insertions: stats.insertions, deletions: stats.deletions },
       createdAt: document.createdAt, root: document.root, baseRoot: document.baseRoot };
   }
@@ -917,44 +889,11 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null> {
-    // Captured physical sources and forked immutable sources are both current
-    // production creation paths, with distinct original-operation identities.
-    const operation = await this.context.client.getOperation(`branch-fork:${branchId}`, options?.signal)
-      ?? await this.context.client.getOperation(`branch-create:${branchId}`, options?.signal);
-    if (operation === null) {
-      return null;
-    }
-    if ((operation.kind !== "branch.create" && operation.kind !== "branch.fork") || operation.state !== "committed") {
-      throw new Error("Working source preparation is not committed");
-    }
-    const receipt = asRecord(operation.result);
-    if (receipt.branchId !== branchId || receipt.workspaceId !== this.context.identity.workspaceId
-      || typeof receipt.root !== "string" || !receipt.root || receipt.writeRevision !== 0 || receipt.headRevision !== 0) {
-      throw new Error("Working source preparation receipt has inconsistent provenance");
-    }
-    if (receipt.sourceProvenance === undefined) return null;
-    const reference = asRecord(receipt.sourceProvenance);
-    if (receipt.branchId !== branchId || receipt.workspaceId !== this.context.identity.workspaceId
-      || typeof receipt.root !== "string" || !receipt.root || receipt.writeRevision !== 0 || receipt.headRevision !== 0
-      || typeof reference.objectHash !== "string" || !reference.objectHash
-      || reference.recordId !== `working-source:${branchId}` || reference.slot !== "source-provenance") {
-      throw new Error("Working source preparation receipt has inconsistent provenance");
-    }
-    const chunks: Buffer[] = [];
-    let offset = 0;
-    for (;;) {
-      const slice = await this.context.client.getBlob(reference.objectHash, { recordId: reference.recordId, slot: reference.slot },
-        { offset, length: 256 * 1024, ...(options?.signal ? { signal: options.signal } : {}) });
-      chunks.push(Buffer.from(slice.bytesBase64, "base64"));
-      if (slice.eof) break;
-      if (slice.nextOffset <= offset) throw new Error("Working source provenance cursor did not advance");
-      offset = slice.nextOffset;
-    }
-    const provenance = parseSourceProvenance(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-    if ('root' in provenance && provenance.root !== receipt.root) {
-      throw new Error("Working source provenance differs from its prepared branch");
-    }
-    return { root: receipt.root, provenance };
+    return readOriginalSource(this.context.client, this.context.identity.workspaceId, branchId, options?.signal);
+  }
+
+  async readTextEncoding(branchId: string, revision: number, options?: { signal?: AbortSignal; root?: string }): Promise<KernelTextPolicy> {
+    return readFixedSourceTextEncoding(this.context.client, this.context.identity.workspaceId, branchId, revision, options?.signal, options?.root);
   }
 
 
@@ -1002,8 +941,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     let created: Record<string, unknown>;
     // The upload is transient until the original branch-create transaction
     // transfers it to its working.source record. No separate source snapshot.
-    const provenanceUpload = options?.sourceProvenance
-      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options.signal)
+    const sourceProvenance = options?.sourceProvenance === undefined ? undefined : parseSourceProvenance(options.sourceProvenance);
+    const provenanceUpload = sourceProvenance
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(sourceProvenance), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options?.signal)
       : undefined;
     try {
       created = await this.context.client.createBranch({
@@ -1016,6 +956,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         draftBasePaths: normalizedDraftPaths,
         captureScopes: normalizedCaptureScopes,
         ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
+        ...(options?.textEncoding !== undefined ? { textEncoding: options.textEncoding }
+          : sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
       }, options?.signal);
     } catch (error) {
       await releasePendingOwners(true);
@@ -1064,8 +1006,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     for (const entry of parentEntries?.entries ?? []) if (directDraftPaths.some((file) => entry.path.startsWith(`${file}/`))) draftClosure.add(entry.path);
     const normalizedDraftPaths = [...draftClosure].sort();
     const normalizedCaptureScopes = [...new Set(captureScopes.map(normalizeCaptureScope))].sort();
-    const provenanceUpload = options?.sourceProvenance
-      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options.signal)
+    const sourceProvenance = options?.sourceProvenance === undefined ? undefined : parseSourceProvenance(options.sourceProvenance);
+    const provenanceUpload = sourceProvenance
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(sourceProvenance), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options?.signal)
       : undefined;
     let created: Record<string, unknown>;
     try { created = await this.context.client.forkBranch({
@@ -1078,6 +1021,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       draftBasePaths: normalizedDraftPaths,
       captureScopes: normalizedCaptureScopes,
       ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
+        ...(options?.textEncoding !== undefined ? { textEncoding: options.textEncoding }
+          : sourceProvenance ? { textEncoding: originalSourceTextEncoding(sourceProvenance) } : {}),
     }, options?.signal); } catch (error) {
       if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
       throw error;
@@ -1958,6 +1903,8 @@ export class KernelStorageAdapter {
     try {
       let current = await open();
       const pin = current.pin;
+      const textEncoding = await readFixedSourceTextEncoding(this.client.scoped(current.grant), source.workspaceId,
+        source.branchId, source.revision, signal, pin.root);
       const readOriginalSource = () => current.store.readOriginalSource(source.branchId, signal ? { signal } : {});
       const admitSymlinkTarget = (target: string): Promise<void> => {
         const next = pending.then(async () => {
@@ -1968,6 +1915,8 @@ export class KernelStorageAdapter {
           const derived = await open();
           if (derived.pin.root !== pin.root || derived.pin.revision !== pin.revision) throw new Error("Resource scope derivation changed its original source root");
           current = derived;
+          view.textEncoding = await readFixedSourceTextEncoding(this.client.scoped(current.grant), source.workspaceId,
+            source.branchId, source.revision, signal, pin.root);
         });
         pending = next;
         return next;
@@ -1982,8 +1931,9 @@ export class KernelStorageAdapter {
           return lease.store.readContent(entry, options);
         },
       };
+      const view: ResourceSourceReadView = { pin, readOriginalSource, store, admitSymlinkTarget, textEncoding };
       signal?.throwIfAborted();
-      const result = await consume({ pin, readOriginalSource, store, admitSymlinkTarget });
+      const result = await consume(view);
       await pending;
       signal?.throwIfAborted();
       return result;

@@ -45,6 +45,7 @@ struct Buffer {
     file_end: u64,
     output_closed: bool,
     output_error: Option<String>,
+    channel_ends: Vec<Value>,
     end: u64,
     closed: bool,
     discard: bool,
@@ -444,6 +445,7 @@ impl ProcessManager {
             let mut end = 0u64;
             let mut truncated = false;
             let mut index = SpoolIndex::default();
+            let mut channel_ends = Vec::new();
             while position < length {
                 if length - position < 5 {
                     truncated = true;
@@ -453,6 +455,11 @@ impl ProcessManager {
                 let mut header = [0u8; 5];
                 file.read_exact(&mut header)?;
                 let count = u32::from_le_bytes(header[..4].try_into().expect("header")) as u64;
+                if count == 0 && matches!(header[4], 0x81 | 0x82 | 0xc1 | 0xc2) {
+                    channel_ends.push(channel_end(header[4], end));
+                    position += 5;
+                    continue;
+                }
                 if count == 0 || count > CHUNK_BYTES as u64 || !matches!(header[4], 1 | 2) {
                     return Err(failure("retained output frame is corrupt"));
                 }
@@ -495,6 +502,7 @@ impl ProcessManager {
             {
                 let mut buffer = shared.lock();
                 buffer.end = end;
+                buffer.channel_ends = channel_ends;
                 buffer.file_end = position;
                 buffer.output_closed = true;
                 if !complete {
@@ -721,23 +729,36 @@ impl Drop for ProcessManager {
     }
 }
 
+fn channel_end(tag: u8, offset: u64) -> Value {
+    let mut value = json!({"channel":if tag & 3 == 1 {"stdout"} else {"stderr"},"offset":offset});
+    if tag & 0x40 != 0 { value["error"] = json!("Process output reader failed before EOF"); }
+    value
+}
+
 fn read_output(
     live: &OutputHandle,
     cursor: u64,
     limit: usize,
 ) -> Result<Value, KernelError> {
-    let (end, file_end, input_sequence, input_error, output_error, output_complete) = {
+    let (end, file_end, input_sequence, input_error, output_error, output_complete, channel_ends) = {
         let buffer = live.shared.lock();
         (buffer.end, buffer.file_end, buffer.input_sequence, buffer.input_error.clone(),
-            buffer.output_error.clone(), buffer.output_closed && buffer.output_error.is_none())
+            buffer.output_error.clone(), buffer.output_closed && buffer.output_error.is_none(), buffer.channel_ends.clone())
     };
     if cursor > end {
         return Err(failure(format!("process output cursor {cursor} is outside retained range [0, {end}]; read from any cursor in that range")));
     }
     let mut file = File::open(&live.output_path)?;
     let header=|file:&mut File, position:u64, offset:u64| -> Result<SpoolFrame,KernelError> {
-        file.seek(SeekFrom::Start(position))?;
-        let mut header = [0u8;5]; file.read_exact(&mut header)?;
+        let mut position = position;
+        let mut header = [0u8;5];
+        loop {
+            if position + 5 > file_end { return Err(failure("missing process output storage frame")); }
+            file.seek(SeekFrom::Start(position))?;
+            file.read_exact(&mut header)?;
+            if header[..4] == [0, 0, 0, 0] && matches!(header[4], 0x81 | 0x82 | 0xc1 | 0xc2) { position += 5; }
+            else { break; }
+        }
         let length = u32::from_le_bytes(header[..4].try_into().expect("fixed header")) as usize;
         if length == 0 || length > CHUNK_BYTES || position + 5 + length as u64 > file_end {
             return Err(failure("invalid process output storage frame"));
@@ -795,7 +816,7 @@ fn read_output(
         chunk
     }).collect::<Vec<_>>();
     Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,"startCursor":0,
-            "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
+            "channelEnds":channel_ends,"inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
 }
 
 #[cfg(test)]
@@ -813,7 +834,7 @@ mod output_projection_tests {
         OutputHandle{shared,output_path:path}
     }
     #[test]
-    fn text_pages_align_gbk_utf8_and_utf16_without_consuming_raw_bytes() {
+    fn text_pages_replay_gbk_utf8_and_utf16_without_consuming_raw_bytes() {
         for (encoding,text) in [(encoding_rs::GBK,"中文错误abcd"),(encoding_rs::UTF_8,"中文🙂abcd"),(encoding_rs::UTF_16LE,"中文🙂abcd")] {
             let text=text.repeat(20000);
             let bytes=if encoding==encoding_rs::UTF_16LE {text.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>()} else {encoding.encode(&text).0.into_owned()};
@@ -832,7 +853,7 @@ mod output_projection_tests {
             assert_eq!(decoded,text);
             for cursor in [199997,2,0,65537] {
                 let page=paging::read(&handle,cursor,311,Some(encoding.name()),&record).unwrap();
-                assert_eq!(page["characterAligned"],true);
+                assert_eq!(page["requestedCursor"],cursor);
                 let data=page["chunks"].as_array().unwrap().iter().flat_map(|chunk|BASE64.decode(chunk["bytesBase64"].as_str().unwrap()).unwrap()).collect::<Vec<_>>();
                 assert!(encoding.decode_without_bom_handling_and_without_replacement(&data).is_some());
                 let raw=read_output(&handle,cursor,311).unwrap();
@@ -852,7 +873,7 @@ mod output_projection_tests {
         let mut cursor=0;let mut decoded=String::new();
         for limit in [1,7,311,65535].into_iter().cycle() {
             let mut page=paging::read(&handle,cursor,limit,None,&record).unwrap();
-            assert_eq!(page["characterAligned"],true,"{page}");
+            assert_eq!(page["requestedCursor"],cursor,"{page}");
             let next=page["nextCursor"].as_u64().unwrap();assert!(next>cursor);cursor=next;
             page["process"]=record.clone();text::project(&mut page,&text::Mode::Text,None);
             for chunk in page["chunks"].as_array().unwrap(){decoded.push_str(chunk["text"].as_str().unwrap());}

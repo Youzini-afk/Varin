@@ -1,3 +1,5 @@
+import { bindDocumentTextCodec, type DocumentTextCodec } from './inspect.js';
+import { utf8CoordinationCodec } from './codec.test-helper.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +27,7 @@ interface DocumentToken {
 }
 
 export interface DocumentAuthorityHarnessOverrides {
+  textCodec?: DocumentTextCodec;
   trusted?: boolean | undefined;
   allowedRoot?: string | undefined;
   hostId?: string | undefined;
@@ -55,6 +58,7 @@ export const createDocumentAuthorityHarness = async (
   let trusted: boolean = overrides.trusted ?? true;
   const allowedRootInput = overrides.allowedRoot ?? workspaceRoot;
   const allowedRoot = await fs.promises.realpath(allowedRootInput);
+  const releaseCodec = bindDocumentTextCodec(overrides.textCodec ?? utf8CoordinationCodec);
   const authority = createDocumentAuthority({
     hostId: overrides.hostId ?? '11111111-1111-4111-8111-111111111111',
     dataDir,
@@ -88,6 +92,7 @@ export const createDocumentAuthorityHarness = async (
     }),
     async cleanup() {
       await authority.dispose();
+      releaseCodec();
       // Windows keeps a directory handle open until every child process that touched it has fully
       // exited, so removal races with process teardown and fails with EBUSY. `force` only ignores
       // a missing path, so ask for the retry backoff that covers a busy one.

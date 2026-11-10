@@ -102,10 +102,11 @@ impl Launch {
         let data_process_id = process_id.clone();
         let data_epoch = kernel_epoch.clone();
         let marker_path = spool_path.with_extension("output.complete");
+        let expected_output_channels = if config["mode"] == "pty" { 1 } else { 2 };
         let shared = Arc::new(Shared::new());
         if config["mode"] == "pty" {
-            *shared.screen.lock().unwrap_or_else(|error| error.into_inner()) = screen::Screen::new(
-                config["rows"].as_u64().unwrap_or(24) as u16, config["cols"].as_u64().unwrap_or(80) as u16);
+            *shared.screen.lock().unwrap_or_else(|error| error.into_inner()) = screen::Screen::with_encoding(
+                config["rows"].as_u64().unwrap_or(24) as u16, config["cols"].as_u64().unwrap_or(80) as u16, config["outputEncoding"].as_str());
         }
         let (input, input_rx) = mpsc::sync_channel::<Value>(4);
         let guardian = Arc::new(Mutex::new(guardian));
@@ -300,8 +301,37 @@ impl Launch {
                 let mut offset=0u64;
                 while let Some(frame) = read_frame(&mut data)? {
                     let value: Value = serde_json::from_slice(&frame)?;
+                    let channel = match value["channel"].as_str() {
+                        Some("stdout") => 1u8,
+                        Some("stderr") => 2u8,
+                        _ => return Err(io::Error::other("invalid native output channel")),
+                    };
+                    if value["type"] == "channel-end" {
+                        {
+                            let buffer = data_shared.lock();
+                            if buffer.discard { continue; }
+                            if buffer.channel_ends.iter().any(|end| end["channel"] == value["channel"]) {
+                                return Err(io::Error::other("duplicate native output channel end"));
+                            }
+                        }
+                        let tag = channel | if value["failed"] == true { 0xc0 } else { 0x80 };
+                        spool.write_all(&0u32.to_le_bytes())?;
+                        spool.write_all(&[tag])?;
+                        let position = spool.stream_position()?;
+                        if channel == 1 {
+                            if let Some(screen) = data_shared.screen.lock().unwrap_or_else(|error| error.into_inner()).as_mut() { screen.finish(); }
+                        }
+                        let mut buffer = data_shared.lock();
+                        buffer.channel_ends.push(channel_end(tag, offset));
+                        buffer.file_end = position;
+                        data_shared.notify();
+                        continue;
+                    }
                     if value["type"] != "output" {
                         return Err(io::Error::other("invalid native data event"));
+                    }
+                    if data_shared.lock().channel_ends.iter().any(|end| end["channel"] == value["channel"]) {
+                        return Err(io::Error::other("native output after channel end"));
                     }
                     let bytes = BASE64
                         .decode(value["bytesBase64"].as_str().unwrap_or_default())
@@ -309,11 +339,7 @@ impl Launch {
                     if bytes.is_empty() || bytes.len() > CHUNK_BYTES {
                         return Err(io::Error::other("invalid native output chunk size"));
                     }
-                    let channel = match value["channel"].as_str() {
-                        Some("stdout") => 1u8,
-                        Some("stderr") => 2u8,
-                        _ => return Err(io::Error::other("invalid native output channel")),
-                    };
+
                     if data_shared.lock().discard {
                         continue;
                     }
@@ -338,6 +364,12 @@ impl Launch {
                     data_shared.notify();
                 }
                 spool.sync_data()?;
+                if data_shared.lock().channel_ends.len() != expected_output_channels {
+                    return Err(io::Error::other("guardian data pipe closed without ordered output EOF evidence"));
+                }
+                if data_shared.lock().channel_ends.iter().any(|end| end["error"].is_string()) {
+                    return Err(io::Error::other("process output reader failed before EOF"));
+                }
                 let (end, file_end, discarded) = {
                     let buffer = data_shared.lock();
                     (buffer.end, buffer.file_end, buffer.discard)

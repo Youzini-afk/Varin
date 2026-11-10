@@ -91,9 +91,13 @@ impl Workspaces {
             json!({"kind":"physical","root":{"hostId":task.grant.host_id,"rootId":actual["rootId"],"canonicalRoot":actual["mount"]["path"]}})
         }else{
             let target=format!("native-handoff:{}",task.context.operation_id);
-            let fork=self.execute(port.clone(),Arc::new(||{}),"workspace.fork",json!({"branchId":branch,"generation":entry.binding.generation,
+            let mut params=json!({"branchId":branch,"generation":entry.binding.generation,
                 "targetBranchId":target,"operationId":format!("native-handoff-fork:{}",task.context.operation_id),
-                "sourcePath":if selected.is_empty(){None}else{Some(&selected)}}),actor.clone(),task.cancellation.clone())?;
+                "sourcePath":if selected.is_empty(){None}else{Some(&selected)}});
+            if task.delegation.agent_source.is_none(){if let Some(policy)=&task.binding.text_encoding{
+                params["textEncoding"]=serde_json::to_value(crate::storage::text_formats::scope_text_policy(policy,task.delegation.source_path.as_deref().unwrap_or(""))?)?;
+            }}
+            let fork=self.execute(port.clone(),Arc::new(||{}),"workspace.fork",params,actor.clone(),task.cancellation.clone())?;
             let (target,pin_id,actor)=(target,format!("child-pin:{}",task.context.operation_id),task.grant.clone());
             let pinned=port.call(move|s|s.dispatch("branch.pin",&json!({"operationId":format!("native-handoff-pin:{pin_id}"),"branchId":target,"revision":0,"pinId":pin_id}),Some(&actor.grant_id),&actor))?;
             let mut source=task.source.clone();source.mode=varin_runtime::SourceMode::FixedBranch;source.native_scope=None;
@@ -388,10 +392,11 @@ impl Workspaces {
                     &args.target_branch_id,
                     selected,
                     grant.clone(),
+                    args.text_encoding.clone(),
                 )? {
                     return Ok(result);
                 }
-                let boundary = Self::checkpoint(&entry, selected)?;
+                let boundary = Self::checkpoint(&entry, selected)?.with_text_policy(args.text_encoding.clone())?;
                 if cancelled.load(Ordering::Acquire) {
                     return Err(KernelError::Cancelled);
                 }

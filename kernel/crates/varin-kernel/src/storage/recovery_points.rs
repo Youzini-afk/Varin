@@ -46,6 +46,8 @@ struct Change {
     path: String,
     before: Value,
     after: Value,
+    before_format: Option<Value>,
+    after_format: Option<Value>,
     created_at: String,
     state: String,
     source_run: String,
@@ -172,7 +174,7 @@ impl Storage {
         anchor: Option<&JournalAnchor>,
         paths: Option<&[String]>,
         grant: &Grant,
-    ) -> Result<BTreeMap<String, (Value, Value)>, KernelError> {
+    ) -> Result<BTreeMap<String, (Value, Value, Option<Value>)>, KernelError> {
         if !point.starts_with('p') {
             return Self::point_targets(changes, point, anchor, paths);
         }
@@ -192,7 +194,7 @@ impl Storage {
                 continue;
             }
             let state: Value = serde_json::from_str(file["targetJson"].as_str().unwrap())?;
-            targets.insert(path.to_string(), (state.clone(), state));
+            targets.insert(path.to_string(), (state.clone(), state, row["data"]["textFormats"].get(path).cloned()));
         }
         for change in changes
             .iter()
@@ -200,7 +202,7 @@ impl Storage {
         {
             targets
                 .entry(change.path.clone())
-                .or_insert_with(|| (change.after.clone(), change.before.clone()))
+                .or_insert_with(|| (change.after.clone(), change.before.clone(),change.before_format.clone()))
                 .0 = change.after.clone();
         }
         Ok(targets)
@@ -254,8 +256,9 @@ impl Storage {
         let source=params.source_run_id.as_deref().ok_or_else(||KernelError::Operation("Point source is required".into()))?;
         let name=args["name"].as_str().ok_or_else(||KernelError::Operation("Point name is required".into()))?;
         if let Some(files)=files {
+            let formats:serde_json::Map<String,Value>=files.iter().filter_map(|file|Some((file["path"].as_str()?.into(),file.get("textFormat")?.clone()))).collect();
             self.recovery_operation_create(&json!({"operationId":operation,"workspaceId":workspace,"threadId":thread,"kind":"file-point","state":"planned",
-                "dataJson":json!({"rootId":root,"sourceRunId":source,"name":name}).to_string(),"files":files}),&grant.grant_id)?;
+                "dataJson":json!({"rootId":root,"sourceRunId":source,"name":name,"textFormats":formats}).to_string(),"files":files}),&grant.grant_id)?;
         }
         let checkpoint=self.recovery_checkpoint_create(&json!({"workspaceId":workspace,"operationId":format!("point-label:{operation}"),"label":name}),&grant.grant_id)?;
         self.conn.execute(
@@ -430,7 +433,7 @@ impl Storage {
         )?;
         self.admitted_file_root(root, grant)?;
         let mut query = self.conn.prepare(
-            "SELECT c.sequence,t.run_id,d.path,d.before_json,d.after_json,c.created_at,t.status,json_extract(t.file_target_json,'$.runId'),c.id
+            "SELECT c.sequence,t.run_id,d.path,d.before_json,d.after_json,c.created_at,t.status,json_extract(t.file_target_json,'$.runId'),c.id,d.mutation_id
              FROM recovery_checkpoints c JOIN recovery_turns t ON t.workspace_id=c.workspace_id AND t.checkpoint_id=c.id
              JOIN recovery_changes d ON d.workspace_id=c.workspace_id AND d.checkpoint_id=c.id
              WHERE c.workspace_id=?1 AND json_extract(t.conversation_json,'$.threadId')=?2
@@ -447,13 +450,20 @@ impl Storage {
                     r.get::<_, String>(6)?,
                     r.get::<_, String>(7)?,
                     r.get::<_, String>(8)?,
+                    r.get::<_, Option<String>>(9)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
             .filter(|row| path_allowed(grant, &row.2))
             .map(|row| {
+                let before:Value=serde_json::from_str(&row.3)?;
+                let after:Value=row.4.as_ref().map(|v|serde_json::from_str(v)).transpose()?.unwrap_or(Value::Null);
+                let mut metadata=json!({"workspaceId":workspace,"checkpointId":row.8,"path":row.2,"mutationId":row.9,"before":before,"after":after});
+                self.enrich_recovery_text_formats(&mut metadata)?;
                 Ok(Change {
+                    before_format:metadata.get("beforeFormat").cloned(),
+                    after_format:metadata.get("afterFormat").cloned(),
                     checkpoint: row.8,
                     sequence: row.0,
                     run: row.1,
@@ -477,7 +487,7 @@ impl Storage {
         point: &str,
         anchor: Option<&JournalAnchor>,
         paths: Option<&[String]>,
-    ) -> Result<BTreeMap<String, (Value, Value)>, KernelError> {
+    ) -> Result<BTreeMap<String, (Value, Value, Option<Value>)>, KernelError> {
         let (reference, position) = point.rsplit_once(':').ok_or_else(|| {
             KernelError::Operation("Use a point's before/after reference or current:before".into())
         })?;
@@ -518,16 +528,17 @@ impl Storage {
             .iter()
             .filter(|c| c.sequence >= boundary && paths.is_none_or(|p| p.contains(&c.path)))
         {
-            let target = if position == "after" && change.run == run {
-                change.after.clone()
+            let (target,format) = if position == "after" && change.run == run {
+                (change.after.clone(),change.after_format.clone())
             } else {
-                change.before.clone()
+                (change.before.clone(),change.before_format.clone())
             };
             let entry = targets
                 .entry(change.path.clone())
-                .or_insert_with(|| (change.after.clone(), target));
+                .or_insert_with(|| (change.after.clone(), target,format));
             if position == "after" && change.run == run {
                 entry.1 = change.after.clone();
+                entry.2 = change.after_format.clone();
             }
             // Latest recorded content is the expected current state. A gap is reported
             // per file; it does not prevent other recorded files from being restored.
@@ -592,8 +603,9 @@ impl Storage {
             } else {
                 None
             };
-            let files=targets.into_iter().map(|(path,(expected,target))|{
+            let files=targets.into_iter().map(|(path,(expected,target,format))|{
                 let mut value=json!({"path":path,"expected":expected,"target":target});
+                if let Some(format)=format{value["textFormat"]=format;}
                 if args.references==Some(true) {
                     if let Some(hash)=target["objectHash"].as_str() {
                         let source=changes.iter().filter(|change|change.path==path).find_map(|change|{
@@ -827,10 +839,11 @@ impl Storage {
                         (
                             serde_json::from_str(f["targetJson"].as_str().unwrap())?,
                             serde_json::from_str(f["safetyJson"].as_str().unwrap())?,
+                            old["data"]["textFormats"][f["path"].as_str().unwrap()].get("safety").cloned(),
                         ),
                     ))
                 })
-                .collect::<Result<BTreeMap<String, (Value, Value)>, KernelError>>()?
+                .collect::<Result<BTreeMap<String, (Value, Value, Option<Value>)>, KernelError>>()?
         } else {
             let changes = self.point_changes(workspace, root, thread, grant)?;
             self.file_point_targets(
@@ -1010,7 +1023,7 @@ mod tests {
                 .unwrap();
             let state = self.storage.capture_file_state(&resource).unwrap();
             let read_version = read_version(&self.root_id, path, &state).unwrap();
-            let mutation = TextMutation::Write(FileWriteArgs {
+            let mutation = TextMutation::Write(FileWriteArgs { source_format:None,target_format:None,
                 mode: None,
                 path: path.into(),
                 content: text.into(),
@@ -1059,6 +1072,16 @@ mod tests {
             drop(self);
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn gbk_journal_restore_and_undo_recover_original_bytes_not_reencoded_unicode(){
+        let mut f=Fixture::new();let original=b"\xa3\xa0\r\n\xd6\xd0\xce\xc4\n";
+        fs::write(f.workspace.join("legacy.txt"),original).unwrap();
+        f.write("legacy.txt","　\r\n新文\n");
+        let after=fs::read(f.workspace.join("legacy.txt")).unwrap();assert_eq!(after,b"\xa3\xa0\r\n\xd0\xc2\xce\xc4\n");
+        let restored=f.restore("gbk-restore",Some("current:before"),None);assert_eq!(restored["status"],"applied","{restored}");assert_eq!(fs::read(f.workspace.join("legacy.txt")).unwrap(),original);
+        let undone=f.restore("gbk-undo",None,Some("gbk-restore"));assert_eq!(undone["status"],"applied","{undone}");assert_eq!(fs::read(f.workspace.join("legacy.txt")).unwrap(),after);f.close();
     }
 
     #[test]

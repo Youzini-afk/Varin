@@ -50,6 +50,7 @@ mod storage_schema;
 mod source_resources;
 mod tools;
 mod transport;
+mod text;
 mod workspace_resources;
 mod workspace_backend;
 mod workspace_handoffs;

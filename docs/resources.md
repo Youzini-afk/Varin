@@ -221,8 +221,9 @@ worker 启动 guardian，再将原句柄、控制和输出交回同一个 Proces
 来源登记的真实目录核验、原文件日志的列举与协调也在 worker 执行。列举只观察；协调只依据原目标状态确认已经发生的效果，
 不重放写入。观察期间沿原路径租约排除其他受控写入，提交回执仍由原 Storage 完成；正在执行的操作只报告待完成状态。
 完整读取和部分读取都返回原文件的 `readVersion`。
-该版本由根、路径与内容状态决定，同一文件跨 Run 保持稳定；读写权限由原 grant 独立校验。UTF-8 文本的片段边界会扩展到完整字符，
-翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。`byteLength` 是整文件长度，`returnedBytes` 是本页实际返回字节数。
+该版本的原始状态由根、路径与内容决定；文本读取还将本次实际 codec 绑定到不透明令牌，后续编辑不能因项目设置变化重新解释同一字节。
+读写权限仍由原 grant 独立校验。UTF-8、GBK 与 UTF-16 文本分页按各自字符边界推进，翻页使用返回的 `nextOffset`；
+原始字节读取保留精确范围和明确的 base64 编码。`byteLength` 是整文件长度，`returnedBytes` 是本页实际返回字节数。
 Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一致；`length` 可显式扩大。
 `content.eof` 为 false 时继续传 `content.nextOffset`，到 true 停止；跨页核对 `readVersion`，避免拼接不同版本。
 此默认只在工具参数入口应用，底层文件修改、结构分析等完整读取不受影响。
@@ -252,7 +253,22 @@ Native 来源的版本绑定实际文件状态和同一挂载，重挂后重新�
 及 ignore 规则排除的内容；明确指定的路径作为搜索起点，直接进入该范围，内部的嵌套目录继续应用过滤。
 Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excludeDirectories`、`respectGitignore` 调整范围。
 过滤后零命中返回 `emptyResult`：只说明当前 `scope` 与过滤条件下没有匹配，并列出同一工具可放宽的参数；`scanComplete` 只针对这个范围。工具不会自动关闭过滤或追加全树扫描，也不报告未遍历子树里的文件数。
-文本搜索在分配整文件缓冲之前检查二进制前缀。
+文件文本由 Rust 的共同 codec 解码和严格序列化，Documents、Agent live/fixed 文件能力与 Compute 共用其结果。
+普通非 ASCII 合法 UTF-8 优先；BOM、明确文件规则与操作覆盖参与解析。纯 ASCII 采用项目的 ASCII 兼容默认编码，无此默认时使用 UTF-8；不会把普通 ASCII 字节两两拼成 UTF-16。
+空文件可采用 UTF-16 默认，新建 UTF-16 文本带对应 BOM，明确关闭 BOM 的操作除外。非 UTF-8 中文旧文本采用经过验证的 GBK 兼容解释；`gb2312` 标签是 GBK 别名，不声称严格 GB2312 profile。
+UTF-16 LE/BE 有独立的实际 writer。不能编码的新增字符返回位置和原因，不用问号或字符实体替代。
+原始 revision、object hash、before-image 与恢复数据始终按原字节保存；零文本与零格式变化复用原字节。
+编码/BOM 变更与显式统一换行是不同意图，普通保存保留原换行，明确范围的局部编辑保留未改原片段。
+Host 项目配置的 `textEncoding.defaultEncoding` 是候选先验，`files` 是文件或以 `/` 结束的目录规则；精确文件优先，其次最长目录前缀。
+用户主动重开或转码的选择使用既有 Host 配置，不写入仓库；普通项目沿原项目命名空间，隔离分支的主动选择按其稳定来源身份保存，不以临时执行目录建立项目，也不修改原 live 目录的选择。
+隔离分支的默认读取使用冻结基线加该分支的主动选择；关闭重开后选择仍有效，原固定基线的内容和解释不被倒改。
+显式转换的格式与原始版本随原 Storage 写入提交；项目选择的 revision 防止迟到回执覆盖后来的手动解释。
+固定来源的编码规则随原分支版本保存，所选结果继承该版本实际格式，不依赖旧 Run 私有结果正文或已离线原目录。
+同一 Run 首次命令建立执行副本后，文件能力继续沿用该实际副本；副本的格式变化不回写原固定基线。
+Compute 解码后再搜索和解析，搜索列仍使用 UTF-16 单位；结构范围同时保留解码 UTF-8 坐标和原文件字节坐标。
+结构结果的 `contentHash` 是解码文本哈希，`rawContentHash` 是原始内容哈希，`sourceObjectHash` 保留所选 Storage 对象身份；范围对象的 descriptor hash 不冒充原始内容哈希。
+Compute 的 Unicode 覆盖对象明确按 UTF-8 传递，不再次套用磁盘 GBK 规则；生成实际来源快照时，编辑器草稿按自己的目标文件格式序列化。
+文本检测先识别 BOM，再检查二进制特征，不能用 NUL 前缀误拒 UTF-16。
 
 ## 进程与 Operation 寿命
 
@@ -274,19 +290,23 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 屏幕在输出到达时增量维护，不重放整份日志；退出时保留最后一屏，输出回收时一起释放。screen 不按字节分页；text/raw 与原始输出仍可独立读取。
 字节数和游标始终计入原始控制序列；可见文字较少时不代表输出丢失，不能用显示字符数计算续读位置。
 输出读取不消费保留的历史；各读者可以独立续读或回读任意保留字节。帧位置索引只缓存磁盘偏移，不复制正文，输出释放时一并释放。
-文本页按完整字符对齐，`nextCursor` 仍是原输出的字节位置；从字符中间请求时，`actualCursor` 给出该字符起点，
-`requestedCursor` 保留原请求。`maxBytes` 是文本页目标，极小页面也会返回一个完整字符；原始模式严格保留请求的字节范围。
-自动解码先看 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；`encodingSource` 标明依据，不把代码页默认值伪称为检测结果。
-同一 pipe 块内分行输出不同编码时，逐行应用 UTF-8／原进程代码页判断，混合结果标为 `encoding: mixed`、
-`encodingSource: line_detection`，并保留原字节读取入口。不会猜测一行内部的编码切换。分页使用同样的逐行判断，并在边缘查看完整字符；编码边界检查点只服务定位，不修改原输出。
-已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页在模型文本视图中
-返回原因、`rawAvailable` 与原位置的 `rawRead` 调用，不内联大段 base64；原进程保留精确字节，`mode: raw` 可读取。
+文本投影与 raw 共用唯一原始字节游标；不会为了凑齐字符回退 `actualCursor`。stdout/stderr 各自连续解码，
+一个字符在其最后原始字节所属页发布，`sourceRanges` 可跨页及跨通道间隙。`nextCursor` 只按原字节推进，不能从文字长度推算。
+已知编码跨块保留 decoder 状态；按通道记录实际 EOF，最后一个不完整字符只在该通道结束时结算。进程退出不等于两条通道都已排空。
+自动解码先看每条通道开头的 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；逐行混合判断保留低延迟，
+不声称可以唯一识别所有双合法字节或一行内部的编码切换。`encodingSource` 标明实际依据。
+`process_spawn.inputEncoding` 与 `outputEncoding` 是该进程持续的独立默认；`process_write.encoding` 与
+`process_read.encoding` 仅覆盖本次操作。pipe 的 stdin 文本严格编码，raw bytes 不转码。ConPTY 的 UTF-8 wire 不继承项目文件编码。
+POSIX 已明确采用旧编码的 PTY 在 Agent、screen 和打开该会话的 UI 中复用原生文本投影；subscription 的 `textChunks`
+保留 ANSI，原始 chunks/cursor 不变。Host 不再另猜一遍 GBK，普通 UTF-8 终端继续使用已有 StringDecoder。
+文本投影无法无损解释的片段返回原因、`rawAvailable` 与原位置，原字节仍可通过 `mode: raw` 读取；
+不能为了修复一个异常单元吞掉后面的合法字符。顺序读取保留 decoder，随机读取利用可恢复检查点；状态性编码在必要时从起点重放。
 `outputSummary` 给出本页原始字节数、实际保留的起止游标及总字节数、页面之后的字节数和续读游标；越界错误也说明可读范围，运行中的末尾仍可能增长。
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
 显式 `waitMs` 在同一等待预算内覆盖进程退出和输出收尾，通过原生通知唤醒并响应取消，不增加固定收尾延迟。
 等待预算耗尽时返回实际进展；默认 0 仍立即返回。最终页的完成标志同时用于顶层回执，避免较早进程快照覆盖新读到的 EOF。
 `process_write.text` 按 JSON 解码一次；未指定 submit 时原样写入。`submit:true` 将多行文字的换行统一为原进程的 `input.lineEnding`，并在末尾缺少行结束符时补一次 Enter；空文本提交也是 Enter。
-Windows 上 Agent 启动进程并继承环境时，缺省补入 `PYTHONIOENCODING=utf-8` 与 `PYTHONUTF8=1`，避免 Python 输出中文或 emoji 因本地代码页失败。已有同名环境变量和显式传入的完整 env 保持不变；用户交互终端沿其原环境启动。
+普通 Agent 命令与用户交互终端保留原环境，不为显示输出注入 `PYTHONUTF8` 或 `PYTHONIOENCODING`。Host 自己拥有的专用文本协议子进程可声明 UTF-8 stdio；SmartSearch 仅设置缺省 `PYTHONIOENCODING=utf-8`，不改变 Python 普通文件 `open()` 的全局默认，也不覆盖已有同名环境变量。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
 应用的响应继续读原进程输出。退出与输出收尾分别观察：`outputComplete:false` 保留游标，输出错误显示原错误，
 `outputComplete:true` 也仍可能有当前页尚未读到的后续内容。读取到 `nextCursor == endCursor` 只说明已读到当前保留的末尾。

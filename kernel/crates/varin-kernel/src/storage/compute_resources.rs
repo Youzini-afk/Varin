@@ -73,7 +73,7 @@ impl Storage {
             if !path_allowed(grant,&path){return Err(KernelError::Authorization("Overlay path is outside grant scope".into()));}
             if object.missing==Some(true){
                 if object.object_hash.is_some()||object.owner_id.is_some(){return Err(failure("A missing overlay must not include content"));}
-                overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:None,file:None,range:None});continue;
+                overlays.push(ObjectSource{encoding:object.encoding.clone(),path,revision:object.revision.clone(),hash:None,file:None,range:None});continue;
             }
             let owner=object.owner_id.as_deref().ok_or_else(||failure("An explicit object owner is required for fixed text"))?;
             let object_hash=object.object_hash.as_deref().ok_or_else(||failure("A content hash is required for fixed text"))?;
@@ -82,14 +82,14 @@ impl Storage {
             if !exists{return Err(KernelError::Authorization("Fixed text object belongs to another owner, actor or workspace".into()));}
             if super::file_content::is_range(object_hash) {
                 let length:i64=self.conn.query_row("SELECT byte_length FROM blobs WHERE hash=?1",[object_hash],|row|row.get(0))?;
-                overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:None,
+                overlays.push(ObjectSource{encoding:object.encoding.clone(),path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:None,
                     range:Some((self.root.clone(),u64::try_from(length).map_err(|_|failure("Invalid file version length"))?,self.blob_read_roots.retain(object_hash)))});
                 continue;
             }
             // Open before handing the task over. Even explicit owner release
             // cannot invalidate this admitted reader; Windows GC may retry unlink.
             let file=File::open(object_path(&self.root,object_hash)?)?;
-            overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:Some(file),range:None});
+            overlays.push(ObjectSource{encoding:object.encoding.clone(),path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:Some(file),range:None});
         }
         if [params.pin_id.is_some(), params.root_id.is_some(), params.branch_id.is_some()].into_iter().filter(|present| *present).count() > 1 {
             return Err(failure("A query cannot merge multiple source authorities"));
@@ -102,13 +102,14 @@ impl Storage {
                 params.root_id=Some(root); params.branch_id=None; params.revision=None;
             }
         }
-        let mut pin_id=None;let mut root=None;
+        let mut pin_id=None;let mut root=None;let mut text_receipts=super::text_formats::Snapshot::default();
         let source=if let Some(branch)=&params.branch_id {
             let observed=self.branch_read(&json!({"branchId":branch,"revision":params.revision,"includeEntries":false}))?;
             if observed["workspaceId"].as_str()!=Some(params.workspace_id.as_str()) {
                 return Err(KernelError::Authorization("Branch workspace does not match computation".into()));
             }
             let hash=observed["root"].as_str().ok_or_else(||failure("Branch root identity is unavailable"))?.to_string();
+            text_receipts=self.text_format_receipts_for_fixed(grant,branch,params.revision.expect("admitted branch revision"),&hash)?;
             let reader_pin=format!("compute-reader:{}",Uuid::new_v4());
             self.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) VALUES(?1,?2,?3,?4,?4,?5,?6,1,?7)",
                 params![reader_pin,branch,params.workspace_id,params.revision,hash,format!("native-reader:{}",grant.kernel_epoch),now_ms()])?;
@@ -118,6 +119,7 @@ impl Storage {
             let observed=self.pin_read(&json!({"pinId":pin,"includeEntries":false,"__pathScopes":scopes}),&grant.grant_id)?;
             if observed["workspaceId"].as_str()!=Some(params.workspace_id.as_str()){return Err(KernelError::Authorization("Pin workspace does not match computation".into()));}
             let hash=observed["root"].as_str().ok_or_else(||failure("Pin root identity is unavailable"))?.to_string();
+            if let (Some(branch),Some(revision))=(observed["branchId"].as_str(),observed["revision"].as_i64()){text_receipts=self.text_format_receipts_for_fixed(grant,branch,revision,&hash)?;}
             let reader_pin=format!("compute-reader:{}",Uuid::new_v4());
             self.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) SELECT ?1,branch_id,workspace_id,revision,write_revision,root_hash,?2,1,?3 FROM pins WHERE pin_id=?4",
                 params![reader_pin,format!("native-reader:{}",grant.kernel_epoch),now_ms(),pin])?;
@@ -128,13 +130,14 @@ impl Storage {
             // and query traversal. Control must not synchronously enter a mount.
             let admitted=self.admitted_file_root(root_id,grant)?;
             if admitted.owning_workspace_id!=params.workspace_id{return Err(KernelError::Authorization("Root workspace does not match computation".into()));}
+            text_receipts=self.text_format_receipts(grant,root_id)?;
             Source::Disk{root:admitted.canonical_root,device:device_root.is_some()}
         }else if params.objects.is_some(){Source::Objects}else{return Err(failure("Computation requires an admitted pin, root, or fixed text source"));};
         let selected=params.files.as_deref().unwrap_or_default().iter().filter_map(|f|f.recipe_id.as_ref()).collect::<BTreeSet<_>>();
         let mut recipes=HashMap::new();
         for id in selected{if let Some(recipe)=self.computations.recipes.get(id){recipes.insert(id.clone(),recipe.clone());}}
         let id=params.job_id.clone();
-        let task=Task{params,source,overlays,scopes,recipes,traversal:None};
+        let task=Task{params,text_receipts,source,overlays,scopes,recipes,traversal:None};
         if let Err(error)=self.computations.start(id.clone(),task,grant.grant_id.clone(),grant.kernel_epoch.clone(),pin_id.clone(),root,hash){
             if let Some(pin)=pin_id{self.conn.execute("DELETE FROM pins WHERE pin_id=?1",params![pin])?;}
             return Err(failure(error));

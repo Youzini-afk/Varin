@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { DocumentsAPI, RuntimeAPIs, ThreadIdentity, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
+import type { DocumentsAPI, RuntimeAPIs, ThreadIdentity, ThreadPreparedSource, ThreadsAPI, VarinDocumentRecoveryJournalSummary, VarinDocumentRecoveryWriteRequest } from '@varin/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { unconfiguredWorkspaceEdits } from '@/lib/documents/workspace-edit.test-helper';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
@@ -55,6 +55,17 @@ async function fixture() {
   const release = vi.fn<NonNullable<DocumentsAPI['releaseAgentInputSnapshot']>>(async () => ({ released: true }));
   const resolveWorkspace = vi.fn<DocumentsAPI['resolveWorkspace']>(async () => ({ workspaceId: selected.workspaceId, hostId: 'host', epoch: 1 }));
   const write = vi.fn<DocumentsAPI['write']>(async () => { throw new Error('Draft preparation must not save'); });
+  const journals = new Map<string, { journal: VarinDocumentRecoveryJournalSummary; request: VarinDocumentRecoveryWriteRequest }>();
+  const writeRecoveryJournal = vi.fn<DocumentsAPI['writeRecoveryJournal']>(async request => {
+    const journalId = JSON.stringify([request.recoverySessionId, request.workspaceId, request.resource.resourceId]);
+    const current = journals.get(journalId);
+    if (current && request.expectedRevision !== current.journal.revision) return { status: 'conflict', journal: structuredClone(current.journal) };
+    if (!current && request.expectedRevision !== null) return { status: 'missing', journalId };
+    const journal = { journalId, resource: structuredClone(request.resource), revision: (current?.journal.revision ?? 0) + 1,
+      baseRevision: request.baseRevision, epoch: request.token.epoch, updatedAt: '2026-10-12T00:00:00.000Z', byteLength: new TextEncoder().encode(request.content).length };
+    journals.set(journalId, { journal, request: structuredClone(request) });
+    return { status: 'written', journal: structuredClone(journal) };
+  });
   const documents: DocumentsAPI = {
     ...unconfiguredWorkspaceEdits,
     resolveWorkspace,
@@ -63,9 +74,21 @@ async function fixture() {
     write, captureAgentInputSnapshot: capture, releaseAgentInputSnapshot: release,
     publishDirtyBuffers: async request => ({ ...request, updatedAt: '2026-10-12T00:00:00.000Z' }),
     clearDirtyBuffers: async () => ({ cleared: true }), watch: () => ({ close() {} }),
-    listRecoveryJournals: async () => [], writeRecoveryJournal: async () => ({ status: 'missing', journalId: 'none' }),
+    listRecoveryJournals: async request => [...journals.values()].filter(entry => entry.request.workspaceId === request.workspaceId
+      && (!request.recoverySessionId || entry.request.recoverySessionId === request.recoverySessionId)).map(entry => structuredClone(entry.journal)),
+    writeRecoveryJournal,
     move: async request => ({ status: 'missing', resource: request.from }), delete: async request => ({ status: 'missing', resource: request.resource }),
-    readRecoveryJournal: async journalId => ({ status: 'missing', journalId }), deleteRecoveryJournal: async request => ({ status: 'missing', journalId: request.journalId }),
+    readRecoveryJournal: async journalId => {
+      const entry = journals.get(journalId);
+      return entry ? { ...structuredClone(entry.request), status: 'ready', journal: structuredClone(entry.journal) } : { status: 'missing', journalId };
+    },
+    deleteRecoveryJournal: async request => {
+      const entry = journals.get(request.journalId);
+      if (!entry) return { status: 'missing' };
+      if (request.expectedRevision !== entry.journal.revision) return { status: 'conflict', journal: structuredClone(entry.journal) };
+      journals.delete(request.journalId);
+      return { status: 'deleted' };
+    },
   };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
   const registry = bindDocumentRegistry(documents);
@@ -84,7 +107,7 @@ async function fixture() {
       prepared={onPrepared.mock.calls.at(-1)?.[0] ?? null} onPrepared={onPrepared} onPreparingChange={onPreparingChange} />,
   )); };
   await render();
-  return { saved, documents, registry, capture, release, resolveWorkspace, write, prepareSource, api, onPrepared, onPreparingChange, render };
+  return { saved, documents, registry, capture, release, resolveWorkspace, write, writeRecoveryJournal, prepareSource, api, onPrepared, onPreparingChange, render };
 }
 
 it('captures the selected Documents root once, retries identical draft bytes and scopes, then shows actual provenance', async () => {
@@ -174,7 +197,10 @@ it('releases a late capture before switching Hosts and never sends it to the nex
   await act(async () => {
     const switching = Promise.all([...endpoint.blockers].map(blocker => blocker()));
     late.resolve({ source: 'surface', roots: [{ workspaceId: selected.workspaceId, dirtyPaths: ['draft.txt'] }], snapshot: { status: 'ready', ref: 'late-capture' } });
-    await switching; endpoint.generation += 1; endpoint.listeners.forEach(listener => listener());
+    await switching;
+    expect(f.writeRecoveryJournal).toHaveBeenCalledWith(expect.objectContaining({ resource: expect.objectContaining(selected), content: 'selected unsaved' }));
+    expect(f.writeRecoveryJournal).toHaveBeenCalledWith(expect.objectContaining({ resource: expect.objectContaining(other), content: 'unrelated unsaved' }));
+    endpoint.generation += 1; endpoint.listeners.forEach(listener => listener());
   });
   expect(f.prepareSource).not.toHaveBeenCalled();
   expect(f.release).toHaveBeenCalledExactlyOnceWith({ consumer: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId },

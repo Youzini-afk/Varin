@@ -238,9 +238,12 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
     const childEnv = {
       ...env,
       ...(candidate.env ?? {}),
-      PYTHONIOENCODING: env.PYTHONIOENCODING || 'utf-8',
-      PYTHONUTF8: env.PYTHONUTF8 || '1',
     };
+    const stdioKey = Object.keys(childEnv).find(key => process.platform === 'win32'
+      ? key.toUpperCase() === 'PYTHONIOENCODING' : key === 'PYTHONIOENCODING');
+    // This child speaks a known UTF-8 text protocol. Leave user stdio choices and
+    // Python's global/default-file mode intact, including Windows mixed-case keys.
+    if (stdioKey === undefined || childEnv[stdioKey] === undefined) childEnv.PYTHONIOENCODING = 'utf-8';
     const child = spawn(candidate.command, candidate.args, {
       shell: false,
       windowsHide: true,

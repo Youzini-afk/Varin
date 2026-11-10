@@ -1,3 +1,5 @@
+import type { VarinTextFormat, VarinTextEdit } from '@varin/application-client';
+
 export type DocumentIdentity = {
   workspaceId: string;
   resourceId: string;
@@ -49,6 +51,13 @@ export type DocumentRecord = {
   baseContent: string;
   buffer: string;
   baseRevision: string | null;
+  baseFormat?: VarinTextFormat;
+  /** Sparse edit provenance relative to baseContent, in normalized UTF-16 offsets. */
+  baseEdits?: VarinTextEdit[];
+  normalizeLineEndings?: boolean;
+  /** A failed automatic save is retried only after another edit or an explicit save. */
+  saveErrorRevision?: number;
+  saveErrorReason?: import('@varin/application-client').DocumentsFailureReason;
   localEditRevision: number;
   encoding: string;
   bom: boolean;

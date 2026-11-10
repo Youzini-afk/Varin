@@ -34,7 +34,7 @@ impl Storage {
                 "mutation receipt identifies another resource operation".into(),
             ));
         }
-        let mut receipt = prior["result"].clone();
+        let receipt = prior["result"].clone();
         let identity = if prior["state"] == "started" {
             &receipt["intent"]
         } else {
@@ -123,12 +123,7 @@ impl Storage {
         };
         // Receipt content must be identical across repeated reconciliation and
         // fresh grants. It is a historical effect fact, not a new read snapshot.
-        if let Some(object) = receipt.as_object_mut() {
-            object.remove("__nativeRequestHash");
-            object.remove("__nativeGrantId");
-            object.remove("__nativeEpoch");
-        }
-        receipt["path"] = json!(path);
+        let receipt = self.mutation_receipt(receipt,root_id,&path)?;
         Ok(Some(varin_runtime::ExternalReceipt {
             executor: executor.into(),
             identity: operation_id.into(),

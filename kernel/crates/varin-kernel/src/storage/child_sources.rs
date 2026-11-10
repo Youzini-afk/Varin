@@ -924,7 +924,7 @@ mod handoff_tests {
                 .dispatch(method, &p, Some("parent"), &grant)
                 .unwrap();
         }
-        let binding = ToolBinding {
+        let binding = ToolBinding { text_encoding:None,
             execution_environment: None,
             resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local,
             remote_authority: None,

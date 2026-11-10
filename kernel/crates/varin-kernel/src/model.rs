@@ -140,6 +140,7 @@ pub(crate) struct BlobStream {
 }
 
 pub(crate) struct BranchBuilder {
+    pub(crate) text_encoding: Option<Value>,
     pub(crate) source_provenance: Option<Value>,
     pub(crate) operation_id: String,
     pub(crate) branch_id: String,

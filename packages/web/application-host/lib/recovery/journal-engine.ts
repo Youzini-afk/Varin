@@ -1,3 +1,4 @@
+import { isDocumentEncoding } from '../documents/inspect.js';
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {sameRecoveryFileTarget} from './file-target.js';
@@ -74,6 +75,9 @@ import {
 
 interface WorkspaceRegistration { canonicalPath: string; workspaceId: string;nativeSource?:{execution_workspace_id:string} }
 interface DirtyBufferResource {
+  sourceFormat?: import("@varin/application-client").VarinTextFormat;
+  baseFormat?: import("@varin/application-client").VarinTextFormat;
+  normalizeLineEndings?: boolean;
   bufferHash?: string;
   documentInstanceId?: string;
   encoding?: string;
@@ -125,7 +129,7 @@ export interface RecoverySessionNavigation {
 }
 
 export interface DurableRecoveryChangeSelection {
-  changes: Array<{ after: RecoveryState; before: RecoveryState; checkpointId: string; executionId: string; mutationId: string; path: string; sequence: number; toolName: string; fileTarget?: RecoveryFileTarget }>;
+  changes: Array<{ after: RecoveryState; before: RecoveryState; beforeFormat?: import("@varin/application-client").VarinTextFormat; afterFormat?: import("@varin/application-client").VarinTextFormat; checkpointId: string; executionId: string; mutationId: string; path: string; sequence: number; toolName: string; fileTarget?: RecoveryFileTarget }>;
   turns: Array<{ fileTarget?: RecoveryFileTarget; activeWriterScopes: string[]; checkpointId: string; executionId: string; failure?: Record<string, unknown>; sequence: number; status: string; unrecordedResourceIds: string[] }>;
 }
 export interface RecoveryOperationConflict {
@@ -255,7 +259,7 @@ interface CombinedOperationRecord extends Record<string, unknown> {
   workspaceId: string;
 }
 interface LocatedOperation { identity: RecoveryIdentity; record: CombinedOperationRecord; root: string }
-interface SequencedRecoveryChange { physicalKey?: string; fileTarget?: RecoveryFileTarget; after: RecoveryState; before: RecoveryState; checkpointId: string; mutationId: string; path: string; sequence: number; toolName: string }
+interface SequencedRecoveryChange { physicalKey?: string; fileTarget?: RecoveryFileTarget; after: RecoveryState; before: RecoveryState; beforeFormat?: import("@varin/application-client").VarinTextFormat; afterFormat?: import("@varin/application-client").VarinTextFormat; checkpointId: string; mutationId: string; path: string; sequence: number; toolName: string }
 
 const TERMINAL_STATES = new Set(["complete", "aborted", "compensated", "needs-attention"]);
 class ManagedRecoveryPending extends RecoveryPrimitiveError {
@@ -376,7 +380,7 @@ const mergeInverseTargets = (changes: SequencedRecoveryChange[]) => {
   for (const change of [...changes].sort((left, right) => left.sequence - right.sequence)) {
     const key = change.physicalKey ?? change.path;
     const current = byPath.get(key);
-    if (!current) byPath.set(key, { expected: change.after, target: change.before, ...(change.fileTarget ? { resourcePath: change.path, fileTarget: change.fileTarget, sources:[{path:change.path,target:change.fileTarget}] } : {}) });
+    if (!current) byPath.set(key, { expected: change.after, target: { ...change.before, ...(change.beforeFormat ? { textFormat: change.beforeFormat } : {}) }, ...(change.fileTarget ? { resourcePath: change.path, fileTarget: change.fileTarget, sources:[{path:change.path,target:change.fileTarget}] } : {}) });
     else {
       if (!sameState(current.expected, change.before)) chainConflicts.add(key);
       current.expected = change.after;
@@ -712,13 +716,13 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         for (const entry of publication.resources) {
           const same = process.platform === 'win32' ? entry.resource.resourceId.toLowerCase() === surface.path.toLowerCase() : entry.resource.resourceId === surface.path;
           if (!same) continue;
-          if (!publication.registrationId || !entry.documentInstanceId || !entry.bufferHash || entry.encoding !== 'utf-8'
+          if (!publication.registrationId || !entry.documentInstanceId || !entry.bufferHash || !isDocumentEncoding(entry.encoding)
             || typeof entry.bom !== 'boolean' || !entry.lineEnding) {
             throw new RecoveryPrimitiveError('dirty-state-unavailable', 'The affected editor owner has no complete recovery binding', { origin: 'conflict', retryable: true });
           }
           const owner = { ownerId: publication.ownerId, generation: publication.generation,
             registrationId: publication.registrationId, workspaceId: publication.workspaceId };
-          const binding: DocumentSurfaceBinding = { ...entry, resource: { ...entry.resource, workspaceId: publication.workspaceId },
+          const binding: DocumentSurfaceBinding = { ...entry, ...((entry.baseFormat ?? entry.sourceFormat) ? { baseFormat: entry.baseFormat ?? entry.sourceFormat } : {}), resource: { ...entry.resource, workspaceId: publication.workspaceId },
             documentInstanceId: entry.documentInstanceId, bufferHash: entry.bufferHash, encoding: entry.encoding,
             bom: entry.bom, lineEnding: entry.lineEnding };
           candidates.set(surfaceOwnerKey({ ...owner, binding }), { owner, binding });
@@ -785,6 +789,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     const changes = selected.changes.filter((value) => !sameState(value.before, value.after)).map((value) => ({
       after: parseRecoveryState(value.after),
       before: parseRecoveryState(value.before),
+      ...(value.beforeFormat ? { beforeFormat: value.beforeFormat } : {}),
+      ...(value.afterFormat ? { afterFormat: value.afterFormat } : {}),
       checkpointId: value.checkpointId,
       mutationId: value.mutationId,
       path: value.path,

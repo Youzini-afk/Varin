@@ -7,6 +7,7 @@ import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'node:http';
@@ -41,7 +42,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-live-source-review-'));
   const kernel = createKernelClient({ hostId: 'live-source-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
-  cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   const secret = 'fake-http-provider-key-not-a-real-secret';
   const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
   const provider = createServer((request, response) => {
@@ -70,7 +72,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
-  const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
+  const close = async () => { if (closed) return; closed = true;
+    try { await storage.dispose(); await documents.dispose(); }
+    finally { releaseCodec(); await kernel.close(); }
+  };
   cleanups.push(close);
 
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, liveSources.validate), {

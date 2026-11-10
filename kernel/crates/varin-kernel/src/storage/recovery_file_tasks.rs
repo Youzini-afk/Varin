@@ -100,7 +100,7 @@ pub(crate) fn parse_params(input: &Value) -> Result<KernelFileRecoveryParams, Ke
 pub(super) enum RestorePlan {
     Ready(Value),
     Existing,
-    Targets(BTreeMap<String, (Value, Value)>),
+    Targets(BTreeMap<String, (Value, Value, Option<Value>)>),
 }
 #[derive(Clone)]
 pub(crate) enum Action {
@@ -391,7 +391,7 @@ impl Task {
         let mut files = Vec::new();
         let mut results = args.paths.iter().flatten().filter(|p| !targets.contains_key(*p))
             .map(|path| json!({"path":path,"status":"unavailable","message":"This path has no recorded state at the selected point."})).collect::<Vec<_>>();
-        for (path, (expected, target)) in targets {
+        for (path, (expected, target, target_format)) in targets {
             self.control(owner, |t, s| t.authorize(s).map(|_| ()))?;
             if target.is_null() || target["kind"] == "unsupported" {
                 results.push(json!({"path":path,"status":"unavailable"}));
@@ -420,7 +420,9 @@ impl Task {
                 serde_json::from_str(safety["stateJson"].as_str().ok_or_else(|| {
                     KernelError::Storage("Recovery capture omitted state".into())
                 })?)?;
-            if state == target {
+            let (observed,desired,format,path_key)=(state.clone(),target.clone(),target_format.clone(),path.clone());
+            let text_metadata=self.control(owner,move |t,s|s.restore_text_metadata(&t.authorize(s)?,&t.root.root_id,&path_key,&observed,&desired,format.as_ref(),t.mode))?;
+            if state == target && text_metadata["changed"] != true {
                 results.push(json!({"path":path,"status":"unchanged"}));
                 continue;
             }
@@ -449,7 +451,7 @@ impl Task {
             }
             files.push(
                 json!({"path":path,"expectedJson":state.to_string(),"targetJson":target.to_string(),
-                "safetyJson":state.to_string(),"references":references}),
+                "safetyJson":state.to_string(),"references":references,"textMetadata":text_metadata}),
             );
         }
         files.sort_by_key(|file| {
@@ -479,10 +481,11 @@ impl Task {
             let grant = t.authorize(s)?;
             let journal = if selected.is_empty() {None} else {Some(s.restore_journal(&t.workspace,&t.root.root_id,
                 &t.thread,&id,t.anchor.as_ref(),t.mode,&grant)?)};
+            let formats:serde_json::Map<String,Value>=selected.iter().filter_map(|file|Some((file["path"].as_str()?.into(),file.get("textMetadata")?.clone()))).collect();
             s.recovery_operation_create(&json!({"operationId":id,"workspaceId":t.workspace,"threadId":t.thread,
                 "kind":"file-restore","state":"applying","dataJson":json!({"rootId":t.root.root_id,"runId":grant.run_id,
                 "pointRunId":t.anchor.as_ref().map(|a|&a.run_id),"epoch":grant.kernel_epoch,"arguments":arguments,
-                "files":initial,"journal":journal}).to_string(),"files":selected}), &grant.grant_id)?;
+                "files":initial,"journal":journal,"textFormats":formats}).to_string(),"files":selected}), &grant.grant_id)?;
             Ok(journal)
         })?;
         for (index, file) in files.iter().enumerate() {
@@ -491,6 +494,7 @@ impl Task {
             let mut params = json!({"workspaceId":self.workspace,"rootId":self.root.root_id,"path":path,"operationId":id,
                 "leaseId":format!("restore:{operation}:{}",hex::encode(Sha256::digest(path.as_bytes()))),
                 "targetJson":file["targetJson"],"expectedJson":file["safetyJson"]});
+            if let Some(metadata)=file["textMetadata"]["intent"].as_object(){for(key,value)in metadata{params[key]=value.clone();}}
             let target: Value = serde_json::from_str(file["targetJson"].as_str().unwrap())?;
             if target["kind"] == "regular-file" {
                 params["recordId"] = json!(format!("operation-file:{operation}:{path}"));
@@ -581,7 +585,11 @@ impl Task {
                         KernelError::Storage("Point capture omitted state".into())
                     })?)?;
                 let refs=state["objectHash"].as_str().map(|hash|vec![json!({"slot":"target","objectHash":hash,"ownerId":captured["ownerId"]})]).unwrap_or_default();
-                files.push(json!({"path":path,"targetJson":state.to_string(),"references":refs}));
+                let (path_key,observed)=(path.clone(),state.clone());
+                let format=self.control(owner,move |t,s|s.restore_text_metadata(&t.authorize(s)?,&t.root.root_id,&path_key,&observed,&observed,None,t.mode))?;
+                let mut file=json!({"path":path,"targetJson":state.to_string(),"references":refs});
+                if let Some(format)=format.get("safety"){file["textFormat"]=format.clone();}
+                files.push(file);
             }
             Some(files)
         } else {

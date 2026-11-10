@@ -1,3 +1,4 @@
+import { readFixedSourceTextEncoding } from './source-provenance.js';
 /** Closed source services execute against the target's real admitted Storage handle.
  * The coordinator's Run is attribution; no target Catalog Run or ToolCall is created. */
 import { querySourceFiles } from './thread-source-files.js';
@@ -58,6 +59,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
   const packages = createManagedPackageSource(options.kernel);
   const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.authorityId, scope.resourceEpoch, scope.grant.grantId]);
   const queryOf = (scope: ManagedSourceLocalScope): SourceQueryAccess => ({ source: scope.source, physicalRoot: scope.physicalRoot,
+    ...(scope.textEncoding ? { textEncoding: scope.textEncoding } : {}),
     threadId: scope.scope.threadId, ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId, grantId: scope.grant.grantId } : {}) });
   const verifyIdentity = (scope: ManagedSourceLocalScope, identity: ThreadIdentity) => {
     if (identity.runtime !== 'agent' || identity.threadId !== scope.scope.threadId
@@ -106,7 +108,9 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id }));
         const pin = await store.pinBranch(input.source.branchId, { revision: input.source.revision, ...(input.signal ? { signal: input.signal } : {}) });
         try {
-          const result = await consume({ store, pin, readOriginalSource: () => store.readOriginalSource(input.source.branchId, input.signal ? { signal: input.signal } : {}) });
+          const textEncoding = await readFixedSourceTextEncoding(options.kernel.scoped(scope.grant), input.source.workspaceId,
+            input.source.branchId, input.source.revision, input.signal, pin.root);
+          const result = await consume({ store, pin, textEncoding, readOriginalSource: () => store.readOriginalSource(input.source.branchId, input.signal ? { signal: input.signal } : {}) });
           await assertResources(input.source, input.signal); return result;
         } finally { await pin.release(); }
       },

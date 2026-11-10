@@ -13,6 +13,7 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createAgentDriver } from './agent-driver.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { createKernelClient } from './kernel-client.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createRunDriverOwner, VARIN_AGENT_DRIVER_CAPABILITY } from './run-driver-owner.js';
@@ -53,12 +54,15 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   const endpoint = `http://127.0.0.1:${address.port}/responses`;
   const kernel = createKernelClient({ hostId: 'driver-native-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, ...(probe ? { transportFactory: probe.create } : {}) });
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); });
   const progress: AgentRuntimeStreamEvent[] = [];
   const stopProgress = kernel.onAgentRuntimeEvent(event => { if (event.stream === 'progress') progress.push(event); });
   cleanups.push(async () => { stopProgress(); });
   const extensions = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
     brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
-  await extensions.start(); cleanups.push(() => extensions.stop()); cleanups.push(() => kernel.close());
+  await extensions.start(); cleanups.push(() => extensions.stop());
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); });
   extensions.capabilities.register(VARIN_AGENT_DRIVER_CAPABILITY, createRunDriverOwner(kernel));
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace);
   const documents = createDocumentAuthority({ hostId: 'driver-native-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });

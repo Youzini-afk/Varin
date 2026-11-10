@@ -43,6 +43,7 @@ export interface ManagedSourceBindRequest {
 }
 /** References to the target's Storage remain target references. They confer no local access. */
 export interface ManagedSourceBinding {
+  textEncoding?: import('../kernel/protocol.generated.js').KernelTextPolicy;
   executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;
   authorityId: string;
   resourceEpoch: string;
@@ -65,7 +66,7 @@ export interface ManagedSourceProcessSubscription extends ManagedSourceProcessAd
 export type ManagedSourceProcessControl = ManagedSourceProcessAddress & { subscriptionId: string } & (
   { kind: 'close' } | { kind: 'ack'; stream: 'data' | 'control'; sequence: number }
 );
-export type ManagedSourceProcessWrite = ManagedSourceProcessAddress & { operationId: string; bytesBase64: string; eof?: boolean };
+export type ManagedSourceProcessWrite = ManagedSourceProcessAddress & { operationId: string; bytesBase64?: string; text?: string; encoding?: string; eof?: boolean };
 export type ManagedSourceProcessResize = ManagedSourceProcessAddress & { operationId: string; cols: number; rows: number };
 /** Models use the original accepted invocation; service reads below never invent a ToolCall. */
 export interface ManagedSourceToolRequest extends ManagedSourceAddress {
@@ -155,6 +156,7 @@ export interface ManagedChildSourceReceipt {
   provenance: ChildSourceProvenance;
 }
 export interface ManagedSourceLocalScope {
+  textEncoding?: import('../kernel/protocol.generated.js').KernelTextPolicy;
   operationId?: string | null;
   principal: ManagedSourcePrincipal;
   coordinatorHostId: string;

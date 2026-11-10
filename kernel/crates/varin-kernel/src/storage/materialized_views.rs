@@ -474,8 +474,16 @@ impl Storage {
             }
             return Err(error);
         }
+        // The view is already gone. Resolve the still-owned Storage directory,
+        // then append its recorded relative path (Windows verbatim paths and
+        // macOS /var aliases must match the canonical roots in format evidence).
+        let canonical_storage_root = fs::canonicalize(&self.root)?;
+        let text_format_keys=self.materialized_view_record(&task.workspace_id,&task.view_id)?
+            .and_then(|record|record["path"].as_str().map(|path|canonical_storage_root.join(path)))
+            .map(|directory|self.text_format_keys_for_directory(&task.workspace_id,&directory)).unwrap_or_default();
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let removed = (|| {
+            self.delete_text_format_facts(&text_format_keys)?;
             self.conn.execute("DELETE FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type=?3",params![task.workspace_id,record_id(&task.view_id),RECORD_TYPE])?;
             self.conn.execute(
                 "DELETE FROM operations WHERE operation_id=?1",
@@ -492,6 +500,7 @@ impl Storage {
             return Err(error);
         }
         self.conn.execute_batch("COMMIT")?;
+        self.forget_text_format_facts(&text_format_keys);
         Ok(json!({"viewId":task.view_id,"released":true}))
     }
     /// Old Host references cannot resurrect. Their physical writers still can

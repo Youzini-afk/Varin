@@ -721,3 +721,73 @@ fn file_inventory_bound_scope_rejects_parent_symlink_retarget_during_walk() {
 // The same real Kernel fixture exercises body workers as well as metadata workers.
 #[path = "runtime_capture_tests.rs"]
 mod captures;
+
+#[test]
+fn stateless_text_codec_dispatch_uses_host_identity_without_a_scoped_grant() {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let directory = TempRoot(std::env::temp_dir().join(format!("text-dispatch-{}", Uuid::new_v4())));
+    fs::create_dir_all(&directory.0).unwrap();
+    let mut kernel = Kernel::new(EPOCH.into());
+    let (tx, rx) = mpsc::channel();
+    let decode = json!({"bytesBase64": STANDARD.encode(b"\xd6\xd0\xce\xc4\r\n")});
+    let request = Fixture::request("text.decode", decode.clone(), None);
+    assert!(matches!(
+        kernel.handle(&request, Arc::new(AtomicBool::new(false)), &tx),
+        Err(KernelError::Protocol(message)) if message.contains("handshake")
+    ));
+    let handshake = kernel.handle(
+        &Fixture::request("kernel.handshake", json!({
+            "protocolVersion": PROTOCOL_VERSION, "buildVersion": KERNEL_BUILD_IDENTITY,
+            "hostId": HOST, "hostGeneration": GENERATION,
+            "storageRoot": directory.0.join("store"), "capabilities": []
+        }), None),
+        Arc::new(AtomicBool::new(false)),
+        &tx,
+    ).unwrap().unwrap();
+    assert_eq!(handshake["ok"], true);
+    // No authority.grant.issue call is needed for caller-supplied bytes/text.
+    let dispatch = |kernel: &mut Kernel, method: &str, params: Value| {
+        let request = Fixture::request(method, params, None);
+        assert!(pending_file_worker(method), "retain the original worker/cancellation identity");
+        assert!(kernel.handle(&request, Arc::new(AtomicBool::new(false)), &tx).unwrap().is_none());
+        match rx.recv_timeout(WAIT).expect("native codec worker did not complete") {
+            WorkerRequest::ResourceRequestDone { request: completed, result } => {
+                assert_eq!(completed["id"], request["id"]);
+                assert_eq!(completed["method"], method);
+                result.unwrap()
+            }
+            _ => panic!("unexpected codec completion"),
+        }
+    };
+    let decoded = dispatch(&mut kernel, "text.decode", decode.clone());
+    assert_eq!(decoded["kind"], "text");
+    assert_eq!(decoded["content"], "中文\r\n");
+    assert_eq!(decoded["format"]["encoding"], "gbk");
+    let serialized = dispatch(&mut kernel, "text.serialize", json!({
+        "sourceBytesBase64": decode["bytesBase64"], "sourceFormat": decoded["format"],
+        "content": "中文!\n", "normalizeLineEndings": true
+    }));
+    assert_eq!(serialized["kind"], "serialized");
+    assert_eq!(STANDARD.decode(serialized["bytesBase64"].as_str().unwrap()).unwrap(), b"\xd6\xd0\xce\xc4!\r\n");
+    let rejected = dispatch(&mut kernel, "text.serialize", json!({
+        "sourceBytesBase64": decode["bytesBase64"], "sourceFormat": decoded["format"],
+        "content": "中文😀\n", "normalizeLineEndings": true
+    }));
+    assert_eq!(rejected["kind"], "unrepresentable");
+
+    for method in ["text.decode", "text.serialize"] {
+        let params = if method == "text.decode" { decode.clone() } else { json!({"content":"text"}) };
+        let scoped = Fixture::request(method, params.clone(), Some("tool-grant"));
+        assert!(matches!(kernel.handle(&scoped, Arc::new(AtomicBool::new(false)), &tx), Err(KernelError::Authorization(_))));
+        let mut missing_epoch = Fixture::request(method, params.clone(), None);
+        missing_epoch.as_object_mut().unwrap().remove("epoch");
+        assert!(matches!(kernel.handle(&missing_epoch, Arc::new(AtomicBool::new(false)), &tx), Err(KernelError::Authorization(_))));
+        let mut stale = Fixture::request(method, params, None);
+        stale["epoch"] = json!("old-epoch");
+        assert!(matches!(kernel.handle(&stale, Arc::new(AtomicBool::new(false)), &tx), Err(KernelError::Authorization(_))));
+    }
+    // The stateless exception does not authorize ordinary file access.
+    let file = Fixture::request("file.read", json!({"workspaceId":"workspace","rootId":"unregistered","path":"a.txt"}), None);
+    assert!(matches!(kernel.handle(&file, Arc::new(AtomicBool::new(false)), &tx), Err(KernelError::Authorization(_))));
+}

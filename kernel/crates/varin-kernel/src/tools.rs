@@ -92,7 +92,7 @@ impl ToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::FileRead => {
-                "Read an immutable attachment by ref, or a bounded UTF-8 range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
+                "Read an immutable attachment by ref, or a bounded decoded text range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Return readVersion and content.format as sourceFormat unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
             }
             Self::FileList => "List files and directories with pagination. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
             Self::FileSearch => "Search file text and return bounded matches. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view.",
@@ -227,6 +227,8 @@ pub(crate) fn source_capabilities(
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ToolBinding {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub text_encoding: Option<crate::text::Policy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_environment: Option<crate::shell_environment::ExecutionEnvironment>,
     pub resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
@@ -307,6 +309,8 @@ impl ToolBinding {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FileReadArgs {
+    encoding: Option<String>,
+    raw: Option<bool>,
     path: String,
     #[serde(default)]
     offset: u64,
@@ -315,11 +319,20 @@ struct FileReadArgs {
     end_line: Option<u64>,
     unit: Option<read::UnitReadArgs>,
 }
+fn apply_read_format(params:&mut Value,args:&FileReadArgs,binding:&ToolBinding){
+    if let Some(policy)=&binding.text_encoding{
+        if let Some(encoding)=policy.encoding(&args.path){params["encoding"]=json!(encoding);}
+        if let Some(default)=policy.default_for(&args.path){params["defaultEncoding"]=json!(default);}
+    }
+    if let Some(encoding)=&args.encoding{params["encoding"]=json!(encoding);}
+    if let Some(raw)=args.raw{params["raw"]=json!(raw);}
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProcessWriteArgs {
     pub process_id: String,
     pub text: String,
+    pub encoding: Option<String>,
     #[serde(default)]
     pub submit: bool,
     #[serde(default)]
@@ -327,13 +340,16 @@ pub(crate) struct ProcessWriteArgs {
 }
 impl ProcessWriteArgs {
     pub(crate) fn input(&self, binding: &ToolBinding, resources: &KernelResourceClient) -> Result<crate::process::interaction::Input, ExecutionError> {
-        let mut bytes=self.text.as_bytes().to_vec();
-        if self.submit && binding.remote_authority.is_none() {
-            let process=resources.interactions.as_ref().ok_or_else(||ExecutionError::new("process_unavailable","The original process input owner is unavailable"))?
-                .access(binding.clone(),self.process_id.clone()).map_err(|error|ExecutionError::new("process_input",error.to_string()))?;
-            let ending=process["input"]["lineEnding"].as_str().ok_or_else(||ExecutionError::new("process_input","The original process did not publish an input line ending"))?;
-            bytes = submitted_text(&self.text, ending).into_bytes();
-        }
+        // Remote calls are encoded by their execution owner, not this observer's locale.
+        let process = if binding.remote_authority.is_none() {
+            Some(resources.interactions.as_ref().ok_or_else(||ExecutionError::new("process_unavailable","The original process input owner is unavailable"))?
+                .access(binding.clone(),self.process_id.clone()).map_err(|error|ExecutionError::new("process_input",error.to_string()))?)
+        } else { None };
+        let text = if self.submit && process.is_some() {
+            let ending=process.as_ref().unwrap()["input"]["lineEnding"].as_str().ok_or_else(||ExecutionError::new("process_input","The original process did not publish an input line ending"))?;
+            submitted_text(&self.text, ending)
+        } else { self.text.clone() };
+        let bytes = crate::process::text::encode_process_input(&text, self.encoding.as_deref(), process.as_ref().unwrap_or(&Value::Null)).map_err(|message|ExecutionError::new("process_input_encoding",message))?;
         Ok(crate::process::interaction::Input::Write {bytes:bytes.into(),eof:self.eof})
     }
 }
@@ -343,15 +359,6 @@ fn submitted_text(text: &str, ending: &str) -> String {
     result
 }
 
-fn agent_environment_defaults(environment: &mut Vec<Value>, windows: bool) {
-    if windows {
-        for (name, value) in [("PYTHONIOENCODING", "utf-8"), ("PYTHONUTF8", "1")] {
-            if !environment.iter().any(|entry| entry["name"].as_str().is_some_and(|key| key.eq_ignore_ascii_case(name))) {
-                environment.push(json!({"name":name,"value":value}));
-            }
-        }
-    }
-}
 #[cfg(test)]
 mod process_input_defaults_tests {
     use super::*;
@@ -363,15 +370,12 @@ mod process_input_defaults_tests {
         assert_eq!(submitted_text("line\n", "\n"), "line\n");
     }
     #[test]
-    fn windows_defaults_preserve_user_environment() {
-        let mut env = vec![json!({"name":"PythonIoEncoding","value":"gbk"})];
-        agent_environment_defaults(&mut env, true);
-        assert_eq!(env, vec![json!({"name":"PythonIoEncoding","value":"gbk"}),json!({"name":"PYTHONUTF8","value":"1"})]);
-        let mut empty = vec![];
-        agent_environment_defaults(&mut empty, false);
-        assert!(empty.is_empty());
-        agent_environment_defaults(&mut empty, true);
-        assert!(empty.iter().any(|item| item["name"] == "PYTHONIOENCODING" && item["value"] == "utf-8"));
+    fn input_codecs_are_strict_and_independent_of_output() {
+        let gbk = crate::process::text::encode_input("中文\n", Some("gbk")).unwrap();
+        assert_eq!(gbk, [0xd6, 0xd0, 0xce, 0xc4, 10]);
+        assert!(crate::process::text::encode_input("🙂", Some("gbk")).is_err());
+        assert_eq!(crate::process::text::encode_input("中", Some("utf-16le")).unwrap(), [0x2d, 0x4e]);
+        assert_eq!(crate::process::text::encode_input("中", Some("auto")).unwrap(), "中".as_bytes());
     }
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -423,6 +427,7 @@ struct ProcessSpawnArgs {
     #[serde(default)]
     wait_ms: u64,
     max_output_bytes: Option<u64>,
+    input_encoding: Option<String>,
     output_encoding: Option<String>,
 }
 fn default_process_mode() -> String { "pipe".into() }
@@ -603,6 +608,7 @@ impl ResourceOperation {
                 }
             }
             Self::ProcessSpawn(args) => {
+                crate::process::text::encode_input("", args.input_encoding.as_deref()).map_err(|message| ExecutionError::new("invalid_tool_arguments",message))?;
                 crate::process::text::validate_encoding(args.output_encoding.as_deref()).map_err(|message| ExecutionError::new("invalid_tool_arguments",message))?;
                 if args.wait_ms > 9_007_199_254_740_991 || args.max_output_bytes.is_some_and(|value|value==0 || value > crate::process::CHUNK_BYTES as u64) {
                     return Err(ExecutionError::new("invalid_tool_arguments","waitMs must be a nonnegative safe integer and maxOutputBytes must fit one process output page"));
@@ -756,6 +762,7 @@ impl ResourceOperation {
                 if let Some(length) = args.length {
                     params["length"] = json!(length);
                 }
+                apply_read_format(&mut params,args,binding);
                 if let Some(line) = args.start_line { params["startLine"] = json!(line); }
                 if let Some(line) = args.end_line { params["endLine"] = json!(line); }
                 ("file.read", params)
@@ -786,6 +793,8 @@ impl ResourceOperation {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                     "processId":context.operation_id,"cwd":args.cwd,"command":args.command,"args":args.args,
                     "env":args.env,"mode":args.mode});
+                if let Some(encoding) = &args.input_encoding { params["inputEncoding"] = json!(encoding); }
+                if let Some(encoding) = &args.output_encoding { params["outputEncoding"] = json!(encoding); }
                 if let Some(cols) = args.cols {
                     params["cols"] = json!(cols);
                 }
@@ -926,6 +935,7 @@ pub(crate) fn fixed_read_fixture(
             },
             binding,
             operation: ResourceOperation::FileRead(FileReadArgs {
+                encoding:None,raw:None,
                 path: path.into(),
                 offset: if lines { 0 } else { 1 },
                 length: if lines { None } else { Some(3) },
@@ -1309,7 +1319,7 @@ impl KernelResourceClient {
                 branch_id: branch.clone(),
                 revision: revision as i64,
             });
-        let binding = ToolBinding {
+        let binding = ToolBinding { text_encoding:None,
             execution_environment: None,
             resource_owner: read.1.resource_owner.clone(),
             remote_authority: Some(RemoteResourceAuthority {
@@ -2001,7 +2011,8 @@ impl KernelToolExecutor {
                 let path=std::env::join_paths(std::env::split_paths(current).chain(extra.iter().map(std::path::PathBuf::from)))
                     .map_err(|error|ExecutionError::new("environment_encoding",error.to_string()))?;
                 env.push(json!({"name":"PATH","value":path.to_string_lossy()}));
-                agent_environment_defaults(&mut env, cfg!(windows));
+                // Ordinary project commands inherit Python's own file/stdio semantics.
+                // Known Host protocols prepare UTF-8 stdio at their launch owner instead.
                 arguments["env"]=json!(env);
             }
         }
@@ -2861,24 +2872,24 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"point":{"type":"string","description":"Recovery point reference, or current:before."},"undo":{"type":"string","description":"Operation ID of the restore to undo."},"paths":{"type":"array","items":{"type":"string"}},"overwritePaths":{"type":"array","items":{"type":"string"},"description":"Restore these files even if their current content differs from the recorded changes."}}), vec![],
         ),
         ToolKind::FileWrite => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."},"content":{"type":"string"},
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."},"content":{"type":"string"},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),
                 "mode":{"type":"string","enum":["create","replace"],"description":"create requires an absent target; replace requires an existing file and readVersion. Omit to write against the observed state (or create when no version is supplied)."}}),
             vec!["path", "content"],
         ),
         ToolKind::FileEdit => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"sourceFormat":crate::text::format_schema(),"targetFormat":crate::text::target_schema(),"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
             vec!["path", "readVersion", "edits"],
         ),
         ToolKind::FileRead => return read::schema(),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
-            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte offset. Text may include the character crossing this position and reports actualCursor."},"maxBytes":{"type":"integer","minimum":1,"description":"Byte page target. Text pages end at a complete character; a tiny target returns at least one complete character."},
+            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte watermark. Text includes characters whose final source byte follows this cursor; sourceRanges may begin before it."},"maxBytes":{"type":"integer","minimum":1,"description":"Raw byte page budget. A partial character may produce no text until a later page completes that channel."},
                 "mode":{"type":"string","enum":["text","raw","screen"],"default":"text","description":"screen reads the current PTY viewport (cursor and maxBytes do not paginate it); text reads log pages without ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
                 "encoding":{"type":"string","description":"Text encoding override, such as utf-8, gbk, shift_jis or utf-16le. Auto uses BOM/UTF-8, then the actual Windows source Host's codepage hint."}}),
             vec!["processId"],
         ),
         ToolKind::ProcessWrite => (
-            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"JSON-decoded UTF-8 input; escapes are decoded once. Without submit, all bytes are kept exactly."},"submit":{"type":"boolean","default":false,"description":"Normalize text line breaks to this process input.lineEnding, then append a final Enter if absent. Empty text sends Enter."},"eof":{"type":"boolean"}}),
+            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"Unicode input encoded with this process inputEncoding default, or the per-write encoding override. Unrepresentable characters fail before input is sent."},"encoding":{"type":"string","description":"Override only this input write, for example gbk or utf-8. auto uses UTF-8; output encoding never selects input encoding."},"submit":{"type":"boolean","default":false,"description":"Normalize text line breaks to this process input.lineEnding, then append a final Enter if absent. Empty text sends Enter."},"eof":{"type":"boolean"}}),
             vec!["processId", "text"],
         ),
         ToolKind::ProcessResize => (
@@ -2891,7 +2902,8 @@ fn tool_schema(kind: ToolKind) -> Value {
             "shell":{"type":"string","minLength":1,"description":"Shell ID from the execution Host's available shells (for example bash, pwsh, powershell, cmd). Omit or use auto for the published default. Only with shellCommand. Unavailable choices fail without replaying in another interpreter."},
             "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe until the process exits and its output finishes, or this interval elapses. Zero returns immediately. Never a kill timeout."},
             "maxOutputBytes":{"type":"integer","minimum":1,"maximum":crate::process::CHUNK_BYTES,"description":"Initial output page. Continue with process_read at observation.nextCursor."},
-            "outputEncoding":{"type":"string","description":"Encoding override for the initial text output, for example gbk or utf-16le; omitted uses automatic decoding."},
+            "inputEncoding":{"type":"string","description":"Persistent text stdin default, independently of output; omitted or auto uses UTF-8. Raw byte input remains unchanged."},
+            "outputEncoding":{"type":"string","description":"Persistent output decoding default, for example gbk, utf-8 or auto. Per-read encoding overrides it. Pipe defaults to auto; PTY defaults to UTF-8."},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
             vec![],
@@ -3092,7 +3104,8 @@ pub(crate) fn prepare_resource(
                 request.binding.root_id.as_deref().ok_or_else(||KernelError::Authorization("Physical file source is missing".into()))?,
                 &request.context.operation_id, mutation, &grant, request.journal.as_ref(), request.binding.source_mode,
                 request.binding.materialized_source.as_ref(), request.cancellation.shared_flag())?
-                .with_source(Some(key), request.binding.live_root.clone());
+                .with_source(Some(key), request.binding.live_root.clone()).with_text_policy(request.binding.text_encoding.clone())
+                .with_text_branch(request.binding.native_workspace.as_ref().map(|n|n.branch_id.clone()).or_else(||request.binding.materialized_source.as_ref().map(|m|m.branch_id.clone())));
             Ok(ResourceWork::TextMutation(task))
         })();
         return result.map_err(|error|ResourceFailure{error,dispatched:false});
@@ -3137,7 +3150,7 @@ pub(crate) fn prepare_resource(
         if request.binding.source_mode != SourceMode::FixedBranch {
             let expected = request.expected_resource_key.clone().ok_or_else(|| KernelError::Authorization("File read has no original canonical resource admission".into()))?;
             let task = storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())?
-                .with_expected_key(expected).with_live_root(request.binding.live_root.clone());
+                .with_expected_key(expected).with_live_root(request.binding.live_root.clone()).with_text_receipts(args.encoding.as_deref().is_none_or(|e|e=="auto"));
             return Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task)));
         }
         if request.expected_resource_key.as_deref().is_some_and(|key|key!=fixed_read_key(&request.binding,&args.path)) {
@@ -3145,6 +3158,7 @@ pub(crate) fn prepare_resource(
         }
         let state =
             storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant)?;
+        let fixed_root=state["root"].as_str().ok_or_else(||KernelError::Storage("Fixed file read omitted its root".into()))?.to_owned();
         let source = request
             .binding
             .file_source
@@ -3175,6 +3189,7 @@ pub(crate) fn prepare_resource(
         }
         if let Some(line) = args.start_line { params["startLine"] = json!(line); }
         if let Some(line) = args.end_line { params["endLine"] = json!(line); }
+        apply_read_format(&mut params,args,&request.binding);
         let (grant, authorized) = storage.authorize(
             Some(&request.binding.grant_id),
             epoch,
@@ -3186,7 +3201,8 @@ pub(crate) fn prepare_resource(
         validate_binding(&grant, &request.binding, &request.context)?;
         let task =
             storage.prepare_blob_read(&authorized, &grant, request.cancellation.shared_flag())?;
-        Ok(ResourceWork::BlobRead(task.with_file_output(
+        let format=if args.encoding.as_deref().is_none_or(|e|e=="auto") {storage.text_format_receipts_for_fixed(&grant,&source.branch_id,source.revision,&fixed_root)?.format(&args.path,hash).cloned()}else{None};
+        Ok(ResourceWork::BlobRead(task.with_text_receipt(format).with_file_output(
             args.path.clone(),
             serde_json::to_value(source)?,
             crate::storage::file_mutations::read_version(&crate::storage::file_mutations::fixed_read_namespace(&request.binding.workspace_id,source),
@@ -3462,7 +3478,7 @@ fn serve_resource_immediate(
                 }
             }
             let physical = storage.source_physical_root(&request.binding, &grant, host_id)?;
-            return Ok(json!({"source":source,"physicalRoot":physical}));
+            return Ok(json!({"source":source,"physicalRoot":physical,"textEncoding":request.binding.text_encoding}));
         }
         if method == "file.read" {
             storage.set_cancellation(request.cancellation.shared_flag());
@@ -3700,6 +3716,7 @@ impl ResourceOperation {
         use crate::source_resources::SourceResourceAction as A;
         Ok(match self {
             Self::FileRead(args) => A::Read {
+                encoding:args.encoding.clone(),raw:args.raw,
                 path: args.path.clone(),
                 offset: args.offset,
                 length: args.length,
@@ -3751,12 +3768,14 @@ impl ResourceOperation {
         use crate::source_resources::SourceResourceAction as A;
         match action {
             A::Read {
+                encoding,raw,
                 path,
                 offset,
                 length,
                 start_line,
                 end_line,
             } => Self::FileRead(FileReadArgs {
+                encoding,raw,
                 path,
                 offset,
                 length,
@@ -3856,6 +3875,7 @@ mod child_lifecycle_context_tests {
         let resources=KernelResourceClient::new(|_|panic!("unauthorized action reached resource owner"), |_|Ok(()),Default::default());
         let context=ResourceExecutionContext {run_id:"child-run".into(),operation_id:"child".into(),origin:None};
         let result=resources.call_resource(&binding(),&context,ResourceOperation::FileRead(FileReadArgs {
+            encoding:None,raw:None,
             path:"secret".into(),offset:0,length:None,start_line:None,end_line:None,unit:None,
         }),false,&CancellationToken::default());
         assert!(matches!(result,Err(ResourceFailure {error:KernelError::Authorization(_),dispatched:false})));

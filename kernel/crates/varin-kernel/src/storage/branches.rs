@@ -152,6 +152,7 @@ impl Storage {
             }
             identity["sourceProvenance"]=provenance.clone();
         }
+        if let Some(policy) = params.get("textEncoding") { identity["textEncoding"] = Self::normalize_text_policy(policy)?; }
         Ok(identity)
     }
 
@@ -363,6 +364,7 @@ impl Storage {
                 || existing.workspace_id != workspace_id
                 || existing.base_ref != base_ref
                 || existing.source_provenance != params.get("sourceProvenance").cloned()
+                || existing.text_encoding != params.get("textEncoding").map(Self::normalize_text_policy).transpose()?
                 || existing.parent_ref != parent_ref
                 || existing.draft_base_paths != draft_base_paths
                 || existing.capture_scopes != capture_scopes
@@ -386,6 +388,7 @@ impl Storage {
         self.branch_builders.insert(
             builder_id.to_string(),
             BranchBuilder {
+                text_encoding: params.get("textEncoding").map(Self::normalize_text_policy).transpose()?,
                 source_provenance:params.get("sourceProvenance").cloned(),
                 operation_id: operation_id.to_string(),
                 branch_id: branch_id.to_string(),
@@ -526,6 +529,7 @@ impl Storage {
             "entries": builder.entries,
         });
         if let Some(provenance)=builder.source_provenance {creation["sourceProvenance"]=provenance;}
+        if let Some(policy)=builder.text_encoding {creation["textEncoding"]=policy;}
         if let Some(base_ref) = &builder.base_ref {
             creation
                 .as_object_mut()
@@ -721,6 +725,7 @@ impl Storage {
             let reference=self.insert_source_provenance(workspace_id,branch_id,&root,provenance)?;
             receipt["sourceProvenance"]=reference;
         }
+        self.capture_branch_text_snapshot(branch_id,&root,params.get("baseRef").and_then(Value::as_str),params.get("textEncoding"))?;
         self.import_entry_metadata(branch_id,&entries,grant_id,true)?;
         Ok(receipt)
     }
@@ -833,6 +838,7 @@ impl Storage {
         };
         self.project_native_entries(branch_id,revision,if requested_revision.is_none(){branch.write_revision}else{-1},&root,None,&mut entries)?;
         let mut response = json!({"branchId": branch_id, "workspaceId": branch.workspace_id, "root": root, "revision": revision, "view": view, "currentRoot": branch.head_root, "headRevision": branch.head_revision, "writeRevision": branch.write_revision, "draftBasePaths": branch.draft_base_paths, "captureScopes": branch.capture_scopes, "createdAt": branch.created_at, "updatedAt": branch.updated_at, "entries": entries, "nextCursor": next_cursor});
+        if let Some(policy) = self.branch_text_policy(branch_id,revision,&root,scopes.as_deref())? { response["textEncoding"] = policy; }
         if let Some(parent_ref) = branch.parent_ref {
             response
                 .as_object_mut()
@@ -1457,6 +1463,7 @@ impl Storage {
         } else {
             0
         };
+        self.release_branch_text_snapshots(branch_id)?;
         let deleted = self.conn.execute(
             "DELETE FROM branches WHERE branch_id = ?1",
             params![branch_id],

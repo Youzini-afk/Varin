@@ -1,4 +1,4 @@
-import type { VarinLanguageWorkspaceEdit, VarinResourceReference } from './types.js';
+import type { VarinLanguageWorkspaceEdit, VarinResourceReference, VarinTextFormat, VarinTextEdit } from './types.js';
 
 /** Editor state is separate from saved file bytes. All text is editor-normalized. */
 export interface VarinWorkspaceEditBuffer {
@@ -6,6 +6,9 @@ export interface VarinWorkspaceEditBuffer {
   documentInstanceId: string;
   localEditRevision: number;
   baseRevision: string | null;
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
+  edits?: VarinTextEdit[];
   buffer: string;
   baseContent: string;
   encoding: string;

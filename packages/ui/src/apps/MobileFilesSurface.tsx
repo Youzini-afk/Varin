@@ -18,6 +18,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
+import { DocumentEncodingMenu, DocumentEncodingNotice } from '@/components/workbench/DocumentEncodingMenu';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -434,9 +435,7 @@ const MobileFileDetail: React.FC<{
   const loadingDocument = !isImage && !binaryBlocked && !error && (
     isLoading || !identity || !record || record.status === 'loading' || record.status === 'unloaded'
   );
-  const documentError = error ?? record?.errorMessage ?? (
-    record?.status === 'error' ? t('filesView.error.previewUnavailable') : null
-  );
+  const documentError = error ?? (record?.status === 'error' ? record.errorMessage ?? t('filesView.error.previewUnavailable') : null);
 
   const save = (): void => {
     if (!identity) return;
@@ -481,6 +480,7 @@ const MobileFileDetail: React.FC<{
         <Button type="button" variant="ghost" size="icon" onClick={onCopyPath} aria-label={t('mobile.files.copyPathAria')}>
           <RiClipboardLine className="size-4" />
         </Button>
+        {!isImage && identity && record ? <DocumentEncodingMenu identity={identity}><Button type="button" variant="ghost" size="icon" aria-label={t('chat.composer.options')}><Icon name="more" className="size-4" /></Button></DocumentEncodingMenu> : null}
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
         {loadingDocument ? (
@@ -503,6 +503,7 @@ const MobileFileDetail: React.FC<{
         ) : identity ? (
           <div className="flex h-full min-h-0 flex-col">
             <DocumentConflictBanner identity={identity} />
+            <DocumentEncodingNotice identity={identity} />
             <div className="min-h-0 flex-1 overflow-hidden">
               <DocumentCodeMirror identity={identity} className="h-full" />
             </div>

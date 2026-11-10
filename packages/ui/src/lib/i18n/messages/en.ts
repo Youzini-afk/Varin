@@ -14,6 +14,13 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 import { imageAnnotationsEn } from './imageAnnotations';
 export const dict = {
+  'filesView.encoding.reopen': 'Reopen with Encoding',
+  'filesView.encoding.reopenDirty': 'Save or discard your changes before reopening.',
+  'filesView.encoding.save': 'Save with Encoding',
+  'filesView.encoding.lineEndings': 'Line Endings',
+  'filesView.encoding.undoFormat': 'Undo Format Change',
+  'filesView.encoding.saveUtf8': 'Save as UTF-8',
+
   'bot.groups.create': 'New group',
   'bot.appearance.title': "Appearance",
   'bot.appearance.custom': "Imported appearance",

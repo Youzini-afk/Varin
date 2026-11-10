@@ -474,6 +474,23 @@ impl Storage {
                 "process mode must be pty or pipe".into(),
             ));
         }
+        for name in ["inputEncoding", "outputEncoding"] {
+            if params_value.get(name).is_some_and(|value| !value.is_string()) { return Err(KernelError::Operation(format!("{name} must be an encoding label"))); }
+            process::text::validate_encoding(params_value[name].as_str()).map_err(KernelError::Operation)?;
+        }
+        let canonical_encoding = |label: &str| encoding_rs::Encoding::for_label(label.as_bytes()).map_or_else(|| "auto".into(), |encoding| encoding.name().to_lowercase());
+        let input_label = canonical_encoding(params_value["inputEncoding"].as_str().unwrap_or("utf-8"));
+        let input_encoding = input_label.as_str();
+        process::text::encode_input("", Some(input_encoding)).map_err(KernelError::Operation)?;
+        let output_label = canonical_encoding(params_value["outputEncoding"].as_str().unwrap_or(if mode == "pty" { "utf-8" } else { "auto" }));
+        let output_encoding = output_label.as_str();
+        if cfg!(windows) && mode == "pty" {
+            for label in [input_encoding, output_encoding] {
+                if !label.eq_ignore_ascii_case("auto") && encoding_rs::Encoding::for_label(label.as_bytes()) != Some(encoding_rs::UTF_8) {
+                    return Err(KernelError::Operation("Windows ConPTY uses UTF-8 input and output; legacy encodings apply to pipe processes, not this wire".into()));
+                }
+            }
+        }
         let stdin_mode = match params_value.get("stdinMode") {
             None => "pipe",
             Some(_) => string(params_value, "stdinMode")?,
@@ -543,6 +560,7 @@ impl Storage {
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
             "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":if mode=="pty" {"pty"} else {stdin_mode},
             "input":{"writable":stdin_mode!="null","eofSupported":mode=="pipe"&&stdin_mode!="null","lineEnding":if mode=="pty"&&cfg!(windows){"\r"}else{"\n"}},
+            "inputEncoding":input_encoding,"outputEncoding":output_encoding,
             "outputCodePage":if mode=="pty" {Some(65001)} else {process::text::code_page()},
             "status":"starting","pid":null,"exitCode":null,"signal":null,
             "reason":null,"writerActive":true,"outputAvailable":false});
@@ -551,7 +569,7 @@ impl Storage {
             params![id,workspace,root.execution_workspace_id,grant.grant_id,grant.kernel_epoch,cwd.to_string_lossy(),job_name,hash,serde_json::to_string(&record)?])?;
         let launch=self.processes.prepare_launch(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
             "receiptPath":process::receipt_path(&self.root,id),"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
-            "windowsRawArguments":params_value["windowsRawArguments"],"env":params_value["env"],"mode":mode,"stdinMode":stdin_mode,"cols":cols,"rows":rows,"runId":grant.run_id}));
+            "windowsRawArguments":params_value["windowsRawArguments"],"env":params_value["env"],"mode":mode,"outputEncoding":output_encoding,"stdinMode":stdin_mode,"cols":cols,"rows":rows,"runId":grant.run_id}));
         match launch {
             Ok(launch) => Ok(super::process_tasks::Admission::Launch(launch)),
             Err(error) => self

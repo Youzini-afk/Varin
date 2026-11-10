@@ -1,3 +1,5 @@
+import { composeDocumentEdits } from '@varin/application-client';
+import { isDocumentEncoding } from './inspect.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type {
@@ -118,9 +120,10 @@ export interface WorkspaceEditServices {
 }
 
 const applyTextEdits = (
-  text: string,
+  before: VarinWorkspaceEditBuffer,
   edits: VarinLanguageWorkspaceEdit['documentChanges'][number] & { kind: 'text' }
-): string => {
+): Pick<VarinWorkspaceEditBuffer, 'buffer' | 'edits'> => {
+  let text = before.buffer;
   const offset = (position: { line: number; character: number }): number => {
     if (
       !Number.isSafeInteger(position.line) ||
@@ -149,8 +152,10 @@ const applyTextEdits = (
   for (let i = 0; i < sorted.length; i++)
     if (sorted[i]!.to < sorted[i]!.from || (i > 0 && sorted[i - 1]!.to > sorted[i]!.from))
       fail('Text edits have overlapping or reversed ranges');
-  for (const change of sorted.reverse()) text = text.slice(0, change.from) + change.text + text.slice(change.to);
-  return text;
+  const descending = sorted.reverse();
+  for (const change of descending) text = text.slice(0, change.from) + change.text + text.slice(change.to);
+  return { buffer: text, edits: composeDocumentEdits(before.baseContent, before.buffer, before.edits,
+    descending.map(change => ({ from: change.from, to: change.to, insert: change.text }))) };
 };
 
 const bufferVersionKey = (owner: SurfaceOwner, documentInstanceId: string) =>
@@ -163,7 +168,9 @@ const bufferSlot = (
 const affectedPaths = (change: VarinLanguageWorkspaceEdit['documentChanges'][number]): string[] =>
   change.kind === 'rename' ? [change.from.resourceId, change.to.resourceId] : [change.resource.resourceId];
 const hasDraft = (buffer: VarinWorkspaceEditBuffer | undefined) =>
-  Boolean(buffer && buffer.buffer !== buffer.baseContent);
+  Boolean(buffer && (buffer.buffer !== buffer.baseContent || buffer.normalizeLineEndings
+    || buffer.baseFormat && (buffer.encoding !== buffer.baseFormat.encoding || buffer.bom !== buffer.baseFormat.bom
+      || buffer.lineEnding !== buffer.baseFormat.defaultLineEnding)));
 
 export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) => {
   let disposed = false;
@@ -350,7 +357,7 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                     .get(id)!
                     .set(path, {
                       ...before,
-                      buffer: applyTextEdits(before.buffer, change),
+                      ...applyTextEdits(before, change),
                       localEditRevision: before.localEditRevision + 1,
                     });
               }
@@ -423,7 +430,7 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                   typeof buffer.buffer !== 'string' ||
                   typeof buffer.baseContent !== 'string' ||
                   (buffer.baseRevision !== null && typeof buffer.baseRevision !== 'string') ||
-                  buffer.encoding !== 'utf-8' ||
+                  !isDocumentEncoding(buffer.encoding) ||
                   typeof buffer.bom !== 'boolean' ||
                   !['lf', 'crlf', 'cr'].includes(buffer.lineEnding) ||
                   !['ready', 'missing', 'deleted'].includes(buffer.status)
@@ -515,8 +522,8 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                     const sourcePath = Object.keys(initialDisk).find((candidate) =>
                       sameState(initialDisk[candidate]!, state)
                     );
-                    const read = sourcePath ? await services.read(resource(request.workspaceId, sourcePath)) : null;
-                    if (state.kind !== 'regular-file' || (read && read.status !== 'ready'))
+                    const read = await services.read(resource(request.workspaceId, sourcePath ?? path));
+                    if (state.kind !== 'regular-file' || (read.status !== 'ready' && read.status !== 'missing'))
                       fail(`Text edit targets a non-text file: ${path}`);
                     const text =
                       read?.status === 'ready'
@@ -532,8 +539,9 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                       baseRevision: revision(state),
                       buffer: text,
                       baseContent: text,
-                      encoding: read?.status === 'ready' ? read.encoding : 'utf-8',
-                      bom: read?.status === 'ready' ? read.bom : false,
+                      ...((read.status === 'ready' || read.status === 'missing') && read.format ? { baseFormat: read.format } : {}),
+                      encoding: read.status === 'ready' ? read.encoding : read.status === 'missing' ? read.format?.encoding ?? 'utf-8' : 'utf-8',
+                      bom: read.status === 'ready' ? read.bom : read.status === 'missing' ? read.format?.bom ?? false : false,
                       lineEnding: read?.status === 'ready' ? detectLineEnding(read.content) : 'lf',
                       status: 'ready',
                     };
@@ -543,7 +551,7 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                     fail(`Document version changed: ${path}`);
                   const after = {
                     ...before,
-                    buffer: applyTextEdits(before.buffer, change),
+                    ...applyTextEdits(before, change),
                     localEditRevision: before.localEditRevision + 1,
                   };
                   updateBuffers(step, new Map([[path, after]]));
@@ -576,9 +584,10 @@ export const createWorkspaceEditCoordinator = (services: WorkspaceEditServices) 
                             buffer: '',
                             baseContent: '',
                             baseRevision: revision(emptyFile),
-                            encoding: 'utf-8',
+                            baseFormat: { encoding: before.encoding, bom: false, lineEnding: 'none', defaultLineEnding: before.lineEnding, source: 'create' },
                             bom: false,
-                            lineEnding: 'lf',
+                            normalizeLineEndings: false,
+                            edits: [],
                             status: 'ready',
                             localEditRevision: before.localEditRevision + 1,
                           },

@@ -4,7 +4,7 @@ import type { CaptureToken } from '../../documents/mutation-authority.js';
 import { CaptureInventoryChangedError } from '../../documents/capture-inventory.js';
 import { stateIdentity } from '../../recovery/journal-files.js';
 import { normalizePathIdentity } from '../../workspace/path-safety.js';
-import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance } from '../../kernel/protocol.generated.js';
+import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance, KernelTextPolicy } from '../../kernel/protocol.generated.js';
 type CapturedSourceProvenance = Extract<ChildSourceProvenance, { consistency: 'stable-capture' | 'git-base-with-overlay' }>;
 import { createBranchWithDraftBaseline, overlayDraftsOnBaseline } from './draft-baseline.js';
 import type { RecoveryState, WorkingBranchRoot, WorkingStateRootStore, WorkingBranchCreateOptions } from './types.js';
@@ -120,7 +120,8 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
 }
 
 export type SourceCaptureDocuments = Pick<ReturnType<typeof createDocumentAuthority>,
-  'beginDirtyStateBarrier' | 'beginCapture' | 'captureInventory' | 'completeCapture' | 'discardCapture' | 'inspectDirtyBuffers' | 'inspectMutation' | 'inspectWorkspace' | 'resolveWorkspace'>;
+  'beginDirtyStateBarrier' | 'beginCapture' | 'captureInventory' | 'completeCapture' | 'discardCapture' | 'inspectDirtyBuffers' | 'inspectMutation' | 'inspectWorkspace' | 'resolveWorkspace'>
+  & Partial<Pick<ReturnType<typeof createDocumentAuthority>, 'resolveTextEncodingPolicy'>>;
 
 export interface SourceResourceCapturePlan {
   resources: SourceResourceCapture;
@@ -130,7 +131,7 @@ export interface SourceResourceCapturePlan {
 }
 export interface StableSourcePreparationOwners {
   prepareResources?(input: { store: WorkingStateRootStore; directory: string; workspaceId: string;
-    captureWorkspaceId: string; branchId: string; editorDrafts?: readonly { path: string; content: Buffer }[]; signal?: AbortSignal }): Promise<SourceResourceCapturePlan>;
+    captureWorkspaceId: string; branchId: string; textEncoding?: KernelTextPolicy; editorDrafts?: readonly { path: string; content: Buffer; encoding?: string }[]; signal?: AbortSignal }): Promise<SourceResourceCapturePlan>;
   documents: SourceCaptureDocuments;
   inspectInventory: StableDirectoryCaptureInput['inspectInventory'];
 }
@@ -146,7 +147,7 @@ export interface StableSourceCaptureInput {
   content: { mode: 'saved-files' } | { mode: 'fixed-draft-baseline'; draftBaselineId?: string };
   captureIdentity?: string;
   drafts?: SourceDraftProvenance;
-  editorDrafts?: readonly { path: string; content: Buffer }[];
+  editorDrafts?: readonly { path: string; content: Buffer; encoding?: string }[];
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
   onDiscovered?: (completed: number) => void;
@@ -181,6 +182,7 @@ export async function captureStableSourceBaseline(
     return { branch: restored.branch, provenance: restored.provenance };
   }
   const workspace = await documents.inspectWorkspace(captureWorkspaceId, signal ? { signal } : {});
+  const textEncoding = await documents.resolveTextEncodingPolicy?.(captureWorkspaceId);
   if (normalizePathIdentity(workspace.root) !== normalizePathIdentity(input.directory)) throw new Error('Source capture directory differs from its admitted Documents root');
   const barrier = await documents.beginDirtyStateBarrier(captureWorkspaceId, ['.'], { signal });
   let token: CaptureToken | undefined;
@@ -204,10 +206,14 @@ export async function captureStableSourceBaseline(
         if (state.kind !== 'regular-file') throw new Error('Source draft baseline contains a non-file');
         const content = await store.getObject(state.objectHash);
         if (!content) throw new Error('Source draft baseline bytes are unavailable');
-        return { path, content };
+        const encoding = baseline.provenance[path]?.encoding;
+        return { path, content, ...(encoding ? { encoding } : {}) };
       }));
     }
-    const resources = await owners.prepareResources?.({ store, directory: input.directory, workspaceId: input.workspaceId,
+    const draftEncodings = Object.fromEntries(editorDrafts.filter(draft => draft.encoding).map(draft => [draft.path, draft.encoding!]));
+    const effectiveTextEncoding: KernelTextPolicy = { ...textEncoding,
+      ...(Object.keys(draftEncodings).length ? { files: { ...textEncoding?.files, ...draftEncodings } } : {}) };
+    const resources = await owners.prepareResources?.({ textEncoding: effectiveTextEncoding, store, directory: input.directory, workspaceId: input.workspaceId,
       captureWorkspaceId, branchId: input.branchId, editorDrafts, ...(signal ? { signal } : {}) });
     captured = await captureStableDirectoryBaseline({ ...input,
       captureScopes: [...input.captureScopes, ...resources?.captureScopes ?? []],
@@ -228,6 +234,7 @@ export async function captureStableSourceBaseline(
     signal?.throwIfAborted();
     const scopes = [...new Set(input.captureScopes)].sort();
     const provenance: CapturedSourceProvenance = { consistency: captured.consistency, contentMode: input.content.mode,
+      textEncoding: effectiveTextEncoding,
       ...(input.captureIdentity ? { captureIdentity: input.captureIdentity } : {}), ...(input.drafts ? { drafts: input.drafts } : {}),
       omittedDraftPaths: input.content.mode === 'saved-files' ? draftPaths(dirty) : [], captureScopes: scopes,
       ...(resources ? { resources: { ...resources.resources, coverage: captured.consistency === 'stable-capture' ? { kind: 'complete' as const }

@@ -188,6 +188,7 @@ impl FileQueryArgs {
         if let Some(value) = &self.queries {
             params["queries"] = json!(value);
         }
+        if let Some(policy)=&binding.text_encoding{params["textEncoding"]=json!(policy);}
         params["pathsOnly"] = json!(self.format.as_deref() == Some("paths"));
         if let Some(value) = self.before {
             params["before"] = json!(value);

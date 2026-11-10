@@ -1118,7 +1118,7 @@ impl Storage {
             for (path, tool_name, mutation_id, before_json, after_json, state, revision) in
                 change_rows
             {
-                changes.push(json!({
+                let mut change = json!({
                     "workspaceId": workspace_id,
                     "checkpointId": checkpoint_id,
                     "fileTarget": file_target,
@@ -1131,7 +1131,9 @@ impl Storage {
                     "after": serde_json::from_str::<Value>(&after_json)?,
                     "state": state,
                     "revision": revision,
-                }));
+                });
+                self.enrich_recovery_text_formats(&mut change)?;
+                changes.push(change);
             }
         }
         Ok(json!({"turns": turns, "changes": changes}))

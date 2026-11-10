@@ -1,5 +1,6 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
+import { waitWithSignal } from '../cancellation.js';
 import { invokedToolResult, responsesToolResult as result } from './provider-tool-result.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
@@ -27,6 +28,7 @@ import { createPlanOwner } from './plan-owner.js';
 import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './native-workspaces.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
@@ -153,6 +155,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
+    const releaseCodec = bindDocumentTextCodec(kernel);
+    disposers.push(async () => { releaseCodec(); await kernel.close(); });
     const grants: Array<{ runId: string; grantId: string; pathScopes: string[] }> = [];
     const issueGrant = kernel.issueGrant.bind(kernel);
     kernel.issueGrant = async (input, signal) => {
@@ -254,11 +258,14 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
           scope: { threadId }, allowFallback: false } });
     };
     const policyDecisions: VarinAgentPolicyInput[] = [];
+    const firstPolicyDecision = gate();
     const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? { prepare: async ({ threadId, requiredBinding }, signal) => {
       const lease = await createAgentPolicy(extensions)({ threadId, projectId, ...(requiredBinding ? { requiredBinding } : {}) }, signal);
       return lease && { ...lease, decide: async (input, signal) => {
         policyDecisions.push(structuredClone(input));
-        return lease.decide(input, signal);
+        const decision = await lease.decide(input, signal);
+        firstPolicyDecision.release();
+        return decision;
       } };
     }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, liveSources.validate,
     options.external && extensions ? createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => ({tool:d.tool!.name,decision:'allow' as const})) }) }) : undefined,
@@ -336,11 +343,12 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await delegationModels.close(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
-      await sources?.dispose();await compute?.dispose();
-      await recovery?.dispose();
-      try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
-      finally { await documents.dispose(); await kernel.close(); }
+      try {
+        collaboration?.stop(); await delegationModels.close(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
+        await sources?.dispose();await compute?.dispose();
+        await recovery?.dispose();
+        try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
+      } finally { releaseCodec(); try { await documents.dispose(); } finally { await kernel.close(); } }
     };
     disposers.push(close);
     const crash = async () => {
@@ -349,10 +357,10 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
       crashed = true;
       const exited = once(kernelProcess, 'exit');
       if (!kernelProcess.kill('SIGKILL')) throw new Error('Could not kill this fixture kernel');
-      await exited; await kernel.close();
+      await exited; releaseCodec(); await kernel.close();
     };
     return { kernel, grants, crash, runtime, adapter, collaboration, external, models, credentials, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
-      errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };
+      policyDecisionReady: firstPolicyDecision.promise, errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
 }
@@ -2169,9 +2177,24 @@ function childSourcePins(root: string) {
   finally { database.close(); }
 }
 
-// Exercise the installed package against the actual native schema admission, before waiting
-// on child context. A rejected policy call never enters that context barrier.
-async function expectPolicyChildAdmission(runtime: AgentRuntimeClient, runId: string, errors: unknown[]) {
+// Exercise actual native schema admission after the installed policy has returned
+// its first decision, before waiting on child context. Cold extension startup is
+// part of each test's unchanged 30s budget, not the 10s admission-only poll.
+// A rejected policy call still cannot pass this assertion or enter child context.
+async function expectPolicyChildAdmission(h: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['openHost']>>, runId: string, signal: AbortSignal) {
+  const { runtime, errors } = h;
+  let admitted = false;
+  cleanup.push(async () => {
+    if (admitted) return;
+    const signal = AbortSignal.timeout(1_000);
+    const run = await runtime.run(runId, signal).catch(() => undefined);
+    console.error('Installed policy child admission did not finish', {
+      runState: run?.state, waiting: Boolean(run?.waiting_on),
+      decisions: h.policyDecisions.map(input => input.event.kind),
+      hostErrorTypes: errors.map(error => error instanceof Error ? error.name : typeof error),
+    });
+  });
+  await waitWithSignal(h.policyDecisionReady, signal);
   await expect.poll(async () => ({
     runState: (await runtime.run(runId)).state,
     errors: errors.map(String),
@@ -2179,9 +2202,10 @@ async function expectPolicyChildAdmission(runtime: AgentRuntimeClient, runId: st
       .map(child => ({ origin: child.origin })),
   }), { timeout: 10_000, message: 'The installed policy must admit exactly one real child before context preparation' })
     .toMatchObject({ children: [{ origin: { kind: 'policy_action' } }] });
+  admitted = true;
 }
 
-it('installed collaboration policy accepts a child and reads before any parent ModelStep, then waits for one genuine report', async () => {
+it('installed collaboration policy accepts a child and reads before any parent ModelStep, then waits for one genuine report', async ({ signal }) => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0;
   const f = await fixture(({ body, response }) => {
@@ -2206,7 +2230,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate, independently inspect, then answer from the report', model, source: prepared.source });
-    await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
+    await expectPolicyChildAdmission(h, receipt.run_id, signal);
     await entered.promise;
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
     expect(parentSteps).toBe(0); expect(childSteps).toBe(0);
@@ -2242,7 +2266,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
   } finally { release.release(); }
 }, 30_000);
 
-it('installed collaboration policy reopens its pending Wait without duplicating child, fixed-source pin or parent model', async () => {
+it('installed collaboration policy reopens its pending Wait without duplicating child, fixed-source pin or parent model', async ({ signal }) => {
   let parentSteps = 0; let childSteps = 0;
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
@@ -2262,7 +2286,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Await the delegated report', model, source: prepared.source });
-  await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
+  await expectPolicyChildAdmission(h, receipt.run_id, signal);
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
   const originalWait = (await h.runtime.run(receipt.run_id)).waiting_on;
   const children = await h.runtime.children(); expect(children).toHaveLength(1);
@@ -2298,7 +2322,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   } finally { release.release(); }
 }, 30_000);
 
-it('cancelling a policy child observation resumes from the real cancellation fact while the child remains independent', async () => {
+it('cancelling a policy child observation resumes from the real cancellation fact while the child remains independent', async ({ signal }) => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0;
   const f = await fixture(({ body, response }) => {
@@ -2317,7 +2341,7 @@ it('cancelling a policy child observation resumes from the real cancellation fac
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate and observe', model, source: prepared.source });
-    await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
+    await expectPolicyChildAdmission(h, receipt.run_id, signal);
     await entered.promise;
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
     const waitId = (await h.runtime.run(receipt.run_id)).waiting_on!;
@@ -2408,14 +2432,18 @@ it.each(['live_root', 'materialized'] as const)('read-only dispatch shares its o
   await h.kernel.nativeWorkspaces!.releaseReference('worktree-continuation-view');
 }, 45_000);
 
-it.each(['user_continuation', 'message_request'] as const)('%s continues a completed writable child after Host restart from its exact fixed files with independent reports/results', async continuationKind => {
+it.for(['user_continuation', 'message_request'] as const)('%s continues a completed writable child after Host restart from its exact fixed files with independent reports/results', { timeout: 45_000 }, async (continuationKind, { signal }) => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const parentReply = gate();
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
       if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write FIRST_RUN_FILES, then report', workMode: 'isolated_write' }, 'initial-dispatch')]);
       else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'initial-wait')]); }
-      else complete(response, [answer('Initial child result received', 'initial-parent-report')]);
+      else {
+        complete(response, [answer('Initial child result received', 'initial-parent-report')]);
+        parentReply.release();
+      }
       return;
     }
     const step = ++childSteps;
@@ -2434,7 +2462,27 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   const prepared = await h.api.prepareSource({ ...parentIdentity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const parent = await h.api.submit({ ...parentIdentity, key: 'parent', expectedHead: null, text: 'Delegate isolated work and observe its result', model, source: prepared.source });
+  let initialCompleted = false;
+  cleanup.push(async () => {
+    if (initialCompleted) return;
+    const signal = AbortSignal.timeout(1_000);
+    const [run, child] = await Promise.all([
+      h.runtime.run(parent.run_id, signal).catch(() => undefined),
+      operationId ? h.runtime.child(operationId, signal).catch(() => undefined) : undefined,
+    ]);
+    console.error('Initial writable child did not finish before continuation', {
+      parentSteps, childSteps, runState: run?.state, waiting: Boolean(run?.waiting_on),
+      childState: child?.state, childOutcome: child?.report?.outcome, codeResult: child?.code_result.kind,
+      hostErrorTypes: h.errors.map(error => error instanceof Error ? error.name : typeof error),
+    });
+  });
+  // The initial six provider turns, native writes and result capture retain the
+  // existing 45s test budget. Start the terminal-state poll only after the real
+  // parent response, as in the family-conversation fixture above. This barrier
+  // observes the provider; it does not drive, retry or complete the native Run.
+  await waitWithSignal(parentReply.promise, signal);
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  initialCompleted = true;
   const original = await h.runtime.child(operationId);
   if (!original.receipt || original.code_result.kind !== 'published' || !original.report) throw new Error('Original execution did not fix its report and result');
   const childIdentity: ThreadIdentity = { runtime: 'agent', threadId: original.child_thread_id, branchId: original.child_branch_id };
@@ -2477,6 +2525,12 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   expect(finished.launch.source).toBeNull();
   expect((await reopened.runtime.launch(finished.receipt.run_id))!.selection.source).toEqual(finished.source.selection);
   expect(finished.source).toMatchObject({ kind: 'ready', handoff: null, pin: { root: original.code_result.result.root } });
+  expect(finished.source.provenance).toEqual(accepted.source_basis!.provenance);
+  const continuedSource = finished.source, originalResult = original.code_result.result;
+  await reopened.workingStates.withBranchStore(originalResult.workspace_id, 'review-continuation-text-policy', async store => {
+    expect(await store.readTextEncoding(continuedSource.pin.source.branch_id!, 0, { root: continuedSource.pin.root }))
+      .toEqual(await store.readTextEncoding(originalResult.branch_id, originalResult.result_revision, { root: originalResult.root }));
+  }, 'shared', { threadId: original.child_thread_id });
   expect(finished.code_result.result.publication_id).not.toBe(original.code_result.result.publication_id);
   expect(finished.code_result.result.base_root).toBe(original.code_result.result.root);
   expect(finished.report.history_ids.some(id => original.report!.history_ids.includes(id))).toBe(false);
@@ -2494,7 +2548,7 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   }
   expect((await reopened.api.snapshot(childIdentity)).history.filter(item => item.run_id === finished.receipt!.run_id && item.source === 'user').map(item => JSON.stringify(item.content)).join('\n')).toContain('SECOND_RUN_REQUEST');
   expect(parentSteps).toBe(3); expect(childSteps).toBe(6); expect(reopened.errors.map(String)).toEqual([]);
-}, 45_000);
+});
 
 it.each(['report', 'cancel'] as const)('a three-level child tree preserves original owners through %s and leaves its sibling independent', async mode => {
   let parentSteps = 0; let middleSteps = 0; let leafSteps = 0; let siblingSteps = 0;

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { open, readdir, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { DocumentAuthority } from '../documents/authority.js';
+import { inspectDocumentBytes, type InspectDocumentOptions } from '../documents/inspect.js';
+import { textEncodingForResource, type SourceTextEncoding } from '../projects/text-encoding.js';
 import type { WorkingStatePinnedRoot, WorkingStateRootStore, WorkingStateTreeEntry } from '../harness/working-state/types.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
 
@@ -45,12 +47,17 @@ function ioFailure(reader: Pick<ResourceReader, 'domainId' | 'viewId'>, target: 
   if (code === 'ENOTDIR' || code === 'EISDIR') return resourceFailure(reader, target, 'invalid', 'Resource has the wrong file type');
   return resourceFailure(reader, target, 'unavailable', 'Resource owner could not read this view');
 }
-function decode(reader: ResourceReader, target: string, bytes: Uint8Array, canonicalId: string, version: string): ResourceFileResult {
-  try {
-    // Preserve a BOM in captured content. Format parsing, rather than the reader, owns its meaning.
-    const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    return { status: 'ready', reference: { domainId: reader.domainId, viewId: reader.viewId, path: target, canonicalId, version }, content };
-  } catch { return resourceFailure(reader, target, 'invalid', 'Resource is not valid UTF-8'); }
+/** Resource bodies are Unicode; original file bytes use the same strict native codec as Documents. */
+export async function decodeResourceBytes(reader: Pick<ResourceReader, 'domainId' | 'viewId'>, target: string,
+  bytes: Uint8Array, canonicalId: string, version: string, options: InspectDocumentOptions = {}, signal?: AbortSignal): Promise<ResourceFileResult> {
+  signal?.throwIfAborted();
+  const result = await inspectDocumentBytes(bytes, true, options);
+  signal?.throwIfAborted();
+  if (result.kind !== 'text') return resourceFailure(reader, target, 'invalid',
+    result.kind === 'binary' ? 'Resource is binary, not text' : 'Resource encoding is unsupported or invalid');
+  // Keep the parser's existing BOM contract while the codec reports BOM separately from Unicode text.
+  const content = `${result.bom ? '\ufeff' : ''}${result.content}`;
+  return { status: 'ready', reference: { domainId: reader.domainId, viewId: reader.viewId, path: target, canonicalId, version }, content };
 }
 function checkedPath(reader: ResourceReader, target: string): string | ResourceFailure {
   try { return relativeResourcePath(target); }
@@ -64,10 +71,15 @@ export function createPinnedResourceReader(input: {
   pin: WorkingStatePinnedRoot;
   /** Original source receipt coverage, not an inference from the entries that happen to exist. */
   coverage: { kind: 'complete' } | { kind: 'selected'; paths: readonly string[]; subtrees: readonly string[] };
+  /** Exact selected revision policy. A getter may expose newly admitted same-pin symlink targets. */
+  textEncoding?: SourceTextEncoding | (() => SourceTextEncoding);
   /** Instruction-only Host scope derivation from an observed same-pin link, never a disk lookup. */
   admitSymlinkTarget?(finalPath: string): Promise<void>;
 }): ResourceReader {
   const { store, pin } = input;
+  const policy = typeof input.textEncoding === 'function' ? input.textEncoding : (() => {
+    const frozen = structuredClone(input.textEncoding ?? {}); return () => frozen;
+  })();
   const covered = (relative: string, subtree = false): boolean => input.coverage.kind === 'complete'
     || input.coverage.subtrees.some(root => !root || relative === root || relative.startsWith(`${root}/`))
     || (!subtree && input.coverage.paths.includes(relative));
@@ -116,7 +128,8 @@ export function createPinnedResourceReader(input: {
         const bytes = await store.readContent(entry, signal ? { signal } : {});
         signal?.throwIfAborted();
         if (!bytes) return resourceFailure(reader, relative, 'unavailable', 'Pinned content object is unavailable');
-        return decode(reader, relative, bytes, `resource:${reader.domainId}/${entry.path}`, entry.state.objectHash);
+        return await decodeResourceBytes(reader, relative, bytes, `resource:${reader.domainId}/${entry.path}`, entry.state.objectHash,
+          textEncodingForResource(policy(), entry.path), signal);
       } catch (error) { return ioFailure(reader, relative, error, signal); }
     },
     async list(target, signal) {
@@ -189,7 +202,10 @@ export function createDocumentResourceReader(input: {
   domainId: string; viewId: string; workspaceId: string;
   documents: Pick<DocumentAuthority, 'readSnapshot'>;
   list: ResourceReader['list'];
+  /** Capturing a source freezes even Auto; later project edits must not change this candidate. */
+  textEncoding?: SourceTextEncoding;
 }): ResourceReader {
+  const policy = input.textEncoding === undefined ? undefined : structuredClone(input.textEncoding);
   const reader: ResourceReader = {
     domainId: input.domainId, viewId: input.viewId, consistency: 'capture-only',
     async list(target, signal) {
@@ -206,7 +222,11 @@ export function createDocumentResourceReader(input: {
     async read(target, signal) {
       const relative = checkedPath(reader, target); if (typeof relative !== 'string') return relative;
       try {
-        const result = await input.documents.readSnapshot({ workspaceId: input.workspaceId, resourceId: relative }, signal ? { signal } : {});
+        const interpretation = policy === undefined ? undefined : textEncodingForResource(policy, relative);
+        const result = await input.documents.readSnapshot({ workspaceId: input.workspaceId, resourceId: relative }, {
+          ...(signal ? { signal } : {}),
+          ...(interpretation ? { ...interpretation, encoding: interpretation.encoding ?? 'auto' } : {}),
+        });
         signal?.throwIfAborted();
         if (result.status === 'missing') return resourceFailure(reader, relative, 'missing', 'Document is absent');
         if (result.status !== 'ready') return resourceFailure(reader, relative, 'invalid', `Document has unsupported content (${result.status})`);
@@ -221,8 +241,12 @@ export function createDocumentResourceReader(input: {
 /** Read-only local user/package asset adapter. Root admission is supplied by the existing owner.
  * It is deliberately capture-only: a pathname is not an immutable revision or a new permission grant.
  */
-export async function createAdmittedDirectoryReader(input: { domainId: string; viewId: string; root: string }): Promise<ResourceReader> {
+export async function createAdmittedDirectoryReader(input: { domainId: string; viewId: string; root: string; textEncoding?: SourceTextEncoding }): Promise<ResourceReader> {
   const root = await canonicalizePathIdentity(input.root, { allowMissing: true });
+  const policy = structuredClone(input.textEncoding ?? {});
+  // Rules and resolved files must share one physical namespace, including Windows junctions
+  // and short-path aliases. Canonicalize once without changing the frozen relative rules.
+  if (policy.root) policy.root = await canonicalizePathIdentity(policy.root, { allowMissing: true });
   const rootInfo = async () => {
     try { return await stat(root); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
@@ -266,7 +290,8 @@ export async function createAdmittedDirectoryReader(input: { domainId: string; v
             || before.ctimeMs !== after.ctimeMs || await realpath(absolute) !== absolute) {
             return resourceFailure(reader, relative, 'stale', 'Resource changed during capture');
           }
-          return decode(reader, relative, bytes, `file:${absolute}`, contentVersion(bytes));
+          return await decodeResourceBytes(reader, relative, bytes, `file:${absolute}`, contentVersion(bytes),
+            textEncodingForResource(policy, policy.root ? absolute : path.relative(root, absolute)), signal);
         } finally { await file.close(); }
       } catch (error) { return ioFailure(reader, relative, error, signal); }
     },

@@ -3,16 +3,21 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { it } from 'vitest';
+import { afterEach, beforeEach, it } from 'vitest';
 import type { AgentInputSnapshotConsumer } from '@varin/protocol';
 import type { ThreadPrepareSource } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
 import { createSurfaceSnapshotStore } from '../documents/surface-snapshot-store.js';
 import type { RecoveryState, WorkingSourcePreparation, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+// This file's tree is a Host coordination substitute, not a native Storage/codec fixture.
+let releaseCodec: () => void;
+beforeEach(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterEach(() => releaseCodec());
 
 /** Real Documents publications/snapshots and physical bytes; this scoped tree fixture is not Rust evidence. */
 async function fixture() {

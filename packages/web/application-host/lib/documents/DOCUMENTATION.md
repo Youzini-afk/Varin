@@ -23,6 +23,38 @@ lifetimes. Conversation deletion may evict an idle inventory cache, but must wai
 Completed source cleanup forgets only that derived source's registrations; original project registration
 and trust remain intact. Corrupt or foreign-host registry files are reported without overwriting them.
 
+## Text format ownership
+
+`inspect.ts` is a transport adapter onto the existing Rust kernel's `text.decode` and `text.serialize`,
+not a second codec or writer. The existing content streams carry large bodies in bounded frames;
+the frame size is not a new document-size limit. Storage still owns byte revisions, conditional writes,
+original before-images and operation receipts. GBK-compatible text and UTF-16 share that same path.
+
+Reads carry the actual format separately from raw revision. Writes retain the original interpretation,
+BOM and line boundaries unless the caller explicitly changes them. Unrepresentable text remains a
+Unicode draft; only serialization to disk fails. Crash journals stay UTF-8 JSON and retain target-format
+intent independently of whether the file's codec can encode the draft. Project interpretation comes
+from the original canonical registration, not the current execution mount. Remembering an explicit
+reopen or conversion updates the existing Host project configuration, not repository files.
+
+Before a save dispatch, Registry journals its exact pending request alongside the latest Unicode draft.
+If the raw write succeeds but preference coordination is interrupted, read verifies the original
+Storage receipt against the current raw hash and can finish only that preference step. The journal's
+CAS-protected completion marker prevents future reads from replaying an old interpretation. Recovery
+consumes the same operation ID before rebasing newer text edits; it never overwrites changed external bytes.
+Editor range edits carry UTF-16 baseline-relative spans through workspace edits, capture and recovery.
+Only Rust reconstructs raw bytes or computes fallback text differences; untouched mixed line endings
+and non-bijective legacy-codec spans remain tied to the original revision.
+
+Three-way integration interprets each immutable raw state from its exact native format receipt when
+available, then its original captured source rules. The live parent uses its own interpretation.
+A shell can silently produce bytes valid under more than one codec; bytes alone cannot prove that a
+transcode occurred. In that case the original explicit source rule remains the contract. Actual decode
+failures, unrepresentable merged output and content conflicts are reported without blocking ordinary
+legacy-encoded shell edits merely because there is no text-operation receipt.
+
+
+
 ## Entrypoints
 
 - `authority.ts`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals, immutable Thread source captures, and authenticated Surface operations for Integration, recovery and workspace edits. Production binds the Rust file-resource backend: write/move/delete and mixed surface/disk operations use its exact/subtree gate and conditional filesystem operations. `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` after physical-root admission. `admitWorkspaceRegistration(workspaceId, signal?)` checks the original Host registration and current deployment trust without reopening that directory; its `canonicalPath` identifies a configuration namespace, not a physical capability. Both methods are Host-only collaborators, not renderer DocumentsAPI methods.
@@ -31,8 +63,8 @@ and trust remain intact. Corrupt or foreign-host registry files are reported wit
   surface body channel, and simulates text versions, create/rename/delete options and annotations.
   Apply validates the whole plan before the first effect, then records disk and buffer dispatches in
   the existing Rust recovery store under one `workspace-edit` operation. No Agent Run is required.
-- `line-ending.ts` — detect / normalize / serialize editor line endings so Registry buffers stay LF while snapshots keep the file's original endings.
-- `surface-snapshot-store.ts` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including encoding/BOM metadata, editor `bufferHash`, `lineEnding`, and content serialized with its original line endings so consumers can reproduce save bytes. Each snapshot belongs to its original Thread and branch. Explicit release, owner withdrawal and Host disposal release content references. Captures stay immutable: disk writes and later Surface receipts never rewrite their captured bytes. The internal clone operation lets Thread preparation copy a validated snapshot into persistent WorkingState; it is not a renderer route.
+- `line-ending.ts` — detect / normalize editor line endings for Unicode buffers; native serialization owns file bytes.
+- `surface-snapshot-store.ts` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including original raw baseline, format metadata, exact edit spans, editor `bufferHash`, and explicit line-ending intent. Native serialization materializes requested source bytes. Each snapshot belongs to its original Thread and branch. Explicit release, owner withdrawal and Host disposal release content references. Captures stay immutable: disk writes and later Surface receipts never rewrite their captured bytes. The internal clone operation lets Thread preparation copy a validated snapshot into persistent WorkingState; it is not a renderer route.
 - `routes.ts`: `registerDocumentRoutes(app, { documents, uiAuthController })` — authenticated `/api/documents/*` routes.
 - `capability.ts`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
 - `contract-fixtures.ts`: shared Web contract fixtures.

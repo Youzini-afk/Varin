@@ -189,14 +189,15 @@ export const createVarinProjectConfigStore = (
       });
     }
     const snapshot = await resolveTextSnapshot(path, project);
-    const encoding = snapshot.result.status === 'ready' ? snapshot.result.encoding : 'utf-8';
-    const bom = snapshot.result.status === 'ready' ? snapshot.result.bom : false;
+    const encoding = snapshot.result.status === 'ready' ? snapshot.result.encoding : snapshot.result.status === 'missing' ? snapshot.result.format?.encoding ?? 'utf-8' : 'utf-8';
+    const bom = snapshot.result.status === 'ready' ? snapshot.result.bom : snapshot.result.status === 'missing' ? snapshot.result.format?.bom ?? false : false;
     const result = await snapshot.documents.write({
       token: mutationToken(snapshot, project),
       resource: snapshot.resource,
       content: `${JSON.stringify(config, null, 2)}\n`,
       encoding,
       bom,
+      ...(snapshot.result.status === 'ready' && snapshot.result.format ? { sourceFormat: snapshot.result.format } : {}),
       expectedRevision,
       operationId: crypto.randomUUID(),
     });
@@ -250,7 +251,7 @@ export const createVarinProjectConfigStore = (
     const snapshot = await resolveTextSnapshot(path, project);
     if (snapshot.result.status === 'missing') return null;
     if (snapshot.result.status !== 'ready') {
-      throw new VarinProjectConfigError('Project text resource is not UTF text', { path, reason: 'unsupported' });
+      throw new VarinProjectConfigError('Project text resource is not supported text', { path, reason: 'unsupported' });
     }
     return snapshot.result.content;
   };
@@ -265,8 +266,9 @@ export const createVarinProjectConfigStore = (
       token: mutationToken(snapshot, project),
       resource: snapshot.resource,
       content,
-      encoding: snapshot.result.status === 'ready' ? snapshot.result.encoding : 'utf-8',
-      bom: snapshot.result.status === 'ready' ? snapshot.result.bom : false,
+      encoding: snapshot.result.status === 'ready' ? snapshot.result.encoding : snapshot.result.status === 'missing' ? snapshot.result.format?.encoding ?? 'utf-8' : 'utf-8',
+      bom: snapshot.result.status === 'ready' ? snapshot.result.bom : snapshot.result.status === 'missing' ? snapshot.result.format?.bom ?? false : false,
+      ...(snapshot.result.status === 'ready' && snapshot.result.format ? { sourceFormat: snapshot.result.format } : {}),
       expectedRevision: snapshot.result.status === 'ready' ? snapshot.result.revision : null,
       operationId: crypto.randomUUID(),
     });

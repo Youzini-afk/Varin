@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageServicesError } from '@varin/application-client';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@varin/application-client';
+import { installRuntimeEndpointFetchFixture } from '../../test/runtime-endpoint.fixture.js';
+
+installRuntimeEndpointFetchFixture();
 
 const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
 

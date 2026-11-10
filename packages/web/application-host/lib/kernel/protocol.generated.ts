@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 83 as const;
+export const KERNEL_PROTOCOL_VERSION = 84 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.entry.resolve","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,9 +11,11 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.driver.finish","runtime
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["runtime.driver.model","runtime.driver.tool","runtime.driver.wait","process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.child.user.receipt":"branchId","runtime.child.user.accept":"branchId","runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.finish","runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v83" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v84" as const;
 
 export type KernelMethod =
+  | "text.decode"
+  | "text.serialize"
   | "runtime.followup.eventAttachment.read"
   | "runtime.followup.eventTransport.get"
   | "runtime.followup.sourceRoute.put"
@@ -307,6 +309,7 @@ export type KernelMethod =
   | "storage.object.rebindOwner"
   | "file.read.check"
   | "file.read"
+  | "file.text.conversions"
   | "file.root.register"
   | "file.operation.list"
   | "file.operation.reconcile"
@@ -499,6 +502,59 @@ export type KernelMethod =
 export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory","capsule-sky","pillar-lilac","lozenge-mint","wedge-apricot","arch-butter","oval-rose","squircle-periwinkle","shield-sage","sail-ivory","lean-coral","bridge-aqua","crest-lilac","step-blue","offset-peach","orbit-sage","cushion-ochre","curve-mint","bevel-rose","drift-blue","stack-ivory","tilt-pistachio","fan-coral","mound-lavender","tab-butter","span-jade","ripple-peach","facet-blue","comma-lilac","inset-sage","pocket-rose","rise-ivory","sweep-aqua","bend-ochre","twin-periwinkle","arc-apricot","tuck-jade","plate-lavender","drop-melon","ribbon-blue","cove-sage","terrace-ivory","slide-rose","ramp-mint","echo-ochre","lens-lilac","ledge-aqua","swell-apricot","parcel-periwinkle","scoop-pistachio","beam-coral","chamfer-jade","float-butter"] as const;
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
+
+export interface KernelProcessChannelEnd {
+  channel: 'stdout' | 'stderr';
+  offset: number;
+  error?: string;
+}
+
+export interface KernelProcessSourceRange {
+  offset: number;
+  byteLength: number;
+}
+
+export interface KernelTextPolicy {defaultEncoding?:string;files?:Record<string,string>;root?:string;choiceRevisions?:Record<string,number>;}
+
+export interface KernelTextFormat {
+  encoding: string;
+  bom: boolean;
+  lineEnding: 'lf' | 'crlf' | 'cr' | 'mixed' | 'none';
+  defaultLineEnding: 'lf' | 'crlf' | 'cr';
+  source: string;
+}
+
+export interface KernelTextTargetFormat {
+  encoding?: string;
+  bom?: boolean;
+  lineEnding?: string;
+}
+
+export interface KernelTextEdit {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface KernelTextDecodeParams {
+  bytesBase64: string;
+  encoding?: string;
+  defaultEncoding?: string;
+  includeContent?: boolean;
+}
+
+export interface KernelTextSerializeParams {
+  content: string;
+  sourceBytesBase64?: string;
+  sourceFormat?: KernelTextFormat;
+  targetFormat?: KernelTextTargetFormat;
+  normalizeLineEndings?: boolean;
+  edits?: KernelTextEdit[];
+}
+
+export type KernelTextDecodeResult = {kind:'text';content?:string;format:KernelTextFormat;byteLength:number} | {kind:'binary'|'unsupported-encoding';byteLength:number;message:string;candidates:string[]};
+
+export type KernelTextSerializeResult = {kind:'serialized';bytesBase64:string;format:KernelTextFormat;byteLength:number} | {kind:'unrepresentable';encoding:string;position:number;character:string;message:string} | {kind:'invalid'|'binary'|'unsupported-encoding';message:string};
 
 export type BotWorkPendingParams = Record<string, never>;
 
@@ -2826,12 +2882,25 @@ export interface KernelFileReadCheckParams {
   path: string;
 }
 
+export interface KernelFileTextConversionsParams {
+  workspaceId: string;
+  rootId: string;
+  path?: string;
+  cursor?: string;
+  pageSize?: number;
+}
+
 export interface KernelFileReadParams {
   workspaceId: string;
   rootId: string;
   path: string;
   offset?: number;
   length?: number;
+  encoding?: string;
+  defaultEncoding?: string;
+  raw?: boolean;
+  startLine?: number;
+  endLine?: number;
 }
 
 export interface RecoveryLabelsParams {
@@ -2855,6 +2924,8 @@ export interface LanguageQuery {
   character?: number;
   query?: string;
   direction?: "incoming" | "outgoing";
+  encoding?: string;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface RecoveryAnchor {
@@ -3050,7 +3121,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 83; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 84; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -4439,6 +4510,8 @@ export interface KernelProcessSpawnParams {
   stdinMode?: string;
   cols?: number;
   rows?: number;
+  inputEncoding?: string;
+  outputEncoding?: string;
 }
 
 export type ProcessOutputMode = 'text' | 'raw' | 'screen';
@@ -4458,7 +4531,9 @@ export interface KernelProcessWriteParams {
   processId: string;
   rootId?: string;
   operationId: string;
-  bytesBase64: string;
+  bytesBase64?: string;
+  text?: string;
+  encoding?: string;
   eof?: boolean;
 }
 
@@ -4514,6 +4589,8 @@ export interface KernelProcessSnapshot {
   outputAvailable: boolean;
   outputComplete?: boolean;
   outputError?: string | null;
+  inputEncoding?: string;
+  outputEncoding?: string;
 }
 
 export interface KernelProcessInput {
@@ -4527,6 +4604,11 @@ export interface KernelProcessOutputChunk {
   offset: number;
   bytesBase64: string;
   text?: string;
+  byteLength?: number;
+  encoding?: string;
+  encodingSource?: string;
+  encodingReason?: string;
+  sourceRanges?: KernelProcessSourceRange[];
 }
 
 export interface KernelProcessScreenCursor {
@@ -4557,6 +4639,8 @@ export interface KernelProcessReadResult {
   inputError: string | null;
   outputComplete: boolean;
   outputError: string | null;
+  channelEnds?: KernelProcessChannelEnd[];
+  textChunks?: KernelProcessOutputChunk[];
 }
 
 export interface KernelProcessInteractionBase {
@@ -4661,6 +4745,7 @@ export interface KernelWorkspaceForkParams {
   targetBranchId: string;
   operationId: string;
   sourcePath?: string;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface KernelWorkspaceResultPrepareParams {
@@ -5275,6 +5360,7 @@ export interface KernelCreateBranchBeginParams {
   draftBasePaths: string[];
   captureScopes: string[];
   sourceProvenance?: KernelSourceProvenanceReference;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface KernelCreateBranchAppendParams {
@@ -5378,6 +5464,7 @@ export interface KernelBranchForkParams {
   draftBasePaths: string[];
   captureScopes: string[];
   sourceProvenance?: KernelSourceProvenanceReference;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface KernelBranchWriteAppendParams {
@@ -5714,6 +5801,7 @@ export interface KernelBranchReadResult {
   branchId: string;
   workspaceId: string;
   root: string;
+  textEncoding?: KernelTextPolicy;
   revision: number;
   view: "current" | "revision";
   currentRoot: string;
@@ -5810,6 +5898,7 @@ export interface KernelComputeObject {
   objectHash?: string;
   ownerId?: string;
   missing?: boolean;
+  encoding?: string;
 }
 
 export interface KernelComputeFile {
@@ -5817,7 +5906,9 @@ export interface KernelComputeFile {
   recipeId?: string;
   revision?: string;
   unchangedRevision?: string;
+  unchangedTextIdentity?: string;
   lines?: number[];
+  encoding?: string;
 }
 
 export interface KernelComputeStartParams {
@@ -5859,6 +5950,9 @@ export interface KernelComputeStartParams {
   queries?: string[];
   pathsOnly?: boolean;
   paged?: boolean;
+  encoding?: string;
+  defaultEncoding?: string;
+  textEncoding?: KernelTextPolicy;
 }
 
 export interface KernelComputeReadParams {
@@ -5944,7 +6038,7 @@ export interface SourceDraftResource { workspaceId: string; resourceId: string; 
 
 export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }
 
-export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
+export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture; textEncoding?: KernelTextPolicy };
 
 export type ChildSource = { kind: 'project'; handoff?: never; project: ChildProjectSource; source_path: string | null } | { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
@@ -6756,7 +6850,7 @@ export interface ExecutionShell {id:string;name:string;executable:string;path?:s
 
 export interface ExecutionEnvironment {searchPath?:string;platform:string;defaultShell:string|null;shells:ExecutionShell[];}
 
-export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
+export interface SourceToolBinding { textEncoding?:KernelTextPolicy; executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
 export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
 
@@ -6766,7 +6860,7 @@ export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostI
 
 export interface SourceAuthorityScopeParams { principalId:string;coordinatorHostId:string;threadId:string;runId:string; }
 
-export type SourceResourceAction = {kind:'read';path:string;offset:number;length:number|null;start_line?:number;end_line?:number}
+export type SourceResourceAction = {kind:'read';path:string;offset:number;length:number|null;start_line?:number;end_line?:number;encoding?:string;raw?:boolean}
  | {kind:'language_source';path:string;derived_view:unknown|null}
  | {kind:'retrieval_source';paths:string[]|null}
  | {kind:'child_source_handoff';delegation:ChildSourceDelegation}
@@ -7211,6 +7305,8 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "text.decode": KernelTextDecodeParams;
+  "text.serialize": KernelTextSerializeParams;
   "runtime.followup.eventAttachment.read": FollowupEventAttachmentReadParams;
   "runtime.followup.eventTransport.get": EventTransportKey;
   "runtime.followup.sourceRoute.put": FollowupSourceRoute;
@@ -7503,6 +7599,7 @@ export type KernelMethodParams = {
   "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
   "file.read.check": KernelFileReadCheckParams;
   "file.read": KernelFileReadParams;
+  "file.text.conversions": KernelFileTextConversionsParams;
   "file.root.register": KernelFileRootRegisterParams;
   "file.operation.list": KernelFileOperationListParams;
   "file.operation.reconcile": KernelFileOperationReconcileParams;
@@ -7695,6 +7792,24 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "text.decode";
+      params: KernelTextDecodeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "text.serialize";
+      params: KernelTextSerializeParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
@@ -10320,6 +10435,15 @@ export type KernelRequest =
       id: string;
       method: "file.read";
       params: KernelFileReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.text.conversions";
+      params: KernelFileTextConversionsParams;
       epoch?: string;
       grantId?: string;
     }

@@ -540,9 +540,12 @@ impl Storage {
         if input.source_provenance.is_some() {
             creation["sourceProvenance"] = params["sourceProvenance"].clone();
         }
+        if let Some(policy)=params.get("textEncoding") { creation["textEncoding"] = policy.clone(); }
+        let text_source = match &input.source_pin_id { Some(pin)=>format!("pin:{pin}"),None=>format!("{}@{}",input.source_branch_id,self.branch(&input.source_branch_id)?.head_revision) };
         self.filesystem_transaction(|storage|{
             let created=storage.create_branch(&creation,grant_id)?;
             if created["created"]==true{
+                storage.capture_branch_text_snapshot(&input.branch_id,&root,Some(&text_source),params.get("textEncoding"))?;
                 let grant=storage.load_grant(grant_id)?;
                 storage.fork_source_filesystem(&input.source_branch_id,&input.branch_id,input.source_pin_id.as_deref(),&root,&grant)?;
             }

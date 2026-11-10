@@ -1618,6 +1618,7 @@ impl Storage {
             ));
         }
         if expected_type == "working.result" {
+            self.clear_fixed_text_snapshots();
             let branch_id = value
                 .get("branchId")
                 .and_then(Value::as_str)
@@ -2199,9 +2200,15 @@ impl Storage {
             Value::String(record_type.to_string()),
         );
         translated_object.insert("state".to_string(), Value::String(state.to_string()));
+        let mut document = document.clone();
+        if record_type == "working.result" {
+            // A caller-authored legacy put has no original candidate watermark.
+            // Do not manufacture historical interpretation from today's receipt.
+            document.as_object_mut().expect("validated working document").remove("textFormats");
+        }
         translated_object.insert(
             "payloadJson".to_string(),
-            Value::String(serde_json::to_string(document)?),
+            Value::String(serde_json::to_string(&document)?),
         );
         let value = self.domain_record_put_inner(&translated, grant_id, true)?;
         let payload = value

@@ -111,7 +111,9 @@ it("R5 constrains candidates by grant scope before matching or budget",async()=>
 });
 it("R5 reads UTF-8 matches with UTF-16 columns and same-revision context",async()=>{
   const f=await fixture();const result=await f.service.text("ws",[{path:"a.ts",revision:"draft",text:"head\n中文😀 needle\ntail"}],{lane:"foreground",operation:"search",query:"needle",before:1,after:1});
-  assert.equal(result.status,"ready");assert.deepEqual(data(result.records[0]!),{line:2,column:6,preview:"中文😀 needle",before:["head"],after:["tail"]});
+  assert.equal(result.status,"ready");assert.deepEqual(data(result.records[0]!),{line:2,column:6,preview:"中文😀 needle",before:["head"],after:["tail"],
+    format:{encoding:"utf-8",bom:false,lineEnding:"lf",defaultLineEnding:"lf",source:"explicit"},
+    textIdentity:createHash("sha256").update("draft:utf-8:false").digest("hex")});
   const bad=await f.service.text("ws",[{path:"a.ts",revision:"draft",text:"foo"}],{lane:"foreground",operation:"search",query:"["});assert.equal(bad.status,"failed");
 });
 it("R5 retained readers survive caller unpin, branch delete and concurrent GC",async()=>{

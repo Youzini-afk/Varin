@@ -1,13 +1,15 @@
 import {nativeExecutionWorkspaceId} from './native-workspaces.js';
 /** Storage-side child preparation. The caller has already admitted the original source
  * owner; these functions neither create a Catalog Run nor mint a resource grant. */
-import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource, ChildPreparationProgress } from './protocol.generated.js';
+import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource, ChildPreparationProgress, KernelTextPolicy } from './protocol.generated.js';
 import type { WorkingStateRootStore, WorkingStatePin } from '../harness/working-state/types.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
-import { buildThreeWayMergePlan } from '../harness/working-state/three-way-merge.js';
+import { buildThreeWayMergePlan, type PathTextInterpretations } from '../harness/working-state/three-way-merge.js';
 import type { ChildPhysicalCapture } from './child-source-capture.js';
 import { scopeFixedSourceResources } from './scoped-source-resources.js';
+import { textEncodingForResource } from '../projects/text-encoding.js';
+import { inspectDocumentBytes, serializeDocumentText } from '../documents/inspect.js';
 
 export interface ChildSourcePreparation {
   source: LaunchSource;
@@ -23,6 +25,46 @@ export interface ChildSourceStoreOwners {
   nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner|undefined;
   /** The original physical handoff, checked by the source owner before opening it. */
   physical(root: { rootId: string; canonicalRoot: string }): Promise<WorkingStateRootStore>;
+}
+
+/** The selected immutable revision owns its format choices, including unchanged ASCII bytes. */
+async function fixedTextEncoding(store: WorkingStateRootStore, branchId: string, revision: number,
+  root: string | undefined, signal: AbortSignal): Promise<KernelTextPolicy> {
+  return store.readTextEncoding(branchId, revision, { signal, ...(root === undefined ? {} : { root }) });
+}
+
+/** Rebase original source-relative rules exactly once with an already accepted subtree pin. */
+function scopedTextEncoding(policy: KernelTextPolicy, prefix: string): KernelTextPolicy {
+  const insensitive = /^[a-z]:/i.test(policy.root ?? '') || policy.root?.startsWith('//');
+  const comparablePrefix = insensitive ? prefix.toLowerCase() : prefix;
+  const project = <T>(values: Record<string, T> | undefined): Record<string, T> => {
+    const scoped: Record<string, T> = Object.create(null);
+    let inherited: { length: number; value: T } | undefined;
+    for (const [file, value] of Object.entries(values ?? {})) {
+      const comparableFile = insensitive ? file.toLowerCase() : file;
+      const directory = comparableFile.endsWith('/');
+      const rule = comparableFile === './' ? '' : directory ? comparableFile.slice(0, -1) : comparableFile;
+      if (directory && (!rule || comparablePrefix === rule || comparablePrefix.startsWith(`${rule}/`))) {
+        if (!inherited || rule.length > inherited.length) inherited = { length: rule.length, value };
+      } else if (comparableFile.startsWith(`${comparablePrefix}/`)) {
+        scoped[file.slice(prefix.length + 1)] = value;
+      }
+    }
+    if (inherited) scoped['./'] = inherited.value;
+    return scoped;
+  };
+  const files = project(policy.files);
+  const choiceRevisions = project(policy.choiceRevisions);
+  return { ...(policy.defaultEncoding ? { defaultEncoding: policy.defaultEncoding } : {}),
+    ...(policy.root ? { root: `${policy.root.replace(/\\/g, '/').replace(/\/$/, '')}/${prefix}` } : {}),
+    ...(Object.keys(files).length ? { files } : {}),
+    ...(Object.keys(choiceRevisions).length ? { choiceRevisions } : {}) };
+}
+
+function draftEncoding(provenance: ChildSourceProvenance | undefined, file: string): string | undefined {
+  const drafts = provenance && ('drafts' in provenance ? provenance.drafts
+    : provenance.consistency === 'fixed-root' ? provenance.selection?.drafts : undefined);
+  return drafts?.resources.find(resource => resource.resourceId === file)?.encoding;
 }
 
 export async function prepareChildSourceStore(
@@ -56,8 +98,14 @@ export async function prepareDispatchSourceStore(
       { root: fixed.root, revision: fixed.source.revision, writeRevision: fixed.source.revision }, signal);
     const original = await store.readOriginalSource(fixed.source.branch_id, { signal });
     const resources=original?.provenance.resources;
-    provenance = { consistency: 'fixed-root', root: fixed.root, ...(resources ? { resources: handoff.source_path && handoff.root.kind !== 'native'
-      ? await scopeFixedSourceResources(store,{branchId:fixed.source.branch_id,revision:fixed.source.revision},resources,handoff.source_path,signal) : resources } : {}) };
+    const selectedPath = handoff.root.kind === 'fixed' ? handoff.source_path?.replace(/\\/g, '/').replace(/\/$/, '') : undefined;
+    const prefix = selectedPath && selectedPath !== '.' ? selectedPath : undefined;
+    // branch.read validates the original full revision itself. A subtree pin has
+    // a different root, so it cannot be compared with that full revision root.
+    const policy = await fixedTextEncoding(store, fixed.source.branch_id, fixed.source.revision, prefix ? undefined : fixed.root, signal);
+    const textEncoding = prefix ? scopedTextEncoding(policy, prefix) : policy;
+    provenance = { consistency: 'fixed-root', root: fixed.root, textEncoding, ...(resources ? { resources: handoff.source_path && handoff.root.kind !== 'native'
+      ? await scopeFixedSourceResources(store,{branchId:fixed.source.branch_id,revision:fixed.source.revision},resources,handoff.source_path,signal,policy) : resources } : {}) };
     const branch = await store.createBranchFromPin(workspace, sourceBranch, pin,
       `${fixed.source.branch_id}@${fixed.source.revision}`, undefined, [], { sourceProvenance: provenance });
     if (branch.baseRoot !== fixed.root) throw new Error('Child source root changed');
@@ -110,8 +158,12 @@ export async function prepareContinuationSourceStore(
     if (pin.root !== basis.root) throw new Error('Continuation source root changed');
     signal.throwIfAborted();
     const branchId = `child-source:${child.execution_id}`;
+    const textEncoding = await fixedTextEncoding(store, basis.source.branch_id, basis.source.revision, basis.root, signal);
+    // Catalog accepted this exact provenance before preparation. Storage owns
+    // the selected revision's policy separately; do not rewrite that receipt.
+    const provenance = basis.provenance;
     const branch = await store.createBranchFromPin(basis.source.workspace_id, branchId, pin,
-      `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: basis.provenance });
+      `${basis.source.branch_id}@${basis.source.revision}`, undefined, [], { sourceProvenance: provenance, textEncoding });
     if (branch.baseRoot !== basis.root) throw new Error('Continuation branch has a different fixed baseline');
     const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
     signal.throwIfAborted();
@@ -119,7 +171,7 @@ export async function prepareContinuationSourceStore(
       mode: child.selected_profile.work_mode === 'isolated_write' ? 'native_workspace' : 'fixed_branch', live_root: null,
       workspace_id: basis.source.workspace_id, execution_workspace_id:child.selected_profile.work_mode==='isolated_write'?nativeExecutionWorkspaceId(child.execution_id):basis.source.execution_workspace_id,
       branch_id: branchId, revision:child.selected_profile.work_mode==='isolated_write'?null:0 };
-    return { source, pin: { pin_id: retained.pinId, root: retained.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance: basis.provenance };
+    return { source, pin: { pin_id: retained.pinId, root: retained.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance };
   } finally { if (!handoffPin) await pin.release(); }
 }
 
@@ -130,15 +182,20 @@ export async function captureContinuationStage(child: DelegatedExecution, owners
   if (await owners.store.readSourcePreparation(branchId, { signal })) return;
   if(source.mode==='native_workspace'){
     if(!owners.nativeWorkspaces)throw new Error('Native continuation source is unavailable');
-    await owners.nativeWorkspaces.snapshot(source,branchId,`child-incoming-snapshot:${child.execution_id}`,signal);return;
+    const admitted = await owners.nativeWorkspaces.open(source, signal);
+    const native = await owners.nativeWorkspaces.acquire(source, admitted.grant, signal);
+    const workspace = await owners.capture.documents.resolveWorkspace({ path: native.path });
+    const textEncoding = await owners.capture.documents.resolveTextEncodingPolicy?.(workspace.workspaceId) ?? {};
+    await owners.nativeWorkspaces.snapshot(source,branchId,`child-incoming-snapshot:${child.execution_id}`,signal,undefined,{ textEncoding });return;
   }
   if (source.mode === 'fixed_branch' || source.mode === 'materialized' && !physical) {
     if (!source.branch_id || source.revision === null) throw new Error('Incoming source is incomplete');
     const pin = await owners.store.pinBranch(source.branch_id, { revision: source.revision, signal });
     try {
       const original = await owners.store.readOriginalSource(source.branch_id, { signal });
+      const textEncoding = await fixedTextEncoding(owners.store, source.branch_id, source.revision, pin.root, signal);
       await owners.store.createBranchFromPin(source.workspace_id, branchId, pin, `${source.branch_id}@${source.revision}`, undefined, [],
-        { sourceProvenance: { consistency: 'fixed-root', root: pin.root, ...(original?.provenance.resources ? { resources: original.provenance.resources } : {}) } });
+        { sourceProvenance: { consistency: 'fixed-root', root: pin.root, textEncoding, ...(original?.provenance.resources ? { resources: original.provenance.resources } : {}) } });
     } finally { await pin.release(); }
     return;
   }
@@ -166,10 +223,37 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
     const result = basis.result ? await store.getResult(basis.result.branch_id, basis.result.result_revision, { signal }) : null;
     if (basis.result && (!result || result.root !== basis.root)) throw new Error('Previous result changed');
     const changes = result?.changedPaths ?? [];
-    const allPaths = [...new Set([...paths, ...changes])];
+    const formatPaths = Object.keys(result?.textFormats ?? {});
+    const allPaths = [...new Set([...paths, ...changes, ...formatPaths])];
     const states = await store.readStateSlice(incomingBranch, allPaths, { revision: 0, signal });
     if (!states) throw new Error('Incoming stage content is unavailable');
-    const plan = await buildThreeWayMergePlan({ operationId: `child-refresh:${child.execution_id}`,
+    const original = result ? await store.readOriginalSource(result.branchId, { signal }) : null;
+    const basePolicy = result ? await fixedTextEncoding(store, result.branchId, 0, result.baseRoot, signal) : {};
+    const childPolicy = result ? await fixedTextEncoding(store, result.branchId, result.resultRevision, result.root, signal) : basePolicy;
+    const incomingPolicy = await fixedTextEncoding(store, incomingBranch, 0, incoming.branch.baseRoot, signal);
+    const interpretations: Record<string, PathTextInterpretations> = Object.fromEntries(changes.map(file => {
+      const format = result?.textFormats?.[file];
+      const baseEncoding = format?.base?.encoding ?? draftEncoding(original?.provenance ?? basis.provenance, file);
+      return [file, {
+        base: baseEncoding ? { encoding: baseEncoding } : textEncodingForResource(basePolicy, file),
+        parent: textEncodingForResource(incomingPolicy, file),
+        child: format?.child ? { encoding: format.child.encoding } : textEncodingForResource(childPolicy, file),
+      }];
+    }));
+    const selectedFiles = { ...incomingPolicy.files };
+    // Format-only choices may have no raw diff. Carry them only when the incoming
+    // state is still the exact state whose interpretation the result retained.
+    if (result && formatPaths.length) {
+      const fixed = await store.readStateSlice(result.branchId, formatPaths, { revision: result.resultRevision, signal });
+      if (!fixed) throw new Error('Previous result format states are unavailable');
+      for (const file of formatPaths) {
+        const format = result.textFormats?.[file]?.child;
+        const previous = fixed[file], current = states[file];
+        if (format && previous?.kind === 'regular-file' && current?.kind === 'regular-file'
+          && previous.objectHash === current.objectHash && previous.byteLength === current.byteLength) selectedFiles[file] = format.encoding;
+      }
+    }
+    const plan = await buildThreeWayMergePlan({ interpretations, operationId: `child-refresh:${child.execution_id}`,
       workspaceId: basis.source.workspace_id, threadId: child.child_thread_id, resultRevision: result?.resultRevision ?? 0,
       allPaths: changes, baseState: result?.baseStates ?? {}, parentState: states, childState: result?.pathStates ?? {},
       readContent: state => state.kind === 'regular-file' ? store.getObject(state.objectHash) : Promise.resolve(null) });
@@ -177,14 +261,34 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
     try {
       for (const path of plan.paths) {
         signal.throwIfAborted();
-        if (path.decision === 'apply-child') states[path.path] = path.childState;
-        else if (path.mergedText !== undefined || path.conflictMarkers !== undefined) {
-          const object = await store.putObject(Buffer.from(path.mergedText ?? path.conflictMarkers!, 'utf8'));
+        if (path.mergedText !== undefined || path.conflictMarkers !== undefined) {
+          const baseline = path.parentState.kind === 'regular-file' ? await store.getObject(path.parentState.objectHash) : null;
+          const format = path.textFormat;
+          if (!baseline || !format) throw new Error('Refreshed text has no original format baseline');
+          const serialized = await serializeDocumentText({ content: path.mergedText ?? path.conflictMarkers!,
+            encoding: format.encoding, bom: format.bom, sourceBytes: baseline, sourceFormat: format, normalizeLineEndings: false });
+          const object = await store.putObject(serialized.bytes);
           if (object.release) owned.push(object.release);
+          selectedFiles[path.path] = serialized.format.encoding;
           states[path.path] = { kind: 'regular-file', objectHash: object.hash, byteLength: object.byteLength,
             ...((path.mergedMode ?? (path.childState.kind === 'regular-file' ? path.childState.mode : undefined)) === undefined ? {}
-              : { mode: path.mergedMode ?? (path.childState.kind === 'regular-file' ? path.childState.mode : undefined) }) };
-        } else if (path.decision === 'conflict') states[path.path] = path.childState;
+              : { mode: path.mergedMode ?? (path.childState.kind === 'regular-file' ? path.childState.mode : undefined) }),
+            ...(path.mergedNative ? { native: path.mergedNative } : {}) };
+        } else if (path.mergedState || path.decision === 'apply-child' || path.decision === 'conflict') {
+          const selected = path.mergedState ?? path.childState;
+          states[path.path] = selected;
+          if (selected.kind === 'regular-file') {
+            const bytes = await store.getObject(selected.objectHash);
+            if (!bytes) throw new Error('Previous result content is unavailable');
+            const keepsIncomingBytes = path.mergedState && path.parentState.kind === 'regular-file'
+              && selected.objectHash === path.parentState.objectHash;
+            const interpretation = keepsIncomingBytes
+              ? textEncodingForResource({ ...incomingPolicy, files: selectedFiles }, path.path) : interpretations[path.path]?.child;
+            const decoded = await inspectDocumentBytes(bytes, false, interpretation);
+            const encoding = decoded.kind === 'text' ? decoded.format.encoding : interpretation?.encoding;
+            if (encoding) selectedFiles[path.path] = encoding;
+          }
+        }
       }
       const conflicts=new Set(plan.conflictPaths);
       // A file/deletion replacing a directory also owns its descendants. Keep
@@ -205,7 +309,7 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
       if (!merged) merged = await store.createBranch(basis.source.workspace_id, provisional, states);
       const provenance: ChildSourceProvenance = { consistency: 'refreshed-root', root: merged.baseRoot,
         previousRoot: basis.root, incoming: basis.incoming, incomingRoot: incoming.branch.baseRoot,
-        conflicts: [...conflicts].sort(), ...(incoming.provenance.resources ? { resources: incoming.provenance.resources } : {}) };
+        conflicts: [...conflicts].sort(), textEncoding: { ...incomingPolicy, ...(Object.keys(selectedFiles).length ? { files: selectedFiles } : {}) }, ...(incoming.provenance.resources ? { resources: incoming.provenance.resources } : {}) };
       const pin = await store.pinBranch(provisional, { revision: 0, signal });
       try {
         await store.createBranchFromPin(basis.source.workspace_id, branchId, pin, `${provisional}@0`, undefined, [], { sourceProvenance: provenance });
@@ -218,6 +322,8 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
   const source: LaunchSource = { ...basis.source, mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'native_workspace',
     live_root: null, environment_run_id: null, branch_id: branchId, revision:child.selected_profile.work_mode==='isolated_write'?null:0,
     execution_workspace_id:child.selected_profile.work_mode==='isolated_write'?nativeExecutionWorkspaceId(child.execution_id):basis.source.execution_workspace_id };
+  // The captured incoming root is already scoped; the new branch owns that root.
+  delete source.native_scope;
   return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance: prepared.provenance };
 }
 

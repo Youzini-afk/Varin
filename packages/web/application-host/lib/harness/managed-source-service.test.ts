@@ -57,7 +57,7 @@ function fixture() {
     start: async () => ({ hostId: 'target' }), issueGrant, claimManagedChildSource, sourceRequest,
     sourceAuthorityGrant: (authority: SourceAuthorityResult) => {
       const grant = grants.get(authority.grantId); if (!grant) throw new Error('Original permit missing'); return grant;
-    }, scoped: () => ({ readBranch, fileMaterialize, fileRootRegister }), retireGrant: vi.fn(async () => ({})),
+    }, scoped: () => ({ readBranch, fileMaterialize, fileRootRegister, getOperation: async () => null, workingResultGet: async () => null }), retireGrant: vi.fn(async () => ({})),
   } as unknown as KernelClient;
   const prepareSource = vi.fn(async (input: ThreadPrepareSource) => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
   const serviceOperation = vi.fn<ManagedSourceServiceHandler>(async () => { state.trusted = false; return { committed: true }; });
@@ -348,7 +348,7 @@ describe('managed Source target admission orchestration', () => {
     const page = () => ({ jobId, workspaceId: 'workspace', kernelEpoch: 'target-epoch', root: 'fixed-root',
       status: cancelled ? 'cancelled' : 'running', records: [], nextCursor: 0, endCursor: 0, scannedFiles: 0 });
     const computeRelease = vi.fn(async () => { releasing(); await released; if (releaseFails) throw new Error('Original compute release failed'); return {}; });
-    Object.defineProperty(f.kernel, 'scoped', { value: () => ({ readBranch: f.readBranch,
+    Object.defineProperty(f.kernel, 'scoped', { value: () => ({ readBranch: f.readBranch, getOperation: async () => null,
       computeStart: async (input: { jobId: string }) => { jobId = input.jobId; started(); return page(); },
       computeRead: async () => page(), computeCancel: async () => { cancelled = true; return {}; }, computeRelease }) });
     const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch, requestId: 'compute-cancel' };
@@ -619,7 +619,7 @@ it('metadata read scopes reopen only an existing materialized environment and ne
     Object.assign(f.kernel, { handshake: { hostId: 'target', storageRoot: root } });
     const location = await originalMaterializationLocation(root, source.workspaceId, 'finished-run');
     await mkdir(location.targetPath, { recursive: true });
-    const getOperation = vi.fn(async () => ({ state: 'committed', result: { status: 'materialized' } }));
+    const getOperation = vi.fn(async (id: string) => id.startsWith('branch-') ? null : ({ state: 'committed', result: { status: 'materialized' } }));
     f.fileRootRegister.mockResolvedValue({ rootId: 'original-environment', canonicalRoot: location.targetPath });
     vi.spyOn(f.kernel, 'scoped').mockReturnValue({ readBranch: f.readBranch, getOperation,
       fileRootRegister: f.fileRootRegister, fileMaterialize: f.fileMaterialize } as never);

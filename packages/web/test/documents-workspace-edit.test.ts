@@ -159,9 +159,33 @@ const ready = <T extends { status: string }>(value: T): Extract<T, { status: 're
   return value as Extract<T, { status: 'ready' }>;
 };
 
+const reverseObjectKeys = (value: unknown): unknown => Array.isArray(value)
+  ? value.map(reverseObjectKeys)
+  : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reverseObjectKeys(item)]))
+    : value;
+
+const reorderSurfaceBuffers = (api: DocumentsAPI) => {
+  const read = api.readSurfaceOperation!;
+  let count = 0;
+  api.readSurfaceOperation = async request => {
+    const payload = await read(request);
+    if (payload.workspaceEdit) for (const slot of [...payload.workspaceEdit.before, ...payload.workspaceEdit.after]) {
+      if (!slot.buffer) continue;
+      // Simulate JSON transport that omits undefined fields and reconstructs
+      // objects in another order, including nested formats and edit objects.
+      slot.buffer = reverseObjectKeys(JSON.parse(JSON.stringify(slot.buffer))) as typeof slot.buffer;
+      count++;
+    }
+    return payload;
+  };
+  return () => count;
+};
+
 describe('ordered workspace edits through Documents and the live Registry', () => {
-  it('prepares without writes, then creates, edits, renames, edits and undoes as one operation', async () => {
+  it.each([false, true])('prepares without writes, then creates, edits, renames, edits and undoes as one operation (reordered DTO keys: %s)', async reordered => {
     const f = await fixture();
+    const reorderedCount = reordered ? reorderSurfaceBuffers(f.api) : undefined;
     const preview = ready(
       await f.prepare([
         { kind: 'create', identity: f.ref('a.ts') },
@@ -173,7 +197,8 @@ describe('ordered workspace edits through Documents and the live Registry', () =
     expect(f.calls).toEqual([]);
     expect(f.registry.get(f.ref('a.ts'))).toBeUndefined();
     expect(await f.durable.listOperations(f.identity.workspaceId)).toEqual([]);
-    expect(await f.registry.applyWorkspaceEdit(preview.groupId)).toMatchObject({ status: 'applied' });
+    const applied = await f.registry.applyWorkspaceEdit(preview.groupId);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'applied' });
     expect(f.registry.get(f.ref('a.ts'))).toBeUndefined();
     expect(f.registry.get(f.ref('b.ts'))).toMatchObject({ buffer: 'one two', dirty: true, localEditRevision: 2 });
     expect(await fs.readFile(path.join(f.workspaceRoot, 'b.ts'), 'utf8')).toBe('');
@@ -181,6 +206,7 @@ describe('ordered workspace edits through Documents and the live Registry', () =
     expect(await f.registry.undoWorkspaceEdit(preview.groupId)).toMatchObject({ status: 'undone' });
     expect(await fs.stat(path.join(f.workspaceRoot, 'b.ts')).catch(() => null)).toBeNull();
     expect(f.registry.get(f.ref('b.ts'))).toBeUndefined();
+    if (reorderedCount) expect(reorderedCount()).toBeGreaterThan(0);
   });
 
   it('preserves an unsaved draft and stable instance across rename, deletion and undo', async () => {
@@ -321,8 +347,9 @@ describe('ordered workspace edits through Documents and the live Registry', () =
     });
   });
 
-  it('compensates a partially executed batch and records intent before the first resource effect', async () => {
+  it.each([false, true])('compensates a partially executed batch and records intent before the first resource effect (reordered DTO keys: %s)', async reordered => {
     const f = await fixture();
+    const reorderedCount = reordered ? reorderSurfaceBuffers(f.api) : undefined;
     const apply = f.files.applyStateDetailed;
     f.files.applyStateDetailed = async (identity, name, state, options) => {
       const operations = await f.durable.listOperations(f.identity.workspaceId, 'workspace-edit');
@@ -341,11 +368,38 @@ describe('ordered workspace edits through Documents and the live Registry', () =
       ])
     );
     expect(await f.registry.applyWorkspaceEdit(preview.groupId)).toMatchObject({ status: 'rejected' });
-    expect(
-      await f.authority.readWorkspaceEdit({ workspaceId: f.identity.workspaceId, operationId: preview.groupId })
-    ).toMatchObject({ status: 'compensated' });
+    const compensated = await f.authority.readWorkspaceEdit({ workspaceId: f.identity.workspaceId, operationId: preview.groupId });
+    expect(compensated, JSON.stringify(compensated)).toMatchObject({ status: 'compensated' });
     expect(await fs.stat(path.join(f.workspaceRoot, 'a.ts')).catch(() => null)).toBeNull();
     expect(f.registry.get(f.ref('a.ts'))).toBeUndefined();
+    if (reorderedCount) expect(reorderedCount()).toBeGreaterThan(0);
+  });
+
+  it.each(['nested format', 'edit order'])('still rejects changed %s when workspace buffer keys are reordered', async mutation => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspaceRoot, 'a.ts'), 'saved');
+    await f.registry.open(f.ref('a.ts'));
+    f.registry.applyTransaction(f.ref('a.ts'), 'SaveD', { origin: 'user',
+      changes: [{ from: 4, to: 5, insert: 'D' }, { from: 0, to: 1, insert: 'S' }] });
+    reorderSurfaceBuffers(f.api);
+    const read = f.api.readSurfaceOperation!;
+    let changed = 0;
+    f.api.readSurfaceOperation = async request => {
+      const payload = await read(request);
+      if (payload.workspaceEdit?.mode === 'validate') for (const slot of payload.workspaceEdit.before) {
+        if (mutation === 'nested format' && slot.buffer?.baseFormat) { slot.buffer.baseFormat.encoding = 'gbk'; changed++; }
+        if (mutation === 'edit order' && slot.buffer?.edits && slot.buffer.edits.length > 1) { slot.buffer.edits.reverse(); changed++; }
+      }
+      return payload;
+    };
+    const preview = ready(await f.prepare([f.text('a.ts', 'draft '), { kind: 'create', identity: f.ref('b.ts') }]));
+    const applied = await f.registry.applyWorkspaceEdit(preview.groupId);
+    expect(changed).toBeGreaterThan(0);
+    expect(applied).toMatchObject({ status: 'rejected',
+      failures: [{ message: 'Document changed after preview: a.ts' }] });
+    expect(f.registry.get(f.ref('a.ts'))).toMatchObject({ buffer: 'SaveD', dirty: true });
+    expect(f.calls).toEqual([]);
+    expect(await fs.readFile(path.join(f.workspaceRoot, 'a.ts'), 'utf8')).toBe('saved');
   });
 
   it('keeps external content when partial-failure compensation observes disk drift', async () => {

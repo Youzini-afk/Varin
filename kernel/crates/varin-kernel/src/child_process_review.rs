@@ -334,7 +334,7 @@ impl Harness {
         let provenance = match &child.source.handoff().unwrap().root {
             ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } => {
                 begin["baseRef"] = json!(pin.root);
-                ChildSourceProvenance::FixedRoot {
+                ChildSourceProvenance::FixedRoot { text_encoding:None,
                     root: pin.root.clone(),
                     selection:None,
                     resources: None,
@@ -347,7 +347,7 @@ impl Harness {
                     1,
                     "this focused recursive capture contains the known changed marker only"
                 );
-                ChildSourceProvenance::StableCapture {
+                ChildSourceProvenance::StableCapture { text_encoding:None,
                     content_mode: ChildSourceContentMode::SavedFiles,
                     capture_scopes: vec![],
                     omitted_draft_paths: vec![],
@@ -440,7 +440,7 @@ impl Harness {
         Node {
             operation: Some(child.operation_id),
             cwd,
-            binding: ToolBinding {
+            binding: ToolBinding { text_encoding:None,
                 execution_environment: None,
                 resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: name.into(),
@@ -639,7 +639,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
             unavailable: None,
         }],
     };
-    let mut binding = ToolBinding {
+    let mut binding = ToolBinding { text_encoding:None,
         execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "parent".into(),

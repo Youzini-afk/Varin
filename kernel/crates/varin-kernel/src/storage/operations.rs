@@ -193,6 +193,7 @@ impl Storage {
         match outcome {
             Ok(released) => {
                 self.conn.execute_batch("COMMIT")?;
+                if released { self.text_formats.release(operation_id); }
                 Ok(
                     json!({"operationId": operation_id, "released": released, "status": if released { "released" } else { "missing" }}),
                 )
@@ -240,6 +241,7 @@ pub(super) fn idempotent(
         "DELETE FROM operations WHERE operation_id = ?1 AND state = 'failed'",
         params![operation_id],
     )?;
+    let text_format_keys = if kind=="branch.delete" {params_value["branchId"].as_str().map(|branch|storage.text_format_keys_for_branch(branch)).unwrap_or_default()} else {Vec::new()};
     storage.conn.execute_batch("BEGIN IMMEDIATE")?;
     let mut ui_mark_readers = BTreeSet::new();
     let outcome = (|| {
@@ -249,6 +251,7 @@ pub(super) fn idempotent(
             params_value.get("workspaceId").and_then(Value::as_str),
         )?;
         let mut result = action(storage)?;
+        storage.delete_text_format_facts(&text_format_keys)?;
         if let Some((record_type, objects)) = &ui_release_objects {
             // Mark in the same transaction as the record and receipt retirement.
             // Shared/read-leased objects remain rooted by the original GC owner.
@@ -262,6 +265,8 @@ pub(super) fn idempotent(
     match outcome {
         Ok(result) => {
             storage.conn.execute_batch("COMMIT")?;
+            storage.forget_text_format_facts(&text_format_keys);
+            if kind=="branch.delete"{storage.clear_fixed_text_snapshots();}
             if ui_release_objects.is_some() {
                 return storage.finish_ui_cleanup_receipt(operation_id, result, &ui_mark_readers);
             }

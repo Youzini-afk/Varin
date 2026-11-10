@@ -1,3 +1,4 @@
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
@@ -55,7 +56,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
-  cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   const grants: Awaited<ReturnType<typeof kernel.issueGrant>>[] = [];
   const issueGrant = kernel.issueGrant.bind(kernel);
   kernel.issueGrant = async (input, signal) => { const grant = await issueGrant(input, signal); grants.push(grant); return grant; };
@@ -87,10 +89,13 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   let experiments: ReturnType<typeof createExperimentService> | undefined;
   let computeResources: ReturnType<typeof createResourceService> | undefined;
   let closed = false; let kernelClosed = false;
-  const closeKernel = async () => { kernelClosed = true; await kernel.close(); };
+  const closeKernel = async () => { kernelClosed = true; releaseCodec(); await kernel.close(); };
   const close = async () => { if (closed) return; closed = true;
-    await research?.dispose(); await experiments?.dispose(); await computeResources?.dispose();
-    try { if (!kernelClosed) await storage.dispose(); } finally { await documents.dispose(); await closeKernel(); } };
+    try {
+      await research?.dispose(); await experiments?.dispose(); await computeResources?.dispose();
+      try { if (!kernelClosed) await storage.dispose(); } finally { await documents.dispose(); }
+    } finally { await closeKernel(); }
+  };
   cleanups.push(close);
 
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
@@ -526,6 +531,7 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
   const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
   const receipt = await f.api.submit({ ...identity, key: 'observe', expectedHead: null, text: 'wait across restart', model, source: prepared.source });
   let reopened: ReturnType<typeof createKernelClient> | undefined;
+  let releaseReopenedCodec: (() => void) | undefined;
   let collaboration: ThreadCollaboration | undefined;
   let reopenedStorage: KernelStorageAdapter | undefined;
   let runtime = f.runtime;
@@ -538,6 +544,7 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     // Close only this fixture's kernel client. Do not revoke the original process grant.
     await f.closeKernel();
     reopened = createKernelClient({ hostId: 'http-review', storageRoot: f.root, buildVersion, kernelPath, allowCargoDevRunner: false });
+    releaseReopenedCodec = bindDocumentTextCodec(reopened);
     runtime = new AgentRuntimeClient(reopened, undefined, undefined, undefined, undefined, undefined, (id, signal) => f.documents.admitWorkspaceRegistration(id, signal));
     const errors: unknown[] = [];
     reopenedStorage = new KernelStorageAdapter({ client: reopened, hostId: 'http-review', storageRoot: f.root, resolveWorkspaceRoot: async id => (await f.documents.inspectWorkspace(id)).root });
@@ -575,12 +582,14 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect((await runtime.operation(processId)).outcome).toBe('failed');
     expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
   } finally {
-    await fs.writeFile(path.join(f.root, 'release-process'), 'release');
-    if (processId) {
-      // Cleanup is scoped to the exact fixture Operation even if an assertion failed.
-      await runtime.cancelOperation(processId).catch(() => undefined);
-    }
-    collaboration?.stop(); await reopenedStorage?.dispose(); await reopened?.close();
+    try {
+      await fs.writeFile(path.join(f.root, 'release-process'), 'release');
+      if (processId) {
+        // Cleanup is scoped to the exact fixture Operation even if an assertion failed.
+        await runtime.cancelOperation(processId).catch(() => undefined);
+      }
+      collaboration?.stop(); await reopenedStorage?.dispose();
+    } finally { releaseReopenedCodec?.(); await reopened?.close(); }
   }
 }, 60_000);
 

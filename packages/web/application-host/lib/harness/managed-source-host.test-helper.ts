@@ -11,6 +11,7 @@ import { KernelClient, KernelClientError } from '../kernel/kernel-client.js';
 import type { ChildSourceHandoff, DelegatedExecution, FileObservationBinding, FollowupFilePreparation, FollowupPendingResult, HostToolCall, KernelHandshakeResult, LaunchSource } from '../kernel/protocol.generated.js';
 import { toolOperationId } from '../kernel/protocol.generated.js';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createLiveSourceOwner } from '../kernel/live-source.js';
 import { createThreadSourcePreparer } from '../kernel/thread-sources.js';
 import { DocumentsFileObservationOwner } from '../kernel/file-observation-owner.js';
@@ -223,8 +224,15 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
     policy_target: { kind: 'default' }, source_basis: null, source: { kind: 'pending', handoff }, code_result: { kind: 'pending' },
     state: 'accepted', revision: 1, cursor: 1, receipt: null, report: null, terminal_head: null, resources_released: false, cancel_requested: false };
   const signal = new AbortController().signal;
-  const preparedChild = await withManagedChildSource(runtime, child, signal, (client, address) =>
-    client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: child } }));
+  const preparedChild = await withManagedChildSource(runtime, child, signal, async (client, address) => {
+    try {
+      return await client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: child } });
+    } catch (error) {
+      // Preserve the original failure if scope release also fails in finally.
+      process.stderr.write(`Managed fixture child_prepare failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      throw error;
+    }
+  });
   assert.equal(preparedChild.source.mode, 'native_workspace'); assert.equal(preparedChild.source.branch_id, `child-source:${dispatch}`);
   assert.deepEqual(preparedChild.source.resource_owner, owner);
   const childRun = 'run:managed-private-child';
@@ -336,13 +344,26 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
 }
 
 async function run(frame: Record<string, unknown>) {
+  const a = kernelFor('a', String(frame.storageRootA), String(frame.epochA));
+  const b = kernelFor('b', String(frame.storageRootB), String(frame.epochB));
+  const releaseACodec = bindDocumentTextCodec(a);
+  const releaseBCodec = bindDocumentTextCodec(b);
+  try {
+    await runWithHosts(frame, a, b);
+  } finally {
+    releaseBCodec();
+    releaseACodec();
+    await Promise.all([a.close(), b.close()]);
+  }
+}
+
+async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: KernelClient) {
   assert.equal(typeof frame.runId, 'string'); const runId = frame.runId as string;
-  const root = String(frame.root), storageRootA = String(frame.storageRootA), storageRootB = String(frame.storageRootB);
+  const root = String(frame.root), storageRootB = String(frame.storageRootB);
   const aRoot = join(root, 'a-project'), bRoot = join(root, 'b-project');
   await Promise.all([mkdir(aRoot, { recursive: true }), mkdir(bRoot, { recursive: true })]);
   await writeFile(join(aRoot, 'source.txt'), 'A_PRIVATE_SOURCE\n');
   await writeFile(join(bRoot, 'source.txt'), 'B_ORIGINAL_SOURCE\n');
-  const a = kernelFor('a', storageRootA, String(frame.epochA)), b = kernelFor('b', storageRootB, String(frame.epochB));
   coordinatorKernel = a; targetKernel = b;
   const documents = await Promise.all(([['a', HOST_A, aRoot], ['b', HOST_B, bRoot]] as const).map(async ([name, hostId, directory]) => {
     const dataDir = join(root, `${name}-documents`);

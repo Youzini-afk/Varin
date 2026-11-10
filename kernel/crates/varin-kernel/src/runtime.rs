@@ -232,6 +232,8 @@ fn pending_file_worker(method: &str) -> bool {
     matches!(
         method,
         "storage.getBlob"
+            | "text.decode"
+            | "text.serialize"
             | "file.read"
             | "file.read.check"
             | "file.lease.wait"
@@ -571,6 +573,18 @@ impl Kernel {
             if self.workspace_shutdown || self.workspace_shutdown_request.is_some() { return Err(KernelError::Operation("The original kernel shutdown is still draining".into())); }
             if let Some(storage) = self.storage.as_ref() { storage.cancel_file_observation_reads(); }
             self.stop_workspaces(Some(request.clone()), completions);
+            return Ok(None);
+        }
+        if matches!(method, "text.decode" | "text.serialize") {
+            if request.get("grantId").is_some() { return Err(KernelError::Authorization("Text codec requires authenticated Host ownership".into())); }
+            let (method, request, completed, cancel) = (method.to_owned(), request.clone(), completions.clone(), cancellation.clone());
+            let worker=thread::Builder::new().name("text-codec".into()).spawn(move || {
+                let result=if cancel.load(Ordering::Acquire){Err(KernelError::Cancelled)}else{crate::text::request(&method,params_value)};
+                let result=if cancel.load(Ordering::Acquire){Err(KernelError::Cancelled)}else{result};
+                let _=completed.send(WorkerRequest::ResourceRequestDone{request,result});
+            })?;
+            self.file_workers.retain(|(_, worker)| !worker.is_finished());
+            self.file_workers.push((cancellation,worker));
             return Ok(None);
         }
         if matches!(method, "model.adapters.publish" | "model.adapters.revoke" | "model.adapters.retain" | "model.adapters.release") {

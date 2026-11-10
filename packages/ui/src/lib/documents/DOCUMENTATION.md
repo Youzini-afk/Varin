@@ -20,6 +20,12 @@ external registry, not in Zustand or Local Storage.
 - Connected affected surfaces contribute read-only preview snapshots. Execution binds each actual
   registration, instance, base and local version. Divergent drafts at one path have no shared text
   version and are reported as conflicts; unrelated windows/resources are not part of the edit.
+- Dirty-state barriers cover exact selected relative paths; `.` is the source-capture fence for the
+  whole workspace. Parent directory entries do not expand a file operation to its siblings, and
+  Surface mutation admission still requires exact targets. Matching respects separators, case policy
+  and verified workspace aliases. Before acknowledgement, the Registry drains affected saves and
+  finishes scheduled recovery journals, so a delayed journal cannot invalidate source capture
+  while the barrier is held.
 - One async undo restores the original batch conditionally. Later edits are retained and uncertain
   steps appear in Recovery with per-resource state and original draft content. A lost response reads
   the original operation, never repeats its effects. Reopened records cannot receive old dispatches.
@@ -39,3 +45,21 @@ Files UI still owns tree and Agent tab navigation. Split groups, preview/pinned 
 cursor restore live in the Editor Workbench Kernel. Document records survive Profile/Settings
 remounts until application-host endpoint switch. `FilesAPI` and `WorkspaceAPI` no longer expose
 text read/write; editors and helpers use DocumentsAPI only.
+
+## Encoding and format edits
+
+The Registry keeps Unicode text, original format and current format intent. Encoding, BOM and explicit
+line-ending changes participate in dirty/local revisions, undo, in-flight save checks and recovery.
+A completed save never clears a newer format change. Ordinary editing does not open an encoding dialog.
+Rare actions reuse the editor's existing more menu and optional IDE encoding field; mobile keeps them
+in its file actions. A save that cannot encode a character keeps the editable draft visible, pauses
+autosave for that failed local revision and offers an explicit UTF-8 save in the file area.
+
+Reopen changes interpretation, while save-with-encoding changes bytes. A dirty document is retained
+rather than replaced by a reinterpretation. Codec selection and byte serialization remain native;
+Monaco and CodeMirror pass text edits and history signals to the same Registry owner.
+
+Format undo checks its actual edit-history anchor, not merely equal final text. Encoding/BOM changes
+can be undone after saving. Explicit mixed-EOL normalization can be undone locally before its save;
+after it has replaced the baseline, restoring the old byte layout belongs to the existing file Recovery
+operation. The format menu does not advertise a local undo that cannot restore that layout.

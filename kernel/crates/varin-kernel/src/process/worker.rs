@@ -79,6 +79,12 @@ fn send_data(output: &DataOutput, event: Value) -> io::Result<()> {
         &event,
     )
 }
+fn empty_output(output: &DataOutput, mode: &str) -> io::Result<()> {
+    for channel in if mode == "pty" { &["stdout"][..] } else { &["stdout", "stderr"][..] } {
+        send_data(output, json!({"type":"channel-end","channel":channel,"failed":false}))?;
+    }
+    Ok(())
+}
 // Opt-in, content-free diagnostics for the original guardian. These frames are
 // not process observations and must not wake subscription/interaction waiters.
 pub(super) fn diagnostic_stage(stage: &str) -> bool {
@@ -347,6 +353,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             "treeConfirmed":true,"stopApplied":true,"spawned":false});
         receipt(&config, &value)?;
         send(&output, json!({"type":"receipt","value":value}))?;
+        empty_output(&data_output, &config.mode)?;
         return Ok(());
     }
     #[cfg(windows)]
@@ -374,6 +381,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 io::Error::other(format!("native exit receipt install: {error}"))
             })?;
             send(&output, json!({"type":"receipt", "value":value}))?;
+            empty_output(&data_output, &config.mode)?;
             return Ok(());
         }
     };
@@ -389,6 +397,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         thread::spawn(move || {
             let mut buffer = [0u8; 16384];
             let mut delivering = true;
+            let mut read_failed = false;
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
@@ -404,8 +413,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                     #[cfg(unix)]
                     Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
-                    Err(_) => { let _ = send(&output, json!({"type":"output-error", "channel":channel})); break; }
+                    Err(_) => { read_failed = true; break; }
                 }
+            }
+            // End evidence must follow this reader's final bytes on the same ordered pipe.
+            // The separate control receipt can arrive first and never proves output EOF.
+            if delivering && send_data(&data_output, json!({"type":"channel-end", "channel":channel, "failed":read_failed})).is_err() {
+                STOP.store(2, Ordering::Release);
+                let _ = send(&output, json!({"type":"output-error", "channel":channel}));
             }
             trace(&diagnostic, "output-reader-ended");
         })

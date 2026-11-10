@@ -1,5 +1,5 @@
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { SourceResourceOwner } from '@varin/protocol';
 import { createScheduledTaskService, type ScheduledTaskService } from './service.js';
@@ -8,6 +8,9 @@ import { SourceAdmissionError } from '../kernel/source-admission-error.js';
 import { createScheduledTasksHttpAPI, switchRuntimeEndpoint } from '@varin/application-client';
 import { registerScheduledTaskRoutes } from './routes.js';
 import { KernelClientError } from '../kernel/kernel-error.js';
+import { installRuntimeEndpointFetchFixture } from '../../../test/runtime-endpoint.fixture.js';
+
+const fetchMock = installRuntimeEndpointFetchFixture();
 
 /** Real client/authenticated route chain; the asset-service port is explicit. */
 function fixture(sourceService?: Pick<ScheduledTaskService, 'listSources' | 'resolveSource'>) {
@@ -21,7 +24,7 @@ function fixture(sourceService?: Pick<ScheduledTaskService, 'listSources' | 'res
   let authenticated = true;
   const requireAuth: RequestHandler = (_req, res, next) => { if (authenticated) next(); else res.status(401).json({ error: 'Sign in required' }); };
   registerScheduledTaskRoutes(app, { scheduledTaskService: service, requireAuth } as unknown as Parameters<typeof registerScheduledTaskRoutes>[1]);
-  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+  fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
     const pathname = new URL(url, 'http://fixture.invalid').pathname;
     const route = routes.find(value => value.method === init.method?.toLowerCase() && new RegExp(`^${value.pattern.replace(/:[^/]+/g, '[^/]+')}$`).test(pathname));
     if (!route) throw new Error(`Missing route ${pathname}`);
@@ -45,7 +48,6 @@ function fixture(sourceService?: Pick<ScheduledTaskService, 'listSources' | 'res
   });
   return { api: createScheduledTasksHttpAPI(), service, occurrence, unauthenticate() { authenticated = false; } };
 }
-afterEach(() => vi.unstubAllGlobals());
 it('the public client keeps manual keys and occurrence CAS, returns actual native occurrence identities and enforces route authentication', async () => {
   const f = fixture();
   const accepted = await f.api.run('project', 'task', 'original-click');

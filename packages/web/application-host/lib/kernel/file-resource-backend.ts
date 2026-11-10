@@ -358,6 +358,17 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     await this.options.authorizeApplyState?.(identity, relativePath, state);
   }
 
+  async readWriteReceipt(identity: RecoveryIdentity, operationId: string): Promise<{ status: 'applied' | 'conflict'; state: RecoveryState } | null> {
+    const context = await this.bind(identity);
+    const value = await context.client.fileOperationReconcile({ workspaceId: context.owningWorkspaceId,
+      rootId: context.rootId, operationId });
+    if (value.status === 'missing') return null;
+    if (value.status !== 'reconciled' || value.kind !== 'file.apply') throw new Error('The original document write outcome is still uncertain');
+    const result = value.result as Record<string, unknown>;
+    if ((result?.status !== 'applied' && result?.status !== 'conflict') || typeof result.stateJson !== 'string') throw new Error('The original document write receipt is malformed');
+    return { status: result.status, state: parseRecoveryState(JSON.parse(result.stateJson)) };
+  }
+
   async writeBytes(
     identity: RecoveryIdentity,
     relativePath: string,

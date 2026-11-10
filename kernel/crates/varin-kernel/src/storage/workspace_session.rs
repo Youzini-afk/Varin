@@ -147,6 +147,7 @@ pub(crate) struct Session {
 /// Owns a frozen namespace and only the dirty file range maps at its boundary.
 /// Parent writes continue while a worker hashes/installs these individual files.
 pub(crate) struct Checkpoint {
+    text_snapshot: super::text_formats::CheckpointText,
     session_id: Uuid,
     selected_scope: String,
     port: StoragePort,
@@ -354,7 +355,9 @@ impl Session {
         target: &str,
         selected: &str,
         requester: Grant,
+        text_policy: Option<crate::text::Policy>,
     ) -> Result<Option<Value>, KernelError> {
+        let text_policy=text_policy.map(|policy| Storage::normalize_text_policy(&serde_json::to_value(policy)?)).transpose()?;
         let selected = path(selected)?;
         self.admit(&requester, &selected, true)?;
         let (operation, target, branch, session, grant) = (
@@ -366,7 +369,7 @@ impl Session {
         );
         self.port.call(move |storage| {
             storage.replay_workspace_fork(
-                &operation, &branch, &target, &selected, session, &grant, &requester,
+                &operation, &branch, &target, &selected, session, &grant, &requester,text_policy.as_ref(),
             )
         })
     }
@@ -1683,7 +1686,7 @@ impl Session {
         let pinned_base = base_pin.clone();
         let metadata_pin = format!("{pin}:filesystem");
         let pinned_metadata = metadata_pin.clone();
-        let (metadata_head, branch) = self.port.call(move |s| {
+        let (metadata_head, branch, text_snapshot) = self.port.call(move |s| {
             s.admit_workspace_session(&branch, "", &actor, false)?;
             require_capability(&actor, "branch.pin")?;
             s.filesystem_transaction(|s| {
@@ -1702,10 +1705,12 @@ impl Session {
                     true,
                     &actor.grant_id,
                 )?;
-                Ok((head, data))
+                let text_snapshot=s.checkpoint_text_snapshot(&actor,&branch,&data)?;
+                Ok((head, data, text_snapshot))
             })
         })?;
         Ok(Checkpoint {
+            text_snapshot,
             session_id: self.id,
             selected_scope: selected,
             port: self.port.clone(),
@@ -1853,6 +1858,10 @@ impl Session {
     }
 }
 impl Checkpoint {
+    pub(crate) fn with_text_policy(mut self, policy: Option<crate::text::Policy>) -> Result<Self,KernelError> {
+        if let Some(policy)=policy { self.text_snapshot.set_policy(policy)?; }
+        Ok(self)
+    }
     fn install_files(
         &self,
         cancelled: &AtomicBool,
@@ -1911,6 +1920,7 @@ impl Checkpoint {
             self.session_id,
         );
         let file_owner = self.grant.clone();
+        let text_snapshot=self.text_snapshot.clone();
         self.port.call(move |storage| {
             if cancelled.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
@@ -1928,6 +1938,7 @@ impl Checkpoint {
                 session,
                 &grant,
                 &file_owner,
+                &text_snapshot,
             )
         })
     }
@@ -1989,6 +2000,7 @@ impl Checkpoint {
             self.grant.clone(),
         );
         let original_requester = requester.clone();
+        let original_policy=self.text_snapshot.requested_policy.clone();
         if let Some(result) = self.port.call(move |s| {
             s.replay_workspace_fork(
                 &operation_key,
@@ -1998,11 +2010,14 @@ impl Checkpoint {
                 session_id,
                 &grant,
                 &original_requester,
+                original_policy.as_ref(),
             )
         })? {
             return Ok(result);
         }
         let installed = self.install_files(cancelled, &selected)?;
+        let text_snapshot=self.text_snapshot.prepare(&self.root,&self.branch.head_root,&installed,&selected,cancelled)?;
+        let requested_policy=self.text_snapshot.requested_policy.clone();
         let (source, pin, workspace, actor, target, operation) = (
             self.source_branch.clone(),
             self.pin.clone(),
@@ -2023,7 +2038,7 @@ impl Checkpoint {
                 return Err(KernelError::Cancelled);
             }
             if let Some(result) = s.replay_workspace_fork(
-                &operation, &source, &target, &selected, session_id, &actor, &requester,
+                &operation, &source, &target, &selected, session_id, &actor, &requester,requested_policy.as_ref(),
             )? {
                 return Ok(result);
             }
@@ -2041,6 +2056,8 @@ impl Checkpoint {
                 &metadata,
                 session_id,
                 &requester.grant_id,
+                &text_snapshot,
+                requested_policy.as_ref(),
             )
         })
     }
@@ -2127,6 +2144,7 @@ impl Storage {
         session: Uuid,
         owner: &Grant,
         requester: &Grant,
+        text_policy: Option<&Value>,
     ) -> Result<Option<Value>, KernelError> {
         let current = self.load_grant(&owner.grant_id)?;
         if current.state != crate::model::GrantState::Active
@@ -2167,6 +2185,7 @@ impl Storage {
             || origin["sessionId"] != session.to_string()
             || origin["ownerGrantId"] != owner.grant_id
             || origin["requestGrantId"] != requester.grant_id
+            || origin.get("textEncoding").filter(|value|!value.is_null()) != text_policy
         {
             return Err(failure("workspace_operation_changed", "Fork operation does not match its original workspace, target and filesystem lifetime"));
         }

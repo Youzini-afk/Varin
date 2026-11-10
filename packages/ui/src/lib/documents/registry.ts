@@ -1,5 +1,9 @@
 import type {
   DocumentsAPI,
+  VarinTextFormat,
+  VarinTextEdit,
+  VarinDocumentWriteRequest,
+  VarinDirtyBufferResource,
   VarinWorkspaceEditBuffer,
   VarinWorkspaceEditSurfaceChange,
   VarinWorkspaceEditSurfaceReceipt,
@@ -13,7 +17,7 @@ import type {
   VarinWorkspaceFileEvent,
   Subscription,
 } from '@varin/application-client';
-import { DocumentsError } from '@varin/application-client';
+import { DocumentsError, applyTextChanges, composeDocumentEdits, documentBaseEdits, invertTextChanges } from '@varin/application-client';
 import { parseAgentInputContext, type AgentInputContext, type AgentInputSnapshotConsumer } from '@varin/protocol';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
@@ -42,6 +46,22 @@ import {
 export type DocumentListener = (record: DocumentRecord) => void;
 
 const EMPTY_RESOURCE_IDS: ReadonlySet<string> = new Set();
+
+/** Workspace CAS compares JSON DTO values, not object insertion order. Undefined
+ * object fields are absent on the wire; array order and every present field matter. */
+const sameWorkspaceBufferValue = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameWorkspaceBufferValue(value, right[index]));
+  }
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a).filter(key => a[key] !== undefined);
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length
+    && keys.every(key => Object.hasOwn(b, key) && sameWorkspaceBufferValue(a[key], b[key]));
+};
 
 const bufferHash = async (content: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
@@ -74,6 +94,7 @@ const endPosition = (content: string): DocumentTextPosition => {
 type PreparedWorkspaceDocument = {
   before: DocumentRecord;
   afterBuffer: string;
+  afterEdits: VarinTextEdit[];
   changes: DocumentChange[];
   editCount: number;
   wasOpen: boolean;
@@ -91,6 +112,8 @@ type WorkspaceEditUndoGroup = {
   documents: Array<{
     identity: DocumentIdentity;
     beforeBuffer: string;
+    beforeEdits: VarinTextEdit[];
+    baseRevision: string | null;
     appliedBuffer: string;
     appliedRevision: number;
   }>;
@@ -176,6 +199,7 @@ const emptyRecord = (
   baseContent: '',
   buffer: '',
   baseRevision: null,
+  baseEdits: [],
   localEditRevision: 0,
   encoding: 'utf-8',
   bom: false,
@@ -191,6 +215,15 @@ const emptyRecord = (
   lastChanges: null,
   externalSource: null,
 });
+
+type EditableFormat = Pick<DocumentRecord, 'encoding' | 'bom' | 'lineEnding' | 'normalizeLineEndings'>;
+const formatFromRecord = (record: EditableFormat): VarinTextFormat => ({ encoding: record.encoding, bom: record.bom,
+  lineEnding: record.lineEnding, defaultLineEnding: record.lineEnding, source: 'explicit' });
+const formatDirty = (record: EditableFormat & { baseFormat?: VarinTextFormat }): boolean => Boolean(record.baseFormat
+  && (record.encoding !== record.baseFormat.encoding || record.bom !== record.baseFormat.bom
+    || record.lineEnding !== record.baseFormat.defaultLineEnding
+    || record.normalizeLineEndings && record.baseFormat.lineEnding === 'mixed'));
+const isDirty = (record: EditableFormat & { baseFormat?: VarinTextFormat; baseContent: string }, buffer: string) => buffer !== record.baseContent || formatDirty(record);
 
 const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): DocumentRecord => {
   if (result.status === 'missing') {
@@ -217,10 +250,12 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
     return {
       ...record,
       status: 'missing',
+      ...(!record.dirty && result.format ? { encoding: result.format.encoding, bom: result.format.bom, lineEnding: result.format.defaultLineEnding, baseFormat: result.format } : {}),
       workspaceEpoch: result.epoch,
       baseContent: '',
       buffer: record.dirty ? record.buffer : '',
       baseRevision: null,
+      baseEdits: documentBaseEdits('', record.dirty ? record.buffer : ''),
       byteLength: 0,
       errorMessage: null,
       conflict: null,
@@ -248,12 +283,13 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
       conflict: null,
     };
   }
-  const lineEnding = detectLineEnding(result.content);
+  const lineEnding = result.format?.defaultLineEnding ?? detectLineEnding(result.content);
+  const baseFormat = result.format ?? formatFromRecord({ encoding: result.encoding, bom: result.bom, lineEnding });
   const normalized = normalizeEditorLineEndings(result.content);
-  if (record.dirty && record.buffer !== normalized && record.baseRevision === result.revision) {
+  if (record.dirty && record.baseRevision === result.revision) {
     return { ...record, status: record.conflict ? 'conflict' : 'ready', workspaceEpoch: result.epoch };
   }
-  if (record.dirty && record.buffer === normalized) {
+  if (record.dirty && record.buffer === normalized && !formatDirty(record)) {
     return {
       ...record,
       status: 'ready',
@@ -261,6 +297,9 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
       dirty: false,
       baseContent: normalized,
       baseRevision: result.revision,
+      baseFormat,
+      baseEdits: [],
+      normalizeLineEndings: false,
       encoding: result.encoding,
       bom: result.bom,
       lineEnding,
@@ -269,7 +308,7 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
       errorMessage: null,
     };
   }
-  if (record.dirty && record.buffer !== normalized) {
+  if (record.dirty) {
     const ancestorContent = record.conflict?.ancestorContent ?? record.baseContent;
     const ancestorRevision = record.conflict?.ancestorRevision ?? record.baseRevision;
     return {
@@ -278,9 +317,11 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
       workspaceEpoch: result.epoch,
       baseContent: normalized,
       baseRevision: result.revision,
-      encoding: result.encoding,
-      bom: result.bom,
-      lineEnding,
+      baseFormat,
+      baseEdits: documentBaseEdits(normalized, record.buffer),
+      encoding: record.encoding,
+      bom: record.bom,
+      lineEnding: record.lineEnding,
       byteLength: result.byteLength,
       conflict: {
         diskRevision: result.revision,
@@ -303,6 +344,9 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
     buffer: normalized,
     localEditRevision: record.localEditRevision + (externalChange ? 1 : 0),
     baseRevision: result.revision,
+    baseFormat,
+    baseEdits: [],
+    normalizeLineEndings: false,
     encoding: result.encoding,
     bom: result.bom,
     lineEnding,
@@ -314,12 +358,27 @@ const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): Doc
   };
 };
 
+type TextHistoryEntry = {
+  beforeState: number;
+  afterState: number;
+  changes: DocumentChange[];
+  inverse: DocumentChange[];
+  baseRevision: string | null;
+  beforeEdits: VarinTextEdit[];
+  afterEdits: VarinTextEdit[];
+};
+
 export class DocumentRegistry {
   readonly recoverySessionId: string;
   private readonly documents: DocumentsAPI;
   private readonly getGeneration: () => number;
   private readonly journalDebounceMs: number;
   private readonly createDocumentInstanceId: () => string;
+  private readonly formatUndo = new Map<string, Array<{ before: EditableFormat; after: EditableFormat; textState: number }>>();
+  private textSequence = 0;
+  private readonly textHistory = new Map<string, { state: number; buffer: string; undo: TextHistoryEntry[]; redo: TextHistoryEntry[] }>();
+  private readonly pendingSaves = new Map<string, { request: VarinDocumentWriteRequest; record: DocumentRecord }>();
+  private readonly savingEdits = new Map<string, { base: string; buffer: string; edits: VarinTextEdit[]; states: Map<number, VarinTextEdit[]> }>();
   private readonly records = new Map<string, DocumentRecord>();
   private readonly openOperations = new Map<string, Promise<DocumentRecord>>();
   private readonly listeners = new Map<string, Set<DocumentListener>>();
@@ -555,12 +614,15 @@ export class DocumentRegistry {
     if (!this.documents.captureAgentInputSnapshot) return unavailable(dirtyRecords);
     const resources = await Promise.all(dirtyRecords.map(async ({ record, alias }) => ({
       baseRevision: record.baseRevision,
+      ...(record.baseFormat ? { sourceFormat: record.baseFormat } : {}),
       bufferHash: await bufferHash(record.buffer),
       documentInstanceId: record.documentInstanceId,
       encoding: record.encoding,
       bom: record.bom,
       lineEnding: record.lineEnding,
+      normalizeLineEndings: record.normalizeLineEndings,
       content: serializeEditorContent(record.buffer, record.lineEnding),
+      edits: documentBaseEdits(record.baseContent, record.buffer, record.baseEdits),
       localEditRevision: record.localEditRevision,
       resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
     })));
@@ -611,17 +673,23 @@ export class DocumentRegistry {
   }
 
   private barrierPath(value: string, caseSensitive: boolean): string {
-    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    const normalized = value.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
+    if (normalized === '.') return '';
     return caseSensitive ? normalized : normalized.toLowerCase();
+  }
+
+  private barrierCoversResource(barrier: DirtyBarrierHold, resource: DocumentIdentity): boolean {
+    if (resource.workspaceId !== barrier.workspaceId) return false;
+    const target = this.barrierPath(resource.resourceId, barrier.caseSensitive);
+    // Source capture explicitly fences '.', while mutation inventories also contain
+    // parent directories that must not turn an exact file operation into a subtree fence.
+    return barrier.paths.has('') || barrier.paths.has(target);
   }
 
   private isDirtyBarrierHeld(identity: DocumentIdentity): boolean {
     return [...this.dirtyBarriers.values()].some((barrier) => (
       barrier.active
-      && this.aliasesFor(identity).some((alias) => (
-        barrier.workspaceId === alias.workspaceId
-        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))
-      ))
+      && this.aliasesFor(identity).some((alias) => this.barrierCoversResource(barrier, alias))
     ));
   }
 
@@ -659,8 +727,7 @@ export class DocumentRegistry {
     this.assertActive();
     while (this.isDirtyBarrierHeld(identity)) {
       await Promise.all([...this.dirtyBarriers.values()].filter(barrier => barrier.active
-        && this.aliasesFor(identity).some(alias => alias.workspaceId === barrier.workspaceId
-          && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))).map(barrier => barrier.released));
+        && this.aliasesFor(identity).some(alias => this.barrierCoversResource(barrier, alias))).map(barrier => barrier.released));
       this.assertActive();
     }
     const key = this.keyFor(identity);
@@ -703,7 +770,8 @@ export class DocumentRegistry {
         this.commit({
           ...next,
           buffer: current.buffer,
-          dirty: current.buffer !== next.baseContent,
+          dirty: isDirty({ ...next, encoding: current.encoding, bom: current.bom, lineEnding: current.lineEnding }, current.buffer),
+          encoding: current.encoding, bom: current.bom, lineEnding: current.lineEnding,
           localEditRevision: current.localEditRevision,
         });
         return this.records.get(key) ?? current;
@@ -732,20 +800,70 @@ export class DocumentRegistry {
     }
   }
 
+  private historyFor(record: DocumentRecord) {
+    let history = this.textHistory.get(record.documentInstanceId);
+    if (!history || history.buffer !== record.buffer) {
+      history = { state: ++this.textSequence, buffer: record.buffer, undo: [], redo: [] };
+      this.textHistory.set(record.documentInstanceId, history);
+    }
+    return history;
+  }
+
+  private trackTextEdit(record: DocumentRecord, buffer: string, supplied?: DocumentChange[], direction?: 'undo' | 'redo', provenance?: VarinTextEdit[]): VarinTextEdit[] {
+    const changes = supplied && applyTextChanges(record.buffer, supplied) === buffer
+      ? supplied : [{ from: 0, to: record.buffer.length, insert: buffer }];
+    const beforeEdits = documentBaseEdits(record.baseContent, record.buffer, record.baseEdits);
+    let afterEdits = provenance ?? composeDocumentEdits(record.baseContent, record.buffer, beforeEdits, changes);
+    const history = this.historyFor(record);
+    const source = direction === 'undo' ? history.undo : direction === 'redo' ? history.redo : undefined;
+    let restored = false;
+    if (source) {
+      let candidate = record.buffer;
+      for (let index = source.length - 1; index >= 0; index -= 1) {
+        const entry = source[index]!;
+        candidate = applyTextChanges(candidate, direction === 'undo' ? entry.inverse : entry.changes);
+        if (candidate !== buffer) continue;
+        const moved = source.splice(index).reverse();
+        (direction === 'undo' ? history.redo : history.undo).push(...moved);
+        history.state = direction === 'undo' ? entry.beforeState : entry.afterState;
+        if (entry.baseRevision === record.baseRevision) afterEdits = direction === 'undo' ? entry.beforeEdits : entry.afterEdits;
+        restored = true;
+        break;
+      }
+    }
+    if (!restored) {
+      const state = ++this.textSequence;
+      history.undo.push({ beforeState: history.state, afterState: state, changes,
+        inverse: invertTextChanges(record.buffer, changes), baseRevision: record.baseRevision, beforeEdits, afterEdits });
+      history.redo = [];
+      history.state = state;
+    }
+    history.buffer = buffer;
+    const saving = this.savingEdits.get(record.documentInstanceId);
+    if (saving) {
+      saving.edits = saving.states.get(history.state)
+        ?? composeDocumentEdits(saving.base, record.buffer, saving.edits, changes);
+      saving.states.set(history.state, saving.edits);
+      saving.buffer = buffer;
+    }
+    return afterEdits;
+  }
+
   applyTransaction(
     identity: DocumentIdentity,
     buffer: string,
-    options: { origin: string; changes?: DocumentChange[] } ,
+    options: { origin: string; changes?: DocumentChange[]; history?: 'undo' | 'redo' } ,
   ): DocumentRecord {
     this.assertActive();
     this.assertDirtyBarrierAllowsEdit(identity);
     const current = this.records.get(this.keyFor(identity))
       ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
-    const dirty = buffer !== current.baseContent;
+    const dirty = isDirty(current, buffer);
     const next: DocumentRecord = {
       ...current,
       buffer,
+      baseEdits: this.trackTextEdit(current, buffer, options.changes, options.history),
       dirty,
       localEditRevision: current.localEditRevision + 1,
       status: current.status === 'deleted' || current.status === 'conflict' || current.status === 'missing'
@@ -768,6 +886,7 @@ export class DocumentRegistry {
       expectedLocalEditRevision: number;
       edits: DocumentChange[];
       origin: string;
+      history?: 'undo' | 'redo';
     },
   ): DocumentEditResult {
     this.assertActive();
@@ -814,7 +933,7 @@ export class DocumentRegistry {
     for (const edit of changes) {
       buffer = `${buffer.slice(0, edit.from)}${edit.insert}${buffer.slice(edit.to)}`;
     }
-    const next = this.applyTransaction(identity, buffer, { origin: input.origin, changes });
+    const next = this.applyTransaction(identity, buffer, { origin: input.origin, changes, history: input.history });
     return { status: 'applied', record: next };
   }
 
@@ -831,7 +950,9 @@ export class DocumentRegistry {
       resource: { workspaceId: resource.workspaceId, resourceId: resource.resourceId },
       documentInstanceId: record.documentInstanceId, localEditRevision: record.localEditRevision,
       baseRevision: record.baseRevision, buffer: record.buffer, baseContent: record.baseContent,
+      ...(record.baseFormat ? { baseFormat: record.baseFormat } : {}),
       encoding: record.encoding, bom: record.bom, lineEnding: record.lineEnding,
+      normalizeLineEndings: record.normalizeLineEndings, edits: documentBaseEdits(record.baseContent, record.buffer, record.baseEdits),
       status: record.status as VarinWorkspaceEditBuffer['status'],
     };
   }
@@ -912,7 +1033,7 @@ export class DocumentRegistry {
         const current = this.get(slot.resource);
         if (!slot.buffer) { if (current) throw new Error(`Document was opened after preview: ${slot.resource.resourceId}`); }
         else if (!current || current.connectionGeneration !== this.getGeneration()
-          || JSON.stringify(this.workspaceBuffer(current, slot.resource)) !== JSON.stringify(slot.buffer)) {
+          || !sameWorkspaceBufferValue(this.workspaceBuffer(current, slot.resource), slot.buffer)) {
           throw new Error(`Document changed after preview: ${slot.resource.resourceId}`);
         }
       }
@@ -957,8 +1078,8 @@ export class DocumentRegistry {
       const isMove = Boolean(old && (old.identity.resourceId !== identity.resourceId || old.identity.workspaceId !== identity.workspaceId));
       const record: DocumentRecord = { ...(old ?? emptyRecord(identity, this.getGeneration(), buffer.documentInstanceId)), identity,
         workspaceEpoch: change.epoch, buffer: buffer.buffer, baseContent: buffer.baseContent, baseRevision: buffer.baseRevision,
-        localEditRevision: buffer.localEditRevision, encoding: buffer.encoding, bom: buffer.bom, lineEnding: buffer.lineEnding,
-        status: buffer.status, dirty: buffer.buffer !== buffer.baseContent, saving: false, conflict: null, errorMessage: null,
+        baseFormat: buffer.baseFormat, baseEdits: documentBaseEdits(buffer.baseContent, buffer.buffer, buffer.edits), normalizeLineEndings: buffer.normalizeLineEndings, localEditRevision: buffer.localEditRevision, encoding: buffer.encoding, bom: buffer.bom, lineEnding: buffer.lineEnding,
+        status: buffer.status, dirty: isDirty(buffer, buffer.buffer), saving: false, conflict: null, errorMessage: null,
         lastOrigin: change.origin, lastChanges: null, ...(isMove ? { recoveryJournalId: null, recoveryJournalRevision: null } : {}) };
       if (isMove) moved.push({ before: old!, after: record });
       return record;
@@ -1024,7 +1145,7 @@ export class DocumentRegistry {
             emptyRecord(identity, generation, this.createDocumentInstanceId()),
             await this.documents.read(identity),
           );
-          document = { before: structuredClone(before), afterBuffer: before.buffer, changes: [], editCount: 0, wasOpen: Boolean(existing), versionSteps: 0 };
+          document = { before: structuredClone(before), afterBuffer: before.buffer, afterEdits: documentBaseEdits(before.baseContent, before.buffer, before.baseEdits), changes: [], editCount: 0, wasOpen: Boolean(existing), versionSteps: 0 };
           documentsByKey.set(key, document);
         }
         const record = document.before;
@@ -1046,6 +1167,7 @@ export class DocumentRegistry {
             ? 'Workspace edit contains a range outside the current document' : 'Workspace edit contains overlapping ranges' });
           continue;
         }
+        document.afterEdits = composeDocumentEdits(record.baseContent, document.afterBuffer, document.afterEdits, prepared.changes);
         document.afterBuffer = prepared.buffer;
         document.editCount += change.edits.length;
         document.versionSteps += 1;
@@ -1178,7 +1300,8 @@ export class DocumentRegistry {
       return {
         ...current,
         buffer: document.afterBuffer,
-        dirty: document.afterBuffer !== current.baseContent,
+        baseEdits: this.trackTextEdit(current, document.afterBuffer, document.changes, undefined, document.afterEdits),
+        dirty: isDirty(current, document.afterBuffer),
         localEditRevision: current.localEditRevision + document.versionSteps,
         status: 'ready' as const,
         lastOrigin: prepared.preview.origin,
@@ -1193,6 +1316,8 @@ export class DocumentRegistry {
       documents: records.map((record, index) => ({
         identity: record.identity,
         beforeBuffer: prepared.documents[index]!.before.buffer,
+        beforeEdits: documentBaseEdits(prepared.documents[index]!.before.baseContent, prepared.documents[index]!.before.buffer, prepared.documents[index]!.before.baseEdits),
+        baseRevision: prepared.documents[index]!.before.baseRevision,
         appliedBuffer: record.buffer,
         appliedRevision: record.localEditRevision,
       })),
@@ -1262,7 +1387,9 @@ export class DocumentRegistry {
       return {
         ...current,
         buffer: document.beforeBuffer,
-        dirty: document.beforeBuffer !== current.baseContent,
+        baseEdits: this.trackTextEdit(current, document.beforeBuffer, change ? [change] : [], 'undo',
+          document.baseRevision === current.baseRevision ? document.beforeEdits : documentBaseEdits(current.baseContent, document.beforeBuffer)),
+        dirty: isDirty(current, document.beforeBuffer),
         localEditRevision: current.localEditRevision + 1,
         status: 'ready' as const,
         lastOrigin: `workspace-edit-undo:${groupId}`,
@@ -1274,50 +1401,134 @@ export class DocumentRegistry {
     return { status: 'undone', groupId, records };
   }
 
+  setFormat(identity: DocumentIdentity, update: Partial<EditableFormat>): DocumentRecord {
+    this.assertActive();
+    this.assertDirtyBarrierAllowsEdit(identity);
+    const current = this.get(identity);
+    if (!current || !['ready', 'missing', 'deleted', 'conflict'].includes(current.status)) throw new DocumentsError('Document is not editable');
+    const nextFormat: EditableFormat = { normalizeLineEndings: update.lineEnding !== undefined ? true : current.normalizeLineEndings, encoding: update.encoding ?? current.encoding, bom: update.bom ?? current.bom, lineEnding: update.lineEnding ?? current.lineEnding };
+    if (!['utf-8', 'gbk', 'utf-16le', 'utf-16be'].includes(nextFormat.encoding)) throw new DocumentsError('Unsupported document encoding');
+    if (nextFormat.encoding === 'gbk') nextFormat.bom = false;
+    if (nextFormat.encoding === current.encoding && nextFormat.bom === current.bom && nextFormat.lineEnding === current.lineEnding
+      && !(update.lineEnding !== undefined && current.baseFormat?.lineEnding === 'mixed' && !current.normalizeLineEndings)) return current;
+    const undo = this.formatUndo.get(current.documentInstanceId) ?? [];
+    undo.push({ before: { encoding: current.encoding, bom: current.bom, lineEnding: current.lineEnding, normalizeLineEndings: current.normalizeLineEndings }, after: nextFormat, textState: this.historyFor(current).state });
+    this.formatUndo.set(current.documentInstanceId, undo);
+    const next = { ...current, ...nextFormat, baseFormat: current.baseFormat ?? formatFromRecord(current),
+      localEditRevision: current.localEditRevision + 1, errorMessage: null, lastOrigin: 'format', lastChanges: null };
+    next.dirty = isDirty(next, next.buffer);
+    this.commit(next); this.scheduleJournal(next);
+    return next;
+  }
+
+  canUndoFormat(identity: DocumentIdentity): boolean {
+    const current = this.get(identity);
+    if (!current) return false;
+    const change = this.formatUndo.get(current.documentInstanceId)?.at(-1);
+    return Boolean(change && this.historyFor(current).state === change.textState
+      && current.encoding === change.after.encoding && current.bom === change.after.bom
+      && current.lineEnding === change.after.lineEnding
+      && Boolean(current.normalizeLineEndings) === Boolean(change.after.normalizeLineEndings));
+  }
+
+  /** Later text edits must be undone first. Saved EOL normalization requires disk Recovery. */
+  undoFormat(identity: DocumentIdentity): boolean {
+    this.assertDirtyBarrierAllowsEdit(identity);
+    if (!this.canUndoFormat(identity)) return false;
+    const current = this.get(identity)!;
+    const stack = this.formatUndo.get(current.documentInstanceId)!;
+    const change = stack.at(-1)!;
+    stack.pop();
+    const next = { ...current, ...change.before, localEditRevision: current.localEditRevision + 1, errorMessage: null,
+      lastOrigin: 'format-undo', lastChanges: null };
+    next.dirty = isDirty(next, next.buffer);
+    this.commit(next); this.scheduleJournal(next);
+    return true;
+  }
+
+  async reopenWithEncoding(identity: DocumentIdentity, encoding: string): Promise<DocumentRecord> {
+    this.assertActive(); this.assertDirtyBarrierAllowsEdit(identity);
+    const current = await this.open(identity);
+    if (current.dirty || current.saving || this.pendingSaves.has(current.documentInstanceId)) {
+      const next = { ...current, errorMessage: 'Save or discard this draft before reopening with another encoding.' };
+      this.commit(next); return next;
+    }
+    const generation = this.getGeneration(), revision = current.localEditRevision;
+    try {
+      const result = await this.documents.read(current.identity, { encoding, rememberEncoding: true });
+      const latest = this.get(identity);
+      if (this.disposed || generation !== this.getGeneration() || !latest || latest.localEditRevision !== revision || latest.dirty) return latest ?? current;
+      const next = applyRead(latest, result);
+      this.commit(next); return next;
+    } catch (error) {
+      const latest = this.get(identity);
+      if (!this.disposed && generation === this.getGeneration() && latest && latest.localEditRevision === revision) {
+        this.commit({ ...latest, errorMessage: error instanceof Error ? error.message : String(error) });
+      }
+      throw error;
+    }
+  }
+
   async save(
     identity: DocumentIdentity,
-    options: { overwriteConflict?: boolean; recreateDeleted?: boolean } = {},
+    options: { overwriteConflict?: boolean; recreateDeleted?: boolean; reconcileOnly?: boolean } = {},
   ): Promise<DocumentRecord> {
     this.assertActive();
     this.assertDirtyBarrierAllowsEdit(identity);
     const generation = this.getGeneration();
-    const current = this.records.get(this.keyFor(identity));
-    if (!current) throw new DocumentsError('Document is not open', { reason: 'failed' });
-    if (!current.dirty) return current;
-    if (current.saving) return current;
-    if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
-    if (current.status === 'conflict' && !options.overwriteConflict) return current;
-    if (current.status === 'deleted' && !options.recreateDeleted) return current;
-    const operationId = crypto.randomUUID();
+    const live = this.records.get(this.keyFor(identity));
+    if (!live) throw new DocumentsError('Document is not open', { reason: 'failed' });
+    const pending = this.pendingSaves.get(live.documentInstanceId);
+    if (!live.dirty && !pending || live.saving) return live;
+    if (!pending && (live.status === 'binary' || live.status === 'unsupported-encoding'
+      || live.status === 'conflict' && !options.overwriteConflict
+      || live.status === 'deleted' && !options.recreateDeleted)) return live;
+    // A transport or preference failure can follow an accepted write. Reconcile
+    // the exact original request before submitting any newer buffer or format.
+    const current = pending?.record ?? live;
+    const operationId = pending?.request.operationId ?? crypto.randomUUID();
     const capturedEdit = current.localEditRevision;
-    const content = serializeEditorContent(current.buffer, current.lineEnding);
-    this.commit({
-      ...current,
-      saving: true,
-      saveOperationId: operationId,
-      saveCapturedEditRevision: capturedEdit,
-    });
+    const content = current.buffer;
+    const request: VarinDocumentWriteRequest = pending?.request ?? {
+      token: {
+        workspaceId: current.identity.workspaceId,
+        epoch: requireWorkspaceEpoch(current.workspaceEpoch),
+        owner: { kind: 'document-surface', id: this.recoverySessionId, generation: current.connectionGeneration },
+      },
+      resource: current.identity,
+      content,
+      edits: documentBaseEdits(current.baseContent, content, current.baseEdits),
+      encoding: current.encoding,
+      bom: current.bom,
+      ...(current.baseFormat ? { sourceFormat: current.baseFormat } : {}),
+      ...((current.normalizeLineEndings || current.baseFormat && current.lineEnding !== current.baseFormat.defaultLineEnding) ? { lineEnding: current.lineEnding } : {}),
+      ...(formatDirty(current) ? { rememberEncoding: true } : {}),
+      expectedRevision: options.recreateDeleted || current.baseRevision === null ? null : current.baseRevision,
+      operationId,
+    };
+    if (!pending) {
+      this.pendingSaves.set(current.documentInstanceId, { request, record: current });
+      this.savingEdits.set(current.documentInstanceId, { base: content, buffer: content, edits: [], states: new Map([[this.historyFor(current).state, []]]) });
+    }
+    this.commit({ ...live, saving: true, saveOperationId: operationId, saveCapturedEditRevision: capturedEdit });
+    let unresolved = true;
+    let dispatched = false;
     try {
-      const result = await this.documents.write({
-        token: {
-          workspaceId: current.identity.workspaceId,
-          epoch: requireWorkspaceEpoch(current.workspaceEpoch),
-          owner: {
-            kind: 'document-surface',
-            id: this.recoverySessionId,
-            generation: current.connectionGeneration,
-          },
-        },
-        resource: current.identity,
-        content,
-        encoding: current.encoding,
-        bom: current.bom,
-        expectedRevision: options.recreateDeleted || current.baseRevision === null ? null : current.baseRevision,
-        operationId,
-      });
+      // A conversion crosses the file and preference owners, so persist its
+      // immutable intent before dispatch. Ordinary saves remain available when
+      // recovery storage is temporarily unavailable.
+      const journal = this.enqueueJournal(identity, () => this.writeJournalRecord(this.get(identity) ?? live, true));
+      if (request.rememberEncoding) await journal;
+      else void journal.catch(error => this.reportJournalFailure(error));
+      if (this.disposed || generation !== this.getGeneration()) return this.get(identity) ?? live;
+      dispatched = true;
+      const result = await this.documents.write(request);
+      unresolved = false;
+      this.pendingSaves.delete(current.documentInstanceId);
       if (this.disposed || generation !== this.getGeneration()) return current;
       const latest = this.records.get(this.keyFor(identity)) ?? current;
       if (result.status === 'stale-epoch') {
+        this.savingEdits.delete(current.documentInstanceId);
         this.commit({
           ...latest,
           saving: false,
@@ -1328,6 +1539,7 @@ export class DocumentRegistry {
         return this.records.get(this.keyFor(identity)) ?? latest;
       }
       if (result.status === 'conflict') {
+        this.savingEdits.delete(current.documentInstanceId);
         const disk = await this.documents.read(current.identity);
         if (this.disposed || generation !== this.getGeneration()) return latest;
         const conflictCurrent = this.records.get(this.keyFor(identity)) ?? latest;
@@ -1353,34 +1565,54 @@ export class DocumentRegistry {
       // The receipt describes the captured write, even if the buffer was edited
       // or discarded while it was in flight.
       const savedContent = normalizeEditorLineEndings(content);
+      const savedFormat = result.format ?? formatFromRecord(current);
+      const desired = latest.localEditRevision === capturedEdit
+        ? { encoding: savedFormat.encoding, bom: savedFormat.bom, lineEnding: savedFormat.defaultLineEnding, normalizeLineEndings: false } : latest;
       const saved: DocumentRecord = {
         ...latest,
         saving: false,
         saveOperationId: null,
         saveCapturedEditRevision: null,
         baseContent: savedContent,
+        baseEdits: documentBaseEdits(savedContent, latest.buffer, this.savingEdits.get(current.documentInstanceId)?.edits),
+        baseFormat: savedFormat,
+        encoding: desired.encoding, bom: desired.bom, lineEnding: desired.lineEnding, normalizeLineEndings: desired.normalizeLineEndings,
         buffer: latest.buffer,
         baseRevision: result.revision,
-        dirty: latest.buffer !== savedContent,
+        dirty: isDirty({ ...desired, baseFormat: savedFormat, baseContent: savedContent }, latest.buffer),
         byteLength: result.byteLength,
         status: 'ready',
         conflict: null,
         errorMessage: null,
       };
+      this.savingEdits.delete(current.documentInstanceId);
       this.commit(saved);
       if (saved.dirty) this.scheduleJournal(saved);
-      else await this.clearJournal(saved);
+      else await this.clearJournal(saved, operationId);
+      if (pending && saved.dirty && !options.reconcileOnly) return this.save(identity, options);
       return saved;
     } catch (error) {
+      const uncertain = unresolved && (dispatched || Boolean(pending)) && (!(error instanceof DocumentsError)
+        || ['failed', 'stale-completion', 'reconciliation-pending'].includes(error.reason));
+      if (!uncertain) {
+        this.pendingSaves.delete(current.documentInstanceId);
+        this.savingEdits.delete(current.documentInstanceId);
+      }
       if (this.disposed || generation !== this.getGeneration()) return current;
-      const latest = this.records.get(this.keyFor(identity)) ?? current;
+      const latest = this.records.get(this.keyFor(identity)) ?? live;
       this.commit({
         ...latest,
         saving: false,
-        saveOperationId: null,
-        saveCapturedEditRevision: null,
+        saveOperationId: uncertain ? operationId : null,
+        saveCapturedEditRevision: uncertain ? capturedEdit : null,
+        saveErrorRevision: capturedEdit,
+        saveErrorReason: error instanceof DocumentsError ? error.reason : 'failed',
         errorMessage: error instanceof Error ? error.message : String(error),
       });
+      if (uncertain) {
+        await this.enqueueJournal(identity, () => this.writeJournalRecord(this.get(identity) ?? latest, true))
+          .catch(journalError => this.reportJournalFailure(journalError));
+      }
       throw error;
     }
   }
@@ -1395,7 +1627,7 @@ export class DocumentRegistry {
       emptyRecord(identity, generation, this.createDocumentInstanceId()),
       await this.documents.read(identity),
     );
-    if (snapshot.status !== 'missing') return this.open(identity);
+    if (snapshot.status !== 'missing') return this.open(identity, { reload: true });
     const result = await this.documents.write({
       token: {
         workspaceId: identity.workspaceId,
@@ -1404,18 +1636,18 @@ export class DocumentRegistry {
       },
       resource: identity,
       content,
-      encoding: 'utf-8',
-      bom: false,
+      encoding: snapshot.encoding,
+      bom: snapshot.bom,
       expectedRevision: null,
       operationId: crypto.randomUUID(),
     });
     if (result.status === 'conflict' || result.status === 'stale-epoch') {
-      return this.open(identity);
+      return this.open(identity, { reload: true });
     }
     if (this.disposed || generation !== this.getGeneration()) {
       return emptyRecord(identity, generation, this.createDocumentInstanceId());
     }
-    return this.open(identity);
+    return this.open(identity, { reload: true });
   }
 
   async reload(identity: DocumentIdentity): Promise<DocumentRecord> {
@@ -1429,7 +1661,9 @@ export class DocumentRegistry {
     const next: DocumentRecord = {
       ...current,
       buffer: current.baseContent,
-      localEditRevision: current.localEditRevision + (current.buffer !== current.baseContent ? 1 : 0),
+      baseEdits: [],
+      ...(current.baseFormat ? { encoding: current.baseFormat.encoding, bom: current.baseFormat.bom, lineEnding: current.baseFormat.defaultLineEnding, normalizeLineEndings: false } : {}),
+      localEditRevision: current.localEditRevision + (current.dirty ? 1 : 0),
       dirty: false,
       status: current.status === 'conflict' ? 'ready' : current.status === 'deleted' ? 'deleted' : current.status,
       conflict: current.status === 'conflict' ? null : current.conflict,
@@ -1437,7 +1671,8 @@ export class DocumentRegistry {
       lastOrigin: 'discard',
     };
     this.commit(next);
-    void this.clearJournal(next);
+    if (this.pendingSaves.has(next.documentInstanceId)) this.scheduleJournal(next);
+    else void this.clearJournal(next);
     return next;
   }
 
@@ -1448,8 +1683,7 @@ export class DocumentRegistry {
 
   private async waitForDirtyBarrierOperations(barrier: DirtyBarrierHold): Promise<boolean> {
     const affected = () => [...this.records.values()].filter((record) => (
-      this.aliasesFor(record.identity).some((alias) => alias.workspaceId === barrier.workspaceId
-        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))
+      this.aliasesFor(record.identity).some((alias) => this.barrierCoversResource(barrier, alias))
     ));
     const busy = () => affected().some(record => record.saving || record.status === 'loading');
     if (!busy()) return true;
@@ -1503,13 +1737,17 @@ export class DocumentRegistry {
     this.dirtyBarriers.set(event.barrierId, barrier);
     try {
       if (!await this.waitForDirtyBarrierOperations(barrier) || !barrier.active) return;
-      const journalWrites = [...this.records.values()].filter(record => this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.workspaceId && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))));
-      for (const record of journalWrites) {
-        const timer = this.journalTimers.get(this.keyFor(record.identity));
-        if (timer) clearTimeout(timer);
-        this.journalTimers.delete(this.keyFor(record.identity));
-      }
-      await Promise.all(journalWrites.map(record => this.journalOperations.get(this.keyFor(record.identity))));
+      const journalWrites = [...this.records.values()].filter(record => this.aliasesFor(record.identity).some(alias => this.barrierCoversResource(barrier, alias)));
+      await Promise.all(journalWrites.map(record => {
+        const key = this.keyFor(record.identity);
+        const timer = this.journalTimers.get(key);
+        if (!timer) return this.journalOperations.get(key);
+        clearTimeout(timer);
+        this.journalTimers.delete(key);
+        // Finish the scheduled journal before acknowledgement, rather than losing
+        // its draft or letting the debounce write invalidate the held capture.
+        return this.enqueueJournal(record.identity, () => this.flushJournal(record.identity, record.connectionGeneration));
+      }));
       await this.publishDirtyWorkspace(event.workspaceId);
       if (!barrier.active) return;
       const result = await this.documents.ackDirtyStateBarrier?.({
@@ -1532,6 +1770,7 @@ export class DocumentRegistry {
   }
 
   handleWatchEvent(event: VarinWorkspaceFileEvent, resetWorkspaceId?: string): void {
+    if (event.operationId && [...this.pendingSaves.values()].some(save => save.request.operationId === event.operationId)) return;
     if (event.operationId && (this.hostWorkspaceEdits.has(event.operationId) || this.workspaceSurfaceOperations.has(event.operationId))) return;
     if (event.kind === 'invalidated') {
       // An entry (including an atomically replaced directory) invalidates open
@@ -1539,7 +1778,7 @@ export class DocumentRegistry {
       for (const record of this.records.values()) {
         if (this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.resource.workspaceId
           && (alias.resourceId === event.resource.resourceId || alias.resourceId.startsWith(`${event.resource.resourceId}/`)))) {
-          if (this.deferWatchReload(record) || record.status === 'loading' || record.saving) continue;
+          if (this.deferWatchReload(record) || record.status === 'loading' || record.saving || this.pendingSaves.has(record.documentInstanceId)) continue;
           void this.open(record.identity, { reload: true }).catch(error => this.reportJournalFailure(error));
         }
       }
@@ -1550,7 +1789,7 @@ export class DocumentRegistry {
         !resetWorkspaceId || this.aliasesFor(record.identity).some((alias) => alias.workspaceId === resetWorkspaceId)
       ));
       for (const record of records) {
-        if (this.deferWatchReload(record) || record.status === 'loading') continue;
+        if (this.deferWatchReload(record) || record.status === 'loading' || this.pendingSaves.has(record.documentInstanceId)) continue;
         void this.open(record.identity, { reload: true }).catch(error => this.reportJournalFailure(error));
       }
       return;
@@ -1603,7 +1842,7 @@ export class DocumentRegistry {
       return;
     }
     if (event.kind === 'changed' || event.kind === 'created') {
-      if (current.saving || current.status === 'loading') return;
+      if (current.saving || current.status === 'loading' || this.pendingSaves.has(current.documentInstanceId)) return;
       if (event.revision && event.revision === current.baseRevision) return;
       void this.open(current.identity, { reload: true }).then((record) => {
         if (this.disposed) return;
@@ -1618,7 +1857,7 @@ export class DocumentRegistry {
 
   async flushRecoveryJournals(): Promise<void> {
     if (this.disposed) return;
-    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
+    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty || this.pendingSaves.has(record.documentInstanceId));
     for (const record of dirtyRecords) {
       const key = this.keyFor(record.identity);
       const timer = this.journalTimers.get(key);
@@ -1641,7 +1880,7 @@ export class DocumentRegistry {
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     const pendingPublications: Promise<unknown>[] = [];
-    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
+    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty || this.pendingSaves.has(record.documentInstanceId));
     const dirtyWorkspaces = [...this.dirtyIdsByWorkspace.keys()];
     this.disposed = true;
     for (const timer of this.journalTimers.values()) clearTimeout(timer);
@@ -1656,6 +1895,8 @@ export class DocumentRegistry {
         .catch((error) => this.reportJournalFailure(error));
     }
     this.records.clear();
+    this.formatUndo.clear();
+    this.textHistory.clear();
     this.coordinationByAlias.clear();
     this.aliasesByCoordination.clear();
     this.availableAliases.clear();
@@ -1688,7 +1929,9 @@ export class DocumentRegistry {
     this.dirtyPublicationTails.clear();
     // Callers sharing the Host process must observe final journal/dirty-owner
     // delivery before disposing the authority it writes to.
-    this.disposePromise = Promise.allSettled([...this.journalOperations.values(), ...pendingPublications]).then(() => undefined);
+    this.disposePromise = Promise.allSettled([...this.journalOperations.values(), ...pendingPublications]).then(() => {
+      this.savingEdits.clear(); this.pendingSaves.clear();
+    });
     return this.disposePromise;
   }
 
@@ -1773,11 +2016,13 @@ export class DocumentRegistry {
         .map((alias) => ({ record, alias })))
       .map(async ({ record, alias }) => ({
         baseRevision: record.baseRevision,
+        ...(record.baseFormat ? { sourceFormat: record.baseFormat } : {}),
         bufferHash: await bufferHash(record.buffer),
         documentInstanceId: record.documentInstanceId,
         encoding: record.encoding,
         bom: record.bom,
         lineEnding: record.lineEnding,
+        normalizeLineEndings: record.normalizeLineEndings,
         localEditRevision: record.localEditRevision,
         resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
       })));
@@ -1788,16 +2033,7 @@ export class DocumentRegistry {
   private enqueueDirtyPublication(
     workspaceId: string,
     generation: number,
-    resources: Array<{
-      baseRevision: string | null;
-      bufferHash?: string;
-      documentInstanceId?: string;
-      encoding?: string;
-      bom?: boolean;
-      lineEnding?: 'lf' | 'crlf' | 'cr';
-      localEditRevision: number;
-      resource: DocumentIdentity;
-    }>,
+    resources: VarinDirtyBufferResource[],
   ): Promise<void> {
     const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
@@ -1980,6 +2216,10 @@ export class DocumentRegistry {
         || hash !== expectedHash
         || record.encoding !== target.encoding || record.bom !== target.bom
         || record.lineEnding !== target.lineEnding
+        || target.normalizeLineEndings !== undefined && Boolean(record.normalizeLineEndings) !== target.normalizeLineEndings
+        || target.baseFormat !== undefined && (record.baseFormat?.encoding !== target.baseFormat.encoding
+          || record.baseFormat?.bom !== target.baseFormat.bom || record.baseFormat?.lineEnding !== target.baseFormat.lineEnding
+          || record.baseFormat?.defaultLineEnding !== target.baseFormat.defaultLineEnding)
         || this.records.get(this.keyFor(target.resource)) !== record) {
         return this.surfaceOperationFailures(payload, `Document surface binding changed before ${payload.action}`);
       }
@@ -1994,6 +2234,7 @@ export class DocumentRegistry {
         beforeLocalEditRevision: record.localEditRevision,
         beforeHash: hash,
         content: record.buffer,
+        edits: documentBaseEdits(record.baseContent, record.buffer, record.baseEdits),
         ...(barrier ? { baseContent: record.baseContent } : {}),
       }));
     }
@@ -2006,7 +2247,11 @@ export class DocumentRegistry {
         const base = target.restoreState!;
         const buffer = normalizeEditorLineEndings(target.newText!);
         const baseContent = normalizeEditorLineEndings(base.baseContent);
-        return { ...record, ...base, baseContent, buffer, dirty: buffer !== baseContent,
+        const baseFormat = base.baseFormat ?? formatFromRecord(base);
+        return { ...record, ...base, baseFormat, baseContent, buffer,
+          baseEdits: documentBaseEdits(baseContent, buffer, base.edits),
+          normalizeLineEndings: base.normalizeLineEndings ?? false,
+          dirty: isDirty({ ...base, baseFormat, baseContent }, buffer),
           localEditRevision: record.localEditRevision + 1,
           status: base.baseRevision === null && buffer === '' ? 'missing' as const : 'ready' as const,
           byteLength: new TextEncoder().encode(base.baseContent).byteLength,
@@ -2130,7 +2375,7 @@ export class DocumentRegistry {
     const key = this.keyFor(record.identity);
     const existing = this.journalTimers.get(key);
     if (existing) clearTimeout(existing);
-    if (!record.dirty) {
+    if (!record.dirty && !this.pendingSaves.has(record.documentInstanceId)) {
       void this.clearJournal(record).catch((error) => this.reportJournalFailure(error));
       return;
     }
@@ -2145,11 +2390,13 @@ export class DocumentRegistry {
   private async flushJournal(identity: DocumentIdentity, generation: number): Promise<void> {
     if (this.disposed || generation !== this.getGeneration()) return;
     const record = this.records.get(this.keyFor(identity));
-    if (!record?.dirty) return;
+    if (!record || !record.dirty && !this.pendingSaves.has(record.documentInstanceId)) return;
     await this.writeJournalRecord(record, true);
   }
 
   private async writeJournalRecord(record: DocumentRecord, updateRegistry: boolean): Promise<void> {
+    const pending = this.pendingSaves.get(record.documentInstanceId);
+    const pendingSave = pending ? (({ token: _token, ...body }) => body)(pending.request) : undefined;
     const request = {
       token: {
         workspaceId: record.identity.workspaceId,
@@ -2162,10 +2409,16 @@ export class DocumentRegistry {
       },
       workspaceId: record.identity.workspaceId,
       recoverySessionId: this.recoverySessionId,
+      pendingSave,
+      pendingEdits: pending ? documentBaseEdits(pending.record.buffer, record.buffer, this.savingEdits.get(record.documentInstanceId)?.edits) : undefined,
       resource: record.identity,
       content: serializeEditorContent(record.buffer, record.lineEnding),
+      edits: documentBaseEdits(record.baseContent, record.buffer, record.baseEdits),
       encoding: record.encoding,
       bom: record.bom,
+      ...(record.baseFormat ? { sourceFormat: record.baseFormat } : {}),
+      lineEnding: record.lineEnding,
+      normalizeLineEndings: record.normalizeLineEndings,
       baseRevision: record.baseRevision,
       expectedRevision: record.recoveryJournalRevision,
     };
@@ -2181,7 +2434,8 @@ export class DocumentRegistry {
     } else if (written.status === 'missing' && request.expectedRevision !== null) {
       written = await this.documents.writeRecoveryJournal({ ...request, expectedRevision: null });
     }
-    if (written.status !== 'written' || !updateRegistry || this.disposed) return;
+    if (written.status !== 'written') throw new Error('Recovery journal changed while saving the draft');
+    if (!updateRegistry || this.disposed) return;
     const latest = this.records.get(this.keyFor(record.identity));
     if (!latest) return;
     this.commit({
@@ -2191,14 +2445,14 @@ export class DocumentRegistry {
     });
   }
 
-  private async clearJournal(record: DocumentRecord): Promise<void> {
+  private async clearJournal(record: DocumentRecord, completedOperationId?: string): Promise<void> {
     const timer = this.journalTimers.get(this.keyFor(record.identity));
     if (timer) clearTimeout(timer);
     this.journalTimers.delete(this.keyFor(record.identity));
     await this.enqueueJournal(record.identity, async () => {
       const latest = this.records.get(this.keyFor(record.identity));
       if (!latest?.recoveryJournalId || latest.recoveryJournalRevision === null) return;
-      const result = await this.documents.deleteRecoveryJournal({
+      const request = {
         token: {
           workspaceId: latest.identity.workspaceId,
           epoch: requireWorkspaceEpoch(latest.workspaceEpoch),
@@ -2210,9 +2464,22 @@ export class DocumentRegistry {
         },
         journalId: latest.recoveryJournalId,
         expectedRevision: latest.recoveryJournalRevision,
-      });
+      };
+      let result = await this.documents.deleteRecoveryJournal(request);
       const current = this.records.get(this.keyFor(record.identity));
       if (!current) return;
+      if (result.status === 'conflict' && completedOperationId && !current.dirty) {
+        const journal = await this.documents.readRecoveryJournal(result.journal.journalId);
+        if (this.get(record.identity) === current && journal.status === 'ready'
+          && journal.pendingSave?.operationId === completedOperationId
+          && normalizeEditorLineEndings(journal.content) === current.buffer
+          && journal.encoding === current.encoding && journal.bom === current.bom
+          && (journal.lineEnding ?? detectLineEnding(journal.content)) === current.lineEnding) {
+          // The Host can advance only the preference-reconciliation marker after
+          // the save. Remove that matching completed intent, never a newer draft.
+          result = await this.documents.deleteRecoveryJournal({ ...request, expectedRevision: journal.journal.revision });
+        }
+      }
       if (result.status === 'stale-epoch') {
         throw new Error(`Workspace epoch changed to ${result.currentEpoch}; recovery journal was not deleted`);
       }
@@ -2306,7 +2573,59 @@ export class DocumentRegistry {
       || loaded.journal.resource.workspaceId !== alias.workspaceId
       || loaded.journal.resource.resourceId !== alias.resourceId) return;
     const buffer = normalizeEditorLineEndings(loaded.content);
-    if (buffer !== latest.baseContent && loaded.journal.baseRevision !== latest.baseRevision) {
+    const restoredFormat = { encoding: loaded.encoding, bom: loaded.bom, lineEnding: loaded.lineEnding ?? detectLineEnding(loaded.content), normalizeLineEndings: loaded.normalizeLineEndings };
+    if (loaded.pendingSave) {
+      const intent = loaded.pendingSave;
+      if (intent.resource.workspaceId !== alias.workspaceId || intent.resource.resourceId !== alias.resourceId) {
+        this.commit({ ...latest, errorMessage: 'The pending save does not belong to this recovery draft.' });
+        return;
+      }
+      const capturedBuffer = normalizeEditorLineEndings(intent.content);
+      const capturedFormat: EditableFormat = { encoding: intent.encoding, bom: intent.bom,
+        lineEnding: intent.lineEnding && intent.lineEnding !== 'mixed' ? intent.lineEnding : intent.sourceFormat?.defaultLineEnding ?? restoredFormat.lineEnding,
+        normalizeLineEndings: intent.lineEnding !== undefined };
+      const hasNewerDraft = buffer !== capturedBuffer || restoredFormat.encoding !== capturedFormat.encoding
+        || restoredFormat.bom !== capturedFormat.bom || restoredFormat.lineEnding !== capturedFormat.lineEnding
+        || Boolean(restoredFormat.normalizeLineEndings) !== Boolean(capturedFormat.normalizeLineEndings);
+      const recovered: DocumentRecord = { ...latest, ...restoredFormat, identity: alias, workspaceEpoch: epoch,
+        buffer, dirty: true, localEditRevision: latest.localEditRevision + 1,
+        baseEdits: documentBaseEdits(latest.baseContent, buffer),
+        recoveryJournalId: loaded.journal.journalId, recoveryJournalRevision: loaded.journal.revision,
+        lastOrigin: 'recovery', lastChanges: null };
+      const captured: DocumentRecord = { ...recovered, ...capturedFormat, buffer: capturedBuffer,
+        baseRevision: intent.expectedRevision, baseFormat: intent.sourceFormat,
+        localEditRevision: recovered.localEditRevision - (hasNewerDraft ? 1 : 0) };
+      const request: VarinDocumentWriteRequest = { ...intent, token: { workspaceId: alias.workspaceId, epoch,
+        owner: { kind: 'document-surface', id: this.recoverySessionId, generation: runtimeGeneration } } };
+      this.pendingSaves.set(recovered.documentInstanceId, { request, record: captured });
+      this.savingEdits.set(recovered.documentInstanceId, { base: capturedBuffer, buffer,
+        edits: documentBaseEdits(capturedBuffer, buffer, loaded.pendingEdits),
+        states: new Map([[this.historyFor(recovered).state, documentBaseEdits(capturedBuffer, buffer, loaded.pendingEdits)]]) });
+      this.commit(recovered);
+      // Reconcile the explicitly requested save, but leave subsequent unsaved
+      // typing as a draft after reopening the application.
+      await this.save(alias, { reconcileOnly: true }).catch(() => undefined);
+      return;
+    }
+    let baseline = latest;
+    if (loaded.sourceFormat && loaded.journal.baseRevision === latest.baseRevision) {
+      if (latest.baseRevision !== null && loaded.sourceFormat.encoding !== latest.baseFormat?.encoding) {
+        // A raw revision alone does not identify Unicode text. Project settings
+        // can change while this draft is closed, so recover the original read
+        // interpretation before applying its baseline-relative edit offsets.
+        const original = await this.documents.read(alias, { encoding: loaded.sourceFormat.encoding });
+        if (this.disposed || this.getGeneration() !== runtimeGeneration || this.get(record.identity) !== latest) return;
+        if (original.status !== 'ready' || original.revision !== loaded.journal.baseRevision || original.epoch !== epoch) {
+          this.commit({ ...latest, status: 'error',
+            errorMessage: 'The recovery draft baseline changed while restoring its original encoding. The draft was preserved.' });
+          return;
+        }
+        baseline = { ...latest, baseContent: normalizeEditorLineEndings(original.content), byteLength: original.byteLength };
+      }
+      baseline = { ...baseline, baseFormat: loaded.sourceFormat };
+    }
+    const restoredDirty = isDirty({ ...baseline, ...restoredFormat }, buffer);
+    if (restoredDirty && loaded.journal.baseRevision !== baseline.baseRevision) {
       this.commit({
         ...latest,
         status: 'error',
@@ -2315,22 +2634,24 @@ export class DocumentRegistry {
       return;
     }
     const withJournal: DocumentRecord = {
-      ...latest,
+      ...baseline,
+      ...restoredFormat,
       identity: alias,
       workspaceEpoch: epoch,
+      buffer,
+      baseEdits: documentBaseEdits(baseline.baseContent, buffer, loaded.edits),
+      dirty: restoredDirty,
+      localEditRevision: latest.localEditRevision + (restoredDirty || buffer !== latest.buffer ? 1 : 0),
       recoveryJournalId: loaded.journal.journalId,
       recoveryJournalRevision: loaded.journal.revision,
     };
-    if (buffer === latest.baseContent) {
+    if (!restoredDirty) {
       this.commit(withJournal);
       await this.clearJournal(withJournal);
       return;
     }
     this.commit({
       ...withJournal,
-      buffer,
-      dirty: true,
-      localEditRevision: latest.localEditRevision + 1,
       lastOrigin: 'recovery',
       lastChanges: null,
     });

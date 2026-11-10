@@ -104,7 +104,7 @@ export async function readExchangeJournal(
         state,
       );
       signal?.throwIfAborted();
-      const decoded = inspectDocumentBytes(bytes);
+      const decoded = await inspectDocumentBytes(bytes);
       return decoded.kind === "text"
         ? { kind: "text", text: decoded.content }
         : { kind: "binary", byteLength: bytes.byteLength };

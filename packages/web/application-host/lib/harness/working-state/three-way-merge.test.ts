@@ -1,8 +1,13 @@
+import { bindUtf8CoordinationCodec } from '../../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import { expect, it } from 'vitest';
 import { buildThreeWayMergePlan, mergeText3Way, planThreeWayPath } from './three-way-merge.js';
-import type { RecoveryState } from './types.js';
+import type { RecoveryState, RegularFileState } from './types.js';
 
-const file = (objectHash: string, mode = 0o644): RecoveryState => ({ kind: 'regular-file', objectHash, byteLength: 10, mode });
+const file = (objectHash: string, mode = 0o644): RegularFileState => ({ kind: 'regular-file', objectHash, byteLength: 10, mode });
 const missing: RecoveryState = { kind: 'missing' };
 
 it.each([
@@ -66,6 +71,23 @@ it('preserves independent native attributes and child binary content without rea
   expect(await planThreeWayPath({ path: 'binary', baseState: base, parentState: parent,
     childState: { ...parent, native: { ...native, xattrs: { dXNlci5w: [2] } } }, readContent: async () => null,
   })).toMatchObject({ decision: 'conflict' });
+});
+
+it('merges text with inherited native attributes but keeps conflicting modes explicit', async () => {
+  const native = { uid: 1, gid: 1, created: null, modified: { seconds: 1, nanos: 0 }, backup: null,
+    windowsAttributes: 0, bsdFlags: 0, security: null, reparseData: null, xattrs: {} };
+  const base = { ...file('base'), native }, parent = { ...file('parent'), native };
+  const child = { ...file('child'), native: { ...native, modified: { seconds: 2, nanos: 0 } } };
+  const contents: Record<string, string> = { base: 'own=0\r\n\r\nteam=0\r\n',
+    parent: 'own=0\r\n\r\nteam=1\r\n', child: 'own=1\r\n\r\nteam=0\r\n' };
+  const readContent = async (state: RecoveryState) => state.kind === 'regular-file' ? Buffer.from(contents[state.objectHash]!) : null;
+  expect(await planThreeWayPath({ path: 'file.txt', baseState: base, parentState: parent, childState: child, readContent }))
+    .toMatchObject({ decision: 'merge-clean', mergedText: 'own=1\r\n\r\nteam=1\r\n',
+      mergedMode: 0o644, mergedNative: child.native, textFormat: { encoding: 'utf-8' } });
+  expect(await planThreeWayPath({ path: 'file.txt', baseState: base,
+    parentState: { ...parent, mode: 0o600 }, childState: { ...child, mode: 0o755 },
+    readContent: async () => { throw new Error('Conflicting modes must not be hidden by a text merge'); },
+  })).toMatchObject({ decision: 'conflict', conflictReason: 'File mode changed differently on both sides' });
 });
 
 it('reports applied paths separately from delete/modify conflicts', async () => {

@@ -1,3 +1,4 @@
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,7 @@ export async function createAuthorityTestRuntime(options: {
   const storageRoot = path.join(options.dataDir, "kernel", options.hostId);
   const client = createKernelClient({ hostId: options.hostId, storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
   await client.start();
+  const releaseTextCodec = bindDocumentTextCodec(client);
   const adapter = new KernelStorageAdapter({
     client, hostId: options.hostId, storageRoot,
     resolveWorkspaceRoot: async (workspaceId) => (await options.documents.inspectWorkspace(workspaceId)).root,
@@ -59,6 +61,7 @@ export async function createAuthorityTestRuntime(options: {
     client, adapter, backend, content, recovery, engine, workingStates, storageRoot,
     async dispose() {
       options.documents.bindDurableMutationStorage(null);
+      releaseTextCodec();
       try { await engine.dispose(); } finally {
         try { await adapter.dispose(); } finally { await client.close(); }
       }

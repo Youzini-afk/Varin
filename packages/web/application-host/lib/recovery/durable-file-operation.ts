@@ -135,6 +135,8 @@ export interface HostResourceOperationGate {
 }
 
 export interface HostFileResourceBackend {
+  /** Observe/reconcile the original durable write, never dispatch a new write. */
+  readWriteReceipt?(identity: RecoveryIdentity, operationId: string): Promise<{ status: 'applied' | 'conflict'; state: RecoveryState } | null>;
   gateFor(identity: RecoveryIdentity): HostResourceOperationGate;
   captureDetailed(
     identity: RecoveryIdentity,

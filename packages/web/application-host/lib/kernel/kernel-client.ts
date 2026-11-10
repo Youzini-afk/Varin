@@ -99,10 +99,26 @@ export interface KernelFileReadResult {
   missing: boolean;
   readVersion?: string;
   state?: { kind: string };
-  content?: { text?: string; byteLength: number; nextOffset: number; eof: boolean };
+  content?: { text?: string; hash?: string; byteLength: number; nextOffset: number; eof: boolean };
 }
 
+export interface KernelTextConversion {
+  operationId: string;
+  conversionOperationId: string;
+  path: string;
+  rawHash: string;
+  sourceEncoding: string;
+  targetEncoding: string;
+  choiceRevision: number;
+  runId: string | null;
+  policyRoot?: string | null;
+  canonicalRoot: string;
+  sourceMode?: string | null;
+}
+export interface KernelTextConversionsPage { conversions: KernelTextConversion[]; nextCursor: string | null }
+
 export interface KernelCreateBranchInput {
+  textEncoding?: import('./protocol.generated.js').KernelTextPolicy;
   sourceProvenance?: { objectHash: string; ownerId: string };
   operationId: string;
   branchId: string;
@@ -287,6 +303,10 @@ export class KernelScopedClient {
 
   fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
     return this.owner.fileRootRegister(params, this.grant, signal);
+  }
+
+  fileTextConversions(params: KernelMethodParams["file.text.conversions"], signal?: AbortSignal): Promise<KernelTextConversionsPage> {
+    return this.owner.fileTextConversions(params, this.grant, signal);
   }
 
   fileOperationList(params: KernelMethodParams["file.operation.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -627,6 +647,8 @@ const NEW_EXECUTION_METHODS = new Set<KernelMethod>([
 
 export class KernelClient {
   nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
+  /** Original project namespace; interpretation only, never a resource grant. */
+  textEncodingPolicy?: (workspaceId: string, source?: import('../projects/text-encoding.js').TextEncodingSource | null, signal?: AbortSignal) => Promise<import('./protocol.generated.js').KernelTextPolicy>;
   private nativeWorkspaceLifetime = false;
   workspaceRequest<T>(method: 'workspace.backend.inspect' | 'workspace.backend.settings' | 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.bind' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
     params: KernelMethodParams[typeof method], grant: KernelGrantHandle, signal?: AbortSignal): Promise<T> {
@@ -1331,6 +1353,17 @@ export class KernelClient {
     return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true, ...options });
   }
 
+  /** Pure native file representation transforms; no filesystem or grant is introduced. */
+  async textDecode(params: import('./protocol.generated.js').KernelTextDecodeParams): Promise<import('./protocol.generated.js').KernelTextDecodeResult> {
+    if (!this.handshakeResult) await this.start();
+    return this.requestRaw('text.decode', params, { allowBootstrap: true });
+  }
+
+  async textSerialize(params: import('./protocol.generated.js').KernelTextSerializeParams): Promise<import('./protocol.generated.js').KernelTextSerializeResult> {
+    if (!this.handshakeResult) await this.start();
+    return this.requestRaw('text.serialize', params, { allowBootstrap: true });
+  }
+
   async health(options: { deep?: boolean; gcPreview?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
     if (!this.handshakeResult) await this.start();
     return this.requestRaw<KernelHealthResult>("storage.health", { ...(options.deep === undefined ? {} : { deep: options.deep }), ...(options.gcPreview ? { gcPreview: true } : {}) }, { signal: options.signal });
@@ -1476,6 +1509,10 @@ export class KernelClient {
 
   async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
     return this.requestRaw<import('./protocol.generated.js').KernelFileRootRegisterResult>("file.root.register", params, { signal, grant });
+  }
+
+  async fileTextConversions(params: KernelMethodParams["file.text.conversions"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelTextConversionsPage> {
+    return this.requestRaw<KernelTextConversionsPage>("file.text.conversions", params, { signal, grant });
   }
 
   async fileOperationList(params: KernelMethodParams["file.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1671,6 +1708,7 @@ export class KernelClient {
         draftBasePaths: params.draftBasePaths,
         captureScopes: params.captureScopes,
         ...(params.sourceProvenance === undefined ? {} : { sourceProvenance: params.sourceProvenance }),
+        ...(params.textEncoding === undefined ? {} : { textEncoding: params.textEncoding }),
       }, { signal, grant: scoped });
       let sequence = 0;
       for (const batch of batchForKernelTransport(params.entries)) {

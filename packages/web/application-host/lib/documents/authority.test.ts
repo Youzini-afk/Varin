@@ -71,7 +71,7 @@ describe('document authority contract', () => {
 
   it('distinguishes missing, empty, binary, and read failure', async () => {
     const missing = await harness.authority.read(harness.resource('missing.txt'));
-    expect(missing).toEqual({
+    expect(missing).toMatchObject({
       status: 'missing',
       epoch: harness.identity.epoch,
       resource: harness.resource('missing.txt'),
@@ -119,26 +119,22 @@ describe('document authority contract', () => {
     ]);
   });
 
-  it('saves and checks conflicts without decoding unused file bodies, while reads retain exact text', async () => {
+  it('returns metadata-only conflict receipts while full reads retain exact text', async () => {
     const resource = harness.resource('metadata-save.txt');
     const original = '\ufeffOriginal 中文\r\n';
     await fs.promises.writeFile(path.join(harness.workspaceRoot, resource.resourceId), original);
     const opened = requireStatus(await harness.authority.read(resource), 'ready');
-    const decode = vi.spyOn(TextDecoder.prototype, 'decode');
-    try {
+    {
       const written = requireStatus(await harness.authority.write({ token: harness.token(), resource,
         content: 'Saved 中文🙂\r\n', encoding: 'utf-8', bom: true, expectedRevision: opened.revision }), 'written');
-      expect(decode).not.toHaveBeenCalled();
       const conflict = requireStatus(await harness.authority.write({ token: harness.token(), resource,
         content: 'stale', encoding: 'utf-8', bom: false, expectedRevision: opened.revision }), 'conflict');
       expect(conflict.current).toMatchObject({ status: 'ready', revision: written.revision, bom: true });
       expect(conflict.current).not.toHaveProperty('content');
-      expect(decode).not.toHaveBeenCalled();
       const read = requireStatus(await harness.authority.read(resource), 'ready');
       expect(read.content).toBe('Saved 中文🙂\r\n');
       expect(read.revision).toBe(written.revision);
-      expect(decode).toHaveBeenCalledOnce();
-    } finally { decode.mockRestore(); }
+    }
   });
 
   it('creates when expected revision is missing and conflicts when the file exists', async () => {
@@ -482,6 +478,26 @@ describe('document authority contract', () => {
     harness.setTrusted(false);
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'trusted.txt'), 'ok');
     await expect(harness.authority.read(harness.resource('trusted.txt'))).rejects.toBeInstanceOf(DocumentUntrustedError);
+  });
+
+  it('persists Unicode drafts and pending save provenance independently of the target file codec', async () => {
+    const resource = harness.resource('draft.txt');
+    const pendingSave = { resource, content: '中文', encoding: 'gbk', bom: false,
+      expectedRevision: null, operationId: 'pending-format-save', rememberEncoding: true };
+    const written = requireStatus(await harness.authority.writeRecoveryJournal({ token: harness.token(),
+      workspaceId: harness.identity.workspaceId, recoverySessionId: 'format-session', resource,
+      content: '中文🙂', encoding: 'gbk', bom: false, lineEnding: 'crlf', normalizeLineEndings: true,
+      baseRevision: null, expectedRevision: null, pendingSave, pendingEdits: [{ start: 2, end: 2, text: '🙂' }],
+    }), 'written');
+    expect(await harness.authority.readRecoveryJournal(written.journal.journalId)).toMatchObject({
+      status: 'ready', content: '中文🙂', encoding: 'gbk', normalizeLineEndings: true, pendingSave,
+      pendingEdits: [{ start: 2, end: 2, text: '🙂' }],
+    });
+    await expect(harness.authority.writeRecoveryJournal({ token: harness.token(),
+      workspaceId: harness.identity.workspaceId, recoverySessionId: 'format-session', resource,
+      content: '中文🙂', encoding: 'gbk', bom: false, baseRevision: null, expectedRevision: written.journal.revision,
+      pendingSave: { ...pendingSave, resource: harness.resource('different.txt') },
+    })).rejects.toThrow('Pending save metadata is malformed');
   });
 
   it('treats missing, malformed, and failed recovery journals as distinct results', async () => {
@@ -828,14 +844,24 @@ it('routes surface bodies only to the bound owner registration and rejects late 
       ownerId, generation, requestId: event.requestId, workspaceId: harness.identity.workspaceId,
     });
     expect(payload.targets[0]).toMatchObject({ resource: { resourceId: 'surface.txt' } });
-    await expect(harness.authority.completeSurfaceOperation({
+    const captured = {
+      resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
+      documentInstanceId: 'document-instance', beforeLocalEditRevision: 7, beforeHash: surfaceHash('draft\n'),
+      edits: [{ start: 0, end: 0, text: 'draft\n' }],
+    };
+    const completion = {
       ownerId, generation, requestId: event.requestId, operationId: 'integration-surface',
-      workspaceId: harness.identity.workspaceId, resources: [{
-        resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
-        documentInstanceId: 'document-instance', beforeLocalEditRevision: 7, beforeHash: surfaceHash('draft\n'),
-      }],
+      workspaceId: harness.identity.workspaceId,
+    };
+    for (const edits of [null, [{ start: -1, end: 0, text: 'draft\n' }], [{ start: 0, end: 0, text: 1 }]]) {
+      await expect(harness.authority.completeSurfaceOperation({
+        ...completion, resources: [{ ...captured, edits }],
+      })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
+    }
+    await expect(harness.authority.completeSurfaceOperation({
+      ...completion, resources: [captured],
     })).resolves.toEqual({ accepted: true });
-    await expect(pending).resolves.toMatchObject([{ status: 'captured', content: 'draft\n' }]);
+    await expect(pending).resolves.toEqual([captured]);
 
     const disconnected = harness.authority.requestSurfaceOperation({
       action: 'capture', ownerId, generation, registrationId: publication.registrationId!,
@@ -1477,7 +1503,7 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
       resources: [{
         ...publication.resources[0]!,
         content: 'draft',
-        encoding: 'utf-16le',
+        encoding: 'koi8-r',
         bom: false,
       }],
     })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });

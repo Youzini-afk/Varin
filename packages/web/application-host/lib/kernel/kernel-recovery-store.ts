@@ -1,3 +1,4 @@
+import { isDocumentTextFormat } from '../documents/inspect.js';
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import {sameRecoveryFileTarget} from '../recovery/file-target.js';
@@ -720,6 +721,8 @@ export class KernelRecoveryStore {
       return {
         after,
         before,
+        ...(isDocumentTextFormat(item.beforeFormat) ? { beforeFormat: item.beforeFormat } : {}),
+        ...(isDocumentTextFormat(item.afterFormat) ? { afterFormat: item.afterFormat } : {}),
         checkpointId: String(item.checkpointId),
         executionId: String(item.executionId),
         mutationId: String(item.mutationId),

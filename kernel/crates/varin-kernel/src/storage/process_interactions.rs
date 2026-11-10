@@ -70,6 +70,11 @@ pub(crate) enum Command {
         receipt: Receipt,
         reply: mpsc::Sender<Result<(), KernelError>>,
     },
+    ProcessContext {
+        context: Context,
+        address: Address,
+        reply: mpsc::Sender<Result<Value, KernelError>>,
+    },
     Access {
         binding: ToolBinding,
         process_id: String,
@@ -157,7 +162,7 @@ impl Client {
             ),
             binding: None,
         };
-        let mut params = request["params"].take();
+        let params = request["params"].take();
         crate::protocol::validate_method_params(&method, &params)?;
         let address = Address {
             workspace_id: params["workspaceId"].as_str().unwrap_or_default().into(),
@@ -176,19 +181,24 @@ impl Client {
         if cancel.is_cancelled() {
             return Err(KernelError::Cancelled);
         }
+        let text_process = if method == "process.write" && params.get("text").is_some() {
+            let (reply, receive) = mpsc::channel();
+            (self.send)(Command::ProcessContext { context: context.clone(), address: address.clone(), reply })?;
+            Some(receive.recv().map_err(|_| KernelError::Storage("process input metadata owner stopped".into()))??)
+        } else { None };
         let receipt = self
             .invoke(
                 context,
                 address,
                 move || {
                     if method == "process.write" {
-                        let bytes = params["bytesBase64"].take();
-                        let bytes =
-                            BASE64
-                                .decode(bytes.as_str().unwrap_or_default())
-                                .map_err(|_| {
-                                    KernelError::Protocol("stdin bytes are not valid base64".into())
-                                })?;
+                        let bytes = match (params.get("bytesBase64").and_then(Value::as_str), params.get("text").and_then(Value::as_str)) {
+                            (Some(bytes), None) if params.get("encoding").is_none() => BASE64.decode(bytes)
+                                .map_err(|_| KernelError::Protocol("stdin bytes are not valid base64".into()))?,
+                            (None, Some(text)) => crate::process::text::encode_process_input(text, params["encoding"].as_str(), text_process.as_ref().unwrap())
+                                .map_err(KernelError::Operation)?,
+                            _ => return Err(KernelError::Protocol("process.write requires either bytesBase64, or text with optional encoding".into())),
+                        };
                         Ok(Input::Write {
                             bytes: bytes.into(),
                             eof: params["eof"].as_bool().unwrap_or(false),
@@ -739,6 +749,11 @@ impl Storage {
                 if completed {
                     return Some((intent, receipt));
                 }
+            }
+            Command::ProcessContext { context, mut address, reply } => {
+                let result = self.interaction_context(&context, epoch, host_id, host_generation, &mut address)
+                    .and_then(|grant| self.authorize_process_access(&address.process_id, &address.workspace_id, &grant, address.root_id.as_deref(), false).map(|(record, _)| record));
+                let _ = reply.send(result);
             }
             Command::Access {
                 binding,

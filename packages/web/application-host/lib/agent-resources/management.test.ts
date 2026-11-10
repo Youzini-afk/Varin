@@ -1,13 +1,19 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
 import { AgentSettingsService } from '../models/settings.js';
 import { createResourceManagement } from './management.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+let releaseCodec: () => void;
+beforeEach(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterEach(async () => {
+  try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); }
+  finally { releaseCodec(); }
+});
 const skill = (name: string, body = 'Use the native owner.') => `---\nname: ${name}\ndescription: A useful skill\n---\n${body}\n`;
 async function fixture() {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'native-resource-management-')));

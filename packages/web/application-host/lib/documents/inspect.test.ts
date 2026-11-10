@@ -1,17 +1,61 @@
-import { expect, it } from 'vitest';
-import { inspectDocumentBytes } from './inspect.js';
+import { afterEach, expect, it, vi } from 'vitest';
+import type { VarinTextFormat } from '@varin/application-client';
+import { bindDocumentTextCodec, inspectDocumentBytes, serializeDocumentText, type DocumentTextCodec } from './inspect.js';
 
-it('classifies metadata exactly like full document reads without returning text', () => {
-  const inputs = [Buffer.alloc(0), Buffer.from('ordinary text\r\n中文🙂'), Buffer.from('\ufeffBOM\r\n'),
-    Buffer.from([0xff, 0xfe, 65, 0]), Buffer.from([0xfe, 0xff, 0, 65]), Buffer.from([0, 65]),
-    Buffer.from([0xc0, 0xaf]), Buffer.from([0xed, 0xa0, 0x80]), Buffer.from([0xf4, 0x90, 0x80, 0x80]),
-    Buffer.from([0xe2, 0x82]), Buffer.from([0xef, 0xbb, 0xbf, 0xff]), Buffer.from('a'.repeat(4096) + '\0')];
-  // Exercise invalid leading/continuation bytes and boundary pairs deterministically.
-  for (let first = 0; first < 256; first++) for (const second of [0x20, 0x7f, 0x80, 0xbf, 0xc2, 0xff]) inputs.push(Buffer.from([first, second]));
-  for (const input of inputs) {
-    const full = inspectDocumentBytes(input);
-    const expected = full.kind === 'text' ? (() => { const { content: _content, ...metadata } = full; return metadata; })() : full;
-    expect(inspectDocumentBytes(input, false)).toEqual(expected);
-    expect(inspectDocumentBytes(new Uint8Array(input), false)).toEqual(expected);
-  }
+const releases: Array<() => void> = [];
+afterEach(() => { for (const release of releases.splice(0).reverse()) release(); });
+
+// Response-only ports identify the active binding. These tests exercise the
+// public adapter's lifecycle, not byte decoding or serialization correctness.
+const responsePort = (name: string): DocumentTextCodec => {
+  const format: VarinTextFormat = { encoding: 'utf-8', bom: false, lineEnding: 'none', defaultLineEnding: 'lf', source: name };
+  return {
+    textDecode: vi.fn(async () => ({ kind: 'text' as const, content: 'x', byteLength: 1, format })),
+    textSerialize: vi.fn(async () => ({ kind: 'serialized' as const, bytesBase64: 'eA==', byteLength: 1, format })),
+  };
+};
+const bind = (codec: DocumentTextCodec) => {
+  const release = bindDocumentTextCodec(codec);
+  releases.push(release);
+  return release;
+};
+const expectBinding = async (name: string | undefined) => {
+  const decoded = inspectDocumentBytes(Buffer.from('x'));
+  if (name === undefined) await expect(decoded).rejects.toMatchObject({ code: 'failed', statusCode: 503 });
+  else await expect(decoded).resolves.toMatchObject({ kind: 'text', format: { source: name } });
+  const serialized = serializeDocumentText({ content: 'x', encoding: 'utf-8', bom: false });
+  if (name === undefined) await expect(serialized).rejects.toMatchObject({ code: 'failed', statusCode: 503 });
+  else await expect(serialized).resolves.toMatchObject({ format: { source: name } });
+};
+
+it('has no default codec before the Host binds a live service', async () => {
+  await expectBinding(undefined);
+});
+
+it.each([[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])(
+  'restores only live bindings when services are released in order %i, %i, %i', async (...order) => {
+    const names = ['host-a', 'host-b', 'host-c'];
+    const remove = names.map(name => bind(responsePort(name)));
+    const active = new Set([0, 1, 2]);
+    await expectBinding('host-c');
+    for (const index of order) {
+      remove[index]!(); active.delete(index);
+      const last = [...active].at(-1);
+      await expectBinding(last === undefined ? undefined : names[last]);
+      // Releasing the same handle twice cannot remove a different binding.
+      remove[index]!();
+      await expectBinding(last === undefined ? undefined : names[last]);
+    }
+  },
+);
+
+it('keeps separate leases when the same client is bound twice', async () => {
+  const codec = responsePort('shared-client');
+  const first = bind(codec), second = bind(codec);
+  first();
+  await expectBinding('shared-client');
+  second();
+  await expectBinding(undefined);
+  first(); second();
+  await expectBinding(undefined);
 });

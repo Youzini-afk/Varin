@@ -1,4 +1,4 @@
-import type { ChildSourceProvenance, KernelWorkingResultCandidate } from "../../kernel/protocol.generated.js";
+import type { ChildSourceProvenance, KernelTextPolicy, KernelWorkingResultCandidate } from "../../kernel/protocol.generated.js";
 import type { ThreadDiffStats } from "@varin/protocol";
 import type {
   RecoveryState,
@@ -140,6 +140,8 @@ export interface WorkingSourcePreparation {
 }
 export interface WorkingBranchCreateOptions {
   sourceProvenance?: ChildSourceProvenance;
+  /** Revision-owned codec choices may be richer than the accepted Catalog provenance. */
+  textEncoding?: KernelTextPolicy;
   signal?: AbortSignal;
 }
 export interface WorkingResultPublicationOptions {
@@ -185,6 +187,8 @@ export interface WorkingStateRootStore {
   readSourcePreparation(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingSourcePreparation | null>;
   /** Original branch-create receipt, independent of subsequent writes or rebase. Never recaptures disk. */
   readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null>;
+  /** Selected immutable branch metadata; does not read another Run's private result records. */
+  readTextEncoding(branchId: string, revision: number, options?: { signal?: AbortSignal; root?: string }): Promise<KernelTextPolicy>;
   createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot>;
   captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string>; verifyCaptured?: Record<string, RecoveryState> }): Promise<Record<string, RecoveryState>>;
   /** Release only transient capture owners; retained branch/result objects remain owned. */
@@ -266,6 +270,8 @@ export interface DraftBaseline {
 }
 
 export interface WorkingResult {
+  /** Formats proven by the original native operation receipts for these exact raw states. */
+  textFormats?: Record<string, { base?: import("../../kernel/protocol.generated.js").KernelTextFormat; child?: import("../../kernel/protocol.generated.js").KernelTextFormat }>;
   resultRevision: number;
   branchId: string;
   parentRef?: string | undefined;
@@ -292,6 +298,7 @@ export type ThreeWayPathDecision =
   | "conflict";
 
 export interface ThreeWayPathPlan {
+  textFormat?: import('@varin/application-client').VarinTextFormat;
   path: string;
   decision: ThreeWayPathDecision;
   baseState: RecoveryState;

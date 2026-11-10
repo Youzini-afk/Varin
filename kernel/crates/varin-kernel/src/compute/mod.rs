@@ -15,6 +15,7 @@ const BUFFER_BYTES: usize = 1024 * 1024;
 const RECORD_BYTES: usize = crate::protocol::MAX_FRAME_BYTES / 2;
 
 pub(crate) struct ObjectSource {
+    pub encoding:Option<String>,
     pub range: Option<(PathBuf, u64, crate::storage::blob_reads::BlobReadRetention)>,
     pub path: String,
     pub revision: String,
@@ -28,6 +29,7 @@ pub(crate) enum Source {
 }
 pub(crate) struct Task {
     pub params: KernelComputeStartParams,
+    pub text_receipts:crate::storage::text_formats::Snapshot,
     pub source: Source,
     pub overlays: Vec<ObjectSource>,
     pub scopes: Vec<String>,

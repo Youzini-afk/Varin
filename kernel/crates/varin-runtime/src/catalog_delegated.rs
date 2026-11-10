@@ -629,7 +629,7 @@ impl ChildContinuationPreparation {
                 let resources = provenance.get("resources").cloned();
                 self.content
                     .save(&serde_json::to_value(
-                        collaboration::ChildSourceProvenance::FixedRoot { root, resources, selection:None },
+                        collaboration::ChildSourceProvenance::FixedRoot { root, resources, selection:None, text_encoding:None },
                     )?)
                     .map(Some)
             })

@@ -12,6 +12,8 @@ pub(crate) struct FileReadTask {
     pub params: Value,
     pub cancellation: Arc<AtomicBool>,
     root: FileRoot,
+    text_receipts: super::text_formats::Snapshot,
+    use_text_receipts: bool,
     grant: Grant,
     leases: Vec<FileLease>,
     response: bool,
@@ -44,6 +46,8 @@ fn unchanged(before: &fs::Metadata, after: &fs::Metadata) -> io::Result<bool> {
     Ok(same)
 }
 impl FileReadTask {
+    pub(crate) fn with_text_receipts(mut self, allowed: bool)->Self {self.use_text_receipts=allowed; self}
+
     #[cfg(test)]
     pub(crate) fn hold_at(&mut self, hold: Box<dyn FnOnce() + Send>) {
         *self.hold.get_mut().unwrap() = Some(hold);
@@ -284,25 +288,11 @@ impl FileReadTask {
                 "file is larger than one response frame; request a byte range".into(),
             ));
         }
-        let end = start.saturating_add(length).min(before.len());
         let mut file = file.try_clone()?;
         file.seek(SeekFrom::Start(0))?;
         let mut hash = Sha256::new();
         let mut position = 0u64;
-        // Three surrounding bytes are enough to align a UTF-8 codepoint.
-        let from = start.saturating_sub(3);
-        let to = end.saturating_add(3).min(before.len());
-        let mut bytes = Vec::new();
-        let mut lines = super::line_reads::LineRead::from_params(&self.params)?;
-        bytes
-            .try_reserve_exact(if lines.is_some() {
-                0
-            } else {
-                (to - from) as usize
-            })
-            .map_err(|_| {
-                KernelError::Operation("Insufficient memory for the requested file range".into())
-            })?;
+        let mut probe=crate::text::Probe::with_encoding(self.params["encoding"].as_str(),self.params["defaultEncoding"].as_str());
         let mut buffer = [0u8; 128 * 1024];
         while position < before.len() {
             self.check()?;
@@ -313,15 +303,7 @@ impl FileReadTask {
             }
             hash.update(&buffer[..count]);
             let next = position + count as u64;
-            let left = from.max(position);
-            let right = to.min(next);
-            if let Some(lines) = &mut lines {
-                lines.push(&buffer[..count])?;
-            } else if left < right {
-                bytes.extend_from_slice(
-                    &buffer[(left - position) as usize..(right - position) as usize],
-                );
-            }
+            probe.push(&buffer[..count]);
             position = next;
         }
         self.check()?;
@@ -360,46 +342,15 @@ impl FileReadTask {
             &resource.path,
             &state,
         )?;
-        if let Some(lines) = lines {
-            let mut content = lines.content(position);
-            content["hash"] = json!(content_hash);
-            return Ok(PreparedFileRead {
-                value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
-                "missing":false,"readVersion":version,"content":content}),
-                state,
-                resource: canonical,
-            });
+        let selected=if self.use_text_receipts {self.text_receipts.format(&resource.path,&content_hash).cloned().map(Ok)} else {None}.unwrap_or_else(||probe.finish(self.params["encoding"].as_str(),self.params["defaultEncoding"].as_str()));
+        let mut content=crate::text::stream::page(&mut file,position,&self.params,selected,&||self.check())?;
+        content["hash"]=json!(content_hash);
+        let version=content["format"]["encoding"].as_str().map(|encoding|super::file_mutations::text_read_version(&version,encoding)).unwrap_or(version);
+        // The page is read after the validating hash pass, so retain the same
+        // filesystem fence around both observations.
+        if !unchanged(&after,&file.metadata()?)? || !unchanged(&after,&fs::symlink_metadata(&resource.absolute)?)? {
+            return Err(KernelError::Operation("file changed while reading text page".into()));
         }
-        let left = (start - from) as usize;
-        let right = (end - from) as usize;
-        let mut aligned_start = left;
-        let mut aligned_end = right;
-        if left != right {
-            while aligned_start > 0 && bytes.get(aligned_start).is_some_and(|b| b & 0xc0 == 0x80) {
-                aligned_start -= 1;
-            }
-            while aligned_end < bytes.len() && bytes[aligned_end] & 0xc0 == 0x80 {
-                aligned_end += 1;
-            }
-        }
-        let mut content = json!({"byteLength":position,"hash":content_hash});
-        match std::str::from_utf8(&bytes[aligned_start..aligned_end]) {
-            Ok(text) if !text.contains('\0') => {
-                content["text"] = json!(text);
-                content["offset"] = json!(from + aligned_start as u64);
-                content["nextOffset"] = json!(from + aligned_end as u64);
-                content["eof"] = json!(from + aligned_end as u64 >= position);
-            }
-            _ => {
-                content["bytesBase64"] = json!(BASE64.encode(&bytes[left..right]));
-                content["encoding"] = json!("base64");
-                content["offset"] = json!(start);
-                content["nextOffset"] = json!(end);
-                content["eof"] = json!(end >= position);
-            }
-        }
-        content["returnedBytes"] =
-            json!(content["nextOffset"].as_u64().unwrap() - content["offset"].as_u64().unwrap());
         Ok(PreparedFileRead {
             value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
             "missing":false,"readVersion":version,"content":content}),
@@ -450,6 +401,8 @@ impl Storage {
             params: params.clone(),
             cancellation,
             root: self.admitted_file_root(root_id, grant)?,
+            text_receipts:self.text_format_receipts(grant,root_id)?,
+            use_text_receipts:params["encoding"].as_str().is_none_or(|e|e=="auto"),
             grant: grant.clone(),
             leases: self.file_leases.values().cloned().collect(),
             response,

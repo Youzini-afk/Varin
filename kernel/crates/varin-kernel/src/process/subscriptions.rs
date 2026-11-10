@@ -262,10 +262,10 @@ fn projection(subscription: &Subscription, buffer: &super::Buffer, cursor: u64) 
     }
     snapshot["outputAvailable"] = json!(true);
     let signature = json!({"process":snapshot,"inputSequence":buffer.input_sequence,"inputError":buffer.input_error,
-        "outputComplete":buffer.output_closed&&buffer.output_error.is_none(),"outputError":buffer.output_error,"controlError":buffer.control_error});
+        "channelEnds":buffer.channel_ends,"outputComplete":buffer.output_closed&&buffer.output_error.is_none(),"outputError":buffer.output_error,"controlError":buffer.control_error});
     let result = json!({"process":snapshot,"chunks":[],"nextCursor":cursor,"endCursor":buffer.end,
         "inputSequence":buffer.input_sequence,"inputError":buffer.input_error,
-        "outputComplete":buffer.output_closed&&buffer.output_error.is_none(),"outputError":buffer.output_error});
+        "channelEnds":buffer.channel_ends,"outputComplete":buffer.output_closed&&buffer.output_error.is_none(),"outputError":buffer.output_error});
     (signature, result)
 }
 fn control_loop(
@@ -349,13 +349,25 @@ fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender
                 .unwrap_or_else(|poison| poison.into_inner());
         };
         drop(buffer);
-        let mut result = match read_output(&subscription.output, cursor, CHUNK_BYTES) {
+        // Keep replay/live delivery separate even for a projected text chunk.
+        // A scalar crossing the boundary belongs to the frame of its final byte.
+        let limit = if cursor < subscription.replay_cursor {
+            (subscription.replay_cursor - cursor).min(CHUNK_BYTES as u64) as usize
+        } else { CHUNK_BYTES };
+        let mut result = match read_output(&subscription.output, cursor, limit) {
             Ok(result) => result,
             Err(error) => {
                 close(&subscription, &error.to_string());
                 return;
             }
         };
+        if super::text::legacy_terminal(&subscription.snapshot) {
+            let length = result["nextCursor"].as_u64().unwrap().saturating_sub(cursor) as usize;
+            match super::paging::read(&subscription.output, cursor, length, None, &subscription.snapshot) {
+                Ok(projected) => result["textChunks"] = projected["chunks"].clone(),
+                Err(error) => { close(&subscription, &error.to_string()); return; }
+            }
+        }
         let buffer = subscription.output.shared.lock();
         let mut state = match subscription.state.lock() {
             Ok(state) => state,

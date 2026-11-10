@@ -1,4 +1,5 @@
 import React from 'react';
+import { DocumentEncodingMenu } from '@/components/workbench/DocumentEncodingMenu';
 import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
 import { activeEditorTab, listEditorGroups } from '@/lib/workbench/editors/groups';
 import { peekEditorWorkbench, subscribeEditorViewState } from '@/lib/workbench/editors/session';
@@ -26,7 +27,7 @@ export function IdeEditorStatus({ workspaceId }: { workspaceId?: string }) {
       <span className="shrink-0">{info.languageName ?? info.languageId}</span>
       <span className="ide-editor-indent shrink-0">{info.insertSpaces ? t('workbench.editor.indentSpaces', { count: info.tabSize }) : t('workbench.editor.indentTabs')}</span>
     </> : null}
-    {document?.encoding ? <span className="shrink-0">{document.encoding.toUpperCase()}{document.bom ? ' BOM' : ''}</span> : null}
+    {document?.encoding && identity ? <DocumentEncodingMenu identity={identity}><button type="button" className="shrink-0 hover:text-foreground" aria-label={t('filesView.encoding.save')}>{document.encoding.toUpperCase()}{document.bom ? ' BOM' : ''}</button></DocumentEncodingMenu> : null}
     {document?.lineEnding ? <span className="ide-editor-eol shrink-0">{document.lineEnding.toUpperCase()}</span> : null}
   </div>;
 }

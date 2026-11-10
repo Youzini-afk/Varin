@@ -14,6 +14,13 @@ import { usageMessages } from './usage';
 import { imageAnnotationsZhCN } from './imageAnnotations';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'filesView.encoding.reopen': '按编码重新打开',
+  'filesView.encoding.reopenDirty': '先保存或放弃当前修改，再重新打开。',
+  'filesView.encoding.save': '以指定编码保存',
+  'filesView.encoding.lineEndings': '换行符',
+  'filesView.encoding.undoFormat': '撤销格式修改',
+  'filesView.encoding.saveUtf8': '以 UTF-8 保存',
+
   'bot.groups.create': '新建分组',
   'bot.appearance.title': "形象",
   'bot.appearance.custom': "自定义形象",

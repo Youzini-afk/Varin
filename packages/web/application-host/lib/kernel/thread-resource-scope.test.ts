@@ -1,3 +1,8 @@
+import { bindUtf8CoordinationCodec } from '../documents/codec.test-helper.js';
+import { beforeAll, afterAll } from 'vitest';
+let releaseCodec: () => void;
+beforeAll(() => { releaseCodec = bindUtf8CoordinationCodec(); });
+afterAll(() => releaseCodec());
 import assert from 'node:assert/strict';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
@@ -7,6 +12,7 @@ import type { InstalledAgentResourcePackage } from '../agent-resources/packages.
 import type { ThreadSource } from '@varin/application-client';
 import { createAgentResourceAuthority, type PreparedAgentResources } from '../agent-resources/authority.js';
 import { contentVersion } from '../agent-resources/source-reader.js';
+import { revisionFromBytes } from '../documents/inspect.js';
 import { captureStableSourceBaseline, type SourceCaptureDocuments } from '../harness/working-state/source-preparation.js';
 import { createCaptureInventory, type CaptureInventoryCandidate } from '../documents/capture-inventory.js';
 import type { RecoveryState, WorkingBranchCreateOptions, WorkingSourcePreparation, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
@@ -65,6 +71,7 @@ async function fixture(files: Record<string, string>) {
     listCaptureScopePaths: vi.fn(async (_root: string, scopes: string[]) => { scans.push([...scopes]); return inventory(scopes); }),
     captureDirectory: vi.fn(capture), releaseCapturedStates: vi.fn(async () => undefined),
     putObject: vi.fn(async (bytes: Buffer) => { const hash = `sha256-${contentVersion(bytes)}`; objects.set(hash, bytes); return { hash, byteLength: bytes.length }; }),
+    getObject: vi.fn(async (hash: string) => objects.get(hash) ?? null),
     createBranch: vi.fn(async (_workspace: string, id: string, states: Record<string, RecoveryState>, _ref: string, _drafts: string[], scopes: string[], options: WorkingBranchCreateOptions) => {
       const hash = contentVersion(JSON.stringify(states));
       const branch = { branchId: id, workspaceId: 'workspace', root: hash, baseRoot: hash, headRevision: 0, writeRevision: 0,
@@ -96,7 +103,7 @@ async function fixture(files: Record<string, string>) {
     readSnapshot: vi.fn(async ({ resourceId }: { resourceId: string }) => {
       try {
         const info = await lstat(path.join(root, resourceId)); if (info.isDirectory()) return { status: 'unsupported' };
-        const content = await readFile(path.join(root, resourceId), 'utf8'); return { status: 'ready', content, revision: contentVersion(content) };
+        const bytes = await readFile(path.join(root, resourceId)); return { status: 'ready', content: bytes.toString('utf8'), revision: revisionFromBytes(bytes) };
       } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' }; throw error; }
     }),
   } as unknown as ThreadResourceScopeOwners['documents'] & SourceCaptureDocuments;
@@ -120,7 +127,7 @@ async function fixture(files: Record<string, string>) {
   const candidate = () => scope.withScope(identity, source, admitted, async ({ admittedScope }) => {
     const result = await authority.prepare(admittedScope); if (result.status !== 'ready') throw new ResourceScopeError(result); return result.snapshot;
   });
-  return { base, root, agentDir, home, write, store, branches, scans, documents, options, scope, trust, packages, sourceReads, source, prepare, candidate, release };
+  return { base, root, agentDir, home, write, store, objects, branches, scans, documents, options, scope, trust, packages, sourceReads, source, prepare, candidate, release };
 }
 
 async function read(f: Awaited<ReturnType<typeof fixture>>, snapshot: PreparedAgentResources, name: string, support?: string) {
@@ -152,6 +159,79 @@ async function reviewDraftResourceClosure() {
 }
 
 describe('Thread source resource admission', () => {
+  it('captures local configured and package skills through the original observed source reader', async () => {
+    const f = await fixture({
+      'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../rules'], packages: ['npm:local'] }),
+      'rules/SKILL.md': skill('configured', 'CONFIGURED ORIGINAL'),
+      'local-package/package.json': JSON.stringify({ varin: { skills: ['skills'] } }),
+      'local-package/skills/review/SKILL.md': skill('packaged', 'PACKAGE ORIGINAL'),
+    });
+    f.packages.push({ identity: 'npm:local', source: 'npm:local', installedPath: path.join(f.root, 'local-package'), scope: 'project' });
+    const catalog = await f.scope.draftSourceSkills!('workspace');
+    expect(catalog.skills.map(skill => skill.name).sort()).toEqual(['configured', 'packaged']);
+    const prepared = await f.prepare();
+    expect(prepared.provenance.resources?.configuredPaths[0]?.target).toEqual({ kind: 'source', directory: 'rules' });
+    expect(prepared.provenance.resources?.installedPackages[0]?.target).toEqual({ kind: 'source', directory: 'local-package' });
+    await f.write('workspace/rules/SKILL.md', skill('configured', 'CONFIGURED LATER'));
+    await f.write('workspace/local-package/skills/review/SKILL.md', skill('packaged', 'PACKAGE LATER'));
+    const snapshot = await f.candidate();
+    const configured = await read(f, snapshot, 'configured');
+    const packaged = await read(f, snapshot, 'packaged');
+    expect(configured.status === 'ready' && configured.kind === 'skill' && configured.file.content).toContain('CONFIGURED ORIGINAL');
+    expect(packaged.status === 'ready' && packaged.kind === 'skill' && packaged.file.content).toContain('PACKAGE ORIGINAL');
+  });
+
+  it('shares an ancestor reader with configured resources captured from that same domain', async () => {
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../../SKILL.md'] }) });
+    await f.write('AGENTS.md', 'ANCESTOR ORIGINAL');
+    await f.write('SKILL.md', skill('ancestor-skill', 'ANCESTOR SKILL ORIGINAL'));
+    await f.prepare();
+    await f.write('AGENTS.md', 'ANCESTOR LATER');
+    await f.write('SKILL.md', skill('ancestor-skill', 'ANCESTOR SKILL LATER'));
+    const snapshot = await f.candidate();
+    expect(snapshot.capturedFiles.some(file => file.content === 'ANCESTOR ORIGINAL')).toBe(true);
+    const selected = await read(f, snapshot, 'ancestor-skill');
+    expect(selected.status === 'ready' && selected.kind === 'skill' && selected.file.content).toContain('ANCESTOR SKILL ORIGINAL');
+  });
+
+  it.each(['saved', 'draft'] as const)('validates %s resources using assembled range bytes, not the descriptor digest', async mode => {
+    const f = await fixture({ 'AGENTS.md': '\ufeff中文\r\n' });
+    const bytes = Buffer.from(mode === 'draft' ? '\ufeff中文草稿\r\n' : '\ufeff中文\r\n');
+    const plan = await f.scope.prepareSourceCapture({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace',
+      branchId: 'source', directory: f.root,
+      ...(mode === 'draft' ? { editorDrafts: [{ path: 'AGENTS.md', content: bytes, encoding: 'utf-8' }] } : {}) });
+    const descriptorHash = `ranges-sha256-${contentVersion('range descriptor')}`;
+    f.objects.set(descriptorHash, bytes);
+    const state = { kind: 'regular-file' as const, objectHash: descriptorHash, byteLength: bytes.length };
+    await expect(plan.validate({ 'AGENTS.md': state })).resolves.toBeUndefined();
+    expect(f.store.getObject).toHaveBeenCalledWith(descriptorHash);
+
+    // Even a descriptor digest equal to the expected raw digest is not evidence of file content.
+    const misleadingHash = `ranges-sha256-${contentVersion(bytes)}`;
+    const different = Buffer.from(bytes); different[different.length - 1] = 0x20;
+    f.objects.set(misleadingHash, different);
+    await expect(plan.validate({ 'AGENTS.md': { ...state, objectHash: misleadingHash } })).rejects.toThrow('Source resource bytes changed during capture');
+    f.objects.delete(descriptorHash);
+    await expect(plan.validate({ 'AGENTS.md': state })).rejects.toThrow('Source resource bytes are unavailable during capture');
+  });
+
+  it('validates captured raw revisions rather than the Unicode representation returned by Documents', async () => {
+    const f = await fixture({ 'AGENTS.md': '\ufeff中文\r\n', '.gitignore': '' });
+    const original = f.documents.readSnapshot;
+    f.documents.readSnapshot = async (...args) => {
+      const result = await original(...args);
+      return result.status === 'ready' ? { ...result, content: result.content.replace(/^\ufeff/, '') } : result;
+    };
+    const captured = await f.prepare();
+    expect(captured.provenance.resources?.coverage.kind).toBe('selected');
+    const snapshot = await f.candidate();
+    const result = await f.scope.withScope(identity, f.source, admitted, ({ readers }) => authority.read({ snapshot, readers },
+      { kind: 'instruction-scope', targetPath: 'main.ts' }), { snapshot, request: { kind: 'instruction-scope', targetPath: 'main.ts' } });
+    expect(result).toMatchObject({ status: 'ready', instructions: expect.arrayContaining([expect.objectContaining({ content: '\ufeff中文\r\n' })]) });
+  });
+
   it('does not select legacy Pi configuration or skill roots even when the native project is trusted', async () => {
     const f = await fixture({ '.pi/settings.json': '{legacy invalid', '.pi/skills/legacy/SKILL.md': skill('legacy', 'OLD ASSET'),
       '.varin/resources/skills/native/SKILL.md': skill('native', 'NATIVE BODY') });
@@ -219,11 +299,12 @@ describe('Thread source resource admission', () => {
     expect(support.status === 'ready' && support.kind === 'skill-resource' && support.file.content).toBe('EXTERNAL SUPPORT');
   });
 
-  it('rejects source dependency changes before branch publication and preserves absence evidence', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': '{}' });
+  it.each(['.varin/settings.json', 'rules/SKILL.md'])('rejects changed %s before branch publication', async file => {
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin',
+      '.varin/settings.json': nativeResources({ skills: ['../../rules'] }), 'rules/SKILL.md': skill('configured', 'ORIGINAL') });
     const prepareResources = async (...args: Parameters<typeof f.scope.prepareSourceCapture>) => {
       const plan = await f.scope.prepareSourceCapture(...args);
-      await f.write('workspace/.varin/settings.json', '{"resources":{"skills":["different"]}}');
+      await f.write(`workspace/${file}`, file.endsWith('.json') ? nativeResources({ skills: ['different'] }) : skill('configured', 'LATER'));
       return plan;
     };
     await expect(captureStableSourceBaseline({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',

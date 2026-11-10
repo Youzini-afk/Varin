@@ -4,7 +4,10 @@ export type DocumentsFailureReason =
   | 'path-escape'
   | 'stale-completion'
   | 'maintenance'
-  | 'unsupported';
+  | 'unsupported'
+  | 'unrepresentable'
+  | 'invalid-text'
+  | 'reconciliation-pending';
 
 export class DocumentsError extends Error {
   readonly reason: DocumentsFailureReason;
@@ -30,6 +33,9 @@ export const parseDocumentsFailureReason = (value: unknown): DocumentsFailureRea
     case 'stale-completion':
     case 'maintenance':
     case 'unsupported':
+    case 'unrepresentable':
+    case 'invalid-text':
+    case 'reconciliation-pending':
       return value;
     default:
       return 'failed';

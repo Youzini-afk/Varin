@@ -58,6 +58,20 @@ const createSpawn = (handlers: SpawnHandler): Spawn => vi.fn((bin: string, args:
 }) as unknown as Spawn;
 
 describe('Smart Search runtime', () => {
+  it('sets protocol stdio without enabling global Python UTF-8 mode or replacing user choices', async () => {
+    for (const env of [{}, { PYTHONIOENCODING: 'gbk', PYTHONUTF8: '0' }, { PYTHONIOENCODING: '', PYTHONUTF8: '' }]) {
+      const spawn = createSpawn(() => ({ stdout: JSON.stringify({ ok: true }) }));
+      const runtime = createSmartSearchRuntime({
+        fsPromises: { readFile: vi.fn(), mkdir: vi.fn(), writeFile: vi.fn(), rename: vi.fn() },
+        path: pathModule, spawn, env,
+      });
+      await runtime.runDoctor();
+      const options = vi.mocked(spawn).mock.calls[0]![2]!;
+      expect(options.env?.PYTHONIOENCODING).toBe('PYTHONIOENCODING' in env ? env.PYTHONIOENCODING : 'utf-8');
+      expect(options.env?.PYTHONUTF8).toBe('PYTHONUTF8' in env ? env.PYTHONUTF8 : undefined);
+    }
+  });
+
   it('loads masked config without returning secret values', async () => {
     const configFile = pathModule.join('tmp', 'smart-search', 'config.json');
     const fsPromises = {

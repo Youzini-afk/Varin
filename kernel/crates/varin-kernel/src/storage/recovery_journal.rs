@@ -255,7 +255,7 @@ mod tests {
                 .resolve_file_resource(&root_id, "a.txt", &grant, false)
                 .unwrap();
             let state = storage.capture_file_state(&resource).unwrap();
-            let mutation = TextMutation::Write(FileWriteArgs {
+            let mutation = TextMutation::Write(FileWriteArgs { source_format:None,target_format:None,
                 mode: None,
                 path: "a.txt".into(),
                 read_version: read_version(&root_id, "a.txt", &state).unwrap(),

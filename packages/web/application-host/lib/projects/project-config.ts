@@ -4,6 +4,7 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
+import { parseProjectTextEncoding, type ProjectTextEncoding } from './text-encoding.js';
 
 const PROJECT_CONFIG_VERSION = 1;
 const THINKING_LEVELS = new Set<string>(thinkingLevels);
@@ -487,21 +488,21 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     };
   };
 
-  const writeProjectConfigToDisk = async (projectID: unknown, config: ProjectConfig): Promise<void> => {
+  const writeRawProjectConfigToDisk = async (projectID: unknown, config: Record<string, unknown>): Promise<void> => {
     const filePath = resolveProjectConfigPath(projectID);
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const existing = await readRawProjectConfigFromDisk(projectID);
-    const merged = {
-      ...existing,
-      version: PROJECT_CONFIG_VERSION,
-      scheduledTasks: config.scheduledTasks,
-    };
-
     await fsPromises.mkdir(parentDirectory, { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
+    await fsPromises.writeFile(temporaryPath, JSON.stringify(config, null, 2), 'utf8');
     await fsPromises.rename(temporaryPath, filePath);
+  };
+
+  const writeProjectConfigToDisk = async (projectID: unknown, config: ProjectConfig): Promise<void> => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    await writeRawProjectConfigToDisk(projectID, {
+      ...existing, version: PROJECT_CONFIG_VERSION, scheduledTasks: config.scheduledTasks,
+    });
   };
 
   const withProjectWriteLock = async <Result>(projectID: unknown, mutate: () => Promise<Result>): Promise<Result> => {
@@ -529,6 +530,45 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
   const listScheduledTasks = async (projectID: unknown): Promise<ScheduledTask[]> => {
     const config = await readProjectConfigFromDisk(projectID);
     return config.scheduledTasks;
+  };
+
+  const readTextEncoding = async (projectID: unknown): Promise<ProjectTextEncoding> => {
+    const raw = await readRawProjectConfigFromDisk(projectID);
+    if (raw.version !== undefined && raw.version !== PROJECT_CONFIG_VERSION) throw new Error('Unsupported project configuration version');
+    return parseProjectTextEncoding(raw.textEncoding);
+  };
+
+  // Share the project transaction with scheduled tasks; remembering a file never edits its repository.
+  const rememberTextEncoding = async (projectID: unknown, filePath: string, encoding: string, minimumRevision = 0): Promise<void> => {
+    if (!Number.isSafeInteger(minimumRevision) || minimumRevision < 0) throw new Error('Invalid text encoding choice revision');
+    await withProjectWriteLock(projectID, async () => {
+      const raw = await readRawProjectConfigFromDisk(projectID);
+      if (raw.version !== undefined && raw.version !== PROJECT_CONFIG_VERSION) throw new Error('Unsupported project configuration version');
+      const current = parseProjectTextEncoding(raw.textEncoding);
+      const revision = Math.max(current.choiceRevisions?.[filePath] ?? 0, minimumRevision) + 1;
+      const next = parseProjectTextEncoding({ ...current, files: { ...current.files, [filePath]: encoding },
+        choiceRevisions: { ...current.choiceRevisions, [filePath]: revision } });
+      if (JSON.stringify(current) === JSON.stringify(next)) return;
+      await writeRawProjectConfigToDisk(projectID, { ...raw, version: PROJECT_CONFIG_VERSION, textEncoding: next });
+    });
+  };
+
+  // Receipt replay uses the same transaction as manual choices. The frozen choice revision
+  // prevents an old Run from undoing a later explicit reopen, even when its bytes did not change.
+  const reconcileTextEncoding = async (projectID: unknown, filePath: string, encoding: string,
+    choiceRevision: number, matchesCurrent: () => Promise<boolean>): Promise<boolean> => {
+    return withProjectWriteLock(projectID, async () => {
+      const raw = await readRawProjectConfigFromDisk(projectID);
+      if (raw.version !== undefined && raw.version !== PROJECT_CONFIG_VERSION) throw new Error('Unsupported project configuration version');
+      const current = parseProjectTextEncoding(raw.textEncoding);
+      if (!Number.isSafeInteger(choiceRevision) || choiceRevision < 0
+        || (current.choiceRevisions?.[filePath] ?? 0) !== choiceRevision || !await matchesCurrent()) return false;
+      const next = parseProjectTextEncoding({ ...current, files: { ...current.files, [filePath]: encoding } });
+      if (JSON.stringify(current) !== JSON.stringify(next)) {
+        await writeRawProjectConfigToDisk(projectID, { ...raw, version: PROJECT_CONFIG_VERSION, textEncoding: next });
+      }
+      return true;
+    });
   };
 
   const upsertScheduledTask = async (projectID: unknown, taskInput: unknown) => {
@@ -833,5 +873,8 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     deleteScheduledTask,
     reconcileLoopTasks,
     resolveProjectConfigPath,
+    readTextEncoding,
+    rememberTextEncoding,
+    reconcileTextEncoding,
   };
 };

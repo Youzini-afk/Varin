@@ -1,6 +1,7 @@
+import type { VarinTextFormat } from '@varin/application-client';
 import { createHash } from 'node:crypto';
 import type { DocumentSurfaceBinding, DocumentSurfaceOperationRequest, DocumentSurfaceOperationResult } from '../documents/authority.js';
-import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
+import { inspectDocumentBytes, isDocumentEncoding, isDocumentTextFormat, isDocumentTextEdits, revisionFromBytes } from '../documents/inspect.js';
 import { detectLineEnding, normalizeEditorLineEndings } from '../documents/line-ending.js';
 import { RecoveryPrimitiveError } from './errors.js';
 import { parseRecoveryState, type RecoveryFileStore, type RecoveryIdentity, type RecoveryState, type RegularFileState } from './journal-files.js';
@@ -13,6 +14,9 @@ export interface RecoverySurfaceOwner {
 }
 
 interface SavedSurfaceText {
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
   content: RegularFileState;
   baseContent: RegularFileState;
   baseRevision: string | null;
@@ -33,7 +37,7 @@ export interface RecoverySurfaceSafety extends RecoverySurfaceTarget {
 }
 
 export type CombinedRecoverySafety = RecoveryState & { surfaces?: RecoverySurfaceSafety[] };
-export type CombinedRecoveryTarget = RecoveryState & { surfaceTargets?: RecoverySurfaceTarget[] };
+export type CombinedRecoveryTarget = RecoveryState & { textFormat?: VarinTextFormat; surfaceTargets?: RecoverySurfaceTarget[] };
 
 const regular = (value: unknown): RegularFileState => {
   const state = parseRecoveryState(value);
@@ -43,7 +47,10 @@ const regular = (value: unknown): RegularFileState => {
 
 const savedText = (value: SavedSurfaceText): SavedSurfaceText => {
   if (!value || (value.baseRevision !== null && typeof value.baseRevision !== 'string')
-    || value.encoding !== 'utf-8' || typeof value.bom !== 'boolean'
+    || (value.baseFormat !== undefined && !isDocumentTextFormat(value.baseFormat))
+    || (value.edits !== undefined && !isDocumentTextEdits(value.edits))
+    || (value.normalizeLineEndings !== undefined && typeof value.normalizeLineEndings !== 'boolean')
+    || !isDocumentEncoding(value.encoding) || typeof value.bom !== 'boolean'
     || !['lf', 'crlf', 'cr'].includes(value.lineEnding)) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Editor recovery base is malformed', { origin: 'storage' });
   }
@@ -80,9 +87,12 @@ export const parseCombinedSafety = (value: unknown): CombinedRecoverySafety => {
 export const parseCombinedTarget = (value: unknown): CombinedRecoveryTarget => {
   const state = parseRecoveryState(value);
   const surfaceTargets = (value as CombinedRecoveryTarget).surfaceTargets;
-  if (surfaceTargets === undefined) return state;
+  const textFormat = (value as CombinedRecoveryTarget).textFormat;
+  if (textFormat !== undefined && !isDocumentTextFormat(textFormat)) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery text format is malformed', { origin: 'storage' });
+  const target = { ...state, ...(textFormat ? { textFormat } : {}) };
+  if (surfaceTargets === undefined) return target;
   if (!Array.isArray(surfaceTargets)) throw new RecoveryPrimitiveError('storage-malformed', 'Editor recovery targets are malformed', { origin: 'storage' });
-  return { ...state, surfaceTargets: surfaceTargets.map(surfaceTarget) };
+  return { ...target, surfaceTargets: surfaceTargets.map(surfaceTarget) };
 };
 
 export const surfaceOwnerKey = (owner: Pick<RecoverySurfaceTarget, 'ownerId' | 'binding'>): string => `${owner.ownerId}\0${owner.binding.documentInstanceId}`;
@@ -121,25 +131,32 @@ export const createSurfaceRecovery = (fileStore: RecoveryFileStore, requestSurfa
     }
     return result as DocumentSurfaceOperationResult & { content: string; baseContent: string };
   };
-  const diskText = async (identity: RecoveryIdentity, state: RecoveryState, store: (bytes: Buffer) => Promise<RegularFileState>): Promise<SavedSurfaceText> => {
+  const diskText = async (identity: RecoveryIdentity, state: RecoveryState, store: (bytes: Buffer) => Promise<RegularFileState>, interpretation?: { encoding?: string; defaultEncoding?: string }): Promise<SavedSurfaceText> => {
     let content = '';
     let baseRevision: string | null = null;
+    let baseFormat: VarinTextFormat | undefined;
     let bom = false;
+    let encoding = 'utf-8';
     if (state.kind === 'regular-file') {
       const bytes = await requireStore().read(identity, state);
-      const inspected = inspectDocumentBytes(bytes);
+      const inspected = await inspectDocumentBytes(bytes, true, interpretation);
       if (inspected.kind !== 'text') throw new RecoveryPrimitiveError('unsupported-metadata', 'This recovery target cannot be represented in a text editor', { origin: 'conflict' });
       content = inspected.content;
       baseRevision = revisionFromBytes(bytes);
       bom = inspected.bom;
+      encoding = inspected.encoding;
+      baseFormat = inspected.format;
     } else if (state.kind !== 'missing') {
       throw new RecoveryPrimitiveError('unsupported-metadata', 'This recovery target is not an editable file', { origin: 'conflict' });
     }
     const stored = await store(Buffer.from(normalizeEditorLineEndings(content), 'utf8'));
-    return { content: stored, baseContent: stored, baseRevision, encoding: 'utf-8', bom, lineEnding: detectLineEnding(content) };
+    return { content: stored, baseContent: stored, baseRevision, encoding, bom, ...(baseFormat ? { baseFormat } : {}), normalizeLineEndings: false, edits: [], lineEnding: detectLineEnding(content) };
   };
-  const expectedApplied = (surface: RecoverySurfaceSafety): DocumentSurfaceBinding => ({ ...surface.binding,
-    baseRevision: surface.target.baseRevision, encoding: surface.target.encoding, bom: surface.target.bom, lineEnding: surface.target.lineEnding,
+  // Only the document identity survives a restore. In particular, a missing
+  // target has no byte baseline and must not inherit the removed file's format.
+  const expectedApplied = (surface: RecoverySurfaceSafety): DocumentSurfaceBinding => ({
+    resource: surface.binding.resource, documentInstanceId: surface.binding.documentInstanceId,
+    baseRevision: surface.target.baseRevision, ...(surface.target.baseFormat ? { baseFormat: surface.target.baseFormat } : {}), ...(surface.target.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: surface.target.normalizeLineEndings }), encoding: surface.target.encoding, bom: surface.target.bom, lineEnding: surface.target.lineEnding,
     localEditRevision: surface.binding.localEditRevision + 1, bufferHash: surface.target.content.objectHash,
   });
   const expectedCompensated = (surface: RecoverySurfaceSafety): DocumentSurfaceBinding => ({ ...surface.binding,
@@ -176,7 +193,7 @@ export const createSurfaceRecovery = (fileStore: RecoveryFileStore, requestSurfa
     const [result] = await requireStore().request({ ownerId: surface.ownerId, generation: surface.generation,
       registrationId: surface.registrationId, workspaceId: surface.workspaceId,
       operationId, barrierId, action: 'restore', targets: [{ ...binding,
-      newText, restoreState: { baseContent, baseRevision: text.baseRevision, encoding: text.encoding, bom: text.bom, lineEnding: text.lineEnding },
+      newText, restoreState: { baseContent, baseRevision: text.baseRevision, ...(text.baseFormat ? { baseFormat: text.baseFormat } : {}), ...(text.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: text.normalizeLineEndings }), ...(text.edits ? { edits: text.edits } : {}), encoding: text.encoding, bom: text.bom, lineEnding: text.lineEnding },
     }] });
     if (result?.status !== 'restored') {
       // Only an exact unchanged receipt closes a dispatched intent. Transport
@@ -199,7 +216,7 @@ export const createSurfaceRecovery = (fileStore: RecoveryFileStore, requestSurfa
   };
   return {
     async prepare(identity: RecoveryIdentity, operationId: string, barrierId: string, owner: RecoverySurfaceOwner,
-      binding: DocumentSurfaceBinding, diskTarget: RecoveryState, textTarget?: SavedSurfaceText): Promise<{ safety: RecoverySurfaceSafety; release(): Promise<void> }> {
+      binding: DocumentSurfaceBinding, diskTarget: CombinedRecoveryTarget, textTarget?: SavedSurfaceText): Promise<{ safety: RecoverySurfaceSafety; release(): Promise<void> }> {
       const captured = await capture(operationId, barrierId, owner, binding);
       const leases: Array<{ release(): Promise<void> }> = [];
       const release = async () => {
@@ -213,11 +230,11 @@ export const createSurfaceRecovery = (fileStore: RecoveryFileStore, requestSurfa
         return lease.state;
       };
       try {
-        const target = textTarget ?? await diskText(identity, diskTarget, store);
+        const target = textTarget ?? await diskText(identity, diskTarget, store, diskTarget.textFormat ? { encoding: diskTarget.textFormat.encoding } : undefined);
         const content = await store(Buffer.from(normalizeEditorLineEndings(captured.content), 'utf8'));
         const baseContent = await store(Buffer.from(normalizeEditorLineEndings(captured.baseContent), 'utf8'));
         return { safety: { ...owner, binding, text: { content, baseContent, baseRevision: binding.baseRevision,
-          encoding: binding.encoding, bom: binding.bom, lineEnding: binding.lineEnding }, target, phase: 'captured' }, release };
+          encoding: binding.encoding, bom: binding.bom, lineEnding: binding.lineEnding, ...(binding.baseFormat ? { baseFormat: binding.baseFormat } : {}), ...(binding.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: binding.normalizeLineEndings }), ...(captured.edits ? { edits: captured.edits } : {}) }, target, phase: 'captured' }, release };
       } catch (error) {
         await release();
         throw error;

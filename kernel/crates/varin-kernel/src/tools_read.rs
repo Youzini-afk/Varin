@@ -38,135 +38,17 @@ fn batch_ranges(files: &[Value]) -> Vec<Option<FileReadArgs>> {
             },
         )
         .collect::<Vec<_>>();
-    let mut grouped = parsed.clone();
-    for (index, args) in parsed
-        .iter()
-        .enumerate()
-        .filter_map(|(i, args)| args.as_ref().map(|a| (i, a)))
-    {
-        let mut merged = args.clone();
-        loop {
-            let before = (
-                merged.offset,
-                merged.length,
-                merged.start_line,
-                merged.end_line,
-            );
-            for other in parsed.iter().flatten().filter(|other| {
-                other.path == args.path && other.start_line.is_some() == args.start_line.is_some()
-            }) {
-                if let (Some(first), Some(next)) = (merged.start_line, other.start_line) {
-                    let last = merged.end_line.unwrap_or(u64::MAX);
-                    let next_last = other.end_line.unwrap_or(u64::MAX);
-                    if next <= last && first <= next_last {
-                        merged.start_line = Some(first.min(next));
-                        merged.end_line = if last == u64::MAX || next_last == u64::MAX {
-                            None
-                        } else {
-                            Some(last.max(next_last))
-                        };
-                    }
-                } else {
-                    let last = merged.offset.saturating_add(merged.length.unwrap_or(65536));
-                    let next_last = other.offset.saturating_add(other.length.unwrap_or(65536));
-                    let start = merged.offset.min(other.offset);
-                    let end = last.max(next_last);
-                    if other.offset <= last
-                        && merged.offset <= next_last
-                        && end - start <= crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64
-                    {
-                        merged.offset = start;
-                        merged.length = Some(end - start);
-                    }
-                }
-            }
-            if before
-                == (
-                    merged.offset,
-                    merged.length,
-                    merged.start_line,
-                    merged.end_line,
-                )
-            {
-                break;
-            }
-        }
-        grouped[index] = Some(merged);
-    }
-    grouped
+    parsed
+
 }
-fn project_range(mut observation: Value, args: &FileReadArgs) -> Value {
-    let content = &observation["content"];
-    let total = content["byteLength"].as_u64().unwrap_or(0);
-    let base = content["offset"].as_u64().unwrap_or(0);
-    let bytes = if let Some(text) = content["text"].as_str() {
-        text.as_bytes().to_vec()
-    } else if let Some(encoded) = content["bytesBase64"].as_str() {
-        match BASE64.decode(encoded) {
-            Ok(bytes) => bytes,
-            Err(_) => return observation,
-        }
-    } else {
-        return observation;
-    };
-    let mut value = content.clone();
-    let (start, end) = if let Some(first) = args.start_line {
-        let base_line = content["startLine"].as_u64().unwrap_or(first);
-        let mut offset = 0usize;
-        let mut start = None;
-        let mut end = 0;
-        let mut last = None;
-        for (index, line) in bytes.split_inclusive(|b| *b == b'\n').enumerate() {
-            let number = base_line + index as u64;
-            if number >= first && number <= args.end_line.unwrap_or(u64::MAX) {
-                start.get_or_insert(offset);
-                end = offset + line.len();
-                last = Some(number);
-            }
-            offset += line.len();
-        }
-        let start = start.unwrap_or(bytes.len());
-        let end = if last.is_some() { end } else { bytes.len() };
-        value["startLine"] = json!(first);
-        value["endLine"] = json!(last);
-        value["nextLine"] = json!(if base + (end as u64) < total {
-            last.map(|line| line + 1)
-        } else {
-            None
-        });
-        (start, end)
-    } else {
-        let mut start = args.offset.saturating_sub(base).min(bytes.len() as u64) as usize;
-        let mut end = args
-            .offset
-            .saturating_add(args.length.unwrap_or(65536))
-            .saturating_sub(base)
-            .min(bytes.len() as u64) as usize;
-        if start != end && content["text"].is_string() {
-            while start > 0 && bytes.get(start).is_some_and(|byte| byte & 0xc0 == 0x80) {
-                start -= 1;
-            }
-            while end < bytes.len() && bytes[end] & 0xc0 == 0x80 {
-                end += 1;
-            }
-        }
-        (start, end)
-    };
-    value["offset"] = json!(base + start as u64);
-    value["nextOffset"] = json!(base + end as u64);
-    value["returnedBytes"] = json!(end - start);
-    value["eof"] = json!(base + end as u64 >= total);
-    if content["text"].is_string() {
-        value["text"] = json!(std::str::from_utf8(&bytes[start..end]).expect("aligned text page"));
-    } else {
-        value["bytesBase64"] = json!(BASE64.encode(&bytes[start..end]));
-    }
-    observation["content"] = value;
+fn project_range(observation:Value,_args:&FileReadArgs)->Value {
+    // Each distinct requested page is projected by the native byte reader.
+    // Identical requests still share their exact observation within a batch.
     observation
 }
 
 pub(super) fn schema() -> Value {
-    let properties = json!({"path":{"type":"string","minLength":1},
+    let properties = json!({"encoding":{"type":"string","description":"Optional explicit file interpretation. Auto defaults to BOM, strict UTF-8, then GBK compatibility. Pass returned content.format as sourceFormat on mutations."},"raw":{"type":"boolean","description":"Return exact original bytes instead of decoded text."},"path":{"type":"string","minLength":1},
         "offset":{"type":"integer","minimum":0,"description":"Byte offset; continue with content.nextOffset and verify readVersion."},
         "length":{"type":"integer","minimum":0,"default":65536,"description":"Byte page size. Explicit pages are delivered without a second preview truncation."},
         "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use instead of offset/length."},
@@ -212,7 +94,7 @@ impl KernelToolExecutor {
                 ExecutionError::new("structure_unavailable", "Structure service is unavailable")
             })?;
             bridge.query(json!({"runId":self.binding.run_id,"threadId":self.binding.thread_id,"grantId":self.binding.grant_id,
-                "source":admitted["source"],"physicalRoot":admitted["physicalRoot"],"method":"structure","path":args.path}),cancel)
+                "source":admitted["source"],"physicalRoot":admitted["physicalRoot"],"textEncoding":admitted["textEncoding"],"encoding":args.encoding,"method":"structure","path":args.path}),cancel)
         })();
         let outline = match outline {
             Ok(value) => value,
@@ -310,8 +192,8 @@ impl KernelToolExecutor {
                 json!({"status":"incomplete","message":"Syntax errors leave the selected declaration incomplete; showing source context","revision":outline["revision"]}));
         }
         let (Some(start), Some(end)) = (
-            selected["range"]["startByte"].as_u64(),
-            selected["range"]["endByte"].as_u64(),
+            selected["range"]["sourceStartByte"].as_u64().or_else(||selected["range"]["startByte"].as_u64()),
+            selected["range"]["sourceEndByte"].as_u64().or_else(||selected["range"]["endByte"].as_u64()),
         ) else {
             return ToolCompletion::NotDispatched {
                 reason: "Structure result omitted exact source bytes".into(),
@@ -324,6 +206,7 @@ impl KernelToolExecutor {
                 error: None,
             };
         }
+        if read.encoding.is_none(){read.encoding=outline["format"]["encoding"].as_str().map(str::to_owned);}
         read.offset = start + args.offset;
         read.length = Some(args.length.unwrap_or(65536).min(end - read.offset));
         let mut completion = self.execute_operation(
@@ -339,11 +222,8 @@ impl KernelToolExecutor {
             ..
         } = &mut completion
         {
-            if content.data["content"]["hash"]
-                != format!(
-                    "sha256-{}",
-                    outline["contentHash"].as_str().unwrap_or_default()
-                )
+            let source_hash=outline["sourceObjectHash"].as_str().map(str::to_owned).unwrap_or_else(||format!("sha256-{}",outline["rawContentHash"].as_str().or_else(||outline["contentHash"].as_str()).unwrap_or_default()));
+            if content.data["content"]["hash"] != source_hash
             {
                 return ToolCompletion::Result{outcome:Outcome::Failed,effect:Effect::None,content:json!({"status":"stale","error":ExecutionError::new("structure_source_changed", "The file changed between structure analysis and reading; select the unit again")}).into()};
             }

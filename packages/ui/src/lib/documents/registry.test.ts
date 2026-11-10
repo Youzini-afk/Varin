@@ -3,6 +3,9 @@ import { describe, expect, test } from 'vitest';
 import { vi } from 'vitest';
 import type {
   DocumentsAPI,
+  VarinTextFormat,
+  VarinTextEdit,
+  VarinDocumentPendingSave,
   VarinAgentInputSnapshotCaptureRequest,
   VarinDocumentReadResult,
   VarinDocumentRecoveryJournalSummary,
@@ -12,6 +15,7 @@ import type {
   VarinResourceReference,
   VarinResourceIdentity,
 } from '@varin/application-client';
+import { DocumentsError } from '@varin/application-client';
 import { DocumentRegistry } from './registry';
 import { documentKey } from './types';
 
@@ -48,6 +52,8 @@ const createMemoryDocuments = () => {
     epoch: number;
     revision: number;
     baseRevision: string | null;
+    encoding?: string; bom?: boolean; sourceFormat?: VarinTextFormat; lineEnding?: 'lf' | 'crlf' | 'cr';
+    normalizeLineEndings?: boolean; edits?: VarinTextEdit[]; pendingSave?: VarinDocumentPendingSave; pendingEdits?: VarinTextEdit[];
   }>();
   const listeners = new Set<(event: VarinDocumentWatchEvent) => void>();
   const dirtyPublications: DirtyPublication[] = [];
@@ -150,7 +156,9 @@ const createMemoryDocuments = () => {
         };
       }
       const revision = nextRevision();
-      files.set(key, { content: request.content, revision });
+      const eol = request.lineEnding ?? request.sourceFormat?.defaultLineEnding;
+      const content = eol === 'crlf' ? request.content.replace(/\r\n|\r/g, '\n').replace(/\n/g, '\r\n') : request.content;
+      files.set(key, { content, revision });
       emit({ sourceId: 'memory-documents', generation: 1, kind: current ? 'changed' : 'created', sequence: ++watchSequence, resource: request.resource, revision });
       return { status: 'written', revision, byteLength: request.content.length };
     },
@@ -187,8 +195,9 @@ const createMemoryDocuments = () => {
           byteLength: entry.content.length,
         },
         content: entry.content,
-        encoding: 'utf-8',
-        bom: false,
+        encoding: entry.encoding ?? 'utf-8',
+        bom: entry.bom ?? false,
+        sourceFormat: entry.sourceFormat, lineEnding: entry.lineEnding, normalizeLineEndings: entry.normalizeLineEndings, edits: entry.edits, pendingSave: entry.pendingSave, pendingEdits: entry.pendingEdits,
       };
     },
     writeRecoveryJournal: async (request) => {
@@ -208,6 +217,7 @@ const createMemoryDocuments = () => {
           } };
         }
         existing.content = request.content;
+        existing.encoding = request.encoding; existing.bom = request.bom; existing.sourceFormat = request.sourceFormat; existing.lineEnding = request.lineEnding; existing.edits = request.edits; existing.normalizeLineEndings = request.normalizeLineEndings; existing.pendingSave = request.pendingSave; existing.pendingEdits = request.pendingEdits;
         existing.revision += 1;
         existing.baseRevision = request.baseRevision;
         return { status: 'written', journal: {
@@ -229,6 +239,7 @@ const createMemoryDocuments = () => {
         epoch: request.token.epoch,
         revision: 1,
         baseRevision: request.baseRevision,
+        encoding: request.encoding, bom: request.bom, sourceFormat: request.sourceFormat, lineEnding: request.lineEnding, normalizeLineEndings: request.normalizeLineEndings, edits: request.edits, pendingSave: request.pendingSave, pendingEdits: request.pendingEdits,
       };
       journals.set(journalId, created);
       return { status: 'written', journal: {
@@ -1419,6 +1430,55 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
+  test.each([
+    { name: 'workspace root', paths: ['.'], caseSensitive: true, affected: ['nested/note.txt', 'second.txt'], otherWorkspace: true },
+    { name: 'normalized root', paths: ['.\\'], caseSensitive: false, affected: ['nested/note.txt', 'second.txt'], otherWorkspace: true },
+    { name: 'exact parent inventory', paths: ['.\\Folder\\', 'Folder\\note.txt', 'folder/nested/second.txt', 'Folder/new.txt'], caseSensitive: false, affected: ['folder/note.txt', 'Folder/nested/second.txt'], otherWorkspace: false },
+  ])('$name barriers finish pending journals and fence only their selected resources', async ({ paths, caseSensitive, affected, otherWorkspace }) => {
+    const memory = createMemoryDocuments();
+    const first = resource(affected[0]);
+    const second = resource(affected[1]);
+    const unrelated = ['folder/untouched.txt', 'folder-other/note.txt'].map(file => ({ ...resource(file), ...(otherWorkspace ? { workspaceId: 'another-workspace' } : {}) }));
+    for (const ref of [first, second, ...unrelated]) memory.files.set(`${ref.workspaceId}\0${ref.resourceId}`, { content: 'base', revision: 'd1_base' });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'barrier-journal' });
+    const started = deferred(), finish = deferred();
+    const write = memory.api.writeRecoveryJournal;
+    const writes = vi.spyOn(memory.api, 'writeRecoveryJournal').mockImplementation(async request => {
+      if (request.resource.resourceId === first.resourceId) { started.resolve(); await finish.promise; }
+      return write(request);
+    });
+    const targetWrites = () => writes.mock.calls.filter(([request]) => request.resource.resourceId === first.resourceId);
+    try {
+      await Promise.all([first, second, ...unrelated].map(ref => registry.open(ref)));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      registry.applyTransaction(first, 'draft', { origin: 'editor' });
+      memory.emit({ action: 'acquire', barrierId: 'source-barrier', caseSensitive, kind: 'dirty-state-barrier', paths, workspaceId: first.workspaceId });
+      for (const ref of [first, second]) expect(() => registry.applyTransaction(ref, 'blocked', { origin: 'editor' })).toThrow('temporarily fenced');
+      for (const ref of unrelated) expect(registry.applyTransaction(ref, 'unrelated', { origin: 'editor' }).buffer).toBe('unrelated');
+      await started.promise;
+      expect(memory.barrierAcknowledgements).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(1);
+      finish.resolve();
+      await memory.barrierAcknowledged;
+      expect([...memory.journals.values()].find(journal => journal.resource.resourceId === first.resourceId)?.content).toBe('draft');
+      let opened = false;
+      const opening = registry.open(resource('folder/new.txt')).then(record => { opened = true; return record; });
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(1);
+      expect(opened).toBe(false);
+      memory.emit({ action: 'release', barrierId: 'source-barrier', caseSensitive, kind: 'dirty-state-barrier', paths, workspaceId: first.workspaceId });
+      expect((await opening).status).toBe('missing');
+      registry.applyTransaction(first, 'later draft', { origin: 'editor' });
+      await vi.advanceTimersByTimeAsync(750);
+      expect(targetWrites()).toHaveLength(2);
+    } finally {
+      finish.resolve();
+      vi.useRealTimers();
+      await registry.dispose();
+    }
+  });
+
   test('stale generation completions do not replace newer buffers', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
@@ -1948,5 +2008,423 @@ describe('DocumentRegistry', () => {
     expect(registry.get(first)?.buffer).toBe('draft-a\n');
     expect(registry.get(second)?.buffer).toBe('draft-b\n');
     registry.dispose();
+  });
+});
+
+
+describe('Document Registry disk format state', () => {
+  // These tests exercise the real Registry against a coordination port, not byte codecs.
+  test('format-only changes participate in revision, dirty and conditional undo', async () => {
+    const { api, files } = createMemoryDocuments(); const identity = resource();
+    files.set(documentKey(identity), { content: 'plain', revision: 'base' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1 });
+    try {
+      const opened = await registry.open(identity);
+      const changed = registry.setFormat(identity, { encoding: 'gbk' });
+      expect(changed).toMatchObject({ buffer: 'plain', dirty: true, encoding: 'gbk', localEditRevision: opened.localEditRevision + 1 });
+      expect(registry.applyEdits(identity, { expectedLocalEditRevision: opened.localEditRevision, edits: [{ from: 0, to: 0, insert: 'x' }], origin: 'stale' }).status).toBe('stale');
+      expect(registry.undoFormat(identity)).toBe(true);
+      expect(registry.get(identity)).toMatchObject({ encoding: 'utf-8', dirty: false, buffer: 'plain' });
+    } finally { await registry.dispose(); }
+  });
+
+  test('a save receipt preserves a later format change and binds the original read format', async () => {
+    const { api, files } = createMemoryDocuments(); const identity = resource();
+    files.set(documentKey(identity), { content: 'plain', revision: 'base' });
+    const release = deferred(); const captured: Parameters<DocumentsAPI['write']>[0][] = [];
+    api.write = async request => { captured.push(request); await release.promise; return { status: 'written', revision: 'saved', byteLength: 5,
+      format: { encoding: 'gbk', bom: false, lineEnding: 'none', defaultLineEnding: 'lf', source: 'explicit' } }; };
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1 });
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'gbk' });
+      const saving = registry.save(identity); registry.setFormat(identity, { encoding: 'utf-16le', bom: true });
+      release.resolve(); await saving;
+      expect(captured[0]).toMatchObject({ encoding: 'gbk', sourceFormat: { encoding: 'utf-8' }, rememberEncoding: true, expectedRevision: 'base' });
+      expect(registry.get(identity)).toMatchObject({ dirty: true, encoding: 'utf-16le', bom: true, baseFormat: { encoding: 'gbk', bom: false }, baseRevision: 'saved' });
+    } finally { await registry.dispose(); }
+  });
+
+  test('format-only journals restore the desired format and retain the disk format', async () => {
+    const { api, files } = createMemoryDocuments(); const identity = resource();
+    files.set(documentKey(identity), { content: 'plain', revision: 'base' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'format-recovery' });
+    await registry.open(identity); registry.setFormat(identity, { encoding: 'gbk' }); await registry.flushRecoveryJournals(); await registry.dispose();
+    const recovered = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'format-recovery' });
+    try { expect(await recovered.open(identity)).toMatchObject({ buffer: 'plain', dirty: true, encoding: 'gbk', baseFormat: { encoding: 'utf-8' } }); }
+    finally { await recovered.dispose(); }
+  });
+
+  test('unrepresentable drafts remain editable and failed automatic save is revision scoped', async () => {
+    const { api, files } = createMemoryDocuments(); const identity = resource();
+    files.set(documentKey(identity), { content: 'plain', revision: 'base' });
+    api.write = async () => { throw new DocumentsError('Cannot save this character as GBK', { reason: 'unrepresentable' }); };
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1 });
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'gbk' });
+      const edited = registry.applyTransaction(identity, 'plain🙂', { origin: 'typing' });
+      await expect(registry.save(identity)).rejects.toMatchObject({ reason: 'unrepresentable' });
+      expect(registry.get(identity)).toMatchObject({ buffer: 'plain🙂', dirty: true, saveErrorRevision: edited.localEditRevision, saveErrorReason: 'unrepresentable' });
+      const next = registry.applyTransaction(identity, 'plain', { origin: 'typing' });
+      expect(next.localEditRevision).not.toBe(next.saveErrorRevision);
+      const read = vi.spyOn(api, 'read'); await registry.reopenWithEncoding(identity, 'utf-8');
+      expect(read).not.toHaveBeenCalled(); expect(registry.get(identity)?.buffer).toBe('plain');
+    } finally { await registry.dispose(); }
+  });
+});
+
+describe('Document Registry edit provenance and recovery', () => {
+  const mixed: VarinTextFormat = { encoding: 'gbk', bom: false, lineEnding: 'mixed', defaultLineEnding: 'crlf', source: 'explicit' };
+  const fixture = () => {
+    const memory = createMemoryDocuments();
+    const identity = resource('mixed.txt');
+    memory.files.set(documentKey(identity), { content: 'old\r\nkeep\nlast\r', revision: 'base' });
+    const read = memory.api.read;
+    memory.api.read = async (...args) => { const result = await read(...args); return result.status === 'ready'
+      ? { ...result, encoding: mixed.encoding, format: mixed } : result; };
+    const writes: Parameters<DocumentsAPI['write']>[0][] = [];
+    memory.api.write = async request => { writes.push(structuredClone(request)); return { status: 'written', revision: `saved-${writes.length}`, byteLength: 15, format: mixed }; };
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'provenance' });
+    const edit = (from: number, to: number, insert: string, history?: 'undo' | 'redo') => registry.applyEdits(identity, {
+      expectedLocalEditRevision: registry.get(identity)!.localEditRevision, edits: [{ from, to, insert }], origin: 'editor', history,
+    });
+    return { ...memory, identity, writes, registry, edit };
+  };
+
+  test('save sends all baseline-relative edits while keeping the untouched middle out of their ranges', async () => {
+    const { registry, identity, edit, writes } = fixture();
+    try {
+      await registry.open(identity); edit(0, 3, 'newer'); edit(11, 15, 'tail'); edit(1, 3, 'EW');
+      await registry.save(identity);
+      expect(writes[0]).toMatchObject({ content: 'nEWer\nkeep\ntail\n', encoding: 'gbk', sourceFormat: mixed,
+        edits: [{ start: 0, end: 3, text: 'nEWer' }, { start: 9, end: 13, text: 'tail' }] });
+      expect(writes[0]?.lineEnding).toBeUndefined();
+      expect(registry.get(identity)?.baseEdits).toEqual([]);
+    } finally { await registry.dispose(); }
+  });
+
+  test('full buffer replacement does not invent untouched middle fragments', async () => {
+    const { registry, identity, writes } = fixture();
+    try {
+      await registry.open(identity); registry.applyTransaction(identity, 'new\nkeep\ntail\n', { origin: 'replace' });
+      await registry.save(identity);
+      expect(writes[0]?.edits).toEqual([{ start: 0, end: 14, text: 'new\nkeep\ntail\n' }]);
+    } finally { await registry.dispose(); }
+  });
+
+  test('undo and redo restore real edit provenance, and manual retyping does not undo format out of order', async () => {
+    const { registry, identity, edit, writes } = fixture();
+    try {
+      await registry.open(identity); edit(0, 3, 'new'); registry.setFormat(identity, { encoding: 'utf-8' });
+      edit(9, 13, 'tail'); edit(9, 13, 'last');
+      expect(registry.undoFormat(identity)).toBe(false);
+      edit(9, 13, 'tail', 'undo');
+      expect(registry.undoFormat(identity)).toBe(false);
+      edit(9, 13, 'last', 'undo');
+      expect(registry.undoFormat(identity)).toBe(true);
+      expect(registry.get(identity)?.baseEdits).toEqual([{ start: 0, end: 3, text: 'new' }]);
+      edit(9, 13, 'tail', 'redo');
+      await registry.save(identity);
+      expect(writes[0]?.edits).toEqual([{ start: 0, end: 3, text: 'new' }, { start: 9, end: 13, text: 'tail' }]);
+    } finally { await registry.dispose(); }
+  });
+
+  test('ordered workspace edits and batch undo preserve the draft provenance', async () => {
+    const { registry, identity, edit } = fixture();
+    try {
+      await registry.open(identity); edit(0, 3, 'new');
+      const prepared = await registry.prepareWorkspaceEdit({ workspaceId: identity.workspaceId, origin: 'agent', changes: [
+        { kind: 'text', identity, version: null, edits: [{ range: { start: { line: 0, character: 3 }, end: { line: 0, character: 3 } }, newText: 'er' }] },
+        { kind: 'text', identity, version: null, edits: [{ range: { start: { line: 2, character: 0 }, end: { line: 2, character: 4 } }, newText: 'tail' }] },
+      ] });
+      expect(prepared.status).toBe('ready'); if (prepared.status !== 'ready') return;
+      await registry.applyWorkspaceEdit(prepared.groupId);
+      expect(registry.get(identity)?.baseEdits).toEqual([{ start: 0, end: 3, text: 'newer' }, { start: 9, end: 13, text: 'tail' }]);
+      expect((await registry.undoWorkspaceEdit(prepared.groupId)).status).toBe('undone');
+      expect(registry.get(identity)?.baseEdits).toEqual([{ start: 0, end: 3, text: 'new' }]);
+    } finally { await registry.dispose(); }
+  });
+
+  test('save receipt rebases edits made while the captured text is being saved', async () => {
+    const { registry, api, identity, edit, writes } = fixture();
+    const write = api.write, release = deferred();
+    api.write = async request => { await release.promise; return write(request); };
+    try {
+      await registry.open(identity); edit(0, 3, 'newer'); const saving = registry.save(identity);
+      edit(11, 15, 'tail'); release.resolve(); await saving;
+      expect(registry.get(identity)?.baseEdits).toEqual([{ start: 11, end: 15, text: 'tail' }]);
+      await registry.save(identity);
+      expect(writes[1]).toMatchObject({ expectedRevision: 'saved-1', edits: [{ start: 11, end: 15, text: 'tail' }] });
+    } finally { await registry.dispose(); }
+  });
+
+  test('recovery journals carry baseline edits and EOL conversion intent across Registry lifetimes', async () => {
+    const { registry, api, identity, edit, writes } = fixture();
+    await registry.open(identity); edit(0, 3, 'new'); edit(9, 13, 'tail');
+    registry.setFormat(identity, { lineEnding: 'crlf' });
+    await registry.flushRecoveryJournals(); await registry.dispose();
+    const restored = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'provenance' });
+    try {
+      expect(await restored.open(identity)).toMatchObject({ normalizeLineEndings: true, baseFormat: mixed, dirty: true,
+        baseEdits: [{ start: 0, end: 3, text: 'new' }, { start: 9, end: 13, text: 'tail' }] });
+      await restored.save(identity);
+      expect(writes[0]).toMatchObject({ lineEnding: 'crlf', sourceFormat: mixed });
+    } finally { await restored.dispose(); }
+  });
+
+  test('Surface compensation restores format-only dirty state and the original EOL baseline', async () => {
+    const memory = fixture(); const { registry, identity } = memory;
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8', lineEnding: 'crlf' });
+      const before = registry.get(identity)!;
+      registry.discard(identity);
+      memory.emit({ kind: 'dirty-state-barrier', action: 'acquire', barrierId: 'restore-barrier', caseSensitive: true,
+        paths: [identity.resourceId], workspaceId: identity.workspaceId });
+      await memory.barrierAcknowledged;
+      const current = registry.get(identity)!;
+      memory.setSurfaceOperation({ action: 'restore', barrierId: 'restore-barrier', operationId: 'restore-format', requestId: 'restore-format-1', workspaceId: identity.workspaceId,
+        targets: [{ resource: identity, documentInstanceId: current.documentInstanceId, baseRevision: current.baseRevision,
+          localEditRevision: current.localEditRevision, bufferHash: await hashText(current.buffer), encoding: current.encoding, bom: current.bom,
+          lineEnding: current.lineEnding, baseFormat: current.baseFormat, normalizeLineEndings: false, newText: before.buffer,
+          restoreState: { baseContent: before.baseContent, baseRevision: before.baseRevision, baseFormat: before.baseFormat,
+            encoding: before.encoding, bom: before.bom, lineEnding: before.lineEnding, normalizeLineEndings: before.normalizeLineEndings, edits: before.baseEdits } }] });
+      memory.emit({ kind: 'surface-operation', action: 'restore', operationId: 'restore-format', requestId: 'restore-format-1', workspaceId: identity.workspaceId });
+      await vi.waitFor(() => expect(memory.surfaceCompletions.at(-1)?.resources[0]?.status).toBe('restored'));
+      expect(registry.get(identity)).toMatchObject({ buffer: before.buffer, dirty: true, encoding: 'utf-8', baseFormat: mixed, normalizeLineEndings: true });
+      expect(registry.dirtyResourceIds(identity.workspaceId).has(identity.resourceId)).toBe(true);
+    } finally {
+      memory.emit({ kind: 'dirty-state-barrier', action: 'release', barrierId: 'restore-barrier', caseSensitive: true, paths: [identity.resourceId], workspaceId: identity.workspaceId });
+      await registry.dispose();
+    }
+  });
+
+  test('a pending conversion retries the identical operation before saving newer text', async () => {
+    const { registry, api, identity, edit } = fixture();
+    const calls: Parameters<DocumentsAPI['write']>[0][] = [];
+    const receipts = new Map<string, Awaited<ReturnType<DocumentsAPI['write']>>>();
+    let writes = 0;
+    let preference = 'gbk';
+    api.write = async request => {
+      calls.push(structuredClone(request));
+      if (!receipts.has(request.operationId)) {
+        writes += 1;
+        receipts.set(request.operationId, { status: 'written', revision: `written-${writes}`, byteLength: 15, format: { ...mixed, encoding: request.encoding } });
+      }
+      if (calls.length === 1) throw new DocumentsError('Preference persistence is temporarily unavailable', { reason: 'reconciliation-pending' });
+      if (request.rememberEncoding) preference = request.encoding;
+      return receipts.get(request.operationId)!;
+    };
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8' });
+      await expect(registry.save(identity)).rejects.toMatchObject({ reason: 'reconciliation-pending' });
+      expect(registry.get(identity)?.saveOperationId).toBe(calls[0]?.operationId);
+      edit(0, 3, 'new');
+      await registry.save(identity);
+      expect(calls[1]).toEqual(calls[0]);
+      expect(calls[2]).toMatchObject({ expectedRevision: 'written-1', content: 'new\nkeep\nlast\n', edits: [{ start: 0, end: 3, text: 'new' }] });
+      expect(writes).toBe(2); expect(preference).toBe('utf-8');
+      expect(registry.get(identity)).toMatchObject({ dirty: false, status: 'ready', encoding: 'utf-8', baseRevision: 'written-2', saveOperationId: null });
+    } finally { await registry.dispose(); }
+  });
+  test('restart reconciles the durable save intent once and preserves later unsaved text', async () => {
+    const { registry, api, identity, edit, files, journals } = fixture();
+    const calls: Parameters<DocumentsAPI['write']>[0][] = [];
+    let written = false;
+    let unavailable = true;
+    api.write = async request => {
+      calls.push(structuredClone(request));
+      const journal = [...journals.values()][0];
+      expect(journal?.pendingSave?.operationId).toBe(request.operationId);
+      expect(journal?.pendingSave).not.toHaveProperty('token');
+      if (!written) {
+        written = true;
+        files.set(documentKey(identity), { content: request.content, revision: 'converted' });
+      }
+      if (unavailable) throw new DocumentsError('Preference unavailable', { reason: 'reconciliation-pending' });
+      return { status: 'written', revision: 'converted', byteLength: 14, format: { ...mixed, encoding: 'utf-8' } };
+    };
+    await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8' });
+    await expect(registry.save(identity)).rejects.toMatchObject({ reason: 'reconciliation-pending' });
+    edit(0, 3, 'newer'); edit(11, 15, 'tail');
+    await registry.flushRecoveryJournals(); await registry.dispose();
+    unavailable = false;
+    // A successful Host read reconciles the persisted preference before decoding.
+    const read = api.read; api.read = async (...args) => { const result = await read(...args); return result.status === 'ready'
+      ? { ...result, encoding: 'utf-8', format: { ...mixed, encoding: 'utf-8' } } : result; };
+    const reopened = new DocumentRegistry({ documents: api, getGeneration: () => 2, recoverySessionId: 'provenance' });
+    try {
+      expect(await reopened.open(identity)).toMatchObject({ status: 'ready', baseRevision: 'converted', encoding: 'utf-8', dirty: true,
+        buffer: 'newer\nkeep\ntail\n', baseEdits: [{ start: 0, end: 3, text: 'newer' }, { start: 9, end: 13, text: 'tail' }] });
+      expect(calls).toHaveLength(2);
+      const { token: firstToken, ...first } = calls[0]!;
+      const { token: resumedToken, ...resumed } = calls[1]!;
+      expect(resumed).toEqual(first);
+      expect(firstToken.owner.generation).toBe(1); expect(resumedToken.owner.generation).toBe(2);
+      expect(files.get(documentKey(identity))?.content).toBe('old\nkeep\nlast\n');
+    } finally { await reopened.dispose(); }
+  });
+
+  test('a conversion is not dispatched when its recovery intent cannot be persisted', async () => {
+    const { registry, api, identity, edit, writes } = fixture();
+    const journal = api.writeRecoveryJournal;
+    api.writeRecoveryJournal = async () => { throw new Error('Recovery storage unavailable'); };
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8' }); edit(0, 3, 'new');
+      await expect(registry.save(identity)).rejects.toThrow('Recovery storage unavailable');
+      expect(writes).toHaveLength(0);
+      expect(registry.get(identity)?.saveOperationId).toBeNull();
+      api.writeRecoveryJournal = journal;
+      await registry.save(identity);
+      expect(writes).toHaveLength(1);
+    } finally { api.writeRecoveryJournal = journal; await registry.dispose(); }
+  });
+
+  test('undo during an in-flight save restores captured byte provenance before later edits', async () => {
+    const { registry, api, identity, edit, writes } = fixture();
+    const write = api.write, release = deferred(); api.write = async request => { await release.promise; return write(request); };
+    try {
+      await registry.open(identity); registry.setFormat(identity, { bom: true, encoding: 'utf-8' });
+      const saving = registry.save(identity);
+      edit(0, 4, 'new\n'); edit(0, 4, 'old\n', 'undo'); edit(9, 13, 'tail');
+      release.resolve(); await saving;
+      expect(registry.get(identity)?.baseEdits).toEqual([{ start: 9, end: 13, text: 'tail' }]);
+      await registry.save(identity);
+      expect(writes[1]?.edits).toEqual([{ start: 9, end: 13, text: 'tail' }]);
+    } finally { await registry.dispose(); }
+  });
+
+  test('saved mixed-EOL normalization is not falsely undone as a uniform default EOL', async () => {
+    const { registry, api, identity } = fixture();
+    api.write = async () => ({ status: 'written', revision: 'normalized', byteLength: 17,
+      format: { ...mixed, lineEnding: 'crlf' } });
+    try {
+      await registry.open(identity); registry.setFormat(identity, { lineEnding: 'crlf' });
+      await registry.save(identity);
+      expect(registry.canUndoFormat(identity)).toBe(false);
+      expect(registry.undoFormat(identity)).toBe(false);
+      expect(registry.get(identity)).toMatchObject({ dirty: false, baseFormat: { lineEnding: 'crlf' } });
+    } finally { await registry.dispose(); }
+  });
+
+  test('ordinary original-format saving remains available when journal storage is unavailable', async () => {
+    const { registry, api, identity, edit, writes } = fixture();
+    const journal = api.writeRecoveryJournal;
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    api.writeRecoveryJournal = async () => { throw new Error('Recovery storage unavailable'); };
+    try {
+      await registry.open(identity); edit(0, 3, 'new');
+      expect(await registry.save(identity)).toMatchObject({ dirty: false, status: 'ready' });
+      expect(writes).toHaveLength(1); expect(writes[0]?.rememberEncoding).toBeUndefined();
+    } finally { api.writeRecoveryJournal = journal; await registry.dispose(); reported.mockRestore(); }
+  });
+
+  test('saved encoding and BOM conversions can still be undone against the new baseline', async () => {
+    const { registry, api, identity } = fixture();
+    api.write = async () => ({ status: 'written', revision: 'utf8-bom', byteLength: 20,
+      format: { ...mixed, encoding: 'utf-8', bom: true } });
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8', bom: true });
+      await registry.save(identity);
+      expect(registry.canUndoFormat(identity)).toBe(true);
+      expect(registry.undoFormat(identity)).toBe(true);
+      expect(registry.get(identity)).toMatchObject({ encoding: 'gbk', bom: false, dirty: true,
+        baseFormat: { encoding: 'utf-8', bom: true } });
+      expect(registry.canUndoFormat(identity)).toBe(false);
+    } finally { await registry.dispose(); }
+  });
+
+  test('creating an already-open missing file inherits the resolved project format and reloads it', async () => {
+    const memory = createMemoryDocuments(); const identity = resource('new-file.txt');
+    const read = memory.api.read, write = memory.api.write;
+    memory.api.read = async (...args) => { const result = await read(...args); return result.status === 'missing' || result.status === 'ready'
+      ? { ...result, encoding: 'gbk', bom: false, format: { ...mixed, lineEnding: 'none', defaultLineEnding: 'lf' } } : result; };
+    const requests: Parameters<DocumentsAPI['write']>[0][] = [];
+    memory.api.write = async request => { requests.push(request); return write(request); };
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1 });
+    try {
+      expect(await registry.open(identity)).toMatchObject({ status: 'missing', encoding: 'gbk' });
+      expect(await registry.create(identity, '中文')).toMatchObject({ status: 'ready', buffer: '中文', dirty: false, encoding: 'gbk' });
+      expect(requests[0]).toMatchObject({ encoding: 'gbk', bom: false, content: '中文', expectedRevision: null });
+    } finally { await registry.dispose(); }
+  });
+
+  test('clears a completed conversion journal after Host preference reconciliation advances its revision', async () => {
+    const { registry, api, identity, journals } = fixture();
+    api.write = async () => {
+      const journal = [...journals.values()][0]!;
+      journal.revision += 1;
+      return { status: 'written', revision: 'converted', byteLength: 14, format: { ...mixed, encoding: 'utf-8' } };
+    };
+    try {
+      await registry.open(identity); registry.setFormat(identity, { encoding: 'utf-8' });
+      expect(await registry.save(identity)).toMatchObject({ dirty: false, baseRevision: 'converted' });
+      expect(journals.size).toBe(0);
+      expect(registry.get(identity)?.recoveryJournalId).toBeNull();
+    } finally { await registry.dispose(); }
+  });
+
+});
+
+describe('Document Registry recovery interpretation', () => {
+  test.each([true, false])('restores the original Unicode baseline after project encoding changes (stored edits: %s)', async (hasStoredEdits) => {
+    const memory = createMemoryDocuments();
+    const identity = resource('interpretation.txt');
+    const bytes = Buffer.from('中文', 'utf8');
+    const originalText = new TextDecoder('gbk', { fatal: true }).decode(bytes);
+    let policy = 'gbk';
+    const reads: Array<Parameters<DocumentsAPI['read']>[1]> = [];
+    memory.api.read = async (resource, options) => {
+      reads.push(options);
+      const encoding = options?.encoding ?? policy;
+      return { status: 'ready', resource, epoch: 1, revision: 'same-raw-revision',
+        content: new TextDecoder(encoding, { fatal: true }).decode(bytes), encoding, bom: false, byteLength: bytes.length,
+        format: { encoding, bom: false, lineEnding: 'none', defaultLineEnding: 'lf', source: options?.encoding ? 'explicit' : 'project' } };
+    };
+    const writes: Parameters<DocumentsAPI['write']>[0][] = [];
+    memory.api.write = async request => {
+      writes.push(request);
+      // Coordination validation uses the actual original bytes and codec. Native
+      // serializer tests separately cover byte output; this catches wrong offsets.
+      let assembled = new TextDecoder(request.sourceFormat!.encoding, { fatal: true }).decode(bytes);
+      for (const edit of [...request.edits!].reverse()) assembled = assembled.slice(0, edit.start) + edit.text + assembled.slice(edit.end);
+      if (assembled !== request.content) throw new DocumentsError('Edits do not produce the supplied content', { reason: 'invalid-text' });
+      return { status: 'written', revision: 'saved', byteLength: bytes.length + 1, format: request.sourceFormat };
+    };
+    const first = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'interpretation' });
+    await first.open(identity);
+    expect(originalText.length).toBe(3);
+    first.applyEdits(identity, { expectedLocalEditRevision: first.get(identity)!.localEditRevision,
+      edits: [{ from: originalText.length, to: originalText.length, insert: '!' }], origin: 'typing' });
+    await first.flushRecoveryJournals(); await first.dispose();
+    if (!hasStoredEdits) for (const journal of memory.journals.values()) delete journal.edits;
+    policy = 'utf-8'; reads.length = 0;
+    const restored = new DocumentRegistry({ documents: memory.api, getGeneration: () => 2, recoverySessionId: 'interpretation' });
+    try {
+      expect(await restored.open(identity)).toMatchObject({ baseContent: originalText, baseFormat: { encoding: 'gbk' },
+        buffer: `${originalText}!`, encoding: 'gbk', dirty: true });
+      expect(reads).toEqual([undefined, { encoding: 'gbk' }]);
+      expect(await restored.save(identity)).toMatchObject({ dirty: false, baseRevision: 'saved' });
+      expect(writes[0]).toMatchObject({ sourceFormat: { encoding: 'gbk' }, expectedRevision: 'same-raw-revision',
+        edits: hasStoredEdits ? [{ start: 3, end: 3, text: '!' }] : [{ start: 0, end: 3, text: `${originalText}!` }] });
+      expect(policy).toBe('utf-8');
+    } finally { await restored.dispose(); }
+  });
+
+  test('does not install an old interpretation if raw bytes change during recovery', async () => {
+    const memory = createMemoryDocuments(); const identity = resource('changed-recovery.txt');
+    const originalFormat: VarinTextFormat = { encoding: 'gbk', bom: false, lineEnding: 'none', defaultLineEnding: 'lf', source: 'project' };
+    await memory.api.writeRecoveryJournal({ token: mutationToken(), workspaceId: identity.workspaceId, recoverySessionId: 'changed-recovery', resource: identity,
+      content: '涓\ue15f枃!', encoding: 'gbk', bom: false, sourceFormat: originalFormat, edits: [{ start: 3, end: 3, text: '!' }],
+      baseRevision: 'old-raw', expectedRevision: null });
+    memory.api.read = async (resource, options) => ({ status: 'ready', resource, epoch: 1, revision: options?.encoding ? 'new-raw' : 'old-raw',
+      content: options?.encoding ? 'external' : '中文', encoding: options?.encoding ?? 'utf-8', bom: false, byteLength: 6,
+      format: { ...originalFormat, encoding: options?.encoding ?? 'utf-8' } });
+    const write = vi.spyOn(memory.api, 'write');
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'changed-recovery' });
+    try {
+      expect(await registry.open(identity)).toMatchObject({ status: 'error', buffer: '中文', baseFormat: { encoding: 'utf-8' } });
+      expect(registry.get(identity)?.errorMessage).toContain('baseline changed');
+      expect([...memory.journals.values()][0]?.content).toBe('涓\ue15f枃!');
+      expect(write).not.toHaveBeenCalled();
+    } finally { await registry.dispose(); }
   });
 });

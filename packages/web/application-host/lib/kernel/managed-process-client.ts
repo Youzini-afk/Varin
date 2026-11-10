@@ -17,7 +17,10 @@ export function createManagedProcessClient(client: ManagedSourceClient, address:
     },
     processWrite(input) {
       requireAddress(input);
-      return client.processWrite({ ...address, operationId: input.operationId, bytesBase64: input.bytesBase64,
+      return client.processWrite({ ...address, operationId: input.operationId,
+        ...(input.bytesBase64 === undefined ? {} : { bytesBase64: input.bytesBase64 }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+        ...(input.encoding === undefined ? {} : { encoding: input.encoding }),
         ...(input.eof === undefined ? {} : { eof: input.eof }) });
     },
     processResize(input) {

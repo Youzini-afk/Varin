@@ -46,8 +46,8 @@ export const writeWorkspaceTextFile = async (
   const resource = await resolveTextDocumentIdentity(documents, workspaceRoot, filePath);
   const current = await documents.read(resource);
   if (current.status === 'binary' || current.status === 'unsupported-encoding') return false;
-  const encoding = current.status === 'ready' ? current.encoding : 'utf-8';
-  const bom = current.status === 'ready' ? current.bom : false;
+  const encoding = current.status === 'ready' ? current.encoding : current.format?.encoding ?? 'utf-8';
+  const bom = current.status === 'ready' ? current.bom : current.format?.bom ?? false;
   const expectedRevision = current.status === 'missing' ? null : current.revision;
   const written = await documents.write({
     token: {
@@ -59,6 +59,7 @@ export const writeWorkspaceTextFile = async (
     content,
     encoding,
     bom,
+    ...(current.status === 'ready' && current.format ? { sourceFormat: current.format } : {}),
     expectedRevision,
     operationId: crypto.randomUUID(),
   });

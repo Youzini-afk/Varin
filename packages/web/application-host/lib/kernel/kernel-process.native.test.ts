@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelProcessService } from "./process-service.js";
 import fs from "node:fs/promises";
 import os from "node:os";
-import { stripVTControlCharacters } from "node:util";
+import { promisify, stripVTControlCharacters } from "node:util";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, expect, it as vitestIt } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient, type KernelScopedClient } from "./kernel-client.js";
-import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
+import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
@@ -23,6 +23,22 @@ const it = vitestIt.skipIf(!available);
 const clients: KernelClient[] = [];
 const roots: string[] = [];
 const pause = (ms = 10) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+let stdoutEofFixtureDirectory: string | undefined;
+let stdoutEofCommand = process.execPath;
+beforeAll(async () => {
+  if (!available || process.platform !== 'win32') return;
+  // Node/libuv leaves descriptors 0–2 open, and PowerShell/.NET duplicates
+  // stdout's inherited handle. Neither fixture can produce early pipe EOF by
+  // closing just fd 1 / GetStdHandle(-11). Use the verified raw Win32 helper.
+  stdoutEofFixtureDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-stdout-eof-'));
+  stdoutEofCommand = path.join(stdoutEofFixtureDirectory, 'stdout-eof.exe');
+  await promisify(execFile)('rustc', ['--edition=2021', '--crate-name', 'stdout_eof',
+    fileURLToPath(new URL('./tests/fixtures/stdout-eof-windows.rs', import.meta.url)),
+    '-o', stdoutEofCommand], { windowsHide: true, timeout: 60_000 });
+}, 60_000);
+afterAll(async () => {
+  if (stdoutEofFixtureDirectory) await fs.rm(stdoutEofFixtureDirectory, { recursive: true, force: true });
+});
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close()));
   for (const root of roots.splice(0)) {
@@ -807,15 +823,18 @@ it('process startup waits for an overlapping file lease and cancellation withdra
   await f.client.fileLeaseRelease({ ...f.address, leaseId: held.leaseId });
 }, 30_000);
 
-it('text pagination aligns GBK characters and raw reads can revisit any earlier byte', async () => {
+it('text pagination completes GBK across raw cursors and can revisit any earlier byte', async () => {
   const f = await fixture();
   const source = Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a]);
   await f.client.processSpawn(f.spawn('gbk-pages', `process.stdout.write(Buffer.from(${JSON.stringify([...source])}))`));
   await drain(f.client, 'gbk-pages');
   const first = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, maxBytes: 1, mode: 'text', encoding: 'gbk' });
-  assert.equal(first.nextCursor, 2);
+  assert.equal(first.nextCursor, 1);
+  assert.equal(first.chunks.length, 0);
+  const continuation = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 1, maxBytes: 1, mode: 'text', encoding: 'gbk' });
+  assert.equal(continuation.chunks.map(chunk => chunk.text ?? '').join(''), '中');
   const second = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 3, maxBytes: 1, mode: 'text', encoding: 'gbk' });
-  assert.equal(second.requestedCursor, 3);assert.equal(second.actualCursor, 2);assert.equal(second.nextCursor, 4);
+  assert.equal(second.requestedCursor, 3);assert.equal(second.actualCursor, 3);assert.equal(second.nextCursor, 4);
   assert.equal(Buffer.concat(second.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString('hex'), 'cec4');
   const raw = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, mode: 'raw' });
   assert.deepEqual(Buffer.concat(raw.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))), source);
@@ -1135,3 +1154,87 @@ it("a held subscription data credit cannot block stdin acknowledgements or nativ
   const read = await drain(f.client, processId);
   assert.deepEqual(read.stdout, Buffer.alloc(8*1024*1024,61));
 }, 30_000);
+
+
+it('retains independent output defaults, channel EOF and byte-accurate replay through the native owner', async () => {
+  const f = await fixture();
+  const processId = 'encoding-defaults';
+  const params = { ...f.spawn(processId, `
+    const fs = require('node:fs');
+    fs.writeSync(1, Buffer.from([0xd6]));
+    setTimeout(() => {
+      fs.writeSync(2, Buffer.from([0xb4, 0xed]));
+      setTimeout(() => { fs.writeSync(1, Buffer.from([0xd0])); }, 30);
+    }, 30);
+  `), inputEncoding: 'utf-8', outputEncoding: 'gbk' };
+  await f.client.processSpawn(params);
+  const drained = await drain(f.client, processId);
+  assert.equal(drained.process.inputEncoding, 'utf-8');
+  assert.equal(drained.process.outputEncoding, 'gbk');
+  const joined = { stdout: '', stderr: '' };
+  let cursor = 0;
+  while (cursor < drained.cursor) {
+    const page = await f.client.processRead({ workspaceId: 'ws', processId, cursor, maxBytes: 1, mode: 'text' });
+    assert.equal(page.nextCursor, cursor + 1);
+    for (const chunk of page.chunks) joined[chunk.channel] += chunk.text ?? '';
+    cursor = page.nextCursor;
+  }
+  assert.deepEqual(joined, { stdout: '中', stderr: '错' });
+  const replay = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'text' });
+  const stdout = replay.chunks.find(chunk => chunk.channel === 'stdout')!;
+  assert.equal(stdout.text, '中');
+  assert.deepEqual(stdout.sourceRanges, [{ offset: 0, byteLength: 1 }, { offset: 3, byteLength: 1 }]);
+  assert.equal(replay.channelEnds?.length, 2);
+  assert.equal(replay.outputComplete, true);
+  const override = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'text', encoding: 'utf-8' });
+  assert.notEqual(override.chunks.map(chunk => chunk.text ?? '').join(''), '错中');
+  assert.equal((await f.client.processInspect({ workspaceId: 'ws', processId })).outputEncoding, 'gbk');
+  const raw = await f.client.processRead({ workspaceId: 'ws', processId, cursor: 0, mode: 'raw' });
+  assert.equal(Buffer.concat(raw.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString('hex'), 'd6b4edd0');
+}, 20_000);
+
+it('Host observes stdout EOF before process exit without ending still-live stderr', async () => {
+  const f = await fixture();
+  const processErrors: string[] = [];
+  const service = createKernelProcessService({ client: f.host,
+    resolveIdentity: async () => ({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: f.workspace }),
+    onError: error => { processErrors.push(error.message); } });
+  try {
+    const args = process.platform === 'win32' ? [] : ['-e', `
+      const fs = require('node:fs'); fs.writeSync(1, 'stdout'); fs.closeSync(1);
+      process.stdin.once('data', () => { fs.writeSync(2, 'after stdout EOF'); process.stdin.destroy(); });
+    `];
+    const child = await service.spawn(stdoutEofCommand, args, { cwd: f.workspace, env: process.env, stdio: 'pipe' });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', bytes => { stdout += bytes.toString(); });
+    child.stderr.on('data', bytes => { stderr += bytes.toString(); });
+    try {
+      await expect.poll(() => child.stdout.readableEnded).toBe(true);
+    } catch (error) {
+      const nativeEvents = f.probe.received
+        .filter(event => event.kind === 'process-event' && event.processId === child.address.processId)
+        .map(envelope => {
+          const event = envelope as unknown as KernelProcessStreamEvent;
+          const result = event.result;
+          return { stream: event.stream, sequence: event.sequence, error: event.error,
+            nextCursor: result?.nextCursor, endCursor: result?.endCursor,
+            channelEnds: result?.channelEnds, outputComplete: result?.outputComplete, outputError: result?.outputError,
+            process: result?.process && { status: result.process.status, pid: result.process.pid,
+              writerActive: result.process.writerActive, exitCode: result.process.exitCode, reason: result.process.reason },
+            chunks: result?.chunks?.map(chunk => ({ channel: chunk.channel, offset: chunk.offset,
+              byteLength: typeof chunk.bytesBase64 === 'string' ? Buffer.from(chunk.bytesBase64, 'base64').length : undefined })) };
+        });
+      throw new Error(`Stdout EOF was not observed: ${JSON.stringify({ stdout, stderr, processErrors,
+        exitConfirmed: child.exitConfirmed, exitCode: child.exitCode, signal: child.signalCode,
+        stdoutEnded: child.stdout.readableEnded, stdoutDestroyed: child.stdout.destroyed,
+        stderrEnded: child.stderr.readableEnded, stderrDestroyed: child.stderr.destroyed, nativeEvents })}`, { cause: error });
+    }
+    assert.equal(stdout, 'stdout');
+    assert.equal(child.stderr.readableEnded, false);
+    assert.equal(child.exitConfirmed, false);
+    await child.writeInput('finish');
+    await child.completion;
+    assert.equal(stderr, 'after stdout EOF');
+    assert.equal(child.exitCode, 0);
+  } finally { await service.dispose(); }
+}, 20_000);

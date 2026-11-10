@@ -1086,6 +1086,8 @@ impl Storage {
         metadata: &[(String, super::workspace_metadata::Metadata)],
         session_id: Uuid,
         request_grant_id: &str,
+        text_snapshot: &super::text_formats::BranchSnapshot,
+        requested_policy: Option<&Value>,
     ) -> Result<Value, KernelError> {
         let grant = self.load_grant(&actor.grant_id)?;
         if grant.state != crate::model::GrantState::Active
@@ -1166,7 +1168,7 @@ impl Storage {
         }
         let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":base,"sourcePath":selected,
             "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[],
-            "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata,"sessionId":session_id,"requestGrantId":request_grant_id});
+            "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata,"sessionId":session_id,"requestGrantId":request_grant_id,"textSnapshot":text_snapshot,"textEncoding":requested_policy});
         super::operations::idempotent(self, "workspace.checkpoint.fork", &input, |s| {
             for (_, _, file) in files {
                 file.record(s)?;
@@ -1186,11 +1188,12 @@ impl Storage {
             let mut result = s.create_filesystem_snapshot_branch(
                 source, target, workspace, &root, operation, actor,
             )?;
+            s.commit_checkpoint_text_snapshot(target,&root,text_snapshot)?;
             let root = pinned_metadata["root"]
                 .as_str()
                 .ok_or_else(|| KernelError::Storage("metadata checkpoint has no root".into()))?;
             s.fork_workspace_metadata(metadata_head, target, root, actor, metadata, selected)?;
-            result["filesystem"] = json!({"sourceBranchId":source,"targetBranchId":target,"sourcePath":selected,"sessionId":session_id,"ownerGrantId":actor.grant_id,"requestGrantId":request_grant_id});
+            result["filesystem"] = json!({"sourceBranchId":source,"targetBranchId":target,"sourcePath":selected,"sessionId":session_id,"ownerGrantId":actor.grant_id,"requestGrantId":request_grant_id,"textEncoding":requested_policy});
             Ok(result)
         })
     }

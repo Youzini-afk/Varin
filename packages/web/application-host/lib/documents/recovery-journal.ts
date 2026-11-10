@@ -1,3 +1,6 @@
+import { isDocumentTextFormat, isDocumentTextEdits } from './inspect.js';
+import type { VarinTextFormat, VarinDocumentPendingSave, VarinTextEdit } from '@varin/application-client';
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createSerialQueues } from './serialize.js';
@@ -10,6 +13,9 @@ interface DocumentResource {
 }
 
 interface JournalRecord {
+  pendingSave?: VarinDocumentPendingSave | undefined;
+  pendingEdits?: VarinTextEdit[] | undefined;
+  pendingSaveReconciled?: boolean;
   schemaVersion: number;
   journalId: string;
   hostId: string;
@@ -19,6 +25,10 @@ interface JournalRecord {
   content: string;
   encoding: string;
   bom: boolean;
+  sourceFormat?: VarinTextFormat;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
+  normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
   baseRevision: string | null;
   epoch: number;
   revision: number;
@@ -42,12 +52,18 @@ interface MutationToken {
 }
 
 export interface RecoveryJournalWriteRequest {
+  pendingSave?: VarinDocumentPendingSave | undefined;
+  pendingEdits?: VarinTextEdit[] | undefined;
   workspaceId: string;
   recoverySessionId: string;
   resource: DocumentResource;
   content: string;
   encoding: string;
   bom: boolean;
+  sourceFormat?: VarinTextFormat;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
+  normalizeLineEndings?: boolean;
+  edits?: Array<{ start: number; end: number; text: string }>;
   baseRevision: string | null;
   expectedRevision: number | null;
   token: MutationToken;
@@ -101,6 +117,18 @@ const summarize = (record: JournalRecord): JournalSummary => ({
   byteLength: Buffer.byteLength(record.content, 'utf8'),
 });
 
+const validPendingSave = (value: unknown, resource: DocumentResource): value is VarinDocumentPendingSave => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const pending = value as VarinDocumentPendingSave;
+  return pending.resource?.workspaceId === resource.workspaceId && pending.resource.resourceId === resource.resourceId
+    && typeof pending.operationId === 'string' && Boolean(pending.operationId)
+    && typeof pending.content === 'string' && typeof pending.encoding === 'string' && typeof pending.bom === 'boolean'
+    && (pending.expectedRevision === null || typeof pending.expectedRevision === 'string')
+    && (pending.sourceFormat === undefined || isDocumentTextFormat(pending.sourceFormat))
+    && (pending.edits === undefined || isDocumentTextEdits(pending.edits))
+    && (pending.rememberEncoding === undefined || typeof pending.rememberEncoding === 'boolean');
+};
+
 const parseRecord = (raw: unknown, journalId: string, expected: ExpectedMatch): ParsedRecord => {
   if (!raw || typeof raw !== 'object' || (raw as { schemaVersion?: unknown }).schemaVersion !== SCHEMA_VERSION) {
     return { status: 'malformed', journalId };
@@ -111,9 +139,14 @@ const parseRecord = (raw: unknown, journalId: string, expected: ExpectedMatch): 
   if (!resource || typeof resource.workspaceId !== 'string' || typeof resource.resourceId !== 'string') {
     return { status: 'malformed', journalId };
   }
+  if ((r.pendingSave !== undefined && !validPendingSave(r.pendingSave, resource as unknown as DocumentResource))
+    || (r.pendingEdits !== undefined && !isDocumentTextEdits(r.pendingEdits))
+    || (r.pendingSaveReconciled !== undefined && typeof r.pendingSaveReconciled !== 'boolean')) return { status: 'malformed', journalId };
   if (typeof r.content !== 'string' || typeof r.encoding !== 'string' || typeof r.bom !== 'boolean') {
     return { status: 'malformed', journalId };
   }
+  if ((r.normalizeLineEndings !== undefined && typeof r.normalizeLineEndings !== 'boolean') || (r.edits !== undefined && !isDocumentTextEdits(r.edits))) return { status: 'malformed', journalId };
+  if ((r.sourceFormat !== undefined && !isDocumentTextFormat(r.sourceFormat)) || (r.lineEnding !== undefined && !['lf', 'crlf', 'cr'].includes(String(r.lineEnding)))) return { status: 'malformed', journalId };
   if (!Number.isSafeInteger(r.revision) || (r.revision as number) < 1) return { status: 'malformed', journalId };
   if (!Number.isSafeInteger(r.epoch) || (r.epoch as number) < 1) return { status: 'malformed', journalId };
   if (r.baseRevision !== null && typeof r.baseRevision !== 'string') return { status: 'malformed', journalId };
@@ -248,7 +281,7 @@ export const createRecoveryJournalStore = ({
     async read(journalId: string): Promise<
       | { status: 'malformed'; journalId: string }
       | { status: 'missing'; journalId: string }
-      | { status: 'ready'; journal: JournalSummary; content: string; encoding: string; bom: boolean }
+      | { status: 'ready'; pendingSave?: VarinDocumentPendingSave | undefined; pendingEdits?: VarinTextEdit[] | undefined; pendingSaveReconciled?: boolean; journal: JournalSummary; content: string; encoding: string; bom: boolean; sourceFormat?: VarinTextFormat; lineEnding?: 'lf' | 'crlf' | 'cr'; normalizeLineEndings?: boolean; edits?: Array<{ start: number; end: number; text: string }> }
     > {
       const found = await findJournal(journalId);
       if (!found) return { status: 'missing', journalId };
@@ -257,10 +290,31 @@ export const createRecoveryJournalStore = ({
       return {
         status: 'ready',
         journal: summarize(parsed.record),
+        ...(parsed.record.pendingSave ? { pendingSave: parsed.record.pendingSave } : {}),
+        ...(parsed.record.pendingEdits ? { pendingEdits: parsed.record.pendingEdits } : {}),
+        ...(parsed.record.pendingSaveReconciled ? { pendingSaveReconciled: true } : {}),
         content: parsed.record.content,
         encoding: parsed.record.encoding,
         bom: parsed.record.bom,
+        ...(parsed.record.edits ? { edits: parsed.record.edits } : {}),
+        ...(parsed.record.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: parsed.record.normalizeLineEndings }),
+        ...(parsed.record.sourceFormat ? { sourceFormat: parsed.record.sourceFormat } : {}),
+        ...(parsed.record.lineEnding ? { lineEnding: parsed.record.lineEnding } : {}),
       };
+    },
+
+    async markPendingSaveReconciled(journalId: string, expectedRevision: number, pendingSave: VarinDocumentPendingSave): Promise<boolean> {
+      const found = await findJournal(journalId);
+      if (!found || found.parsed.status !== 'ready') return false;
+      const original = found.parsed.record;
+      const key = `${original.workspaceId}\0${original.recoverySessionId}\0${original.resource.resourceId}`;
+      return queues.run(key, async () => {
+        const latest = await readFile(found.filePath, journalId, { workspaceId: original.workspaceId, recoverySessionId: original.recoverySessionId });
+        if (latest.status !== 'ready' || latest.record.revision < expectedRevision || !isDeepStrictEqual(latest.record.pendingSave, pendingSave)) return false;
+        if (latest.record.pendingSaveReconciled) return true;
+        await atomicWrite(found.filePath, { ...latest.record, pendingSaveReconciled: true, revision: latest.record.revision + 1, updatedAt: new Date().toISOString() });
+        return true;
+      });
     },
 
     async write(request: RecoveryJournalWriteRequest): Promise<
@@ -269,11 +323,16 @@ export const createRecoveryJournalStore = ({
       | { status: 'written'; journal: JournalSummary }
     > {
       assertPathSegment(request.workspaceId, 'workspaceId');
+      if ((request.sourceFormat !== undefined && !isDocumentTextFormat(request.sourceFormat))
+        || (request.normalizeLineEndings !== undefined && typeof request.normalizeLineEndings !== 'boolean')
+        || (request.edits !== undefined && !isDocumentTextEdits(request.edits))) throw new TypeError('Recovery journal text metadata is malformed');
       assertPathSegment(request.recoverySessionId, 'recoverySessionId');
       if (!request.resource || request.resource.workspaceId !== request.workspaceId
         || typeof request.resource.resourceId !== 'string') {
         throw new TypeError('Recovery journal resource does not match its workspace');
       }
+      if ((request.pendingSave !== undefined && !validPendingSave(request.pendingSave, request.resource))
+        || (request.pendingEdits !== undefined && !isDocumentTextEdits(request.pendingEdits))) throw new TypeError('Pending save metadata is malformed');
       const targetKey = `${request.workspaceId}\0${request.recoverySessionId}\0${request.resource.resourceId}`;
       return queues.run(targetKey, async () => {
         const directory = directoryFor(request.workspaceId, request.recoverySessionId);
@@ -306,9 +365,16 @@ export const createRecoveryJournalStore = ({
           }
           const record: JournalRecord = {
             ...existing,
+            pendingSave: request.pendingSave,
+            pendingEdits: request.pendingEdits,
+            pendingSaveReconciled: Boolean(request.pendingSave && existing.pendingSave?.operationId === request.pendingSave.operationId && existing.pendingSaveReconciled),
             content: request.content,
             encoding: request.encoding,
             bom: request.bom,
+            ...(request.edits ? { edits: request.edits } : {}),
+            ...(request.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: request.normalizeLineEndings }),
+            ...(request.sourceFormat ? { sourceFormat: request.sourceFormat } : {}),
+            ...(request.lineEnding ? { lineEnding: request.lineEnding } : {}),
             baseRevision: request.baseRevision,
             revision: existing.revision + 1,
             updatedAt: new Date().toISOString(),
@@ -322,6 +388,8 @@ export const createRecoveryJournalStore = ({
         }
 
         const record: JournalRecord = {
+          ...(request.pendingSave ? { pendingSave: request.pendingSave } : {}),
+          ...(request.pendingEdits ? { pendingEdits: request.pendingEdits } : {}),
           schemaVersion: SCHEMA_VERSION,
           journalId: randomUUID(),
           hostId,
@@ -331,6 +399,10 @@ export const createRecoveryJournalStore = ({
           content: request.content,
           encoding: request.encoding,
           bom: request.bom,
+            ...(request.edits ? { edits: request.edits } : {}),
+            ...(request.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: request.normalizeLineEndings }),
+            ...(request.sourceFormat ? { sourceFormat: request.sourceFormat } : {}),
+            ...(request.lineEnding ? { lineEnding: request.lineEnding } : {}),
           baseRevision: request.baseRevision,
           epoch: request.token.epoch,
           revision: 1,

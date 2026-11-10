@@ -527,7 +527,7 @@ fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_
     source.branch_id=Some(format!("child-source:{}",next.execution_id)); source.revision=Some(0);source.mode=SourceMode::Materialized;
     let root="merged-refreshed-root".to_string();
     let mut fixed=source.clone();fixed.mode=SourceMode::FixedBranch;
-    let provenance=ChildSourceProvenance::RefreshedRoot {root:root.clone(),previous_root:prior.root.clone(),incoming:incoming.clone(),incoming_root:"incoming-fixed-stage".into(),conflicts:vec![],resources:None};
+    let provenance=ChildSourceProvenance::RefreshedRoot { text_encoding:None,root:root.clone(),previous_root:prior.root.clone(),incoming:incoming.clone(),incoming_root:"incoming-fixed-stage".into(),conflicts:vec![],resources:None};
     let prepared=f.db.prepare_child_source(&next.execution_id,ChildSourcePin {pin_id:format!("child-source-pin:{}",next.execution_id),root,source:fixed},source.clone(),provenance).unwrap().load().unwrap();
     f.db.attach_child_source(prepared).unwrap();
     let continued=prepare(&mut f.db,&next,source);
@@ -639,7 +639,7 @@ fn first_with_selected_resources(f: &mut Fixture) -> (ChildTask, varin_runtime::
     pin_source.mode = SourceMode::FixedBranch;
     let source_preparation = f.db.prepare_child_source(&child.execution_id,
         ChildSourcePin { pin_id: format!("child-source-pin:{}", child.execution_id), root: root.clone(), source: pin_source },
-        source.clone(), ChildSourceProvenance::FixedRoot { root, selection: None, resources: None }).unwrap().load().unwrap();
+        source.clone(), ChildSourceProvenance::FixedRoot { text_encoding:None, root, selection: None, resources: None }).unwrap().load().unwrap();
     f.db.attach_child_source(source_preparation).unwrap();
     let reference = json!({"domainId":"domain","viewId":"fixed-view","path":"review/SKILL.md","canonicalId":"domain/review/SKILL.md","version":"retained-v1"});
     let resources:ContextResources=serde_json::from_value(json!({"source":source,"snapshot":{"id":"original-source-resources","scope":{"threadId":child.child_thread_id,"branchId":child.child_branch_id,"mode":"agent","threadRole":"worker","projectId":child.project_id,"sourceIdentity":"exact-next-source","cwd":"","projectTrusted":true,"projectRoot":null},"readers":[{"domainId":"domain","viewId":"fixed-view","consistency":"immutable"}],"project":null,"configurationDigest":"resources-v1","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[{"id":"review","name":"review","description":"review resource","disableModelInvocation":false,"requiresProjectTrust":false,"origin":"user","reference":reference,"basePath":"review","baseCanonicalId":"domain/review","priority":0}],"diagnostics":[],"capturedFiles":[{"reference":reference,"content":"Use this exact resource"}],"observations":[]}})).unwrap();

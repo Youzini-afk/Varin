@@ -1015,3 +1015,157 @@ fn hybrid_file_read_delegates_paths_to_the_original_live_and_fixed_owner() {
         bridge.close();
     }
 }
+
+#[test]
+fn gbk_file_tools_preserve_read_basis_bytes_and_report_real_encoding_failures(){
+    let mut f=Fixture::new();let path=f.root.join("work/legacy.txt");
+    let original=b"\xa3\xa0\r\n\xd6\xd0\xce\xc4\nlast\r";fs::write(&path,original).unwrap();
+    let read=f.read(json!({"path":"legacy.txt"}));assert_eq!(read["content"]["format"]["encoding"],"gbk");assert_eq!(read["content"]["format"]["lineEnding"],"mixed");
+    let noop=f.call("file_write",json!({"path":"legacy.txt","readVersion":read["readVersion"],"content":read["content"]["text"]}));assert!(matches!(noop,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{noop:?}");assert_eq!(fs::read(&path).unwrap(),original);
+    let edited=f.call("file_edit",json!({"path":"legacy.txt","readVersion":read["readVersion"],"edits":[{"oldText":"中文","newText":"新文"}]}));
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=edited else{panic!("{edited:?}")};assert_eq!(fs::read(&path).unwrap(),b"\xa3\xa0\r\n\xd0\xc2\xce\xc4\nlast\r");
+    let before=fs::read(&path).unwrap();let failed=f.call("file_edit",json!({"path":"legacy.txt","readVersion":content.data["readVersion"],"edits":[{"oldText":"新文","newText":"🙂"}]}));assert!(!matches!(failed,ToolCompletion::Result{outcome:Outcome::Succeeded,..}));assert!(serde_json::to_string(&failed).unwrap().contains("text_unrepresentable"),"{failed:?}");assert_eq!(fs::read(&path).unwrap(),before);
+    // The opaque read version alone fixes an explicit, ambiguous interpretation,
+    // even if the source's default/override changes before the mutation.
+    fs::write(&path,b"\xc2\xa9 old").unwrap();let gbk=f.read(json!({"path":"legacy.txt","encoding":"gbk"}));let utf8=f.read(json!({"path":"legacy.txt","encoding":"utf-8"}));assert_ne!(gbk["readVersion"],utf8["readVersion"]);
+    f.executor.binding.text_encoding=Some(crate::text::Policy{choice_revisions:None,default_encoding:Some("utf-8".into()),files:None,root:None});
+    let edited=f.call("file_edit",json!({"path":"legacy.txt","readVersion":gbk["readVersion"],"edits":[{"oldText":"漏","newText":"中"}]}));assert!(matches!(edited,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{edited:?}");assert_eq!(fs::read(&path).unwrap(),b"\xd6\xd0 old");
+    let observed=f.read(json!({"path":"legacy.txt"}));fs::write(&path,b"\0external").unwrap();let conflict=f.call("file_write",json!({"path":"legacy.txt","readVersion":observed["readVersion"],"content":"stale"}));assert!(!matches!(conflict,ToolCompletion::Result{outcome:Outcome::Succeeded,..}));assert_eq!(fs::read(&path).unwrap(),b"\0external");
+}
+
+#[test]
+fn gbk_live_fixed_pages_batches_and_search_use_one_interpretation(){
+    let mut f=Fixture::new();let bytes=b"\xd6\xd0\xce\xc4\r\n\xd0\xc2\xce\xc4\n";fs::write(f.root.join("work/legacy.txt"),bytes).unwrap();
+    let live=f.read(json!({"path":"legacy.txt","offset":1,"length":1}));assert_eq!(live["content"]["text"],"中");assert_eq!(live["content"]["nextOffset"],2);
+    let batch=f.read(json!({"files":[{"path":"legacy.txt","offset":1,"length":1},{"path":"legacy.txt","offset":3,"length":1},{"path":"legacy.txt","startLine":2,"endLine":2}]}));assert_eq!(batch["files"][0]["result"]["content"]["text"],"中");assert_eq!(batch["files"][1]["result"]["content"]["text"],"文");assert_eq!(batch["files"][2]["result"]["content"]["offset"],6);
+    let search=f.call("file_search",json!({"query":"文"}));let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=search else{panic!("{search:?}")};assert_eq!(content.data["records"][0]["data"]["column"],2,"{}",content.data);
+    {
+        let mut storage=f._storage.lock().unwrap();let mut invoke=|method:&str,params:Value|{let(grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();storage.dispatch(method,&params,Some("actor"),&grant).unwrap()};
+        invoke("storage.putBlob.begin",json!({"operationId":"gbk-body","streamId":"gbk-body","workspaceId":"workspace","byteLength":bytes.len()}));invoke("storage.putBlob.chunk",json!({"streamId":"gbk-body","sequence":0,"bytesBase64":BASE64.encode(bytes)}));let blob=invoke("storage.putBlob.finish",json!({"operationId":"gbk-body","streamId":"gbk-body","workspaceId":"workspace"}));
+        invoke("branch.create.begin",json!({"operationId":"gbk-create","builderId":"gbk-create","workspaceId":"workspace","branchId":"gbk-fixed","draftBasePaths":[],"captureScopes":[]}));invoke("branch.create.append",json!({"builderId":"gbk-create","sequence":0,"entries":[{"path":"legacy.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":bytes.len(),"mode":420},"ownerId":blob["ownerId"]}]}));invoke("branch.create.finish",json!({"operationId":"gbk-create","builderId":"gbk-create"}));
+    }
+    f.executor.binding.source_mode=SourceMode::FixedBranch;f.executor.binding.root_id=None;f.executor.binding.live_root=None;f.executor.binding.file_source=Some(FixedFileSource{branch_id:"gbk-fixed".into(),revision:0});
+    let fixed=f.read(json!({"path":"legacy.txt","offset":1,"length":1}));assert_eq!(fixed["content"],live["content"]);
+    assert_eq!(f.read(json!({"path":"legacy.txt","startLine":2,"endLine":2}))["content"]["text"],"新文\n");
+}
+
+#[test]
+fn explicit_conversion_updates_current_source_reads_and_search_without_repeated_overrides(){
+    let mut f=Fixture::new();let path=f.root.join("work/legacy.txt");
+    fs::write(&path,b"\xd6\xd0 old\r\n").unwrap();
+    f.executor.binding.text_encoding=Some(crate::text::Policy{root:None,default_encoding:None,files:Some(std::collections::BTreeMap::from([("legacy.txt".into(),"gbk".into())])),choice_revisions:None});
+    let read=f.read(json!({"path":"legacy.txt"}));
+    let converted=f.call("file_write",json!({"path":"legacy.txt","readVersion":read["readVersion"],"content":"中 new\r\n","targetFormat":{"encoding":"utf-8"}}));
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=converted else {panic!("{converted:?}")};
+    assert_eq!(content.data["textConversion"]["targetEncoding"],"utf-8");
+    assert_eq!(f.read(json!({"path":"legacy.txt"}))["content"]["text"],"中 new\r\n");
+    let search=f.call("file_search",json!({"query":"中"}));
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=search else {panic!("{search:?}")};
+    assert_eq!(content.data["records"][0]["data"]["preview"],"中 new");
+    let read=f.read(json!({"path":"legacy.txt"}));
+    let converted=f.call("file_write",json!({"path":"legacy.txt","readVersion":read["readVersion"],"content":"中 newer\r\n","targetFormat":{"encoding":"utf-16le","bom":false}}));
+    assert!(matches!(converted,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{converted:?}");
+    assert_eq!(f.read(json!({"path":"legacy.txt"}))["content"]["text"],"中 newer\r\n");
+    let search=f.call("file_search",json!({"query":"中"}));
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=search else {panic!("{search:?}")};
+    assert_eq!(content.data["records"][0]["data"]["preview"],"中 newer");
+}
+
+#[test]
+fn bomless_utf16_rule_aliases_work_in_live_raw_line_reads_and_search(){
+    for encoding in ["UTF-16LE","utf_16be"] {
+        let mut f=Fixture::new();let format=crate::text::Format{encoding:encoding.into(),bom:false,line_ending:"mixed".into(),default_line_ending:"crlf".into(),source:"explicit".into()};
+        let bytes=crate::text::encode("中\r\n文\n",&format).unwrap();fs::write(f.root.join("work/legacy.txt"),&bytes).unwrap();
+        f.executor.binding.text_encoding=Some(crate::text::Policy{root:None,default_encoding:None,files:Some(std::collections::BTreeMap::from([("legacy.txt".into(),encoding.into())])),choice_revisions:None});
+        let read=f.read(json!({"path":"legacy.txt"}));assert_eq!(read["content"]["text"],"中\r\n文\n");
+        let raw=f.read(json!({"path":"legacy.txt","raw":true,"startLine":2,"endLine":2}));
+        assert_eq!(BASE64.decode(raw["content"]["bytesBase64"].as_str().unwrap()).unwrap(),bytes[6..]);
+        let search=f.call("file_search",json!({"query":"文"}));let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=search else{panic!("{search:?}")};
+        assert_eq!(content.data["records"][0]["data"]["line"],2);
+    }
+}
+
+
+#[test]
+fn conflicting_utf16_bom_never_panics_live_or_fixed_line_read(){
+    let mut f=Fixture::new();let bytes=b"\xff\xfe\xd8\x00\x41\x00";fs::write(f.root.join("work/conflict.txt"),bytes).unwrap();
+    let rejected=f.call("file_read",json!({"path":"conflict.txt","encoding":"utf-16be","startLine":1,"endLine":1}));
+    assert!(!matches!(rejected,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{rejected:?}");
+    assert_eq!(f.read(json!({"path":"conflict.txt"}))["content"]["text"],"ØA");
+    {
+        let mut storage=f._storage.lock().unwrap();let mut invoke=|method:&str,params:Value|{let(grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();storage.dispatch(method,&params,Some("actor"),&grant).unwrap()};
+        invoke("storage.putBlob.begin",json!({"operationId":"utf16-body","streamId":"utf16-body","workspaceId":"workspace","byteLength":bytes.len()}));invoke("storage.putBlob.chunk",json!({"streamId":"utf16-body","sequence":0,"bytesBase64":BASE64.encode(bytes)}));let blob=invoke("storage.putBlob.finish",json!({"operationId":"utf16-body","streamId":"utf16-body","workspaceId":"workspace"}));
+        invoke("branch.create.begin",json!({"operationId":"utf16-create","builderId":"utf16-create","workspaceId":"workspace","branchId":"utf16-fixed","draftBasePaths":[],"captureScopes":[]}));invoke("branch.create.append",json!({"builderId":"utf16-create","sequence":0,"entries":[{"path":"conflict.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":bytes.len(),"mode":420},"ownerId":blob["ownerId"]}]}));invoke("branch.create.finish",json!({"operationId":"utf16-create","builderId":"utf16-create"}));
+    }
+    f.executor.binding.source_mode=SourceMode::FixedBranch;f.executor.binding.root_id=None;f.executor.binding.live_root=None;f.executor.binding.file_source=Some(FixedFileSource{branch_id:"utf16-fixed".into(),revision:0});
+    let rejected=f.call("file_read",json!({"path":"conflict.txt","encoding":"utf-16be","startLine":1,"endLine":1}));
+    assert!(!matches!(rejected,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{rejected:?}");
+    assert_eq!(f.read(json!({"path":"conflict.txt"}))["content"]["text"],"ØA");
+}
+
+
+#[cfg(unix)]
+#[test]
+fn scoped_compute_read_and_search_keep_the_selected_ancestor_alias() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.join("work/real")).unwrap();
+    fs::write(f.root.join("work/real/a.txt"), b"\xd6\xd0\xce\xc4").unwrap();
+    std::os::unix::fs::symlink(f.root.join("work/real"), f.root.join("work/alias")).unwrap();
+    let invoke = |method: &str, params: Value| {
+        let mut storage = f._storage.lock().unwrap();
+        let (grant, params) = storage.authorize(Some("actor"), EPOCH, HOST, GENERATION, method, &params).unwrap();
+        storage.dispatch(method, &params, Some("actor"), &grant).unwrap()
+    };
+    for operation in ["read", "search"] {
+        let job = format!("ancestor-alias-{operation}");
+        let mut page = invoke("compute.start", json!({"workspaceId":"workspace","jobId":job,
+            "rootId":f.executor.binding.root_id,"operation":operation,"lane":"foreground",
+            "paths":["alias/a.txt"],"files":[{"path":"alias/a.txt"}],"query":"中文",
+            "includeHidden":true,"respectGitignore":false}));
+        let mut records = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            records.extend(page["records"].as_array().unwrap().iter().cloned());
+            if !matches!(page["status"].as_str().unwrap(), "queued" | "running") && page["nextCursor"] == page["endCursor"] { break; }
+            assert!(std::time::Instant::now() < deadline, "alias computation did not settle");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            page = invoke("compute.read", json!({"workspaceId":"workspace","jobId":job,"cursor":page["nextCursor"]}));
+        }
+        assert_eq!(page["status"], "ready", "{page}");
+        let record = records.iter().find(|record| record["kind"] == if operation == "read" { "text" } else { "hit" }).expect("original logical path must remain readable");
+        assert_eq!(record["path"], "alias/a.txt");
+        assert_eq!(record["data"][if operation == "read" { "text" } else { "preview" }], "中文");
+        assert_eq!(record["data"]["format"]["encoding"], "gbk");
+        invoke("compute.release", json!({"workspaceId":"workspace","jobId":job}));
+    }
+}
+
+
+#[test]
+fn range_backed_fixed_read_materializes_gbk_edit_and_keeps_external_cas_conflicts(){
+    use crate::storage::workspace_session::{Session,StoragePort};
+    use sha2::Digest;
+    let mut f=Fixture::new();let bytes=b"\xd6\xd0 old\n";
+    {
+        let mut storage=f._storage.lock().unwrap();let mut invoke=|method:&str,params:Value|{let(grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();storage.dispatch(method,&params,Some("actor"),&grant).unwrap()};
+        invoke("storage.putBlob.begin",json!({"operationId":"range-body","streamId":"range-body","workspaceId":"workspace","byteLength":bytes.len()}));invoke("storage.putBlob.chunk",json!({"streamId":"range-body","sequence":0,"bytesBase64":BASE64.encode(bytes)}));let blob=invoke("storage.putBlob.finish",json!({"operationId":"range-body","streamId":"range-body","workspaceId":"workspace"}));
+        invoke("branch.create.begin",json!({"operationId":"range-create","builderId":"range-create","workspaceId":"workspace","branchId":"range-main","draftBasePaths":[],"captureScopes":[]}));invoke("branch.create.append",json!({"builderId":"range-create","sequence":0,"entries":[{"path":"legacy.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":bytes.len(),"mode":420},"ownerId":blob["ownerId"]}]}));invoke("branch.create.finish",json!({"operationId":"range-create","builderId":"range-create"}));
+    }
+    let owner=f._storage.clone();let port=StoragePort::new(move |command|{let mut storage=owner.lock().unwrap();command(Some(&mut storage));Ok(())});
+    let grant=f._storage.lock().unwrap().authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap().0;
+    let session=Session::open(port,"range-main".into(),grant.clone()).unwrap();
+    let file=session.lookup("legacy.txt").unwrap();session.write(&file,Some(3),b"new").unwrap();
+    let checkpoint=session.checkpoint().unwrap();checkpoint.fork("range-fixed","range-fork",&std::sync::atomic::AtomicBool::new(false)).unwrap();checkpoint.release().unwrap();
+    let state={let mut s=f._storage.lock().unwrap();s.dispatch("branch.read",&json!({"branchId":"range-fixed","revision":0,"paths":["legacy.txt"]}),Some("actor"),&grant).unwrap()};
+    assert!(state["entries"][0]["state"]["objectHash"].as_str().unwrap().starts_with("ranges-"));
+    f.executor.binding.source_mode=SourceMode::FixedBranch;f.executor.binding.root_id=None;f.executor.binding.live_root=None;f.executor.binding.file_source=Some(FixedFileSource{branch_id:"range-fixed".into(),revision:0});
+    let original=f.read(json!({"path":"legacy.txt"}));assert_eq!(original["content"]["text"],"中 new\n");
+    f.executor.binding.source_mode=SourceMode::Materialized;f.executor.binding.materialized_source=f.executor.binding.file_source.take();
+    let edited=f.call("file_edit",json!({"path":"legacy.txt","readVersion":original["readVersion"],"edits":[{"oldText":"new","newText":"next"}]}));
+    assert!(matches!(edited,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{edited:?}");
+    let current=f.read(json!({"path":"legacy.txt"}));assert_eq!(current["content"]["text"],"中 next\n");
+    let key=hex::encode(sha2::Sha256::digest(serde_json::to_vec(&json!(["workspace","run"])).unwrap()));
+    let physical=f.root.join("store/managed/runs").join(key).join("legacy.txt");
+    fs::write(&physical,b"external").unwrap();let stale=f.call("file_write",json!({"path":"legacy.txt","readVersion":current["readVersion"],"content":"stale"}));
+    assert!(!matches!(stale,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{stale:?}");assert_eq!(fs::read(&physical).unwrap(),b"external");
+}

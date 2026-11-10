@@ -11,10 +11,11 @@ import type { InstalledAgentResourcePackage } from '../agent-resources/packages.
 import { canonicalBundleContains, createAgentResourceAuthority, type AdmittedAgentResourceScope, type PreparedAgentResources, type ResourceCatalogScope, type ResourceDomain } from '../agent-resources/authority.js';
 import { isLocalPattern, parseResourceSettings, type ResourceSettings } from '../agent-resources/configuration.js';
 import { ancestorDirectories, CONTEXT_FILE_NAMES } from '../agent-resources/formats.js';
-import { contentVersion, createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader, createPinnedResourceReader,
+import { contentVersion, createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader, createPinnedResourceReader, decodeResourceBytes,
   referenceKey, relativeResourcePath, resourceFailure, type ResourceDirectoryEntry, type ResourceDirectoryResult,
   type ResourceFailure, type ResourceFileResult, type ResourceReader } from '../agent-resources/source-reader.js';
 import type { DocumentAuthority } from '../documents/authority.js';
+import { textEncodingForResource, type SourceTextEncoding } from '../projects/text-encoding.js';
 import type { StableSourcePreparationOwners, SourceResourceCapturePlan } from '../harness/working-state/source-preparation.js';
 import type { WorkspaceWorkingStateRootAccess, WorkingStateRootStore, WorkingStatePinnedRoot, WorkingOriginalSource } from '../harness/working-state/types.js';
 import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
@@ -37,6 +38,8 @@ export interface ResourceSourceReadInput {
 export interface ResourceSourceReadView {
   store: Pick<WorkingStateRootStore, 'readPath' | 'listPaths' | 'readContent'>;
   pin: WorkingStatePinnedRoot;
+  /** Projected by the selected branch/revision owner, including its committed file conversions. */
+  textEncoding?: SourceTextEncoding;
   readOriginalSource(): Promise<WorkingOriginalSource | null>;
   admitSymlinkTarget?(finalPath: string): Promise<void>;
 }
@@ -68,7 +71,7 @@ export interface ThreadResourceScopeOwners {
   };
   dataDirectory: string;
   homeDir?: string;
-  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots' | 'resolveWorkspace'>>;
+  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots' | 'resolveWorkspace' | 'resolveTextEncodingPolicy'>>;
   workingStates: WorkspaceWorkingStateRootAccess;
   validateLiveSource: LiveSourceResolver;
   resolveNativeSource?(source:Extract<ThreadSource,{mode:'native_workspace'}>,signal?:AbortSignal):Promise<import('./protocol.generated.js').LiveRoot>;
@@ -136,30 +139,34 @@ export function parseSourceResourceCapture(value: unknown): SourceResourceCaptur
   return structuredClone(value) as SourceResourceCapture;
 }
 
-function capsuleReader(capsule: SourceResourceCapsule): ResourceReader {
-  const reader = createCapsuleResourceReader(capsule);
-  return { ...reader,
+function capsuleReader(capsule: SourceResourceCapsule, viewId = capsule.viewId): ResourceReader {
+  const base = createCapsuleResourceReader(capsule);
+  const reader: ResourceReader = { ...base, viewId,
     async read(target, signal) {
-      const result = await reader.read(target, signal);
-      return result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      const result = await base.read(target, signal);
+      const captured = result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      return remap(reader, captured.status === 'ready' ? captured.reference.path : captured.path, captured);
     },
     async list(target, signal) {
-      const result = await reader.list(target, signal);
-      return result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      const result = await base.list(target, signal);
+      const captured = result.status === 'unavailable' ? capsule.failures.find(item => item.path === target) ?? result : result;
+      return remap(reader, captured.status === 'ready' ? captured.reference.path : captured.path, captured);
     },
   };
+  return reader;
 }
 /** Resource-only Host admission may follow an actually requested instruction/skill alias.
  * The resulting handle remains capture-only; this creates no model file or process grant. */
-async function resourceAssetReader(root: string, id: string, viewId: string): Promise<ResourceReader> {
-  const base = await createAdmittedDirectoryReader({ root, domainId: id, viewId });
+async function resourceAssetReader(root: string, id: string, viewId: string, textEncoding?: SourceTextEncoding): Promise<ResourceReader> {
+  const policy = structuredClone(textEncoding ?? {});
+  const base = await createAdmittedDirectoryReader({ root, domainId: id, viewId, textEncoding: policy });
   const target = async (relative: string): Promise<{ reader: ResourceReader; path: string } | undefined> => {
     const canonical = await canonicalizePathIdentity(path.join(root, normalize(relative)), { allowMissing: true });
     if (isPathWithinRoot(canonical, root)) return undefined;
     let directory = canonical; let file = '';
     try { if (!(await stat(canonical)).isDirectory()) { directory = path.dirname(canonical); file = path.basename(canonical); } }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    return { reader: await createAdmittedDirectoryReader({ root: directory, domainId: id, viewId }), path: file };
+    return { reader: await createAdmittedDirectoryReader({ root: directory, domainId: id, viewId, textEncoding: policy }), path: file };
   };
   const reader: ResourceReader = { ...base,
     async read(relative, signal) {
@@ -336,6 +343,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
   const captureSourceResources = async (input: Omit<Parameters<ThreadResourceScope['prepareSourceCapture']>[0], 'branchId'> & { branchId?: string }, documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents, metadataOnly = false): Promise<SourceResourceCapturePlan | ThreadSkillCatalog> => {
     const { store, workspaceId, signal } = input;
     const root = await canonicalizePathIdentity(input.directory);
+    const textEncoding = structuredClone(input.textEncoding ?? await owners.documents.resolveTextEncodingPolicy?.(input.captureWorkspaceId) ?? {});
     const trusted = await owners.projectTrusted(root);
     const captures = new Map<string, ReturnType<typeof recordReader>>();
     const scopes = new Set<string>();
@@ -350,11 +358,13 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (isPathWithinRoot(canonical, root)) {
         const relative = normalize(path.relative(root, canonical)); scopes.add(relative); sourcePaths.add(relative);
-        return { target: { kind: 'source', directory: relative }, reader: source, directory: relative, root };
+        // All roles in this view share the recorder, including validation of configured resources.
+        return { target: { kind: 'source', directory: relative }, reader: observed.reader, directory: relative, root };
       }
       let captured = captures.get(domainRoot);
       if (!captured) {
-        captured = recordReader(await resourceAssetReader(domainRoot, domainId('source-dependency', domainRoot), `source-capsule:${randomUUID()}`), domainRoot);
+        captured = recordReader(await resourceAssetReader(domainRoot, domainId('source-dependency', domainRoot), `source-capsule:${randomUUID()}`,
+          { ...textEncoding, root: textEncoding.root ?? root }), domainRoot);
         captures.set(domainRoot, captured);
       }
       return { target: { kind: 'capsule', capsule: captured.capsule(), directory }, reader: captured.reader, directory, root: domainRoot };
@@ -381,8 +391,13 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       return { ...admitted, path: normalize(path.posix.join(admitted.directory, relative.slice(alias.length).replace(/^\//, ''))) };
     };
     const base = createDocumentResourceReader({ domainId: projectId, viewId: sourceView, workspaceId: input.captureWorkspaceId,
+      textEncoding,
       documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: projectId, viewId: sourceView }, relative, signal) });
-    const draftFiles = new Map((input.editorDrafts ?? []).map(draft => [normalize(draft.path), Buffer.from(draft.content)]));
+    // These are serialized source bytes, not UTF-8 representations of Unicode editor buffers.
+    const draftFiles = new Map((input.editorDrafts ?? []).map(draft => [normalize(draft.path), {
+      bytes: Buffer.from(draft.content), encoding: draft.encoding,
+    }]));
+    const draftPolicy = textEncoding;
     const draftChildren = (relative: string): ResourceDirectoryEntry[] => {
       const prefix = relative ? `${relative}/` : '';
       const entries = new Map<string, ResourceDirectoryEntry>();
@@ -400,7 +415,8 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         signal?.throwIfAborted();
         relative = normalize(relative); sourcePaths.add(relative);
         const draft = draftFiles.get(relative);
-        if (draft) return { status: 'ready', reference: draftReference(relative, contentVersion(draft)), content: draft.toString('utf8') };
+        if (draft) return decodeResourceBytes(source, relative, draft.bytes, `resource:${projectId}/${relative}`, contentVersion(draft.bytes),
+          { ...textEncodingForResource(draftPolicy, relative), ...(draft.encoding ? { encoding: draft.encoding } : {}) }, signal);
         if (draftChildren(relative).length) return resourceFailure(source, relative, 'invalid', 'Captured draft path is a directory');
         try { const link = await external(relative); return link ? remap(source, relative, await link.reader.read(link.path, signal)) : base.read(relative, signal); }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') return resourceFailure(source, relative, 'invalid', 'Resource symlink cycle'); throw error; }
@@ -450,7 +466,9 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         if (skills.status !== 'ready') throw new ResourceScopeError(skills);
       }
       const capsule = captures.get(ancestor)!.capsule();
-      scope.ancestors!.push({ reader: capsuleReader(capsule), displayRoot: ancestor, appliesTo: '', includeSkills });
+      // This immutable ancestor snapshot is distinct from the recorder, which may still
+      // capture configured skills from the same domain before the final capsule is published.
+      scope.ancestors!.push({ reader: capsuleReader(capsule, `${capsule.viewId}:ancestor`), displayRoot: ancestor, appliesTo: '', includeSkills });
       capture.ancestors.push({ capsule, appliesTo: '', includeSkills });
     }
     if (nearestGit && owners.resolvePrimaryWorktreeRoot && (await lstat(path.join(nearestGit, '.git'))).isFile()) {
@@ -547,7 +565,23 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
           if (capture.sourceLinks.some(link => file === link.path || file.startsWith(`${link.path}/`))) continue;
           const actualPath = draftFiles.has(file) ? file : normalize(path.relative(root, await canonicalizePathIdentity(path.join(root, file), { allowMissing: true })));
           const state = states[actualPath];
-          if (observation.status === 'ready' && (state?.kind !== 'regular-file' || state.objectHash !== `sha256-${contentVersion(observation.content)}`)) throw new Error('Source resource bytes changed during capture');
+          if (observation.status === 'ready') {
+            // A Unicode body is not the original GBK/UTF-16/BOM byte sequence. Compare the
+            // source owner's raw revision instead of re-encoding that body as UTF-8.
+            let rawHash = state?.kind === 'regular-file' && /^sha256-[0-9a-f]{64}$/.test(state.objectHash) ? state.objectHash.slice(7) : undefined;
+            if (state?.kind === 'regular-file' && state.objectHash.startsWith('ranges-')) {
+              // A range object's hash identifies its descriptor, not its assembled file bytes.
+              // Read only this observed resource through the already admitted Storage owner.
+              signal?.throwIfAborted();
+              const bytes = await store.getObject(state.objectHash);
+              signal?.throwIfAborted();
+              if (!bytes || bytes.byteLength !== state.byteLength) throw new Error('Source resource bytes are unavailable during capture');
+              rawHash = contentVersion(bytes);
+            }
+            const expected = rawHash === undefined ? undefined : draftFiles.has(file) ? rawHash
+              : `d1_${Buffer.from(rawHash, 'hex').toString('base64url')}`;
+            if (observation.reference.version !== expected) throw new Error('Source resource bytes changed during capture');
+          }
           if (observation.status === 'missing' && state && state.kind !== 'missing') throw new Error('Source resource absence changed during capture');
         }
         await observed.validate(signal);
@@ -600,10 +634,12 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         try {
           const paths = requestPaths();
           if (!paths.length) return unavailable(target) as T;
-          return await withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async ({ store, pin, readOriginalSource, admitSymlinkTarget }) => {
+          return await withSourceRead({ identity, source, paths, ...(options.runId ? { runId: options.runId } : {}), ...(signal ? { signal } : {}) }, async view => {
+            const { store, pin, readOriginalSource, admitSymlinkTarget } = view;
             const original = await readOriginalSource();
             const capture = original?.provenance.resources;
             const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage(),
+              textEncoding: () => view.textEncoding ?? {},
               ...(request?.kind === 'instruction-scope' && admitSymlinkTarget ? { admitSymlinkTarget } : {}) });
             const project = capture ? withSourceLinks(base, capture) : base;
             const scope: AdmittedAgentResourceScope = { ...admitted, threadId: identity.threadId, branchId: identity.branchId,
@@ -672,9 +708,11 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         const previous = options.snapshot?.readers.find(reader => reader.domainId === id);
         const viewId = previous?.viewId ?? `live-resource:${liveRoot.rootId}:${randomUUID()}`;
         if (source.mode === 'native_workspace') {
-          const capture = (await store.readOriginalSource(source.branchId, signal ? { signal } : {}))?.provenance.resources;
+          const original = await store.readOriginalSource(source.branchId, signal ? { signal } : {});
+          const capture = original?.provenance.resources;
+          const textEncoding = await owners.documents.resolveTextEncodingPolicy?.(resourceWorkspaceId) ?? original?.provenance.textEncoding ?? {};
           const base = createDocumentResourceReader({ domainId: id, viewId, workspaceId: resourceWorkspaceId,
-            documents: owners.documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
+            documents: owners.documents, textEncoding, list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
           const reader = capture ? withSourceLinks(base, capture) : base;
           scope.sourceIdentity = `workspace:${source.workspaceId}:native:${liveRoot.rootId}`;
           scope.project = { reader, cwd: capture?.cwd ?? '', skillAncestorBoundary: capture?.skillAncestorBoundary ?? '', displayRoot: root };
@@ -724,13 +762,15 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     }
     const registration = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
     if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
-    return withSourceRead({ identity, source, paths: [''], ...(signal ? { signal } : {}), ...(options.runId ? { runId: options.runId } : {}) }, async ({ store, pin, readOriginalSource }) => {
+    return withSourceRead({ identity, source, paths: [''], ...(signal ? { signal } : {}), ...(options.runId ? { runId: options.runId } : {}) }, async view => {
+      const { store, pin, readOriginalSource } = view;
       const original = await readOriginalSource();
       const capture = original?.provenance.resources;
       const root = capture?.root ?? registration.canonicalPath;
       scope.projectTrusted = await owners.projectTrusted(root);
       scope.sourceIdentity = `workspace:${source.workspaceId}:${source.branchId}@${source.revision}:${pin.root}`;
-      const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage() });
+      const base = createPinnedResourceReader({ domainId: `workspace:${source.workspaceId}`, store, pin, coverage: capture?.coverage ?? noCoverage(),
+        textEncoding: () => view.textEncoding ?? {} });
       const reader = capture ? withSourceLinks(base, capture) : base;
       scope.project = { reader, cwd: capture?.cwd ?? '', skillAncestorBoundary: capture?.skillAncestorBoundary ?? '', displayRoot: root };
       if (capture) applyCapture(scope, reader, capture);

@@ -1,7 +1,10 @@
+import type { VarinTextFormat } from "@varin/application-client";
 import { createHash } from "node:crypto";
 import { sameState, stateIdentity, type RecoveryState } from "../../recovery/journal-files.js";
 
 export interface DirtyBufferInspectResource {
+  baseFormat?: VarinTextFormat;
+  normalizeLineEndings?: boolean;
   resourceId: string;
   baseRevision: string | null;
   localEditRevision: number;
@@ -21,6 +24,9 @@ export interface DirtyBufferInspectPublication {
   generation: number;
   registrationId?: string;
   resources: Array<{
+    sourceFormat?: VarinTextFormat;
+    baseFormat?: VarinTextFormat;
+    normalizeLineEndings?: boolean;
     baseRevision: string | null;
     localEditRevision: number;
     resource: { resourceId: string };
@@ -46,6 +52,8 @@ export const dirtyResourceMap = (
       const owners = found.get(resourceId) ?? [];
       owners.push({
           resourceId,
+          ...((resource.baseFormat ?? resource.sourceFormat) ? { baseFormat: resource.baseFormat ?? resource.sourceFormat } : {}),
+          ...(resource.normalizeLineEndings === undefined ? {} : { normalizeLineEndings: resource.normalizeLineEndings }),
           baseRevision: resource.baseRevision,
           localEditRevision: resource.localEditRevision,
           ownerId: publication.ownerId,

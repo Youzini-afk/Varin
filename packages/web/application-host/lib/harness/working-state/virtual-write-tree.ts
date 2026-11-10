@@ -28,14 +28,6 @@ export const liveViewRevision = (branch: { writeRevision?: number; headRevision:
     : branch.headRevision
 );
 
-export const assertTextUtf8 = (bytes: Buffer, file: string): void => {
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new VirtualWriteTreeError(`${file} is not valid UTF-8`);
-  }
-};
-
 const ancestorKindBlocksChild = (kind: RecoveryState["kind"] | undefined): boolean => (
   kind === "regular-file" || kind === "symlink" || kind === "unsupported"
 );

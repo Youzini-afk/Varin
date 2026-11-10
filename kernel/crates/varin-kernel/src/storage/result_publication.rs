@@ -125,6 +125,7 @@ impl Storage {
                 "workspaceId":branch.workspace_id,"branchId":branch_id,"root":branch.head_root,
                 "baseRoot":branch.base_root,"writeRevision":branch.write_revision,"pinId":pin_id,"basePinId":base_pin_id,
                 "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null});
+            storage.freeze_candidate_text_formats(&mut candidate)?;
             if let Some(filesystem)=storage.retain_branch_result_filesystem(publication,branch_id,grant_id)?{candidate["filesystem"]=serde_json::to_value(filesystem)?;}
             Ok(candidate)
         })
@@ -203,7 +204,12 @@ impl Storage {
                 "result publication is already running".into(),
             ));
         }
+        // The original candidate owns this small projection even if its source
+        // file receipt is superseded/released before publication.
+        let text_formats = candidate.get("__textFormats").cloned().map(serde_json::from_value)
+            .transpose()?.unwrap_or_default();
         Ok(ResultPublicationAdmission::Work(ResultPublicationTask {
+            text_formats,
             candidate,
             params: params.clone(),
             branch,
@@ -285,6 +291,7 @@ impl Storage {
                 return Err(KernelError::Storage("result revision mismatch".into()));
             }
             storage.insert_prepared_working_result(&prepared)?;
+            storage.persist_branch_text_snapshot(branch_id,prepared.revision,&prepared.text_snapshot)?;
             storage.retain_published_result_filesystem(&candidate,&prepared)?;
             Ok(prepared.receipt)
         })
@@ -368,6 +375,7 @@ pub(crate) enum ResultPublicationAdmission {
     Work(ResultPublicationTask),
 }
 pub(crate) struct ResultPublicationTask {
+    text_formats: super::text_formats::WorkingSnapshot,
     candidate: Value,
     params: Value,
     branch: BranchRow,
@@ -377,6 +385,7 @@ pub(crate) struct ResultPublicationTask {
 /// Only this module can construct a verified, serialized record. Record commit does no tree
 /// traversal, body deserialization or hashing; metadata/ref insertion remains real work.
 pub(crate) struct PreparedWorkingResult {
+    text_snapshot: super::text_formats::BranchSnapshot,
     pub(super) workspace: String,
     pub(super) branch_id: String,
     pub(super) record_id: String,
@@ -510,10 +519,29 @@ impl ResultPublicationTask {
         if let Some(parent) = &self.branch.parent_ref {
             document["parentRef"] = json!(parent);
         }
+        let baseline: super::text_formats::BranchSnapshot = self.candidate.get("__textBaseline").cloned().map(serde_json::from_value).transpose()?.unwrap_or_default();
+        let previous: super::text_formats::BranchSnapshot = self.candidate.get("__textPrevious").cloned().map(serde_json::from_value).transpose()?.unwrap_or_default();
+        baseline.inherit(&mut document,"base",|path|Ok(reader.state(&self.branch.base_root,path)?.object_hash().map(str::to_owned)))?;
+        previous.inherit(&mut document,"child",|path|Ok(reader.state(&self.branch.head_root,path)?.object_hash().map(str::to_owned)))?;
+        self.text_formats.attach(&mut document,|selected,path| {
+            let state=reader.state(if selected=="baseRoot"{&self.branch.base_root}else{&self.branch.head_root},path)?;
+            let PathState::RegularFile{object_hash,byte_length,..}=state else{return Ok(None);};
+            if !super::file_content::is_range(&object_hash){return Ok(Some(object_hash));}
+            // Range identities hash their descriptor, not their assembled bytes.
+            // Prove correspondence on this worker rather than stripping a prefix.
+            let storage=self.database.parent().ok_or_else(||KernelError::Storage("object root missing".into()))?;
+            let mut file=super::file_content::Reader::open(storage,&object_hash,byte_length,self.cancellation.clone())?;
+            let mut digest=Sha256::new();let mut buffer=[0u8;128*1024];
+            loop {if self.cancellation.load(Ordering::Acquire){return Err(KernelError::Cancelled);}let count=file.read(&mut buffer)?;if count==0{break;}digest.update(&buffer[..count]);}
+            Ok(Some(format!("sha256-{}",hex::encode(digest.finalize()))))
+        })?;
+        let mut text_snapshot = previous.published(&self.branch.head_root,&document,|path|Ok(reader.state(&self.branch.head_root,path)?.object_hash().map(str::to_owned)))?;
+        self.text_formats.apply_choice_revisions(&mut text_snapshot,&document)?;
         let payload = serde_json::to_string(&document)?;
         let receipt = json!({"publicationId":self.params["operationId"],"workspaceId":self.branch.workspace_id,"branchId":branch_id,
             "resultRevision":revision,"root":self.branch.head_root,"baseRoot":self.branch.base_root,"recordId":record_id,"createdAt":created_at});
         Ok(PreparedWorkingResult {
+            text_snapshot,
             workspace: self.branch.workspace_id.clone(),
             branch_id,
             record_id,

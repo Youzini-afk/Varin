@@ -1,3 +1,4 @@
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { VARIN_CONTEXT_FRAGMENTS_SERVICE } from '@varin/extension-contract';
 import { createScheduledTasksHttpAPI } from '@varin/application-client';
@@ -50,7 +51,8 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
-  cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  const releaseCodec = bindDocumentTextCodec(kernel);
+  cleanups.push(async () => { releaseCodec(); await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   const secret = 'fake-http-provider-key-not-a-real-secret';
   const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
   const provider = createServer((request, response) => {
@@ -84,7 +86,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepareContext = createThreadContext({ composition, personalization, resources, projectForWorkspace: async () => 'selected-project' });
   kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   let closed = false;
-  const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
+  const close = async () => { if (closed) return; closed = true;
+    try { await storage.dispose(); await documents.dispose(); }
+    finally { releaseCodec(); await kernel.close(); }
+  };
   cleanups.push(close);
 
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
