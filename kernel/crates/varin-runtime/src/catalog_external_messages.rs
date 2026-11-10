@@ -347,6 +347,24 @@ impl Catalog {
                 "INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
                 params![wait.id, wait.run_id, encode(&wait)?],
             )?;
+        } else {
+            // The durable inbox acceptance and its canonical caller receipt are one
+            // fact, as for native send. A crash before ToolSettled must not lose the
+            // owner projection or repeat the already admitted message.
+            let mut op:Operation=record(&tx,"operations",&child.operation_id)?;
+            let super::result_content::ToolCompletionMetadata::Result{content_ref,..}=&metadata else {
+                return Err(RuntimeError::Invalid("External send completion changed kind".into()));
+            };
+            op.phase=OperationPhase::Terminal;op.outcome=Some(Outcome::Succeeded);op.effect=Effect::Confirmed;
+            op.result=Some(OperationResultMetadata::Content{reference:content_ref.clone()});
+            op.call_completion=Some(metadata.clone());op.revision+=1;
+            let intent=super::tool_content::ToolIntent::from_operation(&op)?;
+            if let crate::execution::ToolOrigin::ModelStep{request_id}=intent.origin() {
+                let receipt=super::result_content::ToolReceiptMetadata{request_id:request_id.clone(),call_id:intent.call().call_id.clone(),completion:metadata};
+                tx.execute("UPDATE tool_calls SET receipt=?3 WHERE request_id=?1 AND call_id=?2",params![request_id,intent.call().call_id,encode(&receipt)?])?;
+            }
+            put(&tx,"operations",&op.id,&op)?;
+            tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1",[&op.id])?;
         }
         tx.commit()?;
         Ok(completion)

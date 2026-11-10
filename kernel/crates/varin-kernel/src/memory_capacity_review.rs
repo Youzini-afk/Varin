@@ -53,7 +53,7 @@ impl ModelProvider for Provider {
             item: ProviderItem {
                 id: r.view.request_id.clone(),
                 content: if first {
-                    Content::ToolCall { call: search() }
+                    Content::ToolCall { call: search(&r.view.binding.tools) }
                 } else {
                     Content::Text {
                         text: "done".into(),
@@ -70,11 +70,12 @@ impl ModelProvider for Provider {
         })
     }
 }
-fn search() -> ToolCall {
+fn search(tools: &[ToolSchema]) -> ToolCall {
     ToolCall {
         call_id: "search-call".into(),
         name: "file_search".into(),
-        schema_version: "1".into(),
+        schema_version: tools.iter().find(|schema| schema.name == "file_search")
+            .expect("admitted file search").version.clone(),
         arguments: json!({"query":"needle","maxResults":1}),
     }
 }
@@ -336,7 +337,7 @@ grant_id: "search".into(),
     let memory = ToolCall {
         call_id: "memory-read".into(),
         name: TOOL.into(),
-        schema_version: "1".into(),
+        schema_version: schema(true).version,
         arguments: json!({"action":"read"}),
     };
     let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
@@ -364,7 +365,7 @@ grant_id: "search".into(),
     let plan = ToolCall {
         call_id: "plan-read".into(),
         name: "todo".into(),
-        schema_version: "1".into(),
+        schema_version: crate::plan::schema().version,
         arguments: json!({"action":"read"}),
     };
     let plan_frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
@@ -425,7 +426,9 @@ grant_id: "search".into(),
     wait_for(|| (admission.summary().queued == 1
         && registrations.load(Ordering::SeqCst) == 1
         && watched.lock().unwrap().is_some()) || worker.is_finished());
-    assert!(!worker.is_finished(), "engine ended before search queue");
+    if worker.is_finished() {
+        panic!("engine ended before search queue: {:?}", worker.join().unwrap());
+    }
     assert_eq!(admission.summary().queued, 1);
     assert_eq!(registrations.load(Ordering::SeqCst), 1);
     assert_eq!(releases.load(Ordering::SeqCst), 0);

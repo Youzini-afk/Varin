@@ -231,7 +231,11 @@ fn original_family_item_and_continuation_references_are_directly_consumable() {
         assert_eq!(content.data["page"]["text"],expected);
         let model=content.model_data.as_ref().unwrap();
         assert!(model["page"]["anchor"].is_null());
-        assert!(model["page"]["nextRead"]["arguments"]["ref"].as_str().unwrap().starts_with("read:"));
+        if content.data["page"]["nextOffset"].is_null() {
+            assert!(model["page"]["nextRead"].is_null(),"the last page must not invent a continuation");
+        } else {
+            assert!(model["page"]["nextRead"]["arguments"]["ref"].as_str().unwrap().starts_with("read:"));
+        }
     }
     drop(db);drop(catalog);f.finish();
 }

@@ -204,6 +204,15 @@ pub fn admit_call(
     args: Value,
     policy: bool,
 ) -> ToolExecutionContext {
+    let owner=if name=="follow_up" {ExecutorOwner::Kernel} else {
+        ExecutorOwner::External{identity:"original-computer-tool".into(),epoch:"tool-epoch".into()}
+    };
+    admit_call_with_owner(db,run_id,name,args,policy,owner)
+}
+pub fn admit_kernel_call(db:&mut Catalog,run_id:&str,name:&str,args:Value,policy:bool)->ToolExecutionContext {
+    admit_call_with_owner(db,run_id,name,args,policy,ExecutorOwner::Kernel)
+}
+fn admit_call_with_owner(db:&mut Catalog,run_id:&str,name:&str,args:Value,policy:bool,owner:ExecutorOwner)->ToolExecutionContext {
     let child_dispatch = db
         .launch_metadata(run_id)
         .unwrap()
@@ -368,14 +377,7 @@ pub fn admit_call(
         epoch,
         &ExecutionRecord::ToolDispatched {
             context: context.clone(),
-            executor_owner: if name == "follow_up" {
-                ExecutorOwner::Kernel
-            } else {
-                ExecutorOwner::External {
-                    identity: "original-computer-tool".into(),
-                    epoch: "tool-epoch".into(),
-                }
-            },
+            executor_owner: owner,
         },
     )
     .unwrap();

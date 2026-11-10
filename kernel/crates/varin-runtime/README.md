@@ -21,6 +21,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |
 | Fixed attachment descriptors, delivery relations and retention | [catalog_attachments.rs](src/catalog_attachments.rs) |
+| Stable typed model references, execution numbering and scoped public export | [catalog_model_references.rs](src/catalog_model_references.rs), [catalog_export.rs](src/catalog_export.rs) |
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
 | Scope-local bindings, tools and context transforms | [composition](src/composition.rs) |
 | Resource conflict/capacity admission and nested calls | [resource_admission.rs](src/resource_admission.rs), [execution_capacity.rs](src/execution_capacity.rs), [nested_tools.rs](src/nested_tools.rs) |
@@ -44,8 +45,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -60,8 +61,11 @@ representation. Do not add parallel old-format execution/read paths or a second 
   Format 91 restores missing Responses cache-write counts from retained raw ModelStep/planning receipts
   and their matching existing ledger rows, preserving frozen pricing and settlement identity. Missing
   evidence stays unknown; conversion never creates historical charges or replays execution effects.
-  Format 92 protects frozen quote relations in original input bodies from readers that cannot project
-  them. It does not rewrite historical bodies, resource identities or idempotency receipts.
+  Format 92 adds Catalog-local typed model references and execution numbering without rewriting
+  original history or receipts. Existing reference spaces are validated and retained rather than reallocated.
+  Format 93 protects frozen quote relations in original input bodies from readers that cannot project
+  them. Format 94 protects the separate frozen source mappings in readable compaction recipes. These
+  guards do not rewrite historical bodies, resource identities, old recipes or idempotency receipts.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.

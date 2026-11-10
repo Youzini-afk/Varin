@@ -327,7 +327,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         let token = cancel.clone();
         let worker_db = db.clone();
         let worker_run = run.clone();
-        std::thread::spawn(move || {
+        let worker=std::thread::spawn(move || {
             bound.authorize(&ctx, &contract, &token).unwrap();
             worker_db
                 .commit(
@@ -365,6 +365,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
         bridge.receive(json!({"v":1,"kind":"host-tool-response","id":executed["id"],"kernelEpoch":"transport-before","ok":true,"executor_stopped":false,
             "completion":{"kind":"result","outcome":"indeterminate","effect":"unknown","content":{"data":{"error":"observer_cancelled"},"parts":[]}}}));
         let original = result.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.join().unwrap();
         assert!(!original.executor_stopped);
         if let ToolOrigin::PolicyAction { action_id, node_id } = &origin {
             db.settle_policy_node(run, epoch, action_id, node_id, &original.completion)
