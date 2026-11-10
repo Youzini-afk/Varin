@@ -568,9 +568,18 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(errors).toEqual([]); expect(turn).toBe(4);
     expect(context.queries.some(query => query.action === 'synchronize' && query.runId === receipt.run_id)).toBe(true);
     const items = JSON.parse(output) as Array<Record<string, unknown>>;
-    const factMessage = items.find(item => item.role === 'user' && JSON.stringify(item.content).includes('Job lifecycle data'))!;
-    const factEnvelope = JSON.parse(responsesMetadataText(factMessage.content).split('\n').slice(1).join('\n')) as { data: { outcome: string; signal: string | null; treeConfirmed: boolean; stopApplied: boolean } };
-    const fact = factEnvelope.data;
+    const facts = items.flatMap(item => {
+      if (item.role !== 'user' || !Array.isArray(item.content)) return [];
+      const first = item.content[0] as { type?: string; text?: string } | undefined;
+      if (first?.type !== 'input_text' || !first.text?.startsWith('{')) return [];
+      const data = JSON.parse(first.text) as { observationCancelled?: boolean; processId?: string;
+        output?: { read?: { tool: string; arguments: { processId: string } } } };
+      return data.observationCancelled === false && data.output?.read?.tool === 'process_read' ? [data] : [];
+    });
+    expect(facts).toHaveLength(1);
+    const fact = facts[0]!;
+    expect(fact.processId).toMatch(/^proc:[1-9][0-9]*$/);
+    expect(fact.output?.read?.arguments.processId).toBe(fact.processId);
     // Windows TerminateProcess has an exit code, rather than a POSIX signal name.
     const signal = process.platform === 'win32' ? null : 'Killed';
     expect(fact).toMatchObject({ outcome: 'failed', signal, treeConfirmed: true, stopApplied: true });
@@ -580,7 +589,9 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(read.content.process).toMatchObject({ signal, writerActive: false, stopApplied: true });
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
     expect((await runtime.operation(processId)).outcome).toBe('failed');
-    expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
+    const originalFacts = (await runtime.history(identity.branchId)).filter(item => item.source === 'environment'
+      && (item.content as { content?: { output?: { data?: { processId?: string } } } }).content?.output?.data?.processId === processId);
+    expect(originalFacts).toHaveLength(1);
   } finally {
     try {
       await fs.writeFile(path.join(f.root, 'release-process'), 'release');
