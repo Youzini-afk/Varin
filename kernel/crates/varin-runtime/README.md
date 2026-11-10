@@ -75,6 +75,10 @@ representation. Do not add parallel old-format execution/read paths or a second 
 - A model request pins its actual provider/tool/context bindings. Normal retirement permits retained
   exchanges to finish; revocation rejects/cancels them. Recovery uses the saved composition and
   artifact identities instead of silently applying current routing.
+  A new root round activated by Calendar, a message or a follow-up resolves its inherited builtin
+  names against the executable owner's current declarations before admission, just like a new user
+  round. It preserves the source, model and retained Host tool bindings without adding unselected
+  names. Already admitted Runs, receipt retries and delegated continuations keep their frozen launch.
 - Branch history has one writer. Background summary, memory and planning work uses separate admitted
   identities. A Wait releases active execution while retaining the dependency/continuation; cancelling
   observation does not cancel the observed Job or withdraw an independent follow-up definition.

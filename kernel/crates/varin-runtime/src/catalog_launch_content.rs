@@ -53,6 +53,30 @@ pub struct LaunchMetadata {
     pub requires_rebind: bool,
 }
 impl LaunchSelectionMetadata {
+    /// A new root round retains the selected names, resolving only its builtin
+    /// declarations against the executable owner's current directory. This never
+    /// updates an accepted Run or reselects its retained Host tool bindings.
+    pub(super) fn refresh_base_tools(
+        &mut self,
+        content: &crate::content::ContentStore,
+        available: &[ToolSchema],
+    ) -> Result<()> {
+        let previous: Vec<ToolSchema> = serde_json::from_value(content.load(&self.base_tools_ref)?)?;
+        let names = previous.iter().map(|tool| tool.name.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut base = available.iter().filter(|tool| {
+            names.contains(tool.name.as_str()) && tool.requirements.as_ref()
+                .is_none_or(|requirements| requirements.accepts(self.source.as_ref()))
+        }).cloned().collect::<Vec<_>>();
+        base.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut tools: Vec<ToolSchema> = serde_json::from_value(content.load(&self.tools_ref)?)?;
+        tools.retain(|tool| !names.contains(tool.name.as_str()));
+        tools.extend(base.iter().cloned());
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        self.base_tools_ref = content.save(&serde_json::to_value(base)?)?;
+        self.tools_ref = content.save(&serde_json::to_value(tools)?)?;
+        Ok(())
+    }
     pub(super) fn rebase_policy_models(
         &mut self,
         content: &crate::content::ContentStore,
