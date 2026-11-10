@@ -3,10 +3,11 @@ import { defaultVarinWorkbenchProfileDocument, type VarinWorkbenchProfileDocumen
 import type { BotSummary, RuntimeAPIs, ThreadsAPI } from '@varin/application-client';
 import type { ThreadSummary } from '@varin/protocol';
 import { bindThreadStore, useThreadStore } from '@/stores/useThreadStore';
-import { useBotNavigation } from '@/lib/bots';
+import { openBotEntryFor, returnToBot, useBotNavigation } from '@/lib/bots';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { buildDeepLink, parseDeepLink } from '@/apps/deepLinks';
 import { followThreadDeepLink } from '@/apps/threadDeepLinkNavigation';
 const state = vi.hoisted(() => ({ host: 1, document: undefined as VarinWorkbenchProfileDocument | undefined, select: vi.fn(), directory: vi.fn() }));
@@ -22,6 +23,7 @@ const bot: BotSummary = { revision: 1, id: 'bot-owner', name: 'Bot', entry: { ru
 let unbind: (() => void) | undefined;
 const get = vi.fn();
 beforeEach(async () => {
+  useUIStore.getState().closeMainSurfaces();
   state.host = 1; state.document = defaultVarinWorkbenchProfileDocument();
   state.document.activeProfileId = 'default';
   state.select.mockReset().mockImplementation(async (profile: string) => { state.document!.activeProfileId = profile; });
@@ -94,4 +96,45 @@ it('prevents a prepared Bot shell from committing over a newer ordinary navigati
   finish(); await expect(old).rejects.toThrow('superseded');
   expect(useBotNavigation.getState().entry).toBeNull();
   expect(useThreadStore.getState().selectedIdentity?.branchId).toBe('ordinary:review');
+});
+
+it('keeps a newer main surface when a pending conversation lookup finishes', async () => {
+  let finish!: (bot: BotSummary) => void;
+  get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const old = openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' });
+  await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+  useUIStore.getState().setScheduledTasksDialogOpen(true);
+  finish(bot);
+  await expect(old).rejects.toThrow('superseded');
+  expect(state.select).not.toHaveBeenCalled();
+  expect(useBotNavigation.getState().entry).toBeNull();
+  expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+});
+
+it('does not start a Bot shell switch after a newer page supersedes entry resolution', async () => {
+  let finish!: (value: { bot: BotSummary; entry: BotSummary['entry']; model: null }) => void;
+  registerRuntimeAPIs({ bots: { get, entry: () => new Promise(resolve => { finish = resolve; }) } } as unknown as RuntimeAPIs);
+  const old = openBotEntryFor(bot.id);
+  useUIStore.getState().setArchivePageOpen(true);
+  finish({ bot, entry: bot.entry, model: null });
+  await old;
+  expect(state.select).not.toHaveBeenCalled();
+  expect(useBotNavigation.getState().entry).toBeNull();
+  expect(useUIStore.getState().isArchivePageOpen).toBe(true);
+});
+
+it('prevents a prepared return-to-Bot shell from committing over a newer page', async () => {
+  let finish!: () => void;
+  state.select.mockImplementationOnce(async (profile: string, _workspace: string | undefined, options: { beforeCommit(): Promise<void> }) => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    await options.beforeCommit();
+    state.document!.activeProfileId = profile;
+  });
+  const old = returnToBot({ botId: bot.id, botName: bot.name, session: bot.entry, sessionTitle: 'Bot', workThreadId: 'child' });
+  useUIStore.getState().setScheduledTasksDialogOpen(true);
+  finish();
+  await expect(old).rejects.toThrow('superseded');
+  expect(state.document!.activeProfileId).toBe('default');
+  expect(useBotNavigation.getState().entry).toBeNull();
+  expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
 });

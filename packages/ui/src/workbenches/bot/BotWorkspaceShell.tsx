@@ -221,6 +221,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     const controller = new AbortController();
     opening.current = controller;
     const host = getRuntimeEndpointGeneration();
+    const surface = useUIStore.getState().mainSurfaceSelectionRevision;
+    const superseded = () => controller.signal.aborted || getRuntimeEndpointGeneration() !== host
+      || navigate && surface !== useUIStore.getState().mainSurfaceSelectionRevision;
     setBusy(true);
     setError(null);
     try {
@@ -229,7 +232,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       const inactive = known && (known.archived || (known.activity && known.activity.state !== 'awake'));
       if (inactive) {
         const sessions = await listBotSessions(botId, controller.signal);
-        if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
+        if (superseded()) return;
         const entry = sessions.find(session => session.primary && !session.thread.archived)
           ?? sessions.find(session => !session.thread.archived);
         useBotNavigation.setState({ botId, entry: entry?.identity ?? null, model: known.model, archived: known.archived });
@@ -238,7 +241,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         return;
       }
       const { bot, entry, model } = await ensureBotEntry(botId, controller.signal);
-      if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
+      if (superseded()) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       setEntryResolution({ botId: bot.id, entry, profileModelKey: JSON.stringify(bot.model), model });
       // Restoring the shell's entry is not a navigation gesture. In particular it
@@ -247,7 +250,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       setSelectedId(bot.id);
       if (navigate) useUIStore.getState().closeMainSurfaces();
     } catch (cause) {
-      if (!controller.signal.aborted) setError(message(cause));
+      if (!superseded()) setError(message(cause));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }

@@ -194,7 +194,9 @@ describe('Bot workbench', () => {
     state.openWork.mockReset().mockResolvedValue(undefined);
     state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {}, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null });
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {},
+      mainSurfaceSelectionRevision: 0, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null,
+      isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false });
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -369,6 +371,35 @@ describe('Bot workbench', () => {
     await settle();
     expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
   });
+
+  it.each(['schedule', 'archive', 'worktrees', 'multi-run', 'same-schedule'] as const)(
+    'retains a newer %s page when a previously requested Bot lookup completes', async surface => {
+      await render();
+      if (surface === 'same-schedule') await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+      let finish!: (value: BotEntryResult) => void;
+      state.ensure.mockImplementation(async (id: string) => id === 'b'
+        ? new Promise<BotEntryResult>(resolve => { finish = resolve; })
+        : { bot: bot(id), entry: bot(id).entry, model: null });
+      await click('Bot b');
+      await act(async () => {
+        const ui = useUIStore.getState();
+        if (surface === 'archive') ui.setArchivePageOpen(true);
+        else if (surface === 'worktrees') ui.setWorktreesPageProjectId('project');
+        else if (surface === 'multi-run') ui.openMultiRunLauncherWithPrompt('New work');
+        else ui.setScheduledTasksDialogOpen(true);
+      });
+      const chosen = useUIStore.getState();
+      await act(async () => finish({ bot: bot('b'), entry: bot('b').entry, model: null }));
+      await settle();
+      expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+      expect(useUIStore.getState()).toMatchObject({
+        isScheduledTasksDialogOpen: chosen.isScheduledTasksDialogOpen,
+        isArchivePageOpen: chosen.isArchivePageOpen,
+        worktreesPageProjectId: chosen.worktreesPageProjectId,
+        isMultiRunLauncherOpen: chosen.isMultiRunLauncherOpen,
+      });
+    },
+  );
 
   it('renames and pins the right-clicked session without selecting it or changing the Bot profile', async () => {
     const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip planning', title_mode: 'manual' });
