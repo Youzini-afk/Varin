@@ -1,3 +1,4 @@
+import type { ContentReferenceInput } from './content-reference.js';
 import type { Attachment, AttachmentSelection } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import {
@@ -122,12 +123,12 @@ export type ExternalTurnStatus =
   | 'failed'
   | 'cancelled'
   | 'interrupted';
-export interface ExternalInput {
+export interface ExternalInput extends ContentReferenceInput {
   attachmentImageReferences?: Record<string, number>;
   attachments?: AttachmentSelection[];
   config?: Record<string, string>;
   text: string;
-  images?: Array<{ data: string; mimeType: string }>;
+  images?: Array<{ data: string; mimeType: string; reference?: number }>;
   model?: string;
   thinking?: string;
   mode?: string;
@@ -155,7 +156,8 @@ export interface ExternalTurn {
     scope?: 'turn' | 'last_request' | 'conversation' | undefined;
   };
 }
-export type ExternalItem = {
+export type ExternalItem = ContentReferenceInput & {
+  attachmentImageReferences?: Record<string, number>;
   attachments?: Attachment[];
   senderThreadId?: string;
   id: string;
@@ -163,7 +165,7 @@ export type ExternalItem = {
   kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'notice' | 'plan';
   text: string;
   complete?: boolean;
-  images?: Array<{ data: string; mimeType: string }>;
+  images?: Array<{ data: string; mimeType: string; reference?: number }>;
   tool?: {
     name: string;
     input?: unknown;

@@ -374,6 +374,33 @@ mod tests {
     }
 
     #[test]
+    fn external_quotes_require_retained_bindings_and_survive_retry_and_reopen() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:quotes");
+        let text = "[引用点1] [图片7]";
+        let quote = json!({"ref":"private-source","number":1,"title":"引用点1","text":"fixed original passage","source":{"kind":"chat","passages":[]}});
+        let mut input = json!({"text":text,"contentReferences":[quote],"contentReferenceOccurrences":[
+            {"kind":"content","ref":"private-source","start":0,"end":6},
+            {"kind":"image","reference":7,"start":7,"end":12}]});
+        let admit = |input: &Value| json!({"action":"admit","id":"external:quotes","key":"quoted","input":input});
+        assert!(call(&mut c, admit(&input)).is_err(), "unbound image cannot become an accepted external input");
+        input["attachments"] = json!([{"ref":"attachment:fixed","filename":"image.png","mimeType":"image/png","byteLength":4}]);
+        input["attachmentImageReferences"] = json!({"attachment:other":7});
+        assert!(call(&mut c, admit(&input)).is_err(), "file number must identify the actual attachment");
+        input["attachmentImageReferences"] = json!({"attachment:fixed":7});
+        let receipt = call(&mut c, admit(&input)).unwrap();
+        assert_eq!(receipt, call(&mut c, admit(&input)).unwrap());
+        drop(c);
+        let mut c = Catalog::open(directory.path()).unwrap();
+        assert_eq!(receipt, call(&mut c, admit(&input)).unwrap());
+        let restored = call(&mut c, json!({"action":"input","id":"external:quotes","turnId":receipt["id"],"original":true})).unwrap();
+        assert_eq!(restored, input);
+        let markerless = json!({"action":"admit","id":"external:quotes","key":"markerless","input":{"text":"","contentReferences":[quote]}});
+        assert!(call(&mut c, markerless).is_ok(), "retained quote alone is a complete input");
+    }
+
+    #[test]
     fn external_incomplete_attachment_never_admits_the_text_half_of_a_message() {
         let directory = Fixture::new();
         let mut c = Catalog::open(directory.path()).unwrap();
@@ -451,8 +478,36 @@ impl ExternalPreparation {
                 for file in &files { file.validate()?; }
                 if input.get("text").and_then(Value::as_str).is_none_or(|text| text.trim().is_empty())
                     && input.get("images").and_then(Value::as_array).is_none_or(Vec::is_empty)
-                    && files.is_empty() {
+                    && files.is_empty() && input.get("contentReferences").and_then(Value::as_array).is_none_or(Vec::is_empty) {
                     return Err(RuntimeError::Invalid("external input requires text, an image or an attachment".into()));
+                }
+                if input.get("contentReferences").is_some() || input.get("contentReferenceOccurrences").is_some() {
+                    let mut quoted = json!({"text":input["text"], "fileAttachments":files});
+                    for field in ["contentReferences", "contentReferenceOccurrences", "attachmentImageReferences"] { if let Some(value) = input.get(field) { quoted[field] = value.clone(); } }
+                    if let Some(images) = input.get("images").and_then(Value::as_array) {
+                        quoted["attachments"] = json!(images.iter().map(|image| json!({"media_type":image["mimeType"],"data_base64":image["data"]})).collect::<Vec<_>>());
+                        if images.iter().any(|image| image.get("reference").is_some()) {
+                            let mut next = images.iter().filter_map(|image|image["reference"].as_u64()).max().unwrap_or(0);
+                            quoted["imageReferences"] = json!(images.iter().map(|image|image["reference"].as_u64().unwrap_or_else(|| { next += 1; next })).collect::<Vec<_>>());
+                        }
+                    }
+                    let mut bindings = input.get("attachmentImageReferences").cloned().unwrap_or_else(|| json!({}));
+                    for reference in input["contentReferences"].as_array().into_iter().flatten() {
+                        if let Some((file, number)) = reference["attachmentRef"].as_str().zip(reference["imageReference"].as_u64()) {
+                            if !files.iter().any(|attachment| attachment.reference == file && attachment.mime_type.starts_with("image/")) { continue; }
+                            if bindings.get(file).is_some_and(|existing| existing.as_u64() != Some(number)) {
+                                // Different annotated images may retain the same original file.
+                                if quoted["imageReferences"].as_array().is_some_and(|images| images.iter().any(|image| image.as_u64() == Some(number))) { continue; }
+                                return Err(RuntimeError::Invalid("quoted image disagrees with its original file binding".into()));
+                            }
+                            if !bindings.is_object() { return Err(RuntimeError::Invalid("invalid image attachment bindings".into())); }
+                            bindings[file] = json!(number);
+                        }
+                    }
+                    if bindings.as_object().is_some_and(|map| !map.is_empty()) { quoted["attachmentImageReferences"] = bindings; }
+                    // External file-image bytes remain with their Harness owner. Prepared
+                    // descriptors and number bindings still must resolve before admission.
+                    crate::output::validate_user_metadata(&quoted)?;
                 }
                 Some(self.content.save(input)?)
             },
@@ -494,11 +549,14 @@ impl ExternalRead {
                 followups::external::project_inputs(&self.content, &mut inputs)?;
             }
             let mut input = inputs[primary].clone();
+            let quote_text_length = input["text"].as_str().map_or(0, |text| text.encode_utf16().count());
             let mut texts = Vec::new();
             let mut messages = Vec::new();
             let mut images = Vec::new();
+            let mut quote_text_offset = 0usize;
             for (index, message) in inputs.into_iter().enumerate() {
                 if let Some(text) = message["text"].as_str() {
+                    if index < primary { quote_text_offset += text.encode_utf16().count() + 2; }
                     texts.push(text.to_owned());
                 }
                 if let Some(media)=message["images"].as_array() {images.extend(media.iter().cloned());}
@@ -510,6 +568,10 @@ impl ExternalRead {
                     .cloned()
                     .unwrap_or_else(|| input["text"].clone());
                 input["text"] = json!(texts.join("\n\n"));
+                if input.get("contentReferences").is_some() || input.get("contentReferenceOccurrences").is_some() {
+                    input["_quoteTextOffset"] = json!(quote_text_offset);
+                    input["_quoteTextLength"] = json!(quote_text_length);
+                }
                 input["messages"] = json!(messages);
                 if !images.is_empty() {
                     input["images"]=json!(images);

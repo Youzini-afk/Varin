@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 85;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 86;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -3360,6 +3360,10 @@ pub(crate) struct FamilyItemParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MessageSendParams {
+    pub(crate) content_references: Option<Vec<Value>>,
+    pub(crate) content_reference_occurrences: Option<Vec<Value>>,
+    pub(crate) attachment_image_references: Option<std::collections::BTreeMap<String, i64>>,
+    pub(crate) image_references: Option<Vec<i64>>,
     pub(crate) source_agent: Option<String>,
     pub(crate) name: Option<String>,
     pub(crate) key: String,

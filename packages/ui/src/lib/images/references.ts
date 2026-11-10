@@ -1,37 +1,62 @@
-import { ChangeSet, type ChangeSpec } from '@codemirror/state';
+import { type ChangeSpec } from '@codemirror/state';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
+import { createComposerMarkerState, replaceComposerMarkerObjects, composerMarkerObjects, type ComposerMarkerObject } from '@/components/chat/composer/editor/markers';
+import { composerReferences } from '@/components/chat/composer/editor/references';
+import { interactionRanges } from '@/components/chat/composer/editor/interactionRanges';
 import type { ThreadDraft } from '@/stores/useThreadDraftStore';
-import { mapComposerReferences } from '@/components/chat/composer/editor/references';
-import { mapInteractionRanges } from '@/components/chat/composer/editor/interactionRanges';
 
 export function imageReferenceRanges(text: string) {
   return [...text.matchAll(/\[(Image |图片|圖片)([1-9]\d*)\]/g)].map(match => ({
     from: match.index!, to: match.index! + match[0].length, number: Number(match[2]), prefix: match[1]!, text: match[0],
   }));
 }
-export function draftImageReferences(draft: Pick<ThreadDraft, 'images' | 'files'>): number[] {
-  return [...draft.images.map(image => image.reference), ...(draft.files ?? []).map(file => file.imageReference)].filter((number): number is number => number !== undefined).sort((a, b) => a - b);
+export function draftImageReferences(draft: Pick<ThreadDraft, 'images' | 'files' | 'markerObjects'>): number[] {
+  return [...new Set([...draft.images.map(image => image.reference), ...(draft.files ?? []).map(file => file.imageReference), ...(draft.markerObjects ?? []).filter(object => object.kind === 'image').map(object => object.number)].filter((number): number is number => number !== undefined))].sort((a, b) => a - b);
 }
-export const nextImageReference = (draft: Pick<ThreadDraft, 'images' | 'files'>) => Math.max(0, ...draftImageReferences(draft)) + 1;
+export const nextImageReference = (draft: Pick<ThreadDraft, 'images' | 'files' | 'markerObjects'>) => Math.max(0, ...draftImageReferences(draft)) + 1;
 
-/** Only the current unsent attachments change labels; accepted inputs retain their identities. */
+/** Existing attachment owners seed objects once. No regex grants a typed label object identity. */
+export function draftImageMarkerObjects(draft: ThreadDraft, label = (number: number) => `[图片${number}]`): ComposerMarkerObject[] {
+  const objects = [...(draft.markerObjects ?? [])];
+  for (const image of draft.images) {
+    const index = objects.findIndex(object => object.payload.kind === 'image' && (object.payload.image === image || image.draftId === object.id));
+    if (index >= 0) {
+      const object = objects[index]!;
+      if (object.payload.kind === 'image' && object.payload.image !== image) objects[index] = { ...object, payload: { ...object.payload, image } };
+      continue;
+    }
+    const id = image.draftId ?? crypto.randomUUID(), number = image.reference ?? 1;
+    objects.push({ id, kind: 'image', number, label: label(number), host: getRuntimeEndpointGeneration(), payload: { kind: 'image', image: { ...image, draftId: id } } });
+  }
+  for (const file of draft.files ?? []) {
+    if (file.imageReference === undefined) continue;
+    const index = objects.findIndex(object => object.payload.kind === 'file-image' && object.payload.file.id === file.id);
+    if (index >= 0) {
+      const object = objects[index]!;
+      if (object.payload.kind === 'file-image' && object.payload.file !== file) objects[index] = { ...object, payload: { ...object.payload, file } };
+      continue;
+    }
+    objects.push({ id: file.id, kind: 'image', number: file.imageReference, label: label(file.imageReference), host: getRuntimeEndpointGeneration(), payload: { kind: 'file-image', file } });
+  }
+  return objects.sort((a, b) => a.kind === b.kind ? a.number - b.number : a.kind === 'quote' ? -1 : 1);
+}
+
+/** Only explicit bound ranges are relabeled. Typed examples always remain user text. */
 export function renumberDraftImages(draft: ThreadDraft, retained: Pick<ThreadDraft, 'images' | 'files'>): Partial<ThreadDraft> {
-  const numbers = new Map(draftImageReferences(retained).map((number, index) => [number, index + 1]));
-  const original = new Set(draftImageReferences(draft));
-  const edits = imageReferenceRanges(draft.text).flatMap(token => {
-    if (!original.has(token.number)) return [];
-    const next = numbers.get(token.number);
-    return next === token.number ? [] : [{ from: token.from, to: token.to, insert: next === undefined ? '' : `[${token.prefix}${next}]` }];
+  const objects = draftImageMarkerObjects(draft);
+  const retainedImages = new Set(retained.images), retainedIds = new Set(retained.images.map(image => image.draftId).filter(Boolean)), retainedFiles = new Set(retained.files?.map(file => file.id));
+  const keep = objects.filter(object => {
+    const payload = object.payload;
+    if (payload.kind === 'image') return retainedImages.has(payload.image) || retainedIds.has(object.id)
+      || draft.images.some(image => retainedImages.has(image) && (image.draftId === object.id || image === payload.image || !image.draftId && image.reference === object.number));
+    return payload.kind !== 'file-image' || retainedFiles.has(payload.file.id);
   });
-  const changes = ChangeSet.of(edits, draft.text.length);
-  let text = draft.text;
-  for (const edit of [...edits].reverse()) text = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
-  return {
-    images: retained.images.map(image => image.reference === undefined || numbers.get(image.reference) === image.reference ? image : { ...image, reference: numbers.get(image.reference)! }),
-    files: retained.files?.map(file => file.imageReference === undefined || numbers.get(file.imageReference) === file.imageReference ? file : { ...file, imageReference: numbers.get(file.imageReference)! }),
-    text,
-    ...(draft.references ? { references: mapComposerReferences(draft.references, changes) } : {}),
-    ...(draft.interactions ? { interactions: mapInteractionRanges(draft.interactions, changes) } : {}),
-  };
+  const state = createComposerMarkerState({ ...draft, markerObjects: objects });
+  const spec = replaceComposerMarkerObjects(state, keep), next = spec ? state.update(spec).state : state;
+  const markerObjects = next.field(composerMarkerObjects);
+  return { text: next.doc.toString(), references: next.field(composerReferences), interactions: next.field(interactionRanges), markerObjects,
+    images: markerObjects.flatMap(object => object.payload.kind === 'image' ? [object.payload.image] : []),
+    files: retained.files?.map(file => markerObjects.find(object => object.payload.kind === 'file-image' && object.payload.file.id === file.id)?.payload).map((payload, i) => payload?.kind === 'file-image' ? payload.file : retained.files![i]!), editorState: next };
 }
 
 /** Apply relabeling as separate edits so intervening @ references and the caret keep their positions. */

@@ -252,6 +252,9 @@ impl InputEditPreparation {
             if let Some(files) = previous.content.get("fileAttachments") {
                 if stored.is_string() { stored=json!({"text":stored}); }
                 stored["fileAttachments"] = files.clone();
+                if self.value.get("attachments").is_none() {
+                    if let Some(references) = previous.content.get("attachmentImageReferences") { stored["attachmentImageReferences"] = references.clone(); }
+                }
             }
         }
         crate::output::validate_user_metadata(&stored)?;

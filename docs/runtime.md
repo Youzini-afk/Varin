@@ -142,7 +142,7 @@ Host 只重试同一解析请求，不在响应未知时换 UUID。返回旧创�
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 与独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 与独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
 84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
 85 → 86 允许明确 User 派发保留空工具来源，并增加原子任务报告身份；旧工具派发正文和回执保持不变，不回放执行效果。
 78 → 79 初始化外部 Agent 结构，79 → 80 初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。

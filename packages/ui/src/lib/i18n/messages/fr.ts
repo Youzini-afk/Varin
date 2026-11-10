@@ -4033,6 +4033,20 @@ export const dict = {
   "chat.children.configureProfiles": "Configure profiles",
   "chat.children.inheritModel": "Uses the request model",
   "chat.children.noModel": "Model unavailable",
+  "chat.quote.sourceUnavailable": "La source d’origine est indisponible. Cette citation enregistrée reste inchangée.",
+  "chat.quote.insertMarker": "Insérer un repère",
+  "chat.quote.capturedWhileRunning": "Capturé alors que la source était encore en cours d’exécution.",
+  "chat.context.quoteSelection": "Citer le texte sélectionné",
+  "chat.context.quoteBlock": "Citer ce bloc",
+  "chat.context.quoteCode": "Citer le code",
+  "chat.context.quoteTurn": "Citer cette réponse",
+  "chat.context.quoteImage": "Citer l’image",
+  "chat.context.quoteFile": "Citer le fichier",
+  "chat.context.quoteTool": "Citer cet appel",
+  "chat.context.quoteContent": "Citer le contenu actuel",
+  "chat.context.userSource": "Message de l’utilisateur",
+  'chat.model.useImagesAsFiles': "Utiliser les images comme fichiers lisibles",
+  'chat.model.imagesAsFilesNotice': "Ce modèle ne peut pas voir les images. Elles seront jointes comme fichiers, sans entrée visuelle directe.",
 } as const;
 
 export type I18nKey = keyof typeof dict;

@@ -3,6 +3,10 @@ import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { externalAttachmentSupported } from './externalAttachments';
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
+import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { composerDraftChange, saveComposerState } from '@/lib/agent-editor/contentReferences';
+import { DraftMarkerPreview } from './DraftContentReferences';
+import type { ComposerMarkerObject } from '@/components/chat/composer/editor/markers';
 import type { InteractionRange } from '@/components/chat/composer/editor/interactionRanges';
 import { registerUiComposer } from '@/lib/interactive-ui/compose';
 import { flushSync } from 'react-dom';
@@ -66,6 +70,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   backendControls?: React.ReactNode;
 }) {
   const { t } = useI18n();
+  const markerDraft = useThreadDraftStore(state => identityKey ? state.drafts[identityKey] ?? EMPTY_THREAD_DRAFT : EMPTY_THREAD_DRAFT);
+  const [markerPreviewId, setMarkerPreviewId] = React.useState<string>();
+  const markerPreview = markerDraft.markerObjects?.find(object => object.id === markerPreviewId);
+  const setMarkerPreview = (object: ComposerMarkerObject | undefined) => setMarkerPreviewId(object?.id);
+  React.useEffect(() => { setMarkerPreviewId(undefined); }, [identityKey]);
   const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const reducedMotion = usePrefersReducedMotion();
   const motionId = React.useId();
@@ -373,6 +382,13 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             ref={bindEditor}
             value={value}
             references={references}
+            draftKey={identityKey}
+            host={getRuntimeEndpointGeneration()}
+            onMarkerError={setCommandError}
+            markerObjects={markerDraft.markerObjects}
+            editorState={markerDraft.editorState}
+            onEditorStateChange={identityKey ? state => saveComposerState(identityKey, state) : undefined}
+            onMarkerActivate={setMarkerPreview}
             autocomplete={autocomplete && !layer ? { id: menuId, activeId: activeOption } : undefined}
             interactions={interactions}
             onFocus={() => external?.onInteract('focus')}
@@ -386,6 +402,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
               pendingHistoryTextRef.current = null;
               if (messageHistory.isBrowsing) messageHistory.reset();
               onChange(change.value, change.references, change.interactions);
+              if (identityKey) useThreadDraftStore.getState().patch(identityKey, draft => composerDraftChange(draft, change.value, change.references, change.interactions, change.markerObjects));
               updateAutocomplete(
                 change.value,
                 change.selection.end,
@@ -572,6 +589,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
           {connectionStatus}
         </div>}
       </div>
+      {markerPreview && identityKey && <DraftMarkerPreview object={markerPreview} draftKey={identityKey} onClose={() => setMarkerPreview(undefined)} />}
     </motion.div>
   );
 };

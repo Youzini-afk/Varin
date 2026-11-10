@@ -1,3 +1,5 @@
+import { prepareQuoteSelections } from './thread-quotes.js';
+import { parseContentReferenceInput, type ContentReferenceInput } from '@varin/application-client';
 import { currentRequestPrincipal, assertPrincipalOwnership } from './request-principal.js';
 import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
 import type { ContextCompactionOwner } from './context-compaction.js';
@@ -115,35 +117,51 @@ export class ThreadAdapter {
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private messageTime?: () => Promise<MessageTimeSettings>;
   bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
-  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
+  private async prepareInput(input: ThreadIdentity & ContentReferenceInput & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
     const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
-    const attachments = parseAttachmentSelections(input.attachments) ?? [];
+    const quoteSelection = prepareQuoteSelections(input);
+    const attachments = parseAttachmentSelections(quoteSelection.attachments) ?? [];
+    const inputImages = quoteSelection.images;
+    if (options.acceptsImages === false) this.assertImagesSupported(inputImages, { acceptsImages: false });
     const attachmentSelections = [...attachments, ...(selected ?? []).map(material => ({ ref: material.snapshotId }))];
     const skills = parseThreadSkills(input.skills, input.text);
     const references = parseThreadObjectReferences(input.references, input.text);
     const text = references?.length && !options.rawReferences ? await createThreadObjectInputPreparer({ runtime: this.runtime, admitSource: this.admitSource })({ ...input, references }, signal) : input.text;
-    const explicit = { ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
-      ...(selected?.length ? { materials: selected } : {}), ...(attachmentSelections.length ? { attachmentSelections, originalImageCount: input.images?.length ?? 0 } : {}) } } : {}) };
-    const metadata = { ...(text === input.text ? {} : { userText: input.text }), ...explicit, ...(sentTime ? { sentTime } : {}) };
-    if (options.rawReferences) return { ...threadInput(input.text, input.images), ...explicit, ...(sentTime ? { sentTime } : {}) };
+    const hasReferences = Boolean(references?.length || quoteSelection.quotes.contentReferences?.length || quoteSelection.quotes.contentReferenceOccurrences?.length);
+    const explicit = { ...(skills?.length ? { skills } : {}), ...(references?.length ? { references } : {}), ...(hasReferences ? { referenceIntent: { text: input.text,
+      ...(selected?.length ? { materials: selected } : {}), ...(attachmentSelections.length ? { attachmentSelections, originalImageCount: inputImages?.length ?? 0 } : {}),
+      ...(input.attachmentImageReferences ? { attachmentImageReferences: input.attachmentImageReferences } : {}) } } : {}) };
+    const hasQuotes = quoteSelection.quotes.contentReferences !== undefined || quoteSelection.quotes.contentReferenceOccurrences !== undefined;
+    const metadata = { ...(hasQuotes ? { text, userText: input.text } : text === input.text ? {} : { userText: input.text }), ...explicit, ...(sentTime ? { sentTime } : {}) };
+    if (options.rawReferences) return { ...threadInput(input.text, inputImages), ...(hasQuotes ? { text: input.text } : {}), ...quoteSelection.quotes, ...explicit, ...(sentTime ? { sentTime } : {}) };
     if (this.attachments && attachmentSelections.length) {
       const fileAttachments = await this.attachments.prepare(input, attachmentSelections, `user-input:${input.key}`, input.threadId, signal);
-      const images = [...input.images ?? []];
-      if (options.acceptsImages !== false) for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+      const quotes = quoteSelection.bind(fileAttachments);
+      const images = [...inputImages ?? []];
+      const attachmentImageReferences: Record<string, number> = {};
+      let nextImageReference = Math.max(0, ...images.map(image => image.reference ?? 0), ...Object.values(input.attachmentImageReferences ?? {}));
+      for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+        const quotedNumber = quotes.contentReferences?.find(quote => quote.attachmentRef === attachment.ref && quote.imageReference !== undefined)?.imageReference;
+        const explicitNumber = input.attachmentImageReferences?.[attachment.ref];
+        if (quotedNumber !== undefined && explicitNumber !== undefined && quotedNumber !== explicitNumber) throw new Error('Quoted image disagrees with the original file binding');
+        const reference = quotedNumber ?? explicitNumber ?? ++nextImageReference;
+        nextImageReference = Math.max(nextImageReference, reference);
+        attachmentImageReferences[attachment.ref] = reference;
+        if (options.acceptsImages === false || images.some(image => image.reference === reference)) continue;
         const source = await this.attachments.read(input, attachment.ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of source.stream) chunks.push(chunk);
-        images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64'), ...(input.attachmentImageReferences?.[attachment.ref] === undefined ? {} : { reference: input.attachmentImageReferences[attachment.ref] }) });
+        images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64'), reference });
       }
-      return { ...threadInput(text, images.length ? images : input.images), fileAttachments, ...metadata };
+      return { ...threadInput(text, images.length ? images : inputImages), fileAttachments, ...metadata, ...(Object.keys(attachmentImageReferences).length ? { attachmentImageReferences } : {}), ...quotes };
     }
     if (attachments.length) throw new Error('Thread attachment admission is unavailable');
-    if (!selected?.length) return { ...threadInput(text, input.images), ...metadata };
+    if (!selected?.length) return { ...threadInput(text, inputImages), ...metadata, ...quoteSelection.bind([]) };
     if (!this.inputMaterials) throw new Error('Thread material admission is unavailable');
     const materials = await this.inputMaterials(input, selected, signal);
     signal?.throwIfAborted();
-    return { ...threadInput(materialInputText(text, materials), input.images), ...metadata, userText: input.text };
+    return { ...threadInput(materialInputText(text, materials), inputImages), ...metadata, ...quoteSelection.bind([]), userText: input.text };
   }
 
   private compaction?: ContextCompactionOwner;
@@ -510,10 +528,12 @@ export class ThreadAdapter {
     const child=await this.runtime.child(operationId,signal);
     return this.fileTarget({runtime:'agent',threadId:child.child_thread_id,branchId:child.child_branch_id,itemId,path},signal);
   }
-  async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia'>, signal?: AbortSignal) {
+  async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia' | 'imageReferences' | 'contentReferences' | 'contentReferenceOccurrences'> & ContentReferenceInput, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
-    const selections = parseAttachmentSelections(request.attachments);
-    if (!selections?.length) return this.runtime.sendMessage({ ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+    const quoteSelection = prepareQuoteSelections(request);
+    if (quoteSelection.images?.length) throw new Error('Message images must be uploaded through the original attachment owner');
+    const selections = parseAttachmentSelections(quoteSelection.attachments);
+    if (!selections?.length) return this.runtime.sendMessage({ ...request, ...quoteSelection.bind([]), senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
     if (!this.attachments) throw new Error('Thread attachment admission is unavailable');
     let targetThreadId = request.targetThreadId;
     if (!targetThreadId && request.replyTo) {
@@ -527,15 +547,25 @@ export class ThreadAdapter {
     const preparedAttachments = await this.attachments.prepare(identity, selections, `user-message:${request.key}`, targetThreadId, signal);
     let dispatched = false;
     try {
+      const quotes = quoteSelection.bind(preparedAttachments);
       const preparedAttachmentMedia = [];
+      const imageReferences: number[] = [];
+      const attachmentImageReferences: Record<string, number> = {};
+      let nextImageReference = Math.max(0, ...Object.values(request.attachmentImageReferences ?? {}));
       for (const attachment of preparedAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
         const original = await this.attachments.read(identity, attachment.ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of original.stream) chunks.push(chunk);
         preparedAttachmentMedia.push({ media_type: attachment.mimeType, data_base64: Buffer.concat(chunks).toString('base64') });
+        const quotedNumber = quotes.contentReferences?.find(quote => quote.attachmentRef === attachment.ref && quote.imageReference !== undefined)?.imageReference;
+        const explicitNumber = request.attachmentImageReferences?.[attachment.ref];
+        if (quotedNumber !== undefined && explicitNumber !== undefined && quotedNumber !== explicitNumber) throw new Error('Quoted image disagrees with the original file binding');
+        const number = quotedNumber ?? explicitNumber ?? ++nextImageReference;
+        nextImageReference = Math.max(nextImageReference, number);
+        imageReferences.push(number); attachmentImageReferences[attachment.ref] = number;
       }
       dispatched = true;
-      return await this.runtime.sendMessage({ ...request, preparedAttachments, preparedAttachmentMedia, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
+      return await this.runtime.sendMessage({ ...request, attachments: selections, ...quotes, ...(imageReferences.length ? { imageReferences, attachmentImageReferences } : {}), preparedAttachments, preparedAttachmentMedia, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);
     } catch (error) {
       if (!dispatched || error instanceof KernelRequestError) {
         try { await this.attachments.releaseUnpublished(identity, `user-message:${request.key}`, targetThreadId, preparedAttachments.map(item => item.ref)); }
@@ -582,12 +612,12 @@ export class ThreadAdapter {
       await this.requireIdentity(input, signal);
       const child = await this.runtime.childForThread(input.threadId, signal);
       if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
-      let existingReference = Boolean(input.references?.length && (await this.runtime.childExecutions(child.operation_id, signal))
+      let existingReference = Boolean((input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length) && (await this.runtime.childExecutions(child.operation_id, signal))
         .some(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key));
       let preparedInput;
       try { preparedInput = await this.prepareInput(input, signal, { rawReferences: existingReference }); }
       catch (error) {
-        if (!input.references?.length || !(await this.runtime.childExecutions(child.operation_id, signal))
+        if (!(input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length) || !(await this.runtime.childExecutions(child.operation_id, signal))
           .some(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key)) throw error;
         existingReference = true;
         preparedInput = await this.prepareInput(input, signal, { rawReferences: true });
@@ -785,10 +815,17 @@ export class ThreadAdapter {
     const selected = await this.runtime.historyItem(reference, signal);
     const attachments = (selected.content as { attachments?: import('@varin/protocol').StoredMedia[] }).attachments;
     const imageReferences = (selected.content as { imageReferences?: number[] }).imageReferences;
-    if (!attachments?.length) return { ...selection, editorImages: [] as ImageAttachment[] };
+    const quoteContent = selected.content as ContentReferenceInput & { fileAttachments?: import('@varin/protocol').Attachment[]; attachmentImageReferences?: Record<string, number> };
+    const quoteSelection = { ...selection,
+      ...(quoteContent.contentReferences === undefined ? {} : { editorContentReferences: quoteContent.contentReferences }),
+      ...(quoteContent.contentReferenceOccurrences === undefined ? {} : { editorContentReferenceOccurrences: quoteContent.contentReferenceOccurrences }),
+      ...(quoteContent.fileAttachments === undefined ? {} : { editorAttachments: quoteContent.fileAttachments }),
+      ...(quoteContent.attachmentImageReferences === undefined ? {} : { editorAttachmentImageReferences: quoteContent.attachmentImageReferences }) };
+    if (!attachments?.length) return { ...quoteSelection, editorImages: [] as ImageAttachment[] };
     const editorImages: ImageAttachment[] = [];
     for (const [partIndex, media] of attachments.entries()) {
       if (!media.media_type.startsWith('image/')) continue;
+      if (imageReferences?.[partIndex] !== undefined && Object.values(quoteContent.attachmentImageReferences ?? {}).includes(imageReferences[partIndex]!)) continue;
       const chunks: Buffer[] = []; let count = 1; let total = 0;
       for (let chunkIndex = 0; chunkIndex < count; chunkIndex++) {
         const chunk = await this.runtime.mediaRead({ threadId: input.threadId, branchId: input.branchId,
@@ -801,7 +838,7 @@ export class ThreadAdapter {
       if (bytes.length !== total) throw new Error('Original input media is incomplete');
       editorImages.push({ mimeType: media.media_type, data: bytes.toString('base64'), ...(imageReferences ? { reference: imageReferences[partIndex] } : {}) });
     }
-    return { ...selection, editorImages };
+    return { ...quoteSelection, editorImages };
   }
   async navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }, signal?: AbortSignal) {
     await this.requireIdentity(input);
@@ -1010,13 +1047,13 @@ export class ThreadAdapter {
         // atomically; the latest selected project/remote source always wins.
         const candidateSource = input.source ?? await this.defaultDeviceSource?.(input) ?? null;
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length), acceptsImages: model.configuration.acceptsImages !== false }), configuration: model.configuration,
+          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length), acceptsImages: model.configuration.acceptsImages !== false }), configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: candidateSource ? {
             resourceOwner: candidateSource.resourceOwner, workspaceId: candidateSource.workspaceId, executionWorkspaceId: candidateSource.executionWorkspaceId,
             ...(candidateSource.mode==='native_workspace'&&candidateSource.nativeScope?{nativeScope:candidateSource.nativeScope}:{}),branchId: candidateSource.branchId ?? null, revision: candidateSource.revision ?? null, mode: candidateSource.mode, liveRoot: candidateSource.liveRoot ?? null, ...(candidateSource.environmentRunId ? { environmentRunId: candidateSource.environmentRunId } : {}),
           } : null, enabledTools: candidateSource?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
         };
-        if (input.references?.length || input.skills?.length || parseExplicitSkillCommand(input.text) || this.prepareContext || this.prepareChildProfiles || input.agent) {
+        if (input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length || input.skills?.length || parseExplicitSkillCommand(input.text) || this.prepareContext || this.prepareChildProfiles || input.agent) {
           const accepted = await this.runtime.inputReceipt(command);
           if (accepted) {
             admissionStarted = true;
@@ -1025,7 +1062,7 @@ export class ThreadAdapter {
             return accepted;
           }
         }
-        if (input.references?.length) {
+        if (input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length) {
           try { command.input = await this.prepareInput(input, undefined, { acceptsImages: model.configuration.acceptsImages !== false }); }
           catch (error) {
             const accepted = await this.runtime.inputReceipt(command);
@@ -1126,11 +1163,11 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
+  async enqueue(input: ThreadIdentity & ContentReferenceInput & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);
-      if (input.references?.length) {
+      if (input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length) {
         const accepted = await this.runtime.enqueueReceipt({ key: input.key, threadId: input.threadId, branchId: input.branchId,
           mode: input.mode, input: await this.prepareInput(input, undefined, { rawReferences: true }) });
         if (accepted) {
@@ -1153,8 +1190,8 @@ export class ThreadAdapter {
         if (!previous) throw new Error('An initial model selection is required');
         this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
         const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          mode: input.mode, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length), acceptsImages: (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false }) };
-        if (input.references?.length) {
+          mode: input.mode, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length), acceptsImages: (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false }) };
+        if (input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length) {
           try { command.input = await this.prepareInput(input, undefined, { acceptsImages: (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false }); }
           catch (error) {
             const accepted = await this.runtime.enqueueReceipt(command);
@@ -1250,25 +1287,26 @@ export class ThreadAdapter {
     return result;
   }
 
-  async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal, skills?: ThreadSkillSelection[]) {
+  async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal, skills?: ThreadSkillSelection[], quotes?: ContentReferenceInput) {
     const queued = await this.requireInput(inputId);
     if (queued.state !== 'queued' || queued.revision !== expectedRevision) {
       throw Object.assign(new Error('Queued input changed'), { code: 'thread-conflict' });
     }
     if (images?.length) this.assertImagesSupported(images, (await this.requireRun(queued.run_id)).configuration);
     const existing = typeof queued.content === 'string' ? { text: queued.content }
-      : queued.content as { text?: string; userText?: string; attachments?: unknown[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; referenceIntent?: { text: string; materials?: ThreadMaterialAttachment[]; attachmentSelections?: AttachmentSelection[]; originalImageCount?: number } };
+      : queued.content as ContentReferenceInput & { text?: string; userText?: string; attachments?: unknown[]; fileAttachments?: unknown[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; referenceIntent?: { text: string; materials?: ThreadMaterialAttachment[]; attachmentSelections?: AttachmentSelection[]; originalImageCount?: number } };
     const existingText = existing.userText ?? existing.text ?? '';
     const unchanged = text === existingText;
     // Text-only edits preserve accepted media; an explicit images array replaces/removes it.
     const selections = parseThreadSkills(skills === undefined && unchanged ? existing.skills : skills, text);
     const contentText = unchanged ? existing.text ?? text : text;
+    const quoteMetadata = parseContentReferenceInput(quotes ?? (existing.contentReferences === undefined && existing.contentReferenceOccurrences === undefined ? {} : { ...existing, contentReferenceOccurrences: unchanged ? existing.contentReferenceOccurrences ?? [] : [] }), text);
     const content = { ...(images === undefined ? { text: contentText } : threadInput(contentText, images)),
       ...(unchanged && existing.userText !== undefined ? { userText: existing.userText } : {}),
       ...(unchanged && existing.references?.length ? { references: existing.references } : {}),
       ...(unchanged && existing.referenceIntent ? { referenceIntent: { ...existing.referenceIntent, ...(images !== undefined && existing.referenceIntent.originalImageCount !== undefined ? { originalImageCount: images.length } : {}) } } : {}),
-      ...(selections?.length ? { skills: selections } : {}) };
-    if (!text.length && !(images === undefined ? existing.attachments?.length : images.length)) throw new Error('Text or images are required');
+      ...(selections?.length ? { skills: selections } : {}), ...quoteMetadata };
+    if (!text.length && !(images === undefined ? existing.attachments?.length : images.length) && !existing.fileAttachments?.length && !quoteMetadata.contentReferences?.length) throw new Error('Text or images are required');
     let inputPreparation: InputResourcePreparation | undefined;
     if ((!unchanged || !isDeepStrictEqual(selections ?? [], existing.skills ?? []))
       && (selections?.length || parseExplicitSkillCommand(text))) {

@@ -1,7 +1,9 @@
 import React from 'react';
+import { beginContentReferenceInsertion } from '@/lib/agent-editor/attachments';
+import { declarativeDiscussionText } from '@/lib/interactive-ui/discussion';
 import { conversationUiFields, conversationUiText, type ConversationUiField } from '@varin/application-client';
 import { useDeclarativeUi, type DeclarativeUiSource } from '@/lib/interactive-ui/useDeclarativeUi';
-import { composeUiResult, sendUiResult, type UiComposeInput } from '@/lib/interactive-ui/compose';
+import { composeUiResult, sendUiResult, beginUiComposeInsertion, type UiComposeInput } from '@/lib/interactive-ui/compose';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -45,6 +47,7 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
     if (!action || busyRef.current || action.type === 'send' && sentText === text) return;
     if (!pending.current && (missing.length || !surface.current || surface.current.tagName === 'FORM' && !(surface.current as HTMLFormElement).reportValidity())) { setFailure(t('ui.fragment.required')); return; }
     busyRef.current = true; setBusy(true); setFailure(''); setStatus(''); setStatusText(text);
+    const insertion = action.type === 'compose' && view.session ? beginUiComposeInsertion(view.session.identity) : undefined;
     try {
       if (action.type === 'open') { await objectActions.open(action.ref!); return; }
       if (action.type === 'copy') { const copied = await copyTextToClipboard(text); if (!copied.ok) throw new Error(copied.error); setStatus(t('ui.fragment.copied')); return; }
@@ -53,7 +56,7 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
       if (!input || action.type !== 'send') {
         // Freeze the displayed selection before asynchronous snapshot preparation.
         const reference = shown.type === 'object' ? await objectActions.reference(shown.ref) : await view.reference(text);
-        input = { identity: view.session.identity, host: view.host, sourceKey: props.sourceKey, text, reference };
+        input = { identity: view.session.identity, host: view.host, sourceKey: props.sourceKey, text, reference, insertion };
         if (action.type === 'send') { pending.current = input; setPendingText(input.text); }
       }
       if (action.type === 'send') {
@@ -61,7 +64,18 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
         setSentText(input.text); pending.current = undefined; setPendingText(undefined);
       } else { await composeUiResult(input); setStatusText(input.text); setStatus(t('ui.fragment.filled')); }
     } catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { insertion?.dispose(); busyRef.current = false; setBusy(false); }
+  };
+  const quote = async () => {
+    if (!view.session || busyRef.current) return;
+    busyRef.current = true; setBusy(true); setFailure('');
+    const insertion = beginContentReferenceInsertion(view.session.identity);
+    try {
+      const reference = shown.type === 'object' ? await objectActions.reference(shown.ref)
+        : await view.reference(declarativeDiscussionText(shown, view.state));
+      if (reference) insertion.add(reference);
+    } catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
+    finally { insertion.dispose(); busyRef.current = false; setBusy(false); }
   };
   const renderField = (field: ConversationUiField, index: number) => {
     const fieldId = `${id}:${field.key}`, value = view.values[field.key];
@@ -94,8 +108,10 @@ export const DeclarativeUiContent = React.memo(function DeclarativeUiContent(pro
   };
   const selectedTab = shown.type === 'tabs' ? shown.tabs.find(tab => tab.key === view.state.controls.tab) ?? shown.tabs[0] : undefined;
   const Surface = shown.type === 'embed' ? 'div' : 'form';
-  return <Surface ref={(element: HTMLDivElement | HTMLFormElement | null) => { surface.current = element; }} onSubmit={event => event.preventDefault()} data-conversation-ui-fragment={props.sourceKey} className="conversation-ui-fragment my-3 min-w-0 space-y-3 text-foreground" aria-label={shown.label}
+  return <Surface ref={(element: HTMLDivElement | HTMLFormElement | null) => { surface.current = element; }} onSubmit={event => event.preventDefault()} data-conversation-ui-fragment={props.sourceKey} data-chat-view-ref={view.session?.viewRef} data-chat-revision-ref={props.source?.ref} className="conversation-ui-fragment my-3 min-w-0 space-y-3 text-foreground" aria-label={shown.label}
     onFocusCapture={() => { focused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; setShown(props.node); } }}>
+    {shown.type !== 'embed' && view.session && <button type="button" className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-interactive-hover focus-visible:outline-2 focus-visible:outline-primary"
+      disabled={busy} onClick={() => void quote()}><Icon name="chat-quote" className="size-3.5" />{t('chat.context.quoteContent')}</button>}
     {shown !== props.node && <p role="status" className="text-sm text-muted-foreground">{t('ui.fragment.updated')} <button type="button" className={buttonClass} onClick={() => { focused.current = false; setShown(props.node); }}>{t('ui.fragment.applyUpdate')}</button></p>}
     {shown.type === 'form' && shown.label && <p className="font-medium">{shown.label}</p>}
     {fields.length > 0 && <div className="conversation-ui-fields">{fields.map(renderField)}</div>}

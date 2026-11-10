@@ -9,6 +9,11 @@ export interface MarkdownImageAsset {
 export interface MarkdownImageItem { source: string; originalSource?: string; label: string; asset?: MarkdownImageAsset }
 type ImageEntry = { item: MarkdownImageItem; signature: string; image: HTMLImageElement | null; dispose?(): void };
 const originalReaders = new WeakMap<HTMLElement, (signal: AbortSignal) => Promise<MarkdownImageAsset>>();
+/** Preserve the source owner's exact reader across morphs and list unmounts. */
+export function captureMarkdownImageReader(element: HTMLElement) {
+  const reference = element.closest<HTMLElement>('[data-md-image-src],[data-md-image-link]');
+  return reference ? originalReaders.get(reference) : undefined;
+}
 export function readMarkdownImageOriginal(element: HTMLElement, signal: AbortSignal) {
   const reference = element.closest<HTMLElement>('[data-md-image-src]');
   return reference ? originalReaders.get(reference)?.(signal) : undefined;

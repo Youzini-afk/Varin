@@ -1,4 +1,5 @@
 import React from 'react';
+import { useChatQuoteObject, captureAttachmentReference, addChatObjectReference } from '@/components/conversation/chatQuoteObjects';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import type { Attachment } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
@@ -54,6 +55,9 @@ function AttachmentCard({ attachment, data, api, identity, read, draft }: { atta
   const [error, setError] = React.useState<string>();
   const [busy, setBusy] = React.useState(false);
   const card = React.useRef<HTMLDivElement>(null);
+  const captureReference = React.useCallback(() => captureAttachmentReference(identity!, attachment,
+    card.current?.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId), [attachment, identity]);
+  const quoteTarget = useChatQuoteObject(!draft && api && identity && attachment.ref ? captureReference : undefined);
   const owner = React.useRef<{ controller?: AbortController; url?: string; blob?: Blob }>({});
   React.useEffect(() => {
     const state = owner.current;
@@ -82,6 +86,11 @@ function AttachmentCard({ attachment, data, api, identity, read, draft }: { atta
       if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(failure instanceof Error ? failure.message : String(failure));
     } finally { if (!controller.signal.aborted) { state.controller = undefined; setBusy(false); } }
   };
+  const quote = async () => {
+    if (!identity || !api || !attachment.ref || host !== getRuntimeEndpointGeneration()) return;
+    try { await addChatObjectReference(identity, captureReference(), api); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  };
   const download = async () => {
     const blob = await load();
     if (!blob || !owner.current.url || host !== getRuntimeEndpointGeneration()) return;
@@ -100,7 +109,7 @@ function AttachmentCard({ attachment, data, api, identity, read, draft }: { atta
     observer.observe(card.current);
     return () => observer.disconnect();
   }, [data, image]);
-  return <div ref={card} role="group" aria-label={attachment.filename} aria-busy={busy} className="min-w-0 max-w-full space-y-1 typography-meta" data-attachment-ref={attachment.ref || undefined}>
+  return <div ref={node => { card.current = node; quoteTarget(node); }} data-chat-quote-object={!draft && api && identity && attachment.ref ? true : undefined} role="group" aria-label={attachment.filename} aria-busy={busy} className="min-w-0 max-w-full space-y-1 typography-meta" data-attachment-ref={attachment.ref || undefined}>
     <button type="button" title={attachment.filename} aria-label={t('chat.attachments.preview', { name: attachment.filename })}
       className="flex max-w-full items-center gap-2 text-left hover:text-primary" onClick={() => { setOpen(true); void load(); }}>
       {image && url ? <img src={url} alt={attachment.filename} className="size-12 rounded object-cover" /> : <Icon name={image ? 'file-image' : pdf ? 'file-pdf' : 'file'} className="size-5 shrink-0" />}
@@ -108,12 +117,13 @@ function AttachmentCard({ attachment, data, api, identity, read, draft }: { atta
         <span className="block typography-micro text-muted-foreground">{attachmentSize(attachment.byteLength)}</span></span>
     </button>
     {!draft && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-micro text-muted-foreground">
+      {api && identity && attachment.ref && <button type="button" disabled={busy} onClick={() => void quote()}>{t(image ? 'chat.context.quoteImage' : 'chat.context.quoteFile')}</button>}
       <button type="button" aria-label={`${t('chat.media.download')}: ${attachment.filename}`} disabled={busy} onClick={() => void download()}>{t('chat.media.download')}</button>
       {attachment.ref && <button type="button" aria-label={`${t('chat.attachments.copyRef')}: ${attachment.filename}`} onClick={() => void copyTextToClipboard(attachment.ref).then(result => { if (!result.ok) setError(result.error); }).catch(failure => setError(String(failure)))}>{t('chat.attachments.copyRef')}</button>}
     </div>}
     {busy && <p role="status">{t('chat.media.loading')}</p>}
     {error && <p role="alert" className="break-words text-destructive">{error}</p>}
-    {open && url && image ? <ConversationImageViewer src={url} identity={identity} sourceId={attachment.ref || localId} label={attachment.filename} onClose={()=>setOpen(false)}/> : <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-[90vw]" aria-describedby={undefined}><DialogTitle className="break-words">{attachment.filename}</DialogTitle>
+    {open && url && image ? <ConversationImageViewer src={url} identity={identity} sourceId={attachment.ref || localId} sourceReference={identity ? captureReference().source : undefined} label={attachment.filename} onClose={()=>setOpen(false)}/> : <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-[90vw]" aria-describedby={undefined}><DialogTitle className="break-words">{attachment.filename}</DialogTitle>
       {url && image ? <img src={url} alt={attachment.filename} className="max-h-[70vh] max-w-full object-contain" />
         : url && pdf ? <iframe sandbox="" src={url} title={attachment.filename} className="h-[65vh] w-full" />
           : preview !== undefined ? <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap break-words text-sm">{preview}</pre>
