@@ -16,7 +16,8 @@ struct Fixture {
     run: String,
 }
 impl Fixture {
-    fn new() -> Self {
+    fn new() -> Self { Self::with_uncommitted_spawn(false) }
+    fn with_uncommitted_spawn(uncommitted: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "varin-process-wait-review-{}",
             uuid::Uuid::new_v4()
@@ -46,10 +47,10 @@ impl Fixture {
             run: receipt.run_id,
         };
         f.state(RunState::Runnable, None);
-        f.spawn();
+        f.spawn(uncommitted);
         f
     }
-    fn spawn(&mut self) {
+    fn spawn(&mut self, uncommitted: bool) {
         let range = HistoryRange {
             branch_id: "branch".into(),
             ancestor_id: None,
@@ -127,7 +128,7 @@ impl Fixture {
             )
             .unwrap();
         let completion = ToolCompletion::JobAccepted {
-            content: None,
+            content: uncommitted.then(||json!({"processId":PROCESS,"status":"running"}).into()),
             operation_id: PROCESS.into(),
             phase: "running".into(),
             effect: Effect::Dispatched,
@@ -138,6 +139,7 @@ impl Fixture {
             completion: completion.clone(),
             executor_stopped: false,
         });
+        if uncommitted { return; }
         self.record(ExecutionRecord::ToolBatchCommitted {
             request_id: "spawn-request".into(),
             results: vec![ToolResult {
@@ -155,7 +157,8 @@ impl Fixture {
     fn state(&mut self, state: RunState, waiting_on: Option<String>) {
         self.record(ExecutionRecord::StateChanged { state, waiting_on });
     }
-    fn wait(&mut self, suffix: &str) -> Wait {
+    fn wait(&mut self, suffix: &str) -> Wait { self.wait_selected(suffix, PROCESS) }
+    fn wait_selected(&mut self, suffix: &str, selected:&str) -> Wait {
         let request = format!("request-{suffix}");
         let range = HistoryRange {
             branch_id: "branch".into(),
@@ -211,7 +214,7 @@ impl Fixture {
             call_id: "wait".into(),
             name: WAIT_TOOL.into(),
             schema_version: "1".into(),
-            arguments: json!({"processId":PROCESS}),
+            arguments: json!({"processId":selected}),
         };
         self.record(ExecutionRecord::ModelFinished {
             request_id: request.clone(),
@@ -673,5 +676,100 @@ fn policy_process_observer_cancel_before_park_is_delivered_without_stopping_proc
     f.terminal();
     f.db.deliver_process_waits().unwrap();
     assert_eq!(f.facts().len(), 1);
+    f.cleanup();
+}
+
+#[test]
+fn short_process_wait_keeps_original_call_and_target_after_reopen() {
+    let mut f=Fixture::new();
+    let reference=f.db.register_model_reference(varin_runtime::catalog::model_references::ReferenceKind::Process,"fixture-host",&json!({"operationId":PROCESS}),&f.run).unwrap();
+    let wait=f.wait_selected("short-reference",&reference);
+    assert_eq!(wait.subject,PROCESS);
+    let operation=f.db.operation("request-short-reference:tool:wait").unwrap();
+    let original=f.db.capture_operation_read(operation).load().unwrap();
+    assert_eq!(original.intent["call"]["arguments"]["processId"],reference,"persisted model call is never replaced by resolved arguments");
+    let mut f=f.reopen();
+    assert_eq!(f.db.resolve_managed_process_reference(&reference).unwrap(),PROCESS);
+    let context=ToolExecutionContext{run_id:f.run.clone(),operation_id:"request-short-reference:tool:wait".into(),origin:ToolOrigin::ModelStep{request_id:"request-short-reference".into()}};
+    assert_eq!(f.db.wait_for_process(&context,PROCESS).unwrap().id,wait.id);
+    f.cleanup();
+}
+
+#[test]
+fn presaved_process_receipt_accepts_projection_once_and_commits_original_raw_evidence() {
+    use std::sync::Mutex;
+    use varin_runtime::catalog::model_references::ReferenceKind;
+    let mut f = Fixture::with_uncommitted_spawn(true);
+    let context = ToolExecutionContext {
+        run_id: f.run.clone(), operation_id: PROCESS.into(),
+        origin: ToolOrigin::ModelStep { request_id: "spawn-request".into() },
+    };
+    let before = f.db.capture_operation_read(f.db.operation(PROCESS).unwrap()).load().unwrap();
+    let raw: ToolCompletion = before.call_completion.clone().unwrap()
+        .map_media::<varin_runtime::output::ResolvedMedia, ()>(|_| unreachable!("fixture has no media")).unwrap();
+    let reference = f.db.register_model_reference(ReferenceKind::Process, "fixture-host",
+        &json!({"operationId":PROCESS}), &f.run).unwrap();
+    let mut projected = raw.clone();
+    let ToolCompletion::JobAccepted { content: Some(content), .. } = &mut projected else { panic!("original process receipt missing"); };
+    content.model_data = Some(json!({"processId":reference,"status":"running"}));
+    let epoch = f.db.epoch();
+    let owner = Mutex::new(f.db);
+    let settled = owner.settle_tool(&context, epoch, ToolExecutionReceipt {
+        completion: projected.clone(), executor_stopped: false,
+    }).unwrap();
+    assert_eq!(settled.completion, projected);
+    assert!(!settled.executor_stopped);
+    let mut db = owner.into_inner().unwrap();
+    let after = db.capture_operation_read(db.operation(PROCESS).unwrap()).load().unwrap();
+    assert_eq!(after.result, before.result, "raw original process result must not be replaced");
+    assert_eq!(after.intent, before.intent, "model ToolCall remains original");
+    assert_eq!(serde_json::to_value(&after.call_completion).unwrap(), serde_json::to_value(Some(&projected)).unwrap());
+    db.commit_execution(&f.run, epoch, &ExecutionRecord::ToolBatchCommitted {
+        request_id: "spawn-request".into(), results: vec![ToolResult {
+            request_id: "spawn-request".into(), call_id: "process".into(), completion: projected.clone(),
+        }],
+    }).unwrap();
+    // A different later projection cannot rewrite the now-published model history.
+    let mut replacement = projected.clone();
+    if let ToolCompletion::JobAccepted { content: Some(body), .. } = &mut replacement {
+        body.model_data = Some(json!({"processId":"proc:999","status":"changed"}));
+    }
+    let owner = Mutex::new(db);
+    assert_eq!(owner.settle_tool(&context, epoch, ToolExecutionReceipt {
+        completion: replacement, executor_stopped: false,
+    }).unwrap().completion, projected);
+    let db = owner.into_inner().unwrap();
+    drop(db);
+    let db = Catalog::open(&f.root).unwrap();
+    let reopened = db.capture_operation_read(db.operation(PROCESS).unwrap()).load().unwrap();
+    assert_eq!(serde_json::to_value(&reopened.call_completion).unwrap(), serde_json::to_value(Some(&projected)).unwrap());
+    assert_eq!(reopened.result, before.result);
+    assert_eq!(db.resolve_managed_process_reference(&reference).unwrap(), PROCESS);
+    drop(db);
+    std::fs::remove_dir_all(f.root).unwrap();
+}
+
+#[test]
+fn new_process_lifecycle_event_reuses_original_ref_without_raw_identifiers_in_model_view() {
+    let mut f=Fixture::new();
+    let reference=f.db.operation_model_reference(PROCESS,&f.run).unwrap();
+    f.wait("projected-terminal");
+    f.terminal();
+    assert_eq!(f.db.deliver_process_waits().unwrap(),vec![f.run.clone()]);
+    let history=f.db.execution_history("branch").unwrap();
+    let output=history.iter().find_map(|item|{
+        if !item.id.starts_with("process-result:"){return None;}
+        if let Content::Output{output}=&item.content {Some(output)}else{None}
+    }).expect("actual process lifecycle event");
+    assert_eq!(output.data["processId"],PROCESS);
+    assert_eq!(output.model_data()["operationRef"],reference);
+    assert_eq!(output.model_data()["output"]["read"]["arguments"]["processId"],reference);
+    assert!(!output.model_data().to_string().contains(PROCESS));
+    for part in &output.parts {if let varin_runtime::output::OutputPart::Text{text}=part {assert!(!text.contains(PROCESS));}}
+    let before=f.facts();
+    let mut f=f.reopen();
+    f.db.deliver_process_waits().unwrap();
+    assert_eq!(f.facts(),before);
+    assert_eq!(f.db.resolve_managed_process_reference(&reference).unwrap(),PROCESS);
     f.cleanup();
 }

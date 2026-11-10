@@ -899,3 +899,30 @@ fn passive_delivery_before_and_after_reopen_preserves_the_original_pending_decis
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn short_message_references_preserve_original_reply_queue_and_access_owners() {
+    let mut f=Fixture::new();let child=f.accept();f.settle_exchange();
+    let original=parent_message(&mut f,"short-reference-original","Original immutable message body");
+    let reference=f.db.message_reference(&original.identity.message_id,&original.identity.message_id).unwrap();
+    assert!(reference.starts_with("msg:"));
+    let read=f.db.capture_message("thread:parent","branch:parent",&reference).unwrap().load().unwrap();
+    assert_eq!(read.text,"Original immutable message body");
+    assert_eq!(read.summary.receipt,original);
+    let mut reply=input(&child.child_thread_id,&child.child_branch_id,"Reply using the selected short message");
+    reply.reply_to=Some(reference.clone());
+    let accepted=send(&mut f,"short-reference-reply","thread:parent","branch:parent",reply);
+    assert_eq!(accepted.identity.reply_to.as_deref(),Some(original.identity.message_id.as_str()));
+    assert_eq!(accepted.identity.target_thread_id,child.child_thread_id);
+    let reply_ref=f.db.message_reference(&accepted.identity.message_id,&accepted.identity.message_id).unwrap();
+    let view=f.db.capture_message("thread:parent","branch:parent",&reply_ref).unwrap().load().unwrap();
+    f.db.control_queued_message("thread:parent","branch:parent",&reply_ref,view.summary.revision,"cancel").unwrap();
+    assert_eq!(f.db.capture_message("thread:parent","branch:parent",&reply_ref).unwrap().load().unwrap().summary.state,InputState::Cancelled);
+    f.db.create_thread("unrelated-reader","unrelated-reader-branch").unwrap();
+    assert!(f.db.capture_message("unrelated-reader","unrelated-reader-branch",&reference).is_err(),"short references do not grant message ownership");
+    let root=f.root.clone();drop(f);
+    let mut db=Catalog::open(&root).unwrap();
+    assert_eq!(db.message_reference(&original.identity.message_id,&original.identity.message_id).unwrap(),reference);
+    assert_eq!(db.capture_message("thread:parent","branch:parent",&reference).unwrap().load().unwrap().text,"Original immutable message body");
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}

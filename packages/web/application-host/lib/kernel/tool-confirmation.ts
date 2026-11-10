@@ -23,7 +23,7 @@ export async function withToolConfirmation<T>(
 ): Promise<T> {
   if (confirmations.has(scope)) throw new Error('tool_confirmation_already_active');
   confirmations.set(scope, { owner: { ...owner }, toolName: authority.toolName,
-    arguments: structuredClone(authority.arguments), consumed: false });
+    arguments: structuredClone(authority.resolvedArguments ?? authority.arguments), consumed: false });
   try { return await work(); }
   finally { confirmations.delete(scope); }
 }
@@ -36,7 +36,7 @@ export function requireConfirmedToolInvocation(context: HostCapabilityCallContex
   const proof = context.invocation && confirmations.get(context.invocation);
   if (!proof || proof.consumed || authority.operation !== 'effect'
     || ownerKey(proof.owner) !== ownerKey(context.owner) || proof.toolName !== authority.toolName
-    || !isDeepStrictEqual(proof.arguments, input) || !isDeepStrictEqual(authority.arguments, input)) {
+    || !isDeepStrictEqual(proof.arguments, input) || !isDeepStrictEqual(authority.resolvedArguments ?? authority.arguments, input)) {
     throw new Error('tool_confirmation_unavailable');
   }
   proof.consumed = true;

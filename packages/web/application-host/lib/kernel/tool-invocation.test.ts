@@ -235,3 +235,19 @@ test('plugin user follows the admitted invocation, rejects forged scopes and exp
     assert.throws(() => requirePluginPrincipal({ owner, signal, invocation }), /unavailable/);
   });
 });
+
+test('typed resolution never rewrites original invocation proof and only the exact resolved domain input executes', async () => {
+  const original = { id:'settings:17', set:{enabled:false} };
+  const resolved = { id:'harness.tools', expectedRevision:'observed', set:{enabled:false} };
+  const signal = new AbortController().signal;
+  await withToolInvocation({authority:{...authority,arguments:original,resolvedArguments:resolved},owner,signal}, async invocation => {
+    const context = {owner,signal,invocation};
+    assert.deepEqual(requireToolInvocation(context).arguments,original);
+    assert.throws(() => runToolDomainCall(context,{...input,arguments:{...resolved,expectedRevision:'latest'}},async () => receipt),/tool_domain_call_changed/);
+    assert.deepEqual(await runToolDomainCall(context,{...input,arguments:resolved},async admitted => {
+      assert.deepEqual(admitted.arguments,original);
+      assert.deepEqual(admitted.resolvedArguments,resolved);
+      return receipt;
+    }),receipt.completion.kind === 'result' ? receipt.completion.content.data : null);
+  });
+});

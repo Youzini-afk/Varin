@@ -467,6 +467,7 @@ mod tests {
                 occurred_at_ms: 1,
                 attributes: json!({}),
                 content: crate::output::OutputBody {
+                    model_data: None,
                     data: Value::Null,
                     parts: vec![
                         crate::output::OutputPart::Text {

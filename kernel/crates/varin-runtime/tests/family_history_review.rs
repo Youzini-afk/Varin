@@ -207,53 +207,32 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
 }
 
 #[test]
-fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_temporary_tail() {
+fn cancelled_report_leaves_current_directory_only_after_actual_history_delivery() {
     let mut f=Fixture::new();
-    assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
-    let child=f.accept();f.settle_exchange();f.db.cancel_child(&child.operation_id).unwrap();
-    let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
-    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"archive-settling-child".into(),expected_revision:revision,title:None,title_mode:None,pinned:None,archived:Some(true)}).unwrap();
-    let attention=f.db.capture_attention_read().load(&||false).unwrap();
-    assert!(attention.branches.iter().any(|b|b.thread_id==child.child_thread_id&&b.archived&&b.has_unsettled_work));
-    let relation=attention.team_executions.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
-    assert_eq!(relation.state,"cancelled");assert_eq!(relation.parent_run_id,child.parent_run_id);
-    assert!(relation.activity.is_none());assert!(relation.child_run_id.is_none());
-    let tail=f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().unwrap();
-    let Content::Text{text}=&tail.content else {panic!("status text")};
-    assert!(text.contains(&child.agent_id));assert!(text.contains("reportCursor"));
-    let before=f.db.history("branch:parent").unwrap().len();
-    let launch=f.db.launch_intent(&f.context.run_id).unwrap().unwrap().selection;
-    let range=HistoryRange{branch_id:"branch:parent".into(),ancestor_id:None,leaf_id:f.db.head("branch:parent").unwrap()};
-    let snapshot=RequestSnapshot {view:RequestView {request_id:"consume-agent-report".into(),run_id:f.context.run_id.clone(),
-        origin:RequestOrigin::Conversation{compaction:None,step:2,history_range:range.clone()},
-        binding:RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,provider_id: None, tokenizer: None,
-        request_context:None,child_dispatch:f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,goal:None,resource_activations:vec![],resource_checkpoint_id:None,
-            connection_identity:launch.connection_identity,provider_family:launch.provider_family,model:launch.model,credential_ref:Some("credential-ref".into()),
-            configuration_generation:2,tool_schema_generation:1,tools:launch.tools,instruction_sources:vec![],memory_checkpoint:None,attachment_refs:vec![],environment_cursor:0,history_range:range},
-        history:vec![tail.into()]},serialized:json!({}).into()};
-    let epoch=f.db.epoch();
-    for record in [ExecutionRecord::RequestPrepared{snapshot:snapshot.into()},ExecutionRecord::ModelDispatched{request_id:"consume-agent-report".into()},
-        ExecutionRecord::ModelFinished{request_id:"consume-agent-report".into(),outcome:ModelOutcome::Completed,finish_reason:Some(FinishReason::Stop),
-            items:vec![ProviderItem{id:"received-report".into(),content:Content::Text{text:"received".into()},opaque:None}],interrupted_deltas:vec![],usage:UsageReceipt::default(),failure:None}] {
-        f.db.commit_execution(&f.context.run_id,epoch,&record).unwrap();
-    }
-    assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
-    let hidden = f.db.capture_attention_read().load(&||false).unwrap();
-    assert!(!hidden.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
-    assert!(!hidden.delegations.iter().any(|r|r.child_thread_id==child.child_thread_id));
-    let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
-    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"show-completed-child".into(),expected_revision:revision,title:None,title_mode:None,pinned:None,archived:Some(false)}).unwrap();
-    let visible = f.db.capture_attention_read().load(&||false).unwrap();
-    assert!(!visible.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
-    let relation=visible.delegations.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
-    assert_eq!(relation.accepted_cursor,Some(child.cursor));
-    assert_eq!(relation.parent_branch_id,child.parent_branch_id);
-    let history=f.db.history("branch:parent").unwrap();assert_eq!(history.len(),before+1);
-    assert!(history.iter().all(|item|!item.content.to_string().contains("当前协作任务")));
-    let page=f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,FamilyListQuery{scope:Some("history".into()),query:Some(child.agent_id.to_lowercase()),limit:Some(1),..Default::default()},&||false).unwrap();
-    assert_eq!(page.members[0].thread_id,child.child_thread_id);assert!(!page.members[0].current);
-    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+    let child=f.accept(); f.settle_exchange(); f.db.cancel_child(&child.operation_id).unwrap();
+    let current=|f:&Fixture| f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,
+        FamilyListQuery{scope:Some("current".into()),query:Some(child.agent_id.clone()),..Default::default()},&||false).unwrap().members;
+    assert!(current(&f).iter().any(|member|member.thread_id==child.child_thread_id));
+    let before=f.db.history("branch:parent").unwrap();
+    let owner=std::sync::Mutex::new(f.db);
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    f.db=owner.into_inner().unwrap();
+    // Queued is not delivered, and reading the directory is not acknowledgement.
+    assert!(current(&f).iter().any(|member|member.thread_id==child.child_thread_id));
+    assert_eq!(f.db.history("branch:parent").unwrap().len(),before.len());
+    let head=f.db.head("branch:parent").unwrap();
+    let prepared=f.db.prepare_input_delivery(&child.parent_run_id,f.db.epoch(),head.as_deref()).unwrap().load().unwrap();
+    f.db.admit_input_delivery(prepared).unwrap().unwrap();
+    assert!(!current(&f).iter().any(|member|member.thread_id==child.child_thread_id));
+    let history=f.db.history("branch:parent").unwrap();
+    assert_eq!(history.len(),before.len()+1);
+    assert_eq!(&history[..before.len()],before.as_slice());
+    let page=f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,
+        FamilyListQuery{scope:Some("history".into()),query:Some(child.agent_id.to_lowercase()),limit:Some(1),..Default::default()},&||false).unwrap();
+    assert_eq!(page.members[0].thread_id,child.child_thread_id); assert!(!page.members[0].current);
+    let root=f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
 }
+
 #[test]
 fn retained_output_pages_return_exact_text_and_complete_records() {
     let mut f = Fixture::new();
@@ -1193,10 +1172,9 @@ fn a_completed_fork_does_not_relabel_an_active_root_thread_as_completed() {
         .iter()
         .find(|member| member.thread_id == "thread:parent")
         .unwrap();
-    assert!(root_member
-        .branches
-        .iter()
-        .any(|branch| branch.active_run_id.as_deref() == Some(root_run.as_str())));
+    assert!(root_member.branches.iter().any(|branch|branch.active_run_id.as_deref()==Some(root_run.as_str())), "UI directory retains branch navigation");
+    let overview = f.db.capture_family_read(&child.child_thread_id,Some("thread:parent"),None).unwrap().overview(&||false).unwrap();
+    assert!(overview["executions"].as_array().unwrap().iter().any(|execution|execution["runId"]==root_run));
     assert_eq!(
         root_member.state,
         serde_json::to_value(still_active.state)
@@ -1314,4 +1292,185 @@ fn a_completed_fork_does_not_relabel_an_active_root_thread_as_completed() {
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn task_directory_does_not_open_dispatch_bodies_or_enumerate_branches() {
+    let mut f = Fixture::new();
+    let child = f.accept(); f.settle_exchange();
+    let body = varin_runtime::content::object_path(&f.root.join("content"), child.input_ref["content_object"].as_str().unwrap()).unwrap();
+    std::fs::write(&body, b"unavailable original large task body").unwrap();
+    let directory = f.db.capture_family_read("thread:parent",None,None).unwrap().directory_page(false,FamilyListQuery {scope:Some("all".into()),..Default::default()},&||false).unwrap();
+    let member = directory.members.iter().find(|member|member.thread_id==child.child_thread_id).unwrap();
+    assert!(member.task.is_none());
+    assert!(member.source.is_none());
+    assert!(member.branches.is_empty());
+    assert_eq!(member.agent_id,child.agent_id);
+    assert!(f.db.capture_family_read("thread:parent",Some(&child.agent_id),None).unwrap().overview(&||false).is_err(),
+        "only an explicit overview opens the original task");
+    let root=f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn overview_reads_indexed_assistant_text_without_loading_unrelated_tool_bodies() {
+    let mut f=Fixture::new(); let child=f.accept(); f.settle_exchange();
+    let run=f.context.run_id.clone();
+    append(&mut f,&run,"A real assistant observation, not a generated progress summary.");
+    let head=f.db.head("branch:parent").unwrap();
+    let tool=f.db.append_history(&run,f.db.epoch(),head.as_deref(),HistorySource::Tool,
+        json!({"veryLargeResult":"unrelated output".repeat(10000)}),None).unwrap();
+    let raw=rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    let body:String=raw.query_row("SELECT body FROM history WHERE id=?1",[&tool.id],|row|row.get(0)).unwrap();
+    let metadata:HistoryItem=serde_json::from_str(&body).unwrap(); drop(raw);
+    let path=varin_runtime::content::object_path(&f.root.join("content"),metadata.content["content_object"].as_str().unwrap()).unwrap();
+    std::fs::write(path,b"unreadable irrelevant tool body").unwrap();
+    let overview=f.db.capture_family_read(&child.child_thread_id,Some("thread:parent"),None).unwrap().overview(&||false).unwrap();
+    assert_eq!(overview["executions"][0]["latestAssistantMessage"]["text"],"A real assistant observation, not a generated progress summary.");
+    assert!(overview["task"].is_null(),"ordinary work is not given a synthetic dispatch task");
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn short_history_continuation_survives_restart_and_preserves_its_original_head() {
+    use varin_runtime::catalog::model_references::ReferenceKind;
+    let mut f=Fixture::new(); let child=f.accept(); f.settle_exchange();
+    let run=f.context.run_id.clone();
+    append(&mut f,&run,"first original answer"); append(&mut f,&run,"second original answer");
+    let page=read(&f,&child.child_thread_id,"thread:parent","branch:parent",request(recent(1)));
+    let arguments=json!({"threadId":"thread:parent","branchId":"branch:parent","runId":null,"anchor":page.anchor,"cursor":page.next_cursor,"query":{"kind":"recent","limit":1,"maxItemBytes":null}});
+    let target=f.db.model_history_read_target("read_thread",&arguments).unwrap();
+    let reference=f.db.register_model_reference(ReferenceKind::Read,"history",&target,&child.operation_id).unwrap();
+    append(&mut f,&run,"later appended answer is outside the original fixed read");
+    let root=f.root.clone();let child_thread=child.child_thread_id.clone();let caller_run=run.clone();drop(f);
+    let mut db=Catalog::open(&root).unwrap();
+    let selected=db.resolve_model_reference(ReferenceKind::Read,&reference).unwrap();
+    let arguments=db.model_history_read_arguments(&caller_run,&selected.target).unwrap();
+    let rebound=db.model_history_read_target("read_thread",&arguments).unwrap();
+    assert_eq!(selected.target,rebound);
+    assert_eq!(db.register_model_reference(ReferenceKind::Read,"history",&rebound,&child.operation_id).unwrap(),reference);
+    let read_request=ReadRequest{run_id:None,anchor:arguments["anchor"].as_str().map(str::to_owned),cursor:arguments["cursor"].as_str().map(str::to_owned),query:serde_json::from_value(arguments["query"].clone()).unwrap()};
+    let continued=db.capture_family_read("thread:parent",Some("thread:parent"),Some("branch:parent")).unwrap().read(read_request.clone(),&||false).unwrap();
+    let repeated=db.capture_family_read("thread:parent",Some("thread:parent"),Some("branch:parent")).unwrap().read(read_request,&||false).unwrap();
+    assert_eq!(continued.items[0].id,repeated.items[0].id);
+    assert_eq!(continued.items[0].body.as_ref().unwrap()["content"]["text"],"first original answer");
+    // The same fixed observation can be transferred within its real family without treating
+    // the old caller's cursor as a capability or switching to the new branch head.
+    let target=db.model_history_read_target("read_thread",&arguments).unwrap();
+    assert_eq!(target,selected.target);
+    assert_ne!(child_thread,"thread:parent");
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn overview_keeps_parallel_accepted_jobs_after_a_later_completed_read() {
+    let mut f=Fixture::new(); let child=f.accept(); f.settle_exchange();
+    let mut jobs=Vec::new();
+    for (id,path) in [("live-one","first.txt"),("live-two","second.txt")] {
+        let context=f.admit_policy_call(ToolCall{call_id:id.into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":path})});
+        f.settle_policy_call(&context,"running");
+        assert_ne!(f.db.operation(&context.operation_id).unwrap().phase,OperationPhase::Terminal);
+        jobs.push(context.operation_id);
+    }
+    let call=ToolCall{call_id:"finished-read".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"later.txt"})};
+    let context=f.admit_policy_call_with_contract(call,ToolContract{name:"file_read".into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Result,lifetime:Lifetime::Call,resources:vec![]});
+    f.db.commit_execution(&context.run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:context.clone(),executor_stopped:true,
+        completion:ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:json!({"text":"finished"}).into()}}).unwrap();
+    let ToolOrigin::PolicyAction{action_id,node_id}=&context.origin else {unreachable!()};
+    let completion=f.db.capture_call_completion(&context.operation_id).unwrap().load().unwrap();
+    f.db.settle_policy_node(&context.run_id,f.db.epoch(),action_id,node_id,&completion).unwrap();
+    let overview=f.db.capture_family_read(&child.child_thread_id,Some("thread:parent"),None).unwrap().overview(&||false).unwrap();
+    let actions=overview["executions"][0]["actions"].as_array().unwrap();
+    for id in jobs {assert!(actions.iter().any(|action|action["operationId"]==id),"live accepted Job was lost: {overview}");}
+    assert!(!actions.iter().any(|action|action["operationId"]==context.operation_id));
+    assert!(overview["executions"][0]["latestAction"].is_null(),"parallel live work must not be replaced by a later finished read");
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn external_directory_pages_use_real_owners_without_opening_item_bodies() {
+    let mut f=Fixture::new_in_bot("directory-bot");
+    let external=|db:&mut Catalog,value:serde_json::Value| {
+        let command=serde_json::from_value(value).unwrap();
+        let prepared=db.prepare_external(command).load().unwrap();
+        db.execute_external(prepared).unwrap().load().unwrap()
+    };
+    for id in ["external-one","external-two"] {
+        external(&mut f.db,json!({"action":"create","id":id,"key":id,"configurationId":"codex","harness":"codex","title":format!("External {id}"),"cwd":"/workspace"}));
+        let turn=external(&mut f.db,json!({"action":"admit","id":id,"key":format!("turn-{id}"),"input":{"text":"original input"}}));
+        external(&mut f.db,json!({"action":"item","id":id,"turnId":turn["id"],"itemId":"large-result","content":{"kind":"assistant","text":"body".repeat(10000)}}));
+    }
+    let options=FamilyListQuery{scope:Some("all".into()),query:Some("External".into()),limit:Some(1),..Default::default()};
+    let first=f.db.capture_family_read("thread:parent",None,None).unwrap().directory_page(false,options.clone(),&||false).unwrap();
+    assert_eq!(first.members.len(),1);assert!(first.members[0].branches.is_empty());assert!(first.members[0].task.is_none());
+    let raw=rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    let bodies:Vec<String>=raw.prepare("SELECT body FROM external_items").unwrap().query_map([],|row|row.get(0)).unwrap().collect::<Result<_,_>>().unwrap();
+    for body in bodies {let value:serde_json::Value=serde_json::from_str(&body).unwrap();let path=varin_runtime::content::object_path(&f.root.join("content"),value["content_object"].as_str().unwrap()).unwrap();std::fs::write(path,b"unavailable body").unwrap();}
+    drop(raw);
+    let second=f.db.capture_family_read("thread:parent",None,None).unwrap().directory_page(false,FamilyListQuery{cursor:first.next_cursor.clone(),..options},&||false).unwrap();
+    assert_eq!(second.members.len(),1);assert_ne!(first.members[0].thread_id,second.members[0].thread_id);assert!(second.next_cursor.is_none());
+    f.db.create_thread("unrelated-owner","unrelated-branch").unwrap();
+    assert!(f.db.capture_family_read("unrelated-owner",None,None).unwrap().directory_page(false,FamilyListQuery{scope:Some("all".into()),..Default::default()},&||false).unwrap().members.is_empty());
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn exact_agent_source_and_admitted_dispatch_source_survive_a_later_run() {
+    let mut f=Fixture::new();let child=f.accept();f.settle_exchange();
+    let caller=f.context.clone();let original=f.db.execution_reference(&caller.run_id).unwrap();
+    let exact=f.db.agent_source(&caller.run_id,&original.reference).unwrap();
+    assert_eq!(exact.run_id,caller.run_id);
+    let mut input=f.input.clone();input.source_agent=Some("thread:parent".into());
+    let fixed=f.db.freeze_dispatch_agent_source(&caller,&input).unwrap().unwrap();
+    f.db.commit_execution(&caller.run_id,f.db.epoch(),&ExecutionRecord::StateChanged{state:RunState::Completed,waiting_on:None}).unwrap();
+    let head=f.db.head("branch:parent").unwrap();
+    let configuration=f.db.run(&caller.run_id).unwrap().configuration;
+    let later=f.db.submit_with_launch(&SubmitInput{key:"later-source-run".into(),thread_id:"thread:parent".into(),branch_id:"branch:parent".into(),expected_head:head,input:json!("new work"),configuration},Some(f.launch.clone())).unwrap();
+    assert_ne!(later.run_id,fixed.run_id);
+    assert_eq!(f.db.agent_source(&later.run_id,"thread:parent").unwrap().run_id,later.run_id);
+    assert_eq!(f.db.agent_source(&later.run_id,&original.reference).unwrap(),exact);
+    assert_eq!(f.db.freeze_dispatch_agent_source(&caller,&input).unwrap().unwrap(),fixed);
+    let root=f.root.clone();drop(f.db);let mut db=Catalog::open(&root).unwrap();
+    assert_eq!(db.freeze_dispatch_agent_source(&caller,&input).unwrap().unwrap(),fixed);
+    input.source_agent=Some(child.agent_id);
+    assert!(db.freeze_dispatch_agent_source(&caller,&input).is_err(),"original selector cannot change on retry");
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn overview_recent_operation_keeps_completion_order_and_original_identity() {
+    let mut f=Fixture::new(); let child=f.accept(); f.settle_exchange();
+    f.db.fail_child_preparation(&child.operation_id,"source unavailable").unwrap();
+    f.db.mark_child_resources_released(&child.execution_id).unwrap();
+    let owner=std::sync::Mutex::new(f.db);
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    f.db=owner.into_inner().unwrap();
+    let first=f.admit_policy_call(ToolCall{call_id:"admitted-first".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"admitted-first"})});
+    f.settle_policy_call(&first,"running");
+    let second=f.admit_policy_call_with_contract(
+        ToolCall{call_id:"admitted-second".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"admitted-second"})},
+        ToolContract{name:"file_read".into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Result,lifetime:Lifetime::Call,resources:vec![]});
+    f.db.commit_execution(&second.run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:second.clone(),executor_stopped:true,
+        completion:ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:json!({"text":"original result"}).into()}}).unwrap();
+    let ToolOrigin::PolicyAction{action_id,node_id}=&second.origin else {unreachable!()};
+    let completion=f.db.capture_call_completion(&second.operation_id).unwrap().load().unwrap();
+    f.db.settle_policy_node(&second.run_id,f.db.epoch(),action_id,node_id,&completion).unwrap();
+    f.db.settle_operation(&first.operation_id,f.db.epoch(),Outcome::Succeeded,Effect::None,json!({"text":"first job completed last"})).unwrap();
+    let progress=f.db.capture_execution_progress(&f.context.run_id).unwrap().load(&||false).unwrap();
+    assert_eq!(progress["actions"],json!([]));
+    assert_eq!(progress["latestAction"]["operationId"],first.operation_id);
+    assert_eq!(progress["latestAction"]["arguments"]["path"],"admitted-first");
+    let third=f.admit_policy_call_with_contract(
+        ToolCall{call_id:"final-read".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"final"})},
+        ToolContract{name:"file_read".into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Result,lifetime:Lifetime::Call,resources:vec![]});
+    f.db.commit_execution(&third.run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:third.clone(),executor_stopped:true,
+        completion:ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:json!({"text":"final result"}).into()}}).unwrap();
+    let ToolOrigin::PolicyAction{action_id,node_id}=&third.origin else {unreachable!()};
+    let completion=f.db.capture_call_completion(&third.operation_id).unwrap().load().unwrap();
+    f.db.settle_policy_node(&third.run_id,f.db.epoch(),action_id,node_id,&completion).unwrap();
+    let progress=f.db.capture_execution_progress(&f.context.run_id).unwrap().load(&||false).unwrap();
+    assert_eq!(progress["latestAction"]["operationId"],third.operation_id,"policy receipt must not replace its canonical Operation");
+    let root=f.root.clone();let run=f.context.run_id.clone();drop(f);
+    let db=Catalog::open(&root).unwrap();
+    assert_eq!(db.capture_execution_progress(&run).unwrap().load(&||false).unwrap()["latestAction"],progress["latestAction"]);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
 }

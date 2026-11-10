@@ -15,7 +15,7 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
 }
 pub(crate) fn schema() -> ToolSchema {
-    let mut schema = ToolSchema { requirements: None, name:messages::SEND_TOOL.into(),version:"5".into(),description:"Send a durable inform or request message to another member of this task family. Accepts a stable Agent short code in targetThreadId; branch may be omitted for the delegated branch. Optional sourceAgent selects a related Agent’s file stage for the next execution of an isolated child, preserving its own changes. Optional name updates the purpose name with this request. Set afterCurrent:true to queue separate work after the current execution rather than changing its active task. Use replyTo from a message received on your branch. An explicit reply target must match the original sender. Attachments select a fixed file reference or a path in your current Source. Text may be empty when attachments are supplied. An inform is retained for the target's next normal processing and does not start or wake a model. Returns an accepted message ID, not proof that the target handled it. A request enters an active Run at a closed input boundary or starts a new idle Run, while preserving explicit pauses, unanswered questions and Goal limits. An explicit wait:{} observes only an actual replyTo this message without a deadline; wait:{timeoutMs:N} fixes a deadline at acceptance (0 ends immediately). It returns the original operation handle and parks this Run until all its observations end. Cancelling observation never withdraws the accepted message.".into(),output_schema:None,metadata:None,
+    let mut schema = ToolSchema { requirements: None, name:messages::SEND_TOOL.into(),version:"5".into(),description:"Send a durable inform or request message to another member of this task family. Accepts a stable Agent short code in targetThreadId; branch may be omitted for the delegated branch. Optional sourceAgent selects a related Agent’s file stage for the next execution of an isolated child, preserving its own changes. Optional name updates the purpose name with this request. Set afterCurrent:true to queue separate work after the current execution rather than changing its active task. replyTo accepts the msg: reference or original messageId received on your branch; read_thread ref reads that original message directly. An explicit reply target must match the original sender. Attachments select a fixed file reference or a path in your current Source. Text may be empty when attachments are supplied. An inform is retained for the target's next normal processing and does not start or wake a model. Returns an accepted message ID, not proof that the target handled it. A request enters an active Run at a closed input boundary or starts a new idle Run, while preserving explicit pauses, unanswered questions and Goal limits. An explicit wait:{} observes only an actual replyTo this message without a deadline; wait:{timeoutMs:N} fixes a deadline at acceptance (0 ends immediately). It returns the original operation handle and parks this Run until all its observations end. Cancelling observation never withdraws the accepted message.".into(),output_schema:None,metadata:None,
         schema:json!({"type":"object","properties":{"afterCurrent":{"type":"boolean","description":"Deliver after the recipient current Run ends, rather than at its next model request. Inform remains passive and does not wake a model."},"sourceAgent":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"targetThreadId":{"type":"string","minLength":1},"targetBranchId":{"type":"string","minLength":1},"replyTo":{"type":"string","minLength":1},"kind":{"type":"string","enum":["inform","request"]},"text":{"type":"string"},"wait":{"type":"object","properties":{"timeoutMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64}},"additionalProperties":false}},"required":["kind"],"anyOf":[{"required":["text"],"properties":{"text":{"minLength":1}}},{"required":["attachments"],"properties":{"attachments":{"minItems":1}}}],"additionalProperties":false}) };
     schema.schema["properties"]["attachments"] = crate::attachment_tools::selector_schema();
     schema
@@ -59,13 +59,28 @@ impl MessageTools {
         call: &ToolCall,
     ) -> Result<MessagePreparation, ExecutionError> {
         let input = input(call)?;
-        let schema = schema();
-        let call = call.clone();
-        self.catalog
-            .lock()
-            .map_err(error)?
-            .prepare_tool_message(context, call, schema, input)
-            .map_err(error)
+        let frozen=crate::attachment_tools::original_invocation(&self.catalog,context,call,true)?;
+        let schema=frozen.tools.iter().find(|schema|schema.name==call.name && schema.version==call.schema_version)
+            .cloned().ok_or_else(||error("send capability is not selected"))?;
+        let mut db=self.catalog.lock().map_err(error)?;
+        let preparation=db.prepare_tool_message(context,call.clone(),schema,input).map_err(error)?;
+        let identity=preparation.identity().clone();
+        let reference=db.message_reference(&identity.message_id,&identity.message_id).map_err(error)?;
+        db.retain_model_reference(&reference,&context.run_id).map_err(error)?;
+        let sender=db.agent_identity(&identity.sender_thread_id).map_err(error)?;
+        let recipient=db.agent_identity(&identity.target_thread_id).map_err(error)?;
+        let reply=identity.reply_to.as_deref().map(|id|db.message_reference(id,&identity.message_id).map_err(error)).transpose()?;
+        let mut display=json!({"ref":reference,
+            "sender":format!("{} [{}]",sender["name"].as_str().unwrap_or("Agent"),sender["agentId"].as_str().unwrap_or("")),
+            "recipient":format!("{} [{}]",recipient["name"].as_str().unwrap_or("Agent"),recipient["agentId"].as_str().unwrap_or("")),
+            "kind":identity.kind,"replyTo":reply});
+        if let Some(reader)=frozen.tools.iter().find(|schema|schema.name=="read_thread") {
+            let arguments=if reader.schema["properties"].get("ref").is_some() { json!({"ref":reference}) }
+                else { json!({"threadId":identity.target_thread_id,"branchId":identity.target_branch_id,
+                    "query":{"kind":"recent","limit":20}}) };
+            display["nextRead"]=json!({"tool":"read_thread","arguments":arguments});
+        }
+        Ok(preparation.with_model_identity(display))
     }
 }
 impl ToolExecutor for MessageTools {
@@ -90,7 +105,7 @@ impl ToolExecutor for MessageTools {
         let selected = schema();
         if call.name != selected.name
             || call.schema_version != selected.version
-            || !request.tools.contains(&selected)
+            || !request.tools.iter().any(|schema|schema.name==call.name && schema.version==call.schema_version)
         {
             return Err(error("send was not selected in this frozen invocation"));
         }

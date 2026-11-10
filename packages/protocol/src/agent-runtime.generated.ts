@@ -493,6 +493,7 @@ export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';i
 export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
 
 export interface Attachment {
+  modelRef?: string;
   ref: string;
   filename: string;
   mimeType: string;
@@ -535,7 +536,7 @@ export interface KernelObjectView {
   readOnly: boolean;
 }
 
-export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
+export interface OutputBody<M = StoredMedia> { data: unknown; model_data?: unknown; parts: OutputPart<M>[] }
 
 export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M} | {kind:'attachment';attachment:Attachment};
 
@@ -1810,7 +1811,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 86; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 88; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3336,7 +3337,7 @@ export interface ChildSelectedProfile {
   model_selection_required?: boolean;
 }
 
-export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };
+export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string } | { kind: 'execution'; execution_id: string } | { kind: 'run'; run_id: string };
 
 export interface TreeCancelParams {
   target: TreeCancelTarget;

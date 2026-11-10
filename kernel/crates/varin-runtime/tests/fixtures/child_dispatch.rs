@@ -1047,13 +1047,7 @@ impl Fixture {
             let result = ToolResult {
                 request_id: request_id.clone(),
                 call_id: call.call_id,
-                completion: ToolCompletion::JobAccepted {
-                    content: None,
-                    operation_id: context.operation_id.clone(),
-                    phase: "awaiting_child".into(),
-                    effect: Effect::None,
-                    lifetime: Lifetime::Thread,
-                },
+                completion: self.db.capture_call_completion(&context.operation_id).unwrap().load().unwrap(),
             };
             self.db
                 .commit_execution(
@@ -1091,11 +1085,21 @@ impl Fixture {
         waits
     }
     pub(crate) fn admit_policy_call(&mut self, call: ToolCall) -> ToolExecutionContext {
-        let contract = ToolContract { name: call.name.clone(), schema_version: call.schema_version.clone(),
-            read_only: true, completion: CompletionKind::Job, lifetime: Lifetime::Thread, resources: vec![] };
+        let contract = ToolContract {
+            name: call.name.clone(),
+            schema_version: call.schema_version.clone(),
+            read_only: true,
+            completion: CompletionKind::Job,
+            lifetime: Lifetime::Thread,
+            resources: vec![],
+        };
         self.admit_policy_call_with_contract(call, contract)
     }
-    pub(crate) fn admit_policy_call_with_contract(&mut self, call: ToolCall, contract: ToolContract) -> ToolExecutionContext {
+    pub(crate) fn admit_policy_call_with_contract(
+        &mut self,
+        call: ToolCall,
+        contract: ToolContract,
+    ) -> ToolExecutionContext {
         let run_id = self.context.run_id.clone();
         let epoch = self.db.epoch();
         self.db
@@ -1170,10 +1174,7 @@ impl Fixture {
                 epoch,
                 &ExecutionRecord::ToolAdmitted {
                     context: context.clone(),
-                    tool: AdmittedTool {
-                        contract,
-                        call,
-                    },
+                    tool: AdmittedTool { contract, call },
                 },
             )
             .unwrap();

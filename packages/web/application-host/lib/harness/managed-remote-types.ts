@@ -94,8 +94,8 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
-  | { kind: 'attachment_capture'; operationId: string; ref: string; path: string }
-  | { kind: 'attachment_recover'; operationId: string; ref: string; path: string }
+  | { kind: 'attachment_capture'; operationId: string; ref: string; path: string; expectedReadVersion?: string }
+  | { kind: 'attachment_recover'; operationId: string; ref: string; path: string; expectedReadVersion?: string }
   | { kind: 'attachment_describe'; ref: string }
   | { kind: 'attachment_read'; ref: string; offset: number; length: number; representation?: 'manifest'; rangeObject?: string }
   | { kind: 'attachment_release'; ref: string }
@@ -230,7 +230,7 @@ export interface SourceServiceResults {
   native_resource: unknown;
   validate: { pathScopes: string[] };
   read: import('./file-snapshot.js').ExploreFileSnapshot;
-  document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: string };
+  document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: string; fileObservation?: {path:string;readVersion:string} };
   binary_write: import('../kernel/binary-file-owner.js').BinaryFileWriteResult;
   package_capture: { captureId: string; snapshot: import('../kernel/extension-source.js').ExtensionSourceSnapshot };
   package_read: import('../kernel/protocol.generated.js').KernelObjectSlice;

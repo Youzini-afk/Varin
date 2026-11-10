@@ -8,6 +8,9 @@ use serde_json::Value;
 #[serde(deny_unknown_fields)]
 pub struct OutputBody<M = ResolvedMedia> {
     pub data: Value,
+    /// Stable owner-authored projection; raw data remains the original receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_data: Option<Value>,
     pub parts: Vec<OutputPart<M>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,14 +23,18 @@ pub enum OutputPart<M = ResolvedMedia> {
 impl<M> From<Value> for OutputBody<M> {
     fn from(data: Value) -> Self {
         Self {
+            model_data: None,
             data,
             parts: Vec::new(),
         }
     }
 }
 impl<M> OutputBody<M> {
+    pub fn model_data(&self) -> &Value { self.model_data.as_ref().unwrap_or(&self.data) }
+
     pub fn text(text: impl Into<String>) -> Self {
         Self {
+            model_data: None,
             data: Value::Null,
             parts: vec![OutputPart::Text { text: text.into() }],
         }
@@ -37,6 +44,7 @@ impl<M> OutputBody<M> {
         mut map: impl FnMut(M) -> Result<N, E>,
     ) -> Result<OutputBody<N>, E> {
         Ok(OutputBody {
+            model_data: self.model_data,
             data: self.data,
             parts: self
                 .parts

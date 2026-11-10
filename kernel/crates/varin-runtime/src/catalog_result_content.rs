@@ -368,14 +368,13 @@ pub(super) fn publish_job_acceptance_content(
         lifetime: Lifetime::Thread,
         content_ref,
     };
-    if op
-        .call_completion
-        .as_ref()
-        .is_some_and(|previous| previous != &completion)
-    {
-        return Err(RuntimeError::Conflict(
-            "original invocation acceptance changed".into(),
-        ));
+    if op.call_completion.as_ref().is_some_and(|previous|previous!=&completion) {
+        let original:Option<String>=tx.query_row("SELECT original FROM model_bound_targets WHERE operation_id=?1 AND purpose='tool_result_projection'",[&op.id],|r|r.get(0)).optional()?;
+        if original.as_deref().map(serde_json::from_str::<ToolCompletionMetadata>).transpose()?.as_ref()==Some(&completion) {
+            // Idempotent owner acceptance never removes an already published projection.
+            return Ok(());
+        }
+        return Err(RuntimeError::Conflict("original invocation acceptance changed".into()));
     }
     op.call_completion = Some(completion.clone());
     if let ToolOrigin::ModelStep { request_id } = admitted.origin() {

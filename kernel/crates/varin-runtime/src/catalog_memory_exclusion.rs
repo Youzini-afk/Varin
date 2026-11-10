@@ -124,6 +124,7 @@ pub(super) fn filter<M: Clone + Serialize>(
             if contains_excluded_row(&output.data, &knowledge.exclusions) {
                 if let Content::Output { output } = &mut std::sync::Arc::make_mut(item).content {
                     *output = crate::output::OutputBody {
+                        model_data: None,
                         data: json!({"kind":"forgotten_memory_payload"}),
                         parts: vec![],
                     };
@@ -139,6 +140,7 @@ pub(super) fn filter<M: Clone + Serialize>(
                         if let Content::ToolResult { result } = &mut item.content {
                             if let ToolCompletion::Result { content, .. } = &mut result.completion {
                                 *content = crate::output::OutputBody {
+                                    model_data: None,
                                     data: json!({"kind":"forgotten_memory_payload"}),
                                     parts: vec![],
                                 };

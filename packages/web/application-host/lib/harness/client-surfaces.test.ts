@@ -187,3 +187,19 @@ describe("client surface bridge", () => {
   });
 
 });
+
+it('an observed settings target never follows a Surface reconnect, including the same Surface id', async () => {
+  const {bridge,sent}=bridgeWithSent(),original=fakeResponse(),replacement=fakeResponse();
+  const identity={threadId:'thread-1',branchId:'branch-1'};
+  bridge.attach(original.res,'device','desktop','session',identity);
+  const reading=bridge.request({type:'read',entries:[{id:'appearance.language'}]},identity);
+  ackEvent(bridge,sent.get(original.res)![0]!,[{id:'appearance.language',status:'applied',values:{language:'en'},consistency:'last-write-wins'}]);
+  const observed=await reading;
+  assert.ok(observed.connectionId);
+  bridge.dropConnection(original.res);
+  bridge.attach(replacement.res,'device','desktop','session',identity);
+  let dispatched=false;
+  await assert.rejects(bridge.request({type:'apply',entries:[{id:'appearance.language',values:{language:'zh'}}]},
+    {...identity,expectedSurface:{surfaceId:observed.surface.id,connectionId:observed.connectionId!},onDispatch(){dispatched=true;}}),/no authenticated surface/);
+  assert.equal(dispatched,false);assert.equal(sent.get(replacement.res)?.length??0,0);
+});

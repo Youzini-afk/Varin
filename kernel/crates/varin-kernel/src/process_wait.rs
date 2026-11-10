@@ -17,6 +17,7 @@ struct Handle {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadHandle {
     process_id: String,
+    #[serde(default)]
     cursor: u64,
     max_bytes: Option<u64>,
     #[serde(default)]
@@ -73,6 +74,7 @@ pub(crate) fn declarations(
     resources: KernelResourceClient,
 ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
     let selected = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
+    let resources = resources.with_reference_catalog(catalog.clone());
     let endpoint = Arc::new(ProcessWaitTools {
         catalog,
         binding,
@@ -94,6 +96,46 @@ struct ProcessWaitTools {
     resources: KernelResourceClient,
 }
 impl ProcessWaitTools {
+    fn arguments(&self, call: &ToolCall) -> Result<Value,ExecutionError> {
+        let catalog = self.catalog.lock().map_err(error)?;
+        let mut args = call.arguments.clone();
+        if let Some(reference) = args["ref"].as_str() {
+            if args.as_object().is_none_or(|o|o.len()!=1) {return Err(error("Use the process continuation ref alone"));}
+            let target: crate::resource_references::ReadTarget = crate::resource_references::resolve(&catalog,varin_runtime::catalog::model_references::ReferenceKind::Read,reference)?;
+            if target.tool != call.name {return Err(error("Use the original tool from nextRead"));}
+            args=target.arguments;
+        }
+        if let Some(id) = args["processId"].as_str() {args["processId"]=json!(crate::resource_references::process(&catalog,id)?);}
+        Ok(args)
+    }
+    fn project_completion(&self, c:&ToolExecutionContext, call:&ToolCall, completion:&mut ToolCompletion) -> Result<(),ExecutionError> {
+        let tools=crate::collaboration::original_tools(&self.catalog,c,call)?;
+        if tools.iter().any(|schema|schema.name=="process_read" && schema.schema["properties"].get("ref").is_none()) {
+            // Keep the original processId/cursor contract for already admitted
+            // readers. A new implementation version does not expand that schema.
+            return Ok(());
+        }
+        let resolved = self.arguments(call)?;
+        let id = resolved["processId"].as_str().ok_or_else(||error("processId required"))?.to_owned();
+        let mut catalog = self.catalog.lock().map_err(error)?;
+        let original = catalog.operation(&id).map_err(error)?;
+        let kind = if original.managed_process.as_ref().is_some_and(|p|p.is_environment()) {varin_runtime::catalog::model_references::ReferenceKind::Script} else {varin_runtime::catalog::model_references::ReferenceKind::Process};
+        let owner = crate::resource_references::owner(&self.binding.source_selection().map_err(error)?);
+        let reference=crate::resource_references::register(&mut catalog,kind,&owner,&crate::resource_references::ProcessTarget{operation_id:id},&c.run_id)?;
+        if let ToolCompletion::Result {content,..} | ToolCompletion::JobAccepted {content:Some(content),..} = completion {
+            let mut projected=content.data.clone();
+            projected["operationRef"]=json!(reference);
+            crate::tools::references::project_process_page(&mut catalog,&owner,&reference,&mut projected,&c.run_id)?;
+            if let Some(cursor)=content.data["nextCursor"].as_u64() {
+                let mut arguments=resolved;
+                arguments["processId"]=json!(reference);
+                arguments["cursor"]=json!(cursor);
+                projected["nextRead"]=crate::resource_references::continuation(&mut catalog,&owner,"process_read",None,arguments,&c.run_id)?;
+            }
+            content.model_data=Some(projected);
+        }
+        Ok(())
+    }
     fn handle(
         &self,
         context: &ToolExecutionContext,
@@ -109,7 +151,7 @@ impl ProcessWaitTools {
                 "process control requires the bound Run and selected process capability",
             ));
         }
-        let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+        let handle: Handle = serde_json::from_value(self.arguments(call)?).map_err(error)?;
         if handle.process_id.is_empty() {
             return Err(error("processId required"));
         }
@@ -158,7 +200,7 @@ impl ProcessWaitTools {
                 resources: vec![],
             }
         };
-        if call.schema_version != "1" || &expected != contract {
+        if !matches!(call.schema_version.as_str(), "1" | "2") || &expected != contract {
             return Err(error("process observation contract changed"));
         }
         Ok(())
@@ -170,12 +212,12 @@ impl ProcessWaitTools {
     ) -> Result<(String, crate::process::interaction::Input), ExecutionError> {
         let (id, input, kind) = if call.name == "process_write" {
             let args: crate::tools::ProcessWriteArgs =
-                serde_json::from_value(call.arguments.clone()).map_err(error)?;
+                serde_json::from_value(self.arguments(call)?).map_err(error)?;
             let input=args.input(&self.binding,&self.resources)?;
             (args.process_id,input,ToolKind::ProcessWrite)
         } else {
             let args: crate::tools::ProcessResizeArgs =
-                serde_json::from_value(call.arguments.clone()).map_err(error)?;
+                serde_json::from_value(self.arguments(call)?).map_err(error)?;
             (
                 args.process_id,
                 crate::process::interaction::Input::Resize {
@@ -296,11 +338,11 @@ impl ProcessWaitTools {
             return Err(error("process observation tool is not selected"));
         }
         let (id, read, mode, encoding) = if call.name == "process_read" {
-            let h: ReadHandle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+            let h: ReadHandle = serde_json::from_value(self.arguments(call)?).map_err(error)?;
             crate::process::text::validate_encoding(h.encoding.as_deref()).map_err(error)?;
             (h.process_id, Some(crate::process::text::ReadPage{cursor:h.cursor,max_bytes:h.max_bytes,mode:h.mode.clone(),encoding:h.encoding.clone()}), h.mode, h.encoding)
         } else {
-            let h: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+            let h: Handle = serde_json::from_value(self.arguments(call)?).map_err(error)?;
             (h.process_id, None, crate::process::text::Mode::Text, None)
         };
         let source_run_id = self.check_owner(c, &id)?;
@@ -438,7 +480,7 @@ impl ToolExecutor for ProcessWaitTools {
         if call.schema_version != "1" || !frozen.tools.contains(&schema) {
             return Err(error("process tool schema is not frozen"));
         }
-        let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+        let handle: Handle = serde_json::from_value(self.arguments(call)?).map_err(error)?;
         if handle.process_id.is_empty() {
             return Err(error("processId required"));
         }
@@ -639,6 +681,10 @@ impl PreparedToolCall for ProcessCall {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolExecutionReceipt {
-        self.owner.execute_receipt(c, &self.call, contract, cancel)
+        let mut receipt=self.owner.execute_receipt(c, &self.call, contract, cancel);
+        if let Err(error)=self.owner.project_completion(c,&self.call,&mut receipt.completion) {
+            if let ToolCompletion::Result {content,..} | ToolCompletion::JobAccepted {content:Some(content),..}=&mut receipt.completion { content.data["referenceError"]=json!(error); }
+        }
+        receipt
     }
 }

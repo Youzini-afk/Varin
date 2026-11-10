@@ -499,11 +499,12 @@ mod tests {
 
     #[test]
     fn file_parts_are_quoted_once_without_reinterpreting_or_losing_fixed_identity() {
-        let attachment = crate::catalog::attachments::Attachment {
+        let attachment = crate::catalog::attachments::Attachment { model_ref: None,
             reference: "attachment:fixed".into(), filename: "report.csv".into(),
             mime_type: "text/csv".into(), byte_length: 23,
         };
         let output = crate::output::OutputBody {
+            model_data: None,
             data: Value::Null,
             parts: vec![OutputPart::Attachment { attachment: attachment.clone() }],
         };

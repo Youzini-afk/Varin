@@ -20,6 +20,7 @@ fn gif_attachment(content:&Content)->bool {
 
 fn output_text(output: &OutputBody, omitted: &dyn Fn(&crate::output::ResolvedMedia)->Option<&'static str>) -> OutputBody {
     OutputBody {
+        model_data: output.model_data.clone(),
         data: output.data.clone(),
         parts: output.parts.iter().map(|part| match part {
             OutputPart::Media { media } if omitted(media).is_some() =>
@@ -67,6 +68,46 @@ fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bo
     }
 }
 
+/// Explicit owner contract for accepted Jobs; never infer handles from arbitrary
+/// raw JSON fields and never look up current Catalog state during serialization.
+fn projected_operation(output:&OutputBody)->Option<String> {
+    let reference=output.model_data.as_ref()?.get("operationRef")?.as_str()?;
+    let valid=if let Some((kind,id))=reference.split_once(':') {
+        matches!(kind,"proc"|"env"|"job"|"forward"|"followup") && id.parse::<u64>().is_ok_and(|id|id>0)
+    } else if let Some((agent,sequence))=reference.split_once('/') {
+        agent.len()==8 && agent.bytes().all(|byte|byte.is_ascii_uppercase()||byte.is_ascii_digit()) && sequence.parse::<u64>().is_ok_and(|id|id>0)
+    } else {false};
+    valid.then(||reference.into())
+}
+fn owner_projection(content: &Content) -> Option<Content> {
+    let output = match content {
+        Content::Output {output} => output,
+        Content::ToolResult {result} => completion_output(&result.completion)?,
+        _ => return None,
+    };
+    if output.model_data.is_none() && !output.parts.iter().any(|part|matches!(part,OutputPart::Attachment{attachment} if attachment.model_ref.is_some())) {return None;}
+    // Every serializer, including existing extension codecs, consumes the same
+    // transient semantic data. Durable raw receipts and navigation stay intact.
+    let mut projected = content.clone();
+    let output = match &mut projected {
+        Content::Output {output} => output,
+        Content::ToolResult {result} => match &mut result.completion {
+            ToolCompletion::Result {content,..} => content,
+            ToolCompletion::JobAccepted {operation_id,content:Some(content),..} => {
+                if let Some(reference)=projected_operation(content) {*operation_id=reference;}
+                content
+            },
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+    if let Some(model)=output.model_data.take() {output.data=model;}
+    for part in &mut output.parts {
+        if let OutputPart::Attachment{attachment}=part {*attachment=attachment.model_descriptor();}
+    }
+    Some(projected)
+}
+
 fn process_call(call: &ToolCall) -> bool {
     let name = if call.name == crate::tool_disclosure::INVOKE { crate::tool_disclosure::invoked_name(&call.arguments).unwrap_or("") } else { &call.name };
     matches!(name,"process_spawn"|"process_read")
@@ -91,7 +132,7 @@ fn process_text(content: &Content) -> Option<Content> {
         ToolCompletion::JobAccepted {content:Some(content),..}=>content,
         _=>return None,
     };
-    project(&mut output.data).then_some(Content::ToolResult {result})
+    project(output.model_data.as_mut().unwrap_or(&mut output.data)).then_some(Content::ToolResult {result})
 }
 
 /// Shared by built-in and contributed adapters. Unchanged items keep their Arc identity;
@@ -108,6 +149,7 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
     let google_gif=matches!(view.binding.provider_family.as_str(),google::FAMILY|google::VERTEX_FAMILY)
         && view.history.iter().any(|item|gif_attachment(&item.content));
     if !google_gif && connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none()
+        && !view.history.iter().any(|item| owner_projection(&item.content).is_some())
         && !view.history.iter().any(|item| matches!(&item.content, Content::ToolCall { call } if retrieval_preview_limit(call).is_some() || process_call(call))) { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
     let can_read = view.binding.tools.iter().any(|tool| tool.name == crate::catalog::family::READ_TOOL);
@@ -137,7 +179,8 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
         };
         let key = Arc::as_ptr(source) as usize;
         let item = previous.remove(&key).map(|(_, projected)| projected).unwrap_or_else(|| {
-            let mut content = process.then(||process_text(&source.content)).flatten();
+            let mut content = owner_projection(&source.content);
+            if process { if let Some(projected)=process_text(content.as_ref().unwrap_or(&source.content)) {content=Some(projected);} }
             if let Some(bounded) = connection.tool_output_visible_bytes.or(snippet_limit.map(|_| usize::MAX)).filter(|_| !explicit_read)
                 .and_then(|budget| bounded_content(content.as_ref().unwrap_or(&source.content), budget, &source.id, can_read, snippet_limit)) {
                 content=Some(bounded);

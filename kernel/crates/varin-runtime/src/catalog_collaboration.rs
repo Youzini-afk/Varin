@@ -8,6 +8,60 @@ pub const DISPATCH_TOOL: &str = "dispatch";
 pub const STATUS_TOOL: &str = "child_status";
 pub const REPORT_TOOL: &str = "child_report";
 pub const WAIT_TOOL: &str = "wait_child";
+/// Output compatibility belongs to the original reader declarations, not their version:
+/// the target/ref forms were added without changing the collaboration versions. Missing
+/// readers are not legacy readers and must not become newly advertised capabilities.
+#[derive(Clone, Copy, Default)]
+pub struct ModelContract {
+    pub preserve_original: bool,
+    status: bool,
+    wait: bool,
+    pub report: bool,
+}
+impl ModelContract {
+    pub fn from_tools(tools: &[crate::execution::ToolSchema]) -> Self {
+        let mut contract = Self::default();
+        for tool in tools {
+            let selector = match tool.name.as_str() {
+                STATUS_TOOL => { contract.status = true; "target" }
+                WAIT_TOOL => { contract.wait = true; "target" }
+                REPORT_TOOL => { contract.report = true; "ref" }
+                _ => continue,
+            };
+            // Recognize only the explicit collaboration selector alternatives. A
+            // same-name/string property alone does not make a frozen declaration
+            // accept a selector-only call (old report requires operationId+itemId).
+            let selector_only = tool.schema["properties"][selector]["type"] == "string"
+                && tool.schema.get("required").and_then(Value::as_array).is_none_or(Vec::is_empty)
+                && tool.schema["anyOf"].as_array().is_some_and(|alternatives|
+                    alternatives.iter().any(|alternative| alternative["required"] == json!([selector])));
+            contract.preserve_original |= !selector_only;
+        }
+        contract
+    }
+    pub fn retain_declared_readers(&self, value: &mut Value) {
+        if let Some(object) = value.as_object_mut() {
+            if !self.status { object.remove("read"); }
+            if !self.wait { object.remove("wait"); }
+        }
+    }
+}
+/// Presentation is fixed before publishing the original receipt. Older readers retain
+/// the existing raw OutputBody; no stored call or schema is rewritten to consume refs.
+pub(super) fn acceptance_model(reference: &super::model_references::ExecutionReference, name: &str,
+    state: &str, retrieval: bool, contract: ModelContract) -> Option<Value>
+{
+    if contract.preserve_original && !retrieval { return None; }
+    let target = &reference.reference;
+    let read = if retrieval { json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"status"}}) }
+        else { json!({"tool":STATUS_TOOL,"arguments":{"target":target}}) };
+    let wait = if retrieval { json!({"tool":super::retrieval::CONTROL_TOOL,"arguments":{"operationId":target,"action":"wait"}}) }
+        else { json!({"tool":WAIT_TOOL,"arguments":{"target":target}}) };
+    let mut model = json!({"accepted":true,"agentId":reference.agent_id,"name":name,"executionRef":target,"ref":target,"operationRef":target,"state":state,"read":read,"wait":wait});
+    if !retrieval { contract.retain_declared_readers(&mut model); }
+    Some(model)
+}
+
 
 pub use super::dispatch::DispatchInput;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -615,14 +669,25 @@ impl Catalog {
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
         let accepted_at_ms = observations::wall_time_ms()?;
+        child.cursor = event(
+            &tx,
+            &op.id,
+            child.revision,
+            "child.accepted",
+            json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id,"acceptedAtMs":accepted_at_ms}),
+        )?;
+        delegated::insert_initial(&tx, &child, prepared.model_selection_required)?;
         if let Some(admitted) = &admitted {
+        let reference=super::model_references::execution_reference(&tx,&child.execution_id)?;
+        let mut output:crate::output::OutputBody=if prepared.internal_retrieval {
+            json!({"kind":"retrieval","operationId":child.operation_id,"status":"preparing", "acceptedAtMs":accepted_at_ms,
+                "control":{"tool":"retrieval_control","actions":["status","wait","stop"]},
+                "delivery":"The final answer is delivered automatically. Continue other work, inspect status, wait, or stop this investigation."})
+        } else {json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id})}.into();
+        output.model_data=acceptance_model(&reference,&child.name,"preparing",prepared.internal_retrieval,prepared.model_contract);
         let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
             operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
-            content:Some(if prepared.internal_retrieval {
-                json!({"kind":"retrieval","operationId":child.operation_id,"status":"preparing", "acceptedAtMs":accepted_at_ms,
-                    "control":{"tool":"retrieval_control","actions":["status","wait","stop"]},
-                    "delivery":"The final answer is delivered automatically. Continue other work, inspect status, wait, or stop this investigation."})
-            } else { json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}) }.into()),
+            content:Some(output),
         })?;
         let content_ref=match acceptance {super::result_content::ToolCompletionMetadata::JobAccepted{content_ref,..}=>content_ref,_=>unreachable!()};
         super::result_content::publish_job_acceptance_content(&tx, &mut op, admitted, "preparing_child",content_ref)?;
@@ -632,14 +697,7 @@ impl Catalog {
         op.effect = Effect::None;
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
-        child.cursor = event(
-            &tx,
-            &op.id,
-            child.revision,
-            "child.accepted",
-            json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id,"acceptedAtMs":accepted_at_ms}),
-        )?;
-        delegated::insert_initial(&tx, &child, prepared.model_selection_required)?;
+        super::background::retain_reference_ids(&tx, &prepared.background_reference_ids, &child.execution_id)?;
         if let child_content::ChildAdmissionOrigin::User(user) = origin {
             super::user_dispatch::publish_receipt(&tx, user, &child, accepted_at_ms)?;
         } else { super::goals::bind_child(&tx, &op.id, &run.id)?; }
@@ -664,7 +722,7 @@ pub(super) fn pending_cancelled_observation(
     let Some(id) = wait.id.strip_prefix("child-wait:") else {
         return Ok(false);
     };
-    if !wait.cancelled || wait.run_id != run.id || wait.kind != "operation.settled" {
+    if !wait.cancelled || wait.run_id != run.id || !matches!(wait.kind.as_str(), "operation.settled" | "child.report_ready") {
         return Ok(false);
     }
     let Some(op) = optional_record::<Operation>(db, "operations", id)? else {
@@ -685,12 +743,10 @@ pub(super) fn pending_cancelled_observation(
     if !matches!(admitted.call().name.as_str(), WAIT_TOOL | super::retrieval::CONTROL_TOOL) {
         return Ok(false);
     }
-    let Some(child) =
-        optional_record::<delegated::ChildRelation>(db, "child_tasks", &wait.subject)?
-    else {
-        return Ok(false);
-    };
-    Ok(child.parent_thread_id == run.thread_id)
+    let Some(execution) = optional_record::<delegated::DelegatedExecution>(db, "delegated_executions", &wait.subject)? else { return Ok(false); };
+    let child = delegated::relation(db, &execution.child_operation_id)?;
+    let receiver = super::bot_reports::requester(db, &execution.execution_id)?;
+    Ok(child.parent_thread_id == run.thread_id || (receiver.thread_id == run.thread_id && receiver.branch_id == run.branch_id))
 }
 
 /// Required on every existing catalog before any write-capable open or epoch advancement.
@@ -1118,6 +1174,8 @@ impl ChildPreparation {
             Some(content.save_history(&serde_json::to_value(fact)?, &None)?)
         } else { None };
         let mut submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            input_id: None,
+            model_attachments: None,
             inherited_context: if continuing { None } else { child.inherited_context.clone() },
             input_preparation,
             command: SubmitInput {
@@ -1293,7 +1351,12 @@ impl Catalog {
         let operation_id = prepared.child_operation_id.as_str();
         let child = if prepared.tool_name == super::retrieval::CONTROL_TOOL {
             self.require_retrieval_parent(&context.run_id, operation_id)?
+        } else if let Some(execution) = &prepared.execution_id {
+            self.require_delegated_parent(&context.run_id, operation_id, execution)?;
+            self.execution_task(execution)?
         } else { self.require_child_parent(&context.run_id, operation_id)? };
+        let subject = child.execution_id.as_str();
+        let event_kind = if prepared.execution_id.is_some() { "child.report_ready" } else { "operation.settled" };
         let wait_id = format!("child-wait:{}", context.operation_id);
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &context.run_id)?;
@@ -1308,7 +1371,7 @@ impl Catalog {
             ));
         }
         if let Some(wait) = optional_record::<Wait>(&tx, "waits", &wait_id)? {
-            if wait.run_id != run.id || wait.subject != operation_id {
+            if wait.run_id != run.id || wait.subject != subject {
                 return Err(RuntimeError::Conflict("child wait target changed".into()));
             }
             // A retry returns the existing observation, including cancellation/delivery, without
@@ -1328,14 +1391,14 @@ impl Catalog {
             ));
         }
         let trigger_cursor = tx.query_row(
-            "SELECT cursor FROM events WHERE subject=?1 AND kind='operation.settled' AND cursor>?2 ORDER BY cursor LIMIT 1",
-            params![operation_id, sql_number(child.cursor)?], |r| read_number(r, 0),
+            "SELECT cursor FROM events WHERE subject=?1 AND kind=?3 AND cursor>?2 ORDER BY cursor LIMIT 1",
+            params![subject, sql_number(child.cursor)?, event_kind], |r| read_number(r, 0),
         ).optional()?;
         let wait = Wait {
             id: wait_id.clone(),
             run_id: run.id.clone(),
-            subject: operation_id.into(),
-            kind: "operation.settled".into(),
+            subject: subject.into(),
+            kind: event_kind.into(),
             after_cursor: child.cursor,
             deadline_at_ms: None,
             trigger_cursor,
@@ -1359,7 +1422,10 @@ impl Catalog {
         op.phase = OperationPhase::Waiting;
         op.handed_off = true;
         op.revision += 1;
-        super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "awaiting_child")?;
+        let reference=super::model_references::execution_reference(&tx,&child.execution_id)?;
+        let output=crate::output::OutputBody {data:json!({"operationId":child.operation_id,"state":"waiting"}),parts:Vec::new(),model_data:acceptance_model(&reference,&child.name,"waiting",prepared.tool_name==super::retrieval::CONTROL_TOOL,prepared.model_contract)};
+        let content_ref=Some(self.content.save_output(&output)?);
+        super::result_content::publish_job_acceptance_content(&tx, &mut op, &admitted, "awaiting_child",content_ref)?;
         put(&tx, "operations", &op.id, &op)?;
         event(
             &tx,

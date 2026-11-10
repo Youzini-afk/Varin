@@ -27,11 +27,14 @@ export function createSettingsToolOwner(options: {
       toolName: `settings_${method}`, arguments: params }, async authority => {
       let pendingWrites = 0;
       let changed = false;
+      let referenceTarget: {surfaceId:string;connectionId:string}|undefined;
       try {
         context.signal.throwIfAborted();
         const run = await options.runtime.run(authority.runId, context.signal);
         if (run.thread_id !== authority.threadId) throw new Error('Settings invocation Thread changed');
         const caller: SettingsServiceCaller = { threadId: run.thread_id, branchId: run.branch_id,
+          ...(authority.settingsSurface ? {expectedSurface:authority.settingsSurface}:{}),
+          onReferenceTarget(target){referenceTarget=target;},
           runId: authority.runId, operationId: authority.operationId, invocation: authority,
           ...(authority.permissionSettingsRevision ? { permissionSettingsRevision: authority.permissionSettingsRevision } : {}),
           workspaceId: options.localWorkspace?.(authority) ?? null, signal: context.signal,
@@ -47,7 +50,7 @@ export function createSettingsToolOwner(options: {
         const failed = ['failed', 'partial', 'unavailable', 'denied', 'malformed'].includes(status);
         const effect = pendingWrites > 0 ? 'unknown' : changed ? failed ? 'partial' : 'confirmed' : 'none';
         return { executor_stopped: true, completion: { kind: 'result', outcome: pendingWrites > 0 ? 'indeterminate' : failed ? 'failed' : 'succeeded', effect,
-          content: { data: parseVarinToolJson(JSON.parse(JSON.stringify(result)) as JsonValue), parts: [] } } };
+          content: { data: parseVarinToolJson(JSON.parse(JSON.stringify({...result,...(referenceTarget ? {referenceTarget}:{})})) as JsonValue), parts: [] } } };
       } catch (error) {
         const uncertain = pendingWrites > 0;
         return { executor_stopped: true, completion: { kind: 'result', outcome: uncertain ? 'indeterminate' : 'failed', effect: uncertain ? 'unknown' : changed ? 'partial' : 'none',

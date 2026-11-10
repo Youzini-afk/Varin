@@ -52,6 +52,7 @@ pub(super) fn execute(
         .map_err(domain)?
         .with_attachments(attachments, media)
         .map_err(domain)?;
+    let selected = {let catalog=lock()?; selected.with_model_references(&catalog).map_err(domain)?};
     let (resolved, tools) = crate::collaboration::resolve_selection_with_attachments(
         &selected.selection,
         &selected.input,

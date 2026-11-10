@@ -1,0 +1,428 @@
+[
+  {
+    "name": "file_read",
+    "version": "1",
+    "description": "Read an immutable attachment by ref, or a bounded decoded text range by path. Live sources accept absolute device paths or paths relative to the working directory; isolated sources use their own file view. For binary attachments the original bytes are returned as base64. Return readVersion and content.format as sourceFormat unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version.",
+    "schema": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "type": "string",
+              "description": "Optional explicit file interpretation. Auto defaults to BOM, strict UTF-8, then GBK compatibility. Pass returned content.format as sourceFormat on mutations."
+            },
+            "raw": {
+              "type": "boolean",
+              "description": "Return exact original bytes instead of decoded text."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Byte offset; continue with content.nextOffset and verify readVersion."
+            },
+            "length": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 65536,
+              "description": "Byte page size. Explicit pages are delivered without a second preview truncation."
+            },
+            "startLine": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "First line, 1-based. Use instead of offset/length."
+            },
+            "endLine": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Last line, inclusive; requires startLine."
+            },
+            "unit": {
+              "type": "object",
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "line"
+                  ]
+                },
+                {
+                  "required": [
+                    "symbol"
+                  ]
+                }
+              ],
+              "description": "Read a complete syntax unit, for example {path: 'file.ts', unit: {symbol: 'functionName'}} or unit: {line: 24}. symbol belongs inside unit and is an exact declaration name, not a filename. Multiple matches return candidates; add unit.line to disambiguate. offset/length page within the selected unit; continue with nextRead. Uncovered lines return source context and nearby units; incomplete/unavailable structure returns plain context with its reason.",
+              "properties": {
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "symbol": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "revision": {
+                  "type": "string",
+                  "description": "Retain the returned revision when continuing a unit."
+                }
+              }
+            },
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "encoding": {
+                    "type": "string",
+                    "description": "Optional explicit file interpretation. Auto defaults to BOM, strict UTF-8, then GBK compatibility. Pass returned content.format as sourceFormat on mutations."
+                  },
+                  "raw": {
+                    "type": "boolean",
+                    "description": "Return exact original bytes instead of decoded text."
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Byte offset; continue with content.nextOffset and verify readVersion."
+                  },
+                  "length": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 65536,
+                    "description": "Byte page size. Explicit pages are delivered without a second preview truncation."
+                  },
+                  "startLine": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "First line, 1-based. Use instead of offset/length."
+                  },
+                  "endLine": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Last line, inclusive; requires startLine."
+                  },
+                  "unit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "anyOf": [
+                      {
+                        "required": [
+                          "line"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "symbol"
+                        ]
+                      }
+                    ],
+                    "description": "Read a complete syntax unit, for example {path: 'file.ts', unit: {symbol: 'functionName'}} or unit: {line: 24}. symbol belongs inside unit and is an exact declaration name, not a filename. Multiple matches return candidates; add unit.line to disambiguate. offset/length page within the selected unit; continue with nextRead. Uncovered lines return source context and nearby units; incomplete/unavailable structure returns plain context with its reason.",
+                    "properties": {
+                      "line": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "symbol": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "revision": {
+                        "type": "string",
+                        "description": "Retain the returned revision when continuing a unit."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "description": "Read multiple files or ranges. Results retain input order, versions and individual errors."
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "path"
+              ],
+              "not": {
+                "required": [
+                  "files"
+                ]
+              }
+            },
+            {
+              "required": [
+                "files"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "path"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "offset"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "length"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "startLine"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endLine"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "unit"
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "length": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 65536
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "output_schema": null,
+    "metadata": null,
+    "requirements": null
+  },
+  {
+    "name": "file_write",
+    "version": "1",
+    "description": "Create a new file or replace an existing file using its read version.",
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "readVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."
+        },
+        "content": {
+          "type": "string"
+        },
+        "sourceFormat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "type": "string"
+            },
+            "bom": {
+              "type": "boolean"
+            },
+            "lineEnding": {
+              "type": "string"
+            },
+            "defaultLineEnding": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "encoding",
+            "bom",
+            "lineEnding",
+            "defaultLineEnding",
+            "source"
+          ],
+          "description": "Copy content.format from the original file_read along with readVersion. It fixes the interpretation, not a conversion."
+        },
+        "targetFormat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "type": "string"
+            },
+            "bom": {
+              "type": "boolean"
+            },
+            "lineEnding": {
+              "type": "string",
+              "enum": [
+                "lf",
+                "crlf",
+                "cr",
+                "mixed"
+              ]
+            }
+          },
+          "description": "Only provide for an explicit conversion. Ordinary saves preserve the source format."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "create",
+            "replace"
+          ],
+          "description": "create requires an absent target; replace requires an existing file and readVersion. Omit to write against the observed state (or create when no version is supplied)."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ]
+    },
+    "output_schema": null,
+    "metadata": null,
+    "requirements": {
+      "source": "physical",
+      "process": false
+    }
+  },
+  {
+    "name": "file_edit",
+    "version": "1",
+    "description": "Apply exact text edits against a file read version in the admitted writable workspace.",
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "readVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceFormat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "type": "string"
+            },
+            "bom": {
+              "type": "boolean"
+            },
+            "lineEnding": {
+              "type": "string"
+            },
+            "defaultLineEnding": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "encoding",
+            "bom",
+            "lineEnding",
+            "defaultLineEnding",
+            "source"
+          ],
+          "description": "Copy content.format from the original file_read along with readVersion. It fixes the interpretation, not a conversion."
+        },
+        "targetFormat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "type": "string"
+            },
+            "bom": {
+              "type": "boolean"
+            },
+            "lineEnding": {
+              "type": "string",
+              "enum": [
+                "lf",
+                "crlf",
+                "cr",
+                "mixed"
+              ]
+            }
+          },
+          "description": "Only provide for an explicit conversion. Ordinary saves preserve the source format."
+        },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "oldText": {
+                "type": "string",
+                "minLength": 1
+              },
+              "newText": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "oldText",
+              "newText"
+            ]
+          }
+        }
+      },
+      "required": [
+        "path",
+        "readVersion",
+        "edits"
+      ]
+    },
+    "output_schema": null,
+    "metadata": null,
+    "requirements": {
+      "source": "physical",
+      "process": false
+    }
+  }
+]

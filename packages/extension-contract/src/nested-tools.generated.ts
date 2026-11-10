@@ -1,6 +1,7 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
 export interface Attachment {
+  modelRef?: string;
   ref: string;
   filename: string;
   mimeType: string;
@@ -72,7 +73,7 @@ export interface ResolvedMedia { media_type: string; source: OutputSource; data_
 
 export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M} | {kind:'attachment';attachment:Attachment};
 
-export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
+export interface OutputBody<M = StoredMedia> { data: unknown; model_data?: unknown; parts: OutputPart<M>[] }
 
 export type ToolOrigin = {kind:'driver';invocation_id:string} | {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
 /** Canonical invocation identity shared by all public/Host consumers. */

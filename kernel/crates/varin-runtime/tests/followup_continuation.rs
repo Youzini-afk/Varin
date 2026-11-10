@@ -1251,3 +1251,19 @@ mod logs;
 
 #[path = "fixtures/followup_metrics.rs"]
 mod metrics;
+
+#[test]
+fn process_reference_registers_original_followup_target_without_rewriting_instruction() {
+    let mut f=Fixture::new();
+    let reference=f.db.register_model_reference(varin_runtime::catalog::model_references::ReferenceKind::Process,"fixture-host",&json!({"operationId":f.process}),&f.run).unwrap();
+    let prepared=f.db.prepare_followup_registration("short-process-followup",&f.run,FollowupRegistration {
+        repeat:FollowupRepeat::Once,trigger:FollowupRegistrationTrigger::ProcessStopped{operation_id:reference.clone()},
+        instruction:format!("Read the literal code {reference}, not a rewritten ID"),wait:None,
+    }).unwrap().load().unwrap();
+    let accepted=f.db.admit_followup_registration(prepared).unwrap().followup;
+    assert_eq!(accepted.trigger,FollowupTrigger::ProcessStopped{operation_id:f.process.clone()});
+    let details=f.db.followup(&accepted.id).unwrap();
+    assert_eq!(details.trigger,FollowupTrigger::ProcessStopped{operation_id:f.process.clone()});
+    assert_eq!(f.db.capture_followup(&accepted.id).unwrap().load().unwrap().instruction.as_deref(),Some(format!("Read the literal code {reference}, not a rewritten ID").as_str()));
+    f.cleanup();
+}

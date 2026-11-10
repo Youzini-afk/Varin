@@ -63,3 +63,28 @@ it('recognizes a live subroot shared from a deferred private source without trea
   expect(await sameSharedWritableSource(runtime, { runId: 'scoped', source: scoped }, { runId: 'private', source }, signal)).toBe(true);
   expect(await sameSharedWritableSource(runtime, { runId: 'separate', source: materialized(null, 'separate-source') }, { runId: 'private', source }, signal)).toBe(false);
 });
+
+it('freezes original code participants before recovery instead of selecting the Agent latest Run again', async () => {
+  const {resolveCodeExchangeParticipants}=await import('./code-exchange.js');
+  let selected:unknown=null,current='peer-one',sourceReads=0;
+  const nativeSource=materialized(null,'original-baseline');
+  const runtime={
+    run:async (id:string)=>({thread_id:id==='self-run'?'self-thread':'peer-thread',branch_id:id==='self-run'?'self-branch':`branch:${id}`}),
+    launch:async ()=>({selection:{source:nativeSource,tools:[]}}),
+    familyList:async ({query}:{query:string})=>({members:[{threadId:query,agentId:query==='self-thread'?'AAA':'BBB',name:query,parentThreadId:'peer-thread',branches:[{branchId:'new-current-branch',activeRunId:current}]}]}),
+  } as unknown as AgentRuntimeClient;
+  const kernel={agentRuntimeRequest:async(method:string,params:Record<string,unknown>)=>{
+    if(method==='runtime.model_reference.target'){if(params.target!==undefined)selected=structuredClone(params.target);return structuredClone(selected);}
+    if(method==='runtime.external.command')return null;
+    if(method==='runtime.model_reference.agent_source'){sourceReads++;expect(params.identity).toBe('BBB/1');return {run_id:current,source:nativeSource};}
+    throw new Error(method);
+  }};
+  const authority={runId:'self-run',threadId:'self-thread',operationId:'original-exchange',source:live('root'),arguments:{source:'BBB/1',files:['report.ts']}} as import('./tool-invocation.js').ToolInvocationAuthority;
+  const owners={kernel,runtime} as unknown as Parameters<typeof resolveCodeExchangeParticipants>[0];
+  const first=await resolveCodeExchangeParticipants(owners,authority,'update',{source:'BBB/1'},new AbortController().signal);
+  expect(first.peer).toMatchObject({runId:'peer-one',branchId:'branch:peer-one',source:nativeSource});
+  current='peer-two';
+  const retry=await resolveCodeExchangeParticipants(owners,authority,'update',{source:'BBB/1'},new AbortController().signal);
+  expect(retry.peer).toMatchObject({runId:'peer-one',branchId:'branch:peer-one',source:nativeSource});
+  expect(sourceReads).toBe(1);
+});

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isModelReference } from './model-references.js';
 import { BROWSER_CAPABILITY, BROWSER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
@@ -84,7 +85,11 @@ export function createBrowserRuntime(options: {
           return { executor_stopped: true, completion: { kind: 'result', outcome: result.status === 'ok' ? 'succeeded' : 'failed', effect: 'none', content: webOutput(result) } };
         }
         const files = await Promise.all((input.files as { path?: string; snapshotId?: string }[]).map(async file => {
-          if (file.path) { const original = await options.sources.tool(invocation).readPath!(file.path, call.signal); return { name: path.basename(file.path), bytes: original.source }; }
+          if (file.path) {
+            const sources = options.sources.tool(invocation);
+            const original = await (isModelReference(file.path,'file') ? sources.readRef!(file.path,call.signal) : sources.readPath!(file.path,call.signal));
+            return { name: path.basename(original.title || file.path), bytes: original.source };
+          }
           const original = await options.materials.read(context.workspaceId, file.snapshotId!, context.authority, { includeSource: true, signal: call.signal });
           if (!original?.source) throw new Error('The selected attachment has no accessible original file');
           return { name: path.basename(original.ref.title || 'attachment'), bytes: original.source.bytes };

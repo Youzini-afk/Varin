@@ -154,6 +154,10 @@ impl UserChildDispatchPreparation {
     }
 }
 impl UserChildDispatchSelection {
+    pub fn with_model_references(mut self, catalog: &Catalog) -> Result<Self> {
+        catalog.project_attachments(&mut self.attachments, &self.preparation.parent.id)?;
+        Ok(self)
+    }
     /// A planned domain identity for retaining original Host dependencies before commit.
     /// It does not create an Operation or impersonate an admitted tool invocation.
     pub fn retention_identity(&self) -> (String, String, u64) {
@@ -222,6 +226,7 @@ impl UserChildDispatchSelection {
             &p.parent,
             &p.command.input.background,
         )?;
+        let background_reference_ids = background::capture_reference_ids(&database, &p.parent.id, &history)?;
         let inherited_context = if history.is_empty() {
             None
         } else {
@@ -258,6 +263,7 @@ impl UserChildDispatchSelection {
             )?)
         };
         Ok(PreparedChildAdmission {
+            model_contract: super::collaboration::ModelContract::default(),
             attachments: self.attachments,
             attachment_input_ref,
             model_selection_required: resolved.profile.model_selection_required,
@@ -265,6 +271,7 @@ impl UserChildDispatchSelection {
             source_path: None,
             background: p.command.input.background.clone(),
             inherited_context,
+            background_reference_ids,
             avatar: launch.selected_profile.avatar.clone(),
             source_agent: None,
             input_ref: p.content.save(&serde_json::to_value(&p.command.input)?)?,

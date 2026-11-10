@@ -186,7 +186,7 @@ it('admits final typed report references on demand without granting unrelated re
   await expect(f.owner.read(peer, attachment.ref)).rejects.toThrow('has not received');
 });
 
-it('recovers a durable native capture without opening its deleted original pathname again', async () => {
+it.each(['path','file-reference'] as const)('recovers a durable native %s capture without opening its deleted original pathname again', async kind => {
   const f = fixture(), body = Buffer.from('original captured bytes'), operationId = 'restore';
   const key = createHash('sha256').update(JSON.stringify([root.threadId, operationId, 0])).digest('hex');
   const ref = `attachment:${key}`, captureId = `attachment-capture:${key}`, hash = `sha256-${createHash('sha256').update(body).digest('hex')}`;
@@ -194,20 +194,27 @@ it('recovers a durable native capture without opening its deleted original pathn
     branch_id: null, revision: null, live_root: { hostId: 'host', rootId: 'root', canonicalRoot: '/deleted-original' } };
   f.objects.set(hash, body);
   f.records.set(captureId, { recordId: captureId, workspaceId: 'original-source', recordType: 'attachment.capture', state: 'temporary', threadId: root.threadId, recordRevision: 1,
-    payloadJson: JSON.stringify({ path: 'fixed.bin', stateJson: JSON.stringify({ kind: 'regular-file', objectHash: hash, byteLength: body.length }), operationId: `attachment-preparation:${Buffer.from(operationId).toString('base64url')}:0`,
+    payloadJson: JSON.stringify({ path: 'fixed.bin', readVersion:'native-version', stateJson: JSON.stringify({ kind: 'regular-file', objectHash: hash, byteLength: body.length }), operationId: `attachment-preparation:${Buffer.from(operationId).toString('base64url')}:0`,
       canonicalRoot: '/deleted-original', executionWorkspaceId: 'execution-source' }), references: [{ slot: 'source', objectHash: hash }] });
   vi.mocked(f.runtime.run).mockResolvedValue({ id: 'run', thread_id: root.threadId, branch_id: root.branchId } as never);
   vi.mocked(f.runtime.thread).mockImplementation(async id => ({ branches: all.filter(value => value.threadId === id).map(value => ({ branch_id: value.branchId, active_run_id: 'run' })) }) as never);
   vi.mocked(f.runtime.launch).mockResolvedValue({ selection: { source } } as never);
   const sourceClient = { ...f.client, getRecord: vi.fn(async (_workspace: string, id: string) => f.records.get(id) ?? null),
     releaseRecord: vi.fn(async (_op: string, _workspace: string, id: string) => { f.records.delete(id); return {}; }) };
-  const kernel = { issueGrant: vi.fn(async input => ({ grantId: input.grantId })), scoped: () => sourceClient, revokeGrant: vi.fn(async () => ({})) };
+  const kernel = { issueGrant: vi.fn(async input => ({ grantId: input.grantId })), scoped: () => sourceClient, revokeGrant: vi.fn(async () => ({})),
+    agentRuntimeRequest: vi.fn(async (method:string,params:Record<string,unknown>)=>{
+      if (method==='runtime.model_reference.resolve') return {kind:'file',owner:'source',target:{kind:'observation',source,path:'fixed.bin',readVersion:'observed-version',format:null}};
+      if (method==='runtime.model_reference.file_state') {expect(params).toMatchObject({source,path:'fixed.bin',readVersion:'native-version',expectedReadVersion:'observed-version'});return {readVersion:'native-version'};}
+      throw new Error(method);
+    }),
+  };
   const resolveLiveSource = vi.fn(async () => { throw new Error('The source root no longer exists'); });
   const owner = createThreadAttachments({ kernel: kernel as unknown as KernelClient, runtime: f.runtime, storage: f.workingStates, materials: f.materials, resolveLiveSource });
+  const selection=kind==='path'?{path:'/deleted-original/fixed.bin'}:{ref:'file:42'};
   f.client.putBlobStream.mockRejectedValueOnce(new DOMException('Observer cancelled', 'AbortError'));
-  await expect(owner.prepare(root, [{ path: '/deleted-original/fixed.bin' }], operationId, child.threadId)).rejects.toThrow('Observer cancelled');
+  await expect(owner.prepare(root, [selection], operationId, child.threadId)).rejects.toThrow('Observer cancelled');
   expect(f.records.has(captureId)).toBe(true);
-  const attachments = await owner.prepare(root, [{ path: '/deleted-original/fixed.bin' }], operationId, child.threadId);
+  const attachments = await owner.prepare(root, [selection], operationId, child.threadId);
   expect(attachments[0]?.ref).toBe(ref);
   expect(await collected((await owner.read(child, ref)).stream)).toEqual(body);
   expect(resolveLiveSource).not.toHaveBeenCalled();

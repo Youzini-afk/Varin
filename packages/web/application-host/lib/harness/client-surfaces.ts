@@ -42,7 +42,7 @@ interface SurfaceConnection {
 interface PendingRequest {
   authKey: string;
   connectionIds: Set<string>;
-  resolve: (value: { surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }) => void;
+  resolve: (value: { surface: ClientSurfaceInfo; connectionId?:string; results: ClientSurfaceFieldResult[] }) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   surface: ClientSurfaceInfo;
@@ -150,7 +150,8 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
       );
     }
     const targets = [...connections.values()];
-    const threadTargets = targets.filter((conn) => sameSelection(conn.identity, target));
+    const threadTargets = targets.filter((conn) => sameSelection(conn.identity, target)
+      && (!target.expectedSurface || conn.surfaceId === target.expectedSurface.surfaceId && conn.connectionId === target.expectedSurface.connectionId));
     const targetSurfaces = new Map<string, ClientSurfaceInfo>();
     for (const conn of threadTargets) {
       const identity = `${conn.authKey}\0${conn.surfaceId}`;
@@ -173,11 +174,12 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
     const targetIdentity = threadTargets.find((conn) => conn.surfaceId === surface.id)!;
     const selectedTargets = targets.filter((conn) => (
       conn.surfaceId === surface.id
+      && (!target.expectedSurface || conn.connectionId === target.expectedSurface.connectionId)
       && conn.authKey === targetIdentity.authKey
       && sameSelection(conn.identity, targetIdentity.identity)
     ));
     const requestId = `surface-${randomUUID()}`;
-    const results = new Promise<{ surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }>((resolve, reject) => {
+    const results = new Promise<{ surface: ClientSurfaceInfo; connectionId?:string; results: ClientSurfaceFieldResult[] }>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(new HarnessServiceError(
@@ -196,6 +198,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
       });
     });
     try {
+      target.onDispatch?.();
       for (const conn of selectedTargets) {
         writeSseEvent(conn.res, {
           type: 'varin:client-settings-request',
@@ -241,7 +244,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
       || new Set(results.map(result => JSON.stringify([result.id, result.itemIndex]))).size !== results.length) return false;
     clearTimeout(request.timer);
     pending.delete(requestId);
-    request.resolve({ surface: request.surface, results });
+    request.resolve({ surface: request.surface, connectionId, results });
     return true;
   };
 

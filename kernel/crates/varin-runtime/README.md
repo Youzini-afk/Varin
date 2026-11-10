@@ -21,6 +21,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |
 | Fixed attachment descriptors, delivery relations and retention | [catalog_attachments.rs](src/catalog_attachments.rs) |
+| Stable typed model references, execution numbering and scoped public export | [catalog_model_references.rs](src/catalog_model_references.rs), [catalog_export.rs](src/catalog_export.rs) |
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
 | Scope-local bindings, tools and context transforms | [composition](src/composition.rs) |
 | Resource conflict/capacity admission and nested calls | [resource_admission.rs](src/resource_admission.rs), [execution_capacity.rs](src/execution_capacity.rs), [nested_tools.rs](src/nested_tools.rs) |
@@ -44,8 +45,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -62,6 +63,10 @@ representation. Do not add parallel old-format execution/read paths or a second 
   evidence stays unknown; conversion never creates historical charges or replays execution effects.
   Format 92 protects frozen quote relations in original input bodies from readers that cannot project
   them. It does not rewrite historical bodies, resource identities or idempotency receipts.
+  Format 93 adds Catalog-local typed model references and execution numbering. Catalog 92
+  accepts either the quote-only layout with all seven index tables and both external item columns
+  absent, or the complete validated collaboration index. Existing spaces, references and allocation
+  high waters survive unchanged; partial or malformed layouts are rejected before writable recovery.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.
@@ -150,9 +155,16 @@ worker retains only its latest compiled prefix under exact epoch/Run/branch/chec
 new steps hydrate the new suffix, while current memory/Goal/policy evidence is freshly projected.
 Navigation, changed checkpoints and worker exit discard the derived cache.
 
-The current-teammates projection is appended last and omitted when empty. It is temporary request data;
-only the exact request snapshot retains it. Delivery acknowledgements consume reports actually included in
-the organizer's completed model exchange. The same indexed lifecycle facts drive current/history UI pages.
+Collaboration messages and original reports append through the existing input/history owner. The engine
+never enumerates teammates at each model step. Report delivery is acknowledged by the actual receiving
+history transaction, not by parsing prompt text or observing a directory. Ordinary idle Agents are not
+started by passive reports; Bot continuation keeps its existing policy. Old delivery facts retain their meaning.
+
+[Model references](src/catalog_model_references.rs) persist small typed original-owner/selection mappings
+and per-Agent admission sequences. They contain no resource bytes and grant no access. Fixed file reads
+retain the original source/version/format; accepted controls retain their selected execution across retries.
+OutputBody keeps the original data and an optional stable model_data projection. Providers consume that
+projection without rewriting historical bodies or introducing another receipt authority.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped

@@ -78,6 +78,9 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
         "missing",
         "artifact",
         "configuration",
+        "schema-version",
+        "schema-name",
+        "schema-body",
         "expanded",
         "foreign-source",
     ] {
@@ -93,6 +96,9 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
                 wrong["extensionBindings"][0]["binding"]["configurationIdentity"] =
                     json!("different")
             }
+            "schema-version" => wrong["extensionBindings"][0]["binding"]["tool"]["version"] = json!("2"),
+            "schema-name" => wrong["extensionBindings"][0]["binding"]["tool"]["name"] = json!("memory"),
+            "schema-body" => wrong["extensionBindings"][0]["binding"]["tool"]["schema"] = json!({"type":"object","properties":{"extra":{"type":"string"}}}),
             "expanded" => {
                 let extra = wrong["extensionBindings"][0].clone();
                 wrong["extensionBindings"]

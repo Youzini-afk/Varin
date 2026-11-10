@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { createHostModelReferences, resolveFileReference, type FileReferenceTarget } from './model-references.js';
 /** Attachment admission is a material-owner adapter. Rust Storage owns every byte,
  * record, upload receipt and prepared execution path; Catalog owns delivery. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -195,9 +197,25 @@ export function createThreadAttachments(options: {
       return original.attachment;
     });
   };
-  const capture = async (scope: Scope, selection: AttachmentSelection, operationId: string, index: number, runId: string | undefined, signal?: AbortSignal, frozenSource?: LaunchSource | null): Promise<Attachment> => {
+  const references = createHostModelReferences(options.kernel);
+  const capture = async (scope: Scope, selection: AttachmentSelection, operationId: string, index: number, runId: string | undefined, signal?: AbortSignal, frozenSource?: LaunchSource | null,
+    observed?: {reference:string;target:Extract<FileReferenceTarget,{kind:'observation'}>}): Promise<Attachment> => {
+    const originalSelection: AttachmentSelection = observed ? {ref:observed.reference} : selection;
+    const verifyObservation = async (state: KernelBranchState, path: string, rootId?: string, readVersion?: string) => {
+      if (!observed) return;
+      await options.kernel.agentRuntimeRequest('runtime.model_reference.file_state', {source:observed.target.source,path,state,
+        ...(rootId ? {rootId}:{}),...(readVersion ? {readVersion}:{}),expectedReadVersion:observed.target.readVersion},signal);
+    };
     if (typeof selection.ref === 'string') {
       const selectedRef = selection.ref;
+      if (selectedRef.startsWith('file:')) {
+        const target = await resolveFileReference(references,selectedRef,signal);
+        if (target.kind === 'attachment') return capture(scope,{ref:target.reference},operationId,index,runId,signal,frozenSource);
+        if (!runId) throw new HarnessServiceError('unavailable','A file observation needs its original execution source');
+        const source = frozenSource ?? (await options.runtime.launch(runId,signal))?.selection.source;
+        if (!isDeepStrictEqual(source,target.source)) throw new HarnessServiceError('conflict','This file observation belongs to a different source; read the path in the selected source to choose a new observation');
+        return capture(scope,{path:target.path},operationId,index,runId,signal,source,{reference:selectedRef,target});
+      }
       if (selectedRef.startsWith('attachment:')) {
         const existing = await inScope(scope, 'attachment-read', async context => context.records.get(recordId(selectedRef)));
         if (existing) {
@@ -267,17 +285,18 @@ export function createThreadAttachments(options: {
       const record = await context.records.get(ref); return record && record.state !== 'released' ? stored(record) : null;
     });
     if (cached) {
-      if (JSON.stringify(cached.selection) !== JSON.stringify(selection)) throw new HarnessServiceError('conflict', 'The attachment retry changed its original selection');
+      if (JSON.stringify(cached.selection) !== JSON.stringify(originalSelection)) throw new HarnessServiceError('conflict', 'The attachment retry changed its original selection');
       return cached.attachment;
     }
     const importAbsolute = async () => {
+      if (observed) throw new HarnessServiceError('unavailable','The original file observation must be captured by its source owner');
       if (!absoluteCapture) throw new HarnessServiceError('unavailable', 'The selected absolute file requires its original directory owner');
       const original = await absoluteCapture({ threadId: scope.threadId, operationId, ref, selectedPath: selection.path }, signal);
       let committed = false;
       try {
         const attachment = await inScope(scope, 'attachment-write', async context => {
           const object = await transferPages(context.client, original.contentHash, original.byteLength, original.readPage, `absolute-transfer:${ref}`, signal);
-          return write(context, scope, { attachment: { ref, filename: filename(original.filename), mimeType: original.mimeType, byteLength: original.byteLength }, contentHash: object.hash, selection, operationId }, [object.ownerId]);
+          return write(context, scope, { attachment: { ref, filename: filename(original.filename), mimeType: original.mimeType, byteLength: original.byteLength }, contentHash: object.hash, selection: originalSelection, operationId }, [object.ownerId]);
         });
         committed = true; return attachment;
       } finally { await original.release(committed); }
@@ -295,14 +314,14 @@ export function createThreadAttachments(options: {
         const { client, binding } = access;
         const address = { coordinatorHostId: options.runtime.coordinatorHostId, authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
         const original = await client.service({ ...address, requestId: `${restore ? 'recover' : 'capture'}:${ref}`, operation: {
-          kind: restore ? 'attachment_recover' : 'attachment_capture', operationId, ref, path: selection.path } }, signal);
+          kind: restore ? 'attachment_recover' : 'attachment_capture', operationId, ref, path: selection.path, ...(observed ? {expectedReadVersion:observed.target.readVersion}:{}) } }, signal);
         if (!original) return null;
         if (original.attachment.ref !== ref) throw new HarnessServiceError('unavailable', 'The remote attachment owner changed the original reference');
         const attachment = await inScope(scope, 'attachment-write', async context => {
           const read = (offset: number, length: number, view: FileContentReadOptions = {}) => client.service({ ...address, requestId: `attachment-read:${randomUUID()}`,
             operation: { kind: 'attachment_read', ref, offset, length, ...view } }, signal);
           const object = await transferPages(context.client, original.contentHash, original.attachment.byteLength, read, `remote-transfer:${ref}`, signal);
-          return write(context, scope, { attachment: original.attachment, contentHash: object.hash, selection, operationId }, [object.ownerId]);
+          return write(context, scope, { attachment: original.attachment, contentHash: object.hash, selection: originalSelection, operationId }, [object.ownerId]);
         });
         await client.service({ ...address, requestId: `release:${ref}`, operation: { kind: 'attachment_release', ref } });
         return attachment;
@@ -323,16 +342,18 @@ export function createThreadAttachments(options: {
     try {
       const client = options.kernel.scoped(retainedGrant), record = await client.getRecord(source.workspace_id, captureRecordId, signal);
       if (record && record.state !== 'released') {
-        const receipt = JSON.parse(record.payloadJson) as { path: string; stateJson: string; operationId: string; canonicalRoot: string; executionWorkspaceId: string };
-        const selectedPath = path.isAbsolute(selection.path) ? path.relative(receipt.canonicalRoot, selection.path).replaceAll('\\', '/') : selection.path.replaceAll('\\', '/');
+        const receipt = JSON.parse(record.payloadJson) as { path: string; stateJson: string; readVersion?:string; operationId: string; canonicalRoot: string; executionWorkspaceId: string };
+        const relative = path.isAbsolute(selection.path) ? path.relative(receipt.canonicalRoot, selection.path) : selection.path;
+        const selectedPath = (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) ? selection.path : relative).replaceAll('\\', '/');
         if (record.recordType !== 'attachment.capture' || record.threadId !== scope.threadId || receipt.operationId !== captureOperationId
           || receipt.executionWorkspaceId !== source.execution_workspace_id || receipt.path !== selectedPath
           || source.mode === 'live_root' && receipt.canonicalRoot !== source.live_root?.canonicalRoot) throw new HarnessServiceError('conflict', 'The attachment retry changed its original Source or path');
         const state = JSON.parse(receipt.stateJson) as KernelBranchState;
+        await verifyObservation(state,receipt.path,source.live_root?.rootId,receipt.readVersion);
         if (state.kind !== 'regular-file') throw new HarnessServiceError('unavailable', 'The retained attachment capture is incomplete');
         const attachment = await inScope(scope, 'attachment-write', async context => {
           const object = await transfer(context.client, client, state.objectHash, state.byteLength, { recordId: captureRecordId, slot: 'source' }, `capture-transfer:${ref}`, signal);
-          return write(context, scope, { attachment: { ref, filename: path.basename(receipt.path), mimeType: attachmentMimeType(receipt.path), byteLength: state.byteLength }, contentHash: object.hash, selection, operationId }, [object.ownerId]);
+          return write(context, scope, { attachment: { ref, filename: path.basename(receipt.path), mimeType: attachmentMimeType(receipt.path), byteLength: state.byteLength }, contentHash: object.hash, selection: originalSelection, operationId }, [object.ownerId]);
         });
         await client.releaseRecord(`release:${captureRecordId}`, source.workspace_id, captureRecordId);
         return attachment;
@@ -346,15 +367,16 @@ export function createThreadAttachments(options: {
       if (path.isAbsolute(sourcePath)) {
         if (!authority.canonicalRoot) return await importAbsolute();
         const relative = path.relative(authority.canonicalRoot, sourcePath);
-        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return await importAbsolute();
-        sourcePath = relative.replaceAll('\\', '/');
+        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) { if (!observed) return await importAbsolute(); }
+        else sourcePath = relative.replaceAll('\\', '/');
       }
       const captured = await authority.client.getRecord(source.workspace_id, captureRecordId, signal);
       if (captured && captured.state !== 'released') {
-        const original = JSON.parse(captured.payloadJson) as { path: string; stateJson: string; operationId: string; executionWorkspaceId: string; canonicalRoot: string };
+        const original = JSON.parse(captured.payloadJson) as { path: string; stateJson: string; readVersion?:string; operationId: string; executionWorkspaceId: string; canonicalRoot: string };
         if (captured.recordType !== 'attachment.capture' || original.operationId !== captureOperationId || original.executionWorkspaceId !== source.execution_workspace_id
           || original.canonicalRoot !== authority.canonicalRoot || original.path !== sourcePath.replaceAll('\\', '/')) throw new HarnessServiceError('conflict', 'The attachment retry changed its original Source or selected path');
         state = JSON.parse(original.stateJson); sourcePath = original.path;
+        await verifyObservation(state,sourcePath,authority.rootId,original.readVersion);
         proof = { recordId: captureRecordId, slot: 'source' };
       } else if (source.mode === 'fixed_branch' || source.mode === 'materialized' && !authority.rootId) {
         const read = await authority.client.readBranch({ branchId: source.branch_id!, revision: source.revision!, paths: [sourcePath], includeEntries: true }, signal);
@@ -363,11 +385,12 @@ export function createThreadAttachments(options: {
       } else {
         if (!authority.rootId) throw new HarnessServiceError('unavailable', 'The attachment execution root is unavailable');
         const read = await authority.client.fileCapture({ operationId: captureOperationId, workspaceId: source.workspace_id, rootId: authority.rootId,
-          path: sourcePath, store: true, retentionRecordId: captureRecordId }, signal);
+          path: sourcePath, store: true, retentionRecordId: captureRecordId, ...(observed ? {expectedReadVersion:observed.target.readVersion}:{}) }, signal);
         if (typeof read.stateJson !== 'string') throw new HarnessServiceError('unavailable', 'The original attachment capture is incomplete');
         state = JSON.parse(read.stateJson); proof = { recordId: captureRecordId, slot: 'source' };
         if (typeof read.path === 'string') sourcePath = read.path;
       }
+      if (source.mode === 'fixed_branch') await verifyObservation(state,sourcePath);
       if (state.kind !== 'regular-file') throw new HarnessServiceError(state.kind === 'missing' ? 'not-found' : 'invalid-params', `The selected attachment is ${state.kind}, not a regular file`);
       const file = state;
       const attachment = await inScope(scope, 'attachment-write', async context => {
@@ -375,7 +398,7 @@ export function createThreadAttachments(options: {
         // the recipient's independent durable object record has committed.
         const object = await transfer(context.client, authority.client, file.objectHash, file.byteLength, proof, `capture-transfer:${ref}`, signal);
         return write(context, scope, { attachment: { ref, filename: path.basename(sourcePath), mimeType: attachmentMimeType(sourcePath), byteLength: file.byteLength },
-          contentHash: object.hash, selection, operationId }, [object.ownerId]);
+          contentHash: object.hash, selection: originalSelection, operationId }, [object.ownerId]);
       });
       committed = true;
       return attachment;
@@ -607,17 +630,24 @@ export function createThreadAttachments(options: {
       await createMaterialLifecycle(actorStorage).releaseThreadMaterials(scope.workspaceId, scope.threadId);
     },
     async upload(identity: ThreadIdentity, request: AttachmentUpload, source: AsyncIterable<Uint8Array>, signal?: AbortSignal) { const scope = await scopeFor(identity, signal); return nativeActivity(identity, scope, () => upload(scope, request, source, signal), signal); },
-    async read(identity: ThreadIdentity, ref: string, signal?: AbortSignal) { const scope = await scopeFor(identity, signal); return nativeActivity(identity, scope, () => read(scope, ref, signal), signal); },
+    async read(identity: ThreadIdentity, ref: string, signal?: AbortSignal) { if (ref.startsWith('file:')) { const selected = await resolveFileReference(references,ref,signal); if (selected.kind !== 'attachment') throw new HarnessServiceError('invalid-params','Read this file observation through its original source'); ref = selected.reference; } const scope = await scopeFor(identity, signal); return nativeActivity(identity, scope, () => read(scope, ref, signal), signal); },
     async prepare(identity: ThreadIdentity, selections: readonly AttachmentSelection[], operationId: string, targetThreadId = identity.threadId, signal?: AbortSignal) {
       const thread = await options.runtime.thread(identity.threadId, signal);
       const branch = thread.branches.find(branch => branch.branch_id === identity.branchId);
       const scope = await scopeFor(identity, signal);
       return nativeActivity(identity, scope, () => prepare(scope, selections, operationId, targetThreadId, branch?.active_run_id ?? branch?.latest_run?.id, signal), signal);
     },
+    async prepareForRun(authority: {runId:string;threadId:string;operationId:string;source:LaunchSource | null}, ref: string, signal?: AbortSignal) {
+      const run = await options.runtime.run(authority.runId,signal);
+      if (run.thread_id !== authority.threadId) throw new HarnessServiceError('forbidden','The file observation belongs to another invocation');
+      const identity = {runtime:'agent' as const,threadId:run.thread_id,branchId:run.branch_id};
+      const scope = await scopeFor(identity,signal);
+      return nativeActivity(identity,scope,() => prepare(scope,[{ref}],`file-reader:${authority.operationId}:${ref}`,scope.threadId,authority.runId,signal,authority.source),signal);
+    },
     async prepareQuery(query: AttachmentPreparationQuery, signal: AbortSignal) {
       const frozen = await options.runtime.resourceSnapshot({ runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId }, signal);
       const run = await options.runtime.run(query.runId, signal);
-      if (query.request.attachments.some(item => typeof item.ref === 'string' && !item.ref.startsWith('attachment:') && !parseWebSourceCitation(item.ref))) throw new HarnessServiceError('invalid-params', 'Use the canonical attachment reference returned by the original file or document tool');
+      if (query.request.attachments.some(item => typeof item.ref === 'string' && !item.ref.startsWith('attachment:') && !item.ref.startsWith('file:') && !parseWebSourceCitation(item.ref))) throw new HarnessServiceError('invalid-params', 'Use the canonical attachment reference returned by the original file or document tool');
       const identity = { runtime: 'agent' as const, threadId: run.thread_id, branchId: run.branch_id }, scope = await scopeFor(identity, signal);
       try { return await nativeActivity(identity, scope, () => prepare(scope, query.request.attachments,
         query.request.operationId, query.request.targetThreadId, query.runId, signal, frozen.source), signal); }

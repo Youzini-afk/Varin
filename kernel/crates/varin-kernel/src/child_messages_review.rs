@@ -48,6 +48,12 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
         assert_eq!(matches!(origin, ToolOrigin::ModelStep { .. }), model);
         let operation = db.operation(operation_id).unwrap();
         let public = db.capture_operation_read(operation.clone()).load().unwrap();
+        let ToolCompletion::Result {content,..}=public.call_completion.as_ref().unwrap() else {panic!("send result")};
+        let reference=content.model_data.as_ref().unwrap()["message"]["ref"].as_str().unwrap();
+        assert!(reference.starts_with("msg:"));
+        let selected=db.capture_message("thread:parent","branch:parent",reference).unwrap().load().unwrap();
+        assert_eq!(selected.summary.receipt.identity.message_id,receipt.identity.message_id);
+        assert_eq!(selected.text,"Child original progress");
         let invocation: ToolInvocation = serde_json::from_value(public.intent.clone()).unwrap();
         let context = ToolExecutionContext {
             run_id: run_id.clone(),
@@ -464,6 +470,20 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
             assert_eq!(matches!(origin, ToolOrigin::ModelStep { .. }), model);
             let op = db.operation(operation_id).unwrap();
             assert_eq!(op.effect, Effect::Confirmed);
+            let completion=db.capture_call_completion(operation_id).unwrap().load().unwrap();
+            let output=match completion {
+                ToolCompletion::Result{content,..}|ToolCompletion::JobAccepted{content:Some(content),..}=>content,
+                other=>panic!("follow-up acceptance lost its owner projection: {other:?}"),
+            };
+            assert_eq!(output.data["followupId"],value.id);
+            let reference=output.model_data()["followupId"].as_str().expect("follow-up handle");
+            assert!(reference.starts_with("followup:"));
+            assert_eq!(output.model_data()["read"]["arguments"]["followupId"],reference);
+            if wait {assert_eq!(output.model_data()["operationRef"],reference);}
+            if let Some(job)=&job {
+                assert!(output.data["trigger"].to_string().contains(&job.operation_id));
+                assert!(!output.model_data()["trigger"].to_string().contains(&job.operation_id));
+            }
             let view = db.capture_followup(&value.id).unwrap();
             if wait {
                 assert_eq!(op.phase, varin_runtime::OperationPhase::Waiting);
@@ -1347,3 +1367,70 @@ mod log_followups;
 
 #[path = "metric_followup_review.rs"]
 mod metric_followups;
+
+#[test]
+fn followup_reference_pages_replay_the_original_query_and_keep_literal_registration_text() {
+    use varin_runtime::catalog::{followups::*,model_references::ReferenceKind};
+    let f=Fixture::with_tools(false,vec![crate::followup_tools::schema()],vec!["follow_up".into()]);
+    let job=accepted_family_job(&f,"reference-pages");
+    let owner=f.catalog();
+    let (followup_ref,next_ref,first_ids,next_ids,operation_ref)={
+        let mut db=owner.lock().unwrap();
+        let operation_ref=db.operation_model_reference(&job.operation_id,&f.run.id).unwrap();
+        let p=db.prepare_followup_registration("reference-log",&f.run.id,FollowupRegistration{
+            repeat:FollowupRepeat::Each,trigger:FollowupRegistrationTrigger::LogLiteral{
+                operation_id:operation_ref.clone(),stream:LogStream::Stdout,literal:"job:999".into(),from_offset:None},
+            instruction:"Keep the literal job:999 unchanged".into(),wait:None}).unwrap().load().unwrap();
+        let admitted=db.admit_followup_registration(p).unwrap();
+        for n in 0..66u64 {
+            let work=db.followup_research_works(None).unwrap().0.into_iter().find(|work|work.key.followup_id==admitted.followup.id).unwrap();
+            let expected=work.log.clone().unwrap();
+            let end=(n+1)*7;
+            db.apply_log_observation(FollowupLogObservation {key:work.key,binding:job.clone(),expected,
+                next:FollowupLogState{offset:end,matched_prefix:0,ended:false,failure_code:None},
+                evidence:Some(FollowupLogEvidence::LogLiteral{binding:job.clone(),stream:LogStream::Stdout,
+                    start_offset:n*7,end_offset:end,published_bytes:end,job_revision:n+2})}).unwrap();
+        }
+        let page=db.followup_occurrences(&admitted.followup.id,None).unwrap();
+        assert_eq!(page.occurrences.len(),64);
+        let after=page.next_cursor.unwrap();
+        let next=db.followup_occurrences(&admitted.followup.id,Some(after)).unwrap();
+        assert_eq!(next.occurrences.len(),2);
+        let followup_ref=db.register_model_reference(ReferenceKind::Followup,"catalog-followup",&json!({"followupId":admitted.followup.id}),&f.run.id).unwrap();
+        let next_ref=db.register_model_reference(ReferenceKind::Read,"catalog-followup",&json!({"tool":"follow_up","source":null,
+            "arguments":{"action":"occurrences","followupId":admitted.followup.id,"after":after}}),&f.run.id).unwrap();
+        let occurrence_ref=db.register_model_reference(ReferenceKind::Observation,"catalog-followup",&json!({"followupId":admitted.followup.id,"occurrenceId":page.occurrences[0].id}),&f.run.id).unwrap();
+        let mut wrong:FollowupToolInput=serde_json::from_value(json!({"action":"occurrence","followupId":"another-followup","occurrenceId":occurrence_ref})).unwrap();
+        assert!(db.resolve_followup_tool_input(&mut wrong).is_err());
+        (followup_ref,next_ref,page.occurrences.into_iter().map(|v|v.id).collect::<Vec<_>>(),next.occurrences.into_iter().map(|v|v.id).collect::<Vec<_>>(),operation_ref)
+    };
+    let inputs=[json!({"action":"occurrences","followupId":followup_ref}),json!({"action":"read","ref":next_ref}),
+        json!({"action":"read","ref":next_ref}),json!({"action":"get","followupId":followup_ref}),json!({"action":"jobs"})];
+    let calls=inputs.into_iter().enumerate().map(|(n,arguments)|ToolCall{call_id:format!("reference-page-{n}"),name:"follow_up".into(),
+        schema_version:crate::followup_tools::schema().version,arguments}).collect();
+    execute(&f,true,calls,&mut OwnerReplies::default(),false);
+    let db=owner.lock().unwrap();
+    let history=db.execution_history(&f.run.branch_id).unwrap();
+    let results=history.iter().filter_map(|item|match &item.content {
+        Content::ToolResult{result} if result.call_id.starts_with("reference-page-")=>Some((result.call_id.clone(),result.completion.clone())),_=>None,
+    }).collect::<std::collections::BTreeMap<_,_>>();
+    let output=|n:usize|{let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=&results[&format!("reference-page-{n}")] else{panic!("original followup reader failed: {:?}",results)};content};
+    assert_eq!(output(0).model_data()["nextRead"]["arguments"],json!({"action":"read","ref":next_ref}));
+    assert_eq!(output(1),output(2),"nextRead is repeatable and never consumes a cursor");
+    assert_eq!(output(0).data["occurrences"][0]["id"],first_ids[0]);
+    assert_eq!(output(1).data["occurrences"][0]["id"],next_ids[0]);
+    assert_eq!(output(3).model_data()["registrationTrigger"]["operationId"],operation_ref);
+    assert_eq!(output(3).model_data()["registrationTrigger"]["literal"],"job:999");
+    assert_eq!(output(3).model_data()["instruction"],"Keep the literal job:999 unchanged");
+    assert!(!output(0).model_data().to_string().contains(&job.operation_id));
+    assert!(output(4).model_data().to_string().contains(&operation_ref));
+    drop(db);drop(owner);
+    let f=f.reopen();
+    let mut selected:FollowupToolInput=serde_json::from_value(json!({"action":"read","ref":next_ref})).unwrap();
+    f.catalog().lock().unwrap().resolve_followup_tool_input(&mut selected).unwrap();
+    assert!(matches!(selected,FollowupToolInput::Occurrences{after:Some(_),..}));
+    f.finish();
+}
+
+#[path = "child_query_continuation_review.rs"]
+mod query_continuation_review;

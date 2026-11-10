@@ -21,7 +21,7 @@ impl ModelProvider for Investigate {
         let content=if let Some(result)=evidence {
             assert!(serde_json::to_string(result).unwrap().contains("native retrieval evidence"));
             Content::Text{text:"body.txt:1 contains native retrieval evidence.".into()}
-        } else {Content::ToolCall {call:ToolCall{call_id:"read-evidence".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"body.txt"})}}};
+        } else {Content::ToolCall {call:ToolCall{call_id:"read-evidence".into(),name:"file_read".into(),schema_version:request.view.binding.tools.iter().find(|schema|schema.name=="file_read").expect("admitted file reader").version.clone(),arguments:json!({"path":"body.txt"})}}};
         if self.pause.is_some() && evidence.is_some() {
             let Content::Text{text}=content else {unreachable!()};
             emit(ProviderEvent::TextDelta{item_id:"reply".into(),text})?;
@@ -45,7 +45,7 @@ fn stopping_background_retrieval_retains_actual_partial_output() {
     run_investigation(true);
 }
 fn run_investigation(stop:bool) {
-    let read=crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).remove(0);
+    let read=crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).into_iter().find(|schema|schema.name=="file_read").expect("native file reader");
     let mut f=dispatch::Fixture::new_internal_retrieval_with_read(read);
     let child=f.accept();
     let status=f.db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
@@ -104,7 +104,24 @@ fn run_investigation(stop:bool) {
     if !stop {assert_eq!(status["latestAssistantMessage"]["text"],"body.txt:1 contains native retrieval evidence.");}
     let usage=usage.load(&||false).unwrap();let retrieval=usage.rows.iter().find(|row|row.kind=="retrieval").unwrap();
     assert_eq!(retrieval.requests,2);assert_eq!(retrieval.input_tokens.known.as_deref(),Some("200"));
-    runtime.shutdown().unwrap();drop(owner);drop(runtime);std::fs::remove_dir_all(root).unwrap();
+    runtime.shutdown().unwrap();drop(owner);drop(runtime);
+    // A cheap file read has no Operation. Its canonical call metadata must still
+    // describe the latest action after reopening, without opening the result body.
+    let db=Catalog::open(&root).unwrap();
+    let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    let object:String=sql.query_row("SELECT json_extract(receipt,'$.completion.content_ref.content_object') FROM tool_calls WHERE call_id='read-evidence'",[],|row|row.get(0)).unwrap();
+    drop(sql);
+    let result=varin_runtime::content::object_path(&root.join("content"),&object).unwrap();
+    std::fs::write(result,b"unavailable original tool result").unwrap();
+    let reopened=db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
+    assert_eq!(reopened["latestAction"],status["latestAction"]);
+    // Supported older Catalogs retain batch events without the request identity.
+    let sql=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    sql.execute("UPDATE events SET data=json_remove(data,'$.request_id') WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='tool_batch_committed'",[&receipt.run_id]).unwrap();
+    drop(sql);
+    let legacy=db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
+    assert_eq!(legacy["latestAction"],status["latestAction"]);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

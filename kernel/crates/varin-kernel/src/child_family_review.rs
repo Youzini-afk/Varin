@@ -196,3 +196,76 @@ fn available_family_capabilities_do_not_enter_unselected_child_or_restore() {
     drop(restored);
     f.finish();
 }
+
+#[test]
+fn original_family_item_and_continuation_references_are_directly_consumable() {
+    use varin_runtime::catalog::{family::{ItemRequest,ReadRequest,FamilyReadQuery},model_references::ReferenceKind};
+    let f=family_fixture(vec!["read_thread".into()]);
+    let (item_ref,next_ref,first_text,next_text)={
+        let catalog=f.catalog();let mut db=catalog.lock().unwrap();
+        let page=db.capture_family_read(&f.run.thread_id,Some("thread:parent"),Some("branch:parent")).unwrap()
+            .read(ReadRequest {run_id:None,anchor:None,cursor:None,query:FamilyReadQuery::Recent{limit:Some(1),max_item_bytes:Some(16)}},&||false).unwrap();
+        let item=page.items[0].id.clone();
+        let first=db.capture_family_read(&f.run.thread_id,Some("thread:parent"),Some("branch:parent")).unwrap()
+            .item(ItemRequest{run_id:None,anchor:Some(page.anchor.clone()),item_id:item.clone(),offset:None,max_bytes:Some(31)},&||false).unwrap();
+        let second=db.capture_family_read(&f.run.thread_id,Some("thread:parent"),Some("branch:parent")).unwrap()
+            .item(ItemRequest{run_id:None,anchor:Some(page.anchor.clone()),item_id:item.clone(),offset:first.next_offset,max_bytes:Some(31)},&||false).unwrap();
+        let mut args=json!({"threadId":"thread:parent","branchId":"branch:parent","anchor":page.anchor,"query":{"kind":"item","itemId":item,"maxBytes":31}});
+        let target=db.model_history_read_target("read_thread",&args).unwrap();
+        let first_ref=db.register_model_reference(ReferenceKind::Item,"history",&target,&f.run.id).unwrap();
+        args["query"]["offset"]=json!(first.next_offset.unwrap());
+        let target=db.model_history_read_target("read_thread",&args).unwrap();
+        let next_ref=db.register_model_reference(ReferenceKind::Read,"history",&target,&f.run.id).unwrap();
+        (first_ref,next_ref,first.text,second.text)
+    };
+    let calls=[item_ref,next_ref].into_iter().enumerate().map(|(index,reference)|ToolCall{call_id:format!("short-history-{index}"),name:"read_thread".into(),schema_version:"2".into(),arguments:json!({"ref":reference})}).collect();
+    execute(&f,true,calls,&mut OwnerReplies::default(),false);
+    let catalog=f.catalog();let db=catalog.lock().unwrap();
+    let results=db.history(&f.run.branch_id).unwrap().into_iter()
+        .filter_map(|item|serde_json::from_value::<ConversationItem>(item.content).ok())
+        .filter_map(|item|if let Content::ToolResult{result}=item.content {Some(result)}else{None}).collect::<Vec<_>>();
+    assert_eq!(results.len(),2);
+    for (result,expected) in results.iter().zip([first_text,next_text]) {
+        let ToolCompletion::Result{outcome,content,..}=&result.completion else {panic!("read result")};
+        assert_eq!(*outcome,Outcome::Succeeded,"{content:?}");
+        assert_eq!(content.data["page"]["text"],expected);
+        let model=content.model_data.as_ref().unwrap();
+        assert!(model["page"]["anchor"].is_null());
+        if content.data["page"]["nextOffset"].is_null() {
+            assert!(model["page"]["nextRead"].is_null(),"the last page must not invent a continuation");
+        } else {
+            assert!(model["page"]["nextRead"]["arguments"]["ref"].as_str().unwrap().starts_with("read:"));
+        }
+    }
+    drop(db);drop(catalog);f.finish();
+}
+
+#[test]
+fn native_execution_references_read_the_exact_original_run_and_list_as_usable_targets() {
+    let f=family_fixture(vec!["read_thread".into()]);
+    let (execution,original_run)={
+        let catalog=f.catalog();let db=catalog.lock().unwrap();
+        let original=db.history("branch:parent").unwrap().last().unwrap().run_id.clone();
+        (db.execution_reference(&original).unwrap().reference,original)
+    };
+    let calls=vec![
+        ToolCall{call_id:"native-exact-thread".into(),name:"read_thread".into(),schema_version:"2".into(),arguments:json!({"threadId":execution,"query":{"kind":"recent","limit":20}})},
+        ToolCall{call_id:"native-exact-run".into(),name:"read_thread".into(),schema_version:"2".into(),arguments:json!({"runId":execution,"query":{"kind":"overview"}})},
+        ToolCall{call_id:"native-runs".into(),name:"read_thread".into(),schema_version:"2".into(),arguments:json!({"threadId":"thread:parent","query":{"kind":"runs"}})},
+    ];
+    execute(&f,true,calls,&mut OwnerReplies::default(),false);
+    let catalog=f.catalog();let db=catalog.lock().unwrap();
+    let results=db.history(&f.run.branch_id).unwrap().into_iter().filter_map(|item|serde_json::from_value::<ConversationItem>(item.content).ok())
+        .filter_map(|item|if let Content::ToolResult{result}=item.content {Some(result)}else{None}).collect::<Vec<_>>();
+    assert_eq!(results.len(),3);
+    for result in &results {let ToolCompletion::Result{outcome,content,..}=&result.completion else {panic!("read result")};assert_eq!(*outcome,Outcome::Succeeded,"{content:?}");}
+    let ToolCompletion::Result{content,..}=&results[0].completion else {unreachable!()};
+    assert_eq!(content.data["page"]["runId"],original_run);
+    let ToolCompletion::Result{content,..}=&results[1].completion else {unreachable!()};
+    assert_eq!(content.model_data.as_ref().unwrap()["page"]["executions"][0]["ref"],execution);
+    let ToolCompletion::Result{content,..}=&results[2].completion else {unreachable!()};
+    let runs=content.model_data.as_ref().unwrap()["page"]["runs"].as_array().unwrap();
+    assert!(runs.iter().any(|run|run["ref"]==execution && run["nextRead"]["arguments"]["threadId"]==execution));
+    assert!(runs.iter().all(|run|run["runId"].is_null() && run["branchId"].is_null()));
+    drop(db);drop(catalog);f.finish();
+}

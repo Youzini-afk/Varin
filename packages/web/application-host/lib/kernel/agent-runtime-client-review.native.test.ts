@@ -1,3 +1,4 @@
+import { originalProcessOperationId } from './model-reference.test-helper.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -316,17 +317,18 @@ it.each([false, true])('tool process settles OS and durable operation evidence (
   const result = continuation.find(item => item.type === 'function_call_output');
   const accepted = JSON.parse(responsesMetadataText(result?.output)) as { operation_id: string };
   expect(typeof accepted.operation_id).toBe('string');
-  const processIdentity = { workspaceId: 'process-workspace', rootId: registered.rootId, processId: accepted.operation_id };
+  const operationId = await originalProcessOperationId(f.host, accepted.operation_id);
+  const processIdentity = { workspaceId: 'process-workspace', rootId: registered.rootId, processId: operationId };
   try {
     await expect.poll(async () => fs.readFile(path.join(workspace, 'test-marker.txt'), 'utf8').catch(() => ''), { timeout: 8_000 }).toBe('real process');
     await expect(actor.processList({ workspaceId: 'process-workspace', rootId: String(registered.rootId) })).rejects.toThrow(/process maintenance/i);
     if (cancelProcess) {
       expect((await actor.processInspect(processIdentity)).writerActive).toBe(true);
-      await f.runtimeClient.cancelOperation(accepted.operation_id);
+      await f.runtimeClient.cancelOperation(operationId);
     }
     await expect.poll(async () => (await actor.processInspect(processIdentity)).writerActive, { timeout: 8_000 }).toBe(false);
-    await expect.poll(async () => (await f.runtimeClient.operation(accepted.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
-    expect((await f.runtimeClient.operation(accepted.operation_id)).outcome).toBe(cancelProcess ? 'cancelled' : 'succeeded');
+    await expect.poll(async () => (await f.runtimeClient.operation(operationId)).phase, { timeout: 8_000 }).toBe('terminal');
+    expect((await f.runtimeClient.operation(operationId)).outcome).toBe(cancelProcess ? 'cancelled' : 'succeeded');
   } finally {
     if ((await actor.processInspect(processIdentity)).writerActive) {
       await actor.processKill({ ...processIdentity, force: true });
@@ -517,16 +519,17 @@ it('model interrupt preserves an accepted background process job until explicit 
   await expect.poll(() => provider.requests.length).toBe(2);
   const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const receipt = JSON.parse(responsesMetadataText(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
-  const identity = { workspaceId: 'interrupt-job-workspace', rootId: root.rootId, processId: receipt.operation_id };
+  const operationId = await originalProcessOperationId(f.host, receipt.operation_id);
+  const identity = { workspaceId: 'interrupt-job-workspace', rootId: root.rootId, processId: operationId };
   try {
     expect((await actor.processInspect(identity)).writerActive).toBe(true);
     await f.runtimeClient.enqueue({ key: 'interrupt-job-new-input', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', mode: 'interrupt', input: { text: 'change foreground response' } });
     await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
     expect(provider.requests).toHaveLength(3);
     expect((await actor.processInspect(identity)).writerActive).toBe(true);
-    expect((await f.runtimeClient.operation(receipt.operation_id)).cancel_requested).toBe(false);
-    await f.runtimeClient.cancelOperation(receipt.operation_id);
-    await expect.poll(async () => (await f.runtimeClient.operation(receipt.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
+    expect((await f.runtimeClient.operation(operationId)).cancel_requested).toBe(false);
+    await f.runtimeClient.cancelOperation(operationId);
+    await expect.poll(async () => (await f.runtimeClient.operation(operationId)).phase, { timeout: 8_000 }).toBe('terminal');
     expect((await actor.processInspect(identity)).writerActive).toBe(false);
   } finally {
     if ((await actor.processInspect(identity)).writerActive) {
@@ -691,8 +694,8 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
 it('file write and edit preserve conflict receipts and round-trip through the recovery panel', async () => {
   const f = await fixture();
   const revision = await publishSource(f.host, 'mutation-source', 'original text\n');
-  const receipts: Array<{ outcome?: string; effect?: string; content?: { readVersion?: string; status?: string; content?: { text?: string } } }> = [];
-  let firstVersion = '';
+  const receipts: Array<{ outcome?: string; effect?: string; content?: { ref?: string; status?: string; content?: { text?: string } } }> = [];
+  let firstRef = '';
   let turn = 0;
   let successorReadRequested = false;
   let successorRead = '';
@@ -712,11 +715,12 @@ it('file write and edit preserve conflict receipts and round-trip through the re
     turn++;
     if (turn === 1) toolResponse(response, 'file_read', { path: 'source.txt' }, turn);
     else if (turn === 2) {
-      firstVersion = last?.content?.readVersion ?? '';
-      toolResponse(response, 'file_write', { path: 'source.txt', readVersion: firstVersion, content: 'alpha\nbeta\n' }, turn);
-    } else if (turn === 3) toolResponse(response, 'file_edit', { path: 'source.txt', readVersion: last?.content?.readVersion, edits: [{ oldText: 'beta', newText: 'gamma' }] }, turn);
+      firstRef = last?.content?.ref ?? '';
+      expect(firstRef).toMatch(/^file:/);
+      toolResponse(response, 'file_write', { ref: firstRef, content: 'alpha\nbeta\n' }, turn);
+    } else if (turn === 3) toolResponse(response, 'file_edit', { ref: last?.content?.ref, edits: [{ oldText: 'beta', newText: 'gamma' }] }, turn);
     else if (turn === 4 || turn === 6) toolResponse(response, 'file_read', { path: 'source.txt' }, turn);
-    else if (turn === 5) toolResponse(response, 'file_write', { path: 'source.txt', readVersion: firstVersion, content: 'must not overwrite newer text' }, turn);
+    else if (turn === 5) toolResponse(response, 'file_write', { ref: firstRef, content: 'must not overwrite newer text' }, turn);
     else completeLocalResponse(response, 'mutation-answer', 'mutation fixture finished');
   });
   await f.runtimeClient.createThread('mutation-thread', 'mutation-conversation');

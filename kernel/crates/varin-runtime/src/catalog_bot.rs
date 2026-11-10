@@ -419,6 +419,7 @@ impl Catalog {
             };
             tx.execute(&statement, params![runs, threads])?;
         }
+        super::model_references::collect_unheld(&tx, &self.content)?;
         let matter_prefix = format!("bot-matter:{}:", suspension.bot_id);
         tx.execute("DELETE FROM commands WHERE substr(id,1,length(?1))=?1", [&matter_prefix])?;
         let matter_subject = format!("bot-work:{}", suspension.bot_id);

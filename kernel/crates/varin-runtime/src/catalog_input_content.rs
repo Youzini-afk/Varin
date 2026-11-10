@@ -2,6 +2,8 @@
 use super::*;
 
 pub struct QueuePreparation {
+    input_id: String,
+    model_attachments: Vec<super::super::attachments::Attachment>,
     existing: Option<(Value, InputReceipt)>,
     current: Option<context::CheckpointRead>,
     input_preparation: Option<resources::InputResourcePreparation>,
@@ -56,6 +58,8 @@ impl QueuePreparation {
     pub fn load(self) -> Result<PreparedQueueInput> {
         let duplicate = self.existing_receipt()?.is_some();
         let Self {
+            input_id,
+            model_attachments,
             command,
             epoch,
             content,
@@ -69,10 +73,6 @@ impl QueuePreparation {
                 "input idempotency key cannot be empty".into(),
             ));
         }
-        let input_id = existing
-            .as_ref()
-            .map(|(_, receipt)| receipt.input_id.clone())
-            .unwrap_or_else(id);
         let (history, intent, checkpoint) = if duplicate {
             (
                 Value::Null,
@@ -97,12 +97,13 @@ impl QueuePreparation {
             } else {
                 None
             };
-            let material = resources::bind_input(
+            let mut material = resources::bind_input(
                 &command.input,
                 1,
                 input_preparation.as_ref(),
                 current.as_ref(),
             )?;
+            if !model_attachments.is_empty() {material["fileAttachments"]=serde_json::to_value(&model_attachments)?;}
             (
                 content.save_user_history(&input_id, &material)?,
                 {
@@ -113,7 +114,7 @@ impl QueuePreparation {
             )
         };
         Ok(PreparedQueueInput {
-            attachments: super::super::attachments::input_attachments(&command.input)?,
+            attachments: model_attachments,
             title: threads::input_title(&command.input),
             identity: QueueIdentity {
                 input_id,
@@ -152,6 +153,7 @@ impl QueuedInputRead {
     }
 }
 pub struct InputEditPreparation {
+    model_attachments: Option<Vec<super::super::attachments::Attachment>>,
     previous: QueuedInputRead,
     current: Option<context::CheckpointRead>,
     input_preparation: Option<resources::InputResourcePreparation>,
@@ -257,6 +259,7 @@ impl InputEditPreparation {
                 }
             }
         }
+        if let Some(files)=self.model_attachments {stored["fileAttachments"]=serde_json::to_value(files)?;}
         crate::output::validate_user_metadata(&stored)?;
         let attachments = super::super::attachments::input_attachments(&stored)?;
         let reference = self.content.save_stored_user_history(&stored)?;
@@ -290,14 +293,20 @@ impl Catalog {
                 ))
             })
             .transpose()?;
+        let publication=self.content.begin_publication();
+        let input_id=existing.as_ref().map(|(_,receipt): &(Value,InputReceipt)|receipt.input_id.clone()).unwrap_or_else(id);
+        let mut model_attachments=super::super::attachments::input_attachments(&command.input)?;
+        if existing.is_none() {self.project_attachments(&mut model_attachments,&input_id)?;}
         Ok(QueuePreparation {
+            input_id,
+            model_attachments,
             current: self.capture_active_checkpoint(&command.branch_id)?,
             existing,
             input_preparation: None,
             command,
             epoch: self.epoch,
             content: self.content.clone(),
-            publication: self.content.begin_publication(),
+            publication,
         })
     }
     pub fn queued_input_metadata(&self, id: &str) -> Result<QueuedInputMetadata> {
@@ -353,7 +362,13 @@ impl Catalog {
             ));
         }
         context_jobs::require_regular_branch(&self.db, &metadata.branch_id)?;
+        let model_attachments=if value.get("fileAttachments").is_some() {
+            let mut files=super::super::attachments::input_attachments(&value)?;
+            self.project_attachments(&mut files,id)?;
+            Some(files)
+        } else {None};
         Ok(InputEditPreparation {
+            model_attachments,
             previous: self.capture_queued_input(id)?,
             current: self.capture_active_checkpoint(&metadata.branch_id)?,
             input_preparation: None,

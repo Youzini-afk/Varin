@@ -260,12 +260,34 @@ fn execute(
     owner: &mut OwnerReplies,
     uncertain: bool,
 ) {
-    f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
-    let mut start = f.start(0);
-    start.provider = Arc::new(ModelCalls {
+    let provider = Arc::new(ModelCalls {
         calls: calls.clone(),
         next: AtomicUsize::new(0),
     });
+    execute_with_provider(f, model, calls, owner, uncertain, provider);
+}
+fn execute_with_provider(
+    f: &Fixture,
+    model: bool,
+    calls: Vec<ToolCall>,
+    owner: &mut OwnerReplies,
+    uncertain: bool,
+    provider: Arc<dyn ModelProvider>,
+) {
+    execute_with_provider_frames(f, model, calls, owner, uncertain, provider, &mut |_, _| false);
+}
+fn execute_with_provider_frames(
+    f: &Fixture,
+    model: bool,
+    calls: Vec<ToolCall>,
+    owner: &mut OwnerReplies,
+    uncertain: bool,
+    provider: Arc<dyn ModelProvider>,
+    frame_handler: &mut dyn FnMut(&Fixture, &Value) -> bool,
+) {
+    f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
+    let mut start = f.start(0);
+    start.provider = provider;
     let input = f
         .catalog()
         .lock()
@@ -305,7 +327,7 @@ fn execute(
             }
             continue;
         }
-        if f.ordinary_frame(&frame) || (uncertain && frame["kind"] == "plan-cancel") {
+        if frame_handler(f, &frame) || f.ordinary_frame(&frame) || (uncertain && frame["kind"] == "plan-cancel") {
             continue;
         }
         assert_eq!(frame["kind"], "agent-policy-request", "{frame}");
@@ -355,6 +377,10 @@ fn execute(
         }
     );
 }
+
+#[path = "child_file_references_review.rs"]
+mod file_references;
+
 #[test]
 fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_separate() {
     for model in [false, true] {
@@ -540,6 +566,104 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
         f.finish();
     }
 }
+#[test]
+fn frozen_child_same_version_builtins_execute_after_reopen_without_refreshing_launch() {
+    for model in [false, true] {
+        let mut native = vec![crate::memory::schema(true), crate::plan::schema()];
+        for schema in &mut native {
+            schema.description = format!("Original admitted {} instructions", schema.name);
+        }
+        let f = Fixture::with_tools(false, native, vec!["memory".into(), "todo".into()]);
+        let original = f.original.clone();
+        let f = f.reopen();
+        let mut owner = OwnerReplies::default();
+        execute(&f, model, calls(), &mut owner, false);
+        assert_eq!(owner.queries.len(), 7);
+        assert_eq!(owner.plan_ref.as_deref(), Some("child-plan-2"));
+        assert_eq!(owner.revision, 1);
+        let f = f.reopen();
+        let launch = f.catalog().lock().unwrap().launch_intent(&f.run.id).unwrap().unwrap();
+        assert_eq!(launch.selection.tools, original.tools);
+        assert_eq!(launch.selection.source, original.source);
+        assert_eq!(launch.selection.extension_bindings, original.extension_bindings);
+        f.finish();
+    }
+}
+
+#[test]
+fn frozen_child_native_v1_read_executes_after_reopen_with_original_call_and_source() {
+    // The shared admission fixture commits the parent's original file_read v1
+    // declaration, then derives a real independent child and its frozen launch.
+    let f = Fixture::with_tools(false, Vec::new(), vec!["file_read".into()]);
+    assert_eq!(f.original.tools.len(), 1);
+    assert_eq!(f.original.tools[0].version, "1");
+    let mut f = f.reopen();
+    // Extra currently available tools must not become part of the child's scope.
+    f.params["toolBinding"]["enabledTools"] = json!(["file_read", "file_list"]);
+    let source = f.original.source.clone().unwrap();
+    let run_id = f.run.id.clone();
+    let thread_id = f.run.thread_id.clone();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+    f.assembly.resources = crate::tools::KernelResourceClient::new(
+        move |request| {
+            assert_eq!(request.binding.run_id, run_id);
+            assert_eq!(request.binding.thread_id, thread_id);
+            assert_eq!(request.binding.grant_id, "child-source-grant");
+            assert_eq!(request.binding.source_selection().unwrap(), source);
+            assert_eq!(request.context.run_id, run_id);
+            assert!(matches!(request.context.origin, Some(ToolOrigin::ModelStep { .. })));
+            seen.fetch_add(1, Ordering::SeqCst);
+            // Controlled original resource owner, including its canonical read key.
+            // Storage authorization/bytes are covered by the resource owner's tests.
+            let resource_key = json!(["file", request.binding.resource_owner, "fixed",
+                request.binding.execution_workspace_id, request.binding.file_source, "body.txt"]).to_string();
+            request.reply.send(Ok(json!({"resourceKey":resource_key, "path":"body.txt",
+                "content":{"text":"Original child read reached its resource owner", "eof":true}}))).unwrap();
+            Ok(())
+        },
+        |_| Ok(()),
+        Default::default(),
+    );
+    let call = ToolCall { call_id:"frozen-v1-read".into(), name:"file_read".into(),
+        schema_version:"1".into(), arguments:json!({"path":"body.txt"}) };
+    execute(&f, true, vec![call.clone()], &mut OwnerReplies::default(), false);
+    assert!(requests.load(Ordering::SeqCst) > 0);
+    let f = f.reopen();
+    let catalog = f.catalog();
+    let db = catalog.lock().unwrap();
+    let history: Vec<ConversationItem> = db.history(&f.run.branch_id).unwrap().into_iter()
+        .filter_map(|item| serde_json::from_value(item.content).ok()).collect();
+    assert!(history.iter().any(|item| matches!(&item.content, Content::ToolCall { call: recorded } if recorded == &call)));
+    let result = history.iter().find_map(|item| match &item.content {
+        Content::ToolResult { result } if result.call_id == call.call_id => Some(result),
+        _ => None,
+    }).expect("original model tool result persisted");
+    let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = &result.completion else {
+        panic!("original native read must succeed: {result:?}")
+    };
+    assert_eq!(content.data["content"]["text"], "Original child read reached its resource owner");
+    assert_eq!(db.launch_intent(&f.run.id).unwrap().unwrap().selection.tools, f.original.tools);
+    assert_eq!(f.original.tools.iter().map(|schema| schema.name.as_str()).collect::<Vec<_>>(), ["file_read"]);
+    drop(db);
+    drop(catalog);
+    f.finish();
+}
+
+#[test]
+fn frozen_child_rejects_unsupported_builtin_versions_instead_of_upgrading_authority() {
+    for version in ["0", "2", "99"] {
+        let mut memory = crate::memory::schema(true);
+        memory.version = version.into();
+        let f = Fixture::with_tools(false, vec![memory], vec!["memory".into()]).reopen();
+        let preparation = RunPreparation::new(serde_json::from_value(f.params.clone()).unwrap(), &f.run).unwrap();
+        let result = f.assembly.prepare(preparation, None, || false);
+        assert!(matches!(result, Err(KernelError::Authorization(message))
+            if message == "Child capability rebind does not match admitted declarations"), "{version}");
+        f.finish();
+    }
+}
+
 #[test]
 fn available_but_unselected_child_helpers_do_not_enter_assembly() {
     let f = fixture(vec!["helper".into()]);
@@ -895,3 +1019,6 @@ fn bot_plan_reconcile_separates_stopped_executor_from_unknown_effect() {
         f.finish();
     }
 }
+
+#[path = "child_collaboration_references_review.rs"]
+mod collaboration_references;

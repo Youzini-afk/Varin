@@ -434,6 +434,7 @@ impl Catalog {
             };
             // Queued Runs own their admission scope now, not when eventually promoted.
             tx.execute("INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",params![next.id,next.branch_id,encode(&next)?])?;
+            super::model_references::admit_native(&tx, &next)?;
             if let Some(previous) = predecessor.as_ref().filter(|previous| {
                 super::usage_ledger::same_configuration(&previous.configuration, &next.configuration) || desired.is_some()
             }) {

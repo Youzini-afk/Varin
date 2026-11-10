@@ -1269,7 +1269,7 @@ fn coordinator_read(
         let call = ToolCall {
             call_id: "managed-read".into(),
             name: "file_read".into(),
-            schema_version: "1".into(),
+            schema_version: read_schema.version.clone(),
             arguments: json!({"path":"source.txt"}),
         };
         let request_id = "coordinator-request".to_string();
@@ -1393,14 +1393,14 @@ fn coordinator_read(
             Value::Null,
         )?;
         let directory = varin_runtime::composition::tools::ToolDirectory::assemble(vec![
-            varin_runtime::composition::tools::ToolDeclaration::new(read_schema, executor.clone()),
+            varin_runtime::composition::tools::ToolDeclaration::new(read_schema.clone(), executor.clone()),
         ])?;
         let engine = ExecutionEngine {
             persistence: catalog.clone(),
             context_preparation: Arc::new(NoopContextPreparation),
             provider: Arc::new(NoModel),
             tools: Arc::new(directory),
-            policy: Arc::new(ReadPolicy),
+            policy: Arc::new(ReadPolicy { schema_version:read_schema.version.clone() }),
             progress: ProgressSink::default(),
         };
         let report = engine.run_recovered(execution, CancellationToken::default(), recovery)?;
@@ -1748,7 +1748,7 @@ impl ModelProvider for NoModel {
         panic!("policy-only fixture cannot invoke a provider")
     }
 }
-struct ReadPolicy;
+struct ReadPolicy { schema_version:String }
 impl AgentPolicy for ReadPolicy {
     fn identity(&self) -> PolicyIdentity {
         PolicyIdentity {
@@ -1771,7 +1771,7 @@ impl AgentPolicy for ReadPolicy {
                     call: ToolCall {
                         call_id: "managed-policy-read".into(),
                         name: "file_read".into(),
-                        schema_version: "1".into(),
+                        schema_version:self.schema_version.clone(),
                         arguments: json!({"path":"source.txt"}),
                     },
                 }],
@@ -2513,15 +2513,44 @@ fn native_file_followup(
         },
     )?;
     let receipt = bound.execute(&context, &contract, &cancel);
-    catalog.commit(
-        run,
+    let original = {
+        let db = catalog.lock().unwrap();
+        db.capture_call_completion(&context.operation_id)?
+    }.load()?;
+    let (
+        ToolCompletion::Result { content: original_body, .. },
+        ToolCompletion::Result { content: projected_body, .. },
+    ) = (&original, &receipt.completion) else {
+        panic!("native follow-up did not retain its original acceptance");
+    };
+    assert!(original_body.model_data.is_none());
+    assert_eq!(original_body.data, projected_body.data);
+    assert_eq!(original_body.parts, projected_body.parts);
+    let reference = projected_body.model_data()["followupId"]
+        .as_str()
+        .expect("original follow-up model reference");
+    assert!(reference.starts_with("followup:"));
+    assert_ne!(projected_body.model_data()["followupId"], original_body.data["followupId"]);
+    // Native execution settles through Persistence, which publishes the typed
+    // projection exactly once after the domain's original durable acceptance.
+    let receipt = catalog.settle_tool(&context, epoch, receipt)?;
+    let replay = catalog.settle_tool(
+        &context,
         epoch,
-        &ExecutionRecord::ToolSettled {
-            context,
-            completion: receipt.completion.clone(),
-            executor_stopped: receipt.executor_stopped,
-        },
+        bound.execute(&context, &contract, &cancel),
     )?;
+    assert_eq!(replay.completion, receipt.completion);
+    let mut changed = receipt.completion.clone();
+    if let ToolCompletion::Result { content, .. } = &mut changed {
+        content.model_data.as_mut().unwrap()["followupId"] = json!("followup:999999");
+    }
+    let unchanged = catalog.settle_tool(&context, epoch, ToolExecutionReceipt {
+        completion: changed.clone(), executor_stopped: true,
+    })?;
+    assert_eq!(unchanged.completion, receipt.completion);
+    assert!(catalog.commit(run, epoch, &ExecutionRecord::ToolSettled {
+        context, completion: changed, executor_stopped: true,
+    }).is_err(), "direct settlement cannot replace the frozen original projection");
     Ok(serde_json::to_value(receipt.completion)?)
 }
 
@@ -2578,8 +2607,12 @@ fn managed_package_delivery_cleanup_recovers_original_catalog_without_replaying_
     assert!(reopened.try_lock().is_ok());
     bridge.receive(json!({"v":1,"kind":"source-resource-response","id":replay["id"],"kernelEpoch":"coordinator-epoch",
         "result":{"ok":true,"value":{"operationId":id,"released":true}}}));
+    // The resource client owns both journal and model-reference Catalog handles.
+    // Drop the caller's client and wait for the actual replay worker to release
+    // every handle rather than assuming how many handles a live client retains.
+    drop(resources);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Arc::strong_count(&reopened) > 2 {
+    while Arc::strong_count(&reopened) > 1 {
         assert!(Instant::now() < deadline, "cleanup worker did not settle");
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -2587,7 +2620,7 @@ fn managed_package_delivery_cleanup_recovers_original_catalog_without_replaying_
     assert_eq!(operation.outcome, Some(varin_runtime::Outcome::Succeeded));
     assert!(serde_json::to_value(operation).unwrap().to_string().contains("original-artifact"));
     assert!(rx.try_recv().is_err(), "cleanup emitted no stage invocation");
-    drop(resources); drop(reopened); bridge.close();
+    drop(reopened); bridge.close();
     std::fs::remove_dir_all(root).unwrap();
 }
 

@@ -67,7 +67,7 @@ pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str, initial_branch: &str
     if branch_exists { return Err(RuntimeError::Conflict("initial branch identity already exists".into())); }
     loop {
         let code = Uuid::new_v4().simple().to_string()[..8].to_uppercase();
-        let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE agent_code=?1 UNION ALL SELECT 1 FROM retired_agent_codes WHERE code=?1)", [&code], |r| r.get(0))?;
+        let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE agent_code=?1 COLLATE NOCASE UNION ALL SELECT 1 FROM retired_agent_codes WHERE code=?1 COLLATE NOCASE UNION ALL SELECT 1 FROM model_agents WHERE agent_code=?1 COLLATE NOCASE)", [&code], |r| r.get(0))?;
         if !used {
             tx.execute("INSERT INTO threads(id,agent_code) VALUES(?1,?2)", params![thread_id,code])?;
             super::identity::record(tx, thread_id, initial_branch, domain, bot_id)?;
@@ -76,7 +76,7 @@ pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str, initial_branch: &str
     }
 }
 pub(super) fn resolve(db: &Connection, identity: &str) -> Result<String> {
-    db.query_row("SELECT id FROM threads WHERE id=?1 OR agent_code=?2", params![identity,identity.to_uppercase()], |r| r.get(0))
+    db.query_row("SELECT id FROM threads WHERE id=?1 OR agent_code=?2 COLLATE NOCASE", params![identity,identity.to_uppercase()], |r| r.get(0))
         .optional()?.ok_or_else(|| RuntimeError::NotFound(identity.into()))
 }
 pub(super) fn branch(db: &Connection, thread_id: &str) -> Result<String> {

@@ -283,7 +283,10 @@ pub(super) fn execute(
                 if let Some(references) = p.attachment_image_references { content.insert("attachmentImageReferences".into(), serde_json::to_value(references)?); }
                 Some(Value::Object(content))
             } else { None };
-            let prepared = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).with_user_content(user_content).load().map_err(domain)?;
+            let preparation = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).with_user_content(user_content);
+            let preparation = {let owner=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
+                preparation.with_model_references(&owner).map_err(domain)?};
+            let prepared = preparation.load().map_err(domain)?;
             let mut owner = catalog
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;

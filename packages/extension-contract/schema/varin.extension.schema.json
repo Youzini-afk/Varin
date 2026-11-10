@@ -737,6 +737,9 @@
               "type": "boolean"
             }
           }
+        },
+        "references": {
+          "$ref": "#/$defs/toolReferences"
         }
       },
       "allOf": [
@@ -1274,6 +1277,111 @@
             "object",
             "boolean"
           ]
+        }
+      }
+    },
+    "toolReferenceField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind",
+        "owner",
+        "reference",
+        "fields"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?:/|$)"
+        },
+        "kind": {
+          "enum": [
+            "message",
+            "item",
+            "file",
+            "media",
+            "read",
+            "process",
+            "script",
+            "page",
+            "observation",
+            "settings",
+            "material",
+            "followup",
+            "forward",
+            "job",
+            "report"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "enum": [
+              "__proto__",
+              "prototype",
+              "constructor"
+            ]
+          }
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "enum": [
+              "__proto__",
+              "prototype",
+              "constructor"
+            ]
+          }
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "enum": [
+                "__proto__",
+                "prototype",
+                "constructor"
+              ]
+            }
+          }
+        },
+        "omit": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "enum": [
+                "__proto__",
+                "prototype",
+                "constructor"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "toolReferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolReferenceField"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolReferenceField"
+          }
         }
       }
     }

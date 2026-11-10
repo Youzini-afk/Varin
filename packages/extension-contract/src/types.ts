@@ -53,7 +53,27 @@ export interface VarinExtensionServiceRequirement {
 }
 
 /** One service declaration also supplies its tool projection; read is a claim, never a grant. */
+export type VarinModelReferenceKind = 'message' | 'item' | 'file' | 'media' | 'read' | 'process' | 'script' | 'page' | 'observation' | 'settings' | 'material' | 'followup' | 'forward' | 'job' | 'report';
+/** Explicit object positions, never a recursive identifier scanner. Owner names are
+ * scoped to the declaring extension. Fields bind original owner identity/version. */
+export interface VarinToolReferenceField {
+  /** JSON pointer to an object; * traverses declared array items only. Empty selects root. */
+  path: string;
+  kind: VarinModelReferenceKind;
+  owner: string;
+  /** Property containing the reference in model input/output. */
+  reference: string;
+  /** Original object properties retained as the typed target. */
+  fields: string[];
+  /** Properties omitted from the model projection, never from original receipts. */
+  omit?: string[];
+}
+export interface VarinToolReferences {
+  inputs?: VarinToolReferenceField[];
+  outputs?: VarinToolReferenceField[];
+}
 export interface VarinExtensionToolDeclaration {
+  references?: VarinToolReferences;
   /** Optional read-only navigation over the original input schema. */
   disclosure?: VarinToolDisclosure;
   /** Execution dependency declaration; actual source and process grants remain Host-owned. */

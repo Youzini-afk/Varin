@@ -67,7 +67,7 @@ impl TextMutation {
 /// Versioned interpretation envelope around the unchanged raw-state CAS digest.
 /// Old raw receipts stay valid; only this exact prefix has text-basis semantics.
 pub(crate) fn text_read_version(raw:&str,encoding:&str)->String{format!("text-v1:{encoding}:{raw}")}
-fn read_basis(version:&str)->(&str,Option<&str>){
+pub(crate) fn read_basis(version:&str)->(&str,Option<&str>){
     if let Some(body)=version.strip_prefix("text-v1:"){if let Some((encoding,raw))=body.split_once(':'){if !raw.is_empty()&&crate::text::codec(encoding).is_ok(){return(raw,Some(encoding));}}}
     (version,None)
 }

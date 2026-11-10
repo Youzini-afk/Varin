@@ -212,6 +212,7 @@ impl Originals {
                 provenance: Provenance::ExternalData { source: "retained-source-citation".into() },
                 resource_activation: None, opaque: None,
                 content: Content::Output { output: crate::output::OutputBody {
+                    model_data: None,
                     data: Value::Null, parts: vec![crate::output::OutputPart::Attachment { attachment }],
                 } },
             }));
@@ -377,13 +378,13 @@ mod tests {
     }
     #[test]
     fn summary_source_citations_keep_only_acquired_typed_descriptors_for_inheritance() {
-        let attachment = crate::catalog::attachments::Attachment {
+        let attachment = crate::catalog::attachments::Attachment { model_ref: None,
             reference: format!("attachment:material_{}", hex::encode("snap-acquired")), filename: "Source".into(),
             mime_type: "text/plain".into(), byte_length: 12,
         };
         let history = vec![Arc::new(ConversationItem {
             id: "original-source".into(), provenance: Provenance::ExternalData { source: "websearch".into() }, resource_activation: None, opaque: None,
-            content: Content::Output { output: crate::output::OutputBody { data: Value::Null,
+            content: Content::Output { output: crate::output::OutputBody { model_data: None, data: Value::Null,
                 parts: vec![crate::output::OutputPart::Attachment { attachment: attachment.clone() }] } },
         })];
         let originals = Originals::new(history, TokenCounter::default());

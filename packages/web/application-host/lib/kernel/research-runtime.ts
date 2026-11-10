@@ -212,7 +212,7 @@ export function createResearchRuntime(options: {
   const capability: HostCapabilityHandler = async (method, input, context) => {
     ensure();
     const params = decodeResearchParams(method as ResearchMethod, input), authority = requireToolInvocation(context);
-    if (!isDeepStrictEqual(authority.arguments, input))
+    if (!isDeepStrictEqual(authority.resolvedArguments ?? authority.arguments, input))
       throw new Error('Research call differs from its original arguments');
     const effect = ['submit', 'wait', 'cancel', 'collect', 'register'].includes(method);
     if (!effect) {

@@ -192,7 +192,7 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
         content: Content::ToolResult { result: ToolResult {
             request_id: "request".into(), call_id: "call-1".into(),
             completion: ToolCompletion::Result { outcome: crate::Outcome::Failed, effect: crate::Effect::Partial,
-                content: OutputBody { data: json!({"error":"timeout"}), parts: vec![OutputPart::Text { text: text.clone() }] } },
+                content: OutputBody { model_data: None, data: json!({"error":"timeout"}), parts: vec![OutputPart::Text { text: text.clone() }] } },
         } }, opaque: None,
     };
     request.history.push(original.clone().into());
@@ -3128,7 +3128,7 @@ fn unsupported_provider_image_keeps_the_delivered_file_without_claiming_vision()
         let item=Arc::make_mut(request.history.iter_mut().find(|item|item.id=="result:first").unwrap());
         let Content::ToolResult{result}=&mut item.content else {unreachable!()};
         let ToolCompletion::Result{content,..}=&mut result.completion else {unreachable!()};
-        content.parts.push(crate::output::OutputPart::Attachment {attachment:crate::catalog::attachments::Attachment {
+        content.parts.push(crate::output::OutputPart::Attachment {attachment:crate::catalog::attachments::Attachment { model_ref: None,
             reference:"attachment:animated".into(),filename:"animated.gif".into(),mime_type:"image/gif".into(),byte_length:10,
         }});
         let original=request.clone();
@@ -3144,11 +3144,11 @@ fn unsupported_provider_image_keeps_the_delivered_file_without_claiming_vision()
         assert_eq!(request,original);
         let mut user=view(family);
         let provenance=Provenance::UserInstruction{input_id:"file-input".into()};
-        let file=crate::catalog::attachments::Attachment {reference:"attachment:user-gif".into(),filename:"image.gif".into(),mime_type:"image/gif".into(),byte_length:10};
+        let file=crate::catalog::attachments::Attachment { model_ref: None,reference:"attachment:user-gif".into(),filename:"image.gif".into(),mime_type:"image/gif".into(),byte_length:10};
         let media=crate::output::IncomingMedia {media_type:"image/gif".into(),data_base64:MEDIA_PNG.into()}
             .admit(crate::output::OutputSource::Conversation{provenance:provenance.clone()}).unwrap();
         for (index,content) in [
-            Content::Output {output:crate::output::OutputBody {data:Value::Null,parts:vec![crate::output::OutputPart::Attachment{attachment:file}]}},
+            Content::Output {output:crate::output::OutputBody {model_data: None,data:Value::Null,parts:vec![crate::output::OutputPart::Attachment{attachment:file}]}},
             Content::Media{media},
         ].into_iter().enumerate() {
             user.history.push(ConversationItem {id:format!("file-input:{index}"),provenance:provenance.clone(),content,opaque:None,resource_activation:None}.into());
@@ -3158,6 +3158,88 @@ fn unsupported_provider_image_keeps_the_delivered_file_without_claiming_vision()
         assert_eq!(wire.contains(MEDIA_PNG),family==chat::FAMILY);
         assert_eq!(user,original);
     }
+}
+
+#[test]
+fn owner_resource_projection_is_stable_and_never_emits_raw_identifiers() {
+    let mut request = view(responses::FAMILY);
+    let body = OutputBody {data:json!({"readVersion":"private-file-state","source":{"rootId":"private-root"},"content":{"text":"untouched prose proc:999"}}),
+        model_data:Some(json!({"ref":"file:8","path":"visible.txt","content":{"text":"untouched prose proc:999"},"nextRead":{"tool":"file_read","arguments":{"ref":"read:9"}}})),parts:vec![]};
+    let completion = ToolCompletion::Result {outcome:crate::Outcome::Succeeded,effect:crate::Effect::None,content:body.clone()};
+    request.history.push(ConversationItem {resource_activation:None,id:"native-read".into(),provenance:Provenance::ToolData{call_id:"read-call".into()},opaque:None,
+        content:Content::ToolResult {result:ToolResult{request_id:request.request_id.clone(),call_id:"read-call".into(),completion}}}.into());
+    let conn=connection(vec![],1);
+    let mut reuse=RequestCompileReuse::new();
+    let first=input_projection::model_input(&request,&conn,Some(&mut reuse)).history[0].clone();
+    let second=input_projection::model_input(&request,&conn,Some(&mut reuse)).history[0].clone();
+    assert!(Arc::ptr_eq(&first,&second));
+    let wire=responses::ResponsesProvider::new(conn).serialize(&request,None).unwrap().to_value().to_string();
+    assert!(wire.contains("file:8") && wire.contains("read:9") && wire.contains("untouched prose proc:999"));
+    assert!(!wire.contains("private-file-state") && !wire.contains("private-root") && !wire.contains("model_data"));
+    let Content::ToolResult {result}= &request.history[0].content else {panic!("original result")};
+    assert_eq!(super::completion_output(&result.completion).unwrap(),&body);
+    let bytes=serde_json::to_vec(&body).unwrap();
+    let reopened:OutputBody=serde_json::from_slice(&bytes).unwrap();assert_eq!(body,reopened);
+    let mapped:OutputBody<crate::output::ResolvedMedia>=reopened.map_media(|media|Ok::<_,std::convert::Infallible>(media)).unwrap();assert_eq!(mapped.model_data,body.model_data);
+}
+
+#[test]
+fn projected_job_receipt_keeps_original_identity_out_of_provider_text() {
+    let original="original-process-operation-uuid-is-private";
+    let content=OutputBody {data:json!({"processId":original}),model_data:Some(json!({"processId":"proc:4","command":"printf","observation":{"text":"result"}})),parts:vec![]};
+    let completion=ToolCompletion::JobAccepted {operation_id:original.into(),phase:"running".into(),effect:crate::Effect::Dispatched,lifetime:crate::Lifetime::Thread,content:Some(content)};
+    let wire=super::completion_text(&completion);
+    assert!(wire.contains("proc:4"));assert!(!wire.contains(original));
+    assert!(serde_json::to_string(&completion).unwrap().contains(original));
+    let ToolCompletion::JobAccepted {content:Some(body),..}=&completion else {unreachable!()};
+    if let Some(projected)=super::output_preview::bounded_output(body,10,"history",true,None) {
+        let bounded=ToolCompletion::JobAccepted {operation_id:original.into(),phase:"running".into(),effect:crate::Effect::Dispatched,lifetime:crate::Lifetime::Thread,content:Some(projected)};
+        assert!(!super::completion_text(&bounded).contains(original));
+    }
+}
+
+#[test]
+fn published_user_attachment_has_one_stable_model_ref_in_real_provider_requests() {
+    use crate::catalog::model_references::ReferenceKind;
+    let root=std::env::temp_dir().join(format!("provider-attachment-{}",uuid::Uuid::new_v4()));
+    let mut catalog=crate::Catalog::open(&root).unwrap();
+    catalog.create_thread("attachment-thread","attachment-branch").unwrap();
+    let raw="attachment:original-immutable-object-123456789012345678901234567890";
+    let command=crate::SubmitInput {key:"user-file".into(),thread_id:"attachment-thread".into(),branch_id:"attachment-branch".into(),
+        expected_head:None,input:json!({"text":"Review this file. The literal file:999 stays unchanged.","fileAttachments":[{
+            "ref":raw,"filename":"measurements.csv","mimeType":"text/csv","byteLength":7}]}),configuration:json!({})};
+    let prepared=catalog.prepare_submission(command.clone(),None,None).unwrap().load(None,false).unwrap();
+    let admitted=catalog.admit_submission(prepared).unwrap();
+    let history=catalog.execution_history("attachment-branch").unwrap();
+    let attachment=history.iter().find_map(|item| match &item.content {
+        Content::Output{output}=>output.parts.iter().find_map(|part|match part{OutputPart::Attachment{attachment}=>Some(attachment),_=>None}),_=>None,
+    }).unwrap();
+    let reference=attachment.model_ref.clone().expect("owner publication registers file reference");
+    assert_eq!(attachment.reference,raw);
+    let resolved=catalog.resolve_model_reference(ReferenceKind::File,&reference).unwrap();
+    assert_eq!(resolved.target,json!({"kind":"attachment","reference":raw}));
+    assert_eq!(resolved.owner,"attachment");
+    for family in [responses::FAMILY,chat::FAMILY,anthropic::FAMILY,google::FAMILY,pi_messages::FAMILY] {
+        let mut request=view(family);request.history=history.clone();
+        let original=request.clone();
+        let provider=media_provider(family,true);
+        let mut reuse=RequestCompileReuse::new();reuse.prepare(&request,1,None,1,None);
+        let first=provider.serialize(&request,Some(&mut reuse)).unwrap();
+        let warm=provider.serialize(&request,Some(&mut reuse)).unwrap();
+        assert_eq!(first.wire_bytes(),warm.wire_bytes());
+        let text=first.to_value().to_string();
+        assert!(text.contains(&reference)&&text.contains("file:999")&&text.contains("measurements.csv"),"{family}: {text}");
+        assert!(!text.contains(raw)&&!text.contains("modelRef"),"{family}: {text}");
+        assert_eq!(request,original,"provider projection cannot change raw snapshot descriptors");
+    }
+    let replay=catalog.prepare_submission(command,None,None).unwrap().load(None,false).unwrap();
+    assert_eq!(catalog.admit_submission(replay).unwrap(),admitted);
+    drop(catalog);
+    let catalog=crate::Catalog::open(&root).unwrap();
+    assert_eq!(catalog.resolve_model_reference(ReferenceKind::File,&reference).unwrap().target,resolved.target);
+    let original=catalog.history("attachment-branch").unwrap();
+    assert!(serde_json::to_string(&original).unwrap().contains(raw),"raw history/UI still has byte-owner identity");
+    drop(catalog);std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::followups::{self, FollowupToolInput};
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
+#[path="followup_references.rs"]
+mod references;
 fn error(e: impl ToString) -> ExecutionError {
     ExecutionError::new("follow_up", e.to_string())
 }
@@ -58,6 +60,7 @@ pub(crate) fn schema() -> ToolSchema {
         output_schema: None,
         metadata: None,
         schema: json!({"type":"object","oneOf":[
+            {"type":"object","properties":{"action":{"const":"read"},"ref":text},"required":["action","ref"],"additionalProperties":false},
             {"type":"object","properties":{"action":{"const":"sources"}},"required":["action"],"additionalProperties":false},
             {"type":"object","properties":{
                 "action":{"const":"arrange"},"followupId":text,"expectedRevision":{"type":"integer","minimum":1},
@@ -87,8 +90,9 @@ pub(crate) fn schema() -> ToolSchema {
         ]}),
     }
 }
-fn input(call: &ToolCall) -> Result<FollowupToolInput, ExecutionError> {
-    let input: FollowupToolInput = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+fn input(catalog: &Arc<Mutex<Catalog>>, call: &ToolCall) -> Result<FollowupToolInput, ExecutionError> {
+    let mut input: FollowupToolInput = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+    catalog.lock().map_err(error)?.resolve_followup_tool_input(&mut input).map_err(error)?;
     if let Some(v) = input.registration() {
         v.validate().map_err(error)?;
     }
@@ -135,13 +139,13 @@ impl ToolExecutor for FollowupTools {
         let selected = schema();
         if call.name != selected.name
             || call.schema_version != selected.version
-            || !frozen.tools.contains(&selected)
+            || !frozen.tools.iter().any(|tool|tool.name==call.name && tool.version==call.schema_version)
         {
             return Err(error(
                 "follow_up was not selected in the original invocation",
             ));
         }
-        let input = input(call)?;
+        let input = input(&self.catalog, call)?;
         let waiting = input.registration().is_some_and(|v| v.wait.is_some());
         let read_only = matches!(
             input,
@@ -179,7 +183,7 @@ impl ToolExecutor for FollowupTools {
         if cancel.is_cancelled() {
             return Err(error("follow-up cancelled"));
         }
-        match input(call)? {
+        match input(&self.catalog, call)? {
             FollowupToolInput::Arrange { source, filter, .. } => {
                 let p = self
                     .catalog
@@ -285,7 +289,7 @@ impl ToolExecutor for FollowupTools {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
-            match input(call)? {
+            match input(&self.catalog, call)? {
                 value @ (FollowupToolInput::Arrange { .. }
                 | FollowupToolInput::Backlog { .. }
                 | FollowupToolInput::Route { .. }) => {
@@ -431,7 +435,7 @@ impl ToolExecutor for FollowupTools {
                         .capture_tool_followups(c, call.clone(), schema())
                         .map_err(error)?;
                     let p = p.load().map_err(error)?;
-                    let mut value = match value {
+                    let value = match value {
                         FollowupToolInput::Jobs => {
                             let jobs = self
                                 .catalog
@@ -480,7 +484,6 @@ impl ToolExecutor for FollowupTools {
                         )
                         .map_err(error)?,
                     };
-                    followups::project_tool_followups(&mut value);
                     if cancel.is_cancelled() {
                         return Err(error("follow-up read cancelled"));
                     }
@@ -492,6 +495,10 @@ impl ToolExecutor for FollowupTools {
                 }
             }
         })();
-        result.unwrap_or_else(|e| ToolCompletion::not_dispatched(e))
+        let mut completion=result.unwrap_or_else(|e| ToolCompletion::not_dispatched(e));
+        if let Err(error)=self.project_references(c,call,&mut completion) {
+            if let ToolCompletion::Result {content,..}=&mut completion {content.data["referenceError"]=json!(error);}
+        }
+        completion
     }
 }

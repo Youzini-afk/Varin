@@ -467,7 +467,7 @@ fn bot_forgotten_source_filters_unicode_and_attributed_work_updates_without_chan
             "kind":"history-item","id":"source","revision":revision,"start":14,"end":33,"threadId":"ordinary","branchId":"ordinary-main","headId":"source"}]}]}})).unwrap();
     let mut history: ConversationHistory = vec![ConversationItem { resource_activation:None,id:"source".into(),provenance:Provenance::UserInstruction{input_id:"source".into()},content:Content::Text{text:original.into()},opaque:None }.into(),
         ConversationItem {resource_activation:None,id:"update".into(),provenance:Provenance::EnvironmentFact{event_id:"work".into()},opaque:None,
-            content:Content::Output{output:crate::output::OutputBody{data:json!({"kind":"work_update","source":{"kind":"user_input","itemId":"source"}}),parts:vec![crate::output::OutputPart::Text{text:original.into()}]}}}.into()];
+            content:Content::Output{output:crate::output::OutputBody{model_data: None,data:json!({"kind":"work_update","source":{"kind":"user_input","itemId":"source"}}),parts:vec![crate::output::OutputPart::Text{text:original.into()}]}}}.into()];
     let originals = history.clone();
     super::memory_exclusion::filter(Some(&state),&mut history).unwrap();
     assert_eq!(originals[0].content,Content::Text{text:original.into()});

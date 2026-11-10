@@ -8,7 +8,7 @@ const EPOCH: &str = "tools-epoch";
 #[test]
 fn process_environment_inheritance_works_without_a_shell_snapshot_and_respects_full_overrides() {
     let f=Fixture::new();
-    let parse=|args:Value|f.executor.operation(None,&ToolCall {call_id:"env".into(),name:"process_spawn".into(),schema_version:"1".into(),arguments:args}).unwrap();
+    let parse=|args:Value|f.executor.operation(None,&ToolCall {call_id:"env".into(),name:"process_spawn".into(),schema_version:f.executor.schemas.iter().find(|schema|schema.name=="process_spawn").unwrap().version.clone(),arguments:args}).unwrap();
     let ResourceOperation::ProcessSpawn(inherited)=parse(json!({"command":"program"})) else {panic!("process operation")};
     let path=inherited.env.iter().find(|entry|entry.name=="PATH").unwrap();
     assert_eq!(std::env::split_paths(&path.value).collect::<Vec<_>>(),std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>());
@@ -120,7 +120,8 @@ impl Fixture {
         let call = ToolCall {
             call_id: format!("call-{}", self.serial),
             name: name.into(),
-            schema_version: "1".into(),
+            schema_version: self.executor.schemas.iter().find(|schema| schema.name == name)
+                .expect("fixture tool is enabled").version.clone(),
             arguments,
         };
         let origin = ToolOrigin::ModelStep {
@@ -476,7 +477,7 @@ fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
         assert!(structured && read);
     });
     let executor=Arc::new(KernelToolExecutor::new(binding,f.executor.resources.clone().with_source_bridge(source.clone())).unwrap().with_language(language.clone()));
-    let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
+    let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:executor.schemas.iter().find(|schema|schema.name=="file_read").unwrap().version.clone(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
     let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
     let request=FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
     let cancel=CancellationToken::default();let bound=executor.clone().bind_call(&call,&request,&cancel).unwrap();
@@ -998,11 +999,11 @@ fn hybrid_file_read_delegates_paths_to_the_original_live_and_fixed_owner() {
         let catalog=Arc::new(Mutex::new(varin_runtime::Catalog::open(f.root.join("catalog")).unwrap()));
         let wrapped=crate::attachment_reads::declaration(Some(native),catalog,bridge.clone());
         let directory=Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(vec![wrapped]).unwrap());
-        let call=ToolCall{call_id:"read-original".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.txt"})};
+        let call=ToolCall{call_id:"read-original".into(),name:"file_read".into(),schema_version:directory.schemas().iter().find(|schema|schema.name=="file_read").unwrap().version.clone(),arguments:json!({"path":"source.txt"})};
         let origin=ToolOrigin::ModelStep{request_id:"original-request".into()};
         let context=execution_context("run",&call,&origin);
         let frozen=FrozenToolContext{tool_output_visible_bytes:None,execution_environment:None,direct_tools:None,run_id:"run".into(),origin,
-            tools:Arc::new(f.executor.schemas.clone()),tool_schema_generation:1,source:Some(f.executor.binding.source_selection().unwrap()),
+            tools:Arc::new(directory.schemas().to_vec()),tool_schema_generation:1,source:Some(f.executor.binding.source_selection().unwrap()),
             child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
         let cancel=CancellationToken::default();let bound=directory.bind_call(&call,&frozen,&cancel).unwrap();
         let contract=bound.prepare(&cancel).unwrap();bound.authorize(&context,&contract,&cancel).unwrap();
@@ -1178,4 +1179,52 @@ fn range_backed_fixed_read_materializes_gbk_edit_and_keeps_external_cas_conflict
     assert_eq!(fs::read(&physical).unwrap(),b"\xd6\xd0 next\n");
     fs::write(&physical,b"external").unwrap();let stale=f.call("file_write",json!({"path":"legacy.txt","readVersion":current["readVersion"],"content":"stale"}));
     assert!(!matches!(stale,ToolCompletion::Result{outcome:Outcome::Succeeded,..}),"{stale:?}");assert_eq!(fs::read(&physical).unwrap(),b"external");
+}
+
+#[test]
+fn model_file_references_keep_observed_format_conflicts_and_replayable_pages() {
+    let mut f = Fixture::new();
+    let path = f.root.join("work/observed.txt");
+    let original = [vec![0xff,0xfe], "first\r\nsecond\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect()].concat();
+    fs::write(&path,&original).unwrap();
+    let catalog = Arc::new(Mutex::new(varin_runtime::Catalog::open(f.root.join("catalog")).unwrap()));
+    f.executor.resources.reference_catalog = Some(catalog.clone());
+    let ToolCompletion::Result {content:first,..} = f.call("file_read",json!({"path":"observed.txt","length":16})) else {panic!("file read")};
+    let visible = first.model_data.as_ref().unwrap();
+    let reference = visible["ref"].as_str().unwrap().to_owned();
+    assert!(reference.starts_with("file:"));
+    assert!(visible.get("readVersion").is_none());
+    assert!(first.data["readVersion"].is_string(),"raw receipt stays inspectable");
+    assert_eq!(first.data["content"]["format"]["encoding"],"utf-16le");
+    assert_eq!(first.data["content"]["format"]["bom"],true);
+    let mut other=Fixture::new();
+    fs::write(other.root.join("work/observed.txt"),&original).unwrap();
+    other.executor.resources.reference_catalog=Some(catalog.clone());
+    let ToolCompletion::Result {content:independent,..}=other.call("file_read",json!({"path":"observed.txt","length":16})) else {panic!("independent source read")};
+    assert_ne!(independent.model_data.as_ref().unwrap()["ref"],reference,"same path and bytes in another source are distinct observations");
+    assert_eq!(other.try_call("file_read",json!({"ref":reference})).unwrap_err().code,"reference_source_changed");
+    drop(other);
+    let next=visible["nextRead"]["arguments"].clone();
+    assert!(next["ref"].as_str().unwrap().starts_with("read:"));
+    let ToolCompletion::Result {content:page1,..}=f.call("file_read",next.clone()) else {panic!("continuation")};
+    let ToolCompletion::Result {content:page2,..}=f.call("file_read",next) else {panic!("continuation replay")};
+    assert_eq!(page1.data,page2.data,"continuation is not a consuming cursor");
+    let ToolCompletion::Result {outcome, ..}=f.call("file_edit",json!({"ref":reference,"edits":[{"oldText":"first","newText":"changed"}]})) else {panic!("reference edit")};
+    assert_eq!(outcome,Outcome::Succeeded);
+    let changed = fs::read(&path).unwrap();
+    assert!(changed.starts_with(&[0xff,0xfe]));
+    assert_eq!(String::from_utf16(&changed[2..].chunks_exact(2).map(|pair|u16::from_le_bytes([pair[0],pair[1]])).collect::<Vec<_>>()).unwrap(),"changed\r\nsecond\r\n");
+    assert!(matches!(f.call("file_edit",json!({"ref":reference,"edits":[{"oldText":"changed","newText":"lost update"}]})),ToolCompletion::NotDispatched {..}),"old observation must retain the original CAS version");
+    let ToolCompletion::Result {outcome,content,..}=f.call("file_read",json!({"ref":reference})) else {panic!("stale read")};
+    assert_eq!(outcome,Outcome::Failed);assert_eq!(content.data["status"],"stale");assert!(content.data.get("content").is_none(),"never show newer bytes as the original observed file");
+    let source = f.executor.binding.source_selection().unwrap();
+    let target: crate::resource_references::FileTarget = crate::resource_references::resolve(&catalog.lock().unwrap(),varin_runtime::catalog::model_references::ReferenceKind::File,&reference).unwrap();
+    let crate::resource_references::FileTarget::Observation {source:observed,..}=target else {panic!("file observation")};
+    assert_eq!(observed,source);
+    f.executor.binding.execution_workspace_id="another-workspace".into();
+    assert_eq!(f.try_call("file_read",json!({"ref":reference})).unwrap_err().code,"reference_source_changed");
+    f.executor.resources.reference_catalog=None;drop(catalog);
+    let reopened=varin_runtime::Catalog::open(f.root.join("catalog")).unwrap();
+    let restored:crate::resource_references::FileTarget=crate::resource_references::resolve(&reopened,varin_runtime::catalog::model_references::ReferenceKind::File,&reference).unwrap();
+    assert!(matches!(restored,crate::resource_references::FileTarget::Observation {read_version,..} if read_version == first.data["readVersion"].as_str().unwrap()));
 }

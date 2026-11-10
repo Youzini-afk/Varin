@@ -168,7 +168,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         (false, false, false, true),
         (true, true, false, true),
     ] {
-        let selected_schema=if file_attachment {crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).remove(0)} else {schema()};
+        let selected_schema=if file_attachment {crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).into_iter().find(|schema|schema.name=="file_read").expect("native file reader")} else {schema()};
         let root =
             std::env::temp_dir().join(format!("varin-resource-builtin-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
@@ -458,7 +458,9 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         db.lock().unwrap().request_cancel_run(&run).unwrap();
                     }
                 }
-                bridge.receive(json!({"v":1,"kind":"resource-response","id":frame["id"],"kernelEpoch":"epoch","result":{"status":"ready","content":"old"}}));
+                let result=if file_attachment {json!({"status":"ready","attachment":{"ref":"attachment:fixed","filename":"fixed.txt","mimeType":"text/plain","byteLength":10},
+                    "content":{"text":"old","offset":7,"nextOffset":10,"byteLength":10,"eof":true}})} else {json!({"status":"ready","content":"old"})};
+                bridge.receive(json!({"v":1,"kind":"resource-response","id":frame["id"],"kernelEpoch":"epoch","result":result}));
             })
         };
         bound.authorize(&context, &contract, &cancel).unwrap();
@@ -482,7 +484,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             }
         );
         assert_eq!(
-            content.data["content"],
+            if file_attachment && !cancel_before_reply {content.data["content"]["text"].clone()} else {content.data["content"].clone()},
             if cancel_before_reply {
                 Value::Null
             } else {
@@ -502,4 +504,142 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
     }
+}
+
+struct AttachmentPages;
+impl ModelProvider for AttachmentPages {
+    fn serialize(
+        &self,
+        view: &RequestView,
+        _: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(view).unwrap().into())
+    }
+    fn generate(
+        &self,
+        request: &RequestSnapshot,
+        _: &CancellationToken,
+        emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+    ) -> Result<FinishReason, ModelFailure> {
+        let pages = request.view.history.iter().filter_map(|item| match &item.content {
+            Content::ToolResult { result } if result.call_id.starts_with("page-") => {
+                let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = &result.completion else {
+                    panic!("attachment page failed: {:?}", result.completion);
+                };
+                Some(content)
+            }
+            _ => None,
+        }).collect::<Vec<_>>();
+        let done = pages.len() == 3;
+        let content = if done {
+            assert_eq!(pages.iter().map(|page| page.model_data()["content"]["text"].as_str().unwrap()).collect::<String>(), "abcdefghi");
+            assert!(pages[2].model_data().get("nextRead").is_none());
+            Content::Text { text: "Read the original immutable file through all three pages.".into() }
+        } else {
+            let arguments = match pages.len() {
+                0 => json!({"ref":"attachment:fixed","offset":0,"length":3}),
+                1 => {
+                    let reference = pages[0].model_data()["ref"].as_str().unwrap();
+                    assert!(reference.starts_with("file:"));
+                    json!({"ref":reference,"offset":3,"length":3})
+                }
+                2 => {
+                    let next = &pages[1].model_data()["nextRead"];
+                    assert_eq!(next["tool"], "file_read");
+                    assert!(next["arguments"]["ref"].as_str().unwrap().starts_with("read:"));
+                    next["arguments"].clone()
+                }
+                _ => panic!("attachment pagination did not stop"),
+            };
+            let selected = request.view.binding.tools.iter().find(|schema| schema.name == "file_read").unwrap();
+            Content::ToolCall { call: ToolCall {
+                call_id: format!("page-{}", pages.len()),
+                name: selected.name.clone(),
+                schema_version: selected.version.clone(),
+                arguments,
+            } }
+        };
+        emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+            id: request.view.request_id.clone(), content, opaque: None,
+        } })?;
+        Ok(if done { FinishReason::Stop } else { FinishReason::ToolCalls })
+    }
+}
+
+#[test]
+fn attachment_file_reference_and_continuation_retain_the_original_resource_consumer() {
+    let root = std::env::temp_dir().join(format!("varin-resource-pages-{}", uuid::Uuid::new_v4()));
+    let mut catalog = Catalog::open(&root).unwrap();
+    catalog.create_thread("thread", "branch").unwrap();
+    let prepared = catalog.prepare_submission(
+        SubmitInput {
+            key: "input".into(), thread_id: "thread".into(), branch_id: "branch".into(),
+            expected_head: None, input: json!("Read the attached immutable file"), configuration: json!({}),
+        },
+        Some(ContextProposal {
+            key: "old-context".into(), branch_id: "branch".into(), through_id: None,
+            expected_revision: 0, summary: String::new(), effective_system_prompt: "old".into(),
+            instruction_sources: vec![], memory_checkpoint: None,
+        }),
+        Some(basis("old")),
+    ).unwrap().with_resources(Some(resources("old"))).load(None, false).unwrap();
+    let receipt = catalog.admit_submission(prepared).unwrap();
+    let db = Arc::new(Mutex::new(catalog));
+    let (out, frames) = mpsc::sync_channel(4);
+    let bridge = OwnerChannel::new("resource", out);
+    bridge.initialize("epoch");
+    let directory = Arc::new(ToolDirectory::assemble(vec![
+        crate::attachment_reads::declaration(None, db.clone(), bridge.clone()),
+    ]).unwrap());
+    let binding = RequestBinding {
+        pricing: None, tool_output_visible_bytes: None, mcp_tools: vec![], execution_environment: None,
+        direct_tools: None, provider_id: None, tokenizer: None, request_context: None, child_dispatch: None,
+        goal: None, resource_activations: vec![], resource_checkpoint_id: Some("old-context".into()),
+        connection_identity: "fixture".into(), provider_family: "fixture".into(), model: "fixture".into(),
+        credential_ref: None, configuration_generation: 1, tool_schema_generation: 1,
+        tools: directory.schemas().to_vec(), instruction_sources: vec![], memory_checkpoint: None,
+        attachment_refs: vec![], environment_cursor: 0,
+        history_range: HistoryRange { branch_id: "branch".into(), ancestor_id: None, leaf_id: Some(receipt.input_id) },
+    };
+    let input = db.lock().unwrap().prepare_execution(
+        &receipt.run_id, binding, DefaultAgentPolicy.identity(), Value::Null,
+    ).unwrap();
+    let responder = {
+        let db = db.clone();
+        let bridge = bridge.clone();
+        std::thread::spawn(move || {
+            struct CloseOwner(OwnerChannel);
+            impl Drop for CloseOwner { fn drop(&mut self) { self.0.close(); } }
+            let _connection = CloseOwner(bridge.clone());
+            for (page, text) in ["abc", "def", "ghi"].into_iter().enumerate() {
+                let frame = frames.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                assert_eq!(frame["kind"], "resource-request");
+                let mut query = frame["query"].clone();
+                let request = query.as_object_mut().unwrap().remove("request").unwrap();
+                assert_eq!(request, json!({"kind":"attachment","ref":"attachment:fixed","view":"content","offset":page * 3,"limit":3}),
+                    "short file and continuation references must reach the original immutable owner");
+                let snapshot = execute_rpc(db.clone(), "runtime.resources.snapshot", query, Arc::new(AtomicBool::new(false))).unwrap();
+                assert_eq!(snapshot["snapshot"]["capturedFiles"][0]["content"], "old");
+                let result = json!({"status":"ready","attachment":{"ref":"attachment:fixed","filename":"fixed.txt","mimeType":"text/plain","byteLength":9},
+                    "content":{"text":text,"offset":page * 3,"nextOffset":(page + 1) * 3,"byteLength":9,"eof":page == 2}});
+                bridge.receive(json!({"v":1,"kind":"resource-response","id":frame["id"],"kernelEpoch":"epoch","result":result}));
+            }
+        })
+    };
+    let engine = ExecutionEngine {
+        persistence: db.clone(), context_preparation: Arc::new(NoopContextPreparation),
+        provider: Arc::new(AttachmentPages), tools: directory, policy: Arc::new(DefaultAgentPolicy),
+        progress: ProgressSink::default(),
+    };
+    let report = engine.run(input, CancellationToken::default()).unwrap();
+    responder.join().unwrap();
+    assert_eq!(report.state, varin_runtime::RunState::Completed, "{report:?}");
+    assert_eq!(report.model_steps, 4);
+    let sql = rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    assert_eq!(sql.query_row("SELECT count(*) FROM operations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    drop(sql);
+    bridge.close();
+    drop(engine);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
 }
