@@ -29,7 +29,9 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
   React.useEffect(() => setSelected(jobRunId ?? null), [jobRunId]);
   const latest = latestContextJob(snapshot), row = selected ? snapshot.context.jobs.find(row => row.run.id === selected) : latest;
   const phase = row ? contextJobPhase(row, snapshot) : undefined;
-  const historical = !!row && (row !== latest || phase === 'applied' && row.job.request.key !== snapshot.context.checkpoint?.id);
+  // Resource/profile publication can advance the current checkpoint after compaction.
+  // Only an explicit history selection may switch inspection back to that job's snapshot.
+  const historical = !!selected && !!row && (row !== latest || phase === 'applied' && row.job.request.key !== snapshot.context.checkpoint?.id);
   const [processOpen, setProcessOpen] = React.useState(false), [summaryOpen, setSummaryOpen] = React.useState(false);
   const summaryElement = React.useRef<HTMLDivElement>(null);
   const [summaryOverflow, setSummaryOverflow] = React.useState(false);

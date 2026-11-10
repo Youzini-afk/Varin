@@ -1690,6 +1690,52 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
   expect(f.cancelRun).not.toHaveBeenCalled();
 });
 
+it('keeps the current resources refreshable after compaction and returns from historical inspection to the live checkpoint', async () => {
+  const f = fixture();
+  const original = resourceCheckpoint();
+  original.proposal.summary = 'Original compaction summary';
+  const run = { ...initialSnapshot(true).activeRun!, id: 'summary:applied', state: 'completed' as const };
+  f.view.context = { checkpoint: original, jobs: [{ run, job: {
+    compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'model_plan', sourceCutHash: 'cut', planHash: 'plan' },
+    published_revision: original.revision,
+    request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null },
+      key: original.id, branch_id: identity.branchId, through_id: 'history:compacted', expected_revision: original.revision - 1, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null },
+    receipt: { thread_id: 'summary:thread', branch_id: 'summary:branch', run_id: run.id, input_id: 'summary:input', cursor: 2 },
+  } }] };
+  f.api.contextHistory = vi.fn(async () => ({ head: null, previous: null, items: [], checkpoint: structuredClone(original) }));
+  const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+    const next = structuredClone(f.view.context.checkpoint!);
+    next.id = `context:resources:${input.expectedRevision + 1}`; next.revision = input.expectedRevision + 1;
+    next.resources!.snapshot.id = `resources:${next.revision}`;
+    next.resources!.snapshot.skills[0]!.name = 'paper-search';
+    f.view.context.checkpoint = next;
+    return next;
+  });
+  f.api.resources.refresh = refresh;
+  await renderWithContext(f.api);
+  await openResources();
+  await act(async () => button('Refresh instructions and skills').click());
+  const resources = () => container.querySelector('[aria-label="Instructions and skills"]');
+  expect(resources()?.textContent).toContain('resources:4');
+  expect(resources()?.textContent).toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  expect(f.api.contextHistory).not.toHaveBeenCalled();
+
+  // Historical selection reads the original checkpoint, without making it current.
+  window.HTMLElement.prototype.scrollTo = () => {};
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Compaction history'))!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('.context-history button')!.click());
+  expect(resources()?.textContent).toContain('resources:original');
+  expect(resources()?.textContent).not.toContain('paper-search');
+  expect(button('Refresh instructions and skills')).toBeUndefined();
+  await act(async () => button('Back to current context').click());
+  expect(resources()?.textContent).toContain('resources:4');
+  expect(button('Refresh instructions and skills')).toBeDefined();
+  await act(async () => button('Refresh instructions and skills').click());
+  expect(refresh.mock.calls.map(([input]) => input.expectedRevision)).toEqual([3, 4]);
+  expect(original.resources!.snapshot.skills[0]!.name).toBe('review-code');
+});
+
 it('retries summary generation without duplicating the job and applies its completed checkpoint without hiding history', async () => {
   const f = fixture();
   f.view.history = [{ id: 'summary-cut', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'original full message' }, provider: null }];
