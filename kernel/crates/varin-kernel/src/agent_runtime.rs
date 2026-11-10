@@ -504,7 +504,8 @@ pub(crate) fn spawn(
                     let epoch = &selected.1;
                     let result: Result<(), KernelError> = (|| {
                         let catalog = result?;
-                        let owner = Arc::new(RunSupervisor::new(catalog));
+                        let owner = Arc::new(RunSupervisor::new(catalog
+                            .with_ingress_tool_catalog(crate::run_tools::ingress_schemas)));
                         resources=resources.clone().with_journal_catalog(owner.catalog());
                         mcp_bridge.set_source_cleanup(resources.clone());
                         let (notify, notifications) = mpsc::sync_channel(1);

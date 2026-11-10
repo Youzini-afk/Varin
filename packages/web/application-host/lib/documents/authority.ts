@@ -16,6 +16,7 @@ import { detectLineEnding, normalizeEditorLineEndings } from './line-ending.js';
 import type { DurableFileOperationContext } from '../recovery/durable-file-operation.js';
 import {
   canonicalizePathIdentity,
+  isPathWithinRoot,
   normalizePathIdentity,
   normalizeWorkspaceRelativePath,
   resolveWorkspacePath,
@@ -467,6 +468,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     dirtyBarrierTimeoutMs = 15_000,
   } = options;
 
+  // Trusted domain owners may reuse this writer without expanding the public workspace
+  // boundary. The capability is local to its call chain, never stored on a registration.
+  const resourceRoots = new AsyncLocalStorage<{ roots: readonly string[]; active: boolean }>();
+  const admitsResourceRoot = (root: string): boolean => {
+    const scope = resourceRoots.getStore();
+    return scope?.active === true && scope.roots.some(candidate =>
+      isPathWithinRoot(root, candidate, pathModule, { platform: processLike.platform }));
+  };
+  const allowedRoot = (root: string) => admitsResourceRoot(root) ? Promise.resolve(true) : isAllowedRoot(root);
+  const trustedRoot = (root: string) => admitsResourceRoot(root) ? Promise.resolve(true) : isTrusted(root);
+
   const registry = createWorkspaceRegistry({
     hostId,
     filePath: pathModule.join(dataDir, 'documents', 'workspaces.json'),
@@ -506,10 +518,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     processLike,
   });
   const releaseMutationRetentionHint = mutations.subscribe(() => {
-    if (!disposed) options.onSourceRetentionChanged?.();
+    if (!disposed) resourceRoots.exit(() => options.onSourceRetentionChanged?.());
   });
 
-  const publishMutation = (event: Omit<DocumentMutationObservation, 'changeId' | 'observedAt'>): void => {
+  const publishMutation = (event: Omit<DocumentMutationObservation, 'changeId' | 'observedAt'>): void => resourceRoots.exit(() => {
     // One operation can apply, undo and redo the same resource. Its receipt is
     // provenance, not the identity of an individual committed mutation.
     const changeId = randomUUID();
@@ -522,7 +534,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     } catch (error) {
       console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
     }
-  };
+  });
 
   /** Admits the original Host namespace without opening its former filesystem location.
    * This is registration/trust authority only, never a physical root or file capability. */
@@ -533,7 +545,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if(saved?.nativeSource&&!native)throw new DocumentWorkspaceUnavailableError('Native workspace owner is unavailable');
     const mapping = native?{workspaceId,canonicalPath:native.root,hostId:native.hostId,kind:'directory' as const,nativeSource:native.reference}:await waitWithSignal(registry.get(workspaceId), signal);
     if (!mapping || mapping.hostId !== hostId) throw new DocumentWorkspaceUnregisteredError();
-    if (!await waitWithSignal(isTrusted(native?.originalPath??mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
+    if (!await waitWithSignal(trustedRoot(native?.originalPath??mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
     if(native&&!saved)await registry.registerNative(workspaceId,native.originalPath,native.reference);
     signal?.throwIfAborted();
     return mapping;
@@ -566,7 +578,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     ) {
       throw new DocumentUntrustedError('Workspace root identity changed');
     }
-    if (!await isTrusted(native?.originalPath??root)) {
+    if (!await trustedRoot(native?.originalPath??root)) {
       throw new DocumentUntrustedError();
     }
     return { ...mapping, root };
@@ -919,7 +931,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (!stat.isDirectory()) {
       throw new DocumentPathError('Workspace path is not a directory', 400);
     }
-    if (!await isAllowedRoot(canonicalPath)) {
+    if (!await allowedRoot(canonicalPath)) {
       throw new DocumentPathError(`Workspace path is outside the Host deployment boundary: ${canonicalPath}`);
     }
     return canonicalPath;
@@ -933,7 +945,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if(native){await admitWorkspaceRegistration(native.workspaceId);return {canonicalPath:native.root,workspaceId:native.workspaceId};}
       }
       const canonicalPath = await admitWorkspaceDirectory(value);
-      if (!await isTrusted(canonicalPath)) throw new DocumentUntrustedError();
+      if (!await trustedRoot(canonicalPath)) throw new DocumentUntrustedError();
       const mapping = await registry.findExact(canonicalPath, 'directory');
       return { canonicalPath, workspaceId: mapping?.workspaceId ?? null };
     } catch (error) {
@@ -964,7 +976,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if (!mapping) throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
       const mutation = await mutations.inspect(mapping.workspaceId);
       const resolved = { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
-      void Promise.resolve().then(() => onWorkspaceResolved(resolved)).catch((error: unknown) => {
+      void Promise.resolve().then(() => resourceRoots.exit(() => onWorkspaceResolved(resolved))).catch((error: unknown) => {
         console.warn(`[Documents] Workspace resolution observer failed: ${(error as Error)?.message || error}`);
       });
       return resolved;
@@ -991,7 +1003,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const containing = await registry.findContaining(canonicalPath);
       if (containing) return containing.workspaceId;
       await fsPromises.stat(canonicalPath);
-      if (!await isAllowedRoot(canonicalPath)) return null;
+      if (!await allowedRoot(canonicalPath)) return null;
       const mapping = await registry.resolve({ canonicalPath, create: true });
       return mapping?.workspaceId ?? null;
     } catch {
@@ -1026,7 +1038,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   ): Promise<WorkspaceMapping> => {
     const native=kind==='file'?undefined:await options.nativeWorkspaces?.resolvePath(canonicalPath);
     if(native)return admitWorkspaceRegistration(native.workspaceId);
-    if (!await isAllowedRoot(canonicalPath)) {
+    if (!await allowedRoot(canonicalPath)) {
       throw new DocumentPathError(`Resource path is outside the Host deployment boundary: ${canonicalPath}`);
     }
     const mapping = await registry.resolve({ canonicalPath, create: true, kind });
@@ -2628,6 +2640,29 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     findContainingResourceRoot,
     findExactResourceRoot,
     ensureResourceRoot,
+    /** Host-only port for a trusted resource domain. Do not expose this factory or
+     * its addressing through Documents/Files routes. Every ordinary caller keeps
+     * the deployment guard, even when it knows a privately registered workspace ID. */
+    createResourceAccess: async (roots: readonly string[]) => {
+      const admitted = await Promise.all(roots.map(root => canonicalizePathIdentity(root, {
+        allowMissing: true, fsPromises, pathModule,
+      })));
+      const scoped = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
+        (...args: Args): Promise<Result> => {
+          const scope = { roots: admitted, active: true };
+          return resourceRoots.run(scope, async () => {
+            try { return await operation(...args); }
+            finally { scope.active = false; }
+          });
+        };
+      return {
+        ensureResourceRoot: scoped(ensureResourceRoot),
+        read: scoped(read),
+        write: scoped(write),
+        delete: scoped(remove),
+        inspectMutation: scoped(mutations.inspect),
+      };
+    },
     registerWriterForScope,
     runMutationForScope,
     runResourceOperation,

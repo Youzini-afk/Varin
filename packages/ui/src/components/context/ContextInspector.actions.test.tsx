@@ -105,3 +105,29 @@ it('binds reconciliation to the original projection owner after navigation', asy
   expect(read).toHaveBeenLastCalledWith(next, expect.any(AbortSignal));
   expect(read.mock.calls.at(-1)![1]?.aborted).toBe(false);
 });
+
+it('does not replace a newer job link when an earlier preparation is accepted', async () => {
+  const view = snapshot();
+  view.context.jobs[0]!.run.state = 'failed';
+  let finish!: (job: Awaited<ReturnType<ThreadsAPI['compact']>>) => void;
+  const compact = vi.fn<ThreadsAPI['compact']>(() => new Promise(resolve => { finish = resolve; }));
+  const api = { compact } as unknown as ThreadsAPI;
+  let jobRunId: string | undefined;
+  const refresh = vi.fn(async () => { render(); });
+  const render = () => root.render(<ContextInspector api={api} identity={identity} snapshot={view} jobRunId={jobRunId} active={false} refresh={refresh} />);
+  const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!;
+  await act(async () => render());
+  await act(async () => button(dict['contextManager.prepareAgain']).click());
+  expect(compact).toHaveBeenCalledOnce();
+  await act(async () => { jobRunId = 'context-job'; render(); });
+  await act(async () => {
+    const prior = view.context.jobs[0]!;
+    const job = { ...prior.job, request: { ...prior.job.request, key: 'summary:new' }, receipt: { ...prior.job.receipt, run_id: 'context-job:new' } };
+    view.context.jobs.push({ job, run: { ...prior.run, id: 'context-job:new', state: 'completed' } });
+    finish(job);
+  });
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(container.querySelector('.context-state h3')?.textContent).toBe(dict['contextManager.failed']);
+  await act(async () => button(dict['contextManager.backCurrent']).click());
+  expect(container.querySelector('.context-state h3')?.textContent).toBe(dict['contextManager.ready']);
+});

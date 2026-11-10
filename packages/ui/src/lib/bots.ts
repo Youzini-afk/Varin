@@ -61,15 +61,26 @@ export const botWorkId = (item: BotWorkItem) => JSON.stringify([item.identity.th
 export const botWorkTitle = (item: BotWorkItem) => item.thread.title || item.identity.threadId;
 export const botWorkEntry = (item: BotWorkItem): BotReadyEntry => item.identity;
 export const sameBotEntry = (a: BotReadyEntry | null | undefined, b: BotReadyEntry | null | undefined) => Boolean(a && b && a.threadId === b.threadId && a.branchId === b.branchId);
+const botNavigationFence = () => {
+  const generation = getRuntimeEndpointGeneration();
+  const surface = useUIStore.getState().mainSurfaceSelectionRevision;
+  const isCurrent = () => generation === getRuntimeEndpointGeneration() && surface === useUIStore.getState().mainSurfaceSelectionRevision;
+  return { isCurrent, beforeCommit: async () => {
+    if (!isCurrent()) throw new Error('Conversation navigation was superseded');
+  } };
+};
 export const openBotConversation = async (botId: string, entry: BotReadyEntry, model: BotModelSelection | null = null, archived?: boolean): Promise<void> => {
   // Bot work has a separate presentation selection; ordinary Thread navigation remains intact.
   useBotNavigation.setState({ botId, entry, model, archived });
+  // Navigation reveals its target even when the user selects the current conversation again.
+  useUIStore.getState().closeMainSurfaces();
 };
 export const openBotEntryFor = async (botId: string): Promise<void> => {
-  const generation = getRuntimeEndpointGeneration();
+  const navigation = botNavigationFence();
   const { bot, entry, model } = await ensureBotEntry(botId);
-  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
-  if (generation !== getRuntimeEndpointGeneration()) return;
+  if (!navigation.isCurrent()) return;
+  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: navigation.beforeCommit });
+  if (!navigation.isCurrent()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(bot.id, entry, model);
 };
@@ -80,9 +91,9 @@ export const openBotWorkFor = async (bot: BotSummary, work: BotWorkItem): Promis
     await openThreadFromNavigation(entry);
     return;
   }
-  const generation = getRuntimeEndpointGeneration();
-  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
-  if (generation !== getRuntimeEndpointGeneration()) return;
+  const navigation = botNavigationFence();
+  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: navigation.beforeCommit });
+  if (!navigation.isCurrent()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(bot.id, entry);
 };
@@ -94,9 +105,9 @@ export const openBotWorkInWorkbench = async (point: BotReturnPoint, work: BotRea
 };
 /** Return from delegated work to the Bot conversation that dispatched it. */
 export const returnToBot = async (point: BotReturnPoint): Promise<void> => {
-  const generation = getRuntimeEndpointGeneration();
-  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
-  if (generation !== getRuntimeEndpointGeneration()) return;
+  const navigation = botNavigationFence();
+  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: navigation.beforeCommit });
+  if (!navigation.isCurrent()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(point.botId, point.session);
   useBotReturn.setState({ point: null, returned: point });

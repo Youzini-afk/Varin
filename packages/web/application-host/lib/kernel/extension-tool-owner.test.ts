@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRestoreError } from '@varin/extension-host';
-import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
+import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
 import { createMaterialStoreFixture } from '../harness/web-materials.test-helper.js';
 import {
@@ -26,6 +26,7 @@ import {
 import type { KernelClient } from './kernel-client.js';
 import { createComputerRuntime } from './computer-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './nested-tool-owner.js';
+import { createToolFamilySettings } from './tool-family-settings.js';
 
 // Real bundles, file catalogs and broker processes use the suite's shared timeout.
 it('installed SDK declaration reaches shared bridge, compiled schemas, validated model/policy scope and real material adapter', async () => {
@@ -579,7 +580,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     // Reconstruct the saved exact A while current routing points to B. Only subsequent
     // new candidate preparation follows B; recovery never silently rewrites the old binding.
     const recovered = await createExtensionTools(options)(
-      { runId: 'recovered', threadId: 'thread', branchId: 'history-branch', source: null },
+      { runId: 'recovered', threadId: 'thread', branchId: 'history-branch', source: null, restoreExact: true },
       [scope.initial[0]!.binding],
       new AbortController().signal,
     );
@@ -769,5 +770,156 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  }
+});
+
+it.each(['settings', 'routing'] as const)('exact restoration defers unavailable current %s without blocking the committed directory', async unavailable => {
+  const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tool-exact-restore-'));
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: '0.9.44',
+    brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
+  const scopes: Awaited<ReturnType<ReturnType<typeof createExtensionTools>>>[] = [];
+  const leases: Awaited<ReturnType<typeof retainExtensionTool>>[] = [];
+  const listeners = new Set<() => void>();
+  const selectedId = 'varin.script.close', omittedId = 'varin.script.run';
+  let currentFailure: Error | undefined, currentReads = 0, staleReads = 0;
+  const readState = runtime.state.bind(runtime);
+  const stateObserver = vi.spyOn(runtime, 'state').mockImplementation(async () => {
+    const state = await readState();
+    if (!state.routing.authoritative) staleReads++;
+    return state;
+  });
+  const input = { runId: 'original', threadId: 'thread', branchId: 'history', source: {
+    resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace',
+    mode: 'materialized' as const, branch_id: 'source', revision: 1, live_root: null,
+  } };
+  try {
+    runtime.capabilities.register(SCRIPT_CAPABILITY, () => { throw new Error('Preparation must not execute'); });
+    await runtime.start();
+    await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+      rule: { serviceId: omittedId, version: 1, providerKeys: [`varin.builtin.scripts:host:${omittedId}@1`],
+        allowFallback: false, scope: { threadId: 'unrelated' } } });
+    const routingPath = path.join(runtime.storage.directory, 'varin.core.service-routing', 'application',
+      `${createHash('sha256').update('rules').digest('hex')}.json`);
+    const routingBytes = await fs.readFile(routingPath);
+    const prepare = createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
+      prepareConfiguration: async (_run, required) => {
+        if (!required.length) { currentReads++; if (currentFailure) throw currentFailure; }
+        return Object.assign((descriptor: { id: string }, original?: string | null) => original === undefined
+          ? descriptor.id === omittedId ? 'configuration' : null : original,
+        { enabled: (descriptor: { id: string }) => required.length > 0 || [selectedId, omittedId].includes(descriptor.id) });
+      }, subscribeConfiguration: listener => { listeners.add(listener); return () => listeners.delete(listener); } });
+    const original = await prepare(input, [], new AbortController().signal);
+    scopes.push(original); leases.push(...original.initial);
+    const saved = structuredClone(original.initial.find(lease => lease.binding.serviceId === selectedId)!.binding);
+    original.close();
+    if (unavailable === 'settings') currentFailure = new Error('current settings snapshot unavailable');
+    else await fs.writeFile(routingPath, '{truncated');
+    // A new admission still requires current settings. Exact recovery does not.
+    await expect(prepare({ ...input, runId: 'pending' }, [], new AbortController().signal))
+      .rejects.toThrow(currentFailure?.message ?? 'extension_tool_catalog_unavailable');
+    const readsBeforeRestore = currentReads;
+    const recovered = await prepare({ ...input, runId: 'recovered', restoreExact: true }, [saved], new AbortController().signal);
+    scopes.push(recovered); leases.push(...recovered.initial);
+    expect(currentReads).toBe(readsBeforeRestore);
+    expect(recovered.initial.map(lease => lease.binding)).toEqual([saved]);
+    expect(recovered.initial[0]!.lease.available(saved.tool)).toBe(true);
+    const publications: string[] = [], previousReads = currentReads, previousStaleReads = staleReads;
+    recovered.start(async (_slot, lease) => { if (lease) { publications.push(lease.binding.serviceId); leases.push(lease); } });
+    await expect.poll(() => currentReads).toBeGreaterThan(previousReads);
+    if (unavailable === 'routing') await expect.poll(() => staleReads).toBeGreaterThan(previousStaleReads);
+    expect(publications).toEqual([]);
+    currentFailure = undefined;
+    if (unavailable === 'routing') await fs.writeFile(routingPath, routingBytes);
+    for (const listener of listeners) listener();
+    // Current discovery resumes through the existing live subscription, without a fence.
+    await expect.poll(() => publications).toContain(selectedId);
+    await expect.poll(() => publications).toContain(omittedId);
+  } finally {
+    for (const scope of scopes) scope.close();
+    for (const lease of leases) lease.lease.release();
+    stateObserver.mockRestore();
+    await runtime.stop(); await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it('explicit empty directory needs no current configuration or discovery snapshot', async () => {
+  const state = vi.fn(async () => { throw new Error('current discovery unavailable'); });
+  const prepareConfiguration = vi.fn(async () => { throw new Error('current settings unavailable'); });
+  const prepare = createExtensionTools({ runtime: { state, subscribe: () => () => {} } as unknown as ApplicationExtensionRuntime,
+    kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }), prepareConfiguration });
+  const input = { runId: 'empty', threadId: 'thread', branchId: 'history', source: null, restoreExact: true };
+  const scope = await prepare(input, [], new AbortController().signal);
+  try {
+    expect(scope.initial).toEqual([]);
+    expect(state).not.toHaveBeenCalled();
+    expect(prepareConfiguration).not.toHaveBeenCalled();
+  } finally { scope.close(); }
+  const aborted = new AbortController(); aborted.abort(new Error('preparation cancelled'));
+  await expect(prepare(input, [], aborted.signal)).rejects.toThrow('preparation cancelled');
+});
+
+
+it('new roots discover current enabled tools after an empty or disabled prior directory, while prepared roots restore exactly', async () => {
+  const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tool-current-directory-'));
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: '0.9.44',
+    brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
+  const scopes: Awaited<ReturnType<ReturnType<typeof createExtensionTools>>>[] = [];
+  const leases: Awaited<ReturnType<typeof retainExtensionTool>>[] = [];
+  const listeners = new Set<() => void>();
+  const enabled = new Set<string>();
+  const settings = createToolFamilySettings(SCRIPT_TOOL_DECLARATIONS, async () => ({
+    global: { harness: { tools: Object.fromEntries(SCRIPT_TOOL_DECLARATIONS.map(value => [value.tool!.name, enabled.has(value.id)])) } },
+    globalRevision: '1', projectRevision: 'none', project: {}, projectTrusted: false,
+  }));
+  const input = { runId: 'automatic', threadId: 'thread', branchId: 'history', source: {
+    resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace',
+    mode: 'materialized' as const, branch_id: 'source', revision: 1, live_root: null,
+  } };
+  try {
+    runtime.capabilities.register(SCRIPT_CAPABILITY, () => { throw new Error('Preparation must not execute'); });
+    await runtime.start();
+    const prepare = createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
+      prepareConfiguration: (run, required) => settings.prepareConfiguration(run, required,
+        Object.assign(() => null, { enabled: (descriptor: { id: string }) => descriptor.id.startsWith('varin.script.') })),
+      subscribeConfiguration: listener => { listeners.add(listener); return () => listeners.delete(listener); } });
+    const open = async (run: Parameters<typeof prepare>[0], required: Parameters<typeof prepare>[1] = []) => {
+      const scope = await prepare(run, required, new AbortController().signal);
+      scopes.push(scope); leases.push(...scope.initial); return scope;
+    };
+    const empty = await open(input);
+    expect(empty.initial).toEqual([]); empty.close();
+    enabled.add('varin.script.close');
+    const current = await open({ ...input, runId: 'next-root' });
+    expect(current.initial.map(value => value.binding.serviceId)).toEqual(['varin.script.close']);
+    const saved = current.initial.map(value => structuredClone(value.binding)); current.close();
+    enabled.clear();
+    const disabled = await open({ ...input, runId: 'disabled-next-root' });
+    expect(disabled.initial).toEqual([]); disabled.close();
+    const exact = await open({ ...input, runId: 'original-root', restoreExact: true }, saved);
+    expect(exact.initial.map(value => value.binding)).toEqual(saved); exact.close();
+    enabled.add('varin.script.run');
+    // A committed empty initial directory stays empty at restoration, but ordinary
+    // live candidates remain enabled at subsequent closed publication boundaries.
+    const restoredEmpty = await open({ ...input, runId: 'empty-original', restoreExact: true });
+    expect(restoredEmpty.initial).toEqual([]);
+    const published: string[] = [];
+    restoredEmpty.start(async (_slot, lease) => { if (lease) { published.push(lease.binding.serviceId); leases.push(lease); } });
+    await expect.poll(() => published).toContain('varin.script.run');
+    const next = await open({ ...input, runId: 'new-current-root' });
+    expect(next.initial.map(value => value.binding.serviceId)).toEqual(['varin.script.run']); next.close();
+    const sourceless = await open({ ...input, runId: 'sourceless-root', source: null });
+    expect(sourceless.initial).toEqual([]);
+    expect(sourceless.inspect()).toContainEqual(expect.objectContaining({ serviceId: 'varin.script.run', status: 'unavailable',
+      error: 'extension_tool_source_unavailable:varin.script.run:requires_physical' }));
+    const frozenEmpty = await open({ ...input, runId: 'child', fixed: true });
+    expect(frozenEmpty.initial).toEqual([]);
+    frozenEmpty.start(async () => { throw new Error('A delegated empty directory must remain frozen'); });
+    for (const listener of listeners) listener();
+  } finally {
+    for (const scope of scopes) scope.close();
+    for (const lease of leases) lease.lease.release();
+    await runtime.stop(); await fs.rm(root, { recursive: true, force: true });
   }
 });

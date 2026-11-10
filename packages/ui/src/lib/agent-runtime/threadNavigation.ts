@@ -22,7 +22,8 @@ async function selectConversationShell(bot: boolean, assertCurrent: () => void, 
 }
 export async function openExternalConversationFromNavigation(id: string): Promise<void> {
   const host = getRuntimeEndpointGeneration(), request = ++navigation;
-  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
+  const surface = useUIStore.getState().mainSurfaceSelectionRevision;
+  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation || surface !== useUIStore.getState().mainSurfaceSelectionRevision) throw new Error('Conversation navigation was superseded'); };
   const { useExternalAgentStore } = await import('@/stores/useExternalAgentStore');
   current(); await selectConversationShell(false, current); current();
   useExternalAgentStore.getState().select(id);
@@ -30,8 +31,9 @@ export async function openExternalConversationFromNavigation(id: string): Promis
 }
 export async function openThreadFromNavigation(target: { threadId: string; branchId?: string; directory?: string | null }): Promise<ThreadIdentity> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
+  const surface = useUIStore.getState().mainSurfaceSelectionRevision;
   const current = () => {
-    if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded');
+    if (host !== getRuntimeEndpointGeneration() || request !== navigation || surface !== useUIStore.getState().mainSurfaceSelectionRevision) throw new Error('Conversation navigation was superseded');
   };
   const { identity, botId, parentThreadId } = await useThreadStore.getState().resolveThread(target);
   current();
@@ -57,7 +59,8 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
 }
 export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
-  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
+  const surface = useUIStore.getState().mainSurfaceSelectionRevision;
+  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation || surface !== useUIStore.getState().mainSurfaceSelectionRevision) throw new Error('Conversation navigation was superseded'); };
   await selectConversationShell(false, current);
   current();
   const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? undefined });

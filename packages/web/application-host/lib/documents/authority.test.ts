@@ -1497,15 +1497,26 @@ it('preserves explicit surface snapshot encoding and BOM metadata while rejectin
         bom: false,
       }],
     })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
-    await expect(harness.authority.captureAgentInputSnapshot({
+    // Snapshot admission validates the label's shape; the native codec owns the
+    // supported encoding catalogue and decoding, including legacy encodings.
+    const legacyConsumer = { kind: 'thread' as const, threadId: 'thread-legacy-encoding', branchId: 'main' };
+    const legacy = await harness.authority.captureAgentInputSnapshot({
       ...publication,
-      consumer: { kind: 'thread', threadId: 'thread-unsupported-encoding', branchId: 'main' },
+      consumer: legacyConsumer,
       resources: [{
         ...publication.resources[0]!,
         content: 'draft',
         encoding: 'koi8-r',
         bom: false,
       }],
+    });
+    expect(harness.authority.cloneInputSnapshot(legacyConsumer, legacy)).toMatchObject({
+      status: 'ready', resources: [{ encoding: 'koi8-r', bom: false }],
+    });
+    await expect(harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      consumer: { kind: 'thread', threadId: 'thread-empty-encoding', branchId: 'main' },
+      resources: [{ ...publication.resources[0]!, content: 'draft', encoding: '  ', bom: false }],
     })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
     await expect(harness.authority.captureAgentInputSnapshot({
       ...publication,

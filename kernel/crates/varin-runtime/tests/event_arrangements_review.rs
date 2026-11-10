@@ -694,6 +694,8 @@ fn object_routes_preserve_other_targets_and_only_trusted_sender_mapping_is_user_
 fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence() {
     let f = Fixture::new();
     let mut db = f.open();
+    let current_format = f.raw()
+        .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap();
     db.create_thread("work", "work-main").unwrap();
     let run = db
         .submit_with_launch(&SubmitInput {
@@ -739,7 +741,7 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
         f.raw()
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        89
+        current_format
     );
 }
 

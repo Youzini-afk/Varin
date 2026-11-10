@@ -21,15 +21,24 @@ import { readableContextSummary, useContextJobHistory } from './useContextJobHis
 import { contextMessageKinds } from './contextMessages';
 import './context-manager.css';
 
+type ContextSelection = { kind: 'history' | 'preparation'; runId: string };
+
 export function ContextInspector({ api, identity, snapshot, active, jobRunId, error, readOnly, refresh }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot: ThreadSnapshot; active: boolean; jobRunId?: string; error?: string; readOnly?: boolean; refresh(): Promise<void>;
 }) {
   const { t } = useI18n();
-  const [selected, setSelected] = React.useState<string | null>(jobRunId ?? null);
-  React.useEffect(() => setSelected(jobRunId ?? null), [jobRunId]);
-  const latest = latestContextJob(snapshot), row = selected ? snapshot.context.jobs.find(row => row.run.id === selected) : latest;
+  const [selected, setSelected] = React.useState<ContextSelection | null>(jobRunId ? { kind: 'history', runId: jobRunId } : null);
+  React.useEffect(() => setSelected(jobRunId ? { kind: 'history', runId: jobRunId } : null), [jobRunId]);
+  const latest = latestContextJob(snapshot), row = selected ? snapshot.context.jobs.find(row => row.run.id === selected.runId) : latest;
   const phase = row ? contextJobPhase(row, snapshot) : undefined;
-  const historical = !!row && (row !== latest || phase === 'applied' && row.job.request.key !== snapshot.context.checkpoint?.id);
+  // Resource/profile publication can advance the current checkpoint after compaction.
+  // Only an explicit history selection may switch inspection back to that job's snapshot.
+  const historical = selected?.kind === 'history' && !!row && (row !== latest || phase === 'applied' && row.job.request.key !== snapshot.context.checkpoint?.id);
+  // A manually prepared candidate is followed until publication, not pinned as history.
+  // Reconcile from the observed commit, including automatic or uncertain publication.
+  React.useEffect(() => {
+    if (selected?.kind === 'preparation' && phase === 'applied') setSelected(current => current === selected ? null : current);
+  }, [selected, phase]);
   const [processOpen, setProcessOpen] = React.useState(false), [summaryOpen, setSummaryOpen] = React.useState(false);
   const summaryElement = React.useRef<HTMLDivElement>(null);
   const [summaryOverflow, setSummaryOverflow] = React.useState(false);
@@ -114,7 +123,7 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
       expectedRevision: snapshot.context.checkpoint?.revision ?? 0,
       model: { providerId: model.providerId, modelId: model.catalogModelId ?? model.model,
         thinkingLevel: THINKING_LEVELS.includes(model.thinkingLevel as ThinkingLevel) ? model.thinkingLevel as ThinkingLevel : undefined } });
-    if (current === lifetime.current && host === getRuntimeEndpointGeneration()) { preparationKeys.current.delete(fingerprint); setSelected(job.receipt.run_id); }
+    if (current === lifetime.current && host === getRuntimeEndpointGeneration()) { preparationKeys.current.delete(fingerprint); setSelected(previous => previous === selected ? { kind: 'preparation', runId: job.receipt.run_id } : previous); }
   });
   const allItems = history.ready ? history.items : snapshot.history;
   const messageKinds = React.useMemo(() => contextMessageKinds(allItems), [allItems]);
@@ -159,7 +168,7 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
       </div>
     </ContextDisclosure>}
     {snapshot.context.jobs.length > 0 && <ContextDisclosure title={t('contextManager.history')} hint={snapshot.context.jobs.length}>
-      <div className="context-history">{snapshot.context.jobs.slice().reverse().map((item, index) => <button type="button" key={item.run.id} data-selected={row?.run.id === item.run.id} onClick={() => { setSelected(item.run.id); scroll.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+      <div className="context-history">{snapshot.context.jobs.slice().reverse().map((item, index) => <button type="button" key={item.run.id} data-selected={row?.run.id === item.run.id} onClick={() => { setSelected({ kind: 'history', runId: item.run.id }); scroll.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}>
         <Icon name="history" className="size-3" /><span>{t('contextManager.historyItem', { number: snapshot.context.jobs.length - index })}</span><small>{t(contextPhaseLabels[contextJobPhase(item, snapshot)])}</small><Icon name="arrow-right-s" className="size-3" />
       </button>)}</div>
     </ContextDisclosure>}

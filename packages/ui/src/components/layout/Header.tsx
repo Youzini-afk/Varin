@@ -24,7 +24,7 @@ import { ExternalContextUsage } from './ExternalContextUsage';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { contextPhaseLabels } from '@/lib/contextPresentation';
-import { openThreadContext } from '@/lib/openThreadContext';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -128,6 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   streamPerfCount('ui.header.render');
   const { t } = useI18n();
+  const openThreadContext = useOpenThreadContext();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);

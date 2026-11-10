@@ -1,6 +1,6 @@
 /** Ordinary scripts use the original Storage process/guardian and original invocation scopes. */
 import { isDeepStrictEqual } from 'node:util';
-import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-builtins';
+import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinToolJson, type JsonValue, type NestedToolInput, type NestedToolReceipt } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
 import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
@@ -8,11 +8,11 @@ import { compileToolJsonSchema } from '../models/schema.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
-import type { KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
+import type { ExtensionToolBinding, KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 import { undispatchedToolReceipt } from './tool-bridge.js';
 import { scheduleAtDeadline } from '../deadline.js';
-import { resolveScriptNodeBinding, scriptNodeSpawnInput } from './script-node-binding.js';
+import { resolveScriptNodeBinding, restoreScriptNodeBinding, scriptNodeSpawnInput } from './script-node-binding.js';
 import { createManagedProcessClient } from './managed-process-client.js';
 import { stopManagedScript } from './managed-script-source.js';
 import { KernelManagedProcess } from './process-service.js';
@@ -201,7 +201,7 @@ export function createScriptRuntime(options: {
     if (environments.has(authority.operationId)) throw new Error('script_environment_already_open');
     const node = authority.source?.resource_owner.kind === 'managed_host'
       ? await (await runtime.managedSource(authority.source.resource_owner, signal)).scriptBinding({ coordinatorHostId: runtime.coordinatorHostId, source: authority.source }, signal)
-      : await resolveScriptNodeBinding();
+      : await restoreScriptNodeBinding(authority.configurationIdentity);
     if (node.configuration_identity !== authority.configurationIdentity) throw new Error('script_binding_changed');
     await rpc('runtime.managed_process.begin', { operationId: authority.operationId, executionOwner: authority.executorOwner, node }, signal);
     const launch = await runtime.launch(authority.runId, signal);
@@ -406,14 +406,27 @@ export function createScriptRuntime(options: {
   return {
     capability,
     recoverSource: (owner: import('../harness/managed-remote-types.js').ManagedHostSourceOwner) => recover(owner),
-    async prepareConfiguration(fallback: NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>, source: import('./protocol.generated.js').LaunchSource | null): Promise<NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>> {
+    async prepareConfiguration(fallback: NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>, source: import('./protocol.generated.js').LaunchSource | null,
+      required: readonly ExtensionToolBinding[] = []): Promise<NonNullable<ExtensionToolOwnerOptions['configurationIdentity']>> {
+      // Required bindings come from Catalog. Their original extension composition
+      // is independently checked by createExtensionTools before any dispatch. Only
+      // the local builtin owner can restore one here; remote paths are not authority.
+      async function capture(original: string | null) {
+        return restoreScriptNodeBinding(original).then(value => ({ value }), error => ({ error }));
+      }
+      const originals = source?.resource_owner.kind === 'managed_host' ? [] : required.filter(binding =>
+        binding.extensionId === VARIN_BUILTIN_SCRIPT_EXTENSION_ID && SCRIPT_TOOL_DECLARATIONS.some(entry =>
+          entry.id === binding.serviceId && entry.version === binding.serviceVersion)).map(binding => binding.configurationIdentity);
+      const restored = new Map(await Promise.all([...new Set(originals)].map(async original =>
+        [original, await capture(original)] as const)));
       const captured = await (source?.resource_owner.kind === 'managed_host'
         ? runtime.managedSource(source.resource_owner).then(client => client.scriptBinding({ coordinatorHostId: runtime.coordinatorHostId, source }))
         : resolveScriptNodeBinding()).then(value => ({ value }), error => ({ error }));
       return Object.assign((descriptor: Parameters<typeof fallback>[0], original?: string | null) => {
         if (!SCRIPT_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return fallback(descriptor, original);
-        if ('error' in captured) throw captured.error;
-        const node = captured.value;
+        const selected = original === undefined ? captured : restored.get(original) ?? captured;
+        if ('error' in selected) throw selected.error;
+        const node = selected.value;
         if (original !== undefined && original !== node.configuration_identity) throw new Error('Original script Node binding is unavailable');
         return node.configuration_identity;
       }, fallback);

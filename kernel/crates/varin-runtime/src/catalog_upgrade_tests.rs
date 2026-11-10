@@ -695,3 +695,56 @@ fn catalog_upgrade_v83_fixes_historical_default_driver_without_rewriting_effects
     assert_eq!(raw.query_row("SELECT count(*) FROM driver_calls",[],|row|row.get::<_,i64>(0)).unwrap(),0);
     assert_eq!(raw.query_row("SELECT count(*) FROM driver_checkpoints",[],|row|row.get::<_,i64>(0)).unwrap(),0);
 }
+
+#[test]
+fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission() {
+    // Build the released layout by its actual earlier converters, not by relabelling
+    // a new launch with the new admission marker as historical data.
+    let fixture = Fixture::v83();
+    let content = crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
+    let mut raw = fixture.raw();
+    let tx = raw.transaction().unwrap();
+    let mut version = 83;
+    while version < 89 {
+        let step = UPGRADES.iter().find(|step| step.from == version).unwrap();
+        (step.convert)(&tx, &[]).unwrap();
+        version = step.to;
+        tx.pragma_update(None, "user_version", version).unwrap();
+    }
+    let selection: launches::LaunchSelection = serde_json::from_value(json!({
+        "extension_bindings":[],"child_dispatch":null,"connection_identity":"original-connection",
+        "provider_family":"fixture","model":"original-model","configuration_generation":1,
+        "tool_schema_generation":1,"tools":[],"policy":{"name":"default","version":"1"},"source":null
+    })).unwrap();
+    let selected = launch_content::LaunchSelectionMetadata::stage(&content, selection.clone()).unwrap();
+    let launch = json!({"dispatch_context_ref":null,"policy_generation":0,"policy_target":{"kind":"default"},
+        "preparation_failure":null,"run_id":"run","revision":4,"selection":selected,
+        "bound_epoch":17,"requires_rebind":false});
+    let original_launch = encode(&launch).unwrap();
+    tx.execute("INSERT INTO run_launches(id,body) VALUES('run',?1)", [&original_launch]).unwrap();
+    tx.commit().unwrap();
+    let original_receipt: (String, String) = raw.query_row("SELECT intent,receipt FROM commands WHERE id='original-command'", [],
+        |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    let original_effect: String = raw.query_row("SELECT body FROM operations WHERE id='effect'", [], |row|row.get(0)).unwrap();
+    let original_model: String = raw.query_row("SELECT body FROM model_steps WHERE id='settled'", [], |row|row.get(0)).unwrap();
+    let original_bodies = fixture.bodies();
+    // A crash in the same upgrade transaction cannot advance the marker or change a receipt.
+    assert!(apply_before_commit(&mut raw, 89, &content, |_| Err(RuntimeError::Invalid("injected precommit interruption".into()))).is_err());
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), 89);
+    assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
+    apply(&mut raw, 89, &content).unwrap();
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), 90);
+    assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
+    assert_eq!(raw.query_row("SELECT intent,receipt FROM commands WHERE id='original-command'", [], |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).unwrap(), original_receipt);
+    assert_eq!(raw.query_row("SELECT body FROM operations WHERE id='effect'", [], |row|row.get::<_,String>(0)).unwrap(), original_effect);
+    assert_eq!(raw.query_row("SELECT body FROM model_steps WHERE id='settled'", [], |row|row.get::<_,String>(0)).unwrap(), original_model);
+    assert_eq!(fixture.bodies(), original_bodies);
+    drop(raw);
+    let catalog = Catalog::open(&fixture.0).unwrap();
+    // This historical fixture deliberately has no reliable Thread creation receipt.
+    // Inspect the original owner metadata without manufacturing that missing identity.
+    let restored = catalog.launch_metadata("run").unwrap().unwrap();
+    assert_eq!(restored.selection.clone().load(&catalog.content).unwrap(), selection);
+    assert_eq!(restored.extension_admission, None);
+    assert_eq!(restored.revision, 4);
+}

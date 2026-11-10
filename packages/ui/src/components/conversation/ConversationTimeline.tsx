@@ -13,7 +13,7 @@ import { getUiSession } from '@/lib/interactive-ui/sessions';
 import { projectUiWork } from '@/lib/interactive-ui/work-projection';
 import { HistoryPresentation, assistant } from './historyPresentation';
 import { contextTimelineEntries } from '@/lib/contextPresentation';
-import { openThreadContext } from '@/lib/openThreadContext';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { useTimelineViewStore } from './timelineViewStore';
 import { threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
 import { ThreadAttachments } from '../thread/ThreadAttachments';
@@ -46,12 +46,13 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   onScrollContainerChange?: ChatTimelineProps['onScrollContainerChange'];
 }) {
   const { t } = useI18n();
+  const openThreadContext = useOpenThreadContext();
   const key = threadComposerKey(threadHostKey(), identity);
   const timelineKey = viewId ? `${key}:${viewId}` : key;
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
   const entries = React.useMemo(() => contextTimelineEntries(view.entries, snapshot), [view.entries, snapshot]);
-  const openContext = React.useCallback((runId?: string) => openThreadContext(identity, cwd, runId, readOnly), [identity, cwd, readOnly]);
+  const openContext = React.useCallback((runId?: string) => openThreadContext(identity, cwd, runId, readOnly), [identity, cwd, readOnly, openThreadContext]);
   const head = history.at(-1)?.id ?? null;
   const sourceView = React.useRef(view);
   React.useLayoutEffect(() => { sourceView.current = view; }, [view]);

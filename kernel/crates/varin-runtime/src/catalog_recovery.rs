@@ -875,6 +875,11 @@ impl Catalog {
         allow_cancelled: bool,
         prepared_request: Option<&str>,
     ) -> Result<ExecutionPreparation> {
+        if self.launch_metadata(run_id)?.as_ref().and_then(|launch| launch.extension_admission.as_ref())
+            .is_some_and(launches::ExtensionAdmission::pending)
+        {
+            return Err(RuntimeError::Conflict("current extension directory is not prepared".into()));
+        }
         let run = self.run(run_id)?;
         if run.epoch != self.epoch
             || (!allow_cancelled && run.cancel_requested)
