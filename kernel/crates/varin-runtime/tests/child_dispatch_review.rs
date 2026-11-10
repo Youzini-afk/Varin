@@ -464,6 +464,9 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
             f.db.fail_child_preparation(&child.operation_id, "distinct preparation failure")
                 .unwrap();
         }
+        let original_child = f.db.child_task(&child.operation_id).unwrap();
+        let original_completion = f.db.capture_call_completion(&child.operation_id)
+            .unwrap().load().unwrap();
         // Readiness alone is not receipt by the parent.
         assert!(f.db.capture_attention_read().load(&|| false).unwrap().delivered_reports.is_empty());
         assert_eq!(
@@ -481,6 +484,7 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
         let delivered_cursor = proof.delivered_cursor;
         assert!(delivered_cursor > child.cursor && delivered_cursor <= received.event_cursor);
         assert!(!serde_json::to_string(proof).unwrap().contains("distinct preparation failure"));
+        let resumed_run = f.db.run(&f.context.run_id).unwrap();
         assert!(
             f.db.deliver_child_waits()
                 .unwrap()
@@ -488,6 +492,7 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
                 .all(|run| run == &f.context.run_id),
             "only the original pending continuation may be rediscovered"
         );
+        assert_eq!(f.db.run(&f.context.run_id).unwrap(), resumed_run);
         let history = f.db.history("branch:parent").unwrap();
         let reports: Vec<_> = history
             .iter()
@@ -496,11 +501,14 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
         assert_eq!(reports.len(), 1);
         let item: ConversationItem = serde_json::from_value(reports[0].content.clone()).unwrap();
         let Content::Output{output}=&item.content else {panic!("wait reports use typed output with an original preview")};
-        let projected=output.model_data.as_ref().unwrap();
-        let execution=f.db.execution_reference(&child.execution_id).unwrap().reference;
-        assert_eq!(projected["ref"],execution);
-        assert_eq!(projected["read"]["arguments"]["target"],execution);
-        assert!(projected["report"].is_null() && projected["operationId"].is_null());
+        // This fixture froze an operationId-based wait without a child_report reader.
+        // Catalog history retains the original body, not a provider request projection.
+        assert!(output.model_data.is_none(), "legacy readers keep the original report");
+        assert_eq!(output.data["report"], serde_json::to_value(&original_child.report).unwrap());
+        assert_eq!(output.data["code_result"], serde_json::to_value(&original_child.code_result).unwrap());
+        assert!(output.data.get("read").is_none(), "do not advertise an undeclared reader");
+        assert_eq!(f.db.child_task(&child.operation_id).unwrap(), original_child);
+        assert_eq!(f.db.capture_call_completion(&child.operation_id).unwrap().load().unwrap(), original_completion);
         assert!(output.parts.iter().all(|part|match part {varin_runtime::output::OutputPart::Text{text}=>!text.contains(&child.child_thread_id) && !text.contains("next_offset"),_=>true}));
         assert_eq!(
             item.provenance,
@@ -533,6 +541,8 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
             "only the original pending continuation may be rediscovered"
         );
         assert_eq!(f.db.history("branch:parent").unwrap(), history);
+        assert_eq!(f.db.child_task(&child.operation_id).unwrap(), original_child);
+        assert_eq!(f.db.capture_call_completion(&child.operation_id).unwrap().load().unwrap(), original_completion);
         let after = f.db.capture_attention_read().load(&|| false).unwrap();
         assert_eq!(after.delivered_reports.len(), 1);
         assert_eq!(after.delivered_reports[0].delivered_cursor, delivered_cursor);
