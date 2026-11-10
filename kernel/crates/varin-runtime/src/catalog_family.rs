@@ -203,6 +203,8 @@ pub(super) const CURRENT: &str = r#"(
    JOIN runs work ON work.id=json_extract(pending.data,'$.runId')
    JOIN input_queue request ON request.id=json_extract(pending.data,'$.messageId')
    WHERE pending.kind='bot.request_report_pending' AND json_extract(work.body,'$.thread_id')=t.id
+     AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id
+       WHERE internal.child_thread_id=request.sender_thread_id AND json_extract(owner.body,'$.executor')='code_retrieval')
      AND NOT EXISTS(SELECT 1 FROM input_queue reply
        JOIN history delivered ON delivered.id=reply.id JOIN runs receiver ON receiver.id=delivered.run_id
        WHERE reply.id='message:bot-report:run:'||work.id||':'||request.id AND reply.state='delivered'

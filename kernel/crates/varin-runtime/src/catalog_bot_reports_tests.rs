@@ -522,3 +522,73 @@ fn report_read_in_another_parent_fork_does_not_clear_requester_pending_work() {
     assert!(current(&f.db).is_empty());
     let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn frozen_report_receiver_consumes_original_ids_from_wait_and_background_delivery() {
+    use crate::execution::*;
+    for waiting in [false, true] {
+        // Original main declarations, including same-version operationId/itemId requirements.
+        let readers: Vec<ToolSchema> = serde_json::from_str(include_str!("../tests/fixtures/collaboration_readers_main.json")).unwrap();
+        let status = readers.iter().find(|schema| schema.name == collaboration::STATUS_TOOL).unwrap().clone();
+        let dispatch = ToolSchema {requirements:None,name:collaboration::DISPATCH_TOOL.into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None};
+        let mut f = child_fixture::Fixture::new_parent_custom(0, status, dispatch, false, false, false,
+            move |input, launch| {
+                input.tools = Some(vec![collaboration::STATUS_TOOL.into()]);
+                launch.tools.retain(|schema| schema.name == collaboration::DISPATCH_TOOL);
+                launch.tools.extend(readers);
+            });
+        let child = f.accept();
+        let accepted = f.db.capture_call_completion(&child.operation_id).unwrap().load().unwrap();
+        let ToolCompletion::JobAccepted {content:Some(content),..} = &accepted else {panic!("dispatch acceptance")};
+        assert!(content.model_data.is_none());
+        assert_eq!(content.model_data()["operationId"], child.operation_id);
+        f.settle_exchange();
+        let mut source = child.source.pin().unwrap().source.clone();
+        source.branch_id = Some(format!("child-source:{}", child.execution_id));
+        source.revision = Some(0);
+        let proposal = context::ContextProposal {key:"reader-context".into(),branch_id:child.child_branch_id.clone(),through_id:None,
+            expected_revision:0,summary:String::new(),effective_system_prompt:"Original report".into(),instruction_sources:vec![],memory_checkpoint:None};
+        let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
+            "configurationDigest":"reader-report","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,
+            "originalSections":[{"name":"preamble","content":"Original report"}],"instructionSources":[]})).unwrap();
+        let child = f.db.prepare_child(&child.execution_id, source, proposal, basis).unwrap();
+        let run = child.receipt.as_ref().unwrap().run_id.clone();
+        f.db.commit_execution(&run,f.db.epoch(),&ExecutionRecord::StateChanged {state:RunState::Runnable,waiting_on:None}).unwrap();
+        let head = f.db.head(&child.child_branch_id).unwrap();
+        f.db.append_history(&run,f.db.epoch(),head.as_deref(),HistorySource::Assistant,
+            serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia>{id:"actual-reader-answer".into(),resource_activation:None,
+                provenance:Provenance::Assistant,content:Content::Text{text:"Original report answer".into()},opaque:None}).unwrap(),None).unwrap();
+        f.db.commit_execution(&run,f.db.epoch(),&ExecutionRecord::StateChanged {state:RunState::Completed,waiting_on:None}).unwrap();
+        f.db.reconcile_child_reports().unwrap();
+        let expected_report = f.db.child_task(&child.operation_id).unwrap().report.unwrap();
+        let message_id = if waiting {
+            let wait = f.admit_wait("real-frozen-reader");
+            let acceptance = f.db.capture_call_completion(wait.id.strip_prefix("child-wait:").unwrap()).unwrap().load().unwrap();
+            let ToolCompletion::JobAccepted{content:Some(output),..}=acceptance else {panic!("wait acceptance")};
+            assert!(output.model_data.is_none());
+            assert_eq!(output.model_data()["operationId"], child.operation_id);
+            f.db.deliver_child_waits().unwrap();
+            format!("child-report:{}:{}", child.parent_branch_id, child.execution_id)
+        } else {
+            let execution = f.db.pending_bot_reports().unwrap().remove(0);
+            let prepared = f.db.prepare_bot_report(execution).unwrap().load().unwrap();
+            let message = f.db.admit_message(prepared).unwrap();
+            let head = f.db.head(&child.parent_branch_id).unwrap();
+            let prepared = f.db.prepare_input_delivery(&child.parent_run_id,f.db.epoch(),head.as_deref()).unwrap().load().unwrap();
+            f.db.admit_input_delivery(prepared).unwrap().unwrap();
+            message.receipt.identity.message_id
+        };
+        let root=f.root.clone(); drop(f.db);
+        let db=Catalog::open(&root).unwrap();
+        let item=db.execution_history(&child.parent_branch_id).unwrap().into_iter().find(|item|item.id==message_id).unwrap();
+        let Content::Output{output}=&item.content else {panic!("typed report")};
+        assert!(output.model_data.is_none(),"the actual receiver, not the sender's smaller tool subset, controls compatibility");
+        assert_eq!(output.model_data()["report"]["history_ids"],json!(expected_report.history_ids));
+        assert!(!output.parts.iter().any(|part|matches!(part,crate::output::OutputPart::Text{text} if text.contains("child_report target="))));
+        let item=output.model_data()["report"]["history_ids"][0].as_str().unwrap();
+        let page=db.capture_child_report(&child.operation_id,item,0,65536).unwrap().load().unwrap();
+        assert_eq!(page.text,"Original report answer");
+        assert_eq!(db.capture_call_completion(&child.operation_id).unwrap().load().unwrap(),accepted);
+        drop(db);std::fs::remove_dir_all(root).unwrap();
+    }
+}

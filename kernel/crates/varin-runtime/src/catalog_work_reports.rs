@@ -3,8 +3,17 @@
 use super::*;
 use crate::execution::Content;
 
+// A retrieval result activates its parent through the same queue, but is the original
+// Operation's completion, not a work request from a public Agent. Its private worker
+// must never become the receiver of an automatic completion reply.
+const WORK_REQUEST: &str = r#"q.state='delivered' AND q.origin='message'
+    AND json_extract(q.body,'$.origin.identity.kind')='request'
+    AND json_extract(q.body,'$.origin.identity.actor.kind')='agent'
+    AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id
+        WHERE internal.child_thread_id=q.sender_thread_id AND json_extract(owner.body,'$.executor')='code_retrieval')"#;
+
 fn requests(db: &Connection, run: &str) -> Result<Vec<inputs::QueuedInputMetadata>> {
-    let mut query = db.prepare("SELECT q.body FROM input_queue q WHERE q.run_id=?1 AND q.state='delivered' AND q.origin='message' AND json_extract(q.body,'$.origin.identity.kind')='request' AND json_extract(q.body,'$.origin.identity.actor.kind')='agent'")?;
+    let mut query = db.prepare(&format!("SELECT q.body FROM input_queue q WHERE q.run_id=?1 AND {WORK_REQUEST}"))?;
     let rows = query
         .query_map([run], |row| row.get::<_, String>(0))?
         .map(|row| Ok(serde_json::from_str(&row?)?))
@@ -130,7 +139,7 @@ impl ReportRead {
 
 impl Catalog {
     fn pending_work_reports(&self) -> Result<Vec<(String, String)>> {
-        let mut query = self.db.prepare("SELECT DISTINCT json_extract(e.data,'$.messageId'),json_extract(e.data,'$.runId') FROM events e JOIN input_queue q ON q.id=json_extract(e.data,'$.messageId') JOIN threads target ON target.id=q.sender_thread_id JOIN branches b ON b.id=q.branch_id JOIN threads source ON source.id=b.thread_id WHERE e.kind='bot.request_report_pending' AND target.deleted_at_ms IS NULL AND source.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.id='bot-report:run:'||json_extract(e.data,'$.runId')||':'||q.id) ORDER BY e.cursor")?;
+        let mut query = self.db.prepare(&format!("SELECT DISTINCT json_extract(e.data,'$.messageId'),json_extract(e.data,'$.runId') FROM events e JOIN input_queue q ON q.id=json_extract(e.data,'$.messageId') JOIN threads target ON target.id=q.sender_thread_id JOIN branches b ON b.id=q.branch_id JOIN threads source ON source.id=b.thread_id WHERE e.kind='bot.request_report_pending' AND {WORK_REQUEST} AND target.deleted_at_ms IS NULL AND source.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.id='bot-report:run:'||json_extract(e.data,'$.runId')||':'||q.id) ORDER BY e.cursor"))?;
         let rows = query.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(Into::into)
@@ -172,7 +181,7 @@ impl Catalog {
 
     fn prepare_work_report(
         &mut self,
-        mut body: ReportBody,
+        body: ReportBody,
     ) -> Result<messages::MessagePreparation> {
         let messages::MessageActor::Agent {
             run_id: requester, ..
@@ -195,7 +204,7 @@ impl Catalog {
             .transpose()?
             .unwrap_or_default();
         let requester_run = self.run(requester)?;
-        let read = if let Some(answer) = &body.answer {
+        let (read, model_read) = if let Some(answer) = &body.answer {
             let arguments = json!({"threadId":body.run.thread_id,"branchId":body.run.branch_id,
                 "runId":body.run.id,"query":{"kind":"item","itemId":answer.id}});
             let target = self.model_history_read_target(family::READ_TOOL, &arguments)?;
@@ -206,12 +215,10 @@ impl Catalog {
                 &body.run.id,
             )?;
             self.retain_model_reference(&reference, requester)?;
-            body.text.push_str(&format!(
-                "\n\nRead the original answer with read_thread ref={reference}."
-            ));
-            json!({"tool":family::READ_TOOL,"arguments":{"ref":reference}})
+            (json!({"tool":family::READ_TOOL,"arguments":arguments}),
+                json!({"tool":family::READ_TOOL,"arguments":{"ref":reference}}))
         } else {
-            Value::Null
+            (Value::Null, Value::Null)
         };
         let data = json!({"kind":"work_report","executionRef":body.execution.reference,"agentRef":body.execution.agent_id,
             "status":body.run.state,"runId":body.run.id,"itemId":body.answer.as_ref().map(|item|&item.id),
@@ -255,7 +262,7 @@ impl Catalog {
         .and_then(|preparation| {
             preparation
                 .with_attachments(attachments)
-                .with_delivery_data(data)
+                .with_delivery_data(data).with_report_model_read(model_read).with_report_receiver(self, &requester_run.id)?
                 .with_model_references(self)
         })
     }
@@ -288,3 +295,7 @@ pub(super) fn deliver(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
 #[cfg(test)]
 #[path = "catalog_work_reports_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_retrieval_reports_tests.rs"]
+mod retrieval_tests;

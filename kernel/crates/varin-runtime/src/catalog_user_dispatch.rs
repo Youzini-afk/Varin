@@ -263,6 +263,7 @@ impl UserChildDispatchSelection {
             )?)
         };
         Ok(PreparedChildAdmission {
+            model_contract: super::collaboration::ModelContract::default(),
             attachments: self.attachments,
             attachment_input_ref,
             model_selection_required: resolved.profile.model_selection_required,

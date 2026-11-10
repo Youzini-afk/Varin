@@ -1431,3 +1431,6 @@ fn followup_reference_pages_replay_the_original_query_and_keep_literal_registrat
     assert!(matches!(selected,FollowupToolInput::Occurrences{after:Some(_),..}));
     f.finish();
 }
+
+#[path = "child_query_continuation_review.rs"]
+mod query_continuation_review;

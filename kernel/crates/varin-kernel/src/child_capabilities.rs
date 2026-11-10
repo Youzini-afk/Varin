@@ -56,13 +56,24 @@ pub(crate) fn select(names: &[String]) -> Result<Vec<ToolSchema>, varin_runtime:
         })
         .collect()
 }
+/// Compatibility of an already admitted native declaration with its trusted current
+/// builtin owner. Callers must select that owner from the native registry first;
+/// this is never a name-based fallback for Host/MCP contributions. The original
+/// schema remains the granted and model-visible contract at every later admission.
+pub(crate) fn supports_frozen_builtin(original: &ToolSchema, current: &ToolSchema) -> bool {
+    original.name == current.name && (original.version == current.version
+        || (original.version == "1" && current.version == "2"
+            && ToolKind::all().any(|kind| kind.name() == original.name)))
+}
 pub(crate) fn select_frozen(
     selected: &varin_runtime::catalog::dispatch::ChildDispatchSelection,
     names: &[String],
 ) -> Result<Vec<ToolSchema>, varin_runtime::RuntimeError> {
+    let has_host_binding = |name: &str| selected.extension_bindings.iter().any(|binding| binding.tool.name == name)
+        || selected.mcp_binding.iter().any(|binding| binding.tools.iter().any(|tool| tool.name == name));
     let native = names
         .iter()
-        .filter(|name| selected.host_tool(name).is_none())
+        .filter(|name| !has_host_binding(name))
         .cloned()
         .collect::<Vec<_>>();
     let available = select(&native)?;
@@ -72,8 +83,12 @@ pub(crate) fn select_frozen(
             if let Some(tool) = selected.host_tool(name) {
                 return Ok(tool.clone());
             }
+            if has_host_binding(name) {
+                return Err(varin_runtime::RuntimeError::Invalid(format!("frozen Host capability changed: {name}")));
+            }
             let original = selected.frozen.allowed_delegation.iter().find(|tool| &tool.name == name);
-            original.filter(|tool| available.contains(tool) || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false))
+            original.filter(|tool| available.iter().any(|current| supports_frozen_builtin(tool, current))
+                || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false))
                 .or_else(|| {
                     // The resolved configured profile (or explicit isolated-write mode)
                     // can select native capabilities beyond the parent's visible tools.
