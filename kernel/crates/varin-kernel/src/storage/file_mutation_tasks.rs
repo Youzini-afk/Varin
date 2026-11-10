@@ -255,7 +255,7 @@ impl Task {
                 Some(BASE64.decode(encoded).map_err(|_|KernelError::Storage("Invalid original bytes".into()))?)
             }else{None};
             if let (Some(encoding),Some(format))=(self.mutation.read_encoding(),self.mutation.source_format()){
-                if crate::text::codec(encoding).map_err(crate::text::Failure::kernel)?!=crate::text::codec(&format.encoding).map_err(crate::text::Failure::kernel)?{
+                if crate::text::canonical(encoding).map_err(crate::text::Failure::kernel)?!=crate::text::canonical(&format.encoding).map_err(crate::text::Failure::kernel)?{
                     return Err(KernelError::Operation("sourceFormat differs from the original read interpretation; read again with the requested encoding".into()));
                 }
             }

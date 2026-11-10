@@ -14,6 +14,9 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 import { imageAnnotationsEn } from './imageAnnotations';
 export const dict = {
+  'filesView.encoding.search': 'Search encodings…',
+  'filesView.encoding.noMatches': 'No matching encoding',
+  'filesView.encoding.retry': 'Could not load encodings · Retry',
   'filesView.encoding.reopen': 'Reopen with Encoding',
   'filesView.encoding.reopenDirty': 'Save or discard your changes before reopening.',
   'filesView.encoding.save': 'Save with Encoding',

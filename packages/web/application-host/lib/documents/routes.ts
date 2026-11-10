@@ -2,6 +2,7 @@ import { isDocumentAuthorityError } from './errors.js';
 import type { Express, Request, RequestHandler, Response } from 'express';
 
 interface DocumentAuthority {
+  textEncodings(): Promise<unknown>;
   setWorkspaceRetention?(request:unknown):Promise<unknown>;
   resolveWorkspace(input: unknown): Promise<unknown>;
   resolveResourceIdentity(resource: unknown, options?: unknown): Promise<unknown>;
@@ -69,6 +70,10 @@ export const registerDocumentRoutes = (app: Express, {
 }: DocumentRoutesOptions) => {
   const requireAuth: RequestHandler = uiAuthController?.requireAuth
     ?? ((_req, _res, next) => next());
+
+  app.post(`${base}/encodings`, requireAuth, async (_req: Request, res: Response) => {
+    try { return res.json(await documents.textEncodings()); } catch (error) { return sendError(res, error); }
+  });
 
   app.post(`${base}/workspace/resolve`, requireAuth, async (req: Request, res: Response) => {
     try {

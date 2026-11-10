@@ -1354,6 +1354,11 @@ export class KernelClient {
   }
 
   /** Pure native file representation transforms; no filesystem or grant is introduced. */
+  async textEncodings(): Promise<import('./protocol.generated.js').KernelTextCodec[]> {
+    if (!this.handshakeResult) await this.start();
+    return this.requestRaw('text.encodings', {}, { allowBootstrap: true });
+  }
+
   async textDecode(params: import('./protocol.generated.js').KernelTextDecodeParams): Promise<import('./protocol.generated.js').KernelTextDecodeResult> {
     if (!this.handshakeResult) await this.start();
     return this.requestRaw('text.decode', params, { allowBootstrap: true });

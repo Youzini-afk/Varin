@@ -66,28 +66,11 @@ impl Failure {
         )
     }
 }
-pub(crate) fn codec(label: &str) -> Result<&'static Encoding, Failure> {
-    match label.to_ascii_lowercase().replace('_', "-").as_str() {
-        "utf-8" | "utf8" => Ok(UTF_8),
-        // Encoding Standard aliases describe GBK compatibility, not strict GB2312.
-        "gbk" | "cp936" | "windows-936" | "gb2312" => Ok(GBK),
-        "utf-16le" => Ok(UTF_16LE),
-        "utf-16be" => Ok(UTF_16BE),
-        _ => Err(Failure::invalid(format!(
-            "Unsupported file encoding: {label}"
-        ))),
-    }
-}
-fn name(codec: &Encoding) -> &'static str {
-    if codec == GBK {
-        "gbk"
-    } else if codec == UTF_16LE {
-        "utf-16le"
-    } else if codec == UTF_16BE {
-        "utf-16be"
-    } else {
-        "utf-8"
-    }
+mod codecs;
+pub(crate) use codecs::{canonical, codec};
+use codecs::{decode_payload, registry, ByteProfile};
+fn name(codec: &'static Encoding) -> String {
+    codec.name().to_ascii_lowercase()
 }
 fn marker(codec: &Encoding) -> &'static [u8] {
     if codec == UTF_8 {
@@ -104,7 +87,7 @@ pub(crate) fn clearly_binary(bytes: &[u8]) -> bool {
     if bytes.starts_with(b"\xff\xfe") || bytes.starts_with(b"\xfe\xff") {
         return false;
     }
-    bytes.contains(&0) || bytes.iter().any(|b| matches!(*b,1..=8|14..=31|127))
+    bytes.contains(&0) || bytes.iter().any(|b| matches!(*b,1..=8|14..=26|28..=31|127))
 }
 #[derive(Default)]
 pub(crate) struct Endings {
@@ -160,21 +143,31 @@ impl Endings {
 }
 struct Validation {
     decoder: encoding_rs::Decoder,
+    profile: ByteProfile,
     valid: bool,
     endings: Endings,
     binary: bool,
+    stateful: bool,
 }
 impl Validation {
-    fn new(codec: &'static Encoding) -> Self {
-        Self {
-            decoder: codec.new_decoder_without_bom_handling(),
+    fn new(label: &str) -> Result<Self, Failure> {
+        let enc = codec(label)?;
+        Ok(Self {
+            decoder: enc.new_decoder_without_bom_handling(),
+            profile: ByteProfile::new(label),
             valid: true,
             endings: Endings::default(),
             binary: false,
-        }
+            stateful: enc == encoding_rs::ISO_2022_JP,
+        })
     }
     fn push(&mut self, mut bytes: &[u8], last: bool) {
         if !self.valid {
+            return;
+        }
+        self.profile.push(bytes);
+        if !self.profile.valid {
+            self.valid = false;
             return;
         }
         let mut output = [0u8; 8192];
@@ -187,7 +180,7 @@ impl Validation {
             self.binary |= text
                 .as_bytes()
                 .iter()
-                .any(|c| matches!(*c,0..=8|14..=31|127));
+                .any(|c| matches!(*c,0..=8|14..=31|127) && !(self.stateful && *c == 27));
             bytes = &bytes[read..];
             match result {
                 DecoderResult::InputEmpty => break,
@@ -198,145 +191,12 @@ impl Validation {
                 DecoderResult::OutputFull => {}
             }
         }
-    }
-}
-/// Streaming validation keeps range reads bounded even when auto must inspect
-/// bytes after the requested range. A sample is never proof of whole-file UTF-8.
-pub(crate) struct Probe {
-    utf8: Validation,
-    gbk: Validation,
-    utf16: Option<Validation>,
-    utf16_explicit: bool,
-    prefix: Vec<u8>,
-    ascii: bool,
-    gbk_lead: bool,
-    gbk_valid: bool,
-    initialized: bool,
-}
-impl Probe {
-    pub(crate) fn new() -> Self {
-        Self {
-            utf8: Validation::new(UTF_8),
-            gbk: Validation::new(GBK),
-            utf16: None,
-            utf16_explicit: false,
-            prefix: Vec::new(),
-            ascii: true,
-            gbk_lead: false,
-            gbk_valid: true,
-            initialized: false,
+        if last {
+            self.valid &= self.profile.finish();
         }
     }
-    pub(crate) fn with_encoding(explicit: Option<&str>, default: Option<&str>) -> Self {
-        let mut probe = Self::new();
-        if let Some(enc) = explicit
-            .filter(|e| *e != "auto")
-            .or(default)
-            .and_then(|e| codec(e).ok())
-            .filter(|e| *e == UTF_16LE || *e == UTF_16BE)
-        {
-            probe.utf16 = Some(Validation::new(enc));
-            probe.utf16_explicit = explicit.is_some_and(|e| e != "auto");
-        }
-        probe
-    }
-    pub(crate) fn push(&mut self, bytes: &[u8]) {
-        if !self.initialized {
-            let consumed = (3 - self.prefix.len()).min(bytes.len());
-            self.prefix.extend_from_slice(&bytes[..consumed]);
-            if self.prefix.len() < 3 {
-                return;
-            }
-            self.initialized = true;
-            let initial = self.prefix.clone();
-            if !self.utf16_explicit && initial.starts_with(b"\xff\xfe") {
-                self.utf16 = Some(Validation::new(UTF_16LE));
-            } else if !self.utf16_explicit && initial.starts_with(b"\xfe\xff") {
-                self.utf16 = Some(Validation::new(UTF_16BE));
-            }
-            self.feed(&initial);
-            self.feed(&bytes[consumed..]);
-            return;
-        }
-        self.feed(bytes);
-    }
-    fn feed(&mut self, bytes: &[u8]) {
-        self.ascii &= bytes.is_ascii();
-        for &b in bytes {
-            if self.gbk_lead {
-                self.gbk_lead = false;
-                if !(0x40..=0xfe).contains(&b) || b == 0x7f {
-                    self.gbk_valid = false;
-                }
-            } else if (0x81..=0xfe).contains(&b) {
-                self.gbk_lead = true;
-            } else if b == 0xff {
-                self.gbk_valid = false;
-            }
-        }
-        self.utf8.push(bytes, false);
-        self.gbk.push(bytes, false);
-        if let Some(v) = &mut self.utf16 {
-            v.push(bytes, false);
-        }
-    }
-    pub(crate) fn finish(
-        mut self,
-        explicit: Option<&str>,
-        default: Option<&str>,
-    ) -> Result<Format, Failure> {
-        if !self.initialized {
-            let bytes = self.prefix.clone();
-            self.initialized = true;
-            if !self.utf16_explicit && bytes.starts_with(b"\xff\xfe") {
-                self.utf16 = Some(Validation::new(UTF_16LE));
-            } else if !self.utf16_explicit && bytes.starts_with(b"\xfe\xff") {
-                self.utf16 = Some(Validation::new(UTF_16BE));
-            }
-            self.feed(&bytes);
-        }
-        self.utf8.push(&[], true);
-        self.gbk.push(&[], true);
-        if let Some(v) = &mut self.utf16 {
-            v.push(&[], true);
-        }
-        let explicit = explicit.filter(|s| *s != "auto");
-        let (chosen, source) = if let Some(e) = explicit {
-            (codec(e)?, "explicit")
-        } else if self.prefix.starts_with(b"\xef\xbb\xbf") {
-            (UTF_8, "bom")
-        } else if self.prefix.starts_with(b"\xff\xfe") {
-            (UTF_16LE, "bom")
-        } else if self.prefix.starts_with(b"\xfe\xff") {
-            (UTF_16BE, "bom")
-        } else if self.ascii && !self.utf8.binary {
-            let selected = default.map(codec).transpose()?.unwrap_or(UTF_8);
-            if !self.prefix.is_empty() && (selected == UTF_16LE || selected == UTF_16BE) {
-                (UTF_8, "utf8")
-            } else {
-                (selected, if default.is_some() { "default" } else { "utf8" })
-            }
-        } else if self.utf8.valid && !self.utf8.binary {
-            (UTF_8, "utf8")
-        } else if let Some(selected) = default.map(codec).transpose()?.filter(|e| {
-            (*e == UTF_16LE || *e == UTF_16BE)
-                && self.utf16.as_ref().is_some_and(|v| v.valid && !v.binary)
-        }) {
-            (selected, "default")
-        } else {
-            (GBK, "detected")
-        };
-        let validation = if chosen == UTF_8 {
-            self.utf8
-        } else if chosen == GBK {
-            self.gbk.valid &= self.gbk_valid && !self.gbk_lead;
-            self.gbk
-        } else {
-            self.utf16.ok_or_else(|| {
-                Failure::invalid("UTF-16 without BOM requires explicit byte decoding")
-            })?
-        };
-        if validation.binary {
+    fn format(self, encoding: String, bom: bool, source: &str) -> Result<Format, Failure> {
+        if self.binary {
             return Err(Failure {
                 kind: "binary",
                 message: "File contains binary control characters".into(),
@@ -345,24 +205,238 @@ impl Probe {
                 character: None,
             });
         }
-        if !validation.valid {
+        if !self.valid {
             return Err(Failure {
                 kind: "unsupported-encoding",
-                message: format!("File is not valid {} text", name(chosen)),
-                encoding: Some(name(chosen).into()),
+                message: format!("File is not valid {encoding} text"),
+                encoding: Some(encoding),
                 position: None,
                 character: None,
             });
         }
-        let (line_ending, default_line_ending) = validation.endings.finish();
+        let (line_ending, default_line_ending) = self.endings.finish();
         Ok(Format {
-            encoding: name(chosen).into(),
-            bom: !marker(chosen).is_empty() && self.prefix.starts_with(marker(chosen)),
+            encoding,
+            bom,
             line_ending,
             default_line_ending,
             source: source.into(),
         })
     }
+}
+/// Detection consumes the complete stream with constant memory. Only the UTF-8
+/// and configured interpretations are validated in this pass. A guessed or
+/// declared legacy interpretation is validated on the existing seekable reader
+/// before it becomes a text result; decode success alone never proves identity.
+pub(crate) struct Probe {
+    utf8: Validation,
+    configured: Option<(String, Validation)>,
+    detector: Option<chardetng::EncodingDetector>,
+    gbk_shape: ByteProfile,
+    prefix: Vec<u8>,
+    header: Vec<u8>,
+    ascii: bool,
+    explicit: bool,
+    initialized: bool,
+}
+impl Probe {
+    #[cfg(test)]
+    pub(crate) fn new() -> Self {
+        Self::with_encoding(None, None)
+    }
+    pub(crate) fn with_encoding(explicit: Option<&str>, default: Option<&str>) -> Self {
+        let selected = explicit
+            .filter(|e| !e.trim().eq_ignore_ascii_case("auto"))
+            .or(default)
+            .and_then(|e| canonical(e).ok());
+        Self {
+            utf8: Validation::new("utf-8").unwrap(),
+            configured: selected
+                .filter(|e| e != "utf-8")
+                .and_then(|e| Validation::new(&e).ok().map(|v| (e, v))),
+            detector: explicit
+                .filter(|e| !e.trim().eq_ignore_ascii_case("auto"))
+                .is_none()
+                .then(|| chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Allow)),
+            gbk_shape: ByteProfile::new("gbk"),
+            prefix: Vec::new(),
+            header: Vec::new(),
+            ascii: true,
+            explicit: explicit.is_some_and(|e| !e.trim().eq_ignore_ascii_case("auto")),
+            initialized: false,
+        }
+    }
+    pub(crate) fn push(&mut self, bytes: &[u8]) {
+        // HTML's encoding declaration prescan is its standard 1024-byte window;
+        // this bounds sniffing metadata, never the file or decoder input.
+        let n = (1024 - self.header.len()).min(bytes.len());
+        self.header.extend_from_slice(&bytes[..n]);
+        if !self.initialized {
+            let n = (3 - self.prefix.len()).min(bytes.len());
+            self.prefix.extend_from_slice(&bytes[..n]);
+            if self.prefix.len() < 3 {
+                return;
+            }
+            self.initialize();
+            let initial = self.prefix.clone();
+            self.feed(&initial);
+            self.feed(&bytes[n..]);
+        } else {
+            self.feed(bytes);
+        }
+    }
+    fn initialize(&mut self) {
+        self.initialized = true;
+        if let Some(enc) = Encoding::for_bom(&self.prefix).map(|(e, _)| e) {
+            // Explicit reinterpretation wins over the marker. Otherwise validate
+            // its real Unicode codec instead of feeding UTF-16 into a legacy one.
+            if !self.explicit {
+                let label = name(enc);
+                self.configured = if enc == UTF_8 {
+                    None
+                } else {
+                    Some((label.clone(), Validation::new(&label).unwrap()))
+                };
+            }
+        }
+    }
+    fn feed(&mut self, bytes: &[u8]) {
+        self.ascii &= bytes.is_ascii();
+        self.utf8.push(bytes, false);
+        if let Some((_, validation)) = &mut self.configured {
+            validation.push(bytes, false);
+        }
+        self.gbk_shape.push(bytes);
+        if let Some(detector) = &mut self.detector {
+            detector.feed(bytes, false);
+        }
+    }
+    pub(crate) fn finish(
+        mut self,
+        explicit: Option<&str>,
+        default: Option<&str>,
+    ) -> Result<Format, Failure> {
+        if !self.initialized {
+            self.initialize();
+            let initial = self.prefix.clone();
+            self.feed(&initial);
+        }
+        self.utf8.push(&[], true);
+        if let Some(detector) = &mut self.detector {
+            detector.feed(&[], true);
+        }
+        if let Some((_, v)) = &mut self.configured {
+            v.push(&[], true);
+        }
+        let explicit = explicit.filter(|e| !e.trim().eq_ignore_ascii_case("auto"));
+        let (chosen, source) = if let Some(e) = explicit {
+            (canonical(e)?, "explicit")
+        } else if let Some((e, _)) = Encoding::for_bom(&self.prefix) {
+            (name(e), "bom")
+        } else if let Some(e) = declaration(&self.header) {
+            (canonical(&e)?, "declaration")
+        } else if self.ascii && !self.utf8.binary {
+            let chosen = default
+                .map(canonical)
+                .transpose()?
+                .unwrap_or_else(|| "utf-8".into());
+            if !self.prefix.is_empty() && matches!(chosen.as_str(), "utf-16le" | "utf-16be") {
+                ("utf-8".into(), "utf8")
+            } else {
+                (chosen, if default.is_some() { "default" } else { "utf8" })
+            }
+        } else if self.utf8.valid && !self.utf8.binary {
+            ("utf-8".into(), "utf8")
+        } else if self
+            .configured
+            .as_ref()
+            .is_some_and(|(_, v)| v.valid && !v.binary)
+            && default.is_some()
+        {
+            (canonical(default.unwrap())?, "default")
+        } else {
+            let enc = self
+                .detector
+                .as_ref()
+                .expect("auto detector")
+                .guess(None, chardetng::Utf8Detection::Deny);
+            let label = if enc == GBK || enc == encoding_rs::GB18030 {
+                if self.gbk_shape.finish() {
+                    "gbk".into()
+                } else {
+                    "gb18030".into()
+                }
+            } else {
+                name(enc)
+            };
+            (label, "detected")
+        };
+        let bom =
+            !marker(codec(&chosen)?).is_empty() && self.prefix.starts_with(marker(codec(&chosen)?));
+        if chosen == "utf-8" {
+            return self.utf8.format(chosen, bom, source);
+        }
+        if self.configured.as_ref().is_some_and(|(e, _)| *e == chosen) {
+            return self.configured.unwrap().1.format(chosen, bom, source);
+        }
+        // The caller completes strict validation using the chosen decoder.
+        Ok(Format {
+            encoding: chosen,
+            bom,
+            line_ending: "none".into(),
+            default_line_ending: "lf".into(),
+            source: source.into(),
+        })
+    }
+}
+/// Recognize declarations in the header, not arbitrary occurrences of the word
+/// encoding in program text. Browser aliases remain compatibility aliases.
+fn declaration(header: &[u8]) -> Option<String> {
+    let header = String::from_utf8_lossy(header);
+    let lower = header.to_ascii_lowercase();
+    let mut candidates = Vec::new();
+    if lower.starts_with("<?xml") {
+        candidates.push(lower.split("?>").next().unwrap_or(&lower));
+    }
+    for line in lower.lines().take(2) {
+        if line.trim_start().starts_with('#') {
+            candidates.push(line);
+        }
+    }
+    let mut rest = lower.as_str();
+    while let Some((_, tail)) = rest.split_once("<meta") {
+        let (tag, tail) = tail.split_once('>').unwrap_or((tail, ""));
+        candidates.push(tag);
+        rest = tail;
+    }
+    for text in candidates {
+        for key in ["encoding", "charset", "coding"] {
+            let mut rest = text;
+            while let Some((before, tail)) = rest.split_once(key) {
+                rest = tail;
+                if before
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                {
+                    continue;
+                }
+                let tail = tail.trim_start();
+                if !tail.starts_with(['=', ':']) {
+                    continue;
+                }
+                let tail = tail[1..].trim_start().trim_start_matches(['\'', '"']);
+                let label = tail
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                    .collect::<String>();
+                if !label.is_empty() && codec(&label).is_ok() {
+                    return Some(label);
+                }
+            }
+        }
+    }
+    None
 }
 pub(crate) fn decode<'a>(
     bytes: &'a [u8],
@@ -377,10 +451,14 @@ fn decode_with_content<'a>(
     default: Option<&str>,
     include_content: bool,
 ) -> Result<(Cow<'a, str>, Format), Failure> {
-    let forced = explicit.filter(|e| *e != "auto").map(codec).transpose()?;
-    let utf8_candidate = forced == Some(UTF_8)
-        || (forced.is_none()
-            && (!bytes.is_ascii() || default.is_none() || default == Some("utf-8")));
+    let forced = explicit
+        .filter(|e| !e.trim().eq_ignore_ascii_case("auto"))
+        .map(codec)
+        .transpose()?;
+    let utf8_candidate = declaration(&bytes[..bytes.len().min(1024)]).is_none()
+        && (forced == Some(UTF_8)
+            || (forced.is_none()
+                && (!bytes.is_ascii() || default.is_none() || default == Some("utf-8"))));
     if utf8_candidate && !clearly_binary(bytes) {
         if let Ok(text) = std::str::from_utf8(bytes) {
             let bom = bytes.starts_with(marker(UTF_8));
@@ -410,20 +488,45 @@ fn decode_with_content<'a>(
     let mut probe = Probe::with_encoding(explicit, default);
     probe.push(bytes);
     let format = probe.finish(explicit, default)?;
-    if !include_content {
-        return Ok((Cow::Borrowed(""), format));
-    }
     let enc = codec(&format.encoding)?;
     let payload = if format.bom {
         &bytes[marker(enc).len()..]
     } else {
         bytes
     };
-    let text = if enc == UTF_8 {
-        Cow::Borrowed(std::str::from_utf8(payload).map_err(|_| Failure::invalid("Invalid UTF-8"))?)
+    let needs_validation = matches!(format.source.as_str(), "detected" | "declaration");
+    let (text, format) = if include_content {
+        let text = decode_payload(payload, &format.encoding)?;
+        let mut format = format;
+        if needs_validation {
+            let stateful = enc == encoding_rs::ISO_2022_JP;
+            if text
+                .as_bytes()
+                .iter()
+                .any(|c| matches!(*c,0..=8|14..=31|127) && !(stateful && *c == 27))
+            {
+                return Err(Failure {
+                    kind: "binary",
+                    message: "File contains binary control characters".into(),
+                    encoding: None,
+                    position: None,
+                    character: None,
+                });
+            }
+            let mut endings = Endings::default();
+            endings.push(&text);
+            (format.line_ending, format.default_line_ending) = endings.finish();
+        }
+        (text, format)
+    } else if needs_validation {
+        let mut validation = Validation::new(&format.encoding)?;
+        validation.push(payload, true);
+        (
+            Cow::Borrowed(""),
+            validation.format(format.encoding, format.bom, &format.source)?,
+        )
     } else {
-        enc.decode_without_bom_handling_and_without_replacement(payload)
-            .ok_or_else(|| Failure::invalid("Invalid encoded text"))?
+        (Cow::Borrowed(""), format)
     };
     Ok((text, format))
 }
@@ -431,10 +534,13 @@ pub(crate) fn encode(text: &str, format: &Format) -> Result<Vec<u8>, Failure> {
     let enc = codec(&format.encoding)?;
     let mut bytes = Vec::new();
     if format.bom {
-        if enc == GBK {
-            return Err(Failure::invalid("GBK has no BOM"));
+        if marker(enc).is_empty() {
+            return Err(Failure::invalid(format!("{} has no BOM", format.encoding)));
         }
         bytes.extend_from_slice(marker(enc));
+    }
+    if canonical(&format.encoding)? == "gb2312-strict" {
+        return codecs::encode_gb2312(text, format);
     }
     if enc == UTF_8 {
         bytes.extend_from_slice(text.as_bytes());
@@ -464,6 +570,9 @@ pub(crate) fn encode(text: &str, format: &Format) -> Result<Vec<u8>, Failure> {
                 }
             }
         }
+    }
+    if enc != UTF_8 && enc != UTF_16LE && enc != UTF_16BE {
+        codecs::verify_encoded_text(text, &bytes, &format.encoding)?;
     }
     Ok(bytes)
 }
@@ -505,42 +614,69 @@ fn raw_positions(
     requested: &std::collections::BTreeSet<usize>,
 ) -> Result<Vec<(usize, usize)>, Failure> {
     let enc = codec(&format.encoding)?;
-    let mut raw = if format.bom { marker(enc).len() } else { 0 };
-    let mut decoded = 0;
+    let skip = if format.bom { marker(enc).len() } else { 0 };
+    let mut units =
+        stream::Units::new(std::io::Cursor::new(&bytes[skip..]), &format.encoding, skip)?;
     let mut spans = Vec::new();
+    let mut decoded = 0;
+    let mut pending_cr = false;
     if requested.contains(&0) {
-        spans.push((0, raw));
+        spans.push((0, skip));
     }
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        raw += if enc == UTF_8 {
-            c.len_utf8()
-        } else if enc == GBK {
-            if (0x81..=0xfe).contains(&bytes[raw]) {
-                2
-            } else {
-                1
+    while let Some(unit) = units
+        .next(&|| Ok(()))
+        .map_err(|e| Failure::invalid(e.to_string()))?
+    {
+        let value = unit.text();
+        if pending_cr && normalized && value == "\n" {
+            if let Some((at, raw)) = spans.last_mut() {
+                if *at == decoded {
+                    *raw = unit.end;
+                }
             }
-        } else {
-            c.len_utf16() * 2
-        };
-        if normalized && c == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-                raw += if enc == UTF_16LE || enc == UTF_16BE {
-                    2
-                } else {
-                    1
-                };
-            }
+            pending_cr = false;
+            continue;
+        }
+        let before = decoded;
+        if normalized && value == "\r" {
             decoded += 1;
+            pending_cr = true;
         } else {
-            decoded += c.len_utf8();
+            decoded += value.len();
+            pending_cr = false;
         }
-        if requested.contains(&decoded) {
-            spans.push((decoded, raw));
+        if requested
+            .range((
+                std::ops::Bound::Excluded(before),
+                std::ops::Bound::Excluded(decoded),
+            ))
+            .next()
+            .is_some()
+        {
+            if spans.last().is_none_or(|p| p.0 != before) {
+                spans.push((before, unit.start));
+            }
+            spans.push((decoded, unit.end));
+        } else if requested.contains(&decoded) {
+            spans.push((decoded, unit.end));
         }
     }
+    let expected = if normalized {
+        normalize(text).len()
+    } else {
+        text.len()
+    };
+    if decoded != expected {
+        return Err(Failure::invalid("Source character mapping changed"));
+    }
+    if requested.contains(&decoded) {
+        if let Some((at, raw)) = spans.last_mut() {
+            if *at == decoded {
+                *raw = bytes.len();
+            }
+        }
+    }
+
     Ok(spans)
 }
 /// Deterministic full-replacement fallback. Line anchors preserve unchanged
@@ -633,6 +769,47 @@ fn raw_at(spans: &[(usize, usize)], index: usize) -> Result<usize, Failure> {
         .map(|i| spans[i].1)
         .map_err(|_| Failure::invalid("Edit is not on a character boundary"))
 }
+/// A Big5 combining pair cannot be split on disk. Expand only the touched
+/// encoded unit, retaining every unrelated original byte and line ending.
+fn expand_ranges(
+    ranges: Vec<(usize, usize, String)>,
+    baseline: &str,
+    spans: &[(usize, usize)],
+) -> Result<Vec<(usize, usize, String)>, Failure> {
+    let mut groups: Vec<(usize, usize, Vec<(usize, usize, String)>)> = Vec::new();
+    for (start, end, text) in ranges {
+        let a = match spans.binary_search_by_key(&start, |p| p.0) {
+            Ok(i) => spans[i].0,
+            Err(i) if i > 0 => spans[i - 1].0,
+            _ => return Err(Failure::invalid("Missing source boundary")),
+        };
+        let b = match spans.binary_search_by_key(&end, |p| p.0) {
+            Ok(i) => spans[i].0,
+            Err(i) if i < spans.len() => spans[i].0,
+            _ => return Err(Failure::invalid("Missing source boundary")),
+        };
+        if let Some(group) = groups.last_mut().filter(|group| a <= group.1) {
+            group.1 = group.1.max(b);
+            group.2.push((start, end, text));
+        } else {
+            groups.push((a, b, vec![(start, end, text)]));
+        }
+    }
+    Ok(groups
+        .into_iter()
+        .map(|(start, end, edits)| {
+            let mut text = String::new();
+            let mut cursor = start;
+            for (a, b, value) in edits {
+                text.push_str(&baseline[cursor..a]);
+                text.push_str(&value);
+                cursor = b;
+            }
+            text.push_str(&baseline[cursor..end]);
+            (start, end, text)
+        })
+        .collect())
+}
 pub(crate) fn serialize(
     content: &str,
     source: Option<&[u8]>,
@@ -655,13 +832,13 @@ pub(crate) fn serialize(
             default_line_ending: "lf".into(),
             source: "default".into(),
         });
-    format.encoding = name(codec(&format.encoding)?).into();
+    format.encoding = canonical(&format.encoding)?;
     let original = format.clone();
     if let Some(target) = target {
         if let Some(encoding) = &target.encoding {
-            format.encoding = name(codec(encoding)?).into();
+            format.encoding = canonical(encoding)?;
             format.source = "explicit".into();
-            if format.encoding == "gbk" && target.bom.is_none() {
+            if marker(codec(&format.encoding)?).is_empty() && target.bom.is_none() {
                 format.bom = false;
             }
         }
@@ -684,8 +861,8 @@ pub(crate) fn serialize(
     {
         format.bom = true;
     }
-    if format.bom && format.encoding == "gbk" {
-        return Err(Failure::invalid("GBK has no BOM"));
+    if format.bom && marker(codec(&format.encoding)?).is_empty() {
+        return Err(Failure::invalid(format!("{} has no BOM", format.encoding)));
     }
     let convert_eol = target
         .and_then(|f| f.line_ending.as_deref())
@@ -789,6 +966,40 @@ pub(crate) fn serialize(
             let ranges = edit_ranges.unwrap_or_else(|| replacement_ranges(baseline, &comparison));
             let requested = ranges.iter().flat_map(|(a, b, _)| [*a, *b]).collect();
             let spans = raw_positions(source.unwrap(), &original, old, normalized, &requested)?;
+            let ranges = expand_ranges(ranges, baseline, &spans)?;
+            let independent = codec(&original.encoding)? != encoding_rs::ISO_2022_JP
+                && ranges
+                    .iter()
+                    .all(|(a, b, _)| raw_at(&spans, *a).is_ok() && raw_at(&spans, *b).is_ok());
+            if !independent {
+                let mut body = String::new();
+                let mut cursor = 0;
+                let positions = ranges.iter().flat_map(|(a, b, _)| [*a, *b]).collect();
+                let utf8_format = Format {
+                    encoding: "utf-8".into(),
+                    bom: false,
+                    ..original.clone()
+                };
+                let utf8_spans =
+                    raw_positions(old.as_bytes(), &utf8_format, old, normalized, &positions)?;
+                for (start, end, replacement) in &ranges {
+                    let start = raw_at(&utf8_spans, *start)?;
+                    let end = raw_at(&utf8_spans, *end)?;
+                    body.push_str(&old[cursor..start]);
+                    body.push_str(&if normalized {
+                        ending(replacement, &format.default_line_ending)
+                    } else {
+                        replacement.clone()
+                    });
+                    cursor = end;
+                }
+                body.push_str(&old[cursor..]);
+                let bytes = encode_at(&body, &format, normalized, 0)?;
+                let mut endings = Endings::default();
+                endings.push(&body);
+                (format.line_ending, format.default_line_ending) = endings.finish();
+                return Ok((bytes, format));
+            }
             let mut assembled = String::new();
             let same_codec = format.encoding == original.encoding;
             let source_codec = codec(&original.encoding)?;
@@ -818,11 +1029,7 @@ pub(crate) fn serialize(
                 if same_codec {
                     bytes.extend_from_slice(unchanged);
                 } else {
-                    transcoded.push_str(
-                        &source_codec
-                            .decode_without_bom_handling_and_without_replacement(unchanged)
-                            .ok_or_else(|| Failure::invalid("Source fragment is not decodable"))?,
-                    );
+                    transcoded.push_str(&decode_payload(unchanged, &original.encoding)?);
                 }
                 let replacement = if normalized {
                     ending(&replacement, &format.default_line_ending)
@@ -851,13 +1058,10 @@ pub(crate) fn serialize(
             if same_codec {
                 bytes.extend_from_slice(&source.unwrap()[raw_cursor..]);
             } else {
-                transcoded.push_str(
-                    &source_codec
-                        .decode_without_bom_handling_and_without_replacement(
-                            &source.unwrap()[raw_cursor..],
-                        )
-                        .ok_or_else(|| Failure::invalid("Source fragment is not decodable"))?,
-                );
+                transcoded.push_str(&decode_payload(
+                    &source.unwrap()[raw_cursor..],
+                    &original.encoding,
+                )?);
                 bytes = encode_at(&transcoded, &format, normalized, 0)?;
             }
             let (_, actual) = decode(&bytes, Some(&format.encoding), None)?;
@@ -898,6 +1102,9 @@ struct SerializeParams {
     edits: Option<Vec<Edit>>,
 }
 pub(crate) fn request(method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "text.encodings" {
+        return Ok(registry());
+    }
     if method == "text.decode" {
         let p: DecodeParams = serde_json::from_value(params)?;
         let bytes = STANDARD
@@ -924,7 +1131,12 @@ pub(crate) fn request(method: &str, params: Value) -> Result<Value, KernelError>
                         v["kind"] = json!("unsupported-encoding");
                     }
                     v["byteLength"] = json!(bytes.len());
-                    v["candidates"] = json!(["utf-8", "gbk", "utf-16le", "utf-16be"]);
+                    v["candidates"] = json!(registry()
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|e| e["encoding"].clone())
+                        .collect::<Vec<_>>());
                     v
                 }
             },
@@ -1089,55 +1301,61 @@ pub(crate) fn locate_structure_ranges(
             _ => {}
         }
     }
-    fn apply(value: &mut Value, positions: &std::collections::BTreeMap<usize, usize>) {
+    let mut positions = std::collections::BTreeMap::new();
+    gather(value, &mut positions);
+    // Parser offsets stay in Unicode bytes; original ranges cover the complete
+    // decoder emission when a boundary lies inside a multi-scalar mapping.
+    let enc = codec(&format.encoding)?;
+    let skip = if format.bom { marker(enc).len() } else { 0 };
+    let mut units =
+        stream::Units::new(std::io::Cursor::new(&bytes[skip..]), &format.encoding, skip)?;
+    let mut decoded = 0;
+    let mut bounds = std::collections::BTreeMap::new();
+    while let Some(unit) = units
+        .next(&|| Ok(()))
+        .map_err(|e| Failure::invalid(e.to_string()))?
+    {
+        let end = decoded + unit.text().len();
+        for (&offset, _) in positions.range(decoded..=end) {
+            bounds.entry(offset).or_insert(if offset == decoded {
+                (unit.start, unit.start)
+            } else if offset == end {
+                (unit.end, unit.end)
+            } else {
+                (unit.start, unit.end)
+            });
+        }
+        decoded = end;
+    }
+    bounds.insert(text.len(), (bytes.len(), bytes.len()));
+    fn project(value: &mut Value, bounds: &std::collections::BTreeMap<usize, (usize, usize)>) {
         match value {
             Value::Object(o) => {
-                for (key, raw) in [
-                    ("startByte", "sourceStartByte"),
-                    ("endByte", "sourceEndByte"),
+                for (key, raw, end) in [
+                    ("startByte", "sourceStartByte", false),
+                    ("endByte", "sourceEndByte", true),
                 ] {
-                    if let Some(n) = o.get(key).and_then(Value::as_u64) {
-                        if let Some(n) = positions.get(&(n as usize)) {
-                            o.insert(raw.into(), json!(n));
-                        }
+                    if let Some(&(a, b)) = o
+                        .get(key)
+                        .and_then(Value::as_u64)
+                        .and_then(|n| bounds.get(&(n as usize)))
+                    {
+                        o.insert(raw.into(), json!(if end { b } else { a }));
                     }
                 }
-                for v in o.values_mut() {
-                    apply(v, positions);
+                for value in o.values_mut() {
+                    project(value, bounds);
                 }
             }
             Value::Array(a) => {
-                for v in a {
-                    apply(v, positions)
+                for value in a {
+                    project(value, bounds);
                 }
             }
             _ => {}
         }
     }
-    let mut positions = std::collections::BTreeMap::new();
-    gather(value, &mut positions);
-    let enc = codec(&format.encoding)?;
-    let mut raw = if format.bom { marker(enc).len() } else { 0 };
-    for (offset, c) in text.char_indices() {
-        if let Some(pos) = positions.get_mut(&offset) {
-            *pos = raw;
-        }
-        raw += if enc == UTF_8 {
-            c.len_utf8()
-        } else if enc == GBK {
-            if (0x81..=0xfe).contains(&bytes[raw]) {
-                2
-            } else {
-                1
-            }
-        } else {
-            c.len_utf16() * 2
-        };
-    }
-    if let Some(pos) = positions.get_mut(&text.len()) {
-        *pos = bytes.len();
-    }
-    apply(value, &positions);
+    project(value, &bounds);
     Ok(())
 }
 
@@ -1171,7 +1389,13 @@ mod tests {
                 .encoding,
             "utf-8"
         );
-        assert!(decode(b"ascii", Some("gb2312-strict"), None).is_err());
+        assert_eq!(
+            decode(b"ascii", Some("gb2312-strict"), None)
+                .unwrap()
+                .1
+                .encoding,
+            "gb2312-strict"
+        );
         // GBK's encoding_rs decoder also accepts GB18030. Our profile does not
         // silently claim that a four-byte-only character is GBK-encodable.
         assert!(decode(b"\x94\x39\xfc\x36", Some("gbk"), None).is_err());
@@ -1259,7 +1483,7 @@ mod tests {
     fn range_pages_follow_raw_gbk_boundaries_and_keep_raw_mode_exact() {
         let bytes = b"\xd6\xd0\xce\xc4\r\n\xd0\xc2\n";
         let mut cursor = std::io::Cursor::new(bytes);
-        let format = stream::probe(&mut cursor, &json!({}), &|| Ok(()))
+        let format = stream::probe(&mut cursor, &json!({"encoding":"gbk"}), &|| Ok(()))
             .unwrap()
             .unwrap();
         let a = stream::page(
@@ -1332,7 +1556,7 @@ mod tests {
     #[test]
     fn structure_ranges_distinguish_unicode_offsets_from_raw_bytes() {
         let bytes = b"//\xd6\xd0\nhello";
-        let (text, format) = decode(bytes, None, None).unwrap();
+        let (text, format) = decode(bytes, Some("gbk"), None).unwrap();
         let mut value = json!({"range":{"startByte":6,"endByte":11}});
         locate_structure_ranges(&mut value, bytes, &text, &format).unwrap();
         assert_eq!(value["range"]["startByte"], 6);

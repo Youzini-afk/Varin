@@ -8,6 +8,7 @@ export const revisionFromBytes = (bytes: Buffer | Uint8Array): string => (
 
 /** Transport adapter only. Rust is the sole file codec and strict serializer. */
 export interface DocumentTextCodec {
+  textEncodings?(): Promise<import('@varin/application-client').VarinTextCodec[]>;
   textDecode(input: { bytesBase64: string; encoding?: string; defaultEncoding?: string; includeContent?: boolean }): Promise<
     | { kind: 'text'; content?: string; format: VarinTextFormat; byteLength: number }
     | { kind: 'binary' | 'unsupported-encoding'; byteLength: number; message?: string; candidates?: string[] }>;
@@ -34,9 +35,16 @@ const codec = (): DocumentTextCodec => {
   return nativeCodec;
 };
 
+/** The native owner supplies labels and actual capabilities; never mirror its registry in JS. */
+export const documentTextEncodings = async (): Promise<import('@varin/application-client').VarinTextCodec[]> => {
+  const nativeCodec = codec();
+  if (!nativeCodec.textEncodings) throw new DocumentAuthorityError('Native text encoding catalog is unavailable', { code: 'failed', statusCode: 503 });
+  return nativeCodec.textEncodings();
+};
+
 /** Format validation, not byte decoding. Aliases are resolved by the native codec. */
 export const isDocumentEncoding = (value: unknown): value is string => typeof value === 'string'
-  && ['utf-8', 'gbk', 'utf-16le', 'utf-16be'].includes(value);
+  && value.trim().length > 0;
 
 export const isDocumentTextFormat = (value: unknown): value is VarinTextFormat => {
   if (!value || typeof value !== 'object') return false;

@@ -117,7 +117,7 @@ impl Owner {
         crate::protocol::validate_method_params(method, &params)?;
         // Match the production Host-only codec branch, without turning these
         // caller-owned bytes into a Storage request or inventing another codec.
-        if matches!(method, "text.decode" | "text.serialize") {
+        if matches!(method, "text.encodings" | "text.decode" | "text.serialize") {
             if grant_id.is_some() {
                 return Err(KernelError::Authorization(
                     "Text codec requires authenticated Host ownership".into(),

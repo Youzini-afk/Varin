@@ -222,7 +222,7 @@ worker 启动 guardian，再将原句柄、控制和输出交回同一个 Proces
 不重放写入。观察期间沿原路径租约排除其他受控写入，提交回执仍由原 Storage 完成；正在执行的操作只报告待完成状态。
 完整读取和部分读取都返回原文件的 `readVersion`。
 该版本的原始状态由根、路径与内容决定；文本读取还将本次实际 codec 绑定到不透明令牌，后续编辑不能因项目设置变化重新解释同一字节。
-读写权限仍由原 grant 独立校验。UTF-8、GBK 与 UTF-16 文本分页按各自字符边界推进，翻页使用返回的 `nextOffset`；
+读写权限仍由原 grant 独立校验。文本分页按实际解码器的字符边界和状态推进（包括 GB18030 四字节、Big5 多字符映射和 ISO-2022-JP），翻页使用返回的 `nextOffset`；
 原始字节读取保留精确范围和明确的 base64 编码。`byteLength` 是整文件长度，`returnedBytes` 是本页实际返回字节数。
 Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一致；`length` 可显式扩大。
 `content.eof` 为 false 时继续传 `content.nextOffset`，到 true 停止；跨页核对 `readVersion`，避免拼接不同版本。
@@ -254,9 +254,10 @@ Native 来源的版本绑定实际文件状态和同一挂载，重挂后重新�
 Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excludeDirectories`、`respectGitignore` 调整范围。
 过滤后零命中返回 `emptyResult`：只说明当前 `scope` 与过滤条件下没有匹配，并列出同一工具可放宽的参数；`scanComplete` 只针对这个范围。工具不会自动关闭过滤或追加全树扫描，也不报告未遍历子树里的文件数。
 文件文本由 Rust 的共同 codec 解码和严格序列化，Documents、Agent live/fixed 文件能力与 Compute 共用其结果。
-普通非 ASCII 合法 UTF-8 优先；BOM、明确文件规则与操作覆盖参与解析。纯 ASCII 采用项目的 ASCII 兼容默认编码，无此默认时使用 UTF-8；不会把普通 ASCII 字节两两拼成 UTF-16。
-空文件可采用 UTF-16 默认，新建 UTF-16 文本带对应 BOM，明确关闭 BOM 的操作除外。非 UTF-8 中文旧文本采用经过验证的 GBK 兼容解释；`gb2312` 标签是 GBK 别名，不声称严格 GB2312 profile。
-UTF-16 LE/BE 有独立的实际 writer。不能编码的新增字符返回位置和原因，不用问号或字符实体替代。
+纯 ASCII 采用项目的 ASCII 兼容默认编码，无此默认时使用 UTF-8；不会把普通 ASCII 字节两两拼成 UTF-16。
+空文件可采用 UTF-16 默认，新建 UTF-16 文本带对应 BOM，明确关闭 BOM 的操作除外。明确选择、BOM 和识别到的头部编码声明先于一般 UTF-8 判断；非 UTF-8 文本优先采用可解码的项目默认，再由 chardetng 进行统计检测，并严格验证完整字节流。
+原生目录统一提供 Unicode、GB18030/GBK、Big5、日文、韩文、Windows、ISO-8859、KOI8 和 Macintosh 等编码，Host、配置和编辑器不再分别写白名单。`gb2312` 按网页标准兼容 GBK；明确的 `gb2312-strict` 使用完整 GB2312-80 映射及字符范围。极短的歧义内容可以通过文件菜单重新解释，不把检测结果当成用户的保存意图。
+UTF-16 LE/BE 有独立的实际 writer。不能编码的新增字符返回位置和原因，不用问号或字符实体替代。状态编码修改后采用连续的严格序列化，保留各处原换行；未修改文件仍返回原始字节。
 原始 revision、object hash、before-image 与恢复数据始终按原字节保存；零文本与零格式变化复用原字节。
 编码/BOM 变更与显式统一换行是不同意图，普通保存保留原换行，明确范围的局部编辑保留未改原片段。
 Host 项目配置的 `textEncoding.defaultEncoding` 是候选先验，`files` 是文件或以 `/` 结束的目录规则；精确文件优先，其次最长目录前缀。

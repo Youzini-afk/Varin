@@ -343,6 +343,7 @@ impl FileReadTask {
             &state,
         )?;
         let selected=if self.use_text_receipts {self.text_receipts.format(&resource.path,&content_hash).cloned().map(Ok)} else {None}.unwrap_or_else(||probe.finish(self.params["encoding"].as_str(),self.params["defaultEncoding"].as_str()));
+        let selected=crate::text::stream::validate(&mut file,selected,&||self.check())?;
         let mut content=crate::text::stream::page(&mut file,position,&self.params,selected,&||self.check())?;
         content["hash"]=json!(content_hash);
         let version=content["format"]["encoding"].as_str().map(|encoding|super::file_mutations::text_read_version(&version,encoding)).unwrap_or(version);

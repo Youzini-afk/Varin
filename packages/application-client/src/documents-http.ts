@@ -194,6 +194,7 @@ function resolveResourceIdentity(resource: VarinResourceReference, options?: { w
 
 
 return ({
+  textEncodings: () => postJson('/api/documents/encodings', {}) as Promise<import('./types.js').VarinTextCodec[]>,
   discardWorkspaceEdit: request => postJson('/api/documents/workspace-edit/discard', request) as ReturnType<DocumentsAPI['discardWorkspaceEdit']>,
   readWorkspaceEditRecovery: request => postJson('/api/documents/workspace-edit/recovery', request) as ReturnType<DocumentsAPI['readWorkspaceEditRecovery']>,
   prepareWorkspaceEdit: request => postJson('/api/documents/workspace-edit/prepare', request) as ReturnType<DocumentsAPI['prepareWorkspaceEdit']>,

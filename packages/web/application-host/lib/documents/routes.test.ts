@@ -5,6 +5,15 @@ import { createDocumentAuthorityHarness } from './contract-fixtures.js';
 import { registerDocumentRoutes } from './routes.js';
 
 describe('document routes', () => {
+  it('serves the selected file owner encoding catalog on its Documents mount', async () => {
+    const app = express();
+    const codecs = [{ encoding: 'gb18030', label: 'GB18030', read: true, write: true, bom: false, defaultBom: false, stateful: false }];
+    const textEncodings = vi.fn(async () => codecs);
+    registerDocumentRoutes(app, { base: '/managed/documents', documents: { textEncodings } as unknown as Parameters<typeof registerDocumentRoutes>[1]['documents'] });
+    await request(app).post('/managed/documents/encodings').send({}).expect(200, codecs);
+    expect(textEncodings).toHaveBeenCalledExactlyOnceWith();
+    await request(app).post('/api/documents/encodings').send({}).expect(404);
+  });
   it('keeps workspace edits under the selected Documents route mount', async () => {
     const app = express(); app.use(express.json());
     const discardWorkspaceEdit = vi.fn(async () => ({ status: 'missing' }));

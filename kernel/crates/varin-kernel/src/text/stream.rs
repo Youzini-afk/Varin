@@ -22,10 +22,164 @@ pub(crate) fn probe<R: Read + Seek + ?Sized>(
         }
         probe.push(&buffer[..n]);
     }
-    Ok(probe.finish(
+    let format = probe.finish(
         params["encoding"].as_str(),
         params["defaultEncoding"].as_str(),
-    ))
+    );
+    validate(reader, format, check)
+}
+
+/// Complete strict validation of the actual chosen codec, with bounded memory.
+/// No sample or successful range read authorizes overwriting malformed bytes.
+pub(crate) fn validate<R: Read + Seek + ?Sized>(
+    reader: &mut R,
+    format: Result<Format, Failure>,
+    check: &impl Fn() -> Result<(), KernelError>,
+) -> Result<Result<Format, Failure>, KernelError> {
+    let format = match format {
+        Ok(f) => f,
+        Err(e) => return Ok(Err(e)),
+    };
+    if !matches!(format.source.as_str(), "detected" | "declaration") {
+        return Ok(Ok(format));
+    }
+    let mut validation = Validation::new(&format.encoding).map_err(Failure::kernel)?;
+    reader.seek(SeekFrom::Start(0))?;
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        check()?;
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        validation.push(&buffer[..n], false);
+    }
+    validation.push(&[], true);
+    Ok(validation.format(format.encoding, format.bom, &format.source))
+}
+
+/// A decoder emission owns a raw interval, rather than assuming one byte unit
+/// always yields one scalar (Big5 can yield two). The same decoder stays alive
+/// across ISO-2022 escape sequences and page boundaries.
+pub(super) struct Unit {
+    pub start: usize,
+    pub end: usize,
+    bytes: [u8; 32],
+    length: usize,
+}
+impl Unit {
+    pub fn text(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.length]).expect("decoder UTF-8")
+    }
+}
+pub(super) struct Units<R: Read> {
+    reader: BufReader<R>,
+    decoder: encoding_rs::Decoder,
+    profile: ByteProfile,
+    label: String,
+    position: usize,
+    start: usize,
+    finished: bool,
+    since_check: usize,
+    utf8: bool,
+}
+impl<R: Read> Units<R> {
+    pub fn new(reader: R, label: &str, start: usize) -> Result<Self, Failure> {
+        Ok(Self {
+            reader: BufReader::new(reader),
+            decoder: codec(label)?.new_decoder_without_bom_handling(),
+            profile: ByteProfile::new(label),
+            label: label.into(),
+            position: start,
+            start,
+            finished: false,
+            since_check: 0,
+            utf8: codec(label)? == UTF_8,
+        })
+    }
+    pub fn next(
+        &mut self,
+        check: &impl Fn() -> Result<(), KernelError>,
+    ) -> Result<Option<Unit>, KernelError> {
+        while !self.finished {
+            if self.since_check >= 128 * 1024 {
+                check()?;
+                self.since_check = 0;
+            }
+            let mut byte = [0u8; 1];
+            let n = self.reader.read(&mut byte)?;
+            self.finished = n == 0;
+            // Validated UTF-8 keeps its cheap local-boundary path. Other codecs
+            // use the continuous decoder, never a guessed byte-width table.
+            if self.utf8 {
+                if self.finished {
+                    return Ok(None);
+                }
+                let width = match byte[0] {
+                    0..=0x7f => 1,
+                    0xc2..=0xdf => 2,
+                    0xe0..=0xef => 3,
+                    0xf0..=0xf4 => 4,
+                    _ => return Err(KernelError::Operation("Invalid UTF-8 boundary".into())),
+                };
+                let mut bytes = [0u8; 32];
+                bytes[0] = byte[0];
+                self.reader.read_exact(&mut bytes[1..width])?;
+                std::str::from_utf8(&bytes[..width])
+                    .map_err(|_| KernelError::Operation("Invalid UTF-8 character".into()))?;
+                let start = self.position;
+                self.position += width;
+                self.start = self.position;
+                self.since_check += width;
+                return Ok(Some(Unit {
+                    start,
+                    end: self.position,
+                    bytes,
+                    length: width,
+                }));
+            }
+            self.profile.push(&byte[..n]);
+            let mut output = [0u8; 32];
+            let (result, read, written) = self.decoder.decode_to_utf8_without_replacement(
+                &byte[..n],
+                &mut output,
+                self.finished,
+            );
+            self.position += read;
+            self.since_check += read;
+            if matches!(result, DecoderResult::Malformed(..))
+                || !self.profile.valid
+                || (self.finished && !self.profile.finish())
+            {
+                return Err(KernelError::Operation(format!(
+                    "File is not valid {} text",
+                    self.label
+                )));
+            }
+            if matches!(result, DecoderResult::OutputFull) || read != n {
+                return Err(KernelError::Operation(
+                    "Text decoder made incomplete scalar progress".into(),
+                ));
+            }
+            if written > 0 {
+                let mut unit = Unit {
+                    start: self.start,
+                    end: self.position,
+                    bytes: output,
+                    length: written,
+                };
+                if self.label == "gb2312-strict" {
+                    if let Cow::Owned(text) = codecs::profile_text(unit.text(), &self.label) {
+                        unit.length = text.len();
+                        unit.bytes[..text.len()].copy_from_slice(text.as_bytes());
+                    }
+                }
+                self.start = self.position;
+                return Ok(Some(unit));
+            }
+        }
+        Ok(None)
+    }
 }
 
 pub(crate) fn page<R: Read + Seek + ?Sized>(
@@ -97,74 +251,18 @@ pub(crate) fn page<R: Read + Seek + ?Sized>(
     } else {
         reader.seek(SeekFrom::Start(position))?;
     }
-    let mut reader = BufReader::new(reader);
-    let mut bytes = Vec::new();
+    let mut units =
+        Units::new(reader, &format.encoding, position as usize).map_err(Failure::kernel)?;
+    let mut text = String::new();
     let mut actual_start = None;
     let mut actual_end = if start < skip { skip } else { start };
     let mut line = 1u64;
     let mut last_line = None;
     let mut previous_cr = false;
-    let mut since_check = 0;
-    while position < total {
-        if since_check >= 128 * 1024 {
-            check()?;
-            since_check = 0;
-        }
-        let at = position;
-        let mut unit = [0u8; 4];
-        reader.read_exact(&mut unit[..1])?;
-        let n = if enc == UTF_8 {
-            if unit[0] < 0x80 {
-                1
-            } else if unit[0] < 0xe0 {
-                2
-            } else if unit[0] < 0xf0 {
-                3
-            } else {
-                4
-            }
-        } else if enc == GBK {
-            if (0x81..=0xfe).contains(&unit[0]) {
-                2
-            } else {
-                1
-            }
-        } else {
-            reader.read_exact(&mut unit[1..2])?;
-            let u = if enc == UTF_16LE {
-                u16::from_le_bytes([unit[0], unit[1]])
-            } else {
-                u16::from_be_bytes([unit[0], unit[1]])
-            };
-            if (0xd800..=0xdbff).contains(&u) {
-                4
-            } else {
-                2
-            }
-        };
-        let already = if enc == UTF_16LE || enc == UTF_16BE {
-            2
-        } else {
-            1
-        };
-        if n > already {
-            reader.read_exact(&mut unit[already..n])?;
-        }
-        position += n as u64;
-        since_check += n;
-        let scalar = if first.is_some() {
-            enc.decode_without_bom_handling_and_without_replacement(&unit[..n])
-                .ok_or_else(|| {
-                    KernelError::Operation(
-                        "Text changed or contains an invalid character boundary".into(),
-                    )
-                })?
-                .chars()
-                .next()
-        } else {
-            None
-        };
-        if previous_cr && scalar != Some('\n') {
+    while let Some(unit) = units.next(check)? {
+        let at = unit.start as u64;
+        position = unit.end as u64;
+        if previous_cr && !unit.text().starts_with('\n') {
             line = line.saturating_add(1);
             previous_cr = false;
         }
@@ -177,16 +275,18 @@ pub(crate) fn page<R: Read + Seek + ?Sized>(
             actual_start.get_or_insert(if at == skip && start == 0 { 0 } else { at });
             actual_end = position;
             last_line = Some(line);
-            bytes.extend_from_slice(&unit[..n]);
-            if bytes.len() > crate::protocol::MAX_BLOB_RESPONSE_BYTES && first.is_some() {
-                return Err(KernelError::Operation("Requested lines exceed one response frame; request fewer lines or use a byte range".into()));
+            text.push_str(unit.text());
+            if text.len() > crate::protocol::MAX_BLOB_RESPONSE_BYTES {
+                return Err(KernelError::Operation("Requested text exceeds one response frame; request fewer lines or a smaller byte range".into()));
             }
         }
-        if scalar == Some('\n') {
-            line = line.saturating_add(1);
-            previous_cr = false;
-        } else if scalar == Some('\r') {
-            previous_cr = true;
+        for scalar in unit.text().chars() {
+            if scalar == '\n' {
+                line = line.saturating_add(1);
+                previous_cr = false;
+            } else if scalar == '\r' {
+                previous_cr = true;
+            }
         }
         if first.is_some() {
             if line > last {
@@ -198,14 +298,13 @@ pub(crate) fn page<R: Read + Seek + ?Sized>(
     }
     check()?;
     let actual_start = actual_start.unwrap_or(if first.is_some() { total } else { start });
-    if bytes.is_empty() {
+    if text.is_empty() {
         actual_end = if first.is_some() { total } else { end };
     }
-    let text = enc
-        .decode_without_bom_handling_and_without_replacement(&bytes)
-        .ok_or_else(|| {
-            KernelError::Operation("Selected text range changed encoding boundaries".into())
-        })?;
+    // Trailing state reset bytes belong to EOF, not to an empty extra page.
+    if units.finished && actual_end == position {
+        actual_end = total;
+    }
     let mut result = json!({"byteLength":total,"offset":actual_start,"nextOffset":actual_end,"returnedBytes":actual_end-actual_start,"eof":actual_end>=total,"text":text,"format":format});
     if let Some(first) = first {
         result["startLine"] = json!(first);

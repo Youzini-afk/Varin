@@ -375,6 +375,7 @@ export class DocumentRegistry {
   private readonly journalDebounceMs: number;
   private readonly createDocumentInstanceId: () => string;
   private readonly formatUndo = new Map<string, Array<{ before: EditableFormat; after: EditableFormat; textState: number }>>();
+  private encodingCatalog: Promise<import('@varin/application-client').VarinTextCodec[]> | null = null;
   private textSequence = 0;
   private readonly textHistory = new Map<string, { state: number; buffer: string; undo: TextHistoryEntry[]; redo: TextHistoryEntry[] }>();
   private readonly pendingSaves = new Map<string, { request: VarinDocumentWriteRequest; record: DocumentRecord }>();
@@ -1401,14 +1402,20 @@ export class DocumentRegistry {
     return { status: 'undone', groupId, records };
   }
 
+  async textEncodings(): Promise<import('@varin/application-client').VarinTextCodec[]> {
+    this.assertActive();
+    if (!this.documents.textEncodings) throw new DocumentsError('Text encoding catalog is unavailable');
+    this.encodingCatalog ??= this.documents.textEncodings().catch(error => { this.encodingCatalog = null; throw error; });
+    return this.encodingCatalog;
+  }
+
   setFormat(identity: DocumentIdentity, update: Partial<EditableFormat>): DocumentRecord {
     this.assertActive();
     this.assertDirtyBarrierAllowsEdit(identity);
     const current = this.get(identity);
     if (!current || !['ready', 'missing', 'deleted', 'conflict'].includes(current.status)) throw new DocumentsError('Document is not editable');
     const nextFormat: EditableFormat = { normalizeLineEndings: update.lineEnding !== undefined ? true : current.normalizeLineEndings, encoding: update.encoding ?? current.encoding, bom: update.bom ?? current.bom, lineEnding: update.lineEnding ?? current.lineEnding };
-    if (!['utf-8', 'gbk', 'utf-16le', 'utf-16be'].includes(nextFormat.encoding)) throw new DocumentsError('Unsupported document encoding');
-    if (nextFormat.encoding === 'gbk') nextFormat.bom = false;
+    if (!nextFormat.encoding.trim()) throw new DocumentsError('Document encoding is required');
     if (nextFormat.encoding === current.encoding && nextFormat.bom === current.bom && nextFormat.lineEnding === current.lineEnding
       && !(update.lineEnding !== undefined && current.baseFormat?.lineEnding === 'mixed' && !current.normalizeLineEndings)) return current;
     const undo = this.formatUndo.get(current.documentInstanceId) ?? [];

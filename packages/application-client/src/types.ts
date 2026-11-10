@@ -1627,6 +1627,16 @@ export interface WorkspaceMutationToken {
   owner: WorkspaceMutationOwner;
 }
 
+/** File encoding capabilities supplied by the native file owner. */
+export interface VarinTextCodec {
+  encoding: string;
+  label: string;
+  read: boolean;
+  write: boolean;
+  bom: boolean;
+  defaultBom: boolean;
+  stateful: boolean;
+}
 /** Resolved disk representation bound to the original raw document revision. */
 export interface VarinTextFormat {
   encoding: string;
@@ -1925,6 +1935,8 @@ export type VarinDocumentRecoveryWriteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 export interface DocumentsAPI extends DocumentsWorkspaceEditAPI {
+  /** Codecs supplied by the actual file owner, not by the renderer locale. */
+  textEncodings?(): Promise<VarinTextCodec[]>;
   setWorkspaceRetention?(request:{workspaceId:string;ownerId:string;retained:boolean}):Promise<{retained:boolean}>;
   ackDirtyStateBarrier?(request: {
     barrierId: string;

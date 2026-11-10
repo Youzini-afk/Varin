@@ -14,6 +14,7 @@ export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.finish","runtime.dri
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v84" as const;
 
 export type KernelMethod =
+  | "text.encodings"
   | "text.decode"
   | "text.serialize"
   | "runtime.followup.eventAttachment.read"
@@ -534,6 +535,18 @@ export interface KernelTextEdit {
   start: number;
   end: number;
   text: string;
+}
+
+export type KernelTextEncodingsParams = Record<string, never>;
+
+export interface KernelTextCodec {
+  encoding: string;
+  label: string;
+  read: boolean;
+  write: boolean;
+  bom: boolean;
+  defaultBom: boolean;
+  stateful: boolean;
 }
 
 export interface KernelTextDecodeParams {
@@ -7305,6 +7318,7 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "text.encodings": KernelTextEncodingsParams;
   "text.decode": KernelTextDecodeParams;
   "text.serialize": KernelTextSerializeParams;
   "runtime.followup.eventAttachment.read": FollowupEventAttachmentReadParams;
@@ -7792,6 +7806,15 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "text.encodings";
+      params: KernelTextEncodingsParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

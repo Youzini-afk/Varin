@@ -296,8 +296,18 @@ for commands and CI selection.
 `text.rs` is the shared strict file codec for native tools, Compute and Host Documents. The
 `text.decode` and `text.serialize` RPCs are pure body-worker operations over the existing chunked
 content transport, not a second file writer or a single-frame whole-file limit. UTF-8 decoding can
-borrow the original text; legacy files use the GBK compatibility profile (including GB2312 aliases),
-with strict UTF-16LE/BE support. Unrepresentable writes fail without replacement characters.
+borrow the original text. `text/codecs.rs` owns the shared catalog, alias resolution and explicit
+profiles: Unicode, GB18030/GBK, Big5, Japanese/Korean, Windows code pages, ISO-8859, KOI8 and Macintosh.
+`text.encodings` exposes actual read/write/BOM capabilities to Documents and every editor, including
+remote file owners. No Host/renderer encoding whitelist duplicates it. `gb2312` retains its browser
+GBK alias; `gb2312-strict` uses the complete attributed GB2312-80 mapping with its real repertoire.
+UTF-16LE/BE use real UTF-16 writers. All encoders reject unmappable characters without replacement.
+
+Detection is separate from codec support: explicit choice, BOM and recognized header declarations
+precede normal strict UTF-8; a valid project default then precedes the statistical `chardetng` guess.
+ASCII retains a compatible project default. A detector guess is validated against the complete stream,
+not accepted because a sample decodes. Very short ambiguous content can still need an explicit
+reinterpretation; detection never claims to prove the intended target character repertoire.
 
 A text read version binds both the raw CAS version and its resolved codec. Normal saves retain the
 original codec, BOM and line endings. Exact editor edits preserve unchanged raw segments, including
@@ -306,8 +316,11 @@ when the reversible uniform-format fast path is insufficient. A diff deadline ma
 semantics, never truncate or silently substitute text. Recovery before-images are original bytes.
 
 Physical reads combine the existing full raw-hash pass with bounded codec validation. UTF-8 range
-alignment seeks within three bytes; GBK and UTF-16 pages walk from a known boundary using bounded
-buffers. A late or repeated legacy page is therefore still O(offset), without a whole-file text buffer
+alignment seeks within three bytes; other pages walk a continuous decoder from a known boundary
+using bounded buffers. GB18030 four-byte sequences, multi-scalar Big5 emissions and ISO-2022-JP state
+are not approximated with a GBK/UTF-16 byte-width table. Exact edits expand only touched multi-scalar
+units; modified stateful files use continuous strict serialization while preserving original EOLs.
+Unchanged stateful files retain the original bytes. A late or repeated legacy page is therefore still O(offset), without a whole-file text buffer
 or a claimed sparse index. Raw line requests must resolve line boundaries and cannot silently become
 an unbounded whole-file response when decoding fails.
 

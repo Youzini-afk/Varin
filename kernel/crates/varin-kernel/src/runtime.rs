@@ -232,6 +232,7 @@ fn pending_file_worker(method: &str) -> bool {
     matches!(
         method,
         "storage.getBlob"
+            | "text.encodings"
             | "text.decode"
             | "text.serialize"
             | "file.read"
@@ -575,7 +576,7 @@ impl Kernel {
             self.stop_workspaces(Some(request.clone()), completions);
             return Ok(None);
         }
-        if matches!(method, "text.decode" | "text.serialize") {
+        if matches!(method, "text.encodings" | "text.decode" | "text.serialize") {
             if request.get("grantId").is_some() { return Err(KernelError::Authorization("Text codec requires authenticated Host ownership".into())); }
             let (method, request, completed, cancel) = (method.to_owned(), request.clone(), completions.clone(), cancellation.clone());
             let worker=thread::Builder::new().name("text-codec".into()).spawn(move || {

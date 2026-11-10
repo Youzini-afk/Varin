@@ -7,6 +7,7 @@ import {
 const METHODS = new Set<string>([
   'resolveWorkspace',
   'prepareWorkspaceEdit', 'discardWorkspaceEdit', 'applyWorkspaceEdit', 'readWorkspaceEdit', 'readWorkspaceEditRecovery', 'undoWorkspaceEdit', 'listWorkspaceEdits',
+  'textEncodings',
   'read',
   'write',
   'move',
@@ -63,6 +64,7 @@ export const createDocumentsCapabilityHandler =
     if (!METHODS.has(method)) {
       throw new Error(`workspace.documents does not implement ${method}`);
     }
+    if (method === 'textEncodings') return (authority.textEncodings as () => Promise<unknown>)();
     if (method === 'resolveWorkspace') {
       return (authority.resolveWorkspace as (input: unknown) => Promise<unknown>)(asRecord(params) ?? {});
     }

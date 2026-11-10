@@ -29,7 +29,7 @@ import {
   DocumentWorkspaceUnregisteredError,
   isDocumentAuthorityError,
 } from './errors.js';
-import { serializeDocumentText, inspectDocumentBytes, isDocumentEncoding, isDocumentTextFormat, isDocumentTextEdits, sameDocumentTextFormat, revisionFromBytes } from './inspect.js';
+import { documentTextEncodings, serializeDocumentText, inspectDocumentBytes, isDocumentEncoding, isDocumentTextFormat, isDocumentTextEdits, sameDocumentTextFormat, revisionFromBytes } from './inspect.js';
 import { createWorkspaceMutationAuthority, type CaptureToken } from './mutation-authority.js';
 import { createCaptureInventory } from './capture-inventory.js';
 import {
@@ -2633,6 +2633,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     runResourceOperation,
     read,
     readSnapshot,
+    textEncodings: documentTextEncodings,
     resolveTextInterpretation,
     resolveTextEncodingPolicy,
     readSnapshots,

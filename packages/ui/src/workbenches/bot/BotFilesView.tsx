@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
 import { DocumentMonacoEditor } from '@/components/workbench/DocumentMonacoEditor';
+import { DocumentEncodingMenu, DocumentEncodingNotice } from '@/components/workbench/DocumentEncodingMenu';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { getResourceDocumentScope, retainResourceWorkspace } from '@/lib/documents/resource-session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
@@ -205,7 +206,7 @@ export function BotFilesView({ view, active, setCloseGuard }: { view: Extract<Bo
       </div>
       {selected && <section className="bot-file-preview" aria-label={t('bot.workspace.preview')}>
         <header><button type="button" className="float-right p-1 text-muted-foreground" aria-label={t('bot.workspace.close')} onClick={() => { if (mayLeave()) { setSelected(undefined); setPreview(undefined); setEditing(false); } }}><Icon name="close" className="size-4" /></button><b>{selected.name}</b><small>{selected.unavailable ?? `${size(selected.size)} · ${new Date(selected.modifiedAt).toLocaleString()}`}</small></header>
-        {identity && <div className="bot-file-conflict"><DocumentConflictBanner identity={identity} registry={scope.documents} /></div>}
+        {identity && <div className="bot-file-conflict"><DocumentConflictBanner identity={identity} registry={scope.documents} /><DocumentEncodingNotice identity={identity} registry={scope.documents} /></div>}
         <div className="bot-file-content">{preview ? mime(selected.name) === 'application/pdf' ? <iframe title={selected.name} src={preview} /> : <img alt={selected.name} src={preview} />
           : identity && document && ['ready', 'conflict', 'deleted'].includes(document.status) ? isMobile ? <DocumentCodeMirror identity={identity} registry={view.owner.kind === 'local' ? undefined : scope.documents} readOnly={!editing || busy} className="h-full" />
             : <DocumentMonacoEditor identity={identity} path={`${location?.root}/${selected.path}`} providerId={BUILTIN_EDITOR_PROVIDER_IDS.text} viewId={view.key} viewState={editorState} onViewStateChange={setEditorState} scope={view.owner.kind === 'local' ? undefined : scope} readOnly={!editing || busy} className="h-full" />
@@ -215,7 +216,7 @@ export function BotFilesView({ view, active, setCloseGuard }: { view: Extract<Bo
           {selected.kind !== 'directory' && <><Button size="sm" variant="outline" disabled={busy || !location} onClick={() => void perform(async () => { await navigation?.cite(location!, selected.path); setNotice(t('bot.workspace.referenced')); })}>{t('bot.workspace.reference')}</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => openDialog('giveWork')}>{t('bot.workspace.giveWork')}</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => void download()}>{t('bot.workspace.download')}</Button></>}
           {document && ['ready', 'conflict'].includes(document.status) && <Button size="sm" variant="ghost" disabled={busy || document.saving} onClick={() => editing ? void save() : setEditing(true)}>{t(editing ? 'bot.workspace.save' : 'bot.workspace.edit')}{dirty ? ' *' : ''}</Button>}
-          {document?.errorMessage && <p role="alert">{document.errorMessage}</p>}
+          {identity && document && <DocumentEncodingMenu identity={identity} registry={scope.documents}><Button size="sm" variant="ghost" aria-label={t('filesView.encoding.save')}><Icon name="more" className="size-4" /></Button></DocumentEncodingMenu>}
           {(['rename', 'copy', 'move'] as const).map(action => <Button key={action} size="sm" variant="ghost" disabled={busy || dirty} onClick={() => openDialog(action)}>{t(`bot.workspace.${action}`)}</Button>)}
           <Button size="sm" variant="ghost" disabled={busy || dirty} onClick={() => { if (window.confirm(t('bot.workspace.deleteConfirm', { name: selected.name, device: view.title }))) void perform(async () => { await api.request({ ...location!, command: { kind: 'remove', path: selected.path, key: crypto.randomUUID() } }); setSelected(undefined); refresh(); }); }}>{t('bot.workspace.delete')}</Button>
         </div>

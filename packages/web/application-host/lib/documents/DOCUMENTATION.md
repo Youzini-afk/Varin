@@ -28,7 +28,11 @@ and trust remain intact. Corrupt or foreign-host registry files are reported wit
 `inspect.ts` is a transport adapter onto the existing Rust kernel's `text.decode` and `text.serialize`,
 not a second codec or writer. The existing content streams carry large bodies in bounded frames;
 the frame size is not a new document-size limit. Storage still owns byte revisions, conditional writes,
-original before-images and operation receipts. GBK-compatible text and UTF-16 share that same path.
+original before-images and operation receipts. All native catalog codecs share that same path.
+`POST /api/documents/encodings` exposes the actual owner catalog (`text.encodings`); managed file
+owners use their existing Documents route. Editors search this catalog rather than maintaining their
+own list. Host format checks validate shape, while Rust resolves aliases and validates actual codecs.
+The explicit `gb2312-strict` profile is separate from the web-compatible `gb2312` → GBK alias.
 
 Reads carry the actual format separately from raw revision. Writes retain the original interpretation,
 BOM and line boundaries unless the caller explicitly changes them. Unrepresentable text remains a

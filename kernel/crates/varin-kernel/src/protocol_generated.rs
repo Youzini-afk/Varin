@@ -269,6 +269,10 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTextEncodingsParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelTextDecodeParams {
     pub(crate) bytes_base64: String,
     pub(crate) encoding: Option<String>,
@@ -4288,6 +4292,9 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "text.encodings" => serde_json::from_value::<KernelTextEncodingsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "text.decode" => serde_json::from_value::<KernelTextDecodeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -1977,6 +1977,23 @@ mod tests {
     }
 
     #[test]
+    fn generic_file_codecs_survive_real_writes_and_read_version_binding() {
+        let mut f=Fixture::new();
+        for (index,encoding,text) in [(0,"gb18030","中文𠀀🙂\r\n"),(1,"shift_jis","日本語\r\n"),(2,"gb2312-strict","中文・―\r\n"),(3,"iso-2022-jp","日本語\r\n")] {
+            let format=crate::text::Format {encoding:encoding.into(),bom:false,line_ending:"crlf".into(),default_line_ending:"crlf".into(),source:"explicit".into()};
+            let bytes=crate::text::encode(text,&format).unwrap();fs::write(f.directory.join("files/a.txt"),&bytes).unwrap();
+            let content=format!("{text}next\r\n");
+            let (_,receipt)=f.mutation(&format!("codec-{index}"),&content,encoding,encoding,None,false);
+            let saved=fs::read(f.directory.join("files/a.txt")).unwrap();
+            assert_eq!(crate::text::decode(&saved,Some(encoding),None).unwrap().0,content);
+            let version=crate::storage::file_mutations::text_read_version("raw-version",encoding);
+            let args=FileWriteArgs {path:"a.txt".into(),read_version:version,content:content.clone(),mode:None,source_format:Some(format),target_format:None};
+            assert_eq!(TextMutation::Write(args).read_encoding(),Some(encoding));
+            assert_eq!(receipt["status"],"applied");
+        }
+    }
+
+    #[test]
     fn committed_receipts_are_source_hash_scoped_and_survive_reopen_without_replaying_choices() {
         let mut f = Fixture::new();
         let bytes = encoding_rs::GBK.encode("中文").0.into_owned();

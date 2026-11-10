@@ -760,6 +760,9 @@ fn stateless_text_codec_dispatch_uses_host_identity_without_a_scoped_grant() {
             _ => panic!("unexpected codec completion"),
         }
     };
+    let encodings=dispatch(&mut kernel,"text.encodings",json!({}));
+    assert!(encodings.as_array().unwrap().iter().any(|e|e["encoding"]=="gb18030" && e["write"]==true));
+    assert!(encodings.as_array().unwrap().iter().any(|e|e["encoding"]=="gb2312-strict"));
     let decoded = dispatch(&mut kernel, "text.decode", decode.clone());
     assert_eq!(decoded["kind"], "text");
     assert_eq!(decoded["content"], "中文\r\n");
@@ -776,8 +779,8 @@ fn stateless_text_codec_dispatch_uses_host_identity_without_a_scoped_grant() {
     }));
     assert_eq!(rejected["kind"], "unrepresentable");
 
-    for method in ["text.decode", "text.serialize"] {
-        let params = if method == "text.decode" { decode.clone() } else { json!({"content":"text"}) };
+    for method in ["text.encodings", "text.decode", "text.serialize"] {
+        let params = match method { "text.decode"=>decode.clone(),"text.encodings"=>json!({}),_=>json!({"content":"text"}) };
         let scoped = Fixture::request(method, params.clone(), Some("tool-grant"));
         assert!(matches!(kernel.handle(&scoped, Arc::new(AtomicBool::new(false)), &tx), Err(KernelError::Authorization(_))));
         let mut missing_epoch = Fixture::request(method, params.clone(), None);

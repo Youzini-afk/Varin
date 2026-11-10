@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { VarinTextFormat } from '@varin/application-client';
-import { bindDocumentTextCodec, inspectDocumentBytes, serializeDocumentText, type DocumentTextCodec } from './inspect.js';
+import { bindDocumentTextCodec, documentTextEncodings, inspectDocumentBytes, serializeDocumentText, type DocumentTextCodec } from './inspect.js';
 
 const releases: Array<() => void> = [];
 afterEach(() => { for (const release of releases.splice(0).reverse()) release(); });
@@ -58,4 +58,12 @@ it('keeps separate leases when the same client is bound twice', async () => {
   await expectBinding(undefined);
   first(); second();
   await expectBinding(undefined);
+});
+
+it('forwards the native codec catalog without a second Host whitelist', async () => {
+  const entries = [{ encoding: 'shift_jis', label: 'Shift_JIS', read: true, write: true, bom: false, defaultBom: false, stateful: false }];
+  const port = { ...responsePort('owner'), textEncodings: vi.fn(async () => entries) };
+  bind(port);
+  await expect(documentTextEncodings()).resolves.toEqual(entries);
+  expect(port.textEncodings).toHaveBeenCalledExactlyOnceWith();
 });

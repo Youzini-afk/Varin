@@ -1267,6 +1267,7 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+    "text.encodings": "KernelTextEncodingsParams",
     "text.decode": "KernelTextDecodeParams",
     "text.serialize": "KernelTextSerializeParams",
     "runtime.followup.eventAttachment.read": "FollowupEventAttachmentReadParams",
@@ -1743,6 +1744,8 @@
     "KernelTextFormat": {"fields":{"encoding":{"type":"string"},"bom":{"type":"boolean"},"lineEnding":{"type":"'lf' | 'crlf' | 'cr' | 'mixed' | 'none'"},"defaultLineEnding":{"type":"'lf' | 'crlf' | 'cr'"},"source":{"type":"string"}},"rustType":"crate::text::Format"},
     "KernelTextTargetFormat": {"fields":{"encoding":{"type":"string","optional":true},"bom":{"type":"boolean","optional":true},"lineEnding":{"type":"string","optional":true}}},
     "KernelTextEdit": {"fields":{"start":{"type":"number"},"end":{"type":"number"},"text":{"type":"string"}}},
+    "KernelTextEncodingsParams": {"fields":{}},
+    "KernelTextCodec": {"fields":{"encoding":{"type":"string"},"label":{"type":"string"},"read":{"type":"boolean"},"write":{"type":"boolean"},"bom":{"type":"boolean"},"defaultBom":{"type":"boolean"},"stateful":{"type":"boolean"}}},
     "KernelTextDecodeParams": {"fields":{"bytesBase64":{"type":"string"},"encoding":{"type":"string","optional":true},"defaultEncoding":{"type":"string","optional":true},"includeContent":{"type":"boolean","optional":true}}},
     "KernelTextSerializeParams": {"fields":{"content":{"type":"string"},"sourceBytesBase64":{"type":"string","optional":true},"sourceFormat":{"type":"KernelTextFormat","optional":true},"targetFormat":{"type":"KernelTextTargetFormat","optional":true},"normalizeLineEndings":{"type":"boolean","optional":true},"edits":{"type":"KernelTextEdit[]","optional":true}}},
     "KernelTextDecodeResult": {"raw":"export type KernelTextDecodeResult = {kind:'text';content?:string;format:KernelTextFormat;byteLength:number} | {kind:'binary'|'unsupported-encoding';byteLength:number;message:string;candidates:string[]};"},
@@ -3368,6 +3371,7 @@
 "ChildSourceDelegation": {"rustType":"varin_runtime::catalog::dispatch::ChildSourceDelegation","fields":{"source_path":{"type":"string","optional":true},"agent_source":{"type":"{ run_id: string; source: LaunchSource }","optional":true},"work_mode":{"type":"ChildWorkMode"},"process":{"type":"boolean"},"configured_preset":{"type":"boolean"},"selection_ref":{"type":"unknown"}}}
   },
   "methods": {
+    "text.encodings": "List the shared native file codecs and strict format profiles",
     "text.decode": "Decode supplied bytes with the shared strict file codec",
     "text.serialize": "Serialize Unicode using retained source bytes and explicit format intent",
     "runtime.followup.eventAttachment.read": "Read original inbound file bytes using the target Thread attachment delivery",
