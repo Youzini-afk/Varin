@@ -1269,7 +1269,7 @@ fn coordinator_read(
         let call = ToolCall {
             call_id: "managed-read".into(),
             name: "file_read".into(),
-            schema_version: "1".into(),
+            schema_version: read_schema.version.clone(),
             arguments: json!({"path":"source.txt"}),
         };
         let request_id = "coordinator-request".to_string();
@@ -1393,14 +1393,14 @@ fn coordinator_read(
             Value::Null,
         )?;
         let directory = varin_runtime::composition::tools::ToolDirectory::assemble(vec![
-            varin_runtime::composition::tools::ToolDeclaration::new(read_schema, executor.clone()),
+            varin_runtime::composition::tools::ToolDeclaration::new(read_schema.clone(), executor.clone()),
         ])?;
         let engine = ExecutionEngine {
             persistence: catalog.clone(),
             context_preparation: Arc::new(NoopContextPreparation),
             provider: Arc::new(NoModel),
             tools: Arc::new(directory),
-            policy: Arc::new(ReadPolicy),
+            policy: Arc::new(ReadPolicy { schema_version:read_schema.version.clone() }),
             progress: ProgressSink::default(),
         };
         let report = engine.run_recovered(execution, CancellationToken::default(), recovery)?;
@@ -1748,7 +1748,7 @@ impl ModelProvider for NoModel {
         panic!("policy-only fixture cannot invoke a provider")
     }
 }
-struct ReadPolicy;
+struct ReadPolicy { schema_version:String }
 impl AgentPolicy for ReadPolicy {
     fn identity(&self) -> PolicyIdentity {
         PolicyIdentity {
@@ -1771,7 +1771,7 @@ impl AgentPolicy for ReadPolicy {
                     call: ToolCall {
                         call_id: "managed-policy-read".into(),
                         name: "file_read".into(),
-                        schema_version: "1".into(),
+                        schema_version:self.schema_version.clone(),
                         arguments: json!({"path":"source.txt"}),
                     },
                 }],

@@ -584,7 +584,7 @@ fn snapshot_consumer(call:&crate::execution::ToolCall)->Result<Option<ResourceRe
             }
             Ok(Some(request))
         }
-        ("file_read","1")=> {
+        ("file_read","1"|"2")=> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct File {#[serde(rename="ref")] reference:String,offset:Option<u64>,length:Option<u64>}
@@ -609,14 +609,20 @@ fn snapshot_consumer(call:&crate::execution::ToolCall)->Result<Option<ResourceRe
             // before asking for access to its returned typed attachment parts.
             // Only history/output queries produce such parts, not runs/media.
             let Some(args)=call.arguments.as_object() else {return Err(denied())};
-            if args.keys().any(|key|!matches!(key.as_str(),"threadId"|"branchId"|"runId"|"anchor"|"cursor"|"query"))
-                || !matches!(args.get("query").and_then(|query|query.get("kind")).and_then(Value::as_str),Some("recent"|"range"|"search"|"item"|"output")) {return Err(denied());}
+            if let Some(reference)=args.get("ref") {
+                // The family reader already resolved this fixed history selector and
+                // authorized its original branch before requesting attachment access.
+                if args.len()!=1 || reference.as_str().is_none_or(|value|value.trim().is_empty()||value.contains('\0')) {return Err(denied());}
+            } else if args.keys().any(|key|!matches!(key.as_str(),"threadId"|"branchId"|"runId"|"anchor"|"cursor"|"query"))
+                || !matches!(args.get("query").and_then(|query|query.get("kind")).and_then(Value::as_str),Some("recent"|"range"|"search"|"item"|"output"|"message")) {return Err(denied());}
             Ok(None)
         }
         ("child_report","3")=> {
             let Some(args)=call.arguments.as_object() else {return Err(denied())};
-            if args.keys().any(|key|!matches!(key.as_str(),"operationId"|"executionId"|"itemId"|"offset"|"maxBytes"))
-                || ["operationId","itemId"].iter().any(|key|args.get(*key).and_then(Value::as_str).is_none_or(str::is_empty)) {return Err(denied());}
+            if args.keys().any(|key|!matches!(key.as_str(),"ref"|"target"|"operationId"|"executionId"|"itemId"|"offset"|"maxBytes"))
+                || !["ref","target","operationId"].iter().any(|key|args.get(*key).and_then(Value::as_str).is_some_and(|value|!value.trim().is_empty()))
+                || ["ref","target","operationId","executionId","itemId"].iter().any(|key|args.get(*key).is_some_and(|value|value.as_str().is_none_or(|value|value.trim().is_empty()||value.contains('\0'))))
+                || ["offset","maxBytes"].iter().any(|key|args.get(*key).is_some_and(|value|value.as_u64().is_none())) {return Err(denied());}
             Ok(None)
         }
         _=>Err(denied()),

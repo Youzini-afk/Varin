@@ -8,7 +8,7 @@ const EPOCH: &str = "tools-epoch";
 #[test]
 fn process_environment_inheritance_works_without_a_shell_snapshot_and_respects_full_overrides() {
     let f=Fixture::new();
-    let parse=|args:Value|f.executor.operation(None,&ToolCall {call_id:"env".into(),name:"process_spawn".into(),schema_version:"1".into(),arguments:args}).unwrap();
+    let parse=|args:Value|f.executor.operation(None,&ToolCall {call_id:"env".into(),name:"process_spawn".into(),schema_version:f.executor.schemas.iter().find(|schema|schema.name=="process_spawn").unwrap().version.clone(),arguments:args}).unwrap();
     let ResourceOperation::ProcessSpawn(inherited)=parse(json!({"command":"program"})) else {panic!("process operation")};
     let path=inherited.env.iter().find(|entry|entry.name=="PATH").unwrap();
     assert_eq!(std::env::split_paths(&path.value).collect::<Vec<_>>(),std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>());
@@ -120,7 +120,8 @@ impl Fixture {
         let call = ToolCall {
             call_id: format!("call-{}", self.serial),
             name: name.into(),
-            schema_version: "1".into(),
+            schema_version: self.executor.schemas.iter().find(|schema| schema.name == name)
+                .expect("fixture tool is enabled").version.clone(),
             arguments,
         };
         let origin = ToolOrigin::ModelStep {
@@ -476,7 +477,7 @@ fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
         assert!(structured && read);
     });
     let executor=Arc::new(KernelToolExecutor::new(binding,f.executor.resources.clone().with_source_bridge(source.clone())).unwrap().with_language(language.clone()));
-    let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
+    let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:executor.schemas.iter().find(|schema|schema.name=="file_read").unwrap().version.clone(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
     let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
     let request=FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
     let cancel=CancellationToken::default();let bound=executor.clone().bind_call(&call,&request,&cancel).unwrap();
@@ -998,11 +999,11 @@ fn hybrid_file_read_delegates_paths_to_the_original_live_and_fixed_owner() {
         let catalog=Arc::new(Mutex::new(varin_runtime::Catalog::open(f.root.join("catalog")).unwrap()));
         let wrapped=crate::attachment_reads::declaration(Some(native),catalog,bridge.clone());
         let directory=Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(vec![wrapped]).unwrap());
-        let call=ToolCall{call_id:"read-original".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.txt"})};
+        let call=ToolCall{call_id:"read-original".into(),name:"file_read".into(),schema_version:directory.schemas().iter().find(|schema|schema.name=="file_read").unwrap().version.clone(),arguments:json!({"path":"source.txt"})};
         let origin=ToolOrigin::ModelStep{request_id:"original-request".into()};
         let context=execution_context("run",&call,&origin);
         let frozen=FrozenToolContext{tool_output_visible_bytes:None,execution_environment:None,direct_tools:None,run_id:"run".into(),origin,
-            tools:Arc::new(f.executor.schemas.clone()),tool_schema_generation:1,source:Some(f.executor.binding.source_selection().unwrap()),
+            tools:Arc::new(directory.schemas().to_vec()),tool_schema_generation:1,source:Some(f.executor.binding.source_selection().unwrap()),
             child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
         let cancel=CancellationToken::default();let bound=directory.bind_call(&call,&frozen,&cancel).unwrap();
         let contract=bound.prepare(&cancel).unwrap();bound.authorize(&context,&contract,&cancel).unwrap();

@@ -21,7 +21,7 @@ impl ModelProvider for Investigate {
         let content=if let Some(result)=evidence {
             assert!(serde_json::to_string(result).unwrap().contains("native retrieval evidence"));
             Content::Text{text:"body.txt:1 contains native retrieval evidence.".into()}
-        } else {Content::ToolCall {call:ToolCall{call_id:"read-evidence".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"body.txt"})}}};
+        } else {Content::ToolCall {call:ToolCall{call_id:"read-evidence".into(),name:"file_read".into(),schema_version:request.view.binding.tools.iter().find(|schema|schema.name=="file_read").expect("admitted file reader").version.clone(),arguments:json!({"path":"body.txt"})}}};
         if self.pause.is_some() && evidence.is_some() {
             let Content::Text{text}=content else {unreachable!()};
             emit(ProviderEvent::TextDelta{item_id:"reply".into(),text})?;
@@ -45,7 +45,7 @@ fn stopping_background_retrieval_retains_actual_partial_output() {
     run_investigation(true);
 }
 fn run_investigation(stop:bool) {
-    let read=crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).remove(0);
+    let read=crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).into_iter().find(|schema|schema.name=="file_read").expect("native file reader");
     let mut f=dispatch::Fixture::new_internal_retrieval_with_read(read);
     let child=f.accept();
     let status=f.db.capture_retrieval_status(&child.parent_run_id,&child.operation_id).unwrap().load().unwrap();
