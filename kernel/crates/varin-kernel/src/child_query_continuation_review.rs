@@ -185,3 +185,159 @@ fn frozen_message_receipts_advertise_a_declared_family_reader() {
         run_sequence(&f,schemas,steps);f.finish();
     }
 }
+
+#[test]
+fn frozen_family_directory_only_advertises_an_original_overview_reader() {
+    for reader in ["absent", "legacy", "current"] {
+        let mut schemas = crate::family_tools::schemas();
+        if reader == "legacy" {
+            schemas.retain(|schema| schema.name != "read_thread");
+            schemas.push(original::family_schemas().into_iter().find(|schema| schema.name == "read_thread").unwrap());
+        }
+        schemas.push(crate::message_tools::schema());
+        schemas.sort_by(|a,b| a.name.cmp(&b.name));
+        let mut selected = vec!["threads".into(), "send".into()];
+        if reader != "absent" { selected.push("read_thread".into()); }
+        let f = Fixture::with_tools(false, schemas.clone(), selected).reopen();
+        let mut steps = vec![initial("threads", json!({"includeSelf":true,"limit":1})),
+            Box::new(move |request: &RequestSnapshot| {
+                let page = &output(request,0).model_data()["page"];
+                for member in page["members"].as_array().unwrap() {
+                    assert_eq!(member.get("nextRead").is_some(), reader == "current");
+                }
+                // Directory pagination is still usable without a history capability.
+                assert_eq!(page["nextRead"]["tool"], "threads");
+                ("threads".into(), page["nextRead"]["arguments"].clone())
+            }) as Step];
+        if reader == "current" {
+            steps.push(Box::new(|request: &RequestSnapshot| {
+                let recipe = &output(request,0).model_data()["page"]["members"][0]["nextRead"];
+                assert_eq!(recipe["tool"], "read_thread");
+                ("read_thread".into(), recipe["arguments"].clone())
+            }));
+        }
+        run_sequence(&f, schemas, steps);
+        let f = f.reopen();
+        let raw = retained(&f,0).data;
+        assert!(raw["page"]["members"][0]["threadId"].is_string());
+        assert!(raw["page"]["nextCursor"].is_string());
+        assert_ne!(raw["page"]["members"][0]["threadId"], retained(&f,1).data["page"]["members"][0]["threadId"]);
+        assert_eq!(f.catalog().lock().unwrap().launch_intent(&f.run.id).unwrap().unwrap().selection.tools, f.original.tools);
+        f.finish();
+    }
+}
+
+fn prepare_family_peer(parent: &mut dispatch::Fixture, child: &ChildTask) -> ChildTask {
+    let mut source = child.source.pin().unwrap().source.clone();
+    source.branch_id = Some(format!("child-source:{}", child.execution_id));
+    source.revision = Some(0);
+    let proposal = varin_runtime::catalog::context::ContextProposal {
+        key: format!("family-context:{}", child.execution_id), branch_id: child.child_branch_id.clone(),
+        through_id: None, expected_revision: 0, summary: String::new(),
+        effective_system_prompt: "Independent family reader".into(), instruction_sources: vec![], memory_checkpoint: None,
+    };
+    let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
+        "configurationDigest":"family-reader-contract","memorySnapshot":{"revision":0,"memories":[]},
+        "threadId":child.child_thread_id,"projectId":child.project_id,
+        "originalSections":[{"name":"preamble","content":"Independent family reader"}],"instructionSources":[]})).unwrap();
+    parent.db.prepare_child(&child.operation_id, source, proposal, basis).unwrap()
+}
+
+fn family_peer_fixture(schemas: Vec<ToolSchema>, prepared: bool) -> (Fixture, ChildTask) {
+    let selected = schemas.iter().map(|schema| schema.name.clone()).collect();
+    let mut parent = dispatch::Fixture::new_host_child_with_native(true, false, None, selected, schemas);
+    parent.launch.policy = crate::observations::default_policy_identity();
+    let peer = parent.accept();
+    parent.settle_policy_call(&parent.context.clone(), "preparing_child");
+    let peer = if prepared {
+        let peer = prepare_family_peer(&mut parent, &peer);
+        let run = &peer.receipt.as_ref().unwrap().run_id;
+        let epoch = parent.db.epoch();
+        parent.db.commit_execution(run, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+        let head = parent.db.head(&peer.child_branch_id).unwrap();
+        parent.db.append_history(run, epoch, head.as_deref(), varin_runtime::HistorySource::Assistant,
+            json!({"id":"original-family-peer-answer","provenance":{"kind":"assistant"},"opaque":null,
+                "content":{"kind":"text","text":"Original family peer answer 原文🙂"}}), None).unwrap();
+        parent.db.commit_execution(run, epoch, &ExecutionRecord::StateChanged { state: RunState::Completed, waiting_on: None }).unwrap();
+        parent.db.reconcile_child_reports().unwrap();
+        parent.db.child_task(&peer.operation_id).unwrap()
+    } else {
+        parent.db.fail_child_preparation(&peer.execution_id, "Original family preparation failure").unwrap()
+    };
+    parent.context = parent.admit_policy_call(ToolCall { call_id: "family-observer-dispatch".into(), name: "dispatch".into(),
+        schema_version: "1".into(), arguments: serde_json::to_value(&parent.input).unwrap() });
+    parent.pin.pin_id = "family-observer-source".into();
+    let observer = parent.accept();
+    let child = prepare_family_peer(&mut parent, &observer);
+    let run = parent.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
+    assert!(parent.db.require_delegated_parent(&run.id, &peer.operation_id, &peer.execution_id).is_err(),
+        "a sibling has family read access, not the original requester report authority");
+    let original = parent.db.launch_intent(&run.id).unwrap().unwrap().selection;
+    let source = original.source.as_ref().unwrap();
+    let params = json!({"runId":run.id,"credentialScope":original.credential_scope,
+        "toolBinding":{"resourceOwner":{"kind":"local"},"grantId":"family-source-grant","runId":run.id,"threadId":run.thread_id,
+            "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,
+            "sourceMode":"fixed_branch","fileSource":{"branchId":source.branch_id,"revision":source.revision},"enabledTools":[]}});
+    (Fixture::from_catalog(parent.root, child, run, original, params, parent.db).reopen(), peer)
+}
+
+#[test]
+fn frozen_family_overview_continues_original_peer_history_without_report_authority() {
+    for report_reader in ["absent", "legacy", "current"] {
+        for prepared in [true, false] {
+            let mut schemas = crate::family_tools::schemas();
+            schemas.retain(|schema| schema.name == "read_thread");
+            if report_reader != "absent" {
+                let reports: Vec<ToolSchema> = if report_reader == "legacy" {
+                    serde_json::from_str(include_str!("../../varin-runtime/tests/fixtures/collaboration_readers_main.json")).unwrap()
+                } else { crate::collaboration::schemas(Vec::new()) };
+                schemas.push(reports.into_iter().find(|schema| schema.name == "child_report").unwrap());
+            }
+            schemas.sort_by(|a,b| a.name.cmp(&b.name));
+            let (f, peer) = family_peer_fixture(schemas.clone(), prepared);
+            let original_report = serde_json::to_value(&peer.report).unwrap();
+            let original_receipt = serde_json::to_value(&peer.receipt).unwrap();
+            let mut steps = vec![initial("read_thread", json!({"threadId":peer.child_thread_id,"query":{"kind":"overview"}}))];
+            if prepared {
+                steps.push(Box::new(|request: &RequestSnapshot| {
+                    let execution = &output(request,0).model_data()["page"]["executions"][0];
+                    let recipe = &execution["nextRead"];
+                    assert_eq!(recipe["tool"], "read_thread");
+                    assert_eq!(recipe["arguments"]["threadId"], execution["ref"]);
+                    ("read_thread".into(), recipe["arguments"].clone())
+                }));
+                steps.push(Box::new(|request: &RequestSnapshot| {
+                    let page = &output(request,1).model_data()["page"];
+                    let item = page["items"].as_array().unwrap().iter().find(|item|
+                        item["body"]["content"]["text"] == "Original family peer answer 原文🙂").unwrap();
+                    assert_eq!(item["nextRead"]["tool"], "read_thread");
+                    ("read_thread".into(), item["nextRead"]["arguments"].clone())
+                }));
+            }
+            run_sequence(&f, schemas, steps);
+            let f = f.reopen();
+            let overview = retained(&f,0);
+            assert_eq!(overview.data["page"]["executions"][0]["report"], original_report);
+            assert_eq!(overview.data["page"]["executions"][0]["executionId"], peer.execution_id);
+            if prepared {
+                assert_eq!(retained(&f,1).data["page"]["runId"], peer.receipt.as_ref().unwrap().run_id);
+                let item = retained(&f,2);
+                assert_eq!(item.data["page"]["format"], "conversation_json");
+                let original: Value = serde_json::from_str(item.data["page"]["text"].as_str().unwrap()).unwrap();
+                assert_eq!(original["content"]["text"], "Original family peer answer 原文🙂");
+            } else {
+                assert!(overview.data["page"]["executions"][0].get("runId").is_none());
+                assert!(overview.model_data()["page"]["executions"][0]["nextRead"].is_null());
+                assert!(!overview.model_data().to_string().contains("child_report"));
+            }
+            let catalog = f.catalog();
+            let db = catalog.lock().unwrap();
+            let unchanged = db.child_task(&peer.operation_id).unwrap();
+            assert_eq!(serde_json::to_value(&unchanged.report).unwrap(), original_report);
+            assert_eq!(serde_json::to_value(&unchanged.receipt).unwrap(), original_receipt);
+            assert!(db.require_delegated_parent(&f.run.id, &peer.operation_id, &peer.execution_id).is_err());
+            assert_eq!(db.launch_intent(&f.run.id).unwrap().unwrap().selection.tools, f.original.tools);
+            drop(db); drop(catalog); f.finish();
+        }
+    }
+}
