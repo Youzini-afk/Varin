@@ -53,10 +53,10 @@ function completed(lease: AgentPolicyLease, before: VarinAgentPolicyDecision, to
   expect(before.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: tool, call: { name: tool } }] });
   return decide(lease, { kind: 'tool_graph_completed', action_id: `${tool}-action`, receipts: [{ node_id: tool, completion }] }, before.state);
 }
-async function readResult(lease: AgentPolicyLease, before: VarinAgentPolicyDecision, tool: string, content: JsonValue) {
+async function readResult(lease: AgentPolicyLease, before: VarinAgentPolicyDecision, tool: string, content: JsonValue, modelData?: JsonValue) {
   const reference = { action_id: `${tool}-action`, node_id: tool, content_ref: `${tool}-original-content` };
   let next = await completed(lease, before, tool, { kind: 'result', outcome: 'succeeded', effect: 'none', output: reference });
-  const bytes = [...new TextEncoder().encode(JSON.stringify({ data: content, parts: [] }))];
+  const bytes = [...new TextEncoder().encode(JSON.stringify({ data: content, parts: [], ...(modelData === undefined ? {} : { model_data: modelData }) }))];
   // The actual broker transports typed result bytes; split inside a Unicode code point when present.
   const multibyte = bytes.findIndex(byte => byte >= 0xc0);
   const split = multibyte < 0 ? Math.ceil(bytes.length / 2) : multibyte + 1;
@@ -69,8 +69,9 @@ async function readResult(lease: AgentPolicyLease, before: VarinAgentPolicyDecis
 }
 async function question(lease: AgentPolicyLease) {
   const read = await decide(lease, { kind: 'started' });
+  expect(read.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'todo', schema_version: '1', arguments: { action: 'read' } } }] });
   const update = await readResult(lease, read, 'todo', { status: 'ready', plan: { ref: 'prior-plan', content: '原计划' } });
-  expect(update.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'todo', arguments: { action: 'update', expectedRef: 'prior-plan' } } }] });
+  expect(update.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'todo', schema_version: '1', arguments: { action: 'update', expectedRef: 'prior-plan' } } }] });
   return completed(lease, update, 'todo', { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
     output: { action_id: 'update-action', node_id: 'todo', content_ref: 'update-receipt' } });
 }
@@ -79,28 +80,32 @@ async function question(lease: AgentPolicyLease) {
 // immutable broker artifact, SDK transport and policy consumer logic, not Catalog Wait/receipt truth.
 it('installed domain policy resumes its saved question, reads genuine result shapes, and keeps original process handles', async () => {
   const f = await fixture(); const first = await f.prepare();
-  const ask = await question(first); const identity = first.binding.artifact.identity;
+  const ask = await question(first);
+  expect(ask.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'ask_user', schema_version: '1' } }] });
+  const identity = first.binding.artifact.identity;
   first.release(); await f.runtime.stop();
   await fs.writeFile(path.join(f.source, 'host.cjs'), "throw new Error('uninstalled source must not be used');\n");
   const reopened = await f.open(); const lease = await f.prepare(reopened);
   expect(lease.binding.artifact.identity).toEqual(identity);
   const status = await completed(lease, ask, 'ask_user', accepted('original-question', 'awaiting_user'));
-  expect(status.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'question_status', arguments: { operationId: 'original-question' } } }] });
+  expect(status.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'question_status', schema_version: '1', arguments: { operationId: 'original-question' } } }] });
   const spawn = await readResult(lease, status, 'question_status', { operationId: 'original-question', status: 'answered', answer: 'run', historyId: 'original-answer' });
-  expect(spawn.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_spawn', arguments: { command: 'node', mode: 'pty', cwd: '' } } }] });
+  expect(spawn.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_spawn', schema_version: '2', arguments: { command: 'node', mode: 'pty', cwd: '' } } }] });
   const resize = await completed(lease, spawn, 'process_spawn', accepted('original-process', 'running', 'dispatched'));
-  expect(resize.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_resize', arguments: { processId: 'original-process', cols: 111, rows: 41 } } }] });
+  expect(resize.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_resize', schema_version: '2', arguments: { processId: 'original-process', cols: 111, rows: 41 } } }] });
   const applied = (name: string): Extract<VarinAgentPolicyToolCompletion, { kind: 'result' }> => ({ kind: 'result', outcome: 'succeeded', effect: 'confirmed',
     output: { action_id: `${name}-action`, node_id: name, content_ref: `${name}-receipt` } });
   const write = await completed(lease, resize, 'process_resize', applied('process_resize'));
-  expect(write.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_write', arguments: { processId: 'original-process', text: 'fixed policy input\n' } } }] });
+  expect(write.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_write', schema_version: '2', arguments: { processId: 'original-process', text: 'fixed policy input\n' } } }] });
   const uncertain = await completed(lease, write, 'process_write', { ...applied('process_write'), kind: 'result', outcome: 'indeterminate', effect: 'unknown' });
   expect(uncertain.action.kind).toBe('fail');
   const wait = await completed(lease, write, 'process_write', applied('process_write'));
-  expect(wait.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'wait_process', arguments: { processId: 'original-process' } } }] });
+  expect(wait.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'wait_process', schema_version: '1', arguments: { processId: 'original-process' } } }] });
   const inspect = await completed(lease, wait, 'wait_process', accepted('original-observer', 'awaiting_process'));
-  expect(inspect.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_inspect', arguments: { processId: 'original-process' } } }] });
-  const delivery = await readResult(lease, inspect, 'process_inspect', { status: 'exited', exitCode: 0 });
+  expect(inspect.action).toMatchObject({ kind: 'tool_graph', nodes: [{ call: { name: 'process_inspect', schema_version: '2', arguments: { processId: 'original-process' } } }] });
+  const delivery = await readResult(lease, inspect, 'process_inspect',
+    { processId: 'original-process', status: 'exited', exitCode: 0 },
+    { processId: 'proc:1', status: 'running', exitCode: null });
   expect(delivery.action).toEqual({ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: 'The original process owner reports that the fixed probe exited with code 0.' }] } });
   const pause = await decide(lease, { kind: 'delivered', action_id: 'delivery', item_id: 'delivery-history' }, delivery.state);
   expect(pause.action.kind).toBe('pause');

@@ -30,8 +30,10 @@ function restore(value: JsonValue): State {
   }
   return structuredClone(value) as unknown as State;
 }
+// These native process tools use v2; plan, question and wait contracts remain v1.
+const processTools = new Set(['process_spawn', 'process_resize', 'process_write', 'process_inspect']);
 function node(name: string, args: JsonValue): VarinAgentPolicyToolNode {
-  return { id: name, depends_on: [], call: { call_id: name, name, schema_version: '1', arguments: args } };
+  return { id: name, depends_on: [], call: { call_id: name, name, schema_version: processTools.has(name) ? '2' : '1', arguments: args } };
 }
 export default defineHostExtension({
   activate(context) {
@@ -74,6 +76,7 @@ export default defineHostExtension({
               return graph('question_status', 'question_status', { operationId: state.questionId });
             }
             if (state.phase === 'spawn') {
+              // The policy receipt retains the original Operation ID, not a model-facing proc: ref.
               state.processId = completion.operation_id;
               return graph('resize', 'process_resize', { processId: state.processId, cols: 111, rows: 41 });
             }

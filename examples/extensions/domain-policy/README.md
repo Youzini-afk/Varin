@@ -14,6 +14,11 @@ waits for input. The policy resizes its original PTY, writes a fixed line, then 
 the answer or run in the extension broker. A question answer does not authorize a process: ordinary
 source and process permissions are still checked independently by core.
 
+The graph explicitly uses native schema version 2 for `process_spawn`, `process_resize`,
+`process_write` and `process_inspect`. `todo`, `ask_user`, `question_status` and `wait_process`
+retain their separate version 1 contracts. Policy inputs do not advertise a tool directory;
+core rejects unavailable versions rather than silently upgrading calls.
+
 From the repository root:
 
 ```sh
@@ -60,11 +65,12 @@ select the policy for a Thread.
 The plan owner retains its CAS receipt under the original operation and tagged tool origin. A lost
 reply is reconciled from that receipt, not by repeating a mutation. The policy fails on an unsuccessful
 or indeterminate plan result. Question and process acceptance remain separate from later terminal
-facts; old handles are retained in private state. Result bytes are read in owned chunks, including
-UTF-8 split across chunks, without inventing a provider call or history entry. The policy requires
+facts; original Operation IDs are retained in private state, not model-facing `proc:` references.
+Result bytes are read in owned chunks, including UTF-8 split across chunks, without inventing a
+provider call or history entry. The policy requires
 `format: "output_body"`, decodes `{ data, parts }`, and reads plan, answer and process facts from
-`data`. It does not treat text/media parts or arbitrary JSON fields as domain receipts. Deliveries
-use `data: null` and one typed text part; the existing delivered/resumed boundaries remain unchanged.
+`data`, even when a separate `model_data` presentation is present. It does not treat text/media
+parts or arbitrary JSON fields as domain receipts. Deliveries use `data: null` and one typed text part; the existing delivered/resumed boundaries remain unchanged.
 
 Portable installed-artifact/Host consumer checks:
 
