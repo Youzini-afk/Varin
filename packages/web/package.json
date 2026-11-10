@@ -74,7 +74,7 @@
     "@mozilla/readability": "0.6.0",
     "@napi-rs/canvas": "1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@simplewebauthn/server": "14.0.3",
+    "@simplewebauthn/server": "14.1.0",
     "@smithy/signature-v4": "^5.7.4",
     "@varin/application-client": "workspace:*",
     "@varin/extension-builtins": "workspace:*",
