@@ -367,9 +367,12 @@ it('merges file attachments with object/skill input and replays without reading 
   f.adapter.bindAttachments({ prepare, read } as unknown as import('./thread-attachments.js').ThreadAttachmentOwner);
   const input = { ...identity, key: 'attachment-and-ref', attachmentImageReferences: { 'attachment:fixed': 3 }, text, references, skills, attachments: [{ ref: 'attachment:selected' }], images, model, expectedHead: null };
   await f.adapter.submit(input);
-  expect(f.runtime.submit.mock.calls[0]![0]).toMatchObject({ input: { userText: text, references, skills, fileAttachments: [file], imageReferences: [4, 3], attachmentImageReferences: { 'attachment:fixed': 3 },
+  expect(f.runtime.submit.mock.calls[0]![0]).toMatchObject({ input: { userText: text, references, skills, fileAttachments: [file], imageReferences: [4, 3],
     referenceIntent: { text, attachmentSelections: input.attachments, originalImageCount: 1 },
     attachments: [...attachments, { media_type: 'image/png', data_base64: Buffer.from('file').toString('base64') }] }, inputPreparation: { skills: [{ resourceId: skill.id }] } });
+  // The Host resolves selection references into the admitted image order. The
+  // transient attachment map is not part of the native InputContent contract.
+  expect(f.runtime.submit.mock.calls[0]![0].input).not.toHaveProperty('attachmentImageReferences');
   f.runtime.inputReceipt.mockResolvedValue(f.submitReceipt);
   prepare.mockRejectedValue(new Error('Original source is unavailable'));
   expect(await f.adapter.submit(input)).toEqual(f.submitReceipt);
