@@ -63,7 +63,7 @@ async function waitingCheckpoint(lease: AgentPolicyLease): Promise<VarinAgentPol
     name: 'dispatch', schema_version: '9', arguments: { workMode: 'read_only', tools: ['file_read'] },
   } }] });
   const read = await decide(lease, graph('dispatch-action', 'dispatch', accepted('original-child-operation', 'preparing_child')), dispatch.state);
-  expect(read.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: 'parent-read', call: { name: 'file_read', arguments: { path: 'source.txt' } } }] });
+  expect(read.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: 'parent-read', call: { name: 'file_read', schema_version: '2', arguments: { path: 'source.txt' } } }] });
   const wait = await decide(lease, graph(reference.action_id, reference.node_id, { kind: 'result', outcome: 'succeeded', effect: 'none', output: reference }), read.state);
   expect(wait.action).toMatchObject({ kind: 'tool_graph', nodes: [{ id: 'wait-child', call: { name: 'wait_child', arguments: { operationId: 'original-child-operation' } } }] });
   expect(wait.state).toEqual({ phase: 'waiting', childOperationId: 'original-child-operation', evidence: [reference] });

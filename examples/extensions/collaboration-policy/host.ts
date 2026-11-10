@@ -61,10 +61,11 @@ export default defineHostExtension({
           if (state.phase === 'dispatch') {
             if (receipt.completion.kind !== 'job_accepted' || receipt.completion.phase !== 'preparing_child'
               || receipt.completion.lifetime !== 'thread') return fail('Child dispatch was not durably accepted');
+            // Policy receipts retain the original Operation identity, not a model execution ref.
             // Acceptance is only the original call receipt. It is not a child terminal result.
             state.childOperationId = receipt.completion.operation_id;
             state.phase = 'parent_read';
-            return { action: { kind: 'tool_graph', nodes: [node('parent-read', 'file_read', { path: config.parentReadPath })] }, state: asJson(state) };
+            return { action: { kind: 'tool_graph', nodes: [node('parent-read', 'file_read', { path: config.parentReadPath }, '2')] }, state: asJson(state) };
           }
           if (state.phase === 'parent_read') {
             if (!state.childOperationId || receipt.completion.kind !== 'result' || receipt.completion.outcome !== 'succeeded') {

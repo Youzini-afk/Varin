@@ -49,8 +49,8 @@ it('real file journal settles a lost receipt after kernel restart without repeat
       turn++;
       if (turn === 1) tool(response, 'file_read', { path: 'source.txt' }, turn);
       else if (turn === 2) {
-        const read = observed.at(-1) as { content: { readVersion: string } };
-        tool(response, 'file_write', { path: 'source.txt', readVersion: read.content.readVersion, content: 'written exactly once\n' }, turn);
+        const read = observed.at(-1) as { content: { ref: string } };
+        tool(response, 'file_write', { ref: read.content.ref, content: 'written exactly once\n' }, turn);
       } else {
         response.writeHead(200, { 'content-type': 'text/event-stream' });
         response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'final-answer', type: 'message', content: [{ type: 'output_text', text: 'recovered' }] }] } })}\n\n`);

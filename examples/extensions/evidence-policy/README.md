@@ -101,3 +101,7 @@ configuration and policy version. Each Run retains its exact broker generation; 
 updates. Restart recovery requires matching artifact/configuration, with no implicit state migration.
 Cancellation discards late decisions and core records actual execution settlement; revocation and
 kernel epoch fencing still apply. There is no second installer, credential owner or policy-status store.
+
+The read graph declares the current native `file_read` schema version 2. Committed
+`read_result` output retains its original `data` and provenance; model references are
+a separate presentation and must not replace policy evidence or source authority.

@@ -87,7 +87,7 @@ it('public completed-turn continuation preserves edited disk while explicit sour
     outputs.push(output); step++;
     let call: { name: string; arguments: Record<string, unknown> } | undefined;
     if ([1, 4, 6].includes(step)) call = { name: 'file_read', arguments: { path: 'source.txt' } };
-    else if (step === 2) call = { name: 'file_write', arguments: { path: 'source.txt', readVersion: (JSON.parse(output) as { content: { readVersion: string } }).content.readVersion, content: 'persisted working edit' } };
+    else if (step === 2) call = { name: 'file_write', arguments: { ref: (JSON.parse(output) as { content: { ref: string } }).content.ref, content: 'persisted working edit' } };
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [call ? { id: `tool-${step}`, type: 'function_call', call_id: `call-${step}`, name: call.name, arguments: JSON.stringify(call.arguments) } : { id: `answer-${step}`, type: 'message', content: [{ type: 'output_text', text: 'completed actual source turn' }] }] } })}\n\n`);
   });

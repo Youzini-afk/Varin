@@ -1,3 +1,4 @@
+import { originalToolOutput } from './model-reference.test-helper.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
@@ -121,7 +122,7 @@ it('explicit live source reads current disk and shares actual root with list, se
     if (output) outputs.push(responsesMetadataText(output.output));
     const result = output ? JSON.parse(responsesMetadataText(output.output)) : undefined;
     if (!output) tool(response, 'file_read', { path: 'source.txt' }, ++serial);
-    else if (String(output.call_id).startsWith('file_read-')) tool(response, 'file_write', { path: 'source.txt', readVersion: result.content.readVersion, content: 'conditional live edit' }, ++serial);
+    else if (String(output.call_id).startsWith('file_read-')) tool(response, 'file_write', { ref: result.content.ref, content: 'conditional live edit' }, ++serial);
     else if (String(output.call_id).startsWith('file_write-')) tool(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'const fs=require("node:fs");fs.writeFileSync("process.txt",fs.readFileSync("source.txt","utf8")+" process same root")'], mode: 'pipe' }, ++serial);
     else if (String(output.call_id).startsWith('process_spawn-')) { processId = result.operation_id; tool(response, 'process_inspect', { processId }, ++serial); }
     else if (String(output.call_id).startsWith('process_inspect-')) {
@@ -143,7 +144,10 @@ it('explicit live source reads current disk and shares actual root with list, se
   expect(outputs.at(-2)).toContain('process.txt');
   expect(outputs.at(-1)).toContain('conditional live edit process same root');
   if (prepared.source.mode !== 'live_root') throw new Error('expected live source');
-  expect(JSON.parse(outputs[0]!).content.source).toEqual({ mode: 'live_root', rootId: prepared.source.liveRoot.rootId, liveRoot: prepared.source.liveRoot });
+  expect(JSON.parse(outputs[0]!).content.ref).toMatch(/^file:/);
+  expect(JSON.parse(outputs[0]!).content).not.toHaveProperty('source');
+  const originalRead = await originalToolOutput<{ source: unknown }>(f.runtime, identity.branchId, 'file_read-1', receipt.run_id);
+  expect(originalRead.data.source).toEqual({ mode: 'live_root', rootId: prepared.source.liveRoot.rootId, liveRoot: prepared.source.liveRoot });
   // Native paged discovery identifies the physical source by its registered root;
   // the durable launch retains the complete live-source admission below.
   for (const output of [outputs.at(-2), outputs.at(-1)]) {
@@ -392,7 +396,7 @@ it('ordinary live sources allow device reads through links and explicitly select
 }, 30_000);
 
 it('fixed branch commands use an isolated execution view even when the binding includes a valid live root', async () => {
-  let serial = 0; let processId = ''; let read: { content: { source: { rootId: string } } } | undefined;
+  let serial = 0; let processId = ''; let read: { outcome: string; content: { ref: string } } | undefined; let readCallId = '';
   const f = await fixture((body, response) => {
     const output = lastOutput(body);
     const result = output ? JSON.parse(responsesMetadataText(output.output)) : undefined;
@@ -404,7 +408,7 @@ it('fixed branch commands use an isolated execution view even when the binding i
     } else if (String(output.call_id).startsWith('process_inspect-')) {
       if (result.content.writerActive) tool(response, 'process_inspect', { processId }, ++serial);
       else tool(response, 'file_read', { path: 'generated.txt' }, ++serial);
-    } else { read = result; done(response); }
+    } else { read = result; readCallId = String(output?.call_id); done(response); }
   });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'immutable baseline');
   const identity = await f.api.create('fixed-process-isolation');
@@ -421,10 +425,12 @@ it('fixed branch commands use an isolated execution view even when the binding i
     workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, sourceMode: 'fixed_branch', rootId: registered.rootId,
     fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn', 'process_inspect', 'file_read'], executionEnvironment: await f.runtime.executionEnvironment() });
   await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('completed');
-  expect(read).toMatchObject({ outcome: 'succeeded', content: { source: { mode: 'materialized', base: { branchId: source.branchId, revision: source.revision } } } });
+  expect(read).toMatchObject({ outcome: 'succeeded', content: { ref: expect.stringMatching(/^file:/) } });
+  const originalRead = await originalToolOutput<{ source: { rootId: string } }>(f.runtime, identity.branchId, readCallId, pending.run_id);
+  expect(originalRead.data).toMatchObject({ source: { mode: 'materialized', base: { branchId: source.branchId, revision: source.revision } } });
   expect(JSON.stringify(read)).toContain('immutable baseline isolated command');
   expect(JSON.stringify(read)).not.toContain('later live contents');
-  expect(read!.content.source.rootId).not.toBe(registered.rootId);
+  expect(originalRead.data.source.rootId).not.toBe(registered.rootId);
   expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('later live contents');
   await expect(fs.access(path.join(f.workspace, 'generated.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   await f.kernel.revokeGrant(grant.grantId);

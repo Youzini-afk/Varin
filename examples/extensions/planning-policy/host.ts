@@ -19,7 +19,7 @@ const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(va
 const asJson = (value: State): JsonValue => value as unknown as JsonValue;
 const sameRef = (a: VarinAgentPolicyEvidenceRef, b: VarinAgentPolicyEvidenceRef) => a.action_id === b.action_id && a.node_id === b.node_id && a.content_ref === b.content_ref;
 function read(id: string, path: string, length?: number): VarinAgentPolicyToolNode {
-  return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '1', arguments: { path, ...(length === undefined ? {} : { length }) } } };
+  return { id, depends_on: [], call: { call_id: id, name: 'file_read', schema_version: '2', arguments: { path, ...(length === undefined ? {} : { length }) } } };
 }
 function restore(value: JsonValue): State {
   // Checkpoints are private to this pinned implementation, not model-produced plan objects.
