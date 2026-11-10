@@ -315,7 +315,12 @@ Committed format evidence lives in original file operation receipts and a small 
 fact in the existing Storage metadata, updated together. These facts retain no file bodies and survive
 receipt release without resurrecting older same-byte choices. A disposable scoped projection allows
 subsequent reads in the same grant/Run/root to honor a successful conversion only while its raw hash
-matches. WorkingResult publication freezes the candidate's matching base/child formats and its exact
+matches. The projection distinguishes retained operation evidence from the current path fact: replacing
+a fact reclaims its already-released predecessor, and release updates only the affected root, branch,
+operation and recovery histories. It neither rebuilds the whole index nor invalidates immutable
+snapshots already admitted by readers. Source cleanup removes the remaining current facts and their
+unretained projections using canonical Storage paths, even after the physical view is gone.
+WorkingResult publication freezes the candidate's matching base/child formats and its exact
 branch/revision/root projection; new Runs read that small projection under existing branch authority,
 not an older Run's private result body. Recovery projects matching before/after formats without changing
 raw-state equality. `file.text.conversions`

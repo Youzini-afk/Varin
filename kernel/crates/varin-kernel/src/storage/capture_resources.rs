@@ -549,9 +549,15 @@ fn verify_entry(
         check(cancel)?;
         let after_resource = resolve()?;
         let after = fs::symlink_metadata(&after_resource.absolute)?;
+        // Native workspace modes come from the logical inode, as in read_entry.
+        // A writable Windows backing file reports 0666 even when that inode is
+        // 0644; comparing those different representations rejects unchanged files.
+        let after_mode = after_resource.native.as_ref()
+            .map(|owner| owner.attributes(&entry.path).map(|attributes| attributes.mode))
+            .transpose()?.unwrap_or_else(|| file_mode(&after));
         if !after.is_file()
             || after.file_type().is_symlink()
-            || Some(file_mode(&after)) != *mode
+            || Some(after_mode) != *mode
             || after_resource.absolute != entry.absolute
         {
             return Err(KernelError::SnapshotChanged(format!(

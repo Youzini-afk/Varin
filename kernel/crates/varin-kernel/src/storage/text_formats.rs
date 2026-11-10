@@ -561,6 +561,7 @@ impl BranchSource {
     }
 }
 type RecoveryKey = (String, String, String);
+type ReceiptHistory = BTreeMap<u64, String>;
 type RootKey = (String, String, String, String);
 fn root_key(source: &Source) -> RootKey {
     (
@@ -576,14 +577,20 @@ struct BranchPath {
     operations: Vec<String>,
 }
 #[derive(Default)]
+struct BranchFormats {
+    paths: BTreeMap<String, ReceiptHistory>,
+    snapshot: Snapshot,
+}
+#[derive(Default)]
 pub(super) struct Projection {
     sequence: u64,
     receipts: HashMap<String, Evidence>,
-    operation_keys: HashMap<String, String>,
+    operation_keys: HashMap<String, ReceiptHistory>,
+    retained_receipts: std::collections::HashSet<String>,
     sources: HashMap<Source, Snapshot>,
-    branch_sources: HashMap<BranchSource, Snapshot>,
+    branch_sources: HashMap<BranchSource, BranchFormats>,
     source_operations: HashMap<Source, BTreeMap<String, String>>,
-    root_operations: HashMap<RootKey, BTreeMap<String, String>>,
+    root_operations: HashMap<RootKey, BTreeMap<String, ReceiptHistory>>,
     current_facts: HashMap<String, CurrentFact>,
     current_roots: HashMap<RootKey, BTreeMap<String, String>>,
     branches: HashMap<BranchKey, BTreeMap<String, BranchPath>>,
@@ -591,48 +598,50 @@ pub(super) struct Projection {
     fixed: std::cell::RefCell<HashMap<(String, i64), BranchSnapshot>>,
 }
 impl Projection {
-    fn insert(&mut self, operation: &str, evidence: Evidence) {
+    fn insert(&mut self, operation: &str, evidence: Evidence, retained: bool) {
         // Released operation IDs can be reused. Only the same commit is a
         // replay; metadata references include its original commit sequence.
         let key = format!("{}:{operation}", evidence.sequence);
+        if retained {
+            self.retained_receipts.insert(key.clone());
+        }
         if self.receipts.contains_key(&key) {
             return;
         }
         self.sequence = self.sequence.max(evidence.sequence);
         // A more recent write to this physical/logical root invalidates an
         // older grant's interpretation even when ASCII bytes have the same hash.
-        if let Some(prior) = self
+        if let Some((prior_key, prior)) = self
             .root_operations
             .get(&root_key(&evidence.source))
             .and_then(|paths| paths.get(&evidence.path))
-            .and_then(|id| self.receipts.get(id))
+            .and_then(|history| history.last_key_value())
+            .and_then(|(_, id)| {
+                self.receipts
+                    .get(id)
+                    .map(|prior| (id.clone(), prior.clone()))
+            })
         {
-            if let Some(paths) = self.source_operations.get_mut(&prior.source) {
-                paths.remove(&prior.path);
-            }
-            if let Some(snapshot) = self.sources.get_mut(&prior.source) {
-                Arc::make_mut(&mut snapshot.0).remove(&prior.path);
-            }
+            self.deactivate_source(&prior, &prior_key);
         }
-        self.source_operations
-            .entry(evidence.source.clone())
-            .or_default()
-            .insert(evidence.path.clone(), key.clone());
         self.root_operations
             .entry(root_key(&evidence.source))
             .or_default()
-            .insert(evidence.path.clone(), key.clone());
-        let snapshot = self.sources.entry(evidence.source.clone()).or_default();
-        Arc::make_mut(&mut snapshot.0).insert(
-            evidence.path.clone(),
-            (evidence.target_hash.clone(), evidence.after.clone()),
-        );
+            .entry(evidence.path.clone())
+            .or_default()
+            .insert(evidence.sequence, key.clone());
+        self.activate_source(&evidence, &key);
         if let (Some(branch), Some(base_root)) = (&evidence.branch, &evidence.base_root) {
-            let snapshot = self
+            let formats = self
                 .branch_sources
                 .entry(BranchSource::new(&evidence.source, branch))
                 .or_default();
-            Arc::make_mut(&mut snapshot.0).insert(
+            formats
+                .paths
+                .entry(evidence.branch_path.clone())
+                .or_default()
+                .insert(evidence.sequence, key.clone());
+            Arc::make_mut(&mut formats.snapshot.0).insert(
                 evidence.branch_path.clone(),
                 (evidence.target_hash.clone(), evidence.after.clone()),
             );
@@ -662,52 +671,175 @@ impl Projection {
                     .or_insert_with(|| key.clone());
             }
         }
-        self.operation_keys.insert(operation.into(), key.clone());
+        self.operation_keys
+            .entry(operation.into())
+            .or_default()
+            .insert(evidence.sequence, key.clone());
         self.receipts.insert(key, evidence);
     }
+    fn activate_source(&mut self, evidence: &Evidence, key: &str) {
+        self.source_operations
+            .entry(evidence.source.clone())
+            .or_default()
+            .insert(evidence.path.clone(), key.into());
+        Arc::make_mut(&mut self.sources.entry(evidence.source.clone()).or_default().0).insert(
+            evidence.path.clone(),
+            (evidence.target_hash.clone(), evidence.after.clone()),
+        );
+    }
+    fn deactivate_source(&mut self, evidence: &Evidence, key: &str) {
+        let Some(paths) = self.source_operations.get_mut(&evidence.source) else {
+            return;
+        };
+        if paths.get(&evidence.path).map(String::as_str) != Some(key) {
+            return;
+        }
+        paths.remove(&evidence.path);
+        if paths.is_empty() {
+            self.source_operations.remove(&evidence.source);
+        }
+        if let Some(snapshot) = self.sources.get_mut(&evidence.source) {
+            Arc::make_mut(&mut snapshot.0).remove(&evidence.path);
+            if snapshot.0.is_empty() {
+                self.sources.remove(&evidence.source);
+            }
+        }
+    }
+
+    /// Remove only this receipt's projections. Current format facts keep their
+    /// own evidence after release, until another write or source cleanup replaces it.
+    fn remove_receipt(&mut self, key: &str) {
+        let Some(evidence) = self.receipts.remove(key) else {
+            return;
+        };
+        self.retained_receipts.remove(key);
+        let operation = key.split_once(':').expect("commit receipt identity").1;
+        if let Some(history) = self.operation_keys.get_mut(operation) {
+            history.remove(&evidence.sequence);
+            if history.is_empty() {
+                self.operation_keys.remove(operation);
+            }
+        }
+        self.deactivate_source(&evidence, key);
+        let root = root_key(&evidence.source);
+        let mut successor = None;
+        if let Some(paths) = self.root_operations.get_mut(&root) {
+            if let Some(history) = paths.get_mut(&evidence.path) {
+                let latest = history
+                    .last_key_value()
+                    .is_some_and(|(_, value)| value == key);
+                history.remove(&evidence.sequence);
+                if latest {
+                    successor = history.last_key_value().map(|(_, id)| id.clone());
+                }
+                if history.is_empty() {
+                    paths.remove(&evidence.path);
+                }
+            }
+            if paths.is_empty() {
+                self.root_operations.remove(&root);
+            }
+        }
+        if let Some(successor) =
+            successor.and_then(|id| self.receipts.get(&id).cloned().map(|value| (id, value)))
+        {
+            self.activate_source(&successor.1, &successor.0);
+        }
+        if let (Some(branch), Some(base_root)) = (&evidence.branch, &evidence.base_root) {
+            let branch_key = (
+                evidence.source.workspace.clone(),
+                branch.clone(),
+                base_root.clone(),
+            );
+            let scope = BranchSource::new(&evidence.source, branch);
+            if let Some(paths) = self.branches.get_mut(&branch_key) {
+                if let Some(history) = paths.get_mut(&evidence.branch_path) {
+                    history.operations.retain(|id| id != key);
+                    if history.first.as_deref() == Some(key) {
+                        history.first = None;
+                    }
+                    if history.operations.is_empty() {
+                        paths.remove(&evidence.branch_path);
+                    }
+                }
+                if paths.is_empty() {
+                    self.branches.remove(&branch_key);
+                }
+            }
+            if let Some(formats) = self.branch_sources.get_mut(&scope) {
+                if let Some(history) = formats.paths.get_mut(&evidence.branch_path) {
+                    let latest = history.last_key_value().is_some_and(|(_, id)| id == key);
+                    history.remove(&evidence.sequence);
+                    if latest {
+                        let snapshot = Arc::make_mut(&mut formats.snapshot.0);
+                        if let Some(receipt) = history
+                            .last_key_value()
+                            .and_then(|(_, id)| self.receipts.get(id))
+                        {
+                            snapshot.insert(
+                                evidence.branch_path.clone(),
+                                (receipt.target_hash.clone(), receipt.after.clone()),
+                            );
+                        } else {
+                            snapshot.remove(&evidence.branch_path);
+                        }
+                    }
+                    if history.is_empty() {
+                        formats.paths.remove(&evidence.branch_path);
+                    }
+                }
+                if formats.paths.is_empty() {
+                    self.branch_sources.remove(&scope);
+                }
+            }
+        }
+        if let Some(checkpoint) = evidence.checkpoint {
+            let recovery = (evidence.source.workspace, checkpoint, evidence.path);
+            if self.recoveries.get(&recovery).map(String::as_str) == Some(key) {
+                self.recoveries.remove(&recovery);
+            }
+        }
+    }
     fn retain_current_fact(&mut self, operation: &str, evidence: Evidence) {
+        let sequence = evidence.sequence;
         let key = current_key(&evidence).expect("validated text format identity");
         self.current_roots
             .entry(root_key(&evidence.source))
             .or_default()
             .insert(evidence.path.clone(), key.clone());
-        self.current_facts.insert(
+        let prior = self.current_facts.insert(
             key,
             CurrentFact {
                 operation_id: operation.into(),
                 evidence,
             },
         );
+        if let Some(prior) = prior.filter(|prior| prior.evidence.sequence != sequence) {
+            let prior_key = format!("{}:{}", prior.evidence.sequence, prior.operation_id);
+            if !self.retained_receipts.contains(&prior_key) {
+                self.remove_receipt(&prior_key);
+            }
+        }
     }
     pub(super) fn release(&mut self, operation: &str) {
-        let Some(key) = self.operation_keys.remove(operation) else {
+        let Some(key) = self
+            .operation_keys
+            .get(operation)
+            .and_then(|history| history.last_key_value())
+            .map(|(_, key)| key.clone())
+        else {
             return;
         };
-        self.receipts.remove(&key);
-        let sequence = self.sequence;
-        let facts = std::mem::take(&mut self.current_facts);
-        let mut remaining = std::mem::take(&mut self.receipts);
-        // Releasing the original operation never revives an obsolete same-hash
-        // codec. Its small current fact is independent of body/receipt retention.
-        for fact in facts.values() {
-            remaining.insert(
-                format!("{}:{}", fact.evidence.sequence, fact.operation_id),
-                fact.evidence.clone(),
-            );
+        self.retained_receipts.remove(&key);
+        let current = self
+            .receipts
+            .get(&key)
+            .and_then(|evidence| current_key(evidence).ok())
+            .and_then(|current| self.current_facts.get(&current))
+            .is_some_and(|fact| format!("{}:{}", fact.evidence.sequence, fact.operation_id) == key);
+        if !current {
+            self.remove_receipt(&key);
         }
-        let mut remaining = remaining.into_iter().collect::<Vec<_>>();
-        remaining.sort_by_key(|(_, evidence)| evidence.sequence);
-        *self = Self::default();
-        for (id, evidence) in remaining {
-            self.insert(
-                id.split_once(':').expect("commit receipt identity").1,
-                evidence,
-            );
-        }
-        for fact in facts.into_values() {
-            self.retain_current_fact(&fact.operation_id, fact.evidence);
-        }
-        self.sequence = sequence;
     }
 }
 
@@ -745,7 +877,7 @@ impl Storage {
         self.text_formats
             .branch_sources
             .get(&key)
-            .cloned()
+            .map(|formats| formats.snapshot.clone())
             .unwrap_or_default()
     }
 
@@ -1151,6 +1283,15 @@ impl Storage {
                     .get_mut(&root_key(&fact.evidence.source))
                 {
                     paths.remove(&fact.evidence.path);
+                    if paths.is_empty() {
+                        self.text_formats
+                            .current_roots
+                            .remove(&root_key(&fact.evidence.source));
+                    }
+                }
+                let receipt = format!("{}:{}", fact.evidence.sequence, fact.operation_id);
+                if !self.text_formats.retained_receipts.contains(&receipt) {
+                    self.text_formats.remove_receipt(&receipt);
                 }
             }
         }
@@ -1276,7 +1417,7 @@ impl Storage {
                     "Text receipt differs from its original file outcome".into(),
                 ));
             }
-            receipts.push((id, evidence));
+            receipts.push((id, evidence, true));
         }
         drop(statement);
         let mut statement = self
@@ -1292,14 +1433,14 @@ impl Storage {
                     "Current text format identity is corrupt".into(),
                 ));
             }
-            receipts.push((fact.operation_id.clone(), fact.evidence.clone()));
+            receipts.push((fact.operation_id.clone(), fact.evidence.clone(), false));
             self.text_formats
                 .retain_current_fact(&fact.operation_id, fact.evidence);
         }
         drop(statement);
-        receipts.sort_by_key(|(_, evidence)| evidence.sequence);
-        for (id, evidence) in receipts {
-            self.text_formats.insert(&id, evidence);
+        receipts.sort_by_key(|(_, evidence, _)| evidence.sequence);
+        for (id, evidence, retained) in receipts {
+            self.text_formats.insert(&id, evidence, retained);
         }
         // A retained candidate is itself evidence of a commit watermark even
         // after the corresponding file receipt was explicitly released.
@@ -1455,7 +1596,7 @@ impl Storage {
                 serde_json::from_value(value.clone()).expect("validated text receipt evidence");
             self.text_formats
                 .retain_current_fact(operation, evidence.clone());
-            self.text_formats.insert(operation, evidence);
+            self.text_formats.insert(operation, evidence, true);
         }
     }
 
@@ -1616,6 +1757,7 @@ impl Storage {
             .text_formats
             .operation_keys
             .get(operation)
+            .and_then(|history| history.last_key_value().map(|(_, key)| key))
             .and_then(|key| self.text_formats.receipts.get(key))
             .filter(|last| {
                 last.source.workspace == workspace
@@ -1977,6 +2119,44 @@ mod tests {
             changes["changes"][0].get("beforeFormat").is_none(),
             "released first evidence must not be replaced with an intermediate source format"
         );
+    }
+
+    #[test]
+    fn released_current_formats_do_not_accumulate_superseded_receipts() {
+        let mut f = Fixture::new();
+        fs::write(f.directory.join("files/a.txt"), b"original").unwrap();
+        for index in 0..8 {
+            let id = format!("save-{index}");
+            f.mutation(&id, &format!("text {index}"), "gbk", "gbk", None, false);
+            f.storage
+                .operation_release(&json!({"workspaceId":"workspace","operationId":id}))
+                .unwrap();
+            assert_eq!(f.storage.text_formats.current_facts.len(), 1);
+            assert_eq!(
+                f.storage.text_formats.receipts.len(),
+                1,
+                "only the current format remains after releasing successive writes"
+            );
+            assert!(f.storage.text_formats.retained_receipts.is_empty());
+            if index == 3 {
+                f.reopen();
+            }
+        }
+        f.reopen();
+        assert_eq!(f.storage.text_formats.receipts.len(), 1);
+        let directory = fs::canonicalize(f.directory.join("files")).unwrap();
+        let keys = f
+            .storage
+            .text_format_keys_for_directory("workspace", &directory);
+        f.storage.delete_text_format_facts(&keys).unwrap();
+        f.storage.forget_text_format_facts(&keys);
+        let formats = &f.storage.text_formats;
+        assert!(formats.receipts.is_empty());
+        assert!(formats.operation_keys.is_empty());
+        assert!(formats.root_operations.is_empty());
+        assert!(formats.source_operations.is_empty());
+        assert!(formats.sources.is_empty());
+        assert!(formats.current_roots.is_empty());
     }
 
     #[test]
@@ -2616,7 +2796,7 @@ mod tests {
             .register_native_file_root(
                 "uncaptured-source",
                 &uncaptured.identity().to_string(),
-                f.directory.join("files"),
+                fs::canonicalize(f.directory.join("files")).unwrap(),
                 "",
                 &f.grant,
             )

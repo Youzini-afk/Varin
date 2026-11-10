@@ -474,8 +474,12 @@ impl Storage {
             }
             return Err(error);
         }
+        // The view is already gone. Resolve the still-owned Storage directory,
+        // then append its recorded relative path (Windows verbatim paths and
+        // macOS /var aliases must match the canonical roots in format evidence).
+        let canonical_storage_root = fs::canonicalize(&self.root)?;
         let text_format_keys=self.materialized_view_record(&task.workspace_id,&task.view_id)?
-            .and_then(|record|record["path"].as_str().map(|path|self.root.join(path)))
+            .and_then(|record|record["path"].as_str().map(|path|canonical_storage_root.join(path)))
             .map(|directory|self.text_format_keys_for_directory(&task.workspace_id,&directory)).unwrap_or_default();
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let removed = (|| {
