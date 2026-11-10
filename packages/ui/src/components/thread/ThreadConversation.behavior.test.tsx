@@ -17,6 +17,9 @@ import { ThreadConversation } from './ThreadConversation';
 import { BotWorkDetail } from '@/workbenches/bot/BotWorkDetail';
 import { BotPanelContext, type BotPanelModel } from '@/workbenches/bot/botPanelModel';
 import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
+import { CommandAutocomplete } from '@/components/chat/CommandAutocomplete';
+import { WorkbenchProfileContext } from '@/lib/workbench/profile-context';
+import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
 import { dict as en } from '@/lib/i18n/messages/en';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
@@ -82,7 +85,7 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 function ComposerCommandFixture({ actions }: { actions: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>['commandActions'] }) {
   const [selected, setSelected] = React.useState<string>();
   const content = selected && actions?.[selected]?.content;
-  return <>{['schedule', 'tasks'].map(key => <button key={key} type="button" disabled={!actions?.[key] || Boolean(actions[key]?.disabled)} title={actions?.[key]?.disabled}
+  return <>{['schedule', 'tasks', 'context'].map(key => <button key={key} type="button" disabled={!actions?.[key] || Boolean(actions[key]?.disabled)} title={actions?.[key]?.disabled}
     onClick={() => { const action = actions?.[key]; if (action?.run) void action.run(); else setSelected(key); }}>Composer {key}</button>)}
     {typeof content === 'function' ? content(() => setSelected(undefined)) : content}</>;
 }
@@ -120,6 +123,8 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
   <ComposerCommandFixture actions={props.commandActions} />
+  {props.value === '/' && <CommandAutocomplete api={props.api} identity={props.identity} source={props.source} searchQuery="" onClose={() => props.onChange('')}
+    onCommandSelect={command => props.onChange(`/${command.name} `)} />}
 </div> }));
 vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
@@ -299,16 +304,16 @@ const openOverview = async (section: string) => {
 
 // Exercise the real shared sidebar selected by the overview/composer, without the
 // desktop shell's unrelated geometry, editor or terminal surfaces.
-function ConversationWithContext({ api }: { api: ThreadsAPI }) {
-  const panel = useUIStore(state => state.contextPanelByDirectory['/workspace/project']);
+function ConversationWithContext({ api, surface = 'workbench' }: { api: ThreadsAPI; surface?: 'workbench' | 'bot' }) {
+  const panel = useUIStore(state => state.contextPanelByDirectory[surface === 'bot' ? BOT_CONVERSATION_PANEL_SCOPE : '/workspace/project']);
   const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
-  return <><ThreadConversation api={api} identity={identity} preferredModel={null} />
-    {panel?.isOpen && tab?.mode === 'context' && <aside aria-label="Context sidebar"><ContextPanelContent identity={tab.thread} jobRunId={tab.targetPath ?? undefined} readOnly={tab.readOnly} /></aside>}</>;
+  return <WorkbenchProfileContext.Provider value={surface === 'bot' ? 'varin.bot' : 'default'}><ThreadConversation api={api} identity={identity} preferredModel={null} surface={surface} />
+    {panel?.isOpen && tab?.mode === 'context' && <aside aria-label="Context sidebar"><ContextPanelContent identity={tab.thread} jobRunId={tab.targetPath ?? undefined} readOnly={tab.readOnly} /></aside>}</WorkbenchProfileContext.Provider>;
 }
-const renderWithContext = async (api: ThreadsAPI) => {
+const renderWithContext = async (api: ThreadsAPI, surface: 'workbench' | 'bot' = 'workbench') => {
   runtimeState.api = api;
   Object.assign(translations.dictionary, Object.fromEntries(Object.entries(en).filter(([key]) => key.startsWith('contextManager.'))));
-  await act(async () => root.render(<ConversationWithContext api={api} />));
+  await act(async () => root.render(<ConversationWithContext api={api} surface={surface} />));
 };
 const openResources = async () => {
   await openOverview('context');
@@ -1510,6 +1515,57 @@ it('adds a hidden skill command and retains the draft and image through a resour
   expect(composer().value).toBe('');
   expect(composer().closest('form')?.querySelector('img')).toBeNull();
 });
+
+it.each((['workbench', 'bot'] as const).flatMap(surface => (['idle', 'generating', 'waiting'] as const).map(state => ({ surface, state }))))(
+  'refreshes a newly installed skill from the real context panel into the slash consumer in $surface/$state without a Source', async ({ surface, state }) => {
+    const f = fixture(state !== 'idle');
+    if (f.view.activeRun && state !== 'idle') f.view.activeRun.state = state;
+    f.view.thread.bot_id = surface === 'bot' ? 'bot:fixture' : null;
+    if (f.view.launch) f.view.launch.selection.source = null;
+    const saved = resourceCheckpoint();
+    const installed = { ...saved.resources!.snapshot.skills[0]!, id: 'skill:paper-search', name: 'paper-search', origin: 'user' as const, requiresProjectTrust: false };
+    saved.resources!.source = null;
+    saved.resources!.snapshot.scope = { ...saved.resources!.snapshot.scope, mode: surface === 'bot' ? 'bot' : 'agent', projectId: null, sourceIdentity: null, projectRoot: null, cwd: '', projectTrusted: false };
+    saved.resources!.snapshot.skills = [];
+    f.view.context.checkpoint = saved;
+    f.api.resources.skills = vi.fn(async () => {
+      const snapshot = f.view.context.checkpoint!.resources!.snapshot;
+      return { snapshotId: snapshot.id, skills: snapshot.skills.map(skill => ({ resourceId: skill.id, name: skill.name,
+        version: skill.reference.version, origin: skill.origin, description: skill.description, path: skill.reference.path })) };
+    });
+    const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
+      const next = structuredClone(f.view.context.checkpoint!);
+      next.id = 'context:new-skill'; next.revision = input.expectedRevision + 1;
+      next.resources!.snapshot.id = 'resources:new-skill'; next.resources!.snapshot.skills.push(installed);
+      f.view.context.checkpoint = next;
+      f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: next.revision, kind: 'context.committed', data: {} });
+      return next;
+    });
+    f.api.resources.refresh = refresh;
+    await renderWithContext(f.api, surface);
+    await edit('[aria-label="Message thread"]', '/');
+    expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(container.querySelector('[role="listbox"]')?.textContent).not.toContain('paper-search');
+    await edit('[aria-label="Message thread"]', '');
+    await act(async () => button('Composer context').click());
+    const disclosure = [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Instructions and skills'))!;
+    expect(disclosure).toBeDefined();
+    await act(async () => disclosure.click());
+    expect(button('Refresh instructions and skills').disabled).toBe(false);
+    await act(async () => button('Refresh instructions and skills').click());
+    expect(refresh).toHaveBeenCalledExactlyOnceWith({ ...identity, expectedRevision: saved.revision });
+    expect(container.querySelector('[aria-label="Instructions and skills"]')?.textContent).toContain('paper-search');
+    await edit('[aria-label="Message thread"]', '/');
+    const option = [...container.querySelectorAll<HTMLElement>('[role="option"]')].find(value => value.textContent?.includes('paper-search'));
+    expect(option).toBeDefined();
+    await act(async () => option!.click());
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('/skill:paper-search ');
+    expect(f.api.resources.skills).toHaveBeenLastCalledWith(identity, {}, expect.any(AbortSignal));
+    expect(saved.resources!.snapshot.skills).toEqual([]);
+    expect(f.cancelRun).not.toHaveBeenCalled();
+    expect(f.submit).not.toHaveBeenCalled();
+    expect(f.enqueue).not.toHaveBeenCalled();
+  });
 
 it('keeps an unrelated request failure when the resource snapshot changes', async () => {
   const f = fixture();

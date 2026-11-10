@@ -8,7 +8,7 @@ import { composerFileSelections, composerHistoryAttachments, selectComposerFile,
 import { ComposerSelectedFiles } from './ComposerSelectedFiles';
 import { composerInputReferences } from '@/components/chat/composer/submit/references';
 import { canRespondToQuestion } from './threadOperations';
-import { openThreadContext } from '@/lib/openThreadContext';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { toast } from '@/components/ui';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
 import { MessageHandoff } from '../conversation/messageHandoff';
@@ -104,6 +104,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   preferredModel?: ThreadModel | null; inheritWorkbenchModel?: boolean; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const botSurface = surface === 'bot';
   const { t } = useI18n();
+  const openThreadContext = useOpenThreadContext();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const draftKey = threadComposerKey(threadHostKey(), identity);
   const viewScope = React.useMemo(() => ({ api, host, draftKey, readOnly }), [api, host, draftKey, readOnly]);
@@ -457,7 +458,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     if (section === 'context') { openThreadContext(identity, initialWorkspacePath, undefined, readOnly); return; }
     setFocusedOverview({ owner: contentOwner, section });
     disclosure(overviewKey, 'overview', true);
-  }, [identity, initialWorkspacePath, readOnly, contentOwner, disclosure, overviewKey]);
+  }, [identity, initialWorkspacePath, readOnly, contentOwner, disclosure, overviewKey, openThreadContext]);
   const treeNavigation = useConversationTreeStore(state => state.navigation[draftKey]);
   React.useEffect(() => () => {
     queueMicrotask(() => {
@@ -483,7 +484,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const localWorkspacePath = preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
     : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
     : !launch?.selection.source ? workspacePath : undefined;
-  const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath, act,
+  const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath, act, readOnly,
     disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => openConversationTree(surface), onFork: head => forkFrom(head, true),
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
   const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),

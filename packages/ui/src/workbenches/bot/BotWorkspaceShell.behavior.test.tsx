@@ -10,10 +10,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useBotNavigation, useBotReturn, type BotSession, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { threadSummary } from '@/test/threadFixtures';
 import { useBotLayout } from './botLayout';
-import { BOT_TREE_PANEL_SCOPE } from '@/lib/openConversationTree';
+import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 
 const state = vi.hoisted(() => ({
-  profileId: 'varin.bot',
+  profileId: 'varin.bot', mobile: false,
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
   create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
   fork: vi.fn(), copy: vi.fn(), arrangements: vi.fn(), eventSources: vi.fn(),
@@ -47,14 +48,16 @@ vi.mock('./BotWorkDetail', async () => {
   } };
 });
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
-vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope }: { layoutScope?: string }) => <aside data-conversation-tree={layoutScope} /> }));
+vi.mock('@/components/layout/ContextSidebarTab', () => ({ ContextPanelContent: ({ identity, jobRunId, readOnly }: { identity?: { threadId: string; branchId: string }; jobRunId?: string; readOnly?: boolean }) => <aside data-context-thread={identity?.threadId} data-context-branch={identity?.branchId} data-context-job={jobRunId} data-context-readonly={String(readOnly)} /> }));
+vi.mock('@/components/thread/ConversationTreePanel', () => ({ ConversationTreePanel: () => <aside data-mobile-tree /> }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes }: { layoutScope?: string; surfaceModes?: readonly string[] }) => <aside data-conversation-tree={layoutScope} data-surface-modes={surfaceModes?.join(',')} /> }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
-vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface} /> }));
+vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => { const openThreadContext = useOpenThreadContext(); return <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface}><button onClick={() => openThreadContext({ runtime: 'agent', ...identity }, undefined, undefined, readOnly)}>Open context</button></div>; } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: () => {} }) } }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
-vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
+vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: state.mobile }) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }), getCurrentIntlLocale: () => 'en-US' }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>, TooltipContent: () => null }));
@@ -172,7 +175,7 @@ describe('Bot workbench', () => {
     root = createRoot(container);
     useBotNavigation.setState({ botId: null, entry: null, archived: undefined });
     useBotLayout.setState({ panelOpen: true, panelWidth: 360, tab: 'overview', seen: {}, activityScope: 'all', memoryScope: 'current', ordinarySidebar: null, sidebarOpen: false });
-    state.profileId = 'varin.bot';
+    state.profileId = 'varin.bot'; state.mobile = false;
     state.list.mockReset().mockResolvedValue([bot('a'), bot('b')]);
     state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` } }));
     state.primary.mockReset().mockResolvedValue({ ...bot('primary'), name: 'Varin' });
@@ -219,12 +222,50 @@ describe('Bot workbench', () => {
     const toggle = container.querySelector<HTMLButtonElement>('[aria-label="chat.tree.title"]')!;
     expect(toggle).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(true);
-    expect(container.querySelector(`[data-conversation-tree="${BOT_TREE_PANEL_SCOPE}"]`)).not.toBeNull();
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(true);
+    expect(container.querySelector(`[data-conversation-tree="${BOT_CONVERSATION_PANEL_SCOPE}"]`)).not.toBeNull();
     await act(async () => toggle.click());
-    expect(useUIStore.getState().contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(false);
     expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
     expect(container.querySelector('[data-conversation-tree]')).not.toBeNull();
+  });
+
+  it('opens Bot context in its visible panel without changing workbench layout or conversation selection', async () => {
+    useUIStore.getState().openContextPanelTab('', { mode: 'file' });
+    const ordinaryPanel = useUIStore.getState().contextPanelByDirectory[''];
+    await render();
+    const identity = useThreadStore.getState().selectedIdentity;
+    await click('Open context');
+    const panel = useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE];
+    expect(panel?.isOpen).toBe(true);
+    const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
+    expect(tab).toMatchObject({ mode: 'context', thread: { runtime: 'agent', threadId: 'entry-a', branchId: 'branch-a' }, readOnly: false });
+    expect(container.querySelector('[data-surface-modes]')?.getAttribute('data-surface-modes')?.split(',')).toContain('context');
+    expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
+    expect(useThreadStore.getState().selectedIdentity).toBe(identity);
+    await click('chat.tree.title');
+    const tree = useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE];
+    expect(tree?.tabs.find(tab => tab.id === tree.activeTabId)?.mode).toBe('tree');
+    await click('Open context');
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.activeTabId).toBe(tab?.id);
+    await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
+  });
+
+  it('opens the exact read-only Bot context in a mobile dialog without a workspace', async () => {
+    state.mobile = true;
+    state.sessions.mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, { archived: true }, true)]);
+    await render();
+    await click('Open context');
+    await settle();
+    const inspector = container.querySelector('[role="dialog"] [data-context-thread]');
+    expect(inspector?.getAttribute('data-context-thread')).toBe('entry-a');
+    expect(inspector?.getAttribute('data-context-branch')).toBe('branch-a');
+    expect(inspector?.getAttribute('data-context-readonly')).toBe('true');
+    expect(container.querySelector('[data-conversation-tree]')).toBeNull();
+    await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
+    expect(container.querySelector('[data-context-thread]')).toBeNull();
   });
 
   it('keeps a staged candidate inert and leaves the ordinary conversation hidden', async () => {

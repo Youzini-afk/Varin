@@ -3,7 +3,7 @@ import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import type { BotMatter } from '@varin/protocol';
 import { getRuntimeEndpointGeneration, type BotSession, type ThreadIdentity } from '@varin/application-client';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { BOT_TREE_PANEL_SCOPE, openConversationTree } from '@/lib/openConversationTree';
+import { BOT_CONVERSATION_PANEL_SCOPE, openConversationTree } from '@/lib/openConversationTree';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -56,7 +56,8 @@ import { workKey } from './botPresentation';
 const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
 const ContextPanel = React.lazy(() => import('@/components/layout/ContextPanel').then(module => ({ default: module.ContextPanel })));
 const ConversationTreePanel = React.lazy(() => import('@/components/thread/ConversationTreePanel').then(module => ({ default: module.ConversationTreePanel })));
-const TREE_SURFACES = ['tree'] as const;
+const ContextPanelContent = React.lazy(() => import('@/components/layout/ContextSidebarTab').then(module => ({ default: module.ContextPanelContent })));
+const CONVERSATION_SURFACES = ['tree', 'context'] as const;
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 /** How long the state line names a team moment (§5.7.3). */
@@ -130,11 +131,12 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
 
 const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { t } = useI18n();
-  const contextPanel = useUIStore(state => state.contextPanelByDirectory[BOT_TREE_PANEL_SCOPE]);
-  const treeTab = contextPanel?.isOpen ? contextPanel.tabs.find(tab => tab.id === contextPanel.activeTabId && tab.mode === 'tree') : undefined;
-  const [treeMounted, setTreeMounted] = React.useState(Boolean(treeTab));
-  React.useEffect(() => { if (treeTab) setTreeMounted(true); }, [treeTab]);
-  const closeTree = () => useUIStore.getState().closeContextPanel(BOT_TREE_PANEL_SCOPE);
+  const contextPanel = useUIStore(state => state.contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]);
+  const conversationTab = contextPanel?.isOpen ? contextPanel.tabs.find(tab => tab.id === contextPanel.activeTabId && (tab.mode === 'tree' || tab.mode === 'context')) : undefined;
+  const treeTab = conversationTab?.mode === 'tree' ? conversationTab : undefined;
+  const [conversationPanelMounted, setConversationPanelMounted] = React.useState(Boolean(conversationTab));
+  React.useEffect(() => { if (conversationTab) setConversationPanelMounted(true); }, [conversationTab]);
+  const closeConversationPanel = () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE);
   const { isMobile } = useDeviceInfo();
   const { threads, bots: botsAPI } = useRuntimeAPIs();
   const navigation = useBotNavigation();
@@ -668,7 +670,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   } : null, [selected, pose, stageFeed, line, needs, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
     sessionTitle, focusTab, openWork, openSession, mutateBot, archiveMatter, newSession, workItems]);
 
-  const spaces = useBotWorkspaces(panelModel, committed && !settingsOpen, () => { closeTree(); if (floating) setNarrowPanelOpen(true); else setPanelOpen(true); });
+  const spaces = useBotWorkspaces(panelModel, committed && !settingsOpen, () => { closeConversationPanel(); if (floating) setNarrowPanelOpen(true); else setPanelOpen(true); });
   const openSpace = spaces.open;
   const shownPanel = React.useMemo<BotPanelModel | null>(() => panelModel && ({ ...panelModel,
     openNeed: need => openSpace({ kind: 'work', key: workKey(need.identity), identity: need.identity, title: need.name }),
@@ -691,7 +693,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const panelControl = isMobile ? undefined : <>
     {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
       className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-      onClick={() => treeTab ? closeTree() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
+      onClick={() => treeTab ? closeConversationPanel() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
     <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" aria-label={panelLabel} aria-expanded={panelVisible} onClick={togglePanel}
@@ -771,9 +773,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       refresh();
     }} /> : null}
     {details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
-    {isMobile && <Dialog open={Boolean(treeTab)} onOpenChange={open => { if (!open) closeTree(); }}>
-      <DialogContent className="flex h-[85dvh] max-w-full flex-col gap-0 p-0"><DialogHeader className="px-4 py-3"><DialogTitle>{t('chat.tree.title')}</DialogTitle></DialogHeader>
-        <div className="min-h-0 flex-1"><React.Suspense fallback={null}><ConversationTreePanel active={Boolean(treeTab)} /></React.Suspense></div>
+    {isMobile && <Dialog open={Boolean(conversationTab)} onOpenChange={open => { if (!open) closeConversationPanel(); }}>
+      <DialogContent className="flex h-[85dvh] max-w-full flex-col gap-0 p-0"><DialogHeader className="px-4 py-3"><DialogTitle>{t(treeTab ? 'chat.tree.title' : 'contextPanel.mode.context')}</DialogTitle></DialogHeader>
+        <div className="min-h-0 flex-1"><React.Suspense fallback={null}>{conversationTab?.mode === 'context'
+          ? <ContextPanelContent active identity={conversationTab.thread} jobRunId={conversationTab.targetPath ?? undefined} readOnly={conversationTab.readOnly} />
+          : <ConversationTreePanel active={Boolean(treeTab)} />}</React.Suspense></div>
       </DialogContent>
     </Dialog>}
   </div>;
@@ -781,10 +785,10 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const workspaceArea = (visible: boolean) => shownPanel && <BotWorkspaceArea model={shownPanel} active={committed && !settingsOpen && visible} expanded={spaceExpanded} onExpand={() => setSpaceExpanded(value => !value)} />;
   const secondaryPanel = (placement: 'docked' | 'drawer', visible: boolean) => placement === 'drawer'
     ? <div className="flex h-full min-h-0 flex-col bg-background">{workspaceArea(visible)}</div>
-    : <><BotPanel model={panelModel} open={!treeTab && panelVisible && panelModel !== null} floating={floating}
+    : <><BotPanel model={panelModel} open={!conversationTab && panelVisible && panelModel !== null} floating={floating}
       workspace={Boolean(spaces.activeKey)} expanded={Boolean(spaces.activeKey) && spaceExpanded}
-      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!treeTab && panelVisible)}</BotPanel>
-      {treeMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_TREE_PANEL_SCOPE} surfaceModes={TREE_SURFACES} /></React.Suspense>}</>;
+      onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!conversationTab && panelVisible)}</BotPanel>
+      {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}><ContextPanel layoutScope={BOT_CONVERSATION_PANEL_SCOPE} surfaceModes={CONVERSATION_SURFACES} /></React.Suspense>}</>;
 
   return <BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelFocus={spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}

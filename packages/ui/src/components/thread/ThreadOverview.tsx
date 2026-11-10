@@ -26,7 +26,7 @@ import { WorkOverviewControl, type OverviewPeekSection } from './WorkOverviewCon
 import { ThreadOperationDetails } from './ThreadOperationDetails';
 import { canCancelOperation, canRespondToQuestion } from './threadOperations';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
-import { openThreadContext } from '@/lib/openThreadContext';
+import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { contextPhaseLabels } from '@/lib/contextPresentation';
 import { useThreadProducts, type ThreadProduct } from './useThreadProducts';
 
@@ -58,6 +58,7 @@ const emptyPlan: PlanSummary = { items: [], total: 0, done: 0, blocked: 0 };
 export function ThreadOverview({ api, identity, sessionKey, snapshot, request, details, pending, readOnly, workspacePath,
   hasComputer, error, recoveryAttention, onAttention, refresh, act, openProcess }: Props) {
   const { t } = useI18n();
+  const openThreadContext = useOpenThreadContext();
   const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const externalChildren = useExternalAgentStore(state => state.children);
   const open = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
@@ -105,7 +106,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     setDetail(section); setProduct(undefined); setOperationId(undefined); if (section === 'threads') setChildId(undefined); setProductError(undefined);
     setVisited(previous => previous.has(section) ? previous : new Set([...previous, section]));
     disclosure(sessionKey, 'overview', true);
-  }, [disclosure, sessionKey, identity, workspacePath, readOnly]);
+  }, [disclosure, sessionKey, identity, workspacePath, readOnly, openThreadContext]);
   React.useEffect(() => { if (request) show(request.section); }, [request, show]);
   const inspectOperation = (id: string) => { show('operations'); setOperationId(id); };
   const inspectProduct = (value: ThreadProduct) => {
