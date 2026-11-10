@@ -429,12 +429,15 @@ fn policy_wait_rejects_changed_target_or_origin_before_registering_any_wait() {
     wrong.origin = ToolOrigin::ModelStep {
         request_id: "fake-model".into(),
     };
-    assert!(f
-        .db
-        .prepare_child_wait_registration(&wrong, &f.context.operation_id)
-        .unwrap()
-        .load()
-        .is_err());
+    // Capturing the original frozen reader rejects a changed origin before any
+    // body is loaded: the original operation cannot belong to this model step.
+    assert!(matches!(
+        f.db.prepare_child_wait_registration(&wrong, &f.context.operation_id),
+        Err(varin_runtime::catalog::RuntimeError::Conflict(message))
+            if message == "invocation operation identity changed"
+    ));
+    assert!(f.db.pending_child_wait(&context.run_id).unwrap().is_none());
+    assert!(f.db.operation(&context.operation_id).unwrap().call_completion.is_none());
     let prepared =
         f.db.prepare_child_wait_registration(&context, &f.context.operation_id)
             .unwrap()

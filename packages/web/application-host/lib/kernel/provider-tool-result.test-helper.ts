@@ -8,13 +8,18 @@ function record(value: unknown): value is Record<string, unknown> {
  * tool data and gateway failures remain intact, even when they contain name. */
 export function invokedToolResult(value: Record<string, unknown> | undefined, callName: unknown, args: unknown) {
   const content = value?.content;
-  if (callName !== 'tool_invoke' || !record(args) || typeof args.name !== 'string'
-    || !record(content) || content.name !== args.name || typeof content.operationId !== 'string'
+  if (callName !== 'tool_invoke' || value?.kind !== 'result' || !record(args) || typeof args.name !== 'string'
+    || !record(content) || content.name !== args.name
     || !record(content.completion) || !Object.hasOwn(content, 'result')) return value;
   const completion = content.completion;
+  // Current gateway projections omit the wrapper's durable ID. Accepted jobs
+  // expose the target owner's operationRef instead; this is a model handle,
+  // not an internal Operation ID. Original frozen output keeps operationId.
+  const operation = typeof completion.operationId === 'string' ? completion.operationId
+    : record(content.result) && typeof content.result.operationRef === 'string' ? content.result.operationRef : undefined;
   if (!['result', 'job_accepted', 'not_dispatched'].includes(String(completion.kind))
-    || completion.kind === 'job_accepted' && typeof completion.operationId !== 'string') return value;
-  return { ...completion, operation_id: completion.operationId, content: content.result };
+    || completion.kind === 'job_accepted' && !operation) return value;
+  return { ...completion, operation_id: completion.kind === 'job_accepted' ? operation : undefined, content: content.result };
 }
 
 export function responsesToolResult(body: Record<string, unknown>, name?: string) {
