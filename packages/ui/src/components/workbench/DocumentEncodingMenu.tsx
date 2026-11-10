@@ -2,6 +2,7 @@ import React from 'react';
 import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { VarinTextCodec } from '@varin/application-client';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MenuHighlight } from '@/components/ui/MenuHighlight';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import type { DocumentIdentity } from '@/lib/documents/types';
@@ -15,16 +16,19 @@ function EncodingChoices({ codecs, current, currentBom, onSelect }: {
   const search = query.trim().toLowerCase().replace(/[\s_-]+/g, '');
   const matches = codecs.filter(codec => `${codec.label} ${codec.encoding}`.toLowerCase().replace(/[\s_-]+/g, '').includes(search));
   return <>
-    <div className="sticky top-0 z-10 bg-popover p-1">
+    <div className="shrink-0 border-b border-border/60 px-1 pt-1 pb-2">
       <input aria-label={t('filesView.encoding.search')} placeholder={t('filesView.encoding.search')}
         className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 typography-ui outline-none focus:border-ring"
         value={query} onChange={event => setQuery(event.target.value)}
         onKeyDown={event => { if (event.key !== 'Escape' && event.key !== 'Tab' && event.key !== 'ArrowDown' && event.key !== 'ArrowUp') event.stopPropagation(); }} />
     </div>
-    {matches.map(codec => <DropdownMenuItem key={`${codec.encoding}:${codec.defaultBom}`} onSelect={() => onSelect(codec)}>
-      <span className="flex-1">{codec.label}</span>{current === codec.encoding && (currentBom === undefined || currentBom === codec.defaultBom) ? <span aria-hidden="true">✓</span> : null}
-    </DropdownMenuItem>)}
-    {matches.length === 0 ? <div className="px-2 py-2 typography-micro text-muted-foreground">{t('filesView.encoding.noMatches')}</div> : null}
+    <div data-menu-highlight="" className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pt-1">
+      <MenuHighlight />
+      {matches.map(codec => <DropdownMenuItem key={`${codec.encoding}:${codec.defaultBom}`} onSelect={() => onSelect(codec)}>
+        <span className="flex-1">{codec.label}</span>{current === codec.encoding && (currentBom === undefined || currentBom === codec.defaultBom) ? <span aria-hidden="true">✓</span> : null}
+      </DropdownMenuItem>)}
+      {matches.length === 0 ? <div className="px-2 py-2 typography-micro text-muted-foreground">{t('filesView.encoding.noMatches')}</div> : null}
+    </div>
   </>;
 }
 
@@ -54,14 +58,14 @@ export function DocumentEncodingMenuItems({ identity, registry: providedRegistry
     <DropdownMenuSub>
       <DropdownMenuSubTrigger disabled={!record || record.dirty || record.saving || codecs.length === 0}
         title={record?.dirty ? t('filesView.encoding.reopenDirty') : undefined}>{t('filesView.encoding.reopen')}</DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="max-h-[min(24rem,70dvh)] min-w-60 overflow-y-auto">
+      <DropdownMenuSubContent className="flex max-h-[min(24rem,70dvh,var(--available-height))] min-w-60 flex-col overflow-hidden">
         <EncodingChoices codecs={codecs.filter(codec => codec.read)} current={record?.encoding}
           onSelect={codec => { void registry.reopenWithEncoding(identity, codec.encoding).catch(() => undefined); }} />
       </DropdownMenuSubContent>
     </DropdownMenuSub>
     <DropdownMenuSub>
       <DropdownMenuSubTrigger disabled={!ready || record?.saving || codecs.length === 0}>{t('filesView.encoding.save')}</DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="max-h-[min(24rem,70dvh)] min-w-60 overflow-y-auto">
+      <DropdownMenuSubContent className="flex max-h-[min(24rem,70dvh,var(--available-height))] min-w-60 flex-col overflow-hidden">
         <EncodingChoices codecs={codecs.filter(codec => codec.write).flatMap(codec => codec.bom ? [
           { ...codec, label: codec.defaultBom ? `${codec.label} BOM` : codec.label },
           { ...codec, label: codec.defaultBom ? codec.label : `${codec.label} BOM`, defaultBom: !codec.defaultBom },
