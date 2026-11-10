@@ -93,6 +93,11 @@ export class HistoryPresentation {
       const configuration = metadata ? { model: metadata.modelId } : undefined;
       const envelope = object(item.content);
       const content = object(envelope.content);
+      // Runtime collaboration observations are context, not chat messages. Keep the
+      // original history/API record available without rendering an empty environment row.
+      const provenance = object(envelope.provenance);
+      if (item.source === 'environment' && provenance.kind === 'external_data'
+        && provenance.source === 'collaboration-state' && content.kind === 'output') continue;
       const thinking = thinkingText(envelope);
       const request = metadata?.requestId ?? requestId(item);
       const call = presentedCall(object(content.call));

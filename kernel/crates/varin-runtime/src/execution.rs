@@ -1469,7 +1469,19 @@ pub trait Persistence: Send + Sync + 'static {
     ) -> Result<Option<crate::catalog::goals::GoalContext>, ExecutionError> {
         Ok(None)
     }
-    fn teammate_context(&self, _run: &str, _epoch: u64) -> Result<Option<ConversationItem>, ExecutionError> { Ok(None) }
+    /// Append a changed collaboration observation through the original closed history
+    /// boundary. A returned item is already durable; it is not a request-only suffix
+    /// and does not acknowledge model delivery. Preview and retry never call this.
+    fn record_collaboration_observation(
+        &self,
+        _run: &str,
+        _epoch: u64,
+        _expected_head: Option<&str>,
+        _expected_checkpoint: Option<&str>,
+        _visible_history: &[Arc<ConversationItem>],
+    ) -> Result<Option<Arc<ConversationItem>>, ExecutionError> {
+        Ok(None)
+    }
     fn goal_boundary(
         &self,
         _run: &str,
@@ -2601,28 +2613,61 @@ impl<
                         policy_state = previous_policy_state;
                         continue 'agent;
                     }
-                    steps = steps.checked_add(1).ok_or_else(|| {
-                        ExecutionError::new("step_overflow", "model step identity exhausted")
-                    })?;
                     let mut binding = input.binding.clone();
                     let mut compaction = None;
                     let mut context_checkpoint = None;
-                    if let Some(context) = self.persistence.compile_context(
-                        &input.run_id,
-                        input.owner_generation,
-                        history_cursor.as_deref(),
-                        Some(&mut context_reuse),
-                    )? {
-                        context_checkpoint = Some(context.checkpoint_id);
-                        compaction = context.compaction;
-                        history = context.history;
-                        binding.resource_checkpoint_id = context.resource_checkpoint_id;
-                        binding.instruction_sources = context.instruction_sources;
-                        binding.memory_checkpoint = context.memory_checkpoint;
+                    let mut observation_committed = false;
+                    loop {
+                        if let Some(context) = self.persistence.compile_context(
+                            &input.run_id,
+                            input.owner_generation,
+                            history_cursor.as_deref(),
+                            Some(&mut context_reuse),
+                        )? {
+                            context_checkpoint = Some(context.checkpoint_id);
+                            compaction = context.compaction;
+                            history = context.history;
+                            binding.resource_checkpoint_id = context.resource_checkpoint_id;
+                            binding.instruction_sources = context.instruction_sources;
+                            binding.memory_checkpoint = context.memory_checkpoint;
+                        }
+                        if observation_committed { break; }
+                        if cancel.is_cancelled() {
+                            policy_state = previous_policy_state;
+                            continue 'agent;
+                        }
+                        match self.persistence.record_collaboration_observation(
+                            &input.run_id,
+                            input.owner_generation,
+                            history_cursor.as_deref(),
+                            context_checkpoint.as_deref(),
+                            &history,
+                        ) {
+                            Ok(Some(item)) => {
+                                history_cursor = Some(item.id.clone());
+                                // Keep the raw-history fallback for backends without checkpoints.
+                                // Always compile again: current memory and other derived tails
+                                // belong after the newly committed original history item.
+                                history.push(item);
+                                observation_committed = true;
+                            }
+                            Ok(None) => break,
+                            Err(error) if matches!(error.code.as_str(),
+                                "input_pending" | "context_changed" | "bot_suspended" | "dispatch_cancelled")
+                                || cancel.is_cancelled() =>
+                            {
+                                policy_state = previous_policy_state;
+                                continue 'agent;
+                            }
+                            Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
+                        }
                     }
                     if let Err(error) = validate_history_pairs(&history) {
                         finish!('agent, RunState::Failed, None, Some(error));
                     }
+                    steps = steps.checked_add(1).ok_or_else(|| {
+                        ExecutionError::new("step_overflow", "model step identity exhausted")
+                    })?;
                     binding.history_range.leaf_id = history_cursor.clone();
                     let request_tools = match selected_tools {
                         Some(selected) => Some(selected.executor),
@@ -2650,7 +2695,6 @@ impl<
                         .persistence
                         .goal_context(&input.run_id, input.owner_generation)?;
                     binding.goal = goal.as_ref().map(|g| g.binding.clone());
-                    let teammates = self.persistence.teammate_context(&input.run_id,input.owner_generation)?;
                     // Current binding instructions belong to the fixed request context, after
                     // the existing system prefix and before growing history. Keep Goal's original
                     // provenance (and provider user role); neither these items nor their placement
@@ -2670,7 +2714,6 @@ impl<
                         let prefix = request_history.iter().take_while(|item| item.provenance.is_system()).count();
                         request_history.splice(prefix..prefix,
                             binding_context.iter().cloned().chain(goal.as_ref().and_then(|g| g.item.clone()).map(Arc::new)));
-                        request_history.extend(teammates.iter().cloned().map(Arc::new));
                         request_history
                     };
                     let request_history = project_request(&history, Some(&mut history_projection_reuse));

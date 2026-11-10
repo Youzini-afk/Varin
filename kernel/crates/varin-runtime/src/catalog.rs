@@ -1856,6 +1856,8 @@ pub mod context;
 
 #[path = "catalog_family.rs"]
 pub mod family;
+#[path = "catalog_collaboration_context.rs"]
+pub mod collaboration_context;
 #[path = "catalog_messages.rs"]
 pub mod messages;
 #[path = "catalog_observations.rs"]

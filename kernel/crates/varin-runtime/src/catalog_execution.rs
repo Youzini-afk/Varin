@@ -5,6 +5,7 @@ use super::tool_content::{ToolCallMetadata, ToolIntent};
 use super::*;
 use crate::execution::*;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 /// HTTP diagnostics are prepared by the model transport, including credential redaction.
@@ -176,14 +177,24 @@ impl Persistence for Mutex<Catalog> {
             .map_err(policy_error)?;
         read.map(|r| r.load()).transpose().map_err(policy_error)
     }
-    fn teammate_context(&self, run: &str, epoch: u64) -> std::result::Result<Option<ConversationItem>,ExecutionError> {
-        let read = {
-            let catalog=self.lock().map_err(catalog_lock_error)?;
-            let run=catalog.run(run).map_err(policy_error)?;
-            fence(&run,epoch).map_err(policy_error)?;
-            catalog.capture_family_read(&run.thread_id,None,None).map_err(policy_error)?
-        };
-        read.status_context().map_err(policy_error)
+    fn record_collaboration_observation(
+        &self,
+        run: &str,
+        epoch: u64,
+        expected_head: Option<&str>,
+        expected_checkpoint: Option<&str>,
+        visible_history: &[Arc<ConversationItem>],
+    ) -> std::result::Result<Option<Arc<ConversationItem>>, ExecutionError> {
+        let preparation = self.lock().map_err(catalog_lock_error)?
+            .prepare_collaboration_observation(run, epoch, expected_head, expected_checkpoint, visible_history)
+            .map_err(policy_error)?;
+        let Some(preparation) = preparation else { return Ok(None); };
+        // Read family facts and persist the immutable body outside the Catalog lock.
+        let prepared = preparation.load().map_err(policy_error)?;
+        let batch = self.lock().map_err(catalog_lock_error)?
+            .admit_input_delivery(prepared).map_err(policy_error)?
+            .ok_or_else(|| ExecutionError::new("context_changed", "context checkpoint changed before collaboration observation"))?;
+        Ok(batch.items.into_iter().last())
     }
     fn goal_boundary(
         &self,
@@ -748,6 +759,8 @@ fn policy_error(error: RuntimeError) -> ExecutionError {
             "goal_changed"
         } else if matches!(error, RuntimeError::InputPending) {
             "input_pending"
+        } else if matches!(error, RuntimeError::DispatchCancelled) {
+            "dispatch_cancelled"
         } else {
             "policy_graph"
         },
@@ -877,9 +890,35 @@ pub(super) struct ExecutionBodyPreparation {
     launch: Option<super::launch_content::LaunchMetadata>,
     has_goal: bool,
 }
+struct PreparedCollaborationDelivery {
+    item_id: String,
+    content: Value,
+    observation: family::CollaborationSnapshot,
+}
+impl PreparedCollaborationDelivery {
+    fn validate(&self, tx: &Transaction<'_>, run: &Run, ancestry: &BTreeSet<String>) -> Result<()> {
+        if self.observation.caller_thread_id != run.thread_id
+            || self.observation.caller_branch_id != run.branch_id
+        {
+            return Err(RuntimeError::Invalid("collaboration delivery scope changed".into()));
+        }
+        let item: HistoryItem = super::record(tx, "history", &self.item_id)?;
+        if item.source != HistorySource::Environment || item.thread_id != run.thread_id
+            || item.content != self.content || item.provider.is_some()
+        {
+            return Err(RuntimeError::Invalid("collaboration delivery has no matching original observation".into()));
+        }
+        if !ancestry.contains(&self.item_id) {
+            return Err(RuntimeError::Invalid("collaboration delivery is outside the frozen history ancestry".into()));
+        }
+        Ok(())
+    }
+}
+
 pub(super) struct PreparedExecutionBodies {
     driver_request: bool,
     teammate_deliveries: Vec<(String,u64)>,
+    collaboration_deliveries: Vec<PreparedCollaborationDelivery>,
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
@@ -1007,13 +1046,37 @@ impl ExecutionBodyPreparation {
             )?),
             _ => None,
         };
-        let mut teammate_deliveries=Vec::new();
-        if let Some(snapshot)=&snapshot {
-            for item in snapshot.view.history.iter().filter(|item|item.id.starts_with("teammates:")) {
-                if let Content::Text{text}=&item.content {
-                    if let Some((_,json))=text.split_once('\n') {
-                        if let Ok(rows)=serde_json::from_str::<Vec<Value>>(json) {
-                            for row in rows {if let (Some(id),Some(cursor))=(row["executionId"].as_str(),row["reportCursor"].as_u64()){teammate_deliveries.push((id.into(),cursor));}}
+        let mut teammate_deliveries = Vec::new();
+        let mut collaboration_deliveries = Vec::new();
+        if matches!(record, ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, .. }) {
+            if let Some(snapshot) = &snapshot {
+                for item in snapshot.view.history.iter().rev() {
+                    if let Some(observation) = family::CollaborationSnapshot::from_item(item)? {
+                        if observation.caller_branch_id == snapshot.view.binding.history_range.branch_id {
+                            collaboration_deliveries.push(PreparedCollaborationDelivery {
+                                item_id: item.id.clone(),
+                                content: self.content.save_conversation(item, &None)?,
+                                observation,
+                            });
+                        }
+                    }
+                }
+                // Decode the old request-only suffix solely for already frozen requests.
+                // New requests never manufacture this legacy envelope.
+                if collaboration_deliveries.is_empty() {
+                    for item in snapshot.view.history.iter().filter(|item|
+                        item.id.starts_with("teammates:") && matches!(&item.provenance,
+                            Provenance::ExternalData { source } if source == "current-teammates")) {
+                        if let Content::Text { text } = &item.content {
+                            if let Some((_, json)) = text.split_once('\n') {
+                                if let Ok(rows) = serde_json::from_str::<Vec<Value>>(json) {
+                                    for row in rows {
+                                        if let (Some(id), Some(cursor)) = (row["executionId"].as_str(), row["reportCursor"].as_u64()) {
+                                            teammate_deliveries.push((id.into(), cursor));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1124,6 +1187,7 @@ impl ExecutionBodyPreparation {
         Ok(PreparedExecutionBodies {
             driver_request,
             teammate_deliveries,
+            collaboration_deliveries,
             _publication: self.publication,
             request,
             tools_ref,
@@ -1198,6 +1262,7 @@ impl Catalog {
         let PreparedExecutionBodies {
             driver_request,
             teammate_deliveries,
+            collaboration_deliveries,
             _publication,
             request: prepared_request,
             tools_ref,
@@ -1260,7 +1325,37 @@ impl Catalog {
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
         if let ExecutionRecord::ModelFinished{request_id,outcome:ModelOutcome::Completed,..}=record {
+            let mut teammate_deliveries = teammate_deliveries;
+            if !collaboration_deliveries.is_empty() {
+                let range = frozen_history_range.as_ref().ok_or_else(|| RuntimeError::Invalid("collaboration delivery history range missing".into()))?;
+                if range.branch_id != run.branch_id {
+                    return Err(RuntimeError::Invalid("collaboration delivery branch changed".into()));
+                }
+                // Verify every retained observation with one ancestor walk, not one full
+                // history traversal per old snapshot. Only requested identities are returned.
+                let ids: Vec<_> = collaboration_deliveries.iter().map(|delivery| &delivery.item_id).collect();
+                let mut statement = tx.prepare(
+                    "WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT id FROM ancestors WHERE id IN (SELECT value FROM json_each(?2))",
+                )?;
+                let ancestry = statement.query_map(params![range.leaf_id, encode(&ids)?], |row| row.get::<_, String>(0))?
+                    .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+                for delivery in collaboration_deliveries {
+                    delivery.validate(&tx, &run, &ancestry)?;
+                    teammate_deliveries.extend(delivery.observation.report_refs().into_iter()
+                        .map(|reference| (reference.execution_id, reference.report_cursor)));
+                }
+            }
             for (execution,cursor) in teammate_deliveries {
+                let valid: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM events WHERE cursor=?1 AND subject=?2 AND kind='child.report_ready')",
+                    params![sql_number(cursor)?, execution], |row| row.get(0),
+                )?;
+                if !valid { return Err(RuntimeError::Invalid("collaboration delivery report cursor changed".into())); }
+                let delivered: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM deliveries WHERE observer=?1 AND fact_cursor=?2 AND state='\"committed\"')",
+                    params![format!("agent-status:{execution}"), sql_number(cursor)?], |row| row.get(0),
+                )?;
+                if delivered { continue; }
                 let delegated=super::delegated::execution(&tx,&execution)?;
                 let relation=super::delegated::relation(&tx,&delegated.child_operation_id)?;
                 let recipient=if let super::delegated::DelegatedTrigger::MessageRequest { message_id, .. }=&delegated.trigger {

@@ -18,6 +18,7 @@ pub(crate) fn conversation_background(history: &[std::sync::Arc<ConversationItem
         !item.provenance.is_system()
             && !matches!(item.provenance, Provenance::GoalInstruction { .. })
             && !matches!(&item.provenance, Provenance::ExternalData { source } if source == "current-teammates")
+            && !crate::catalog::family::CollaborationSnapshot::is_item(item)
             && !matches!(item.content, Content::ProviderOnly)
     }).map(|item| {
         let mut item = item.as_ref().clone();
@@ -66,6 +67,7 @@ pub(crate) struct Originals {
     group_of: BTreeMap<String, usize>,
     costs: Vec<(u64, usize, usize)>,
     counter: TokenCounter,
+    required_groups: BTreeSet<usize>,
 }
 impl Originals {
     pub(crate) fn new(history: ConversationHistory, counter: TokenCounter) -> Self {
@@ -151,7 +153,21 @@ impl Originals {
             group_of,
             costs,
             counter,
+            required_groups: BTreeSet::new(),
         }
+    }
+    /// A summary cannot replace the latest typed observation for this branch. Retain
+    /// its original group, with its actual token cost, alongside model-selected history.
+    pub(crate) fn with_collaboration_branch(mut self, branch_id: &str) -> Result<Self, RuntimeError> {
+        for item in self.history.iter().rev() {
+            if let Some(snapshot) = crate::catalog::family::CollaborationSnapshot::from_item(item)? {
+                if snapshot.caller_branch_id == branch_id {
+                    self.required_groups.insert(self.group_of[&item.id]);
+                    break;
+                }
+            }
+        }
+        Ok(self)
     }
     fn group(&self, id: &str) -> Option<usize> {
         self.group_of.get(id).copied().or_else(|| {
@@ -164,11 +180,15 @@ impl Originals {
     pub(crate) fn annotation(&self, id: &str) -> Option<Value> {
         let group = self.group_of.get(id)?;
         let (tokens, media, provider) = self.costs[*group];
-        Some(json!({"retainId":format!("r{}", group + 1),
-            "estimatedTokens":tokens,"unmeasuredMedia":media,"unmeasuredProviderItems":provider}))
+        let mut annotation = json!({"retainId":format!("r{}", group + 1),
+            "estimatedTokens":tokens,"unmeasuredMedia":media,"unmeasuredProviderItems":provider});
+        if self.required_groups.contains(group) {
+            annotation["required"] = json!("latest collaboration observation");
+        }
+        Some(annotation)
     }
     pub(crate) fn select(&self, ids: &[String]) -> Result<ConversationHistory, RuntimeError> {
-        let groups = ids
+        let mut groups = ids
             .iter()
             .map(|id| {
                 self.group(id).ok_or_else(|| {
@@ -176,6 +196,7 @@ impl Originals {
                 })
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
+        groups.extend(self.required_groups.iter().copied());
         let selected: BTreeSet<_> = groups
             .into_iter()
             .flat_map(|group| self.groups[group].iter().copied())

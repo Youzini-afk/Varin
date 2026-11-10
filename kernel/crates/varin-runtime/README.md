@@ -133,9 +133,21 @@ worker retains only its latest compiled prefix under exact epoch/Run/branch/chec
 new steps hydrate the new suffix, while current memory/Goal/policy evidence is freshly projected.
 Navigation, changed checkpoints and worker exit discard the derived cache.
 
-The current-teammates projection is appended last and omitted when empty. It is temporary request data;
-only the exact request snapshot retains it. Delivery acknowledgements consume reports actually included in
-the organizer's completed model exchange. The same indexed lifecycle facts drive current/history UI pages.
+Collaboration awareness is an immutable, low-authority environment observation in original history.
+At an actual model-request boundary, the runtime reads the original family directory and appends a compact
+full snapshot only when its semantic state changes. Ordinary model/tool phases and history-head churn do
+not change it. An initially empty directory is omitted; a transition back to empty is recorded. The prior
+observation stays in place, so unchanged history remains an append-only prefix instead of a replaced tail.
+The ordinary chat timeline omits these context-only records; original history and context inspection keep them.
+Publication uses the existing closed input boundary with epoch/head/checkpoint and cancellation checks,
+then recompiles the context before freezing the request. Navigation/restart compare the last original
+observation visible in that branch's ancestry and effective checkpoint, not a process-local digest.
+
+Only the organizer's completed frozen request acknowledges the exact reports it actually includes; merely
+publishing, preparing, dispatching or failing does not. Typed observations must match original history,
+scope, ancestry and report cursors. Old frozen request-only teammate suffixes remain readable for settlement.
+The original indexed lifecycle facts still drive current/history UI and the existing threads/read_thread
+(and child-specific) tools. No additional task store or tool call is required for automatic awareness.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped
@@ -158,6 +170,12 @@ Summary recipes freeze the previous summary and all original material in the sel
 including originals retained by the preceding checkpoint. Native automatic compaction selects the latest
 complete exchange as its capture boundary. The model returns a summary and original-block references;
 it chooses retention throughout that material, rather than inheriting a predetermined recent suffix.
+The latest full collaboration observation for the branch is mandatory original retention, including its
+token cost; summaries cannot silently erase that baseline. Older observations remain eligible for normal
+original retention, not a second pending-report queue. A completed request acknowledges reports in every
+original observation it actually retains, including superseded executions, rather than only the latest one.
+Parent-to-child background excludes these
+caller-scoped observations, and the child observes its own directory at its own request boundary.
 Offline tokenizer counts accompany each retention group, and the continuation budget covers summary plus
 originals. User message parts and complete provider/tool exchanges share a group. Costs identify
 unmeasured media/provider content and are not provider billing measurements. The original history remains

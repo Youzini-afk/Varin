@@ -437,7 +437,30 @@ pub struct PreparedInputDelivery {
     pub(super) projections: std::collections::BTreeMap<String, Value>,
     pub(super) initial: Vec<HistoryItem>,
     pub(super) replacements: crate::execution::ConversationHistory,
+    pub(in crate::catalog) environment: Option<PreparedEnvironmentDelivery>,
     pub(super) _publication: crate::content::ContentPublication,
+}
+/// An internal observation uses the original closed input boundary, without inventing
+/// an activating input or another queue. Body preparation happens before this commit.
+pub(in crate::catalog) struct PreparedEnvironmentDelivery {
+    pub checkpoint_id: Option<String>,
+    pub item: Option<(std::sync::Arc<crate::execution::ConversationItem>, Value)>,
+}
+impl PreparedInputDelivery {
+    pub(in crate::catalog) fn environment(
+        run: Run,
+        head: Option<String>,
+        checkpoint_id: Option<String>,
+        item: Option<(std::sync::Arc<crate::execution::ConversationItem>, Value)>,
+        publication: crate::content::ContentPublication,
+    ) -> Self {
+        Self {
+            run, head, selected: Vec::new(), items: Vec::new(),
+            projections: Default::default(), initial: Vec::new(), replacements: Vec::new(),
+            environment: Some(PreparedEnvironmentDelivery { checkpoint_id, item }),
+            _publication: publication,
+        }
+    }
 }
 impl InputDeliveryPreparation {
     pub fn load(self) -> Result<PreparedInputDelivery> {
@@ -483,6 +506,7 @@ impl InputDeliveryPreparation {
             projections,
             initial: self.initial,
             replacements,
+            environment: None,
             _publication: self.publication,
         })
     }
@@ -567,7 +591,7 @@ impl Catalog {
         })
     }
 }
-pub(super) fn validate_delivery(
+pub(in crate::catalog) fn validate_delivery(
     db: &Connection,
     run_id: &str,
     epoch: u64,

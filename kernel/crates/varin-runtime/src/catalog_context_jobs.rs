@@ -863,7 +863,8 @@ impl ContextJobRead {
         };
         Ok(ContextJobCompiler {
             originals: recipe.originals.as_ref().map(|reference| self.content.load_items(reference, &|| false)
-                .map(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer.clone()))).transpose()?,
+                .and_then(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer.clone())
+                    .with_collaboration_branch(&recipe.request.branch_id))).transpose()?,
             recent: self.content.load_items(&recipe.recent,&||false)?,
             recipe,
             sources,
@@ -1224,7 +1225,8 @@ impl ContextJobPreparation {
             history.insert(0, prior.into());
         }
         let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
-        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer.clone()).annotate(&mut sources);
+        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer.clone())
+            .with_collaboration_branch(&self.request.branch_id)?.annotate(&mut sources);
         let model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
         let continuation_budget_tokens = if let Some(tokens) = self.request.summary_recipe.continuation_budget_tokens {
             Some(tokens)
@@ -1487,7 +1489,8 @@ impl ContextJobPublication {
         } else { crate::context_retention::Selection::parse(&summary)? };
         let retained = recipe.originals.as_ref().map(|reference| -> Result<_> {
             let counter = recipe.continuation_tokenizer.clone();
-            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter.clone());
+            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter.clone())
+                .with_collaboration_branch(&recipe.request.branch_id)?;
             let items = originals.select_with_sources(&selection.retain, &selection.summary)?;
             crate::execution::validate_history_pairs(&items)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;

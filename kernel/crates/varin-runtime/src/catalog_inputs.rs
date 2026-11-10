@@ -674,10 +674,11 @@ impl Catalog {
             run: captured,
             head,
             selected: queued,
-            items,
+            mut items,
             projections,
             initial,
             replacements,
+            environment,
             _publication,
         } = prepared;
         if captured.epoch != self.epoch {
@@ -686,7 +687,29 @@ impl Catalog {
             ));
         }
         let tx = self.db.transaction()?;
+        if environment.is_some() {
+            let current: Run = record(&tx, "runs", &captured.id)?;
+            fence(&current, captured.epoch)?;
+            if current.cancel_requested {
+                return Err(RuntimeError::DispatchCancelled);
+            }
+        }
         let run = bodies::validate_delivery(&tx, &captured.id, captured.epoch, head.as_deref())?;
+        if let Some(environment) = &environment {
+            if !super::bot::run_permitted(&tx, &run)? {
+                return Err(RuntimeError::BotSuspended);
+            }
+            if has_boundary_inputs(&tx, &run.id)? {
+                return Err(RuntimeError::InputPending);
+            }
+            let checkpoint: Option<String> = tx.query_row(
+                "SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1",
+                [&run.branch_id], |row| row.get(0),
+            ).optional()?;
+            if checkpoint != environment.checkpoint_id {
+                return Ok(None);
+            }
+        }
         if super::observations::next(&tx, &run.id)?.is_some() {
             return Ok(Some(InputBatch::default()));
         }
@@ -732,6 +755,22 @@ impl Catalog {
         }
         for input in queued {
             deliver_projected(&tx, &run, &input, projections.get(&input.id))?;
+        }
+        if let Some((item, reference)) = environment.and_then(|environment| environment.item) {
+            let parent: Option<String> = tx.query_row(
+                "SELECT head FROM branches WHERE id=?1", [&run.branch_id], |row| row.get(0),
+            )?;
+            let stored = HistoryItem {
+                run_id: run.id.clone(), id: item.id.clone(), thread_id: run.thread_id.clone(),
+                parent, source: HistorySource::Environment, content: reference, provider: None,
+            };
+            tx.execute(
+                "INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+                params![stored.id, stored.thread_id, stored.parent, encode(&stored)?, run.id],
+            )?;
+            tx.execute("UPDATE branches SET head=?2 WHERE id=?1", params![run.branch_id, stored.id])?;
+            event(&tx, &run.branch_id, 0, "history.appended", json!({"id":stored.id}))?;
+            items.push(item);
         }
         if let Some(input_id) = superseding {
             let mut statement=tx.prepare("SELECT body FROM model_steps WHERE run_id=?1 AND state IN ('interrupted','failed','cancelled')")?;
@@ -924,3 +963,4 @@ pub use bodies::{
     InputDeliveryPreparation, InputEditPreparation, PreparedInputDelivery, PreparedInputEdit,
     PreparedQueueInput, QueuePreparation, QueuedInputRead,
 };
+pub(in crate::catalog) use bodies::validate_delivery;

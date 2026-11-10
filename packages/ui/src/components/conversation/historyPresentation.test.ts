@@ -123,3 +123,49 @@ it('retains an extras-bearing row for media-only assistant outputs and anchors m
   expect(dialogue.some(part => part.kind === 'process' && part.activities.some(item => item.sourceId === 'image-only'))).toBe(true);
   expect(dialogue.find(part => part.kind === 'text')).toMatchObject({ contentIndex: 0, extrasId: 'mixed' });
 });
+
+
+it('keeps runtime collaboration observations in original history without adding chat or dialogue rows', () => {
+  const base = { parent: null, thread_id: 'thread', run_id: 'run', provider: null };
+  const data = { version: 1, notice: 'Collaboration state observed at this history point.',
+    callerThreadId: 'thread', callerBranchId: 'branch', rootThreadId: 'thread', members: [] };
+  const observation = { ...base, id: 'collaboration-observation:original', source: 'environment', content: {
+    id: 'collaboration-observation:original', provenance: { kind: 'external_data', source: 'collaboration-state' },
+    content: { kind: 'output', output: { data, parts: [] } }, opaque: null, resource_activation: null,
+  } } as ThreadHistoryItem;
+  const history = [
+    { ...base, id: 'before', source: 'assistant', content: { content: { kind: 'text', text: 'Before' } } },
+    observation,
+    { ...base, id: 'after', source: 'assistant', content: { content: { kind: 'text', text: 'After' } } },
+  ] as ThreadHistoryItem[];
+  const original = JSON.stringify(history);
+  const presentation = new HistoryPresentation('collaboration');
+  for (let read = 0; read < 2; read++) {
+    const entries = presentation.project(history, undefined).entries;
+    expect(entries.map(entry => entry.id)).toEqual(['before', 'after']);
+    const dialogue = projectChatDialogue(entries.filter(entry => entry.type === 'message' || entry.type === 'custom_message'));
+    expect(dialogue.map(part => part.kind)).toEqual(['text', 'text']);
+  }
+  expect(JSON.stringify(history)).toBe(original);
+  expect(observation.content).toMatchObject({ content: { output: { data, parts: [] } } });
+});
+
+it('does not hide user content, other environment facts, or unrelated empty outputs', () => {
+  const base = { parent: null, thread_id: 'thread', run_id: 'run', provider: null };
+  const provenance = { kind: 'external_data', source: 'collaboration-state' };
+  const output = { kind: 'output', output: { data: { arbitrary: 'original data' }, parts: [] } };
+  const history = [
+    { ...base, id: 'user', source: 'user', content: { text: 'User text remains visible', provenance, content: output } },
+    { ...base, id: 'agent', source: 'agent', content: { provenance, content: output } },
+    { ...base, id: 'assistant', source: 'assistant', content: { provenance, content: output } },
+    { ...base, id: 'other-environment', source: 'environment', content: { provenance: { kind: 'external_data', source: 'other-state' }, content: output } },
+    { ...base, id: 'other-provenance', source: 'environment', content: { provenance: { kind: 'environment_fact', source: 'collaboration-state' }, content: output } },
+    { ...base, id: 'ordinary-text', source: 'environment', content: { provenance, content: { kind: 'text', text: 'Original environment text' } } },
+    { ...base, id: 'unrelated-empty', source: 'environment', content: { content: output } },
+  ] as ThreadHistoryItem[];
+  const entries = new HistoryPresentation('other-history').project(history, undefined).entries;
+  expect(entries.map(entry => entry.id)).toEqual(history.map(item => item.id));
+  expect(entries[0]).toMatchObject({ message: { role: 'user', content: 'User text remains visible' } });
+  expect(entries[3]).toMatchObject({ message: { role: 'custom', customType: 'environment', display: true } });
+  expect(entries[5]).toMatchObject({ type: 'custom_message', content: 'Original environment text' });
+});

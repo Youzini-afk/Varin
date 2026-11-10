@@ -7,6 +7,14 @@ use crate::execution::{
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
+#[path = "catalog_family_observation.rs"]
+mod observation;
+pub use observation::{
+    CollaborationBranch, CollaborationCodeResult, CollaborationHandoff, CollaborationHandoffState,
+    CollaborationMember, CollaborationReport, CollaborationReportReference, CollaborationSnapshot,
+    CollaborationState, COLLABORATION_STATE_SOURCE,
+};
+
 pub const THREADS_TOOL: &str = "threads";
 pub const READ_TOOL: &str = "read_thread";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
