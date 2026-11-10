@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -30,14 +31,28 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-async function releases() {
+async function releases(hoisted = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-script-recovery-')); roots.push(root);
-  const packageRoot = path.join(repository, 'packages/script-runtime');
+  let packageRoot = path.join(repository, 'packages/script-runtime');
+  if (hoisted) {
+    const installed = path.join(root, 'source/packages/script-runtime');
+    await fs.cp(path.join(packageRoot, 'dist'), path.join(installed, 'dist'), { recursive: true });
+    await fs.copyFile(path.join(packageRoot, 'package.json'), path.join(installed, 'package.json'));
+    await fs.mkdir(path.join(installed, 'node_modules'), { recursive: true });
+    await fs.mkdir(path.join(root, 'source/node_modules'), { recursive: true });
+    const acornRoot = path.dirname(createRequire(path.join(packageRoot, 'package.json')).resolve('acorn/package.json'));
+    await fs.symlink(acornRoot, path.join(root, 'source/node_modules/acorn'), 'junction');
+    packageRoot = installed;
+  }
+  // Preserve the installed evaluator's real runtime dependency, even when the
+  // package manager hoists it above this package's own node_modules directory.
+  const acornRoot = await fs.realpath(path.dirname(createRequire(path.join(packageRoot, 'package.json')).resolve('acorn/package.json')));
   for (const release of ['original', 'current']) {
     const target = path.join(root, release);
     await fs.cp(path.join(packageRoot, 'dist'), path.join(target, 'dist'), { recursive: true });
     await fs.copyFile(path.join(packageRoot, 'package.json'), path.join(target, 'package.json'));
-    await fs.symlink(await fs.realpath(path.join(packageRoot, 'node_modules')), path.join(target, 'node_modules'), 'junction');
+    await fs.mkdir(path.join(target, 'node_modules'), { recursive: true });
+    await fs.symlink(acornRoot, path.join(target, 'node_modules/acorn'), 'junction');
   }
   installation.worker = path.join(root, 'original/dist/worker.js');
   const original = await resolveScriptNodeBinding();
@@ -45,8 +60,8 @@ async function releases() {
   return { root, original };
 }
 
-it('restores the exact retained worker, rejects changed originals, and executes its actual Node entry point', async () => {
-  const { root, original } = await releases();
+it.each([false, true])('restores the exact retained worker, rejects changed originals, and executes its actual Node entry point (hoisted=%s)', async hoisted => {
+  const { root, original } = await releases(hoisted);
   const current = await resolveScriptNodeBinding();
   expect(current.worker_identity).toBe(original.worker_identity);
   expect(current.configuration_identity).not.toBe(original.configuration_identity);
@@ -62,13 +77,21 @@ it('restores the exact retained worker, rejects changed originals, and executes 
   let stderr = ''; child.stderr.on('data', value => { stderr += value; });
   const lines = createInterface({ input: child.stdout });
   const frames = lines[Symbol.asyncIterator]();
+  const next = async () => {
+    const frame = await frames.next();
+    if (frame.done) {
+      const [code, signal] = await closed;
+      throw new Error(`Script worker closed before its next protocol frame (exit=${code}, signal=${signal}). ${stderr || 'No stderr.'}`);
+    }
+    return JSON.parse(frame.value);
+  };
   try {
     child.stdin.write(JSON.stringify({ v: 2, environmentId: 'original', type: 'initialize', bindingIdentity: restored.configuration_identity }) + '\n');
-    expect(JSON.parse((await frames.next()).value!)).toMatchObject({ type: 'ready', bindingIdentity: original.configuration_identity });
+    expect(await next()).toMatchObject({ type: 'ready', bindingIdentity: original.configuration_identity });
     child.stdin.write(JSON.stringify({ v: 2, environmentId: 'original', type: 'eval', cellId: 'new-cell',
       script: 'print(process.argv[1]); await Promise.resolve(42)' }) + '\n');
-    expect(JSON.parse((await frames.next()).value!)).toMatchObject({ type: 'output', part: { kind: 'text', text: original.worker_path } });
-    expect(JSON.parse((await frames.next()).value!)).toMatchObject({ type: 'completed', cellId: 'new-cell', valueText: '42' });
+    expect(await next()).toMatchObject({ type: 'output', part: { kind: 'text', text: original.worker_path } });
+    expect(await next()).toMatchObject({ type: 'completed', cellId: 'new-cell', valueText: '42' });
     child.stdin.end(); expect(await closed).toEqual([0, null]); expect(stderr).toBe('');
   } finally { lines.close(); if (child.exitCode === null) child.kill(); await closed; }
   const saved = JSON.parse(original.configuration_identity);
