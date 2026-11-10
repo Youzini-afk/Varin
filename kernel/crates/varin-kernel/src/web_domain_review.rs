@@ -26,15 +26,27 @@ impl Host {
         Self::with_script("packages/web/application-host/lib/kernel/web-domain-host.test-helper.ts")
     }
     pub(super) fn with_script(script: &str) -> Self {
-        let mut child =
-            Command::new(std::env::var_os("VARIN_NODE").unwrap_or_else(|| "node".into()))
-                .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
-                .args(["--import", "tsx", script])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .unwrap();
+        let mut command =
+            Command::new(std::env::var_os("VARIN_NODE").unwrap_or_else(|| "node".into()));
+        command
+            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
+            .args(["--import", "tsx", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        if let Some(executable) = std::env::var_os("VARIN_TEST_KERNEL_EXECUTABLE") {
+            // Documents starts the real directory watcher through the Host's
+            // launcher. Use the same selected binary as the Rust process owner,
+            // rather than silently starting a second Cargo build in the helper.
+            let executable = PathBuf::from(executable);
+            let executable = if executable.is_absolute() {
+                executable
+            } else {
+                std::env::current_dir().unwrap().join(executable)
+            };
+            command.env("VARIN_KERNEL_PATH", executable);
+        }
+        let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
         let output = child.stdout.take().unwrap();
         let (sender, frames) = mpsc::channel();

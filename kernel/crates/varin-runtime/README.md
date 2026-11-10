@@ -61,11 +61,14 @@ representation. Do not add parallel old-format execution/read paths or a second 
   Format 91 restores missing Responses cache-write counts from retained raw ModelStep/planning receipts
   and their matching existing ledger rows, preserving frozen pricing and settlement identity. Missing
   evidence stays unknown; conversion never creates historical charges or replays execution effects.
-  Format 92 adds Catalog-local typed model references and execution numbering without rewriting
-  original history or receipts. Existing reference spaces are validated and retained rather than reallocated.
-  Format 93 protects frozen quote relations in original input bodies from readers that cannot project
-  them. Format 94 protects the separate frozen source mappings in readable compaction recipes. These
-  guards do not rewrite historical bodies, resource identities, old recipes or idempotency receipts.
+  Format 92 protects frozen quote relations in original input bodies from readers that cannot project
+  them. It does not rewrite historical bodies, resource identities or idempotency receipts.
+  Format 93 adds Catalog-local typed model references and execution numbering. Catalog 92
+  accepts either the quote-only layout with all seven index tables and both external item columns
+  absent, or the complete validated collaboration index. Existing spaces, references and allocation
+  high waters survive unchanged; partial or malformed layouts are rejected before writable recovery.
+  Format 94 protects the separate frozen source mappings in readable compaction recipes. Old recipes
+  keep their original source slicing, quotation and retention semantics without rewriting their bodies.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.

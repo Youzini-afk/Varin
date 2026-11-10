@@ -53,6 +53,7 @@ pub struct RetrievalStatusRead {
 fn activity_arguments(arguments: &Value) -> Value {
     let mut selected = serde_json::Map::new();
     for key in [
+        "ref",
         "path",
         "paths",
         "query",
@@ -102,6 +103,65 @@ fn activity(
     json!({"operationId":operation_id,"callId":call.call_id,"tool":tool,"state":state,"outcome":outcome,"arguments":activity_arguments(arguments)})
 }
 
+/// Cheap reads have canonical call receipts, but intentionally have no Operation.
+/// Pick at most one original call from each producer. The batch/node commit cursor
+/// orders it against durable Operations without decoding any result or history body.
+fn recent_receipt_activity(
+    db: &Connection,
+    content: &crate::content::ContentStore,
+    run_id: &str,
+    after: u64,
+) -> Result<Option<Value>> {
+    // Aggregate batch cursors once rather than searching the Run's event stream
+    // separately for every call. TEXT affinity allows an indexed derived join.
+    // Legacy batches lack request IDs; their latest request follows result-history
+    // commit order, not model admission order.
+    let mut selected: Option<(u64, String, String)> = db.query_row(
+        "WITH batch_commits AS MATERIALIZED (
+           SELECT CAST(json_extract(data,'$.request_id') AS TEXT) AS request_id,max(cursor) AS cursor FROM events
+           WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind')='tool_batch_committed'
+           GROUP BY json_extract(data,'$.request_id')
+         ), calls AS MATERIALIZED (
+           SELECT t.request_id,t.call_id,t.body,t.receipt,h.rowid AS history_rowid,b.cursor AS batch_cursor
+           FROM tool_calls t JOIN model_steps m ON m.id=t.request_id
+           JOIN history h ON h.id=t.request_id||':result:'||t.call_id
+           LEFT JOIN batch_commits b ON b.request_id=t.request_id
+           WHERE m.run_id=?1 AND t.committed=1
+         )
+         SELECT coalesce(t.batch_cursor,
+           CASE WHEN t.request_id=(SELECT request_id FROM calls WHERE batch_cursor IS NULL ORDER BY history_rowid DESC LIMIT 1)
+           THEN (SELECT cursor FROM batch_commits WHERE request_id IS NULL) ELSE 0 END,0) AS committed_cursor,
+           t.body,json_extract(t.receipt,'$.completion') FROM calls t
+         WHERE json_extract(t.receipt,'$.completion.kind') IN ('result','not_dispatched')
+         AND NOT EXISTS(SELECT 1 FROM operations invocation WHERE invocation.id=t.request_id||':tool:'||t.call_id)
+         ORDER BY committed_cursor DESC,t.history_rowid DESC LIMIT 1",
+        [run_id], |row| Ok((read_number(row,0)?,row.get(1)?,row.get(2)?)),
+    ).optional()?;
+    let policy: Option<(u64, String, String)> = db.query_row(
+        "SELECT e.cursor,n.call,json_extract(n.receipt,'$.completion') FROM operations o
+         JOIN policy_graph_nodes n ON n.action_id=o.id JOIN events e ON e.subject=o.id AND e.kind='policy.node_settled' AND json_extract(e.data,'$.node_id')=n.node_id
+         WHERE o.run_id=?1 AND json_extract(n.receipt,'$.completion.kind') IN ('result','not_dispatched')
+         AND NOT EXISTS(SELECT 1 FROM operations invocation WHERE invocation.id=n.action_id||':node:'||n.node_id) ORDER BY e.cursor DESC LIMIT 1",
+        [run_id], |row| Ok((read_number(row,0)?,row.get(1)?,row.get(2)?)),
+    ).optional()?;
+    if let Some(policy) = policy {
+        if selected.as_ref().is_none_or(|current| policy.0 > current.0) {
+            selected = Some(policy);
+        }
+    }
+    let Some((_, call, completion)) = selected.filter(|entry| entry.0 > after) else {
+        return Ok(None);
+    };
+    let completion: result_content::ToolCompletionMetadata = serde_json::from_str(&completion)?;
+    let (state, outcome) = match completion {
+        result_content::ToolCompletionMetadata::Result { outcome, .. } => ("terminal", Some(outcome)),
+        result_content::ToolCompletionMetadata::NotDispatched { .. } => ("not_dispatched", None),
+        result_content::ToolCompletionMetadata::JobAccepted { .. } => unreachable!(),
+    };
+    let call = serde_json::from_str::<tool_content::ToolCallMetadata>(&call)?.load(content)?;
+    Ok(Some(activity(&call, json!(state), json!(outcome), None)))
+}
+
 /// Locate the original assistant text and tool operations using small Catalog metadata first.
 /// Tool-result bodies are never decoded to find activity, and parallel operations stay parallel.
 pub(super) fn execution_progress(
@@ -122,10 +182,12 @@ pub(super) fn execution_progress(
     }).transpose()?;
     let mut actions = Vec::new();
     let mut recent = None;
-    let mut statement = db.prepare("SELECT body FROM operations WHERE run_id=?1 ORDER BY (json_extract(body,'$.phase')!='terminal') DESC,rowid DESC")?;
-    for row in statement.query_map([&run.id], |row| row.get::<_, String>(0))? {
+    let mut recent_cursor = 0;
+    let mut statement = db.prepare("SELECT o.body,(SELECT coalesce(max(cursor),0) FROM events WHERE subject=o.id AND kind='operation.settled') AS settled FROM operations o WHERE o.run_id=?1 ORDER BY (json_extract(o.body,'$.phase')!='terminal') DESC,settled DESC,o.rowid DESC")?;
+    for row in statement.query_map([&run.id], |row| Ok((row.get::<_, String>(0)?, read_number(row,1)?)))? {
         if cancelled() { return Err(RuntimeError::DispatchCancelled); }
-        let operation: Operation = serde_json::from_str(&row?)?;
+        let (body, cursor) = row?;
+        let operation: Operation = serde_json::from_str(&body)?;
         // JobAccepted acknowledges admission, not executor completion. The original
         // operation remains live until its owner commits a terminal phase.
         let active = operation.phase != OperationPhase::Terminal;
@@ -134,7 +196,13 @@ pub(super) fn execution_progress(
         let call = intent.call().clone().load(content)?;
         let mut value = activity(&call, json!(operation.phase), json!(operation.outcome), Some(&operation.id));
         if let Some(wait) = &operation.waiting_on { value["waitingOn"] = json!(wait); }
-        if active { actions.push(value); } else { recent = Some(value); }
+        if active { actions.push(value); } else { recent = Some(value); recent_cursor = cursor; }
+    }
+    if actions.is_empty() {
+        if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+        if let Some(receipt) = recent_receipt_activity(db, content, &run.id, recent_cursor)? {
+            recent = Some(receipt);
+        }
     }
     let mut waits = Vec::new();
     let mut statement = db.prepare("SELECT body FROM waits WHERE run_id=?1 AND coalesce(json_extract(body,'$.cancelled'),0)=0 AND json_extract(body,'$.trigger_cursor') IS NULL ORDER BY rowid")?;

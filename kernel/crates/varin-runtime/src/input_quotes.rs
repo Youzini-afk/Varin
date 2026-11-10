@@ -363,6 +363,7 @@ impl Projection<'_> {
             self.parts.push((
                 Content::Output {
                     output: OutputBody {
+                        model_data: None,
                         data: Value::Null,
                         model_data: None,
                         parts: vec![OutputPart::Attachment {

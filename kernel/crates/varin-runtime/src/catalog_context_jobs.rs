@@ -1808,9 +1808,12 @@ mod presentation_tests {
                 .map(|reference|reference["content_object"].as_str().unwrap().to_owned()).collect();
             let reference = db.content.save_with_dependencies(&recipe, dependencies).unwrap();
             db.db.execute("UPDATE context_jobs SET recipe=?1,plan_hash=?2 WHERE run_id=?3",params![encode(&reference).unwrap(),recipe.plan_hash,job.receipt.run_id]).unwrap();
+            db.db.pragma_update(None, "user_version", 93).unwrap();
             drop(read);
             drop(db);
             let db = Catalog::open(&root.0).unwrap();
+            assert_eq!(db.db.pragma_query_value(None, "user_version", |row| row.get::<_,i64>(0)).unwrap(), FORMAT);
+            assert_eq!(db.db.query_row("SELECT recipe FROM context_jobs WHERE run_id=?1", [&job.receipt.run_id], |row| row.get::<_,String>(0)).unwrap(), encode(&reference).unwrap());
             let compiler = db.capture_context_job(&job.receipt.run_id).unwrap().compiler().unwrap();
             assert!(compiler.recipe.source_materials.is_none());
             let node = compiler.plan().nodes()[0].id.clone();

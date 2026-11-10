@@ -13,9 +13,10 @@ const UPGRADES: &[Upgrade] = &[
     // Earlier readers must not ignore that mapping and reinterpret offsets/retention groups.
     // Existing recipes retain their exact optional-field-free semantics.
     Upgrade { from: 93, to: 94, convert: |_, _| Ok(()) },
-    // Quote-aware input readers must remain installed after accepting frozen quote relations.
-    Upgrade { from: 92, to: 93, convert: |_, _| Ok(()) },
-    Upgrade { from: 91, to: 92, convert: |tx, _| model_references::upgrade(tx) },
+    Upgrade { from: 92, to: 93, convert: |tx, _| model_references::upgrade(tx) },
+    // Frozen quote relations live in the original input bodies. Older readers must not
+    // silently omit their model projection; historical bodies and receipts stay unchanged.
+    Upgrade { from: 91, to: 92, convert: |_, _| Ok(()) },
     Upgrade { from: 90, to: 91, convert: |tx, _| usage_ledger::upgrade_responses_cache_writes(tx) },
     // Existing launches have no extension admission marker and keep their exact semantics.
     // Only newly admitted automatic roots use the field; old readers must reject it.

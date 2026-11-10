@@ -1435,3 +1435,42 @@ fn exact_agent_source_and_admitted_dispatch_source_survive_a_later_run() {
     assert!(db.freeze_dispatch_agent_source(&caller,&input).is_err(),"original selector cannot change on retry");
     drop(db);std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn overview_recent_operation_keeps_completion_order_and_original_identity() {
+    let mut f=Fixture::new(); let child=f.accept(); f.settle_exchange();
+    f.db.fail_child_preparation(&child.operation_id,"source unavailable").unwrap();
+    f.db.mark_child_resources_released(&child.execution_id).unwrap();
+    let owner=std::sync::Mutex::new(f.db);
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    f.db=owner.into_inner().unwrap();
+    let first=f.admit_policy_call(ToolCall{call_id:"admitted-first".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"admitted-first"})});
+    f.settle_policy_call(&first,"running");
+    let second=f.admit_policy_call_with_contract(
+        ToolCall{call_id:"admitted-second".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"admitted-second"})},
+        ToolContract{name:"file_read".into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Result,lifetime:Lifetime::Call,resources:vec![]});
+    f.db.commit_execution(&second.run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:second.clone(),executor_stopped:true,
+        completion:ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:json!({"text":"original result"}).into()}}).unwrap();
+    let ToolOrigin::PolicyAction{action_id,node_id}=&second.origin else {unreachable!()};
+    let completion=f.db.capture_call_completion(&second.operation_id).unwrap().load().unwrap();
+    f.db.settle_policy_node(&second.run_id,f.db.epoch(),action_id,node_id,&completion).unwrap();
+    f.db.settle_operation(&first.operation_id,f.db.epoch(),Outcome::Succeeded,Effect::None,json!({"text":"first job completed last"})).unwrap();
+    let progress=f.db.capture_execution_progress(&f.context.run_id).unwrap().load(&||false).unwrap();
+    assert_eq!(progress["actions"],json!([]));
+    assert_eq!(progress["latestAction"]["operationId"],first.operation_id);
+    assert_eq!(progress["latestAction"]["arguments"]["path"],"admitted-first");
+    let third=f.admit_policy_call_with_contract(
+        ToolCall{call_id:"final-read".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"final"})},
+        ToolContract{name:"file_read".into(),schema_version:"1".into(),read_only:true,completion:CompletionKind::Result,lifetime:Lifetime::Call,resources:vec![]});
+    f.db.commit_execution(&third.run_id,f.db.epoch(),&ExecutionRecord::ToolSettled{context:third.clone(),executor_stopped:true,
+        completion:ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,content:json!({"text":"final result"}).into()}}).unwrap();
+    let ToolOrigin::PolicyAction{action_id,node_id}=&third.origin else {unreachable!()};
+    let completion=f.db.capture_call_completion(&third.operation_id).unwrap().load().unwrap();
+    f.db.settle_policy_node(&third.run_id,f.db.epoch(),action_id,node_id,&completion).unwrap();
+    let progress=f.db.capture_execution_progress(&f.context.run_id).unwrap().load(&||false).unwrap();
+    assert_eq!(progress["latestAction"]["operationId"],third.operation_id,"policy receipt must not replace its canonical Operation");
+    let root=f.root.clone();let run=f.context.run_id.clone();drop(f);
+    let db=Catalog::open(&root).unwrap();
+    assert_eq!(db.capture_execution_progress(&run).unwrap().load(&||false).unwrap()["latestAction"],progress["latestAction"]);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}
