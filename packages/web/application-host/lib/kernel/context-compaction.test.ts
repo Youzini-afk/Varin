@@ -186,6 +186,6 @@ it('native material mappings stay private while the existing v1 service keeps ex
   await old.replacement.finalize(); f.route();
   const lease = (await f.owner.prepare(scope, native, signal()))!;
   expect(lease.candidate.plan).toMatchObject({ sourceCutHash: native.sourceCutHash, nodes: [{ inputs: [{ range: { start: 1, end: 4 } }] }] });
-  expect(native.sources[0]!.material.historyItemId).toBe('private-original');
+  expect(native.sources[0]!.material!.historyItemId).toBe('private-original');
   lease.release();
 });

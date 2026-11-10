@@ -1301,7 +1301,7 @@ fn stopped_process_projects_each_business_part_once_and_keeps_original_receipt()
     assert!(reference.starts_with("proc:"));
     let target = f.db.resolve_model_reference(varin_runtime::catalog::model_references::ReferenceKind::Process, &reference).unwrap();
     assert_eq!(target.target["operationId"], f.process);
-    let read = f.db.capture_family_read("thread", None, None).unwrap().output(
+    let read = f.db.capture_family_read("thread", Some("thread"), Some("branch")).unwrap().output(
         varin_runtime::catalog::family::OutputRequest { run_id: None, anchor: None,
             item_id: delivered.items[0].id.clone(), pointer: "/model_data/processes/0/result".into(), offset: None, max_bytes: None }, &||false).unwrap();
     assert!(read.to_string().contains("business-log-id"));
