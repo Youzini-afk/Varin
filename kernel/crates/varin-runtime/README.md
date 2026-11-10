@@ -218,3 +218,16 @@ Use [development guidance](../../../docs/development.md) and repository scripts 
 checks from the behavior changed; documentation-only consolidation does not require a runtime build.
 Keep unresolved external effects, platform limits and unexecuted acceptance explicit rather than
 substituting test counts for coverage.
+
+## Quoted user input
+
+Frozen quote objects and exact original UTF-16 occurrences live in the existing user-input
+ContentStore payload. `input_quotes.rs` validates object/range bindings and performs the single
+ordered native model projection. Selected text is not truncated; repeated occurrences deliver one
+copy per input. Source metadata stays in history, while quoted assistant/tool material retains
+external-data provenance. Images/files keep the existing media dependencies and attachment delivery
+edges. UI snapshots named by structured quote sources remain roots in the original retention graph.
+
+Raw receipt identity can omit prepared resource descriptors, but admission cannot. Queues, User
+messages, history forks and reopen consume the same immutable input. Message/plain-text edits retain
+selected objects and clear stale positions; they preserve original message routing and receipts.

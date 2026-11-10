@@ -451,8 +451,22 @@ impl ExternalPreparation {
                 for file in &files { file.validate()?; }
                 if input.get("text").and_then(Value::as_str).is_none_or(|text| text.trim().is_empty())
                     && input.get("images").and_then(Value::as_array).is_none_or(Vec::is_empty)
-                    && files.is_empty() {
+                    && files.is_empty() && input.get("contentReferences").and_then(Value::as_array).is_none_or(Vec::is_empty) {
                     return Err(RuntimeError::Invalid("external input requires text, an image or an attachment".into()));
+                }
+                if input.get("contentReferences").is_some() || input.get("contentReferenceOccurrences").is_some() {
+                    let mut quoted = json!({"text":input["text"], "fileAttachments":files});
+                    for field in ["contentReferences", "contentReferenceOccurrences"] { if let Some(value) = input.get(field) { quoted[field] = value.clone(); } }
+                    if let Some(images) = input.get("images").and_then(Value::as_array) {
+                        quoted["attachments"] = json!(images.iter().map(|image| json!({"media_type":image["mimeType"],"data_base64":image["data"]})).collect::<Vec<_>>());
+                        if images.iter().any(|image| image.get("reference").is_some()) {
+                            let mut next = images.iter().filter_map(|image|image["reference"].as_u64()).max().unwrap_or(0);
+                            quoted["imageReferences"] = json!(images.iter().map(|image|image["reference"].as_u64().unwrap_or_else(|| { next += 1; next })).collect::<Vec<_>>());
+                        }
+                    }
+                    // External file-image bytes are prepared by the original Harness adapter.
+                    // Validate fixed selections/ranges here, without creating a native Run.
+                    crate::input_quotes::validate_intent(&quoted)?;
                 }
                 Some(self.content.save(input)?)
             },
@@ -497,8 +511,10 @@ impl ExternalRead {
             let mut texts = Vec::new();
             let mut messages = Vec::new();
             let mut images = Vec::new();
+            let mut quote_text_offset = 0usize;
             for (index, message) in inputs.into_iter().enumerate() {
                 if let Some(text) = message["text"].as_str() {
+                    if index < primary { quote_text_offset += text.encode_utf16().count() + 2; }
                     texts.push(text.to_owned());
                 }
                 if let Some(media)=message["images"].as_array() {images.extend(media.iter().cloned());}
@@ -510,6 +526,7 @@ impl ExternalRead {
                     .cloned()
                     .unwrap_or_else(|| input["text"].clone());
                 input["text"] = json!(texts.join("\n\n"));
+                if input.get("contentReferenceOccurrences").is_some() { input["_quoteTextOffset"] = json!(quote_text_offset); }
                 input["messages"] = json!(messages);
                 if !images.is_empty() {
                     input["images"]=json!(images);

@@ -370,9 +370,8 @@ it('merges file attachments with object/skill input and replays without reading 
   expect(f.runtime.submit.mock.calls[0]![0]).toMatchObject({ input: { userText: text, references, skills, fileAttachments: [file], imageReferences: [4, 3],
     referenceIntent: { text, attachmentSelections: input.attachments, originalImageCount: 1 },
     attachments: [...attachments, { media_type: 'image/png', data_base64: Buffer.from('file').toString('base64') }] }, inputPreparation: { skills: [{ resourceId: skill.id }] } });
-  // The Host resolves selection references into the admitted image order. The
-  // transient attachment map is not part of the native InputContent contract.
-  expect(f.runtime.submit.mock.calls[0]![0].input).not.toHaveProperty('attachmentImageReferences');
+  // The fixed file/media binding is retained for edit recovery without duplicating bytes.
+  expect(f.runtime.submit.mock.calls[0]![0].input).toHaveProperty('attachmentImageReferences', { 'attachment:fixed': 3 });
   f.runtime.inputReceipt.mockResolvedValue(f.submitReceipt);
   prepare.mockRejectedValue(new Error('Original source is unavailable'));
   expect(await f.adapter.submit(input)).toEqual(f.submitReceipt);
@@ -400,4 +399,42 @@ it('keeps omitted image edits as native-owner retention, including adding a skil
   expect(f.runtime.editInput.mock.calls[1]![0]).toMatchObject({ content: { text, references, referenceIntent, skills },
     inputPreparation: { skills: [{ resourceId: descriptor.id }] } });
   expect(f.runtime.editInput.mock.calls[1]![0].content).not.toHaveProperty('attachments');
+});
+
+it('admits frozen quotes with original skill ranges and reuses accepted file intent without recapturing', async () => {
+  const f = await fixture();
+  const text = '[引用点1] then /skill:review';
+  const skill = f.a.snapshot.skills.find(item => item.name === 'review')!;
+  const quote = { ref: 'private-source', title: '引用点1', number: 1, label: 'Varin', text: 'selected\nfull content', attachment: { ref: 'attachment:selected' },
+    source: { kind: 'chat' as const, thread: identity, passages: [{ entryId: 'original-entry', start: 0, text: 'selected\nfull content' }] } };
+  const contentReferenceOccurrences = [{ kind: 'content' as const, ref: quote.ref, start: 0, end: 6 }];
+  const file = { ref: 'attachment:fixed', filename: 'data.csv', mimeType: 'text/csv', byteLength: 4 };
+  const prepare = vi.fn(async () => [file]);
+  f.adapter.bindAttachments({ prepare } as unknown as import('./thread-attachments.js').ThreadAttachmentOwner);
+  const input = { ...identity, key: 'quoted-skill', expectedHead: null, model, text, contentReferences: [quote], contentReferenceOccurrences,
+    skills: [{ resourceId: skill.id, version: skill.reference.version, start: text.indexOf('/skill:'), end: text.length }] };
+  await f.adapter.submit(input);
+  const admitted = f.runtime.submit.mock.calls[0]![0];
+  expect(admitted.input).toMatchObject({ text, contentReferences: [{ ...quote, attachmentRef: file.ref }], contentReferenceOccurrences,
+    fileAttachments: [file], referenceIntent: { text, attachmentSelections: [{ ref: 'attachment:selected' }], originalImageCount: 0 } });
+  expect(admitted.inputPreparation).toMatchObject({ skills: [{ resourceId: skill.id }] });
+  expect((admitted.input as { text: string }).text).not.toContain('selected\nfull content');
+  expect(input.contentReferences[0]).not.toHaveProperty('attachmentRef');
+  f.runtime.inputReceipt.mockResolvedValue(f.submitReceipt);
+  prepare.mockRejectedValue(new Error('Source must not be read on accepted retry'));
+  expect(await f.adapter.submit(input)).toEqual(f.submitReceipt);
+  expect(prepare).toHaveBeenCalledTimes(1);
+});
+
+it('preserves original quotes through queue promotion and text-only queue edits', async () => {
+  const f = await fixture();
+  const contentReferences = [{ ref: 'quote', title: '引用点1', number: 1, text: 'frozen', source: { kind: 'chat' as const, thread: identity, passages: [] } }];
+  const contentReferenceOccurrences = [{ kind: 'content' as const, ref: 'quote', start: 0, end: 6 }];
+  await f.adapter.enqueue({ ...identity, key: 'quoted-queue', text: '[引用点1]', mode: 'next_run', contentReferences, contentReferenceOccurrences });
+  expect(f.runtime.enqueue.mock.calls[0]![0].input).toMatchObject({ text: '[引用点1]', contentReferences, contentReferenceOccurrences });
+  f.queued.content = structuredClone(f.runtime.enqueue.mock.calls[0]![0].input);
+  await f.adapter.sendInputNow(f.queued.id, 1, f.run.id);
+  expect(f.runtime.sendInputNow).toHaveBeenCalledExactlyOnceWith(f.queued.id, 1, f.run.id, undefined);
+  await f.adapter.editInput(f.queued.id, 1, 'rewritten without markers');
+  expect(f.runtime.editInput.mock.calls[0]![0].content).toMatchObject({ text: 'rewritten without markers', contentReferences, contentReferenceOccurrences: [] });
 });

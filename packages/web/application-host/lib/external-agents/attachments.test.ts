@@ -49,3 +49,18 @@ it('rejects mixed selectors and owner-controlled fields', () => {
   for (const invalid of [[{ ref: file.ref, path: 'other' }], [{ ref: file.ref, filename: 'forged' }], [{ path: '' }]])
     expect(() => parseExternalAttachmentSelections(invalid)).toThrow();
 });
+
+it('projects frozen quotes without private metadata and maps reordered native images to the same numbers', async () => {
+  const text = '[引用点1] [图片9] then [图片2] and [引用点1]';
+  const input = await prepareHarnessInput({ text,
+    contentReferences: [{ ref: 'private-source', title: '引用点1', number: 1, label: 'Varin', text: 'fixed complete sentence', source: { kind: 'chat', thread: { runtime: 'agent', threadId: 'private-thread', branchId: 'private-branch' }, passages: [] } }],
+    contentReferenceOccurrences: [{ kind: 'content', ref: 'private-source', start: 0, end: 6 }, { kind: 'image', reference: 9, start: 7, end: 12 }, { kind: 'image', reference: 2, start: 18, end: 23 }, { kind: 'content', ref: 'private-source', start: 28, end: 34 }],
+    images: [{ mimeType: 'image/png', data: 'dHdv', reference: 2 }, { mimeType: 'image/png', data: 'bmluZQ==', reference: 9 }] }, conversation,
+    { images: true, files: 'paths', models: [], resume: true, steering: false });
+  expect(input.text.match(/fixed complete sentence/g)).toHaveLength(1);
+  expect(input.images?.map(image => image.data)).toEqual(['bmluZQ==', 'dHdv']);
+  expect(input.text).toContain('Attached image 1: [Image 9] / [图片9]');
+  expect(input.text).not.toContain('private');
+  expect(input).not.toHaveProperty('contentReferences');
+  expect(input).not.toHaveProperty('contentReferenceOccurrences');
+});

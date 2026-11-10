@@ -285,6 +285,8 @@ impl Read {
                 message: MessageView {
                     summary: message_summary,
                     text: original.input.text,
+                    content_references: original.user_content.as_ref().and_then(|value| value.get("contentReferences")).cloned(),
+                    content_reference_occurrences: original.user_content.as_ref().and_then(|value| value.get("contentReferenceOccurrences")).cloned(),
                 },
                 code_exchange_operation_id: exchange,
             });

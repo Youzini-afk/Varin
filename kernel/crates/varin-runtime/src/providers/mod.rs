@@ -753,6 +753,10 @@ fn evidence_parts<'a>(
     parts
 }
 fn media_label(media: &crate::output::ResolvedMedia) -> String {
+    // The input owner retains its source identity; it is not useful model context.
+    if matches!(&media.source, crate::output::OutputSource::Conversation { provenance: Provenance::UserInstruction { .. } }) {
+        return "User-provided image.".into();
+    }
     format!(
         "Media source: {}",
         serde_json::to_string(&media.source).expect("typed media source")

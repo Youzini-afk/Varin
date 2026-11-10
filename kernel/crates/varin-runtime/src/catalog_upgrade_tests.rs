@@ -733,7 +733,7 @@ fn catalog_upgrade_v89_preserves_exact_launch_and_receipts_without_new_admission
     assert_eq!(inspect_catalog_format(&raw).unwrap(), 89);
     assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
     apply(&mut raw, 89, &content).unwrap();
-    assert_eq!(inspect_catalog_format(&raw).unwrap(), 90);
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), FORMAT);
     assert_eq!(raw.query_row("SELECT body FROM run_launches WHERE id='run'", [], |row|row.get::<_,String>(0)).unwrap(), original_launch);
     assert_eq!(raw.query_row("SELECT intent,receipt FROM commands WHERE id='original-command'", [], |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).unwrap(), original_receipt);
     assert_eq!(raw.query_row("SELECT body FROM operations WHERE id='effect'", [], |row|row.get::<_,String>(0)).unwrap(), original_effect);

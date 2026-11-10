@@ -6,7 +6,7 @@ import { parseThreadSkills } from './thread-skill-input.js';
 import { parseThreadSourceFileOptions } from './thread-source-files.js';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
-import { threadSourceFailureMessage } from '@varin/application-client';
+import { parseContentReferenceInput, type ContentReferenceInput, threadSourceFailureMessage } from '@varin/application-client';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
 import type { OutputMediaHolder } from '@varin/protocol';
@@ -161,7 +161,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'clientTime', 'skills', 'references'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'clientTime', 'skills', 'references', 'contentReferences', 'contentReferenceOccurrences'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
@@ -207,13 +207,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime', 'skills', 'references'],
+    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime', 'skills', 'references', 'contentReferences', 'contentReferenceOccurrences'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
-    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'mode', 'clientTime', 'skills', 'references'],
-    'input/edit': ['inputId', 'expectedRevision', 'text', 'images', 'skills'], 'input/cancel': ['inputId', 'expectedRevision'],
+    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'mode', 'clientTime', 'skills', 'references', 'contentReferences', 'contentReferenceOccurrences'],
+    'input/edit': ['inputId', 'expectedRevision', 'text', 'images', 'skills', 'contentReferences', 'contentReferenceOccurrences'], 'input/cancel': ['inputId', 'expectedRevision'],
     'input/send-now': ['inputId', 'expectedRevision', 'expectedRunId'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -364,10 +364,12 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('messages/send', (body, signal) => {
     const request = object(body.request);
-    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments', 'afterCurrent'].includes(key))) throw new Error('Invalid message field');
+    if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments', 'afterCurrent', 'contentReferences', 'contentReferenceOccurrences', 'attachmentImageReferences'].includes(key))) throw new Error('Invalid message field');
     if (request.afterCurrent !== undefined && typeof request.afterCurrent !== 'boolean') throw new Error('Invalid message timing');
     if ((request.kind !== 'inform' && request.kind !== 'request') || typeof request.text !== 'string') throw new Error('Invalid message content');
     return adapter.sendMessage(identity(body), { key: text(request.key), kind: request.kind, text: request.text,
+      ...parseContentReferenceInput(request as ContentReferenceInput, request.text),
+      ...(request.attachmentImageReferences === undefined ? {} : { attachmentImageReferences: parseAttachmentImageReferences(request.attachmentImageReferences)! }),
       ...(request.afterCurrent === undefined ? {} : { afterCurrent: request.afterCurrent as boolean }),
       ...(request.attachments === undefined ? {} : { attachments: parseAttachmentSelections(request.attachments)! }),
       ...(request.targetThreadId === undefined ? {} : { targetThreadId: text(request.targetThreadId) }),
@@ -442,7 +444,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         ...(images === undefined ? {} : { images }), ...(attachmentImageReferences === undefined ? {} : { attachmentImageReferences }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
-        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }) };
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }), ...parseContentReferenceInput(body as ContentReferenceInput, body.text as string) };
     });
     return adapter.continueChild(input, signal);
   });
@@ -620,9 +622,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const attachmentImageReferences = parseAttachmentImageReferences(body.attachmentImageReferences, images);
       const materials = parseThreadMaterials(body.materials);
       const attachments = parseAttachmentSelections(body.attachments);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length && !(Array.isArray(body.contentReferences) && body.contentReferences.length))) throw new Error('Text, images or materials are required');
       const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(attachmentImageReferences === undefined ? {} : { attachmentImageReferences }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
-        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }),
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }), ...parseContentReferenceInput(body as ContentReferenceInput, body.text as string),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
@@ -653,9 +655,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const attachmentImageReferences = parseAttachmentImageReferences(body.attachmentImageReferences, images);
       const materials = parseThreadMaterials(body.materials);
       const attachments = parseAttachmentSelections(body.attachments);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length && !(Array.isArray(body.contentReferences) && body.contentReferences.length))) throw new Error('Text, images or materials are required');
       return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(attachmentImageReferences === undefined ? {} : { attachmentImageReferences }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
-        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }),
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }), ...parseContentReferenceInput(body as ContentReferenceInput, body.text as string),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
     });
     return adapter.enqueue(input);
@@ -666,7 +668,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   }, signal));
   post('input/edit', (body, signal) => {
     if (typeof body.text !== 'string') throw new Error('Input text must be a string');
-    return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal, parseThreadSkills(body.skills, body.text));
+    return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal, parseThreadSkills(body.skills, body.text), body.contentReferences === undefined && body.contentReferenceOccurrences === undefined ? undefined : parseContentReferenceInput(body as ContentReferenceInput, body.text));
   });
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
   post('input/send-now', (body, signal) => adapter.sendInputNow(text(body.inputId), revision(body.expectedRevision), text(body.expectedRunId), signal));

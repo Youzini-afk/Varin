@@ -3158,3 +3158,30 @@ fn unsupported_provider_image_keeps_the_delivered_file_without_claiming_vision()
         assert_eq!(user,original);
     }
 }
+
+#[test]
+fn quoted_input_uses_ordered_native_projection_in_every_media_provider() {
+    let raw = json!({"text":"before [引用点1] between [图片2] after [引用点1]",
+        "contentReferences":[{"ref":"private-quote-id","number":1,"title":"quote","label":"Varin","text":"fixed selected sentence",
+            "source":{"kind":"chat","thread":{"runtime":"agent","threadId":"private-source-thread","branchId":"private-source-branch"},"passages":[]}}],
+        "contentReferenceOccurrences":[{"kind":"content","ref":"private-quote-id","start":7,"end":13},{"kind":"image","reference":2,"start":22,"end":27},{"kind":"content","ref":"private-quote-id","start":34,"end":40}],
+        "attachments":[{"media_type":"image/png","data_base64":MEDIA_PNG}],"imageReferences":[2]});
+    let admitted = crate::output::admit_user_input("private-input-id", &raw).unwrap();
+    for family in MEDIA_FAMILIES {
+        let mut request = view(family);
+        request.history = crate::input_quotes::project(&admitted).unwrap().unwrap().into_iter().enumerate().map(|(index,(content, material))| Arc::new(ConversationItem {
+            id: format!("private-input-id:{index}"), resource_activation: None, opaque: None,
+            provenance: if material { Provenance::ExternalData { source:"quoted-content".into() } } else { Provenance::UserInstruction { input_id:"private-input-id".into() } }, content,
+        })).collect();
+        let wire = media_provider(family, true).serialize(&request, None).unwrap().to_value().to_string();
+        assert_eq!(wire.matches("fixed selected sentence").count(), 1, "{family}");
+        assert_eq!(wire.matches(MEDIA_PNG).count(), 1, "{family}");
+        for hidden in ["private-quote-id","private-source-thread","private-source-branch","private-input-id","contentReferences"] {
+            assert!(!wire.contains(hidden), "{family} exposed {hidden}");
+        }
+        let quote = wire.find("fixed selected sentence").unwrap();
+        let media = wire.find(MEDIA_PNG).unwrap();
+        assert!(quote < media, "{family} must preserve quote/image order");
+        assert!(wire[media..].contains("after"), "{family} must preserve trailing user text");
+    }
+}

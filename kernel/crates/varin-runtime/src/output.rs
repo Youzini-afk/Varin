@@ -499,6 +499,8 @@ struct InputReferenceIntent {
     attachment_selections: Vec<crate::catalog::attachments::AttachmentSelection>,
     #[serde(default)]
     original_image_count: Option<usize>,
+    #[serde(default)]
+    attachment_image_references: std::collections::BTreeMap<String, u64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -514,7 +516,17 @@ pub(crate) fn validate_user_metadata(input: &Value) -> Result<(), crate::catalog
 
 // Only the native queued-input edit owner may supply its previously accepted content.
 // This changes count validation, never accepts stored media references as fresh input.
-pub(crate) fn validate_user_metadata_with_retained_media(input: &Value, previous: Option<&Value>) -> Result<(), crate::catalog::RuntimeError> {
+pub(crate) fn validate_user_metadata_with_retained_media(input: &Value, previous: Option<&Value>) -> Result<(), crate::catalog::RuntimeError> { validate_user_metadata_inner(input, previous, true) }
+fn validate_user_metadata_inner(input: &Value, previous: Option<&Value>, prepared: bool) -> Result<(), crate::catalog::RuntimeError> {
+    if prepared { crate::input_quotes::validate(input, previous)?; } else { crate::input_quotes::validate_intent(input)?; }
+    if let Some(value) = input.get("attachmentImageReferences").filter(|_| prepared) {
+        let references: std::collections::BTreeMap<String, u64> = serde_json::from_value(value.clone())?;
+        let files = crate::catalog::attachments::input_attachments(input)?;
+        let mut seen = std::collections::HashSet::new();
+        if references.iter().any(|(id, number)| *number == 0 || !files.iter().any(|file| &file.reference == id && file.mime_type.starts_with("image/")) || !seen.insert(number)) {
+            return Err(crate::catalog::RuntimeError::Invalid("attachment image bindings require the original file and media owners".into()));
+        }
+    }
     if let Some(value) = input.get("userText") {
         let valid = value.as_str().zip(input.get("text").and_then(Value::as_str))
             .is_some_and(|(original, text)| text.starts_with(original));
@@ -529,8 +541,9 @@ pub(crate) fn validate_user_metadata_with_retained_media(input: &Value, previous
         let image_count = input.get("attachments").or_else(|| previous.and_then(|value| value.get("attachments")))
             .and_then(Value::as_array).map_or(0, Vec::len);
         if original != Some(intent.text.as_str())
-            || !input.get("references").and_then(Value::as_array).is_some_and(|references| !references.is_empty())
+            || !["references", "contentReferences", "contentReferenceOccurrences"].iter().any(|key| input.get(*key).and_then(Value::as_array).is_some_and(|references| !references.is_empty()))
             || intent.materials.iter().any(|material| material.snapshot_id.trim().is_empty())
+            || intent.attachment_image_references.iter().any(|(id, number)| id.trim().is_empty() || *number == 0)
             || intent.attachment_selections.is_empty() != intent.original_image_count.is_none()
             || intent.original_image_count.is_some_and(|count| count > image_count) {
             return Err(crate::catalog::RuntimeError::Invalid("reference intent must identify original text, references and material selectors".into()));
@@ -576,6 +589,9 @@ pub(crate) fn admit_user_input_with_retained_media(
     previous: Option<&Value>,
 ) -> Result<Value, crate::catalog::RuntimeError> {
     validate_user_metadata_with_retained_media(input, previous)?;
+    admit_input_media(input_id, input)
+}
+fn admit_input_media(input_id: &str, input: &Value) -> Result<Value, crate::catalog::RuntimeError> {
     image_references(input)?;
     let mut value = input.clone();
     if let Some(attachments) = value.get_mut("attachments") {
@@ -629,7 +645,10 @@ impl crate::content::ContentStore {
         input_id: &str,
         input: &Value,
     ) -> Result<Value, crate::catalog::RuntimeError> {
-        let mut value = admit_user_input(input_id, input)?;
+        // Identity comparison precedes resource preparation. It validates raw selectors and
+        // original ranges, but never treats absent prepared descriptors as accepted media.
+        validate_user_metadata_inner(input, None, false)?;
+        let mut value = admit_input_media(input_id, input)?;
         // The first admitted clock observation is retained with history. A retry's
         // new observation or changed time-display preference is not a new user intent.
         if let Some(object) = value.as_object_mut() {
@@ -638,10 +657,14 @@ impl crate::content::ContentStore {
             // and material descriptions must not rewrite an already accepted retry.
             if let Some(text) = object.get("referenceIntent").and_then(|intent| intent.get("text")).cloned() {
                 object.insert("text".into(), text);
+                if let Some(references) = object.get_mut("contentReferences").and_then(Value::as_array_mut) {
+                    for reference in references { if let Some(reference) = reference.as_object_mut() { reference.remove("attachmentRef"); } }
+                }
                 if let Some(count) = object.get("referenceIntent").and_then(|intent| intent.get("originalImageCount")).and_then(Value::as_u64) {
                     // File descriptors and their automatically rendered vision media are frozen
                     // material, not a second identity for the same original attachment selectors.
                     object.remove("fileAttachments");
+                    object.remove("attachmentImageReferences");
                     if count == 0 { object.remove("attachments"); object.remove("imageReferences"); }
                     else {
                         if let Some(images) = object.get_mut("attachments").and_then(Value::as_array_mut) { images.truncate(count as usize); }

@@ -439,3 +439,19 @@ of the resulting installation lifecycle.
 `plugin-install-intent` parses public npm/GitHub release links and retains navigation until the plugin
 page mounts. It grants no code trust, capability, install or execution permission. Native and web entries
 publish the same intention; local filesystem locations and credentials are not valid public install links.
+
+## Frozen chat quotes
+
+Native submission, queue input, child continuation and User messages accept `contentReferences`
+plus `contentReferenceOccurrences`. Each occurrence binds a quote `ref` or frozen image `reference`
+to an exact UTF-16 range in the original draft. Plain marker-shaped text is not a binding. The Host
+validates selections before asynchronous preparation; source metadata remains history/navigation
+context and never grants file access. Captured images and files use the existing attachment owners.
+Native model projection happens once in Rust and keeps text/media order without exposing source JSON.
+
+Queue edits may supply the replacement quote metadata as the final `editInput` argument. Omission
+keeps frozen objects; changed plain text clears old occurrence positions, so explicitly retained
+objects follow the new body. Navigation preparation returns original quote metadata, file attachments
+and image bindings alongside editable text and inline images. File-backed images are not duplicated
+as new inline uploads. External Harnesses retain the same display metadata and use their existing
+file/image capabilities for the readable projection.

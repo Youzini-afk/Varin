@@ -271,12 +271,19 @@ pub(super) fn execute(
                 kind: p.kind,
                 text: p.text,
             };
-            input.validate().map_err(domain)?;
             let preparation = catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
                 .prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
             let source=varin_runtime::output::OutputSource::Conversation {provenance:varin_runtime::execution::Provenance::UserInstruction {input_id:preparation.identity().message_id.clone()}};
             let media=p.prepared_attachment_media.unwrap_or_default().into_iter().map(|media|varin_runtime::output::ResolvedMedia {media_type:media.media_type,data_base64:media.data_base64,source:source.clone()}).collect();
-            let prepared = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).load().map_err(domain)?;
+            let user_content = if p.content_references.is_some() || p.content_reference_occurrences.is_some() || p.attachment_image_references.is_some() {
+                let mut content = serde_json::Map::new();
+                if let Some(references) = p.content_references { content.insert("contentReferences".into(), serde_json::to_value(references)?); }
+                if let Some(occurrences) = p.content_reference_occurrences { content.insert("contentReferenceOccurrences".into(), serde_json::to_value(occurrences)?); }
+                if let Some(references) = p.image_references { content.insert("imageReferences".into(), serde_json::to_value(references)?); }
+                if let Some(references) = p.attachment_image_references { content.insert("attachmentImageReferences".into(), serde_json::to_value(references)?); }
+                Some(Value::Object(content))
+            } else { None };
+            let prepared = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).with_user_content(user_content).load().map_err(domain)?;
             let mut owner = catalog
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;

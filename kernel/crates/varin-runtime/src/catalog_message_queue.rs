@@ -137,21 +137,26 @@ impl Catalog {
 impl MessageEditPreparation {
     pub fn load(self, text: String) -> Result<PreparedMessageEdit> {
         let mut intent: MessageIntent = serde_json::from_value(self.content.load(&self.intent)?)?;
+        let changed = intent.input.text != text;
         intent.input.text = text;
-        intent.input.validate()?;
+        intent.input.validate_with_content(intent.user_content.as_ref().and_then(|value|value.get("contentReferences")).and_then(Value::as_array).is_some_and(|references| !references.is_empty()))?;
         let (mut body, _) = self
             .content
             .load_stored_history_payload(&self.history, &|| false)?;
-        let old = body["text"].as_str().ok_or_else(|| {
-            RuntimeError::Invalid("Queued User message text is unavailable".into())
-        })?;
-        let header = old
-            .split_once("\n\n")
-            .map(|(header, _)| header)
-            .ok_or_else(|| {
-                RuntimeError::Invalid("Queued message envelope is unavailable".into())
-            })?;
-        body["text"] = json!(format!("{header}\n\n{}", intent.input.text));
+        let old = body["text"].as_str().ok_or_else(|| RuntimeError::Invalid("Queued User message text is unavailable".into()))?;
+        if let Some(original) = body.get("userText").and_then(Value::as_str) {
+            let suffix = old.strip_prefix(original).ok_or_else(|| RuntimeError::Invalid("Queued quoted message envelope is unavailable".into()))?.to_owned();
+            body["text"] = json!(format!("{}{suffix}", intent.input.text));
+            body["userText"] = json!(intent.input.text);
+            if changed {
+                body["contentReferenceOccurrences"] = json!([]);
+                if let Some(metadata) = &mut intent.user_content { metadata["contentReferenceOccurrences"] = json!([]); }
+            }
+            crate::output::validate_user_metadata(&body)?;
+        } else {
+            let header = old.split_once("\n\n").map(|(header, _)| header).ok_or_else(|| RuntimeError::Invalid("Queued message envelope is unavailable".into()))?;
+            body["text"] = json!(format!("{header}\n\n{}", intent.input.text));
+        }
         Ok(PreparedMessageEdit {
             row: self.row,
             intent: self.content.save(&serde_json::to_value(intent)?)?,

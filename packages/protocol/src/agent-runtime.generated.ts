@@ -979,6 +979,10 @@ export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked'
 export type MessageActivation = { state: 'passive' } | { state: 'pending'; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'bound'; runId: string; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'cancelled'; runId: string | null; executionId: string | null } | { state: 'failed'; executionId: string | null; code: string };
 
 export interface MessageSendParams {
+  contentReferences?: unknown[];
+  contentReferenceOccurrences?: unknown[];
+  attachmentImageReferences?: Record<string, number>;
+  imageReferences?: number[];
   sourceAgent?: string;
   name?: string;
   key: string;
@@ -1040,6 +1044,8 @@ export interface MessageSummary extends MessageReceipt {
 }
 
 export interface MessageView extends MessageSummary {
+  contentReferences?: unknown[];
+  contentReferenceOccurrences?: unknown[];
   text: string;
 }
 
@@ -1804,7 +1810,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 85; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 86; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
