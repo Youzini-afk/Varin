@@ -194,7 +194,7 @@ describe('Bot workbench', () => {
     state.openWork.mockReset().mockResolvedValue(undefined);
     state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {} });
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {}, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null });
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -306,6 +306,68 @@ describe('Bot workbench', () => {
     expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
     expect(container.textContent).not.toContain('New thread');
     expect([...container.querySelectorAll('[data-sidebar-row]')].map(row => row.getAttribute('data-sidebar-row'))).toContain('session:thread:bot:a:fresh:branch:bot:a:fresh');
+  });
+
+  it('reveals the selected session or Bot from the schedule page, including repeated selection', async () => {
+    const trip = sessionOf('a', 'trip', 'trip-main', { title: 'Trip planning' });
+    state.sessions.mockImplementation(async (id: string) => id === 'a'
+      ? [sessionOf('a', 'entry-a', 'branch-a', {}, true), trip]
+      : [sessionOf(id, `entry-${id}`, `branch-${id}`, {}, true)]);
+    await render();
+    const ordinary = useThreadStore.getState().selectedIdentity;
+    for (const target of ['Trip planning', 'Trip planning', 'Bot b', 'Bot a']) {
+      await act(async () => useUIStore.getState().openArrangements(bot('a').entry, 'arrangement'));
+      await click(target);
+      await settle();
+      expect(useUIStore.getState().isScheduledTasksDialogOpen, target).toBe(false);
+      expect(useUIStore.getState().scheduledTasksFocus).toBeNull();
+      expect(useThreadStore.getState().selectedIdentity).toBe(ordinary);
+    }
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+  });
+
+  it('retains the current conversation and schedule page when another Bot cannot open', async () => {
+    await render();
+    const previous = useBotNavigation.getState().entry;
+    state.ensure.mockImplementation(async (id: string) => {
+      if (id === 'b') throw new Error('Bot unavailable');
+      return { bot: bot(id), entry: bot(id).entry, model: null };
+    });
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await click('Bot b');
+    await settle();
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    expect(useBotNavigation.getState().entry).toBe(previous);
+    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
+  });
+
+  it('does not dismiss a newer schedule page when restoring the initial Bot entry finishes', async () => {
+    let finish!: (value: BotEntryResult) => void;
+    state.ensure.mockReturnValue(new Promise<BotEntryResult>(resolve => { finish = resolve; }));
+    await render();
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await act(async () => finish({ bot: bot('a'), entry: bot('a').entry, model: null }));
+    await settle();
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+  });
+
+  it('discards a pending Bot switch after the user reselects the current conversation', async () => {
+    await render();
+    let finish!: (value: BotEntryResult) => void;
+    state.ensure.mockImplementation(async (id: string) => id === 'b'
+      ? new Promise<BotEntryResult>(resolve => { finish = resolve; })
+      : { bot: bot(id), entry: bot(id).entry, model: null });
+    await act(async () => useUIStore.getState().setScheduledTasksDialogOpen(true));
+    await click('Bot b');
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    const current = container.querySelector<HTMLButtonElement>('[data-sidebar-row="session:entry-a:branch-a"]');
+    expect(current).not.toBeNull();
+    await act(async () => current!.click());
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(false);
+    await act(async () => finish({ bot: bot('b'), entry: bot('b').entry, model: null }));
+    await settle();
+    expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
   });
 
   it('renames and pins the right-clicked session without selecting it or changing the Bot profile', async () => {

@@ -1563,6 +1563,7 @@ export const useUIStore = create<UIStore>()(
           }
           set({
             isScheduledTasksDialogOpen: false,
+            scheduledTasksFocus: null,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,

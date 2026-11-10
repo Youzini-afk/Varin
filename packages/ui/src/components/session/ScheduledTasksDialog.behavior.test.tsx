@@ -7,13 +7,13 @@ import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 
 const state = vi.hoisted(() => {
   const project = { id: 'project', path: '/project', label: 'Project' };
-  return { projects: [project], project, uiOpen: true, generation: 1, list: vi.fn(), run: vi.fn(), t: (key: string) => key,
+  return { projects: [project], project, uiOpen: true, generation: 1, list: vi.fn(), run: vi.fn(), setOpen: vi.fn(), t: (key: string) => key,
     selectProject: null as null | ((id: string) => void), endpointChanged: null as null | (() => void), events: null as null | ((event: { type: string }) => void), toast: { error: vi.fn(), success: vi.fn() } };
 });
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(),
   createScheduledTasksHttpAPI: () => ({ list: state.list, run: state.run }), getRuntimeKey: () => "runtime", getRuntimeEndpointGeneration: () => state.generation,
   subscribeRuntimeEndpointWillChange: (callback: () => void) => { state.endpointChanged = callback; return () => {}; } }));
-vi.mock('@/stores/useUIStore', () => ({ useUIStore: (selector: (v: unknown) => unknown) => selector({ isScheduledTasksDialogOpen: state.uiOpen, setScheduledTasksDialogOpen() {}, isMobile: false }) }));
+vi.mock('@/stores/useUIStore', () => ({ useUIStore: (selector: (v: unknown) => unknown) => selector({ isScheduledTasksDialogOpen: state.uiOpen, setScheduledTasksDialogOpen: state.setOpen, isMobile: false }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (selector: (v: unknown) => unknown) => selector({ projects: state.projects, getActiveProject: () => state.project }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (selector: (v: unknown) => unknown) => selector({ homeDirectory: '/home' }) }));
 vi.mock('@/lib/bots', () => ({ listBots: async () => [], useBotNavigation: (selector: (v: unknown) => unknown) => selector({ botId: null }) }));
@@ -65,6 +65,14 @@ beforeEach(() => {
   state.run.mockRejectedValue(new ScheduleRequestError(409, 'Earlier result unavailable', 'identity-unavailable'));
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+it('provides a desktop close action without navigating or starting work', async () => {
+  await act(async () => root.render(<ScheduledTasksDialog />));
+  const close = container.querySelector<HTMLButtonElement>('[aria-label="dialog.common.actions.close"]');
+  expect(close).not.toBeNull();
+  await act(async () => close!.click());
+  expect(state.setOpen).toHaveBeenCalledExactlyOnceWith(false);
+  expect(state.run).not.toHaveBeenCalled();
+});
 it('keeps the rejected key through refresh/cancel and replaces it only after explicit confirmation using the latest definition', async () => {
   await act(async () => root.render(<ScheduledTasksDialog />));
   await click(runNow);

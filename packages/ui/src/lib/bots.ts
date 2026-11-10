@@ -64,6 +64,8 @@ export const sameBotEntry = (a: BotReadyEntry | null | undefined, b: BotReadyEnt
 export const openBotConversation = async (botId: string, entry: BotReadyEntry, model: BotModelSelection | null = null, archived?: boolean): Promise<void> => {
   // Bot work has a separate presentation selection; ordinary Thread navigation remains intact.
   useBotNavigation.setState({ botId, entry, model, archived });
+  // Navigation reveals its target even when the user selects the current conversation again.
+  useUIStore.getState().closeMainSurfaces();
 };
 export const openBotEntryFor = async (botId: string): Promise<void> => {
   const generation = getRuntimeEndpointGeneration();

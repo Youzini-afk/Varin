@@ -216,7 +216,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => controller.abort();
   }, [committed, settingsOpen, revision, showArchived]);
 
-  const openEntry = React.useCallback(async (botId: string) => {
+  const openEntry = React.useCallback(async (botId: string, navigate = false) => {
     opening.current?.abort();
     const controller = new AbortController();
     opening.current = controller;
@@ -232,15 +232,20 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
         const entry = sessions.find(session => session.primary && !session.thread.archived)
           ?? sessions.find(session => !session.thread.archived);
-        if (entry) await openBotConversation(botId, entry.identity, known.model, known.archived);
-        else useBotNavigation.setState({ botId, entry: null, model: known.model, archived: known.archived });
+        useBotNavigation.setState({ botId, entry: entry?.identity ?? null, model: known.model, archived: known.archived });
+        setSelectedId(botId);
+        if (navigate) useUIStore.getState().closeMainSurfaces();
         return;
       }
       const { bot, entry, model } = await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       setEntryResolution({ botId: bot.id, entry, profileModelKey: JSON.stringify(bot.model), model });
-      await openBotConversation(bot.id, entry, model);
+      // Restoring the shell's entry is not a navigation gesture. In particular it
+      // must not dismiss a page the user opened while this request was pending.
+      useBotNavigation.setState({ botId: bot.id, entry, model, archived: bot.archived });
+      setSelectedId(bot.id);
+      if (navigate) useUIStore.getState().closeMainSurfaces();
     } catch (cause) {
       if (!controller.signal.aborted) setError(message(cause));
     } finally {
@@ -414,6 +419,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const openSession = React.useCallback((identity: ThreadIdentity) => {
     if (!selected) return;
+    opening.current?.abort();
+    setBusy(false);
     useUIStore.getState().setSessionSwitcherOpen(false);
     const order = sessionsWithWork?.map(session => session.identity.threadId) ?? [];
     noteSwitchDirection(order.indexOf(identity.threadId) - order.indexOf(selectedEntry?.threadId ?? ''));
@@ -631,8 +638,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const selectBot = (botId: string) => {
     useUIStore.getState().setSessionSwitcherOpen(false);
     setProfileOpen(false);
-    if (botId === selectedId) void openEntry(botId);
-    else { useBotNavigation.setState({ botId: null, entry: null }); setSelectedId(botId); }
+    // Keep the current conversation/page until the requested Bot entry is ready.
+    void openEntry(botId, true);
   };
 
   const mattersForBot = matters?.botId === selectedId ? matters.items : null;
