@@ -11,7 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
-import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
+import type { ContextCheckpoint, ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, Attachment } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { BotWorkDetail } from '@/workbenches/bot/BotWorkDetail';
@@ -35,6 +35,7 @@ import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 
 const translations = vi.hoisted(() => ({ dictionary: {} as Record<string, string> }));
+const varinEventListeners = vi.hoisted(() => new Set<(event: import('@/lib/varinEvents').VarinEvent) => void>());
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const endpoint = vi.hoisted(() => ({ generation: 1, hostKey: 'host-a', listeners: new Set<() => void>() }));
 const recoveryService = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined }));
@@ -60,7 +61,7 @@ vi.mock('@varin/application-client', async original => ({
 vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
 // This fixture drives the Thread observer directly; the global Host event transport
 // has its own lifecycle tests and must not open a real connection from linkedom.
-vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: (listener: (event: import('@/lib/varinEvents').VarinEvent) => void) => { varinEventListeners.add(listener); return () => varinEventListeners.delete(listener); } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ ...getRegisteredRuntimeAPIs(), threads: runtimeState.api }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }), { getState: () => ({ currentDirectory: '/workspace/project', setDirectory: () => {} }) }) }));
 vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation?: (active: boolean) => React.ReactNode }) => <div>{renderConversation ? renderConversation(true) : <ChatView />}</div> }));
@@ -4258,4 +4259,148 @@ it('does not fork the old scope when the active branch changes while flushing vi
     await act(async () => root.render(<ThreadConversation api={f.api} identity={next} onBranchCreated={() => {}} />));
     await act(async () => finish()); expect(fork).not.toHaveBeenCalled();
   } finally { delete session.flushState; }
+});
+
+it.each([false, true])('projects an active Bot model without feeding inherited defaults back into its draft (different: %s)', async different => {
+  const f = fixture(true);
+  f.view.thread.bot_id = 'bot';
+  f.view.activeRun!.configuration = { providerId: 'fixture-provider', model: 'request-model', catalogModelId: 'fixture-model', thinkingLevel: 'high', modelOptions: { temperature: 0 } };
+  const running: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'high', temperature: 0 };
+  const inherited: ThreadModel = { providerId: different ? 'other-provider' : running.providerId, modelId: different ? 'other-model' : running.modelId, thinkingLevel: 'off', temperature: 0.7 };
+  const ordinary: ThreadIdentity = { runtime: 'agent', threadId: 'ordinary-work', branchId: 'main' };
+  const originalNavigation = useThreadStore.getState();
+  useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: ordinary, selectedDraftKey: null });
+  useThreadDraftStore.getState().patch(threadComposerKey(threadHostKey(), ordinary), { model: inherited });
+  f.api.listModels = async () => [{ ...running, thinkingLevels: ['off', 'high'] }, ...(different ? [inherited] : [])];
+  f.api.selectModel = vi.fn(f.api.selectModel);
+  const key = threadComposerKey(threadHostKey(), identity);
+  const modelChanges: Array<ThreadModel | undefined> = [];
+  const unsubscribe = useThreadDraftStore.subscribe((state, previous) => {
+    if (state.drafts[key]?.model !== previous.drafts[key]?.model) modelChanges.push(state.drafts[key]?.model);
+  });
+  const render = () => <React.StrictMode><ThreadConversation surface="bot" api={f.api} identity={identity}
+    inheritWorkbenchModel preferredModel={{ ...inherited }} /></React.StrictMode>;
+  try {
+    await act(async () => root.render(render()));
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')!.value).toBe(JSON.stringify([running.providerId, running.modelId]));
+    expect(modelChanges).toEqual([running]);
+    await act(async () => root.render(render()));
+    await act(async () => f.emit({ cursor: 1, subject: 'ui-run', revision: 2, kind: 'run.updated', data: {} }));
+    await edit('[aria-label="Message thread"]', 'Queue without rewriting the Run');
+    await submitForm(composerForm());
+    expect(f.enqueue).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.api.enqueue).mock.calls[0]![0]).not.toHaveProperty('model');
+    expect(f.api.selectModel).not.toHaveBeenCalled();
+    expect(modelChanges).toEqual([running]);
+  } finally {
+    unsubscribe();
+    useThreadStore.setState({ hostKey: originalNavigation.hostKey, selectedIdentity: originalNavigation.selectedIdentity, selectedDraftKey: originalNavigation.selectedDraftKey });
+  }
+});
+
+it('waits for the Bot model catalog, uses the entry capture once, and preserves a user choice through catalog changes', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'bot';
+  const ordinary: ThreadIdentity = { runtime: 'agent', threadId: 'ordinary-work', branchId: 'main' };
+  const originalNavigation = useThreadStore.getState();
+  const captured: ThreadModel = { providerId: 'captured-provider', modelId: 'captured-model', thinkingLevel: 'high', temperature: 0 };
+  const fallback: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' };
+  const chosen: ThreadModel = { providerId: 'chosen-provider', modelId: 'chosen-model', thinkingLevel: 'high', temperature: 0 };
+  useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: ordinary, selectedDraftKey: null });
+  const ordinaryKey = threadComposerKey(threadHostKey(), ordinary);
+  useThreadDraftStore.getState().patch(ordinaryKey, { model: captured });
+  let resolveModels!: (models: ThreadModelInfo[]) => void;
+  f.api.listModels = () => new Promise(resolve => { resolveModels = resolve; });
+  const key = threadComposerKey(threadHostKey(), identity);
+  try {
+    await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} inheritWorkbenchModel preferredModel={fallback} />));
+    expect(useThreadDraftStore.getState().drafts[key]?.model?.providerId).toBeFalsy();
+    await act(async () => useThreadDraftStore.getState().patch(ordinaryKey, { model: fallback }));
+    await act(async () => resolveModels([{ ...captured, thinkingLevels: ['off', 'high'] }, fallback, { ...chosen, thinkingLevels: ['off', 'high'] }]));
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(captured);
+    await edit('[aria-label="Registered model"]', JSON.stringify([chosen.providerId, chosen.modelId]), 'change');
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(chosen);
+    f.api.listModels = async () => [fallback, { ...chosen, thinkingLevels: ['off'] }];
+    await act(async () => { for (const listener of varinEventListeners) listener({ type: 'settings-changed', owner: 'agent-settings', ids: ['model-channels'], scope: 'host', revision: 'catalog-2' }); });
+    expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual({ ...chosen, thinkingLevel: 'off' });
+    await edit('[aria-label="Message thread"]', 'Use my chosen model');
+    await submitForm(composerForm());
+    expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: { ...chosen, thinkingLevel: 'off' } }));
+  } finally {
+    useThreadStore.setState({ hostKey: originalNavigation.hostKey, selectedIdentity: originalNavigation.selectedIdentity, selectedDraftKey: originalNavigation.selectedDraftKey });
+  }
+});
+
+it('applies changed Bot defaults atomically without replaying the same preference over idle edits or reopening', async () => {
+  const f = fixture();
+  const preferred: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 };
+  const alternate: ThreadModel = { providerId: 'other-provider', modelId: 'other-model', thinkingLevel: 'off', temperature: 0 };
+  f.api.listModels = async () => [preferred, alternate];
+  const key = threadComposerKey(threadHostKey(), identity);
+  const render = (model: ThreadModel | null) => <ThreadConversation surface="bot" api={f.api} identity={identity} preferredModel={model} />;
+  await act(async () => root.render(render(preferred)));
+  await edit('[aria-label="Registered model"]', JSON.stringify([alternate.providerId, alternate.modelId]), 'change');
+  await act(async () => root.render(render({ ...preferred })));
+  expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(alternate);
+  await act(async () => root.render(null));
+  await act(async () => root.render(render({ ...preferred })));
+  expect(useThreadDraftStore.getState().drafts[key]?.model).toEqual(alternate);
+  const models: Array<ThreadModel | undefined> = [];
+  const unsubscribe = useThreadDraftStore.subscribe((state, previous) => {
+    if (state.drafts[key]?.model !== previous.drafts[key]?.model) models.push(state.drafts[key]?.model);
+  });
+  try {
+    const changed = { ...preferred, temperature: 0.5 };
+    await act(async () => root.render(render(changed)));
+    expect(models).toEqual([changed]);
+    await act(async () => root.render(render(null)));
+    expect(models).toEqual([changed, { providerId: '', modelId: '', thinkingLevel: 'off' }]);
+  } finally { unsubscribe(); }
+});
+
+it.each([undefined, null] as const)('keeps an omitted model preference distinct from an explicitly empty one (%s)', async preference => {
+  const f = fixture(true);
+  f.view.activeRun!.configuration = { providerId: 'fixture-provider', model: 'request-id', catalogModelId: 'fixture-model', thinkingLevel: 'off', modelOptions: { temperature: 0 } };
+  await f.cancelRun();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preference} />));
+  const model = useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model;
+  expect(model).toEqual(preference === undefined ? { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 }
+    : { providerId: '', modelId: '', thinkingLevel: 'off' });
+  if (preference === null) {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model?.providerId).toBe('fixture-provider');
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={null} />));
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model?.providerId).toBe('');
+  }
+});
+
+it('inherits the desired Run model on finish and preserves a later idle override across snapshots and reopening', async () => {
+  const f = fixture(true);
+  const original: ThreadModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off', temperature: 0 };
+  const desired: ThreadModel = { providerId: 'other-provider', modelId: 'other-model', thinkingLevel: 'off', temperature: 0 };
+  f.view.activeRun!.configuration = { providerId: original.providerId, model: original.modelId, thinkingLevel: original.thinkingLevel, modelOptions: { temperature: 0 } };
+  f.api.listModels = async () => [original, desired];
+  f.api.selectModel = vi.fn(async input => {
+    const selection = { id: input.key, run_id: input.runId, revision: 1, binding_id: 'selected-model', status: 'ready' as const, failure: null, credential_scope: null,
+      configuration: { providerId: input.model.providerId, providerFamily: 'openai-responses', model: 'provider-request-id', catalogModelId: input.model.modelId,
+        thinkingLevel: input.model.thinkingLevel, modelOptions: { temperature: input.model.temperature },
+        endpoint: 'http://localhost/responses', allowAnonymous: true, credentialEnvironment: null, configurationGeneration: 2, maxOutputTokens: 32 } };
+    f.view.modelSelection.desired = selection;
+    return selection;
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={original} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify([desired.providerId, desired.modelId]), 'change');
+  expect(f.api.selectModel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: desired }));
+  await act(async () => {
+    await f.cancelRun();
+    f.emit({ cursor: 1, subject: 'ui-run', revision: 2, kind: 'run.cancelled', data: {} });
+  });
+  await edit('[aria-label="Message thread"]', 'Continue with the selected model');
+  await submitForm(composerForm());
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: desired }));
+  await edit('[aria-label="Registered model"]', JSON.stringify([original.providerId, original.modelId]), 'change');
+  await act(async () => f.emit({ cursor: 2, subject: 'ui-run', revision: 3, kind: 'run.updated', data: {} }));
+  await act(async () => root.render(null));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ ...original }} />));
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.model).toEqual(original);
 });

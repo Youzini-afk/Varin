@@ -69,6 +69,7 @@ import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel,
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
 import { useThreadNextStep } from './useThreadNextStep';
+import { threadConfigurationModel, useThreadModelSelection } from './useThreadModelSelection';
 import { ThreadAgentControls } from './ThreadAgentControls';
 import { useThreadWorkFocus } from './useThreadWorkFocus';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
@@ -85,6 +86,8 @@ import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/th
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { threadLiveActivity, type ThreadLiveActivity, type ThreadProgressActivity } from './threadLiveActivity';
+
+const EMPTY_MODELS: ThreadModelInfo[] = [];
 
 const resourceErrorMessages = new Map([
   ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
@@ -131,14 +134,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return captured.length ? [{ key, drafts: captured }] : [];
   }), [inlineBuckets, draftKey]);
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
-  const providerId = draft.model?.providerId ?? '';
-  const modelId = draft.model?.modelId ?? '';
-  const thinkingLevel = draft.model?.thinkingLevel ?? 'off';
-  const temperature = draft.model?.temperature;
-  const patchModel = React.useCallback((patch: Partial<ThreadModel>) => useThreadDraftStore.getState().patch(draftKey, current => ({ model: { providerId: '', modelId: '', ...current.model, ...patch } })), [draftKey]);
-  const setProviderId = React.useCallback((providerId: string) => patchModel({ providerId }), [patchModel]);
-  const setModelId = React.useCallback((modelId: string) => patchModel({ modelId }), [patchModel]);
-  const setThinkingLevel = React.useCallback((thinkingLevel: ThreadThinkingLevel) => patchModel({ thinkingLevel }), [patchModel]);
   const pendingInput = React.useMemo(() => ({
     get current() { return useThreadDraftStore.getState().drafts[draftKey]?.pendingInput; },
     set current(pendingInput: ThreadPendingInput | undefined) { useThreadDraftStore.getState().patch(draftKey, { pendingInput }); },
@@ -165,30 +160,32 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     setProgressActivity(current => !context ? null : current?.runId === context.runId && current.activity === context.activity ? current : { runId: context.runId, activity: context.activity });
   }, []);
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
-  const appliedModelPreference = React.useRef<string | undefined>(undefined);
-  const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
+  const [modelCatalog, setModelCatalog] = React.useState<{ api: ThreadsAPI; host: number; models: ThreadModelInfo[] }>();
+  const modelsReady = modelCatalog?.api === api && modelCatalog.host === host;
+  const models = modelsReady ? modelCatalog.models : EMPTY_MODELS;
   // Capture the ordinary workbench/IDE selection when entering an unconfigured
   // Bot conversation. Do not turn another conversation's later edits into a binding.
   const workbenchModel = React.useMemo(() => {
-    if (!inheritWorkbenchModel) return null;
+    if (!inheritWorkbenchModel || host !== getRuntimeEndpointGeneration()) return null;
     const navigation = useThreadStore.getState();
     if (navigation.hostKey !== threadHostKey()) return null;
     const key = selectedComposerKey(navigation);
     if (!key || key === draftKey) return null;
     return useThreadDraftStore.getState().drafts[key]?.model ?? null;
-  }, [inheritWorkbenchModel, draftKey]);
+  }, [inheritWorkbenchModel, draftKey, host]);
   const inheritedModel = workbenchModel && models.some(model => model.providerId === workbenchModel.providerId && model.modelId === workbenchModel.modelId)
-    ? defaultConversationModel({ defaultProvider: workbenchModel.providerId, defaultModel: workbenchModel.modelId, defaultThinkingLevel: workbenchModel.thinkingLevel }, models) : null;
+    ? { ...defaultConversationModel({ defaultProvider: workbenchModel.providerId, defaultModel: workbenchModel.modelId, defaultThinkingLevel: workbenchModel.thinkingLevel }, models)!,
+      ...(workbenchModel.temperature === undefined ? {} : { temperature: workbenchModel.temperature }) } : null;
   const preferredModel = inheritedModel ?? configuredPreferredModel;
   const [modelError, setModelError] = React.useState<string>();
   const [defaultsVersion, refreshDefaults] = React.useReducer(version => version + 1, 0);
   React.useEffect(() => {
     let active = true; let request = 0;
-    setModels([]); setModelError(undefined);
+    setModelCatalog(undefined); setModelError(undefined);
     const refresh = () => {
       const current = ++request;
       void api.listModels().then(value => {
-        if (active && current === request) { setModels(value); setModelError(undefined); }
+        if (active && current === request) { setModelCatalog({ api, host, models: value }); setModelError(undefined); }
       }, () => { if (active && current === request) setModelError(t('settings.agents.modelsUnavailable')); });
     };
     refresh();
@@ -247,14 +244,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const runFailure = snapshot?.runFailure?.runId === run?.id ? snapshot?.runFailure : null;
-  const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
-    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string; modelOptions?: { temperature?: number } } | undefined;
-  const samplingModel: ThreadModel | undefined = samplingConfiguration?.providerId && samplingConfiguration.model ? {
-    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.catalogModelId ?? samplingConfiguration.model,
-    ...(samplingConfiguration.thinkingLevel === undefined ? {} : { thinkingLevel: samplingConfiguration.thinkingLevel }),
-    ...(samplingConfiguration.modelOptions?.temperature === undefined ? {} : { temperature: samplingConfiguration.modelOptions.temperature }),
-  } : undefined;
+  const samplingModel = threadConfigurationModel(snapshot?.modelSelection.active?.configuration ?? run?.configuration);
   const active = Boolean(branch?.active_run_id);
+  const delegated = Boolean(snapshot?.delegatedExecutions?.length);
+  const selectedModel = useThreadModelSelection({ draftKey, draft, ready: Boolean(snapshot), active, delegated,
+    runId: run?.id, runModel: threadConfigurationModel(snapshot?.modelSelection.desired?.configuration ?? snapshot?.modelSelection.active?.configuration ?? run?.configuration),
+    preferredModel, inheritWorkbenchModel, preferenceReady: !inheritWorkbenchModel || modelsReady, models });
+  const { providerId, modelId, temperature } = selectedModel;
+  const thinkingLevel = selectedModel.thinkingLevel ?? 'off';
   // A run that finishes in the conversation on screen taps once (§3.14); a failed one says so instead.
   const finishedRun = React.useRef<{ key: string; active: boolean } | null>(null);
   const runKey = `${identity.threadId}\0${identity.branchId}`;
@@ -266,7 +263,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }, [runKey, active, runFailure]);
   const computer = useComputerAutomation(identity, api.computer, branch?.active_run_id);
   const hasComputer = Boolean(computer.error || computer.state?.active || computer.state && computer.state.status !== 'enabled' || computer.state?.cleanups.length || computer.state?.leases.length || computer.state?.requests.length || computer.activities.length);
-  const delegated = Boolean(snapshot?.delegatedExecutions?.length);
   const preparingExecution = snapshot?.delegatedExecutions?.find(execution => execution.state === 'preparing' && !execution.cancel_requested);
   const preparingDelegation = Boolean(preparingExecution);
   const botSession = Boolean(snapshot?.thread.bot_id && !snapshot.thread.parent_thread_id);
@@ -284,25 +280,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const projectedText = projectEditorContextAttachments(appendInlineComments(text, inlineDrafts), editorContext, { includeImages: acceptsImages === true });
   const requestImages = React.useMemo(() => [...images, ...(acceptsImages === true ? editorContext.flatMap(item => item.reference?.image
     ? [{ mimeType: item.reference.image.mimeType, data: item.reference.image.data }] : []) : [])], [images, acceptsImages, editorContext]);
-  React.useEffect(() => {
-    if (active || delegated || draft.firstSend) return;
-    const levels = models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels;
-    if (levels?.length && !levels.includes(thinkingLevel)) setThinkingLevel(levels[0]!);
-  }, [active, delegated, draft.firstSend, models, providerId, modelId, thinkingLevel, setThinkingLevel]);
-  React.useEffect(() => {
-    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string } | undefined;
-    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.catalogModelId ?? config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
-  }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel, setProviderId, setModelId, setThinkingLevel]);
-  React.useEffect(() => {
-    if (!snapshot || preferredModel === undefined) return;
-    if (inheritWorkbenchModel && (!models.length || providerId || modelId)) return;
-    const key = JSON.stringify([host, identity.threadId, identity.branchId, preferredModel]);
-    if (appliedModelPreference.current === key) return;
-    appliedModelPreference.current = key;
-    // Active work consumes the original desired-selection owner. Idle drafts may follow a
-    // changed Bot profile even when their latest Run was cancelled; later renders preserve edits.
-    if (!active) { setProviderId(preferredModel?.providerId ?? ''); setModelId(preferredModel?.modelId ?? ''); setThinkingLevel(preferredModel?.thinkingLevel ?? 'off'); }
-  }, [snapshot, active, host, identity.threadId, identity.branchId, preferredModel, inheritWorkbenchModel, models.length, providerId, modelId, setProviderId, setModelId, setThinkingLevel]);
   const needsDefaultModel = Boolean(snapshot && !run && preferredModel === undefined && !providerId && !modelId);
   React.useEffect(() => {
     if (!needsDefaultModel) return;
@@ -364,8 +341,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
-      return act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}), false, true);
-    } else {setProviderId(provider);setModelId(model);setThinkingLevel(thinking);}
+      return act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{...selectedModel,providerId:provider,modelId:model,thinkingLevel:thinking}}), false, true);
+    } else useThreadDraftStore.getState().patch(draftKey, { model: { ...selectedModel, providerId: provider, modelId: model, thinkingLevel: thinking } });
   };
   const returnToLatest = () => {
     const store = useTimelineViewStore.getState();
