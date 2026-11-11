@@ -147,7 +147,7 @@ pub struct InputReceipt {
 }
 
 /// Admission status is local control evidence, not part of the public durable receipt.
-/// A duplicate interrupt must not stop a newer generation of the same Run.
+/// Repeated admission returns the original receipt without creating another input.
 pub struct QueuedInputAdmission {
     pub receipt: InputReceipt,
     pub accepted: bool,

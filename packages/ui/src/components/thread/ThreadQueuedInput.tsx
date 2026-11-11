@@ -102,7 +102,7 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   };
 
   const editor = editing && <form className="mt-2 space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
-    <label className="text-xs text-muted-foreground">{t(editing.input.mode === 'next_run' ? 'thread.composer.afterRun' : editing.input.mode === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</label>
+    <label className="text-xs text-muted-foreground">{t(editing.input.mode === 'next_run' ? 'thread.composer.afterRun' : editing.input.mode === 'interrupt' ? 'chat.queuedMessage.steering' : 'thread.composer.boundary')}</label>
     {editing.markerObjects.flatMap(object => object.payload.kind === 'stored-image' ? [<ThreadMedia key={object.id} api={api} identity={object.payload.identity} holder={object.payload.holder}
       media={object.payload.media} partIndex={object.payload.partIndex} imageReference={object.number} thumbnail />] : [])}
     <ImageAttachmentStrip key={editing.input.id} images={images}

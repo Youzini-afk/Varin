@@ -389,28 +389,48 @@ it('boundary input edits and cancellation remain outside history until a legal m
   expect((await f.runtimeClient.inputs('boundary-branch')).map(input => input.state)).toEqual(['delivered', 'cancelled']);
 }, 30_000);
 
-it('interrupt replaces only the active model step and continues the same Run', async () => {
+it.each(['interjection', 'sendNow'] as const)('%s queues for the next model request without cancelling the current generation', async (kind) => {
   const f = await fixture();
+  let firstResponse: ServerResponse | undefined;
+  let firstClosed = false;
   let turn = 0;
   const provider = await localProvider((_body, response) => {
     if (++turn === 1) {
+      firstResponse = response;
+      response.on('close', () => { firstClosed = true; });
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', item_id: 'interrupted-message', delta: 'unfinished first answer' })}\n\n`);
-    } else completeLocalResponse(response, `interrupt-output-${turn}`, 'answer after interrupt');
+      response.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', item_id: 'original-message', delta: 'original answer' })}\n\n`);
+    } else completeLocalResponse(response, `interrupt-output-${turn}`, 'answer after interjection');
   });
   await f.runtimeClient.createThread('interrupt-thread', 'interrupt-branch');
   const run = await f.runtimeClient.submit({ key: 'interrupt-initial', threadId: 'interrupt-thread', branchId: 'interrupt-branch', expectedHead: null, input: { text: 'initial prompt' }, configuration: provider.configuration });
   await f.runtimeClient.startRun(run.run_id);
   await expect.poll(() => provider.requests.length).toBe(1);
-  const queued = await f.runtimeClient.enqueue({ key: 'interrupt-queued', threadId: 'interrupt-thread', branchId: 'interrupt-branch', mode: 'interrupt', input: { text: 'correct the current task' } });
-  expect(queued.run_id).toBe(run.run_id);
-  await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  const command = { key: 'interrupt-queued', threadId: 'interrupt-thread', branchId: 'interrupt-branch', mode: kind === 'sendNow' ? 'next_run' as const : 'interrupt' as const, input: { text: 'correct the current task' } };
+  const queued = await f.runtimeClient.enqueue(command);
+  if (kind === 'sendNow') {
+    const promoted = await f.runtimeClient.sendInputNow(queued.input_id, 1, run.run_id);
+    expect(promoted.run_id).toBe(run.run_id);
+    expect(await f.runtimeClient.sendInputNow(queued.input_id, 1, run.run_id)).toEqual(promoted);
+  } else {
+    expect(queued.run_id).toBe(run.run_id);
+    expect(await f.runtimeClient.enqueue(command)).toEqual(queued);
+  }
+  // A later control roundtrip must not observe a cancelled generation or an early
+  // delivery. The original provider is still gated and cannot finish on its own.
+  expect((await f.runtimeClient.input(queued.input_id)).state).toBe('queued');
   expect((await f.runtimeClient.run(run.run_id)).cancel_requested).toBe(false);
+  expect(provider.requests).toHaveLength(1);
+  expect(firstClosed).toBe(false);
+  firstResponse!.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'original-message', type: 'message', content: [{ type: 'output_text', text: 'original answer completed' }] }] } })}\n\n`);
+  await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(2);
-  expect(JSON.stringify(provider.requests[1]!.input)).toContain('correct the current task');
+  const nextInput = JSON.stringify(provider.requests[1]!.input);
+  expect(nextInput).toContain('correct the current task');
+  expect(nextInput).toContain('original answer completed');
   const history = JSON.stringify(await f.runtimeClient.history('interrupt-branch'));
-  expect(history).toContain('answer after interrupt');
-  expect(history).not.toContain('unfinished first answer');
+  expect(history).toContain('answer after interjection');
+  expect(history).toContain('original answer completed');
   expect((await f.runtimeClient.input(queued.input_id)).state).toBe('delivered');
 }, 30_000);
 
@@ -495,10 +515,11 @@ it('process push subscription rejects another actor ack and supports explicit un
   } finally { await subscription.close(); }
 }, 30_000);
 
-it('model interrupt preserves an accepted background process job until explicit operation cancellation', async () => {
+it('interjection preserves the current generation and accepted background process until explicit cancellation', async () => {
   const f = await fixture();
   const workspace = path.join(f.root, 'interrupt-job-workspace');
   await fs.mkdir(workspace);
+  let activeResponse: ServerResponse | undefined;
   let turn = 0;
   const provider = await localProvider((_body, response) => {
     turn++;
@@ -507,7 +528,8 @@ it('model interrupt preserves an accepted background process job until explicit 
       response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'interrupt-job-call', type: 'function_call', call_id: 'interrupt-job-spawn', name: 'process_spawn', arguments: JSON.stringify({ cwd: '', command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], mode: 'pipe' }) }] } })}\n\n`);
     } else if (turn === 2) {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.write(': awaiting model interrupt\n\n');
+      activeResponse = response;
+      response.write(': awaiting original model completion\n\n');
     } else completeLocalResponse(response, `interrupt-job-answer-${turn}`, 'foreground changed; background retained');
   });
   await f.runtimeClient.createThread('interrupt-job-thread', 'interrupt-job-branch');
@@ -523,7 +545,10 @@ it('model interrupt preserves an accepted background process job until explicit 
   const identity = { workspaceId: 'interrupt-job-workspace', rootId: root.rootId, processId: operationId };
   try {
     expect((await actor.processInspect(identity)).writerActive).toBe(true);
-    await f.runtimeClient.enqueue({ key: 'interrupt-job-new-input', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', mode: 'interrupt', input: { text: 'change foreground response' } });
+    const queued = await f.runtimeClient.enqueue({ key: 'interrupt-job-new-input', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', mode: 'interrupt', input: { text: 'change foreground response' } });
+    expect((await f.runtimeClient.input(queued.input_id)).state).toBe('queued');
+    expect(provider.requests).toHaveLength(2);
+    activeResponse!.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'original-foreground', type: 'message', content: [{ type: 'output_text', text: 'original foreground completed' }] }] } })}\n\n`);
     await expect.poll(async () => (await f.runtimeClient.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
     expect(provider.requests).toHaveLength(3);
     expect((await actor.processInspect(identity)).writerActive).toBe(true);

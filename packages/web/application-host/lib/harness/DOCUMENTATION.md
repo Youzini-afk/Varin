@@ -79,6 +79,10 @@ upstream/post-filter/ranking semantics and time basis. Source preferences cannot
 Selection-only preferences retain the anonymous route; an explicit empty connection list still disables
 all connections. Upstream pages are retained whole: display cursors consume the current filtered page
 before advancing, reuse its response cache, and reject changed page ordering after a refetch.
+MCP search completes on the matching JSON-RPC response event and closes its SSE reader without waiting
+for connection EOF. Provider attempts use the existing MCP request timeout budget, including response
+body reads; a timed-out request is aborted before the configured fallback starts. This is a network
+attempt budget, not a Run or result-size limit. Caller cancellation never starts another provider.
 
 Search and scholarly metadata observations use `web-sources.ts` and the original material owner. They
 remain distinguishable from downloaded pages/full papers. Fixed citations carry revision/range, while
