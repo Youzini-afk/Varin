@@ -135,18 +135,21 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // The Host checks browser authority for HTTP auth and every WebSocket.
+      // Preserve both headers, including the UI port; rewriting just one breaks
+      // local development or TLS-terminating proxies with forwarded authority.
       '/auth': {
         target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
-        changeOrigin: true,
+        changeOrigin: false,
       },
       '/health': {
         target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
-        changeOrigin: true,
+        changeOrigin: false,
       },
       '/api': {
         target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
-        changeOrigin: true,
-        rewriteWsOrigin: true,
+        changeOrigin: false,
+        rewriteWsOrigin: false,
         ws: true,
       },
     },
