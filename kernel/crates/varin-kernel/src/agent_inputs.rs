@@ -420,9 +420,8 @@ pub(super) fn execute(
                 }
                 owner.admit_queued_input(prepared).map_err(domain)?
             };
-            if receipt.accepted && receipt.receipt.mode == varin_runtime::InputMode::Interrupt {
-                runtime.interrupt_generation(&receipt.receipt.run_id);
-            }
+            // Interjections join the current Run at its next model boundary. Admission
+            // does not cancel the model request or tools already executing that Run.
             Ok(serde_json::to_value(receipt.receipt)?)
         }
         "runtime.input.edit" => {
@@ -465,9 +464,8 @@ pub(super) fn execute(
                 }
                 owner.send_input_now(&p.input_id, revision, &p.expected_run_id).map_err(domain)?
             };
-            if promotion.accepted {
-                runtime.interrupt_generation(&p.expected_run_id);
-            }
+            // Promotion changes which Run consumes the input, not the lifetime of
+            // its current model request or tools. The next boundary consumes it.
             runtime.advance_pending().map_err(|error| KernelError::Operation(error.to_string()))?;
             Ok(serde_json::to_value(promotion.read.load().map_err(domain)?)?)
         }

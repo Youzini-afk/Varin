@@ -85,9 +85,10 @@ use boundary/interrupt input. Queuing input does not resume an explicit policy P
 While a task runs, new messages follow the Queue / Add to current task setting. The composer has
 no per-message delivery selector. A queued next-Run message can be sent now from its queue row:
 native admission moves that same input to the current Run, preserves its captured media/materials,
-and retires its unstarted successor atomically. Only the newly accepted promotion interrupts the
-current model generation; running tools continue. Retries retain the input identity and cannot
-interrupt another generation again. Changing the default does not alter an outstanding send receipt.
+and retires its unstarted successor atomically. Both interjections and promoted inputs wait for the
+next model-request boundary without interrupting the current generation or any running tools.
+Retries retain the input identity and do not deliver it twice. Changing the default does not alter
+an outstanding send receipt.
 
 `deliverThreadInput` joins an already-running observation for the same original command. An uncertain
 response retains the exact input, model, source, media and key. Explicit retry uses that intent; it does
