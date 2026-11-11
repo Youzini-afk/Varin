@@ -5,7 +5,7 @@ import type { ProjectEntry, ProjectManagementCommand, VersionedProjectWorkspace 
 import type { ManagedSourcePrincipal } from '../harness/managed-remote-types.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
-import type { NativeProjectLifecycle } from '../kernel/native-workspaces.js';
+import { nativeExecutionWorkspaceId, type NativeProjectLifecycle } from '../kernel/native-workspaces.js';
 import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 import { runDirectoryMutation } from '../git/routes.js';
 import * as git from '../git/index.js';
@@ -58,7 +58,7 @@ export function createManagedProjectManagementOwner(options: { kernel: KernelCli
       return options.githubRead(request.command as import('../github/project-read.js').GitHubProjectReadCommand, directory, signal);
     }
     const key = createHash('sha256').update(JSON.stringify([principal.principalId, request.coordinatorHostId, request.projectId, request.workspaceId])).digest('hex');
-    const planned: VersionedProjectWorkspace = { workspaceId: request.workspaceId, executionWorkspaceId: `managed-project:${key}`,
+    const planned: VersionedProjectWorkspace = { workspaceId: request.workspaceId, executionWorkspaceId: nativeExecutionWorkspaceId(`managed-project:${key}`),
       branchId: `project-workspace:${key}`, adoptionOperationId: `workspace-adopt:${key}`, state: 'preparing' };
     if (request.workspace && !isDeepStrictEqual({ ...request.workspace, state: 'preparing' }, planned)) throw new Error('Original project adoption identity changed');
     if (action === 'workspace-plan') return planned;

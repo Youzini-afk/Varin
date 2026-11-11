@@ -1,3 +1,4 @@
+import { looksLikeCanonicalWorkspaceId } from '../documents/workspace-registry.js';
 import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { executeProjectGit, configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@varin/application-client';
 import { registerProjectManagementRoutes } from './project-management-routes.js';
@@ -97,6 +98,7 @@ it('manages the real target Git workspace and joins its original adoption intent
   expect(await remote.workspace({...physicalLocation,command:{kind:'content-search',path:'',query:'actual target',fixedStrings:true}})).toMatchObject({kind:'content-search',result:{status:'ready',hits:[{resource:{workspaceId:workspace.workspaceId,resourceId:'nested/search.txt'},line:1,column:1,revision:expect.any(String)}]}});
   pairedRoot=local;await expect(remote.workspace({...physicalLocation,command:{kind:'filename-search',path:'',query:'search'}})).rejects.toThrow();pairedRoot=target.root;
   const planned = await remote.projectManagement({ ...base, command: { action: 'workspace-plan', input: {} } }) as VersionedProjectWorkspace;
+  expect(looksLikeCanonicalWorkspaceId(planned.executionWorkspaceId)).toBe(true);
   // Typed Git commands use the same target Documents writer as HTTP Git.
   const projectSource = { workspaceId: workspace.workspaceId, resourceOwner: owner };
   registerProjectManagementRoutes(app, { requireAuth: (_request, _response, next) => next(), authorize: async () => true,

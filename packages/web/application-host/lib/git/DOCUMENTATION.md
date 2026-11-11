@@ -11,6 +11,20 @@ This module provides Git repository operations for the web server runtime, inclu
   - `credentials.ts`: Git credentials management.
   - `identity-storage.ts`: Git identity (user.name, user.email) storage.
 
+## Managed project ownership
+
+`project-owner.ts` admits a frozen project source on the target Host; `project-dispatch.ts`
+then invokes the existing Git/GitHub routes and Documents writer. It is not a second Git
+implementation or an arbitrary HTTP proxy. Configuration operations retain their separate
+credential permissions, and credentials stay on the original target.
+
+Logical project paths and mounted execution paths are distinct. Directory admission compares
+canonical target identities (including Windows aliases), executes inside the exact admitted
+view, and maps discovered roots back into that project's navigation space. UI Git addresses
+carry the frozen owner and selection as cache/navigation metadata, never as executable paths.
+Successful cross-Host replies retain the original operation and distinguish `void` from JSON
+values, including `null`, arrays and primitive results.
+
 ## Public API
 
 The following functions are exported and used by the web server:

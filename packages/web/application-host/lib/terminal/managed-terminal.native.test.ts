@@ -1,3 +1,4 @@
+import { looksLikeCanonicalWorkspaceId } from '../documents/workspace-registry.js';
 import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -64,6 +65,7 @@ it('runs an adopted project action in its frozen native view and never writes it
     const principal = { principalId: 'paired-parent', capabilities: ['filesystem:read','filesystem:write','terminal:use','process:control'] };
     const project = { coordinatorHostId: base.coordinatorHostId, projectId: 'terminal-project', workspaceId: registered.workspaceId };
     const planned = await management(principal, { ...project, command: { action: 'workspace-plan', input: {} } }) as import('@varin/application-client').VersionedProjectWorkspace;
+    expect(looksLikeCanonicalWorkspaceId(planned.executionWorkspaceId)).toBe(true);
     const backend = await management(principal, { ...project, command: { action: 'backend', input: {} } }) as import('@varin/application-client').WorkspaceBackendStatus;
     const registry = target.registry(coordinator.client), owner = (await registry.sourceTargets()).targets[0]!.resourceOwner;
     client = await registry.source(owner);

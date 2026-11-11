@@ -111,7 +111,8 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
     const selected=savedSourceLaunch(scope.scope.kind==='run'?scope.scope.runId:invocation.runId,scope.source,[]);
     const target=await openCodeTarget(owners,invocation,selected,scope.physicalRoot,signal);
     try {
-      if(operation.kind==='code_capture')return captureCodeSelection({store:target.store,workspaceId:scope.source.workspace_id,ownerThreadId:operation.sourceThreadId,
+      // Capture/publication must settle before this scope retires its original grant.
+      if(operation.kind==='code_capture')return await captureCodeSelection({store:target.store,workspaceId:scope.source.workspace_id,ownerThreadId:operation.sourceThreadId,
         operationId:invocation.operationId,directory:target.directory,baselineBranchId:operation.baselineBranchId,
         ...(scope.source.mode==='native_workspace'?{nativeSource:scope.source,nativeWorkspaces:owners.kernel.nativeWorkspaces}:{}),
         baselineRevision:operation.baselineRevision,...(operation.files?{files:operation.files}:{}),
