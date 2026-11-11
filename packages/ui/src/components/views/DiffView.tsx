@@ -1,9 +1,8 @@
 import React from 'react';
 
 import { useUIStore } from '@/stores/useUIStore';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
-import { getRuntimeKey } from '@varin/application-client';
+import { getRuntimeKey, projectGitDisplayPath } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import type { GitStatus } from '@varin/application-client';
 import {
@@ -23,6 +22,7 @@ import { toast } from '@/components/ui';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
+import { useProjectGit } from '@/hooks/useProjectGit';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
@@ -42,7 +42,10 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 import { MonacoFileDiffEditor } from '@/components/workbench/MonacoFileDiffEditor';
-import { useWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
+import { useGitDocumentWorkspace, resolveGitDocumentWorkspace } from '@/lib/workbench/editors/git-document-workspace';
+import { openProjectResourceFile } from '@/lib/workbench/editors/resource-workspace';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
+import { requestFileEditorNavigation } from '@/lib/monaco/editor-command-service';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { monacoDiffContentRevision } from '@/lib/monaco/diff-model-registry';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
@@ -139,7 +142,7 @@ const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
 };
 
 const toAbsolutePath = (directory: string, filePath: string): string => {
-    return toAbsoluteFilePath(directory, filePath);
+    return toAbsoluteFilePath(projectGitDisplayPath(directory), filePath);
 };
 
 const normalizePath = (value?: string | null): string =>
@@ -406,7 +409,8 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
     () => getLanguageFromExtension(filePath) || 'text',
     [filePath]
   );
-  const workspace = useWorkbenchWorkspace();
+  const { t } = useI18n();
+  const { workspace, error: workspaceError } = useGitDocumentWorkspace(directory);
   const diffViewId = React.useId();
 
   if (diff.isBinary) {
@@ -424,14 +428,16 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
   }
 
   const absolutePath = toAbsolutePath(directory, filePath);
-  const resourceId = workspace.status === 'ready'
+  const resourceId = workspace
     ? resourceIdFromWorkspacePath(workspace.directory, absolutePath)
     : null;
-  if (useMonaco && workspace.status === 'ready' && resourceId !== null) {
+  if (useMonaco && workspace && resourceId !== null) {
     return (
       <div className="h-[min(70vh,48rem)] min-h-80 w-full" style={{ contain: 'layout' }}>
         <MonacoFileDiffEditor
           identity={{ workspaceId: workspace.workspaceId, resourceId }}
+          scope={workspace.scope}
+          editorWorkspaceId={workspace.editorWorkspaceId}
           originalContent={diff.original}
           originalRevision={`git:${staged ? 'staged' : 'working'}:original:${monacoDiffContentRevision(diff.original)}`}
           {...(staged
@@ -451,6 +457,8 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
       </div>
     );
   }
+
+  if (useMonaco && !workspace) return <div role="status" className="p-4 typography-meta text-muted-foreground">{workspaceError ?? t('filesView.state.loading')}</div>;
 
   return (
     <div className="w-full" style={{ contain: 'layout' }}>
@@ -599,18 +607,19 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     initialDiffData = null,
 }) => {
     const { t } = useI18n();
-    const { git } = useRuntimeAPIs();
+    const { git } = useProjectGit(directory);
     const { isMobile } = useDeviceInfo();
     const useMonacoFileDiff = !isMobile;
-    const workspace = useWorkbenchWorkspace();
+    const { workspace } = useGitDocumentWorkspace(directory);
     const absoluteFilePath = toAbsolutePath(directory, file.path);
-    const documentResourceId = workspace.status === 'ready'
+    const documentResourceId = workspace
         ? resourceIdFromWorkspacePath(workspace.directory, absoluteFilePath)
         : null;
     const documentRecord = useDocumentRecord(
-        workspace.status === 'ready' && documentResourceId !== null
+        workspace && documentResourceId !== null
             ? { workspaceId: workspace.workspaceId, resourceId: documentResourceId }
             : undefined,
+        workspace?.scope?.documents,
     );
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
@@ -996,9 +1005,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     visible = true,
 }) => {
     const { t } = useI18n();
-    const { git, documents } = useRuntimeAPIs();
-    const sessionDirectory = useEffectiveDirectory();
-    const effectiveDirectory = directoryOverride ?? sessionDirectory;
+    const { documents } = useRuntimeAPIs();
+    const { git, directory: effectiveDirectory } = useProjectGit(directoryOverride);
     const { screenWidth, isMobile } = useDeviceInfo();
     const useMonacoFileDiff = !isMobile;
 
@@ -1354,7 +1362,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
         if (!currentThread) return;
-        const directory = effectiveDirectory || '';
+        const directory = navigationDirectory ?? (effectiveDirectory ? projectGitDisplayPath(effectiveDirectory) : '');
         if (!directory) {
             toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
             return;
@@ -1377,7 +1385,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setReviewFlowSubmitting(false);
         }
-    }, [currentThread, effectiveDirectory, t]);
+    }, [currentThread, effectiveDirectory, navigationDirectory, t]);
 
     const scrollToFile = React.useCallback((path: string): boolean => {
         const node = fileSectionRefs.current.get(path);
@@ -1531,12 +1539,24 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
 
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
-            const openValidation = await validateContextFileOpen(documents, absolutePath, { directory: effectiveDirectory });
+            const workspace = await resolveGitDocumentWorkspace(effectiveDirectory, documents);
+            if (runtimeKey !== getRuntimeKey()) return;
+            const resourceId = resourceIdFromWorkspacePath(workspace.directory, absolutePath);
+            if (resourceId === null) throw new Error('The file is outside the original Git workspace');
+            const openValidation = await validateContextFileOpen(workspace.scope?.api ?? documents, absolutePath, {
+                directory: workspace.directory, resource: { workspaceId: workspace.workspaceId, resourceId },
+            });
             if (!openValidation.ok) {
                 toast.error(getContextFileOpenFailureMessage(openValidation.reason));
                 return;
             }
 
+            if (runtimeKey !== getRuntimeKey()) return;
+            if (workspace.location) {
+                const opened = openProjectResourceFile(workspace.location, resourceId, { target: 'context', preview: true });
+                requestFileEditorNavigation({ workspaceId: workspace.workspaceId, resourceId }, resolvedTargetLine, 1, activeEditorTab(opened)?.viewId);
+                return;
+            }
             openContextFileAtLine(
                 navigationDirectory ?? effectiveDirectory,
                 absolutePath,

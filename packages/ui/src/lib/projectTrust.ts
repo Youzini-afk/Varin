@@ -1,7 +1,8 @@
-import { runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
+import { manageProject, type ProjectSourceBinding, runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 export interface ProjectTrust {
+  target?: { projectId: string; expectedSource: ProjectSourceBinding };
   workspaceId: string;
   path: string;
   decision: boolean | null;
@@ -40,12 +41,18 @@ function decode(value: unknown, workspaceId: string): ProjectTrust {
   return entry as ProjectTrust;
 }
 
-async function request(action: 'read' | 'update', workspaceId: string, body: object, owner: number, signal?: AbortSignal): Promise<ProjectTrust> {
+async function request(action: 'read' | 'update', workspaceId: string, body: object, owner: number, signal?: AbortSignal, target?: ProjectTrust['target']): Promise<ProjectTrust> {
   const check = () => {
     signal?.throwIfAborted();
     if (owner !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed. Review project trust again.');
   };
   check();
+  if (target) {
+    const result = action === 'read'
+      ? await manageProject(target.projectId, 'trust-read', {}, signal, target.expectedSource)
+      : await manageProject(target.projectId, 'trust-update', body as { expectedPath:string;expectedRevision:string;decision:boolean|null }, signal, target.expectedSource);
+    check(); return { ...decode(result, workspaceId), target };
+  }
   const response = await runtimeFetch(`/api/project-trust/${action}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId, ...body }), signal,
   });
@@ -59,9 +66,9 @@ async function request(action: 'read' | 'update', workspaceId: string, body: obj
   return decode(result, workspaceId);
 }
 
-export async function readProjectTrust(workspaceId: string, signal?: AbortSignal): Promise<ProjectTrust> {
+export async function readProjectTrust(workspaceId: string, signal?: AbortSignal, target?: ProjectTrust['target']): Promise<ProjectTrust> {
   const observed = generation;
-  const result = await request('read', workspaceId, {}, getRuntimeEndpointGeneration(), signal);
+  const result = await request('read', workspaceId, {}, getRuntimeEndpointGeneration(), signal, target);
   if (observed !== generation) throw new Error('Project trust changed while reading. Reload and try again.');
   return result;
 }
@@ -81,7 +88,7 @@ export async function changeProjectTrust(
   try {
     const result = await request('update', snapshot.workspaceId, {
       expectedPath: snapshot.path, expectedRevision: snapshot.revision, decision,
-    }, owner, options.signal);
+    }, owner, options.signal, snapshot.target);
     return current() ? result : null;
   } finally {
     // A lost response may still have committed. Retire cached grants even on failure.

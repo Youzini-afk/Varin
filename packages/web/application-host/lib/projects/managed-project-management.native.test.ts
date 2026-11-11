@@ -1,3 +1,7 @@
+import { createKernelComputeService } from '../kernel/compute-service.js';
+import { createKernelProcessIdentityResolver } from '../kernel/process-identity.js';
+import { createFsSearchRuntime } from '../fs/search.js';
+import { createWorkspaceContentSearch } from '../search/content.js';
 import os from 'node:os';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelFileResourceBackend } from '../kernel/file-resource-backend.js';
@@ -43,15 +47,17 @@ it('manages the real target Git workspace and joins its original adoption intent
   const prepare = createThreadSourcePreparer({ documents: target.documents, nativeWorkspaces: preparedNative,
     workingStates: { withBranchStore: async () => { throw new Error('Adopted source must use its original native owner'); } } as never,
     inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => target.client.agentRuntimeRequest('runtime.source.tools', { mode }) });
+  const compute = createKernelComputeService({client:target.client,resolveIdentity:createKernelProcessIdentityResolver({documents:target.documents})});
+  cleanups.push(() => compute.dispose());
   const resourceFiles = createResourceFilesOwner(target.documents,new KernelFileResourceBackend(target.adapter),undefined,async(selection,signal)=>{
     const registration=await target.documents.admitWorkspaceRegistration(selection.workspaceId,signal);
     return {path:(await preparedNative.prepareSelection(selection,'project-files',signal)).path,originalRoot:registration.canonicalPath};
-  });
+  }, {files:createFsSearchRuntime({compute}),content:createWorkspaceContentSearch({documents:target.documents,compute})});
   const sources = createManagedSourceService({ kernel: target.client, hostId: 'management-target', documents: target.documents,
     projectManagement: management, workspaceFiles:resourceFiles, validateLiveSource: async () => { throw new Error('Project management uses registered Documents, not a conversation Source'); }, prepareSource: prepare });
   const app = express(); app.use(express.json());
   let pairedRoot = target.root;
-  registerManagedRemoteRoutes(app, { service: { hostId: 'management-target', sources: () => sources,
+  registerManagedRemoteRoutes(app, { documents:target.documents, service: { hostId: 'management-target', sources: () => sources,
     identity: async () => ({ protocolVersion: 1, hostId: 'management-target', capabilities: ['sources'], machine: { machineId: 'managed:management-target', kind: 'managed-remote', state: 'available' } }) } as never,
     resolveAuthContext: async () => ({ type: 'client', clientId: 'paired-management', client: { capabilities: ['filesystem:read','filesystem:write','terminal:use','process:control'], allowedDirectories: [pairedRoot] } } as never) });
   const server = await new Promise<import('node:http').Server>(resolve => { const server = app.listen(0, '127.0.0.1', () => resolve(server)); });
@@ -78,6 +84,13 @@ it('manages the real target Git workspace and joins its original adoption intent
   expect(await remote.projectManagement({ ...base, command: { action: 'worktree-remove', input: { directory: created.path, deleteLocalBranch: true } } })).toEqual({ success: true });
   expect((await list()).map(entry => entry.path)).toEqual([directory]);
   await expect(remote.projectManagement({ ...base, command: { action: 'worktree-remove', input: { directory: local } } })).rejects.toThrow();
+  const physicalLocation={coordinatorHostId:base.coordinatorHostId,root:directory,workspaceId:workspace.workspaceId};
+  const originalAsset=await remote.workspaceAsset({...physicalLocation,path:'original.txt',asset:{kind:'raw'}});
+  expect(await originalAsset.text()).toBe('target original');
+  await mkdir(path.join(directory,'nested'));await writeFile(path.join(directory,'nested','search.txt'),'actual target search content');
+  expect(await remote.workspace({...physicalLocation,command:{kind:'filename-search',path:'',query:'search'}})).toMatchObject({kind:'filename-search',results:[{path:'nested/search.txt'}],enumerationStatus:'complete'});
+  expect(await remote.workspace({...physicalLocation,command:{kind:'content-search',path:'',query:'actual target',fixedStrings:true}})).toMatchObject({kind:'content-search',result:{status:'ready',hits:[{resource:{workspaceId:workspace.workspaceId,resourceId:'nested/search.txt'},line:1,column:1,revision:expect.any(String)}]}});
+  pairedRoot=local;await expect(remote.workspace({...physicalLocation,command:{kind:'filename-search',path:'',query:'search'}})).rejects.toThrow();pairedRoot=target.root;
   const planned = await remote.projectManagement({ ...base, command: { action: 'workspace-plan', input: {} } }) as VersionedProjectWorkspace;
   const backend = await remote.projectManagement({ ...base, command: { action: 'backend', input: {} } }) as WorkspaceBackendStatus;
   await expect(remote.projectManagement({ ...base, workspace: { ...planned, branchId: 'foreign-branch' }, command: { action: 'enable', input: {} } })).rejects.toThrow();
@@ -109,6 +122,11 @@ it('manages the real target Git workspace and joins its original adoption intent
     const written=await remote.workspace({...location,command:{kind:'bytes',path:'adopted-only.txt',offset:0}});
     expect(written.kind==='bytes' && Buffer.from(written.bytesBase64,'base64').equals(body)).toBe(true);
     expect(await readFile(path.join(prepared.path,'adopted-only.txt'),'utf8')).toBe(body.toString());
+    const documentRead=await remote.documents('read','POST',{resource:{workspaceId:opened.workspaceId,resourceId:'adopted-only.txt'}});
+    expect(documentRead.status).toBe(200);expect(JSON.stringify(await documentRead.json())).toContain(body.toString());
+    expect(await remote.workspace({...location,command:{kind:'filename-search',path:'',query:'adopted-only'}})).toMatchObject({kind:'filename-search',results:[{path:'adopted-only.txt'}],enumerationStatus:'complete'});
+    expect(await remote.workspace({...location,command:{kind:'content-search',path:'',query:'written through original',fixedStrings:true}})).toMatchObject({kind:'content-search',result:{status:'ready',hits:[{resource:{workspaceId:opened.workspaceId,resourceId:'adopted-only.txt'},line:1,column:1,revision:expect.any(String)}]}});
+
     await expect(readFile(path.join(directory,'adopted-only.txt'))).rejects.toMatchObject({code:'ENOENT'});
     expect(await readFile(path.join(directory,'original.txt'),'utf8')).toBe('target original');
     pairedRoot=local;await expect(remote.workspace({...location,command:{kind:'list',path:''}})).rejects.toThrow();pairedRoot=target.root;

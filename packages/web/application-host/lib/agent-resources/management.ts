@@ -36,6 +36,7 @@ export interface ResourceManagementDependencies {
   /** Resolve only a saved Host project identity. Do not accept a path as a project ID. */
   resolveProjectRoot(projectId: string): string | null | Promise<string | null>;
   userAgentsDirectory?: string;
+  authorizeRoot?(root: string): Promise<void>;
   promptTools?(context: { projectId?: string; projectRoot?: string }, signal?: AbortSignal): Promise<AgentToolPrompt[]>;
 }
 
@@ -60,6 +61,7 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
   }
   async function domain(root: string, name: string, directory?: string): Promise<ResourceDomain> {
     const admitted = await canonical(root);
+    await deps.authorizeRoot?.(admitted);
     // This is existing backend resource addressing, not a conversation/workspace identity or UI grant.
     await deps.documents.ensureResourceRoot(admitted, 'directory');
     return { reader: await createAdmittedDirectoryReader({ root: admitted, domainId: `resource-management:${name}`, viewId: `current:${contentVersion(admitted)}` }), displayRoot: admitted, ...(directory ? { directory } : {}) };
@@ -72,7 +74,7 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
     const snapshot = await deps.settings.snapshot(projectRoot);
     assertTrust();
     const scope: ResourceCatalogScope = {
-      projectTrusted, user: await domain(resourceDirectory(dataRoot), 'user'), userSettings: await domain(dataRoot, 'settings'),
+      projectTrusted,
       ...(projectRoot && projectTrusted ? { project: { ...await domain(projectRoot, 'project'), cwd: '' } } : {}),
       configuredPaths: [], installedPackages: [], dependencyDiagnostics: [],
     };
@@ -85,6 +87,10 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
         return undefined;
       }
     };
+    const user = await (deps.authorizeRoot ? optionalDomain(resourceDirectory(dataRoot), 'user') : domain(resourceDirectory(dataRoot), 'user'));
+    const userSettings = await (deps.authorizeRoot ? optionalDomain(dataRoot, 'settings') : domain(dataRoot, 'settings'));
+    if (user) scope.user = user;
+    if (userSettings) scope.userSettings = userSettings;
     const userAgents = await optionalDomain(deps.userAgentsDirectory ?? path.join(homedir(), '.agents'), 'user-agents');
     if (userAgents) scope.userAgents = userAgents;
     for (const [kind, document, root] of [
@@ -164,6 +170,7 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
   }
   async function address(filePath: string, root: string) {
     if (!isPathWithinRoot(filePath, root)) throw new ResourceManagementFailure(403, 'resource-denied', 'Resource is outside its native owner.');
+    await deps.authorizeRoot?.(await canonical(root));
     const mapping = await deps.documents.ensureResourceRoot(root, 'directory');
     return { workspaceId: mapping.workspaceId, resourceId: path.relative(root, filePath).split(path.sep).join('/') };
   }

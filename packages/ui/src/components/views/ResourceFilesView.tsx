@@ -1,5 +1,6 @@
+import { assertFileEnumeration } from '@/lib/projectFileOperations';
 import React from 'react';
-import { createResourceFilesHttpAPI, type ResourceFileEntry, type ResourceFileLocation, type ResourceFilePage, type ResourceFileResult } from '@varin/application-client';
+import { getRuntimeKey, createResourceFilesHttpAPI, type ResourceFileEntry, type ResourceFileLocation, type ResourceFilePage, type ResourceFileResult } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,9 +14,14 @@ import { getResourceDocumentScope, retainResourceWorkspace } from '@/lib/documen
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import { useDeviceInfo } from '@/lib/device';
 import { BUILTIN_EDITOR_PROVIDER_IDS, type EditorViewState } from '@/lib/workbench/editors/types';
+import { requestFileEditorNavigation } from '@/lib/monaco/editor-command-service';
+import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
+import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
 import type { BotWorkItem, ThreadIdentity, ThreadSourceTargets } from '@varin/application-client';
 import type { SourceResourceOwner } from '@varin/protocol';
+type FileSelection = Pick<ResourceFileEntry, 'path' | 'name' | 'kind'> & Partial<Pick<ResourceFileEntry, 'size' | 'modifiedAt' | 'unavailable'>> & { match?: import('@varin/application-client').WorkspaceContentSearchHit };
+type FileViewPage = Omit<ResourceFilePage, 'entries'> & { entries: FileSelection[]; incomplete?: boolean };
 const workKey = (identity: ThreadIdentity) => `${identity.threadId}\u0000${identity.branchId}`;
 export interface ResourceFilesViewLocation { selection?: import('@varin/application-client').ProjectSourceSelection; kind: 'files'; key: string; owner: SourceResourceOwner; title: string; task?: ThreadIdentity; path?: string }
 export interface ResourceFilesNavigation { sources: ThreadSourceTargets | null; cite(location: ResourceFileLocation, path: string, target?: ThreadIdentity): Promise<void> }
@@ -34,11 +40,14 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
   const [directory, setDirectory] = React.useState('');
   const [query, setQuery] = React.useState('');
   const search = React.useDeferredValue(query);
-  const [page, setPage] = React.useState<ResourceFilePage>();
-  const [selected, setSelected] = React.useState<ResourceFileEntry>();
+  const [searchMode, setSearchMode] = React.useState<'files' | 'content'>('files');
+  const showHidden = useDirectoryShowHidden(), showGitignored = useFilesViewShowGitignored();
+  const [page, setPage] = React.useState<FileViewPage>();
+  const [selected, setSelected] = React.useState<FileSelection>();
   const scope = React.useMemo(() => getResourceDocumentScope(view.owner), [view.owner]);
   const identity = React.useMemo(() => location && selected && selected.kind !== 'directory' ? { workspaceId: location.workspaceId, resourceId: selected.path } : undefined, [location, selected]);
   const document = useDocumentRecord(identity, scope.documents);
+  const editorViewId = React.useMemo(() => `resource-preview:${JSON.stringify([getRuntimeKey(), view.owner, location?.workspaceId, location?.selection, location?.root, view.key])}`, [view.owner, view.key, location]);
   const [editorState, setEditorState] = React.useState<EditorViewState>({});
   const { isMobile } = useDeviceInfo();
   const [editing, setEditing] = React.useState(false);
@@ -86,10 +95,23 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
   React.useEffect(() => {
     if (!location || !active) return;
     const abort = new AbortController();
-    const nextKey = JSON.stringify([location, directory, search]);
+    const nextKey = JSON.stringify([location, directory, search, searchMode, showHidden, showGitignored]);
     const count = listKey.current === nextKey ? currentPage.current?.entries.length ?? 0 : 0;
     if (listKey.current !== nextKey) { setPage(undefined); listKey.current = nextKey; }
-    void (async () => {
+    void (async (): Promise<FileViewPage> => {
+      if (search.trim()) {
+        if (searchMode === 'content') {
+          const result = await api.request({ ...location, command: { kind: 'content-search', path: '', query: search, includeHidden: showHidden, respectGitignore: !showGitignored } }, abort.signal);
+          if (result.kind !== 'content-search') throw new Error('Source content search is unavailable');
+          if (result.result.status === 'cancelled') throw new DOMException('Source search cancelled', 'AbortError');
+          if (result.result.status === 'failure') throw new Error(result.result.message);
+          return { path: '', nextCursor: null, entries: result.result.status === 'ready' ? result.result.hits.map(hit => ({ name: hit.resource.resourceId.split('/').pop() ?? hit.resource.resourceId, path: hit.resource.resourceId, kind: 'file', match: hit })) : [], incomplete: result.result.status === 'ready' && result.result.incomplete };
+        }
+        const result = await api.request({ ...location, command: { kind: 'filename-search', path: '', query: search, includeHidden: showHidden, respectGitignore: !showGitignored } }, abort.signal);
+        if (result.kind !== 'filename-search') throw new Error('Source filename search is unavailable');
+        assertFileEnumeration(result.enumerationStatus);
+        return { path: '', nextCursor: null, entries: result.results.map(hit => ({ name: hit.path.split('/').pop() ?? hit.path, path: hit.path, kind: 'file' })), incomplete: result.enumerationStatus === 'incomplete' };
+      }
       const first = await api.request({ ...location, command: { kind: 'list', path: directory, query: search } }, abort.signal);
       if (first.kind !== 'list') throw new Error('Directory response is unavailable');
       const result = first.page;
@@ -101,9 +123,9 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
       return result;
     })().then(result => {
       if (!abort.signal.aborted) { setPage(result); setError(undefined); }
-    }, error => { if (!abort.signal.aborted) setError(String(error)); });
+    }, error => { if (!abort.signal.aborted && !(error instanceof Error && error.name === 'AbortError')) setError(String(error)); });
     return () => abort.abort();
-  }, [api, location, directory, search, revision, active]);
+  }, [api, location, directory, search, searchMode, showHidden, showGitignored, revision, active]);
   React.useEffect(() => {
     if (!location || !active) return;
     let frame = 0;
@@ -129,14 +151,15 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
       offset = result.nextOffset;
     }
   };
-  const pick = async (entry: ResourceFileEntry) => {
-    if (selected?.path === entry.path) return;
+  const pick = async (entry: FileSelection) => {
+    if (selected?.path === entry.path && selected.match?.line === entry.match?.line && selected.match?.column === entry.match?.column) return;
     if (!location || !mayLeave()) return;
     const current = ++generation.current;
     setSelected(entry); setPreview(undefined); setEditing(false); setEditorState({});
     if (entry.kind === 'directory') return;
     await scope.documents.open({ workspaceId: location.workspaceId, resourceId: entry.path });
     if (current !== generation.current) return;
+    if (entry.match) requestFileEditorNavigation({ workspaceId: location.workspaceId, resourceId: entry.path }, entry.match.line, entry.match.column, editorViewId);
     if (mime(entry.name) !== 'application/octet-stream') {
       const blob = await bytes(entry.path);
       if (current === generation.current) setPreview(URL.createObjectURL(blob));
@@ -189,29 +212,30 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
       <nav aria-label={t('bot.workspace.location')}><button type="button" onClick={() => go('')}>{location?.root ?? t('bot.workspace.home')}</button>{directory.split('/').filter(Boolean).map((part, i, all) => <React.Fragment key={i}><Icon name="arrow-right-s" className="size-3" /><button type="button" onClick={() => go(all.slice(0, i + 1).join('/'))}>{part}</button></React.Fragment>)}</nav>
       <button type="button" aria-label={t('bot.workspace.refresh')} onClick={refresh}><Icon name="refresh" className="size-4" /></button>
     </div>
-    <div className="bot-files-tools"><Input aria-label={t('bot.workspace.search')} placeholder={t('bot.workspace.search')} value={query} onChange={event => setQuery(event.target.value)} />
+    <div className="bot-files-tools"><div className="flex gap-1">{(['files', 'content'] as const).map(mode => <Button key={mode} size="sm" variant="ghost" aria-pressed={searchMode === mode} onClick={() => setSearchMode(mode)}>{t(mode === 'files' ? 'workbench.ide.search.filesTab' : 'workbench.ide.search.contentTab')}</Button>)}</div><Input aria-label={t('bot.workspace.search')} placeholder={t('bot.workspace.search')} value={query} onChange={event => setQuery(event.target.value)} />
       <Button size="sm" variant="ghost" disabled={!location || busy} onClick={() => upload.current?.click()}><Icon name="arrow-up" className="size-4" />{t('bot.workspace.upload')}</Button>
       <Button size="sm" variant="ghost" aria-label={t('bot.workspace.newFolder')} disabled={!location || busy} onClick={() => openDialog('newFolder')}><Icon name="folder-add" className="size-4" /></Button>
       <Button size="sm" variant="ghost" disabled={!location || busy} onClick={() => openDialog('newFile')} aria-label={t('bot.workspace.newFile')}><Icon name="add" className="size-4" /></Button>
       <input ref={upload} hidden type="file" multiple onChange={event => { const files = [...event.target.files ?? []]; event.target.value = ''; void perform(async () => { if (!location) return; for (const file of files) { setNotice(`${t('bot.workspace.upload')} · ${file.name}`); await api.upload(location, join(directory, file.name), file, crypto.randomUUID()); } setNotice(t('bot.workspace.transferDone')); refresh(); }); }} />
     </div>
     {error && <p role="alert" className="bot-files-feedback text-destructive">{error} <button onClick={() => { setError(undefined); refresh(); }}>{t('settings.harness.retry')}</button></p>}
+    {page?.incomplete && <p role="status" className="bot-files-feedback text-muted-foreground">{t('files.search.incomplete')}</p>}
     {notice && <p role="status" className="bot-files-feedback text-muted-foreground">{notice}</p>}
     <div className="bot-files-body">
       <nav className="bot-files-roots" aria-label={t('bot.workspace.location')}>{roots.map(root => <button type="button" key={root} onClick={() => void perform(() => openRoot(root, undefined))}><Icon name="folder" className="size-3.5" />{root}</button>)}</nav>
       <div className="bot-file-list" role="list" aria-label={t('bot.workspace.files')}>
         {!page && !error && <p role="status">{t('common.loading')}</p>}
-        {page?.entries.map(entry => <button type="button" key={entry.path} role="listitem" className="bot-file-row" aria-current={selected?.path === entry.path} onClick={() => void perform(() => pick(entry))} onDoubleClick={() => { if (entry.kind === 'directory') go(entry.path); }} onContextMenu={event => { event.preventDefault(); void perform(() => pick(entry)); }}>
-          <Icon name={entry.kind === 'directory' ? 'folder' : 'file-text'} className="size-4" /><span>{entry.name}</span><small title={entry.unavailable}>{entry.unavailable ? '—' : entry.kind === 'directory' ? '' : size(entry.size)}</small></button>)}
+        {page?.entries.map(entry => <button type="button" key={`${entry.path}:${entry.match?.line ?? 0}:${entry.match?.column ?? 0}`} role="listitem" className="bot-file-row" aria-current={selected?.path === entry.path} onClick={() => void perform(() => pick(entry))} onDoubleClick={() => { if (entry.kind === 'directory') go(entry.path); }} onContextMenu={event => { event.preventDefault(); void perform(() => pick(entry)); }}>
+          <Icon name={entry.kind === 'directory' ? 'folder' : 'file-text'} className="size-4" /><span>{search.trim() ? entry.path : entry.name}{entry.match && <small>{entry.match.line}:{entry.match.column} · {entry.match.preview}</small>}</span><small title={entry.unavailable}>{entry.unavailable ? '—' : entry.kind === 'directory' || entry.size === undefined ? '' : size(entry.size)}</small></button>)}
         {page && !page.entries.length && <p>{t(query ? 'bot.workspace.noMatch' : 'bot.workspace.emptyDirectory')}</p>}
         {page?.nextCursor && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void perform(async () => { const result = await api.request({ ...location!, command: { kind: 'list', path: directory, query: search, cursor: page.nextCursor! } }); if (result.kind === 'list') setPage({ ...result.page, entries: [...page.entries, ...result.page.entries] }); })}>{t('bot.workspace.more')}</Button>}
       </div>
       {selected && <section className="bot-file-preview" aria-label={t('bot.workspace.preview')}>
-        <header><button type="button" className="float-right p-1 text-muted-foreground" aria-label={t('bot.workspace.close')} onClick={() => { if (mayLeave()) { setSelected(undefined); setPreview(undefined); setEditing(false); } }}><Icon name="close" className="size-4" /></button><b>{selected.name}</b><small>{selected.unavailable ?? `${size(selected.size)} · ${new Date(selected.modifiedAt).toLocaleString()}`}</small></header>
+        <header><button type="button" className="float-right p-1 text-muted-foreground" aria-label={t('bot.workspace.close')} onClick={() => { if (mayLeave()) { setSelected(undefined); setPreview(undefined); setEditing(false); } }}><Icon name="close" className="size-4" /></button><b>{selected.name}</b><small>{selected.unavailable ?? `${selected.size === undefined ? '' : size(selected.size)} · ${selected.modifiedAt === undefined ? '' : new Date(selected.modifiedAt).toLocaleString()}`}</small></header>
         {identity && <div className="bot-file-conflict"><DocumentConflictBanner identity={identity} registry={scope.documents} /><DocumentEncodingNotice identity={identity} registry={scope.documents} /></div>}
         <div className="bot-file-content">{preview ? mime(selected.name) === 'application/pdf' ? <iframe title={selected.name} src={preview} /> : <img alt={selected.name} src={preview} />
           : identity && document && ['ready', 'conflict', 'deleted'].includes(document.status) ? isMobile ? <DocumentCodeMirror identity={identity} registry={view.owner.kind === 'local' ? undefined : scope.documents} readOnly={!editing || busy} className="h-full" />
-            : <DocumentMonacoEditor identity={identity} path={`${location?.root}/${selected.path}`} providerId={BUILTIN_EDITOR_PROVIDER_IDS.text} viewId={view.key} viewState={editorState} onViewStateChange={setEditorState} scope={view.owner.kind === 'local' ? undefined : scope} readOnly={!editing || busy} className="h-full" />
+            : <DocumentMonacoEditor identity={identity} path={`${location?.root}/${selected.path}`} providerId={BUILTIN_EDITOR_PROVIDER_IDS.text} viewId={editorViewId} viewState={editorState} onViewStateChange={setEditorState} scope={view.owner.kind === 'local' ? undefined : scope} readOnly={!editing || busy} className="h-full" />
             : document && document.status !== 'loading' ? <p>{t('bot.workspace.noPreview')}</p> : selected.kind === 'directory' ? null : <p>{t('common.loading')}</p>}</div>
         <div className="bot-file-actions">
           {selected.kind === 'directory' && <Button size="sm" onClick={() => go(selected.path)}>{t('bot.workspace.open')}</Button>}

@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from './resource-workspace';
 import { getRuntimeKey } from '@varin/application-client';
 import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import {
@@ -76,18 +77,24 @@ export const listEditorWorkbenches = (): readonly EditorWorkbenchState[] => (
 const persistStructural = (state: EditorWorkbenchState): EditorWorkbenchState => {
   rememberLastGoodEditorWorkbench(state);
   schedulePersistedEditorWorkbench(state.workspaceId);
-  const documents=getRegisteredRuntimeAPIs()?.documents;
+  const resource = getEditorResourceWorkspace(state.workspaceId);
+  const documents=resource?.scope.api ?? getRegisteredRuntimeAPIs()?.documents;
+  const documentWorkspaceId=resource?.documentWorkspaceId ?? state.workspaceId;
   if(documents){
-    const retained=listOpenResourceIds(state.tree).length>0;
+    const retained=listOpenResourceIds(state.tree).length>0 || Boolean(resource && [...session.byWorkspace.values()].some(other => {
+      if (other.workspaceId === state.workspaceId || !listOpenResourceIds(other.tree).length) return false;
+      const context = getEditorResourceWorkspace(other.workspaceId);
+      return context?.scope === resource.scope && context.documentWorkspaceId === documentWorkspaceId;
+    }));
     const runtimeKey=session.runtimeKey;
     // Enqueue the durable state before importing anything. A quick close/open
     // must preserve user order even when the first dynamic import is cold.
-    const retention=retainEditorWorkspace(documents,state.workspaceId,retained);
+    const retention=retainEditorWorkspace(documents,documentWorkspaceId,retained);
     void (async()=>{
       if(!retained){
         const documents=await import('@/lib/documents/session');
         const current=session.byWorkspace.get(state.workspaceId);
-        if(session.runtimeKey===runtimeKey&&(!current||listOpenResourceIds(current.tree).length===0))documents.releaseClosedDocumentWorkspace(state.workspaceId);
+        if(session.runtimeKey===runtimeKey&&(!current||listOpenResourceIds(current.tree).length===0)){ if (resource) resource.scope.documents.releaseClosedWorkspace(documentWorkspaceId); else documents.releaseClosedDocumentWorkspace(documentWorkspaceId); }
       }
       await retention;
     })().catch(error=>console.error('[Documents] Saved editor source retention failed:',error));

@@ -27,6 +27,8 @@ import { createStorageService } from './lib/storage/service.js';
 import { registerStorageRoutes } from './lib/storage/routes.js';
 import { createStorageCoordinator } from './lib/storage/coordinator.js';
 import { readHostConnections } from './lib/connections/hosts.js';
+import { routeProjectResourceManagement, invokeResourceManagement } from './lib/agent-resources/project-management.js';
+import { assertResourcePathAllowed } from './lib/workspace/resource-access.js';
 import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
@@ -1806,14 +1808,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     catch (error) { res.status(503).json({ error: error instanceof Error ? error.message : String(error) }); }
   });
   const stopModelDirectory = modelsService.startDirectory(egressRuntime.fetch as typeof globalThis.fetch);
-  const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR,
+  const resourceManagementDependencies = { dataDirectory: VARIN_DATA_DIR,
     documents: await documentsAuthority.createResourceAccess([VARIN_DATA_DIR, path.join(os.homedir(), '.agents')]), settings: modelsService.settings,
-    promptTools: (context, signal) => promptToolCatalog(context, signal),
-    resolveProjectRoot: async projectId => {
+    promptTools: (context: {projectId?:string;projectRoot?:string}, signal?:AbortSignal) => promptToolCatalog(context, signal),
+    resolveProjectRoot: async (projectId: string) => {
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => entry.id === projectId);
+      if (project?.source?.resourceOwner.kind === 'managed_host') throw new Error('Project resources belong to another Host');
       return project?.path ?? null;
     },
+  };
+  const resourceManagement = routeProjectResourceManagement(createResourceManagement(resourceManagementDependencies), {
+    coordinatorHostId: hostId, projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    remote: (owner, signal) => agentRuntime.managedSource(owner, signal),
   });
   registerResourceManagementRoutes(app, resourceManagement, uiAuthController.requireAuth);
   const modelExtensions = new ModelsExtensionOwner(extensionRuntime, modelsService, {
@@ -2447,11 +2454,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, validateLiveSource: liveSources.validate, nativeWorkspaces });
   threads.bindFileResolver(userFileTarget);
   // User mutations share Documents' native gate and its lease context.
+  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget, async (selection, signal) => {
     const registration = await documentsAuthority.admitWorkspaceRegistration(selection.workspaceId, signal);
     const prepared = await nativeWorkspaces!.prepareSelection(selection, 'project-files', signal);
     return { path: prepared.path, originalRoot: registration.canonicalPath };
-  });
+  }, { files: catalogFileSearch, content: workspaceContentSearch }, (bytes,format,signal)=>officeRenderer.convert(bytes,format,'pdf',signal));
   registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
@@ -2510,10 +2518,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projectTrusted: cwd => projectTrust.trusted(cwd),
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
+  let projectGitDispatcher: import('./lib/git/project-dispatch.js').ProjectGitDispatcher | undefined;
   let projectGitHubReader: import('./lib/github/project-read.js').GitHubProjectReader | undefined;
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     terminal:createManagedTerminalOwner({terminal:()=>terminalRuntime,documents:documentsAuthority,nativeWorkspaces}),
     projectManagement: createManagedProjectManagementOwner({ kernel: kernelClient, documents: documentsAuthority,
+      githubDispatch: (command, signal) => { if (!projectGitHubReader?.dispatch) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader.dispatch(command, signal); },
+      nativeWorkspaces, gitDispatch: (command, signal) => { if (!projectGitDispatcher) throw new Error('Target Git owner is unavailable'); return projectGitDispatcher(command, signal); },
+      trust: projectTrust,
+      resources: (directory, command, principal, signal) => invokeResourceManagement(createResourceManagement({ ...resourceManagementDependencies,
+        resolveProjectRoot: () => directory, authorizeRoot: root => assertResourcePathAllowed(root, principal.allowedDirectories),
+      }), { projectId: 'registered-source' }, command, signal),
       githubRead: (command, directory, signal) => { if (!projectGitHubReader) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader(command, directory, signal); } }),
     externalChildSource:createManagedExternalChildSourceOwner({kernel:kernelClient,hostId,sources:createExternalSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,
       capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
@@ -2891,7 +2906,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return prepared;
   });
   recoverLegacyObservations();
-  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
   let grammarManifest = EMPTY_GRAMMAR_PACK_MANIFEST;
@@ -3180,6 +3194,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayService.registerRoutes(app);
 
   await platformRoutesRuntime.registerRoutes(app, {
+    onProjectGitDispatcher: dispatch => { projectGitDispatcher = dispatch; },
     onGitHubProjectReader: reader => { projectGitHubReader = reader; },
     pluginFetch: (url, init) => {
       const { dispatcher: _dispatcher, ...request } = init ?? {};

@@ -26,3 +26,10 @@ test('target auth absence and abort do not fall back to another credential owner
   await expect(read({ action: 'github-issues', input: {} }, '/target/project', abort.signal)).rejects.toThrow();
   expect(getOctokitOrNull).toHaveBeenCalledTimes(1);
 });
+
+test('typed complete GitHub dispatch reaches the original target credential mutation', async () => {
+  const activateGitHubAuth = vi.fn(async () => true);
+  const read = registerGitHubRoutes(express(), { getGitHubLibraries: async () => ({ activateGitHubAuth, getGitHubAuth: () => null, getGitHubAuthAccounts: () => [], GH_CLI_ACCOUNT_ID: 'cli' }) });
+  expect(await read.dispatch!({ operation: 'authActivate', args: ['target-account'], selection: { mode: 'live_root' } })).toEqual({ connected: false, accounts: [] });
+  expect(activateGitHubAuth).toHaveBeenCalledWith('target-account');
+});

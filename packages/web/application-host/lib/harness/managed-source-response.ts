@@ -110,8 +110,10 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
 
 /** Project commands have a closed response envelope: only worktrees returns a
  * list. Keep unrelated Source methods on their object-only contract. */
-export function decodeManagedProjectManagementResponse(action: string, value: unknown): unknown {
-  if (action === 'worktrees') {
+export function decodeManagedProjectManagementResponse(action: string, value: unknown, input?: unknown): unknown {
+  if (action === 'resources' && record(input) && input.action === 'tools') {
+    if (!Array.isArray(value) || !value.every(tool => record(tool) && text(tool.name) && text(tool.description) && record(tool.schema))) throw new Error('Managed project tool catalog is unconfirmed');
+  } else if (action === 'worktrees') {
     if (!Array.isArray(value) || !value.every(entry => record(entry)
       && ['head', 'name', 'branch', 'path'].every(key => text(entry[key])))) {
       throw new Error('Managed project worktree listing is unconfirmed');

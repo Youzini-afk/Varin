@@ -4,9 +4,11 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ContextResourceEditor } from './ContextResourceEditor';
 import { openWorkbenchEditor, patchEditorViewState, resetEditorWorkbenchForTests } from '@/lib/workbench/editors/session';
+import { resolveProjectEditorWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 
-const mocks = vi.hoisted(() => ({ documents: { resolveWorkspace: vi.fn() }, editor: vi.fn() }));
+const mocks = vi.hoisted(() => ({ documents: { resolveWorkspace: vi.fn() }, editor: vi.fn(), resource: { api: { setWorkspaceRetention: vi.fn(async () => undefined) }, documents: { releaseClosedWorkspace: vi.fn() } } }));
+vi.mock('@/lib/documents/resource-session', () => ({ getResourceDocumentScope: () => mocks.resource }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents: mocks.documents }) }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
@@ -71,4 +73,21 @@ it('reports a workspace resolution failure without mounting an editor with anoth
   await act(async () => root.render(<ContextResourceEditor filePath="/selected/main.ts" workspaceRoot="/selected" viewId="file" />));
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Repository is unavailable');
   expect(mocks.editor).not.toHaveBeenCalled();
+});
+
+
+it('reopens the same remote editor view without resolving its path on the coordinator', async () => {
+  const resource = resolveProjectEditorWorkspace({ resourceOwner: { kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' }, root: '/same/path', workspaceId: 'target-workspace' });
+  const tab = activeEditorTab(openWorkbenchEditor(resource.workspaceId, 'paper.md'))!;
+  patchEditorViewState(resource.workspaceId, tab.viewId, { previewMode: 'edit' });
+  await act(async () => root.render(<ContextResourceEditor filePath="/same/path/paper.md" workspaceRoot="/same/path" viewId="adjacent" editorViewId={tab.viewId} editorWorkspaceId={resource.workspaceId} />));
+  expect(mocks.documents.resolveWorkspace).not.toHaveBeenCalled();
+  expect(mocks.editor).toHaveBeenLastCalledWith(expect.objectContaining({ workspaceId: resource.workspaceId, tab: expect.objectContaining({ viewId: tab.viewId, viewState: expect.objectContaining({ previewMode: 'edit' }) }) }));
+});
+
+it('does not fall back to a local path when a restored resource identity belongs to another Host', async () => {
+  await act(async () => root.render(<ContextResourceEditor filePath="/same/path/paper.md" workspaceRoot="/same/path" viewId="adjacent" editorWorkspaceId='resource-editor:["another-host",{},"workspace","/same/path"]' />));
+  expect(mocks.documents.resolveWorkspace).not.toHaveBeenCalled();
+  expect(mocks.editor).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('original resource Host');
 });

@@ -1,3 +1,4 @@
+import { dispatchProjectGit, dispatchProjectGitHub } from '../git/project-owner.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ProjectEntry, ProjectManagementCommand, VersionedProjectWorkspace } from '@varin/application-client';
@@ -18,26 +19,43 @@ export interface ManagedProjectManagementRequest {
 }
 /** An adapter over the original resource owners, not a second project registry.
  * The coordinator persists the adoption intent before asking this owner to run it. */
-export function createManagedProjectManagementOwner(options: { kernel: KernelClient; documents: DocumentAuthority; githubRead?: (command: Extract<ProjectManagementCommand, { action: `github-${string}` }>, directory: string, signal?: AbortSignal) => Promise<unknown> }) {
+export function createManagedProjectManagementOwner(options: { kernel: KernelClient; documents: DocumentAuthority; githubDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; gitDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; nativeWorkspaces?: Pick<import('../kernel/native-workspaces.js').NativeWorkspaceOwner, 'prepareSelection'>; resources?: (directory: string, command: import('@varin/application-client').NativeResourceManagementCommand, principal: ManagedSourcePrincipal, signal?: AbortSignal) => Promise<unknown>; trust?: import('../models/project-trust.js').ProjectTrustService; githubRead?: (command: import('../github/project-read.js').GitHubProjectReadCommand, directory: string, signal?: AbortSignal) => Promise<unknown> }) {
   const adapters = new Map<string, { project: ProjectEntry; owner: ReturnType<typeof createNativeWorkspaceOwner> }>();
   return async (principal: ManagedSourcePrincipal, request: ManagedProjectManagementRequest, signal?: AbortSignal): Promise<unknown> => {
     if (!principal.principalId || !principal.capabilities.includes('filesystem:read')
       || !request.coordinatorHostId || !request.projectId || !request.workspaceId) throw new Error('Project management authority is required');
     const action = request.command.action;
-    const readonly = ['worktrees', 'inspect', 'backend', 'workspace-plan', 'worktree-bootstrap'].includes(action) || action.startsWith('git-') || action.startsWith('github-');
+    const readonly = ['worktrees', 'inspect', 'backend', 'workspace-plan', 'worktree-bootstrap'].includes(action) || action.startsWith('git-') || action.startsWith('github-') || action === 'trust-read' || action === 'resources' && ['list','read','prompt','tools'].includes(String((request.command.input as {action?:string}).action));
     if (!readonly && !principal.capabilities.includes('filesystem:write')) throw new Error('Project management requires filesystem write access');
     if ((['worktree-create','worktree-validate','worktree-remove','worktree-remote-branch-delete','worktree-bootstrap','worktrees'].includes(action) || action.startsWith('git-') || action.startsWith('github-'))
       && !principal.capabilities.includes('terminal:use')) throw new Error('Git access requires target process permission');
     const registration = await options.documents.admitWorkspaceRegistration(request.workspaceId, signal);
     await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
     const directory = registration.canonicalPath;
+    if (request.command.action === 'github-command') {
+      if (!options.githubDispatch) throw new Error('Target GitHub owner is unavailable');
+      return dispatchProjectGitHub({ dispatch: options.githubDispatch, ...(options.nativeWorkspaces ? { nativeWorkspaces: options.nativeWorkspaces } : {}) }, principal, request.workspaceId, directory, request.command.input, signal);
+    }
+    if (request.command.action === 'git-command') {
+      if (!options.gitDispatch) throw new Error('Target Git owner is unavailable');
+      return dispatchProjectGit({ dispatch: options.gitDispatch, ...(options.nativeWorkspaces ? { nativeWorkspaces: options.nativeWorkspaces } : {}) }, principal, request.workspaceId, directory, request.command.input, signal);
+    }
     if (action.startsWith('worktree') || action.startsWith('git-') || action.startsWith('github-') && action !== 'github-auth') {
       const primary = await git.resolvePrimaryWorktreeRoot(directory);
       await assertResourcePathAllowed(primary.root, principal.allowedDirectories);
     }
+    if (request.command.action === 'resources') {
+      if (!options.resources) throw new Error('Target resource management owner is unavailable');
+      return options.resources(directory, request.command.input, principal, signal);
+    }
+    if (request.command.action === 'trust-read' || request.command.action === 'trust-update') {
+      if (!options.trust) throw new Error('Target project trust owner is unavailable');
+      return request.command.action === 'trust-read' ? options.trust.snapshot(request.workspaceId, signal)
+        : options.trust.update({ ...request.command.input, workspaceId: request.workspaceId }, signal);
+    }
     if (request.command.action.startsWith('github-')) {
       if (!options.githubRead) throw new Error('Target GitHub owner is unavailable');
-      return options.githubRead(request.command as Extract<ProjectManagementCommand, { action: `github-${string}` }>, directory, signal);
+      return options.githubRead(request.command as import('../github/project-read.js').GitHubProjectReadCommand, directory, signal);
     }
     const key = createHash('sha256').update(JSON.stringify([principal.principalId, request.coordinatorHostId, request.projectId, request.workspaceId])).digest('hex');
     const planned: VersionedProjectWorkspace = { workspaceId: request.workspaceId, executionWorkspaceId: `managed-project:${key}`,

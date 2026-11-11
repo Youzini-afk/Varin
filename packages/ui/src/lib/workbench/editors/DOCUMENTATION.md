@@ -90,3 +90,16 @@ unsaved snapshots are explicit prompt text, tool path hints never override Docum
 and patch accept/reject uses a revision-checked Document Registry transaction. Active-editor context
 is selected by visible view ownership; a disposed or hidden integration cannot become an arbitrary
 fallback command/context target.
+
+Remote project editor placement uses `resource-workspace.ts`: the persisted view key includes the
+coordinator, original resource owner, admitted workspace and frozen project selection. This key is
+not a Documents identity. Text, recovery, encoding, model ownership and source retention use the
+original resource scope and its actual Documents workspace ID. Identical workspace IDs on separate
+Hosts cannot share tabs, buffers or retention queues. Closing one view does not release another view
+of the same source; changing shells keeps the original model owner. Restored context tabs carry their
+editor workspace key and never fall back to resolving a remote path on the coordinator.
+
+Images, embedded Markdown images, PDF originals, Office previews and HTML subresources use the
+same resource location through authenticated resource asset routes. Original target readers perform
+content access. Research readers additionally match the admitted source owner and native selection;
+a matching directory name alone does not establish an admitted conversation source.

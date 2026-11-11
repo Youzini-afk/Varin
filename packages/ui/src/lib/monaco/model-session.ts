@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { listEditorGroups } from '@/lib/workbench/editors/groups';
@@ -25,6 +26,7 @@ const syncWorkbenchOwners = (): void => {
   if (!active) return;
   const nextOwners = new Set<string>();
   for (const workbench of listEditorWorkbenches()) {
+    if (getEditorResourceWorkspace(workbench.workspaceId)) continue;
     for (const group of listEditorGroups(workbench.tree)) {
       for (const tab of group.tabs) {
         if (!OFFICIAL_TEXT_PROVIDER_IDS.has(tab.providerId)) continue;

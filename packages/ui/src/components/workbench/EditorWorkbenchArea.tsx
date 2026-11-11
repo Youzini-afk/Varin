@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import {
@@ -44,9 +45,13 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
   const shellActive = useWorkbenchShellActive();
   const { isMobile, isTablet } = useDeviceInfo();
   const workspaceId = useWorkbenchWorkspaceId();
-  const root = useEffectiveDirectory() ?? '';
+  const localRoot = useEffectiveDirectory() ?? '';
+  const resourceWorkspace = getEditorResourceWorkspace(workspaceId);
+  const root = resourceWorkspace?.location.root ?? localRoot;
+  const registry = resourceWorkspace?.scope.documents;
+  const documentWorkspaceId = resourceWorkspace?.documentWorkspaceId ?? workspaceId;
   const editorWorkbench = useEditorWorkbench(workspaceId);
-  const dirtyResourceIds = useDirtyResourceIds(workspaceId);
+  const dirtyResourceIds = useDirtyResourceIds(documentWorkspaceId, registry);
   const [closingTab, setClosingTab] = React.useState<EditorTab | null>(null);
   const requestClose = React.useCallback((tabId: string): void => {
     if (!workspaceId) return;
@@ -55,14 +60,14 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       .flatMap((group) => group.tabs)
       .find((candidate) => candidate.tabId === tabId);
     if (!tab) return;
-    const record = getDocumentRegistry().get({ workspaceId, resourceId: tab.resourceId });
+    const record = (registry ?? getDocumentRegistry()).get({ workspaceId: documentWorkspaceId!, resourceId: tab.resourceId });
     if (record?.dirty) {
       setClosingTab(tab);
       return;
     }
     closeWorkbenchEditor(workspaceId, tabId);
     if (tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser) closeEmbeddedBrowserPage(root, tab.viewState.browserTabId ?? tab.viewId);
-  }, [workspaceId, root]);
+  }, [workspaceId, root, registry, documentWorkspaceId]);
   const closePending = React.useCallback((): void => {
     if (!workspaceId || !closingTab) return;
     closeWorkbenchEditor(workspaceId, closingTab.tabId);
@@ -71,6 +76,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
 
   React.useEffect(() => {
     if (!shellActive || !workspaceId || !root) return;
+    if (resourceWorkspace) { ensureEditorWorkbench(workspaceId); return; }
     const legacy = useFilesExplorerStore.getState().consumeLegacyEditorTabs(root);
     const resourceIds = legacy.openPaths
       .map((path) => resourceIdFromWorkspacePath(root, path))
@@ -82,7 +88,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       resourceIds,
       ...(selectedResourceId ? { selectedResourceId } : {}),
     });
-  }, [root, workspaceId, shellActive]);
+  }, [root, workspaceId, shellActive, resourceWorkspace]);
 
   React.useEffect(() => {
     if (!shellActive) return;
@@ -97,13 +103,13 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       const tab = activeEditorTab(editorWorkbench);
       if (!tab) return;
       event.preventDefault();
-      void getDocumentRegistry().save({ workspaceId, resourceId: tab.resourceId }).catch((error) => {
+      void (registry ?? getDocumentRegistry()).save({ workspaceId: documentWorkspaceId!, resourceId: tab.resourceId }).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editorWorkbench, workspaceId, shellActive]);
+  }, [editorWorkbench, workspaceId, shellActive, registry, documentWorkspaceId]);
 
   React.useEffect(() => {
     if (!shellActive || !workspaceId) return;
@@ -183,7 +189,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
               variant="ghost"
               onClick={() => {
                 if (!closingTab) return;
-                getDocumentRegistry().discard({ workspaceId, resourceId: closingTab.resourceId });
+                (registry ?? getDocumentRegistry()).discard({ workspaceId: documentWorkspaceId!, resourceId: closingTab.resourceId });
                 closePending();
               }}
             >
@@ -193,7 +199,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
               type="button"
               variant="outline"
               onClick={() => {
-                void getDocumentRegistry().flushRecoveryJournals()
+                void (registry ?? getDocumentRegistry()).flushRecoveryJournals()
                   .then(closePending)
                   .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
               }}
@@ -204,8 +210,8 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
               type="button"
               onClick={() => {
                 if (!closingTab) return;
-                const identity = { workspaceId, resourceId: closingTab.resourceId };
-                void getDocumentRegistry().save(identity)
+                const identity = { workspaceId: documentWorkspaceId!, resourceId: closingTab.resourceId };
+                void (registry ?? getDocumentRegistry()).save(identity)
                   .then((saved) => {
                     if (!saved.dirty) closePending();
                   })

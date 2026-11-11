@@ -80,7 +80,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
 
       <ProjectSettingsSubsection title={t('settings.projectTrust.title')} description={t('settings.projectTrust.description')} settingsItem="projects.trust">
         <div className="divide-y divide-border/50">
-          {project.source?.resourceOwner.kind === 'managed_host' ? <p className="typography-meta text-muted-foreground">File access and workspace trust are checked by {project.source.resourceOwner.hostId}. This Host does not grant trust to a same-named local directory.</p> : projectFolders(project).map(directory => <ProjectTrustSettings key={directory} directory={directory}
+          {project.source?.resourceOwner.kind === 'managed_host' ? <ProjectTrustSettings project={project} directory={project.path} showDescription={false} /> : projectFolders(project).map(directory => <ProjectTrustSettings key={directory} directory={directory}
             label={directory.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || directory} showDescription={false} />)}
         </div>
       </ProjectSettingsSubsection>

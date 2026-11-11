@@ -21,15 +21,15 @@ export const useDocumentRecord = (identity: DocumentIdentity | undefined, regist
   )
 );
 
-export const useDocumentMeta = (identity: DocumentIdentity | undefined): DocumentMeta | undefined => {
-  const record = useDocumentRecord(identity);
+export const useDocumentMeta = (identity: DocumentIdentity | undefined, registry?: ReturnType<typeof getDocumentRegistry>): DocumentMeta | undefined => {
+  const record = useDocumentRecord(identity, registry);
   return record ? toDocumentMeta(record) : undefined;
 };
 
-export const useDirtyResourceIds = (workspaceId: string | undefined): ReadonlySet<string> => (
+export const useDirtyResourceIds = (workspaceId: string | undefined, registry?: ReturnType<typeof getDocumentRegistry>): ReadonlySet<string> => (
   React.useSyncExternalStore(
-    (onStoreChange) => (workspaceId ? getDocumentRegistry().subscribeDirty(workspaceId, onStoreChange) : () => undefined),
-    () => (workspaceId ? getDocumentRegistry().dirtyResourceIds(workspaceId) : EMPTY_DIRTY_IDS),
+    (onStoreChange) => (workspaceId ? (registry ?? getDocumentRegistry()).subscribeDirty(workspaceId, onStoreChange) : () => undefined),
+    () => (workspaceId ? (registry ?? getDocumentRegistry()).dirtyResourceIds(workspaceId) : EMPTY_DIRTY_IDS),
     () => EMPTY_DIRTY_IDS,
   )
 );

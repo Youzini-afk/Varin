@@ -75,3 +75,12 @@ export * from './conversation-organization-http.js';
 export * from './project-management.js';
 
 export * from './managed-terminal.js';
+
+export type { NativeResourceManagementCommand, ProjectTrustSnapshot } from './resource-management.js';
+
+export * from './git-http.js';
+export * from './project-git.js';
+
+export * from './git-integration.js';
+
+export * from './github-http.js';

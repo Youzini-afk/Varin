@@ -1,5 +1,7 @@
+import { MarkdownResourceContext } from './resource-context';
+import { resourceIdFromWorkspacePath, workspacePathFromResourceId } from '@/lib/documents/path';
 import React from 'react';
-import { getRuntimeEndpointGeneration, runtimeFetch, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { createResourceAssetUrl, getRuntimeEndpointGeneration, runtimeFetch, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { ConversationPreviewContext, useOptionalConversationPresentation } from '@/components/conversation/ConversationContext';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getOutsideFileGrant, ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
@@ -13,14 +15,15 @@ import { useImageReply } from '@/components/images/useImageReply';
 export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement | null>, onChange?: (reason: 'structural') => void) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
+  const resource = React.useContext(MarkdownResourceContext);
   const textSource = React.useContext(ChatTextSourceContext);
   const provenance = React.useMemo(() => conversation ? { kind: 'chat' as const, thread: conversation.identity, itemId: textSource?.entryId, passages: [] } : undefined, [conversation, textSource?.entryId]);
   const annotation = useImageReply(undefined, 'image', provenance);
   const preview = React.useContext(ConversationPreviewContext);
   const navigationDirectory = useEffectiveDirectory() ?? '';
-  const directory = conversation ? conversation.fileDirectory ?? '' : navigationDirectory;
+  const directory = resource ? workspacePathFromResourceId(resource.location.root, resource.resourceId.split('/').slice(0, -1).join('/')) : conversation ? conversation.fileDirectory ?? '' : navigationDirectory;
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const scope = JSON.stringify([generation, conversation?.identity, directory]);
+  const scope = JSON.stringify([generation, conversation?.identity, directory, resource]);
   const [viewer, setViewer] = React.useState<{ items: MarkdownImageItem[]; index: number; scope: string }>();
   const labels = React.useMemo(() => ({ view: t('chat.media.view'), loading: t('chat.media.loading'), retry: t('chat.media.retry'), failed: t('chat.images.failed'), long: t('chat.images.fullLength') }), [t]);
   const registry = React.useRef<MarkdownImageRegistry | null>(null);
@@ -29,6 +32,11 @@ export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement |
     const source = resolveMarkdownImageSource(href, directory);
     if (!source || preview) throw new Error('Image source unavailable');
     if (source.kind === 'url') return { src: source.url };
+    if (resource) {
+      const resourceId = resourceIdFromWorkspacePath(resource.location.root, source.path);
+      if (!resourceId) throw new Error('Image is outside the original project source');
+      return { src: createResourceAssetUrl(resource.location, resourceId, { kind: 'raw' }) };
+    }
     let grant = getOutsideFileGrant(source.path);
     // Automatic previews never prompt for a new native file grant.
     if ((original || interactive) && !grant) grant = await ensureOutsideFileGrantForDesktop(source.path, directory);
@@ -43,7 +51,7 @@ export function useMarkdownImages(containerRef: React.RefObject<HTMLDivElement |
     return { src, width: Number(response.headers.get('X-Varin-Image-Width')) || undefined,
       height: Number(response.headers.get('X-Varin-Image-Height')) || undefined,
       release: () => URL.revokeObjectURL(src) };
-  }, [directory, generation, preview]);
+  }, [directory, generation, preview, resource]);
   const loadPreview = React.useCallback((source: string, signal: AbortSignal, interactive?: boolean) => load(source, signal, false, interactive), [load]);
   const loadOriginal = React.useCallback((source: string, signal: AbortSignal) => load(source, signal, true), [load]);
   React.useLayoutEffect(() => {

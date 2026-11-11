@@ -2,7 +2,8 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useScopedGitHubAuth } from '@/hooks/useProjectGitHub';
+import type { GitHubAPI } from '@varin/application-client';
 import type { GitHubAuthStatus, GitHubGitAuthorResult, GitHubTerminalAuthResult } from '@varin/application-client';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
@@ -34,15 +35,11 @@ type DeviceFlowCompleteResponse =
   | { connected: true; user: GitHubUser; scope?: string }
   | { connected: false; status?: string; error?: string };
 
-export const GitHubSettings: React.FC = () => {
+export const GitHubSettings: React.FC<{ github?: GitHubAPI }> = ({ github }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
-  const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
-  const status = useGitHubAuthStore((state) => state.status);
-  const isLoading = useGitHubAuthStore((state) => state.isLoading);
-  const hasChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const refreshStatus = useGitHubAuthStore((state) => state.refreshStatus);
-  const setStatus = useGitHubAuthStore((state) => state.setStatus);
+  const runtimeGitHub = github ?? getRegisteredRuntimeAPIs()?.github;
+  const { status, isLoading, hasChecked, refreshStatus, setStatus } = useScopedGitHubAuth(runtimeGitHub, Boolean(github));
 
   const openExternal = React.useCallback(async (url: string) => {
     await openExternalUrl(url);

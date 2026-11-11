@@ -5,7 +5,7 @@ import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 export type NativeResourceKind = 'skill';
 export type NativeResourceScope = 'user' | 'project';
 /** A saved navigation project, resolved and trust-checked by the Host. No renderer path grants. */
-export interface ResourceManagementTarget { projectId?: string }
+export interface ResourceManagementTarget { projectId?: string; expectedSource?: import('./types.js').ProjectSourceBinding }
 export interface NativeResourceSourceInfo {
   origin: 'package' | 'top-level'; scope: NativeResourceScope; path: string; source: string; baseDir?: string;
 }
@@ -47,4 +47,15 @@ export function createResourceManagementHttpAPI(generation = getRuntimeEndpointG
     remove: (target: ResourceManagementTarget, input: NativeResourceRemove, signal?: AbortSignal) => post<{ removed: true }>('remove', target, input, signal),
     copy: (target: ResourceManagementTarget, input: NativeResourceCopy, signal?: AbortSignal) => post<NativeResourceDocumentSnapshot>('copy', target, input, signal),
   };
+}
+
+export type NativeResourceManagementCommand =
+  | { action: 'list' | 'prompt' | 'tools'; input: Record<string, never> }
+  | { action: 'read'; input: { id: string } }
+  | { action: 'create'; input: NativeResourceCreate }
+  | { action: 'update'; input: NativeResourceUpdate }
+  | { action: 'remove'; input: NativeResourceRemove }
+  | { action: 'copy'; input: NativeResourceCopy };
+export interface ProjectTrustSnapshot {
+  workspaceId: string; path: string; decision: boolean | null; directDecision: boolean | null; revision: string;
 }

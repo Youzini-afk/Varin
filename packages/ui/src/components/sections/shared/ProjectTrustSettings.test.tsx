@@ -3,9 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { VarinEvent } from '@/lib/varinEvents';
-const fixture = vi.hoisted(() => ({ host: 1, fetch: vi.fn(), resolve: vi.fn(), listeners: new Set<() => void>(), events: undefined as ((event: VarinEvent) => void) | undefined }));
+const fixture = vi.hoisted(() => ({ host: 1, fetch: vi.fn(), manage: vi.fn(), resolve: vi.fn(), listeners: new Set<() => void>(), events: undefined as ((event: VarinEvent) => void) | undefined }));
 const documents = { resolveWorkspace: fixture.resolve };
-vi.mock('@varin/application-client', () => ({ runtimeFetch: fixture.fetch, getRuntimeEndpointGeneration: () => fixture.host,
+vi.mock('@varin/application-client', () => ({ manageProject: fixture.manage, runtimeFetch: fixture.fetch, getRuntimeEndpointGeneration: () => fixture.host,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: (listener: (event: VarinEvent) => void) => { fixture.events = listener; return () => { fixture.events = undefined; }; } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents }) }));
@@ -73,4 +73,29 @@ it('keeps save errors visible and offers a fresh revision instead of automatical
   await act(async () => button('settings.projectTrust.trust', true).click());
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('Settings changed'); expect(updates()).toHaveLength(1);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('reads and confirms trust on the registered remote owner without resolving a local path', async () => {
+  const source = {resourceOwner:{kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'endpoint'},workspaceId:'remote-workspace'};
+  fixture.manage.mockImplementation(async (_id, action, input) => ({...snapshot('remote-workspace',action === 'trust-update' ? input.decision : null),path:'/target/project'}));
+  const project = {id:'project',path:'/same/path',source};
+  await act(async()=>root.render(<ProjectTrustSettings project={project} directory={project.path} />));
+  expect(fixture.resolve).not.toHaveBeenCalled(); expect(fixture.fetch).not.toHaveBeenCalled();
+  expect(fixture.manage).toHaveBeenCalledWith('project','trust-read',{},expect.any(AbortSignal),source);
+  await act(async()=>button('settings.projectTrust.trust').click());
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('/target/project');
+  await act(async()=>button('settings.projectTrust.trust',true).click());
+  expect(fixture.manage).toHaveBeenCalledWith('project','trust-update',{expectedPath:'/target/project',expectedRevision:'initial',decision:true},undefined,source);
+});
+
+it('retires a remote trust confirmation when the same project changes source owner', async()=>{
+  const source = {resourceOwner:{kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'endpoint'},workspaceId:'remote-workspace'};
+  fixture.manage.mockImplementation(async()=>({...snapshot('remote-workspace'),path:'/target/project'}));
+  const project = {id:'project',path:'/same/path',source};
+  await act(async()=>root.render(<ProjectTrustSettings project={project} directory={project.path} />));
+  await act(async()=>button('settings.projectTrust.trust').click());
+  const approve=button('settings.projectTrust.trust',true);
+  await act(async()=>root.render(<ProjectTrustSettings project={{...project,source:{...source,resourceOwner:{...source.resourceOwner,hostId:'other'}}}} directory={project.path} />));
+  await act(async()=>approve.click());
+  expect(fixture.manage.mock.calls.filter(([,action])=>action==='trust-update')).toHaveLength(0);
 });

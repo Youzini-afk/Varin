@@ -49,6 +49,7 @@ type ContextPanelTab = {
   contentRef?: string;
   id: string;
   editorViewId?: string;
+  editorWorkspaceId?: string;
   mode: ContextPanelMode;
   targetPath: string | null;
   targetDirectory: string | null;
@@ -68,6 +69,7 @@ type ContextPanelTabDescriptor = {
   contentRef?: string;
   mode: ContextPanelMode;
   editorViewId?: string;
+  editorWorkspaceId?: string;
   targetPath?: string | null;
   targetDirectory?: string | null;
   dedupeKey?: string | null;
@@ -237,6 +239,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     ...(descriptor.contentRef ? { contentRef: descriptor.contentRef } : {}),
     ...(Number.isSafeInteger(descriptor.materialLine) && descriptor.materialLine! >= 1 ? { materialLine: descriptor.materialLine } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
+    ...(descriptor.editorWorkspaceId ? { editorWorkspaceId: descriptor.editorWorkspaceId } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
     dedupeKey,
@@ -285,6 +288,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
       thread?: ThreadIdentity;
       contentRef?: unknown;
       editorViewId?: unknown;
+      editorWorkspaceId?: unknown;
       targetPath?: unknown;
       targetDirectory?: unknown;
       dedupeKey?: unknown;
@@ -322,6 +326,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
       ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
       ...(typeof candidate.materialLine === 'number' && Number.isSafeInteger(candidate.materialLine) && candidate.materialLine >= 1 ? { materialLine: candidate.materialLine } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
+      ...(typeof candidate.editorWorkspaceId === 'string' && candidate.editorWorkspaceId ? { editorWorkspaceId: candidate.editorWorkspaceId } : {}),
       targetPath,
       dedupeKey,
       targetDirectory: normalizeDirectoryPath(typeof candidate.targetDirectory === 'string' ? candidate.targetDirectory.trim() : '') || null,
@@ -391,6 +396,7 @@ const upsertContextPanelTab = (
           mode: nextTab.mode,
           targetPath: nextTab.targetPath || tab.targetPath,
           ...(nextTab.editorViewId ? { editorViewId: nextTab.editorViewId } : {}),
+          ...(nextTab.editorWorkspaceId ? { editorWorkspaceId: nextTab.editorWorkspaceId } : {}),
           targetDirectory: nextTab.targetDirectory,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,

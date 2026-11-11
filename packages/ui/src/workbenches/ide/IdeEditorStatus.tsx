@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 import { DocumentEncodingMenu } from '@/components/workbench/DocumentEncodingMenu';
 import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
@@ -11,10 +12,12 @@ export function IdeEditorStatus({ workspaceId }: { workspaceId?: string }) {
   const { t } = useI18n();
   const workbench = useEditorWorkbench(workspaceId);
   const tab = workbench ? activeEditorTab(workbench) : undefined;
+  const resource = getEditorResourceWorkspace(workspaceId);
+  const documentWorkspaceId = resource?.documentWorkspaceId ?? workspaceId;
   const resourceId = tab?.resourceId;
   const viewId = tab?.viewId;
-  const identity = React.useMemo(() => workspaceId && resourceId ? ({ workspaceId, resourceId }) : undefined, [workspaceId, resourceId]);
-  const document = useDocumentMeta(identity);
+  const identity = React.useMemo(() => documentWorkspaceId && resourceId ? ({ workspaceId: documentWorkspaceId, resourceId }) : undefined, [documentWorkspaceId, resourceId]);
+  const document = useDocumentMeta(identity, resource?.scope.documents);
   const info = React.useSyncExternalStore(subscribeEditorViewState, () => {
     const state = peekEditorWorkbench(workspaceId);
     return state ? listEditorGroups(state.tree).flatMap(group => group.tabs).find(candidate => candidate.viewId === viewId)?.viewState.editorInfo : undefined;
@@ -27,7 +30,7 @@ export function IdeEditorStatus({ workspaceId }: { workspaceId?: string }) {
       <span className="shrink-0">{info.languageName ?? info.languageId}</span>
       <span className="ide-editor-indent shrink-0">{info.insertSpaces ? t('workbench.editor.indentSpaces', { count: info.tabSize }) : t('workbench.editor.indentTabs')}</span>
     </> : null}
-    {document?.encoding && identity ? <DocumentEncodingMenu identity={identity}><button type="button" className="shrink-0 hover:text-foreground" aria-label={t('filesView.encoding.save')}>{document.encoding.toUpperCase()}{document.bom ? ' BOM' : ''}</button></DocumentEncodingMenu> : null}
+    {document?.encoding && identity ? <DocumentEncodingMenu registry={resource?.scope.documents} identity={identity}><button type="button" className="shrink-0 hover:text-foreground" aria-label={t('filesView.encoding.save')}>{document.encoding.toUpperCase()}{document.bom ? ' BOM' : ''}</button></DocumentEncodingMenu> : null}
     {document?.lineEnding ? <span className="ide-editor-eol shrink-0">{document.lineEnding.toUpperCase()}</span> : null}
   </div>;
 }

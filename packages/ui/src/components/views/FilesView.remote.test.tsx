@@ -44,7 +44,7 @@ test('the ordinary Files surface opens and lists the selected remote project thr
   expect(container.textContent).toContain('remote.txt');
   expect(fixture.localTree).not.toHaveBeenCalled();
   expect(fixture.scope).toHaveBeenCalledWith(fixture.project.source.resourceOwner);
-  expect(fixture.request.mock.calls[0]![0]).toEqual({ resourceOwner: fixture.project.source.resourceOwner, command: { kind: 'open', path: '/same/path' } });
+  expect(fixture.request.mock.calls[0]![0]).toEqual({ resourceOwner: fixture.project.source.resourceOwner, selection: { mode: 'live_root' }, command: { kind: 'open', path: '/same/path' } });
   expect(fixture.request.mock.calls[1]![0]).toMatchObject({ resourceOwner: fixture.project.source.resourceOwner, workspaceId: 'remote-registration', command: { kind: 'list' } });
 });
 test('an offline resource stays a visible unavailable project, with no local-path fallback', async () => {

@@ -191,6 +191,7 @@ export interface ManagedSourceService {
 
   projectManagement(principal: ManagedSourcePrincipal, input: import('../projects/managed-project-management.js').ManagedProjectManagementRequest, signal?: AbortSignal): Promise<unknown>;
   workspace(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceRequest & { coordinatorHostId: string }, signal?: AbortSignal): Promise<import('@varin/application-client').ResourceFileResult>;
+  workspaceAsset(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceAsset & { coordinatorHostId: string }, signal?:AbortSignal):Promise<Response>;
   workspaceUpload(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceUpload & { coordinatorHostId: string }, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<{ kind: 'done' }>;
   attachmentBegin(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<{ retained: true; complete: boolean }>;
   attachmentPut(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentObjectRequest, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelPutBlobResult>;

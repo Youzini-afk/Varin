@@ -437,7 +437,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     },
     async workspace(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
-      if (!['open', 'locations', 'list', 'bytes', 'readlink'].includes(input.command?.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
+      if (!['open', 'locations', 'list', 'bytes', 'readlink', 'filename-search', 'content-search'].includes(input.command?.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
       if (!options.workspaceFiles) throw new SourceAdmissionError('source_unavailable');
       const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
       const selection = input.selection === undefined ? undefined : parseProjectSourceSelection(input.selection);
@@ -460,6 +460,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       }
       if ((result.kind === 'opened' || result.kind === 'locations') && principal.allowedDirectories?.length) result.locations = [...principal.allowedDirectories];
       return result;
+    },
+    async workspaceAsset(principal,input,signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if(!options.workspaceFiles)throw new SourceAdmissionError('source_unavailable');
+      const selection=input.selection===undefined?undefined:parseProjectSourceSelection(input.selection);
+      const registration=await documents.admitWorkspaceRegistration(selection?.mode==='native_workspace'?selection.workspaceId:input.workspaceId,signal);
+      const {assertResourcePathAllowed}=await import('../workspace/resource-access.js');
+      await assertResourcePathAllowed(registration.authorizationRoot,principal.allowedDirectories);
+      return options.workspaceFiles.asset(input,signal);
     },
     async workspaceUpload(principal, input, body, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);

@@ -10,6 +10,7 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'files.search.incomplete': '部分結果無法列舉，以下結果並不完整。',
   ...conversationOrganizationZhTW,
   'bot.groups.create': '新增分組',
   'bot.appearance.title': "形象",

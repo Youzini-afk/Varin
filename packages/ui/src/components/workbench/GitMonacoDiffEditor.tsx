@@ -1,6 +1,10 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
+import { projectGitFileLocation, scopedProjectGit } from '@/lib/worktrees/projectGit';
+import { projectGitAddress, projectGitLocation } from '@varin/application-client';
+import type { ResourceDocumentScope } from '@/lib/documents/resource-session';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import type { DocumentIdentity } from '@/lib/documents/types';
@@ -13,6 +17,8 @@ import { MonacoFileDiffEditor } from './MonacoFileDiffEditor';
 
 type GitMonacoDiffEditorProps = {
   identity: DocumentIdentity;
+  documentScope?: ResourceDocumentScope;
+  editorWorkspaceId?: string;
   onViewStateChange?(viewState: EditorViewState): void;
   path: string;
   providerId: string;
@@ -31,6 +37,8 @@ type GitDiffSnapshot =
 
 export const GitMonacoDiffEditor: React.FC<GitMonacoDiffEditorProps> = ({
   identity,
+  documentScope,
+  editorWorkspaceId,
   onViewStateChange,
   path,
   providerId,
@@ -41,7 +49,10 @@ export const GitMonacoDiffEditor: React.FC<GitMonacoDiffEditorProps> = ({
   workspaceRoot,
 }) => {
   const { t } = useI18n();
-  const git = useRuntimeAPIs().git;
+  const localGit = useRuntimeAPIs().git;
+  const resourceWorkspace = getEditorResourceWorkspace(editorWorkspaceId);
+  const gitDirectory = resourceWorkspace ? projectGitFileLocation(resourceWorkspace.location) : undefined;
+  const git = React.useMemo(() => scopedProjectGit(gitDirectory) ?? localGit, [gitDirectory, localGit]);
   const [snapshot, setSnapshot] = React.useState<GitDiffSnapshot>({ status: 'loading' });
   const [retry, setRetry] = React.useState(0);
 
@@ -51,7 +62,13 @@ export const GitMonacoDiffEditor: React.FC<GitMonacoDiffEditorProps> = ({
       setSnapshot({ status: 'failure', message: t('filesView.error.previewUnavailable') });
       return undefined;
     }
-    const repositoryRoot = workspacePathFromResourceId(workspaceRoot, repositoryResourceId);
+    if (documentScope && !gitDirectory) {
+      setSnapshot({ status: 'failure', message: 'Original project identity is required for target Git diff' });
+      return;
+    }
+    const directoryLocation = projectGitLocation(gitDirectory);
+    const physicalRepositoryRoot = workspacePathFromResourceId(workspaceRoot, repositoryResourceId);
+    const repositoryRoot = directoryLocation ? projectGitAddress({ ...directoryLocation, path: physicalRepositoryRoot }) : physicalRepositoryRoot;
     const runtimeKey = getRuntimeKey();
     let cancelled = false;
     setSnapshot({ status: 'loading' });
@@ -72,7 +89,7 @@ export const GitMonacoDiffEditor: React.FC<GitMonacoDiffEditorProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [git, identity.resourceId, repositoryResourceId, retry, scope, t, workspaceRoot]);
+  }, [git, gitDirectory, documentScope, identity.resourceId, repositoryResourceId, retry, scope, t, workspaceRoot]);
 
   if (snapshot.status === 'loading') {
     return <div className="flex h-full items-center justify-center typography-ui text-muted-foreground">{t('filesView.state.loading')}</div>;
@@ -96,6 +113,8 @@ export const GitMonacoDiffEditor: React.FC<GitMonacoDiffEditorProps> = ({
   return (
     <MonacoFileDiffEditor
       identity={identity}
+      {...(documentScope ? { scope: documentScope } : {})}
+      {...(editorWorkspaceId ? { editorWorkspaceId } : {})}
       originalContent={snapshot.original}
       originalRevision={originalRevision}
       {...(scope === 'staged'

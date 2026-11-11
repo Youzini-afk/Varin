@@ -964,32 +964,18 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         return res.type(preview.mime).send(preview.bytes);
       }
       if (req.path === '/api/fs/office') {
-        const { OfficePackage } = await import('../office/package.js');
-        const file = new OfficePackage(content);
-        if (typeof req.query.expectedRevision === 'string' && req.query.expectedRevision !== file.revision)
-          return res.status(409).json({ error: 'The Office file changed. Refresh to read its current revision.', revision: file.revision });
-        const view = req.query.view ?? 'overview';
-        if (view === 'preview') {
-          if (!dependencies.renderOffice) return res.status(503).json({ error: 'Office rendering is unavailable on this Host' });
-          const controller = new AbortController();
-          const cancel = () => { if (!res.writableEnded) controller.abort(); };
-          res.once('close', cancel);
-          try {
-            const rendered = await dependencies.renderOffice(content, file.format, controller.signal);
-            res.setHeader('X-Varin-Document-Revision', file.revision);
-            res.setHeader('X-Varin-Render-Engine', `${rendered.engine.name} ${rendered.engine.version}`);
-            return res.type('application/pdf').send(rendered.bytes);
-          } finally { res.removeListener('close', cancel); }
-        }
-        if (!['overview', 'content', 'find'].includes(String(view))) return res.status(400).json({ error: 'Unsupported Office view' });
-        const input: import('@varin/protocol').OfficeReadRequest = { view: view as 'overview' | 'content' | 'find' };
-        for (const key of ['section', 'objectId', 'range', 'query'] as const) if (typeof req.query[key] === 'string') input[key] = req.query[key];
-        for (const key of ['offset', 'limit'] as const) if (req.query[key] !== undefined) {
-          const number = Number(req.query[key]);
-          if (!Number.isSafeInteger(number) || number < (key === 'limit' ? 1 : 0)) return res.status(400).json({ error: `Invalid ${key}` });
-          input[key] = number;
-        }
-        return res.json({ ...file.read(input), title: path.basename(canonicalPath) });
+        const { readOfficeFilesystem } = await import('../office/filesystem-reader.js');
+        const controller = new AbortController();
+        const cancel = () => { if (!res.writableEnded) controller.abort(); };
+        res.once('close', cancel);
+        try {
+          const input: Record<string, unknown> = { view: req.query.view ?? 'overview' };
+          for (const key of ['section','objectId','range','query','expectedRevision'] as const) if(typeof req.query[key]==='string')input[key]=req.query[key];
+          for (const key of ['offset','limit'] as const) if(req.query[key]!==undefined)input[key]=Number(req.query[key]);
+          const result = await readOfficeFilesystem(content,canonicalPath,input as import('../office/filesystem-reader.js').OfficeFilesystemInput,dependencies.renderOffice,controller.signal);
+          result.headers.forEach((value,key)=>res.setHeader(key,value));
+          return res.status(result.status).send(Buffer.from(await result.arrayBuffer()));
+        } finally {res.removeListener('close',cancel);}
       }
       return res.type(mimeType).send(content);
     } catch (error) {

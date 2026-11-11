@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadResearchScope } from '@varin/application-client';
 import { PdfMaterialReader, type PdfReaderLocation, type PdfMaterialReaderPort } from '@/components/materials/PdfMaterialReader';
@@ -14,6 +15,7 @@ export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOri
   workspaceId: string; identity: ThreadIdentity; tab: EditorTab; path: string; onOpenOriginal(): void;
 }) {
   const api = useRuntimeAPIs().threads;
+  const resource = getEditorResourceWorkspace(workspaceId);
   const [scopes, setScopes] = React.useState<ThreadResearchScope[]>([]);
   const [runId, setRunId] = React.useState('');
   const [error, setError] = React.useState('');
@@ -23,11 +25,18 @@ export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOri
     if (!api?.research) { setError('PDF source inspection is unavailable'); return; }
     void api.research.scopes(identity, controller.signal).then(all => {
       if (controller.signal.aborted) return;
-      const matching = all.filter(scope => scope.workspaceId === workspaceId);
+      const matching = all.filter(scope => {
+        if (!resource) return scope.workspaceId === workspaceId && scope.source.resource_owner.kind === 'local';
+        if (JSON.stringify(scope.source.resource_owner) !== JSON.stringify(resource.location.resourceOwner)) return false;
+        const selection = resource.location.selection;
+        return selection?.mode === 'native_workspace'
+          ? scope.source.mode === 'native_workspace' && scope.source.workspace_id === selection.workspaceId && scope.source.execution_workspace_id === selection.executionWorkspaceId && scope.source.branch_id === selection.branchId && (scope.source.native_scope ?? '') === (selection.nativeScope ?? '')
+          : scope.workspaceId === resource.documentWorkspaceId && scope.source.mode !== 'fixed_branch' && scope.source.live_root?.canonicalRoot === resource.location.root;
+      });
       setScopes(matching); setRunId(matching[0]?.sourceRunId ?? '');
     }, cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [api, host, identity, workspaceId]);
+  }, [api, host, identity, workspaceId, resource]);
   const scope = scopes.find(value => value.sourceRunId === runId);
   const [initial] = React.useState<Partial<PdfReaderLocation>>(() => {
     const saved = tab.viewState.providerState;
@@ -45,7 +54,7 @@ export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOri
         if (!api || !scope || !isCurrent()) throw new Error('The original PDF source is unavailable');
         const { path: _path, artifact: _artifact, snapshotId, ...options } = request;
         if (snapshotId) return api.materials.read(identity, { ...options, snapshotId }, signal);
-        return api.materials.readSource(selection, { ...options, path }, signal);
+        return api.materials.readSource(selection, { ...options, path: resource ? tab.resourceId : path }, signal);
       },
       addRegion(region) {
         if (!isCurrent()) throw new Error('Application Host changed');
@@ -54,7 +63,7 @@ export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOri
         appendThreadDraftText(identity, buildPdfMaterialCitationMarkdown(region.title, region));
       },
     };
-  }, [api, host, identity, path, runId, scope]);
+  }, [api, host, identity, path, runId, scope, resource, tab.resourceId]);
   if (!scope) return <div className="space-y-2 p-3 text-sm"><p role={error ? 'alert' : 'status'}>{error || 'Select a conversation with an admitted source for this workspace to inspect PDF pages and regions.'}</p><button onClick={onOpenOriginal}>Open original PDF</button></div>;
   return <div className="flex h-full min-h-0 flex-col">
     {scopes.length > 1 && <select aria-label="PDF source Run" value={runId} onChange={event => setRunId(event.target.value)}>{scopes.map(item => <option key={item.sourceRunId}>{item.sourceRunId}</option>)}</select>}

@@ -520,3 +520,12 @@ Remote project file views carry the same logical selection through ResourceFiles
 and transfers. The target opens its original native Documents view, while the UI retains the original
 project path for display. Switching the file browser to an explicitly chosen directory clears that
 selection. File browsing does not mutate any conversation's accepted source or creation defaults.
+
+Remote project resource management keeps the original physical project registration,
+matching local Skills and instruction settings rather than silently switching to an
+adopted workspace mount. Resource targets may carry `expectedSource`; a changed
+owner or workspace is rejected before local path resolution or remote mutation.
+Skills CRUD and prompt/tool previews use the target's original resource owner.
+Project trust reads and revision-checked updates use the target trust store and
+canonical registered path. Paired capabilities and allowed roots still apply;
+Agent/Bot personalization and project model preferences retain their original owners.

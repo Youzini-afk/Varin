@@ -128,7 +128,7 @@ export class ManagedTargetClient {
     return headers;
   }
 
-  async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Response> {
+  async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}, preserveErrorResponse = false): Promise<Response> {
     const url = managedEndpointUrl(this.target.connection, relativePath).toString();
     const { body, ...rest } = init;
     const asyncBody = body !== undefined && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function";
@@ -144,7 +144,7 @@ export class ManagedTargetClient {
       await response.body?.cancel().catch(() => undefined);
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
     }
-    if (!response.ok) {
+    if (!response.ok && !preserveErrorResponse) {
       const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown; reason?: unknown; details?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
@@ -436,7 +436,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       });
       if (method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
-      if (method === 'projectManagement') decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result);
+      if (method === 'projectManagement') decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result, (input as Parameters<ManagedSourceService['projectManagement']>[1]).command.input);
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
       if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
       return result;
@@ -507,6 +507,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       workspace: (input, signal) => request('workspace', input, signal),
       documents: (path, method, body, signal) => client.response(`/documents/${path}`, { method, headers: { 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}) }),
+      workspaceAsset: (input,signal) => { if(input.coordinatorHostId!==options.coordinatorHostId)throw new Error('File asset belongs to another coordinator'); return client.response('/sources/workspaceAsset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),...(signal?{signal}:{})},true); },
       workspaceUpload: async (input, body, signal) => {
         if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('File upload belongs to another coordinator');
         return client.request('/sources/workspaceUpload', { method: 'POST', body,

@@ -36,10 +36,16 @@ const assertGeneration = (generation: number): void => {
 };
 
 /** Reuses the full document protocol, including dirty buffers, recovery journals and watch. */
-export const createResourceDocumentsAPI = (owner: SourceResourceOwner): DocumentsAPI => owner.kind === 'local' ? createWebDocumentsAPI() : createWebDocumentsAPI((url, init) => {
-  if (typeof url !== 'string' || !url.startsWith('/api/documents/')) throw new Error('Invalid document route');
-  return runtimeFetch(url.replace('/api/documents/', '/api/resource-documents/'), { ...init, query: { ...init?.query, resourceOwner: JSON.stringify(owner) } });
-});
+export const createResourceDocumentsAPI = (owner: SourceResourceOwner): DocumentsAPI => {
+  if (owner.kind === 'local') return createWebDocumentsAPI();
+  const generation = getRuntimeEndpointGeneration();
+  const resourceOwner = JSON.stringify(owner);
+  return createWebDocumentsAPI((url, init) => {
+    assertGeneration(generation);
+    if (typeof url !== 'string' || !url.startsWith('/api/documents/')) throw new Error('Invalid document route');
+    return runtimeFetch(url.replace('/api/documents/', '/api/resource-documents/'), { ...init, query: { ...init?.query, resourceOwner } });
+  });
+};
 
 const postDocumentJson = async (path: string, body: unknown, fetchDocument: typeof runtimeFetch): Promise<unknown> => {
   const generation = getRuntimeEndpointGeneration();

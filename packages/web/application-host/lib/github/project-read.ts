@@ -1,8 +1,8 @@
-import type { Express, Request } from 'express';
+import type { Request } from 'express';
 import type { ProjectManagementCommand } from '@varin/application-client';
 
-export type GitHubProjectReadCommand = Extract<ProjectManagementCommand, { action: `github-${string}` }>;
-export type GitHubProjectReader = (command: GitHubProjectReadCommand, directory: string, signal?: AbortSignal) => Promise<unknown>;
+export type GitHubProjectReadCommand = Exclude<Extract<ProjectManagementCommand, { action: `github-${string}` }>, { action: 'github-command' }>;
+export type GitHubProjectReader = ((command: GitHubProjectReadCommand, directory: string, signal?: AbortSignal) => Promise<unknown>) & { dispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher };
 interface ReadResponse {
   status(code: number): ReadResponse;
   json(body: Record<string, unknown>): unknown;
@@ -20,7 +20,7 @@ const routes = {
 /** Both HTTP and registered-project reads run the original target Host handlers.
  * The project owner authorizes and resolves directory before calling read; this
  * adapter never accepts a directory or credential from the command payload. */
-export function createGitHubProjectReads(app: Express) {
+export function createGitHubProjectReads(app: { get(path: string, handler: ReadHandler): unknown }) {
   const handlers = new Map<string, ReadHandler>();
   const register = (path: string, handler: ReadHandler) => {
     handlers.set(path, handler);

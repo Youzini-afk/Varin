@@ -10,7 +10,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useProjectGitIdentities } from '@/hooks/useProjectGit';
+import type { FilesAPI, GitAPI } from '@varin/application-client';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -40,6 +41,7 @@ import {
 } from '@varin/application-client';
 
 export interface DirectoryPickerDialogProps {
+  source?: { directory: string; files: Pick<FilesAPI, 'getHomeDirectory' | 'listDirectory' | 'createDirectory'>; git: GitAPI };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode?: 'add-project' | 'select-directory';
@@ -146,17 +148,18 @@ export const DirectoryPickerDialog: React.FC<DirectoryPickerDialogProps> = ({
   description,
   confirmLabel,
   onSelectDirectory,
+  source,
 }) => {
   const { t } = useI18n();
-  const { files, git } = useRuntimeAPIs();
-  const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
-  const gitIdentityProfiles = useGitIdentitiesStore((s) => s.profiles);
-  const globalGitIdentity = useGitIdentitiesStore((s) => s.globalIdentity);
-  const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
-  const loadGitIdentityProfiles = useGitIdentitiesStore((s) => s.loadProfiles);
-  const loadGlobalGitIdentity = useGitIdentitiesStore((s) => s.loadGlobalIdentity);
-  const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
-  const { canRequestAccess, requestAccess, startAccessing } = useFileSystemAccess();
+  const localAPIs = useRuntimeAPIs();
+  const files = source?.files ?? localAPIs.files, git = source?.git ?? localAPIs.git;
+  const localHomeDirectory = useDirectoryStore((s) => s.homeDirectory);
+  const homeDirectory = source ? '' : localHomeDirectory;
+  const { profiles: gitIdentityProfiles, globalIdentity: globalGitIdentity, defaultGitIdentityId,
+    loadProfiles: loadGitIdentityProfiles, loadGlobalIdentity: loadGlobalGitIdentity, loadDefaultGitIdentityId } = useProjectGitIdentities(source?.directory);
+  const filesystemAccess = useFileSystemAccess();
+  const { requestAccess, startAccessing } = filesystemAccess;
+  const canRequestAccess = !source && filesystemAccess.canRequestAccess;
   const { isMobile } = useDeviceInfo();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const addButtonRef = React.useRef<HTMLButtonElement>(null);

@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -25,7 +26,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
-import { getRuntimeUrlResolver } from '@varin/application-client';
+import { createResourceAssetUrl, getRuntimeUrlResolver } from '@varin/application-client';
 import { isDrawioFile, isImageFile, isPdfFile, isSvgFile } from '@/lib/toolHelpers';
 import { useI18n } from '@/lib/i18n';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
@@ -108,6 +109,13 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   tab,
 }) => {
   const { t } = useI18n();
+  const resourceWorkspace = getEditorResourceWorkspace(workspaceId);
+  const documentScope = resourceWorkspace?.scope;
+  const registry = documentScope?.documents ?? getDocumentRegistry();
+  const documentWorkspaceId = resourceWorkspace?.documentWorkspaceId ?? workspaceId;
+  const publishViewState = React.useCallback((state: EditorViewState) => {
+    if (onViewStateChange) onViewStateChange(state); else patchEditorViewState(workspaceId, tab.viewId, state);
+  }, [onViewStateChange, workspaceId, tab.viewId]);
   const { files, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const currentIdentity = useThreadStore(state => state.selectedIdentity);
@@ -115,8 +123,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
   const displayPath = tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? t('contextPanel.mode.browser') : tab.resourceId;
   const identity = React.useMemo<DocumentIdentity>(
-    () => ({ workspaceId, resourceId: tab.resourceId }),
-    [tab.resourceId, workspaceId],
+    () => ({ workspaceId: documentWorkspaceId, resourceId: tab.resourceId }),
+    [tab.resourceId, documentWorkspaceId],
   );
   const surfaceSnapshot = useSurfaceRegistrySnapshot();
   const surfaceContributions = React.useMemo(() => surfaceSnapshot.visibleContributions.filter((contribution) => (
@@ -153,7 +161,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const needsGitWorkingDocument = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff
     && (tab.viewState.diffScope ?? 'working') === 'working';
   const needsDocument = needsText || needsGitWorkingDocument || Boolean(surfaceContribution) || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.office;
-  const record = useDocumentRecord(needsDocument ? identity : undefined);
+  const record = useDocumentRecord(needsDocument ? identity : undefined, registry);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
@@ -164,13 +172,14 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   React.useEffect(() => {
     if (!needsDocument) return;
-    void getDocumentRegistry().open(identity).catch(() => undefined);
-  }, [identity, needsDocument]);
+    void registry.open(identity).catch(() => undefined);
+  }, [identity, needsDocument, registry]);
 
   const editorDocument = React.useMemo(() => createEditorDocumentController({
     identity,
     origin: `editor:${activeProviderId}`,
-  }), [activeProviderId, identity]);
+    registry,
+  }), [activeProviderId, identity, registry]);
   const editorMountProps = React.useMemo(() => ({
     document: editorDocument,
     providerId: activeProviderId,
@@ -179,9 +188,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }), [activeProviderId, editorDocument, identity, tab.viewId]);
   const isolatedEditorProps = React.useMemo(() => ({
     providerId: activeProviderId,
-    resource: identity,
+    resource: { workspaceId, resourceId: tab.resourceId },
     viewId: tab.viewId,
-  }), [activeProviderId, identity, tab.viewId]);
+  }), [activeProviderId, workspaceId, tab.resourceId, tab.viewId]);
 
   React.useEffect(() => {
     if (record?.dirty && tab.preview) pinWorkbenchEditor(workspaceId, tab.tabId);
@@ -190,15 +199,15 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   React.useEffect(() => {
     if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready' || record.saveErrorRevision === record.localEditRevision) return;
     const timer = setTimeout(() => {
-      void saveFileEditorDocument(identity).catch((error) => {
+      void saveFileEditorDocument(identity, registry, tab.viewId).catch((error) => {
         console.error('[Editor] Auto-save failed:', error);
       });
     }, 1_500);
     return () => clearTimeout(timer);
-  }, [autoSaveEnabled, identity, record?.dirty, record?.localEditRevision, record?.saving, record?.status, record?.saveErrorRevision]);
+  }, [autoSaveEnabled, identity, record?.dirty, record?.localEditRevision, record?.saving, record?.status, record?.saveErrorRevision, registry, tab.viewId]);
 
   React.useEffect(() => {
-    if (activeProviderId !== BUILTIN_EDITOR_PROVIDER_IDS.image || isSvgFile(path) || !runtime.isDesktop) {
+    if (resourceWorkspace || activeProviderId !== BUILTIN_EDITOR_PROVIDER_IDS.image || isSvgFile(path) || !runtime.isDesktop) {
       return;
     }
     let cancelled = false;
@@ -210,10 +219,10 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeProviderId, files, path, runtime.isDesktop]);
+  }, [activeProviderId, files, path, runtime.isDesktop, resourceWorkspace]);
 
   const publishCodeMirrorContext = React.useCallback((view: EditorView): void => {
-    const open = getDocumentRegistry().get(identity);
+    const open = registry.get(identity);
     if (!open?.documentInstanceId) return;
     const range = view.state.selection.main;
     const hasText = range.from !== range.to;
@@ -239,7 +248,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       viewId: tab.viewId,
       workspaceId,
     });
-  }, [editorContextOwnerId, identity, path, tab.resourceId, tab.viewId, workspaceId]);
+  }, [editorContextOwnerId, identity, path, tab.resourceId, tab.viewId, workspaceId, registry]);
 
   const viewStateExtension = React.useMemo<Extension>(() => ([
     EditorView.updateListener.of((update) => {
@@ -348,7 +357,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
           title={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
           aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
           onClick={() => {
-            void saveFileEditorDocument(identity).catch((error) => {
+            void saveFileEditorDocument(identity, registry, tab.viewId).catch((error) => {
               toast.error(error instanceof Error ? error.message : String(error));
             });
           }}
@@ -406,7 +415,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         title={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
         aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
         onClick={() => {
-          void saveFileEditorDocument(identity).catch((error) => {
+          void saveFileEditorDocument(identity, registry, tab.viewId).catch((error) => {
             toast.error(error instanceof Error ? error.message : String(error));
           });
         }}
@@ -457,10 +466,10 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         <DropdownMenuItem onSelect={() => setAutoSaveEnabled(!autoSaveEnabled)}>
           <span className="flex-1">{t('filesView.editor.autoSaveOn')}</span>{autoSaveEnabled ? <Icon name="check" className="size-3.5" /> : null}
         </DropdownMenuItem>
-        <DocumentEncodingMenuItems identity={identity} />
+        <DocumentEncodingMenuItems registry={registry} identity={identity} />
       </DropdownMenuContent>
     </DropdownMenu> : null}
-  </div>{needsText ? <DocumentEncodingNotice identity={identity} /> : null}</>;
+  </div>{needsText ? <DocumentEncodingNotice registry={registry} identity={identity} /> : null}</>;
 
   if (needsDocument && (!record || record.status === 'loading' || record.status === 'unloaded')) {
     return (
@@ -479,7 +488,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         workspaceId={workspaceId}
         workspaceRoot={workspaceRoot}
         tab={tab}
-        {...(onViewStateChange ? { onViewStateChange } : {})}
+        onViewStateChange={publishViewState}
       />
     );
     return (
@@ -524,7 +533,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.image) {
-    const src = runtime.isDesktop && !isSvgFile(path)
+    const src = resourceWorkspace ? createResourceAssetUrl(resourceWorkspace.location, tab.resourceId, { kind: 'raw' }) : runtime.isDesktop && !isSvgFile(path)
       ? desktopImageSrc
       : getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
     return (
@@ -537,7 +546,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.office) {
-    const original = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
+    const original = resourceWorkspace ? createResourceAssetUrl(resourceWorkspace.location, tab.resourceId, { kind: 'raw' }) : getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
     const openOriginal = () => { window.open(original, '_blank', 'noopener,noreferrer'); };
     return <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
       <WorkbenchOfficeReader workspaceId={workspaceId} workspaceRoot={workspaceRoot} identity={currentIdentity ?? undefined} tab={tab} path={path}
@@ -546,7 +555,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.pdf || isPdfFile(path)) {
-    const originalPdf = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
+    const originalPdf = resourceWorkspace ? createResourceAssetUrl(resourceWorkspace.location, tab.resourceId, { kind: 'raw' }) : getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
     if (!currentIdentity) {
       return (
         <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
@@ -599,7 +608,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.html && tab.viewState.previewMode !== 'edit') {
     const encoded = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
-    const src = getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
+    const src = resourceWorkspace ? createResourceAssetUrl(resourceWorkspace.location, tab.resourceId, { kind: 'serve' }) : getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <iframe title={tab.resourceId} src={src} className="h-full w-full border-none" sandbox="allow-scripts allow-same-origin allow-forms" />
@@ -613,7 +622,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
           <DiagramEditor
             xml={buffer}
-            onChange={(xml) => getDocumentRegistry().applyTransaction(identity, xml, { origin: 'drawio' })}
+            onChange={(xml) => registry.applyTransaction(identity, xml, { origin: 'drawio' })}
           />
         </div>
       </HostFrame>
@@ -624,6 +633,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <GitMonacoDiffEditor
+          documentScope={documentScope}
+          editorWorkspaceId={workspaceId}
           identity={identity}
           path={path}
           providerId={activeProviderId}
@@ -632,7 +643,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
           viewId={tab.viewId}
           viewState={tab.viewState}
           workspaceRoot={workspaceRoot}
-          {...(onViewStateChange ? { onViewStateChange } : {})}
+          onViewStateChange={publishViewState}
         />
       </HostFrame>
     );
@@ -652,6 +663,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
           </div>
         ) : (
           <MonacoFileDiffEditor
+            scope={documentScope}
+            editorWorkspaceId={workspaceId}
             identity={identity}
             originalContent={record?.baseContent ?? ''}
             originalRevision={`document:${record?.baseRevision ?? 'missing'}`}
@@ -660,7 +673,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
             readOnly={false}
             viewId={tab.viewId}
             viewState={tab.viewState}
-            {...(onViewStateChange ? { onViewStateChange } : {})}
+            onViewStateChange={publishViewState}
           />
         )}
       </HostFrame>
@@ -680,12 +693,13 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   return (
     <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
       <div className="flex h-full min-h-0 flex-col">
-        <DocumentConflictBanner identity={identity} />
+        <DocumentConflictBanner registry={registry} identity={identity} />
         <div className="min-h-0 flex-1 overflow-hidden">
           {/* Mobile owns the document-bound CodeMirror adapter. Desktop/Web use the
               shared Monaco model. */}
           {isMobile ? (
             <DocumentCodeMirror
+              registry={registry}
               identity={identity}
               className="h-full"
               extensions={[viewStateExtension]}
@@ -702,13 +716,15 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
             />
           ) : (
             <DocumentMonacoEditor
+              scope={documentScope}
+              editorWorkspaceId={workspaceId}
               identity={identity}
               path={path}
               providerId={activeProviderId}
               viewId={tab.viewId}
               viewState={tab.viewState}
               className="h-full"
-              {...(onViewStateChange ? { onViewStateChange } : {})}
+              onViewStateChange={publishViewState}
             />
           )}
         </div>

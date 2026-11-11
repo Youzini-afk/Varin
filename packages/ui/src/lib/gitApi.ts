@@ -1,3 +1,4 @@
+import { scopedProjectGit } from '@/lib/worktrees/projectGit';
 
 import * as gitHttp from './gitApiHttp';
 import { actionInstruction } from './actionInstructions';
@@ -36,29 +37,30 @@ export type {
   CommitFileDiffResponse,
 } from '@varin/application-client';
 
-const getRuntimeGit = () => {
+const getRuntimeGit = (directory?: string) => {
+  const project = scopedProjectGit(directory); if (project) return project;
   return getRegisteredRuntimeAPIs()?.git ?? null;
 };
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.checkIsGitRepository(directory);
   return gitHttp.checkIsGitRepository(directory);
 }
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('@varin/application-client').GitStatus> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
 }
 
 export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
-  const result = await gitHttp.resolveGitPrimaryRoot(directory);
+  const result = await (scopedProjectGit(directory) ?? gitHttp).resolveGitPrimaryRoot(directory);
   return result.root;
 }
 
 export async function resolveGitTopLevel(directory: string): Promise<string> {
-  const result = await gitHttp.resolveGitTopLevel(directory);
+  const result = await (scopedProjectGit(directory) ?? gitHttp).resolveGitTopLevel(directory);
   return result.root;
 }
 
@@ -66,12 +68,12 @@ export async function getGitCommitSummaries(
   directory: string,
   shas: string[]
 ): Promise<Array<{ sha: string; short: string; subject: string }>> {
-  const result = await gitHttp.getGitCommitSummaries(directory, shas);
+  const result = await (scopedProjectGit(directory) ?? gitHttp).getGitCommitSummaries(directory, shas);
   return result.commits;
 }
 
 export async function getGitDiff(directory: string, options: import('@varin/application-client').GetGitDiffOptions): Promise<import('@varin/application-client').GitDiffResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getGitDiff(directory, options);
   return gitHttp.getGitDiff(directory, options);
 }
@@ -80,7 +82,7 @@ export async function getGitFileDiff(
   directory: string,
   options: import('@varin/application-client').GetGitFileDiffOptions
 ): Promise<import('@varin/application-client').GitFileDiffResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getGitFileDiff(directory, options);
   return gitHttp.getGitFileDiff(directory, options);
 }
@@ -90,73 +92,73 @@ export async function revertGitFile(
   filePath: string,
   options?: { scope?: 'all' | 'working' }
 ): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.revertGitFile(directory, filePath, options);
   return gitHttp.revertGitFile(directory, filePath, options);
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.stageGitFile) return runtime.stageGitFile(directory, filePath);
   return gitHttp.stageGitFile(directory, filePath);
 }
 
 export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.stageGitFiles) return runtime.stageGitFiles(directory, filePaths);
   return gitHttp.stageGitFiles(directory, filePaths);
 }
 
 export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.unstageGitFile) return runtime.unstageGitFile(directory, filePath);
   return gitHttp.unstageGitFile(directory, filePath);
 }
 
 export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
   return gitHttp.unstageGitFiles(directory, filePaths);
 }
 
 export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.stageGitHunk) return runtime.stageGitHunk(directory, filePath, patch);
   return gitHttp.stageGitHunk(directory, filePath, patch);
 }
 
 export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.unstageGitHunk) return runtime.unstageGitHunk(directory, filePath, patch);
   return gitHttp.unstageGitHunk(directory, filePath, patch);
 }
 
 export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.revertGitHunk) return runtime.revertGitHunk(directory, filePath, patch);
   return gitHttp.revertGitHunk(directory, filePath, patch);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.isLinkedWorktree(directory);
   return gitHttp.isLinkedWorktree(directory);
 }
 
 export async function getGitBranches(directory: string): Promise<import('@varin/application-client').GitBranch> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getGitBranches(directory);
   return gitHttp.getGitBranches(directory);
 }
 
 export async function deleteGitBranch(directory: string, payload: import('@varin/application-client').GitDeleteBranchPayload): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.deleteGitBranch(directory, payload);
   return gitHttp.deleteGitBranch(directory, payload);
 }
 
 export async function deleteRemoteBranch(directory: string, payload: import('@varin/application-client').GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.deleteRemoteBranch(directory, payload);
   return gitHttp.deleteRemoteBranch(directory, payload);
 }
@@ -372,7 +374,7 @@ async function runStructuredGitGeneration({ visiblePrompt, hiddenPrompt, schema,
 }
 
 export async function listGitWorktrees(directory: string): Promise<import('@varin/application-client').GitWorktreeInfo[]> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.list) {
     return runtime.worktree.list(directory);
   }
@@ -384,7 +386,7 @@ export async function validateGitWorktree(
   directory: string,
   payload: import('@varin/application-client').CreateGitWorktreePayload
 ): Promise<import('@varin/application-client').GitWorktreeValidationResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.validate) {
     return runtime.worktree.validate(directory, payload);
   }
@@ -397,7 +399,7 @@ export async function validateGitWorktree(
 export async function getGitWorktreeBootstrapStatus(
   directory: string,
 ): Promise<import('@varin/application-client').GitWorktreeBootstrapStatus> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.bootstrapStatus) {
     return runtime.worktree.bootstrapStatus(directory);
   }
@@ -411,7 +413,7 @@ export async function previewGitWorktree(
   directory: string,
   payload: import('@varin/application-client').CreateGitWorktreePayload
 ): Promise<import('@varin/application-client').GitWorktreeCreateResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.preview) {
     return runtime.worktree.preview(directory, payload);
   }
@@ -425,7 +427,7 @@ export async function createGitWorktree(
   directory: string,
   payload: import('@varin/application-client').CreateGitWorktreePayload
 ): Promise<import('@varin/application-client').GitWorktreeCreateResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.create) {
     return runtime.worktree.create(directory, payload);
   }
@@ -439,7 +441,7 @@ export async function deleteGitWorktree(
   directory: string,
   payload: import('@varin/application-client').RemoveGitWorktreePayload
 ): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.worktree?.remove) {
     return runtime.worktree.remove(directory, payload);
   }
@@ -463,7 +465,7 @@ export async function createGitCommit(
   message: string,
   options: import('@varin/application-client').CreateGitCommitOptions = {}
 ): Promise<import('@varin/application-client').GitCommitResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.createGitCommit(directory, message, options);
   return gitHttp.createGitCommit(directory, message, options);
 }
@@ -472,7 +474,7 @@ export async function gitPush(
   directory: string,
   options: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> } = {}
 ): Promise<import('@varin/application-client').GitPushResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.gitPush(directory, options);
   return gitHttp.gitPush(directory, options);
 }
@@ -481,7 +483,7 @@ export async function gitPull(
   directory: string,
   options: import('@varin/application-client').GitPullOptions = {}
 ): Promise<import('@varin/application-client').GitPullResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.gitPull(directory, options);
   return gitHttp.gitPull(directory, options);
 }
@@ -490,49 +492,49 @@ export async function gitFetch(
   directory: string,
   options: { remote?: string; branch?: string } = {}
 ): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.gitFetch(directory, options);
   return gitHttp.gitFetch(directory, options);
 }
 
 export async function listGitStashes(directory: string): Promise<{ stashes: import('@varin/application-client').GitStashEntry[] }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.listGitStashes(directory);
   return gitHttp.listGitStashes(directory);
 }
 
 export async function countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.countGitStashFiles(directory, refs);
   return gitHttp.countGitStashFiles(directory, refs);
 }
 
 export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.stashGitChanges(directory, options);
   return gitHttp.stashGitChanges(directory, options);
 }
 
 export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.applyGitStash(directory, options);
   return gitHttp.applyGitStash(directory, options);
 }
 
 export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.popGitStash(directory, options);
   return gitHttp.popGitStash(directory, options);
 }
 
 export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.dropGitStash(directory, options);
   return gitHttp.dropGitStash(directory, options);
 }
 
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.checkoutBranch(directory, branch);
   return gitHttp.checkoutBranch(directory, branch);
 }
@@ -542,7 +544,7 @@ export async function createBranch(
   name: string,
   startPoint?: string
 ): Promise<{ success: boolean; branch: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.createBranch(directory, name, startPoint);
   return gitHttp.createBranch(directory, name, startPoint);
 }
@@ -552,7 +554,7 @@ export async function renameBranch(
   oldName: string,
   newName: string
 ): Promise<{ success: boolean; branch: string }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.renameBranch(directory, oldName, newName);
   return gitHttp.renameBranch(directory, oldName, newName);
 }
@@ -561,7 +563,7 @@ export async function getGitLog(
   directory: string,
   options: import('@varin/application-client').GitLogOptions = {}
 ): Promise<import('@varin/application-client').GitLogResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getGitLog(directory, options);
   return gitHttp.getGitLog(directory, options);
 }
@@ -570,7 +572,7 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<import('@varin/application-client').GitCommitFilesResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getCommitFiles(directory, hash);
   return gitHttp.getCommitFiles(directory, hash);
 }
@@ -581,7 +583,7 @@ export async function getCommitFileDiff(
   filePath: string,
   isBinary: boolean
 ): Promise<import('@varin/application-client').CommitFileDiffResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
   return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
 }
@@ -611,13 +613,13 @@ export async function deleteGitIdentity(id: string): Promise<void> {
 }
 
 export async function getCurrentGitIdentity(directory: string): Promise<import('@varin/application-client').GitIdentitySummary | null> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getCurrentGitIdentity(directory);
   return gitHttp.getCurrentGitIdentity(directory);
 }
 
 export async function hasLocalIdentity(directory: string): Promise<boolean> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.hasLocalIdentity) return runtime.hasLocalIdentity(directory);
   return gitHttp.hasLocalIdentity(directory);
 }
@@ -626,7 +628,7 @@ export async function setGitIdentity(
   directory: string,
   profileId: string
 ): Promise<{ success: boolean; profile: import('@varin/application-client').GitIdentityProfile }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.setGitIdentity(directory, profileId);
   return gitHttp.setGitIdentity(directory, profileId);
 }
@@ -644,13 +646,13 @@ export async function getGlobalGitIdentity(): Promise<import('@varin/application
 }
 
 export async function getRemoteUrl(directory: string, remote?: string): Promise<string | null> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.getRemoteUrl) return runtime.getRemoteUrl(directory, remote);
   return gitHttp.getRemoteUrl(directory, remote);
 }
 
 export async function getRemotes(directory: string): Promise<import('@varin/application-client').GitRemote[]> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.getRemotes(directory);
   return gitHttp.getRemotes(directory);
 }
@@ -659,7 +661,7 @@ export async function removeRemote(
   directory: string,
   payload: import('@varin/application-client').GitRemoveRemotePayload
 ): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.removeRemote(directory, payload);
   return gitHttp.removeRemote(directory, payload);
 }
@@ -668,13 +670,13 @@ export async function rebase(
   directory: string,
   options: { onto: string }
 ): Promise<import('@varin/application-client').GitRebaseResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.rebase(directory, options);
   return gitHttp.rebase(directory, options);
 }
 
 export async function abortRebase(directory: string): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.abortRebase(directory);
   return gitHttp.abortRebase(directory);
 }
@@ -683,7 +685,7 @@ export async function merge(
   directory: string,
   options: { branch: string }
 ): Promise<import('@varin/application-client').GitMergeResult> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.merge(directory, options);
   return gitHttp.merge(directory, options);
 }
@@ -692,7 +694,7 @@ export async function checkoutCommit(
   directory: string,
   hash: string
 ): Promise<import('@varin/application-client').CheckoutCommitResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.checkoutCommit(directory, hash);
   return gitHttp.checkoutCommit(directory, hash);
 }
@@ -701,7 +703,7 @@ export async function cherryPick(
   directory: string,
   hash: string
 ): Promise<import('@varin/application-client').CherryPickResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.cherryPick(directory, hash);
   return gitHttp.cherryPick(directory, hash);
 }
@@ -710,7 +712,7 @@ export async function revertCommit(
   directory: string,
   hash: string
 ): Promise<import('@varin/application-client').RevertCommitResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.revertCommit(directory, hash);
   return gitHttp.revertCommit(directory, hash);
 }
@@ -721,25 +723,25 @@ export async function resetToCommit(
   mode: 'soft' | 'mixed' | 'hard',
   force?: boolean
 ): Promise<import('@varin/application-client').ResetToCommitResponse> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.resetToCommit(directory, hash, mode, force);
   return gitHttp.resetToCommit(directory, hash, mode, force);
 }
 
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.abortMerge(directory);
   return gitHttp.abortMerge(directory);
 }
 
 export async function continueRebase(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.continueRebase(directory);
   return gitHttp.continueRebase(directory);
 }
 
 export async function continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.continueMerge(directory);
   return gitHttp.continueMerge(directory);
 }
@@ -748,19 +750,19 @@ export async function stash(
   directory: string,
   options?: { message?: string; includeUntracked?: boolean }
 ): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.stash(directory, options);
   return gitHttp.stash(directory, options);
 }
 
 export async function stashPop(directory: string): Promise<{ success: boolean }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime) return runtime.stashPop(directory);
   return gitHttp.stashPop(directory);
 }
 
 export async function getConflictDetails(directory: string): Promise<import('@varin/application-client').MergeConflictDetails> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.getConflictDetails) return runtime.getConflictDetails(directory);
   return gitHttp.getConflictDetails(directory);
 }
@@ -774,7 +776,7 @@ export async function validateWorktreeDirectory(
   resolvedWorktreeRoot: string | null;
   resolvedCwd: string | null;
 }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.validateWorktreeDirectory) {
     return runtime.validateWorktreeDirectory(directory, worktreeRoot);
   }
@@ -793,7 +795,7 @@ export async function canonicalizeWorktreeState(
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
 }> {
-  const runtime = getRuntimeGit();
+  const runtime = getRuntimeGit(directory);
   if (runtime?.canonicalizeWorktreeState) {
     return runtime.canonicalizeWorktreeState(directory);
   }

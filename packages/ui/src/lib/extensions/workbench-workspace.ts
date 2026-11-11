@@ -1,4 +1,6 @@
 import React from 'react';
+import { useProjectFileLocation, type ProjectFileLocation } from '@/hooks/useProjectFileLocation';
+import { resolveProjectEditorWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import type { DocumentsAPI } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -8,7 +10,7 @@ export type WorkbenchWorkspaceResolution =
   | { directory: null; key: string; status: 'none' }
   | { directory: string; key: string; status: 'loading' }
   | { directory: string; errorMessage: string; key: string; status: 'error' }
-  | { directory: string; key: string; status: 'ready'; workspaceId: string };
+  | { directory: string; key: string; status: 'ready'; workspaceId: string; location?: ProjectFileLocation };
 
 export type WorkbenchWorkspaceState = WorkbenchWorkspaceResolution & {
   retry(): void;
@@ -101,6 +103,7 @@ const ensureResolution = (
 };
 
 export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
+  const fileContext = useProjectFileLocation();
   const documents = useRuntimeAPIs().documents;
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory || null);
   const [runtimeEpoch, setRuntimeEpoch] = React.useState(0);
@@ -114,11 +117,11 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
   const resolved = React.useSyncExternalStore(subscribeWorkbenchWorkspace, snapshot, snapshot);
 
   React.useEffect(() => {
-    ensureResolution(documents, currentDirectory, generation);
-  }, [currentDirectory, documents, generation, runtimeEpoch]);
+    if (!fileContext.remote) ensureResolution(documents, currentDirectory, generation);
+  }, [currentDirectory, documents, generation, runtimeEpoch, fileContext.remote]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || fileContext.remote) return;
     const retryAfterSettingsSync = (): void => {
       if (!currentDirectory) return;
       const currentGeneration = getRuntimeEndpointGeneration();
@@ -128,7 +131,7 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
     };
     window.addEventListener('varin:settings-synced', retryAfterSettingsSync);
     return () => window.removeEventListener('varin:settings-synced', retryAfterSettingsSync);
-  }, [currentDirectory, documents]);
+  }, [currentDirectory, documents, fileContext.remote]);
 
   const effective = resolved.key === expectedKey
     ? resolved
@@ -138,6 +141,11 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
   const retry = React.useCallback(() => {
     ensureResolution(documents, currentDirectory, getRuntimeEndpointGeneration(), true);
   }, [currentDirectory, documents]);
+  if (fileContext.remote) {
+    if (fileContext.location) return { status: 'ready', key: fileContext.key, directory: fileContext.root, workspaceId: resolveProjectEditorWorkspace(fileContext.location).workspaceId, location: fileContext.location, retry: fileContext.retry };
+    if (fileContext.error) return { status: 'error', key: fileContext.key, directory: fileContext.root, errorMessage: fileContext.error, retry: fileContext.retry };
+    return { status: 'loading', key: fileContext.key, directory: fileContext.root, retry: fileContext.retry };
+  }
   return { ...effective, retry };
 };
 

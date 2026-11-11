@@ -59,7 +59,7 @@ const LocalFilesView: React.FC = () => {
 export const FilesView: React.FC = () => {
   const project = useProjectsStore(state => state.projects.find(project => project.id === state.activeProjectId));
   if (project?.source?.resourceOwner.kind === 'managed_host') return <ResourceFilesView
-    key={`${getRuntimeKey()}:${project.id}:${JSON.stringify([project.source,project.versionedWorkspace])}`}
+    key={`${getRuntimeKey()}:${project.id}:${JSON.stringify([project.path,project.source,project.versionedWorkspace])}`}
     view={{ kind: 'files', key: project.id, owner: project.source.resourceOwner, title: project.label ?? project.path, path: project.path, selection: freezeProjectSourceSelection(project) }}
     active />;
   return <LocalFilesView />;

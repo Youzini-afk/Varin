@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DocumentsError, isDocumentsError } from '@varin/application-client';
+import { DocumentsError, isDocumentsError, createResourceDocumentsAPI } from '@varin/application-client';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@varin/application-client';
 import { installRuntimeEndpointFetchFixture } from '../../test/runtime-endpoint.fixture.js';
 
@@ -276,4 +276,11 @@ describe('document observation response cleanup', () => {
       subscription.close();
     }
   });
+});
+
+
+it('rejects a request started by an old resource document scope after a Host switch', async () => {
+  const api = createResourceDocumentsAPI({ kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' });
+  switchRuntimeEndpoint({ apiBaseUrl: `https://resource-documents-${getRuntimeEndpointGeneration()}.example` });
+  await expect(api.read({ workspaceId: 'original-workspace', resourceId: 'note.txt' })).rejects.toMatchObject({ reason: 'stale-completion' });
 });

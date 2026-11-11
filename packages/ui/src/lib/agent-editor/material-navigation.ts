@@ -62,7 +62,7 @@ export async function returnMaterialToConversation(workspaceId: string, workspac
       targetPath: tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? null : workspacePathFromResourceId(workspaceRoot, tab.resourceId),
       ...(tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? { dedupeKey: tab.viewState.browserTabId?.startsWith('browser:')
         ? tab.viewState.browserTabId.slice('browser:'.length) : tab.viewState.browserTabId ?? 'browser' } : {}),
-      targetDirectory: workspaceRoot, editorViewId: tab.viewId,
+      targetDirectory: workspaceRoot, editorViewId: tab.viewId, editorWorkspaceId: workspaceId,
     });
   }
   await selectActiveWorkbenchProfile(profileId, undefined, { enableShell: true });

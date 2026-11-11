@@ -11,6 +11,11 @@ export interface ProjectWorkspaceStatus {
   preparing: boolean;
 }
 export interface ProjectManagementOperations {
+  'github-command': { input: import('./project-git.js').ProjectGitHubCommand; result: unknown };
+  'git-command': { input: import('./project-git.js').ProjectGitCommand; result: unknown };
+  resources: { input: import('./resource-management.js').NativeResourceManagementCommand; result: unknown };
+  'trust-read': { input: Record<string, never>; result: import('./resource-management.js').ProjectTrustSnapshot };
+  'trust-update': { input: { expectedPath: string; expectedRevision: string; decision: boolean | null }; result: import('./resource-management.js').ProjectTrustSnapshot };
   'git-branches': { input: Record<string, never>; result: GitBranch };
   'git-root-context': { input: Record<string, never>; result: { root: string; current: string; tracking: string | null; trackingRemote: string | null } };
   'github-auth': { input: Record<string, never>; result: GitHubAuthStatus };

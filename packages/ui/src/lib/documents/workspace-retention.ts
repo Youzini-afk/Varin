@@ -1,5 +1,12 @@
 import { getRuntimeKey, type DocumentsAPI } from '@varin/application-client';
 let owner: string | undefined;
+const apiKeys = new WeakMap<DocumentsAPI, number>();
+let nextApiKey = 0;
+function retentionKey(documents: DocumentsAPI, workspaceId: string): string {
+    let id = apiKeys.get(documents);
+    if (id === undefined) { id = ++nextApiKey; apiKeys.set(documents, id); }
+    return `${getRuntimeKey()}\0${id}\0${workspaceId}`;
+}
 const tails = new Map<string, Promise<unknown>>();
 const visibleViews = new Map<string, number>();
 const savedTabs = new Map<string, boolean>();
@@ -19,14 +26,14 @@ function ownerId(): string {
 /** Saved tabs retain their actual Host source across reloads and app shutdown.
  * Closing the last tab releases that reference; dirty journals retain themselves. */
 export function retainEditorWorkspace(documents: DocumentsAPI, workspaceId: string, retained: boolean): Promise<unknown> {
-    const key = `${getRuntimeKey()}\0${workspaceId}`;
+    const key = retentionKey(documents, workspaceId);
     if (retained) savedTabs.set(key, true);
     else savedTabs.delete(key);
     return publishRetention(documents, workspaceId, key);
 }
 /** Independent file views share source lifetime with saved editor tabs, not their navigation. */
 export function holdEditorWorkspace(documents: DocumentsAPI, workspaceId: string): () => Promise<unknown> {
-    const key = `${getRuntimeKey()}\0${workspaceId}`;
+    const key = retentionKey(documents, workspaceId);
     visibleViews.set(key, (visibleViews.get(key) ?? 0) + 1);
     void publishRetention(documents, workspaceId, key).catch(error => console.error('[Documents] File view retention failed:', error));
     return () => {

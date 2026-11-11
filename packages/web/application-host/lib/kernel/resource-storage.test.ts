@@ -64,7 +64,7 @@ describe('frozen resource Storage admission', () => {
 
   it('admits Thread source metadata without reading the resource capsule and rejects a different pinned revision', async () => {
     const f = fixture();
-    const documents = { admitWorkspaceRegistration: vi.fn(async (workspaceId: string) => ({ workspaceId, hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original' })) };
+    const documents = { admitWorkspaceRegistration: vi.fn(async (workspaceId: string) => ({ workspaceId, hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original', authorizationRoot: '/removed/original' })) };
     const runtime = { childForThread: vi.fn(async () => null) } as unknown as AgentRuntimeClient;
     const admit = createThreadSourceAdmission({ documents, runtime, withSourceRead: (input, consume) => f.adapter.withResourceRead(input, consume) });
     await admit(f.input.source, f.input.identity, f.input.runId);

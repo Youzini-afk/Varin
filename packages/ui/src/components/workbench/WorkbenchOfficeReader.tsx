@@ -1,5 +1,6 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
-import { getRuntimeEndpointGeneration, getRuntimeUrlResolver, type ThreadIdentity, type ThreadResearchScope } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getRuntimeUrlResolver, createResourceAssetUrl, readResourceOffice, type ThreadIdentity, type ThreadResearchScope } from '@varin/application-client';
 import { OfficeMaterialReader, type OfficeFileReaderPort } from '@/components/materials/OfficeMaterialReader';
 import type { PdfMaterialReaderPort } from '@/components/materials/PdfMaterialReader';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -15,42 +16,45 @@ export function WorkbenchOfficeReader({ workspaceId, workspaceRoot, identity, ta
 }) {
   const apis = useRuntimeAPIs(), api = apis.threads, host = useThreadStore(state => state.hostKey);
   const { t } = useI18n();
+  const resource = getEditorResourceWorkspace(workspaceId);
+  const documents = resource?.scope.api ?? apis.documents;
+  const documentWorkspaceId = resource?.documentWorkspaceId ?? workspaceId;
   const [scope, setScope] = React.useState<ThreadResearchScope>();
   const [error, setError] = React.useState('');
   React.useEffect(() => {
     const controller = new AbortController(); setScope(undefined); setError('');
-    if (identity && api?.research) void Promise.all([api.research.scopes(identity, controller.signal),apis.documents.resolveWorkspace({workspaceId})]).then(([scopes,workspace]) => {
+    if (identity && api?.research) void Promise.all([api.research.scopes(identity, controller.signal),documents.resolveWorkspace({workspaceId: documentWorkspaceId})]).then(([scopes,workspace]) => {
       // A matching project can have several immutable child revisions. Only a
       // source reading this actual physical directory represents the editor file.
       const normalized = (value: string) => { const path = value.replace(/\\/g, '/').replace(/\/$/, ''); return /^[a-z]:/i.test(path) ? path.toLowerCase() : path; };
       if (!controller.signal.aborted) setScope(scopes.find(scope => workspace.nativeSource
-        ? scope.source.mode==='native_workspace'&&scope.source.resource_owner.kind==='local'&&scope.source.workspace_id===workspace.nativeSource.workspaceId
+        ? scope.source.mode==='native_workspace'&&JSON.stringify(scope.source.resource_owner)===JSON.stringify(resource?.location.resourceOwner ?? {kind:'local'})&&scope.source.workspace_id===workspace.nativeSource.workspaceId
           &&scope.source.execution_workspace_id===workspace.nativeSource.executionWorkspaceId&&scope.source.branch_id===workspace.nativeSource.branchId&&(scope.source.native_scope??'')===(workspace.nativeSource.scope??'')
-        : scope.workspaceId===workspaceId&&scope.source.mode!=='fixed_branch'&&scope.source.live_root&&normalized(scope.source.live_root.canonicalRoot)===normalized(workspaceRoot)));
+        : scope.workspaceId===documentWorkspaceId&&JSON.stringify(scope.source.resource_owner)===JSON.stringify(resource?.location.resourceOwner ?? {kind:'local'})&&scope.source.mode!=='fixed_branch'&&scope.source.live_root&&normalized(scope.source.live_root.canonicalRoot)===normalized(workspaceRoot)));
     }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [api,apis.documents, host, identity, workspaceId, workspaceRoot]);
+  }, [api, documents, documentWorkspaceId, resource, host, identity, workspaceId, workspaceRoot]);
   const reader = React.useMemo<PdfMaterialReaderPort | OfficeFileReaderPort>(() => {
     const epoch = getRuntimeEndpointGeneration();
     const current = () => epoch === getRuntimeEndpointGeneration() && host === useThreadStore.getState().hostKey;
     if (!identity || !scope) return { key: JSON.stringify([host, workspaceId, path]), isCurrent: current,
       async readOffice(request, signal) {
-        if (!apis.files.readOffice || !current()) throw new Error('The original file reader is unavailable');
-        return apis.files.readOffice(path, request, { directory: workspaceRoot, signal });
-      }, previewUrl: revision => getRuntimeUrlResolver().authenticatedAsset('/api/fs/office', { path, directory: workspaceRoot, expectedRevision: revision, view: 'preview' }),
+        if ((!apis.files.readOffice && !resource) || !current()) throw new Error('The original file reader is unavailable');
+        return resource ? readResourceOffice(resource.location, tab.resourceId, request, signal) : apis.files.readOffice!(path, request, { directory: workspaceRoot, signal });
+      }, previewUrl: revision => resource ? createResourceAssetUrl(resource.location, tab.resourceId, { kind: 'office-preview', expectedRevision: revision }) : getRuntimeUrlResolver().authenticatedAsset('/api/fs/office', { path, directory: workspaceRoot, expectedRevision: revision, view: 'preview' }),
     };
     return { key: JSON.stringify([host, identity.threadId, identity.branchId, scope.sourceRunId, path]), isCurrent: current,
       async read(request, signal) {
         if (!api || !scope || !current()) throw new Error('The document source is unavailable');
         const { path: _path, artifact: _artifact, snapshotId, ...options } = request;
         return snapshotId ? api.materials.read(identity, { ...options, snapshotId }, signal)
-          : api.materials.readSource({ ...identity, sourceRunId: scope.sourceRunId }, { ...options, path }, signal);
+          : api.materials.readSource({ ...identity, sourceRunId: scope.sourceRunId }, { ...options, path: resource ? tab.resourceId : path }, signal);
       },
     };
-  }, [api, apis.files, host, identity, path, scope, workspaceId, workspaceRoot]);
+  }, [api, apis.files, host, identity, path, scope, workspaceId, workspaceRoot, resource, tab.resourceId]);
   const state = tab.viewState.providerState;
   const saved = state?.providerId === BUILTIN_EDITOR_PROVIDER_IDS.office && state.value && typeof state.value === 'object' && !Array.isArray(state.value) ? state.value : undefined;
-  if (!scope && !apis.files.readOffice) return <div className="space-y-3 p-4 text-sm"><p role={error ? 'alert' : 'status'}>{error || t('office.reader.sourceRequired')}</p><button onClick={onOpenOriginal}>{t('office.reader.openOriginal')}</button></div>;
+  if (!scope && !apis.files.readOffice && !resource) return <div className="space-y-3 p-4 text-sm"><p role={error ? 'alert' : 'status'}>{error || t('office.reader.sourceRequired')}</p><button onClick={onOpenOriginal}>{t('office.reader.openOriginal')}</button></div>;
   return <OfficeMaterialReader reader={reader} title={tab.resourceId.split('/').at(-1) || tab.resourceId} presentation="inline" path={path} refreshKey={revision}
     initialSection={typeof saved?.section === 'string' ? saved.section : undefined} onOpenOriginal={onOpenOriginal}
     onSectionChange={section => patchEditorViewState(workspaceId, tab.viewId, { providerState: { providerId: BUILTIN_EDITOR_PROVIDER_IDS.office, schemaVersion: 1, value: { section } } })}

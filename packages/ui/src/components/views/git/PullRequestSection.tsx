@@ -36,7 +36,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ensureThreadDraftTarget } from '@/lib/agent-runtime/threadDraftActions';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useScopedGitHubAuth } from '@/hooks/useProjectGitHub';
+import { scopedProjectGitHub } from '@/lib/worktrees/projectGit';
+import { GitHubSettings } from '@/components/sections/varin/GitHubSettings';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getPrContextKey, usePrContextStore } from '@/stores/usePrContextStore';
 import { summarizeCheckRuns } from '@/lib/githubChecks';
@@ -335,18 +338,25 @@ export const PullRequestSection: React.FC<{
   const activeRef = React.useRef(isActive);
   activeRef.current = isActive;
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const { github } = useRuntimeAPIs();
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const localGitHub = useRuntimeAPIs().github;
+  const targetGitHub = React.useMemo(() => scopedProjectGitHub(directory), [directory]);
+  const github = targetGitHub ?? localGitHub;
+  const auth = useScopedGitHubAuth(github, Boolean(targetGitHub));
+  const githubAuthStatus = auth.status;
+  const githubAuthChecked = auth.hasChecked;
+  const [targetSettingsOpen, setTargetSettingsOpen] = React.useState(false);
+  const { hasChecked: authChecked, isLoading: authLoading, refreshStatus: refreshAuth } = auth;
+  React.useEffect(() => { if (targetGitHub && !authChecked && !authLoading) void refreshAuth(); }, [targetGitHub, authChecked, authLoading, refreshAuth]);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
+    if (targetGitHub) { setTargetSettingsOpen(true); return; }
     setSettingsPage('github');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSettingsPage]);
+  }, [setSettingsDialogOpen, setSettingsPage, targetGitHub]);
 
   const snapshotKey = React.useMemo(() => getPullRequestSnapshotKey(directory, branch), [directory, branch]);
   const initialSnapshot = React.useMemo(
@@ -1576,6 +1586,7 @@ export const PullRequestSection: React.FC<{
       </div>
 
       <div className={bodyClassName}>
+        {targetGitHub && <Dialog open={targetSettingsOpen} onOpenChange={open => { setTargetSettingsOpen(open); if (!open) void auth.refreshStatus(); }}><DialogContent className="max-h-[85vh] overflow-auto"><DialogTitle>Project source Host GitHub</DialogTitle><GitHubSettings github={targetGitHub} /></DialogContent></Dialog>}
         {shouldShowConnectionNotice ? (
           <div className="space-y-2">
               <div className="typography-meta text-muted-foreground">

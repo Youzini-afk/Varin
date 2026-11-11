@@ -1,9 +1,10 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import { isDeepStrictEqual } from 'node:util';
 import type { ProjectEntry, ProjectManagementCommand, VersionedProjectWorkspace } from '@varin/application-client';
+import { PROJECT_GIT_READ } from '@varin/application-client';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 
-const actions = new Set(['git-branches','git-root-context','github-auth','github-issues','github-prs','github-issue','github-issue-comments','github-pr-context','worktrees','worktree-create','worktree-validate','worktree-remove','worktree-remote-branch-delete','worktree-bootstrap','inspect','enable','disable','backend','backend-settings']);
+const actions = new Set(['github-command','git-command','resources','trust-read','trust-update','git-branches','git-root-context','github-auth','github-issues','github-prs','github-issue','github-issue-comments','github-pr-context','worktrees','worktree-create','worktree-validate','worktree-remove','worktree-remote-branch-delete','worktree-bootstrap','inspect','enable','disable','backend','backend-settings']);
 export function registerProjectManagementRoutes(app: Express, options: {
   requireAuth: RequestHandler;
   authorize(request: Request, response: Response): Promise<boolean>;
@@ -39,7 +40,9 @@ export function registerProjectManagementRoutes(app: Express, options: {
       const result = await remote.projectManagement({ coordinatorHostId: options.coordinatorHostId, projectId: project.id,
         workspaceId: source.workspaceId, ...(project.versionedWorkspace ? { workspace: project.versionedWorkspace } : {}), command },
         // Cancelling a mutation observation does not cancel/replay the original effect.
-        ['inspect','backend','worktrees','worktree-bootstrap'].includes(command.action) ? controller.signal : undefined);
+        (command.action === 'git-command' ? (PROJECT_GIT_READ as readonly string[]).includes(command.input.operation)
+          : command.action === 'github-command' ? ['authStatus','me','prStatus','repoUpstream','repoBranches','prsList','prContext','issuesList','issueGet','issueComments'].includes(command.input.operation)
+          : ['inspect','backend','worktrees','worktree-bootstrap','git-branches','git-root-context','github-auth','github-issues','github-prs','github-issue','github-issue-comments','github-pr-context'].includes(command.action)) ? controller.signal : undefined);
       if (['enable','disable','inspect'].includes(command.action) && result && typeof result === 'object' && 'workspace' in result && result.workspace) {
         const workspace = result.workspace as VersionedProjectWorkspace;
         if (!['preparing','ready','disabled'].includes(workspace.state) || !project.versionedWorkspace || !isDeepStrictEqual({ ...workspace, state: 'preparing' }, { ...project.versionedWorkspace, state: 'preparing' })) throw new Error('Target workspace receipt differs from the original adoption');

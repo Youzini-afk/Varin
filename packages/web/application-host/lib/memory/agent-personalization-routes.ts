@@ -16,7 +16,8 @@ export function registerAgentPersonalizationRoutes(app: Express, service: AgentP
     try {
       const projectId = req.query.projectId;
       if (projectId !== undefined && (typeof projectId !== 'string' || !projectId.trim())) throw new AgentPersonalizationError('Choose a registered project');
-      const result = await read(projectId === undefined ? {} : { projectId }, abort.signal);
+      const expectedSource = req.query.expectedSource === undefined ? undefined : typeof req.query.expectedSource === 'string' ? JSON.parse(req.query.expectedSource) : (() => { throw new AgentPersonalizationError('Invalid project source'); })();
+      const result = await read(projectId === undefined ? {} : { projectId, ...(expectedSource !== undefined ? {expectedSource} : {}) }, abort.signal);
       if (!res.destroyed) res.json(result);
     } catch (failure) { if (!res.destroyed) error(res, failure); }
     finally { res.removeListener('close', closed); }

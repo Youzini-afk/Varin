@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import type { editor } from 'monaco-editor/editor';
 
 import type { DocumentIdentity } from '@/lib/documents/types';
@@ -44,6 +45,7 @@ export type FileEditorCommandId = typeof FILE_EDITOR_COMMAND_IDS[keyof typeof FI
 
 type FileEditorCommandTarget = {
   documents?: ReturnType<typeof getDocumentRegistry>;
+  editorWorkspaceId?: string;
   editor: editor.IStandaloneCodeEditor;
   identity: DocumentIdentity;
   ownerId: string;
@@ -82,7 +84,7 @@ const activeTarget = (): FileEditorCommandTarget | null => {
   const tab = workbench ? activeEditorTab(workbench) : undefined;
   if (!tab || !workspaceId) return null;
   return [...targets.values()].find((target) => (
-    target.identity.workspaceId === workspaceId && target.viewId === tab.viewId
+    (target.editorWorkspaceId ?? target.identity.workspaceId) === workspaceId && target.viewId === tab.viewId
   )) ?? null;
 };
 
@@ -104,7 +106,7 @@ const navigationKey = (identity: DocumentIdentity, viewId?: string): string => (
 
 const activateTarget = (target: FileEditorCommandTarget, focus = false): void => {
   activeOwnerId = target.ownerId;
-  setActiveWorkbenchEditorView(target.identity.workspaceId, target.viewId);
+  setActiveWorkbenchEditorView(target.editorWorkspaceId ?? target.identity.workspaceId, target.viewId);
   if (focus) target.editor.focus();
   refreshContext(true);
 };
@@ -171,24 +173,26 @@ const runAction = async (target: FileEditorCommandTarget, actionId: string): Pro
   return true;
 };
 
-export const saveFileEditorDocument = async (identity: DocumentIdentity): Promise<void> => {
-  const target = targetForIdentity(identity);
+export const saveFileEditorDocument = async (identity: DocumentIdentity, documents?: ReturnType<typeof getDocumentRegistry>, viewId?: string): Promise<void> => {
+  const target = targetForIdentity(identity, viewId);
   if (target?.getSettings().formatOnSave) {
     await runAction(target, 'editor.action.formatDocument').catch(() => undefined);
   }
-  await (target?.documents ?? getDocumentRegistry()).save(identity);
+  await (documents ?? target?.documents ?? getDocumentRegistry()).save(identity);
 };
 
 const saveTarget = async (target: FileEditorCommandTarget): Promise<void> => {
-  await saveFileEditorDocument(target.identity);
+  await saveFileEditorDocument(target.identity, target.documents, target.viewId);
 };
 
 const saveAll = async (): Promise<void> => {
-  const registry = getDocumentRegistry();
   const saves: Array<Promise<unknown>> = [];
   for (const workbench of listEditorWorkbenches()) {
-    for (const resourceId of registry.dirtyResourceIds(workbench.workspaceId)) {
-      saves.push(saveFileEditorDocument({ workspaceId: workbench.workspaceId, resourceId }));
+    const resource = getEditorResourceWorkspace(workbench.workspaceId);
+    const registry = resource?.scope.documents ?? getDocumentRegistry();
+    const workspaceId = resource?.documentWorkspaceId ?? workbench.workspaceId;
+    for (const resourceId of registry.dirtyResourceIds(workspaceId)) {
+      saves.push(saveFileEditorDocument({ workspaceId, resourceId }, registry));
     }
   }
   await Promise.all(saves);
@@ -372,7 +376,7 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
   const disposables = [
     target.editor.onDidFocusEditorText(() => {
       activeOwnerId = target.ownerId;
-      setActiveWorkbenchEditorView(target.identity.workspaceId, target.viewId);
+      setActiveWorkbenchEditorView(target.editorWorkspaceId ?? target.identity.workspaceId, target.viewId);
       refreshContext(true);
     }),
     target.editor.onDidBlurEditorText(() => {

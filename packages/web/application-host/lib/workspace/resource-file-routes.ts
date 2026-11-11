@@ -1,3 +1,4 @@
+import {sendResourceAsset} from './asset-response.js';
 import type { Express, RequestHandler, Response } from 'express';
 import { isDeepStrictEqual } from 'node:util';
 import type { ResourceFileRequest, ResourceFileLocation, ResourceFileResult, ResourceFileTransfer, ThreadIdentity } from '@varin/application-client';
@@ -62,14 +63,41 @@ export function registerResourceFileRoutes(app: Express, options: {
     return { resourceOwner, taskSource: { runId, source } };
   };
   app.post('/api/resource-files', options.requireAuth, async (request, response) => {
+    const controller = new AbortController();
+    const closed = () => { if (!response.writableEnded) controller.abort(); };
+    request.once('aborted', closed); response.once('close', closed);
     try {
       const input = request.body as ResourceFileRequest;
+      const signal = input.command?.kind === 'filename-search' || input.command?.kind === 'content-search' ? controller.signal : undefined;
       const { resourceOwner, taskSource } = await route(input);
       const command = { command: input.command, ...(input.selection !== undefined ? {selection:input.selection} : {}), ...(input.root ? { root: input.root } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), ...(taskSource ? { taskSource } : {}) };
-      const result = resourceOwner.kind === 'local' ? await options.local.request(command)
-        : await (await options.remote(resourceOwner)).workspace({ ...command, coordinatorHostId: options.runtime.coordinatorHostId });
-      response.json(result);
-    } catch (error) { failure(response, error); }
+      const result = resourceOwner.kind === 'local' ? await options.local.request(command, signal)
+        : await (await options.remote(resourceOwner)).workspace({ ...command, coordinatorHostId: options.runtime.coordinatorHostId }, signal);
+      if (!response.destroyed) response.json(result);
+    } catch (error) { if (!controller.signal.aborted) failure(response, error); }
+    finally { request.off('aborted', closed); response.off('close', closed); }
+  });
+  const asset = async (input:import('@varin/application-client').ResourceAssetRequest,response:Response) => {
+    const controller=new AbortController(),close=()=>{if(!response.writableEnded)controller.abort();};
+    response.once('close',close);
+    try {
+      const owner=parseSourceResourceOwner(input.resourceOwner);
+      const result=owner.kind==='local'?await options.local.asset(input,controller.signal)
+        :await (await options.remote(owner)).workspaceAsset({...input,coordinatorHostId:options.runtime.coordinatorHostId},controller.signal);
+      await sendResourceAsset(result,response);
+    }catch(error){if(!controller.signal.aborted&&!response.headersSent)failure(response,error);else if(!response.destroyed)response.end();}
+    finally{response.off('close',close);}
+  };
+  app.get(/^\/api\/resource-assets\/[^/]+\/([^/]+)\/(raw|serve|office-preview)\/(.+)$/,options.requireAuth,async(request,response)=>{
+    try {
+      const location=JSON.parse(request.params[0]!) as ResourceFileLocation;
+      const kind=request.params[1] as 'raw'|'serve'|'office-preview';
+      await asset({...location,path:request.params[2]!,asset:{kind,...(typeof request.query.expectedRevision==='string'?{expectedRevision:request.query.expectedRevision}:{})}},response);
+    }catch(error){failure(response,error);}
+  });
+  app.post('/api/resource-office',options.requireAuth,async(request,response)=>{
+    if(request.body?.asset?.kind!=='office-read'){response.status(400).json({error:'An Office read is required'});return;}
+    await asset(request.body,response);
   });
   app.post('/api/resource-files/upload', options.requireAuth, async (request, response) => {
     try {

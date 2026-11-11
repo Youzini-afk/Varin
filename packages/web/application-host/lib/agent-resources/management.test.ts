@@ -294,3 +294,69 @@ it('does not transfer the private resource capability into mutation observers', 
     if (result.status === 'rejected') expect(result.reason).toMatchObject({ statusCode: 403 });
   }
 });
+
+describe('registered remote project resource ownership', () => {
+  it('routes CRUD and previews to the original target Documents and rejects rebound destinations', async () => {
+    const { routeProjectResourceManagement, invokeResourceManagement } = await import('./project-management.js');
+    const { createManagedProjectManagementOwner } = await import('../projects/managed-project-management.js');
+    const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+    const coordinator = await fixture(), target = await fixture();
+    const workspace = await target.documents.resolveWorkspace({path:target.project});
+    await fs.writeFile(path.join(target.project,'AGENTS.md'),'ONLY TARGET INSTRUCTIONS');
+    await fs.writeFile(path.join(coordinator.project,'AGENTS.md'),'COORDINATOR MUST NOT BE READ');
+    const resourceOwner = {kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'endpoint'};
+    const binding = {resourceOwner,workspaceId:workspace.workspaceId};
+    let source = binding;
+    const principal = {principalId:'paired',capabilities:['filesystem:read','filesystem:write'],allowedDirectories:[target.project]};
+    const targetOwner = createManagedProjectManagementOwner({kernel:{} as never,documents:target.documents,
+      resources:(directory,command,principal,signal)=>invokeResourceManagement(createResourceManagement({dataDirectory:target.data,
+        settings:target.settings,documents:target.documents,userAgentsDirectory:target.userAgents,resolveProjectRoot:()=>directory,
+        authorizeRoot:root=>assertResourcePathAllowed(root,principal.allowedDirectories)}),{projectId:'original'},command,signal)});
+    const remote = {projectManagement:vi.fn((input: import('../projects/managed-project-management.js').ManagedProjectManagementRequest,signal?:AbortSignal)=>targetOwner(principal,input,signal))};
+    const routed = routeProjectResourceManagement(coordinator.owner,{coordinatorHostId:'coordinator',
+      projects:async()=>[{id:'project-1',path:coordinator.project,source}],remote:async()=>remote as never});
+    const selected = {projectId:'project-1',expectedSource:structuredClone(binding)};
+    const express = (await import('express')).default;
+    const http = (await import('supertest')).default;
+    const {registerResourceManagementRoutes} = await import('./management-routes.js');
+    const app = express(); app.use(express.json());
+    registerResourceManagementRoutes(app,routed,(_req,_res,next)=>next());
+    const response = await http(app).post('/api/resources/create').send({target:selected,scope:'project',name:'target-skill',content:skill('target-skill'),key:'create-target'}).expect(200);
+    const created = response.body as Awaited<ReturnType<typeof routed.create>>;
+    expect(created.descriptor.filePath.startsWith(target.project)).toBe(true);
+    expect((await routed.list(selected)).resources.map(item=>item.name)).toContain('target-skill');
+    expect((await routed.read(selected,created.descriptor.id)).content).toContain('Use the native owner');
+    const updated = await routed.update(selected,{id:created.descriptor.id,content:skill('target-skill','Target change'),expectedRevision:created.revision,key:'update-target'});
+    expect((await routed.prompt(selected)).original.workspace_instructions).toContain('ONLY TARGET INSTRUCTIONS');
+    expect(JSON.stringify(await routed.prompt(selected))).not.toContain('COORDINATOR MUST NOT BE READ');
+    const copied = await routed.copy(selected,{id:updated.descriptor.id,expectedRevision:updated.revision,scope:'project',name:'target-copy',key:'copy-target'});
+    expect(copied.content).toContain('Target change');
+    await expect(routed.create(selected,{scope:'user',name:'forbidden',content:skill('forbidden'),key:'outside'})).rejects.toThrow();
+    await routed.remove(selected,{id:updated.descriptor.id,expectedRevision:updated.revision,key:'delete-target'});
+    expect((await coordinator.owner.list({projectId:'project-1'})).resources).toEqual([]);
+    source={...binding,workspaceId:'changed'};
+    const calls=remote.projectManagement.mock.calls.length;
+    await expect(routed.list(selected)).rejects.toThrow('Project source changed');
+    expect(remote.projectManagement).toHaveBeenCalledTimes(calls);
+  });
+});
+
+it('uses target trust revision and allowed roots for reads and writes without changing coordinator trust',async()=>{
+  const { ProjectTrustService }=await import('../models/project-trust.js');
+  const { createManagedProjectManagementOwner }=await import('../projects/managed-project-management.js');
+  const local=await fixture(),target=await fixture();
+  const registration=await target.documents.resolveWorkspace({path:target.project});
+  const trust=new ProjectTrustService(target.data,(id,signal)=>target.documents.admitWorkspaceRegistration(id,signal));
+  const localTrust=new ProjectTrustService(local.data,(id,signal)=>local.documents.admitWorkspaceRegistration(id,signal));
+  const owner=createManagedProjectManagementOwner({kernel:{} as never,documents:target.documents,trust});
+  const principal={principalId:'paired',capabilities:['filesystem:read','filesystem:write'],allowedDirectories:[target.project]};
+  const request={coordinatorHostId:'coordinator',projectId:'project',workspaceId:registration.workspaceId};
+  const initial=await owner(principal,{...request,command:{action:'trust-read',input:{}}}) as Awaited<ReturnType<typeof trust.snapshot>>;
+  expect(initial.path).toBe(target.project);
+  const command={action:'trust-update' as const,input:{expectedPath:initial.path,expectedRevision:initial.revision,decision:true}};
+  await expect(owner({...principal,capabilities:['filesystem:read']},{...request,command})).rejects.toThrow('write');
+  await expect(owner({...principal,allowedDirectories:[local.project]},{...request,command})).rejects.toThrow();
+  expect(await owner(principal,{...request,command})).toMatchObject({decision:true,path:target.project});
+  expect(trust.trusted(target.project)).toBe(true);expect(localTrust.trusted(local.project)).toBe(false);
+  await expect(owner(principal,{...request,command:{...command,input:{...command.input,decision:false}}})).rejects.toThrow();
+});

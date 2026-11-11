@@ -25,13 +25,14 @@ import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey
 type TerminalViewProps = {
     visible?: boolean;
     directoryOverride?: string;
+    source?: import('@/stores/useTerminalStore').TerminalSource;
     attachedOnly?: boolean;
     onClose?: () => void;
 };
 
 const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOverride, attachedOnly = false, onClose }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOverride, source, attachedOnly = false, onClose }) => {
     const { t } = useI18n();
     const { terminal, runtime, threads } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
@@ -376,7 +377,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
 
             const existingState = useTerminalStore.getState().getDirectoryState(directory);
             if (!existingState) {
-                if (!attachedOnly) ensureDirectory(directory);
+                if (!attachedOnly) { if (source) createTab(directory, source); else ensureDirectory(directory); }
                 return;
             }
 
@@ -508,6 +509,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         enableTabs,
         terminalHydrated,
         ensureDirectory,
+        createTab,
+        source,
         setConnecting,
         setTabLifecycle,
         setTabSessionId,
@@ -649,13 +652,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
 
     const handleCreateTab = React.useCallback(() => {
         if (!effectiveDirectory || attachedOnly) return;
-        const tabId = createTab(effectiveDirectory);
+        const tabId = createTab(effectiveDirectory, source);
         setActiveTab(effectiveDirectory, tabId);
         setConnectionError(null);
         setIsFatalError(false);
         setIsReconnectPending(false);
         disconnectStream();
-    }, [attachedOnly, createTab, disconnectStream, effectiveDirectory, setActiveTab]);
+    }, [attachedOnly, createTab, disconnectStream, effectiveDirectory, setActiveTab, source]);
 
     const handleAttachSelection = React.useCallback(async () => {
         if (attachedOnly) return;

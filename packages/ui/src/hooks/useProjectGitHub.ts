@@ -24,3 +24,20 @@ export function useProjectGitHub(project: ProjectRef | null, local: GitHubAPI | 
     checked: remote ? Boolean(current) : localChecked, error: remote ? current?.error : undefined,
     refresh: () => setRefresh(value => value + 1) };
 }
+
+/** Target credentials stay in a per-consumer snapshot, never the coordinator store. */
+export function useScopedGitHubAuth(github: GitHubAPI | undefined, scoped: boolean) {
+  const local = useGitHubAuthStore();
+  const [snapshot, setSnapshot] = React.useState<{ api: typeof github; status: GitHubAuthStatus | null; isLoading: boolean; hasChecked: boolean }>();
+  const current = snapshot?.api === github ? snapshot : undefined;
+  const setStatus = React.useCallback((status: GitHubAuthStatus | null) => {
+    setSnapshot({ api: github, status, isLoading: false, hasChecked: true });
+  }, [github]);
+  const refreshStatus = React.useCallback(async () => {
+    if (!github) throw new Error('Original GitHub owner unavailable');
+    setSnapshot(previous => ({ api: github, status: previous?.api === github ? previous.status : null, isLoading: true, hasChecked: false }));
+    try { const status = await github.authStatus(); setStatus(status); return status; }
+    catch (error) { setStatus({ connected: false, error: error instanceof Error ? error.message : String(error) } as GitHubAuthStatus); return null; }
+  }, [github, setStatus]);
+  return scoped ? { status: current?.status ?? null, isLoading: current?.isLoading ?? false, hasChecked: current?.hasChecked ?? false, setStatus, refreshStatus } : local;
+}
