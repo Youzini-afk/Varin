@@ -10,6 +10,10 @@ const strings = (value: unknown): value is string[] => Array.isArray(value) && v
 const source = (value: unknown): boolean => record(value) && record(value.resource_owner) && text(value.workspace_id)
   && text(value.execution_workspace_id) && ['live_root', 'fixed_branch', 'materialized','native_workspace'].includes(String(value.mode));
 const pin = (value: unknown): boolean => record(value) && text(value.pin_id) && text(value.root) && source(value.source);
+const unhandledOperation = (operation: never): never => {
+  void operation;
+  throw new Error('Unknown managed source response operation');
+};
 
 export function decodeManagedSourceCancellation(input: { requestId: string; resourceEpoch: string }, value: unknown): ManagedSourceServiceCancelReceipt {
   if (!record(value) || value.requestId !== input.requestId || value.resourceEpoch !== input.resourceEpoch
@@ -71,6 +75,10 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
     case 'package_read': valid = record(value) && text(value.bytesBase64) && text(value.hash) && Number.isSafeInteger(value.byteLength)
       && Number(value.byteLength) >= 0 && value.offset === operation.offset && Number.isSafeInteger(value.nextOffset) && typeof value.eof === 'boolean'; break;
     case 'routing_workspace': valid = text(value); break;
+    case 'files': valid = record(value) && Array.isArray(value.entries)
+      && value.entries.every(entry => record(entry) && text(entry.path) && text(entry.relativePath) && text(entry.name)
+        && ['file', 'directory'].includes(String(entry.type)))
+      && (value.nextCursor === null || text(value.nextCursor)); break;
     case 'language': valid = record(value) && text(value.status) && Array.isArray(value.items) && record(value.omissions); break;
     case 'resources_prepare': valid = record(value) && text(value.id) && record(value.scope)
       && Array.isArray(value.readers) && Array.isArray(value.capturedFiles) && Array.isArray(value.skills); break;
@@ -87,7 +95,7 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
       && text(value.root) && text(value.baseRoot) && text(value.pinId) && text(value.basePinId) && typeof value.writeRevision === 'number'; break;
     case 'child_result_publish': case 'code_capture': valid = record(value) && text(value.branchId) && typeof value.resultRevision === 'number'
       && strings(value.changedPaths) && record(value.pathStates) && record(value.baseStates); break;
-    case 'integration': case 'code_apply': valid = record(value) && text(value.status) && strings(value.changedFiles); break;
+    case 'integration': case 'code_apply': case 'external_code_apply': valid = record(value) && text(value.status) && strings(value.changedFiles); break;
     case 'code_release': valid = record(value) && value.released === true; break;
     case 'user_integration': valid = record(value) && ['none', 'confirmed', 'partial', 'unknown'].includes(String(value.effect))
       && typeof value.executorStopped === 'boolean' && record(value.state) && Array.isArray(value.state.operations)
@@ -104,6 +112,7 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
     // These intentionally retain the original native/domain result shape. Its
     // existing consumer performs the full receipt validation.
     case 'native_resource': valid = value === null || record(value); break;
+    default: return unhandledOperation(operation);
   }
   if (!valid) throw new Error(`Managed source ${operation.kind} response is unconfirmed`);
   return value as SourceServiceResponse<Operation>;
