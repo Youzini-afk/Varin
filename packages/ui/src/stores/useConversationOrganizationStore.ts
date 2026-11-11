@@ -1,20 +1,26 @@
 import React from 'react';
 import { create } from 'zustand';
-import { getRuntimeEndpointGeneration, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationCommand, type ConversationOrganizationOperation, type ConversationOrganizationReceipt, type ConversationOrganizationSnapshot, type ConversationOrganizationQuery, type BotSummary } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, ConversationOrganizationError, type ConversationOrganizationMetadataItem, type ConversationOrganizationMetadataResult, type ConversationOrganizationAPI, type ConversationOrganizationCommand, type ConversationOrganizationOperation, type ConversationOrganizationReceipt, type ConversationOrganizationSnapshot, type ConversationOrganizationQuery, type BotSummary } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useThreadStore } from './useThreadStore';
+import { useExternalAgentStore } from './useExternalAgentStore';
 
 export interface OrganizationPage { query: ConversationOrganizationQuery; snapshot: ConversationOrganizationSnapshot | null; loading: boolean; error: string | null }
+export interface OrganizationMetadataIntent {
+  input: { key: string; items: ConversationOrganizationMetadataItem[] };
+  results: ConversationOrganizationMetadataResult[]; pending: boolean;
+}
 interface OrganizationState {
   host: number; snapshot: ConversationOrganizationSnapshot | null; loading: boolean; error: string | null;
   pages: Record<string, OrganizationPage>;
   pending: Record<string, ConversationOrganizationCommand>; failed: Record<string, ConversationOrganizationCommand>;
+  metadata: Record<string, OrganizationMetadataIntent>;
   bots: BotSummary[] | null; botsError: string | null;
 }
 export const organizationQueryKey = (query: ConversationOrganizationQuery): string => JSON.stringify(Object.entries({ ...query, pageNodes: true }).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)));
 const rootQuery: ConversationOrganizationQuery = { pageNodes: true, rootOnly: true, archived: 'exclude' };
-export const useConversationOrganizationStore = create<OrganizationState>(() => ({ host: -1, snapshot: null, loading: false, error: null, pages: {}, pending: {}, failed: {}, bots: null, botsError: null }));
+export const useConversationOrganizationStore = create<OrganizationState>(() => ({ host: -1, snapshot: null, loading: false, error: null, pages: {}, pending: {}, failed: {}, metadata: {}, bots: null, botsError: null }));
 let binding: { host: number; api: ConversationOrganizationAPI; controller: AbortController; refresh(): Promise<void>; load(query: ConversationOrganizationQuery, more?: boolean): Promise<void>; users: number; stop(): void } | null = null;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** Stable identities merge light metadata; ancestor context never consumes a page slot. */
@@ -92,16 +98,59 @@ export async function submitOrganization(operation: ConversationOrganizationOper
   useConversationOrganizationStore.setState(state => ({ pending: { ...state.pending, [command.key]: command }, error: null }));
   try {
     const receipt = await owner.api.command(command, owner.controller.signal);
-    if (binding !== owner) return;
+    if (!currentMutationHost(owner.host)) return;
     useConversationOrganizationStore.setState(state => { const failed = { ...state.failed }; delete failed[command.key]; return { failed }; });
-    await owner.refresh(); return receipt;
+    await refreshConversationOrganization(); return receipt;
   } catch (error) {
-    if (binding !== owner) return;
+    if (!currentMutationHost(owner.host)) return;
     const known = error instanceof ConversationOrganizationError && !['unknown_outcome', 'unavailable'].includes(error.code);
     useConversationOrganizationStore.setState(state => ({ error: message(error), failed: known ? state.failed : { ...state.failed, [command.key]: command } }));
-    await owner.refresh(); throw error;
+    await refreshConversationOrganization(); throw error;
   } finally {
-    if (binding === owner) useConversationOrganizationStore.setState(state => { const pending = { ...state.pending }; delete pending[command.key]; return { pending }; });
+    if (currentMutationHost(owner.host)) useConversationOrganizationStore.setState(state => { const pending = { ...state.pending }; delete pending[command.key]; return { pending }; });
+  }
+}
+const currentMutationHost = (host: number) => host === getRuntimeEndpointGeneration() && useConversationOrganizationStore.getState().host === host;
+const metadataKey = (item: { conversation: { kind: string; id: string } }) => JSON.stringify([item.conversation.kind, item.conversation.id]);
+export const unresolvedOrganizationMetadata = (intent: OrganizationMetadataIntent) => intent.input.items.filter(item => !intent.results.some(result => metadataKey(result) === metadataKey(item) && result.status === 'succeeded'));
+/** UI delivery intent only: original owners retain authority, acceptance and per-item receipts. */
+export async function submitOrganizationMetadata(items: ConversationOrganizationMetadataItem[], retryKey?: string): Promise<void> {
+  const owner = binding;
+  if (!owner || !currentMutationHost(owner.host)) throw new Error('Conversation organization is unavailable on this Host');
+  const state = useConversationOrganizationStore.getState();
+  const existing = retryKey ? state.metadata[retryKey] : Object.values(state.metadata).find(intent => unresolvedOrganizationMetadata(intent).length && (JSON.stringify(intent.input.items) === JSON.stringify(items) || JSON.stringify(unresolvedOrganizationMetadata(intent)) === JSON.stringify(items)));
+  if (retryKey && !existing) throw new Error('The original metadata intent is unavailable on this Host');
+  const intent: OrganizationMetadataIntent = existing ?? { input: { key: crypto.randomUUID(), items: structuredClone(items) }, results: [], pending: false };
+  if (intent.pending) return;
+  const remaining = unresolvedOrganizationMetadata(intent); if (!remaining.length) return;
+  const key = intent.input.key;
+  useConversationOrganizationStore.setState(state => ({ metadata: { ...state.metadata, [key]: { ...intent, pending: true } } }));
+  const settle = (received: ConversationOrganizationMetadataResult[]) => {
+    if (!currentMutationHost(owner.host)) return;
+    useConversationOrganizationStore.setState(state => {
+      const current = state.metadata[key]; if (!current) return state;
+      const results = new Map(current.results.map(result => [metadataKey(result), result]));
+      for (const item of remaining) results.set(metadataKey(item), received.find(result => metadataKey(result) === metadataKey(item)) ?? { conversation: item.conversation, status: 'unknown' });
+      const settled = { ...current, results: [...results.values()], pending: false };
+      const metadata = { ...state.metadata };
+      // Retain partial receipts until every original item is confirmed, then retire the UI intent.
+      if (unresolvedOrganizationMetadata(settled).length) metadata[key] = settled;
+      else delete metadata[key];
+      return { metadata };
+    });
+  };
+  try {
+    const result = await owner.api.metadata({ key, items: remaining }, owner.controller.signal);
+    settle(result.items);
+  } catch (error) {
+    settle(remaining.map(item => ({ conversation: item.conversation, status: 'unknown', message: message(error) })));
+    if (currentMutationHost(owner.host)) throw error;
+  } finally {
+    if (currentMutationHost(owner.host)) {
+      await refreshConversationOrganization();
+      if (currentMutationHost(owner.host)) await useThreadStore.getState().loadCatalog();
+      if (currentMutationHost(owner.host)) await useExternalAgentStore.getState().refresh();
+    }
   }
 }
 export function useConversationOrganization() {
@@ -148,7 +197,9 @@ export function useConversationOrganization() {
       };
       const owner = { host, api, controller, refresh, load, users: 0, stop() { controller.abort(); stopEvents(); if (timer) clearTimeout(timer); } };
       binding = owner;
-      useConversationOrganizationStore.setState({ host, snapshot: null, pages: {}, loading: true, error: null, pending: {}, failed: {}, bots: null, botsError: null });
+      useConversationOrganizationStore.setState(state => state.host === host
+        ? { loading: true }
+        : { host, snapshot: null, pages: {}, loading: true, error: null, pending: {}, failed: {}, metadata: {}, bots: null, botsError: null });
       const loadBots = async () => { try { const bots = await apis.bots?.list(controller.signal); if (valid()) useConversationOrganizationStore.setState({ bots: bots ?? [], botsError: null }); } catch (error) { if (valid()) useConversationOrganizationStore.setState({ botsError: message(error) }); } };
       const stopEvents = subscribeVarinEvents(event => { if (event.type === 'bot-changed' || event.type === 'stream-ready') void loadBots(); });
       const observe = async () => {

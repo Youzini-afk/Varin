@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { WebSocket } from 'ws';
@@ -135,25 +136,26 @@ describe('terminal runtime', () => {
   };
 
   it('keeps an adopted managed terminal on its frozen logical source while authorizing its physical registration', async () => {
+    const physical = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'terminal-original-root-'));
     const f = createHarness();
     const selection = { mode: 'native_workspace' as const, workspaceId: 'original-project', executionWorkspaceId: 'adopted-execution', branchId: 'adopted-branch', adoptionOperationId: 'original-adoption' };
     const nativePath = path.resolve('/managed/native-view');
     const resolveWorkspace = vi.fn(async () => { throw new Error('A mounted view must not be reinterpreted as a physical workspace'); });
-    const registration = vi.fn(async () => ({ canonicalPath: '/repo' }));
+    const registration = vi.fn(async () => ({ canonicalPath: physical }));
     const prepareSelection = vi.fn(async () => ({ path: nativePath, source: { ...selection, resourceOwner: { kind: 'local' as const }, tools: [] } }));
     const owner = createManagedTerminalOwner({ terminal: () => f.runtime,
       documents: { resolveWorkspace, admitWorkspaceRegistration: registration } as never, nativeWorkspaces: { prepareSelection } });
-    const principal = { principalId: 'paired', capabilities: ['terminal:use','process:control'], allowedDirectories: ['/repo'] };
+    const principal = { principalId: 'paired', capabilities: ['terminal:use','process:control'], allowedDirectories: [physical] };
     const base = { coordinatorHostId: 'coordinator', sessionId: 'frozen-action' };
     try {
-      const create = { ...base, command: { action: 'create' as const, options: { cwd: '/repo', selection } } };
+      const create = { ...base, command: { action: 'create' as const, options: { cwd: physical, selection } } };
       const created = await owner.command(principal, create);
       expect(created.cwd).toBe(nativePath);
       expect(f.processes[0]?.options.cwd).toBe(nativePath);
       await owner.command(principal, create);
       expect(prepareSelection).toHaveBeenCalledTimes(1); expect(f.processes).toHaveLength(1);
-      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: '/repo', selection: { ...selection, branchId: 'another-branch' } } } })).rejects.toThrow('another frozen source');
-      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: '/repo' } } })).rejects.toThrow('original adopted source');
+      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: physical, selection: { ...selection, branchId: 'another-branch' } } } })).rejects.toThrow('another frozen source');
+      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: physical } } })).rejects.toThrow('original adopted source');
       await owner.command(principal, { ...base, command: { action: 'write', inputId: 'input', data: 'original-view-command' } });
       expect(f.processes[0]?.writes).toContain('original-view-command');
       const frames: Record<string,unknown>[] = [], controller = new AbortController();
@@ -175,7 +177,7 @@ describe('terminal runtime', () => {
       expect(registration).not.toHaveBeenCalled();
       expect(prepareSelection).toHaveBeenCalledTimes(1);
       expect(f.processes[0]?.writes).not.toContain('must-not-run');
-    } finally { for (const process of f.processes) process.emitExit(); await f.runtime.shutdown(); }
+    } finally { for (const process of f.processes) process.emitExit(); await f.runtime.shutdown(); await fs.promises.rm(physical, { recursive: true, force: true }); }
   });
 
   it('managed sessions reuse the original terminal owner and replay its original frames without another PTY',async()=>{

@@ -69,6 +69,8 @@ export interface ConversationOrganizationProjectResult {
 export interface ConversationOrganizationAPI {
   /** The original Settings owner has already committed registration/removal. Never rolls it back. */
   project(input: { projectId: string; command: ConversationOrganizationCommand }, signal?: AbortSignal): Promise<ConversationOrganizationProjectResult>;
+  /** Exact original metadata/provenance, independent of loaded navigation pages. */
+  entry(conversation: ConversationOrganizationRef, signal?: AbortSignal): Promise<ConversationOrganizationEntry>;
   read(query?: ConversationOrganizationQuery, signal?: AbortSignal): Promise<ConversationOrganizationSnapshot>;
   command(input: ConversationOrganizationCommand, signal?: AbortSignal): Promise<ConversationOrganizationReceipt>;
   metadata(input: { key: string; items: ConversationOrganizationMetadataItem[] }, signal?: AbortSignal): Promise<{ items: ConversationOrganizationMetadataResult[] }>;
@@ -139,4 +141,10 @@ export function parseConversationOrganizationSnapshot(value: unknown): Conversat
     for (const raw of conversations) { const ref = record(record(raw).conversation); if (!seen.has(JSON.stringify([ref.kind, ref.id]))) invalid(); }
   }
   return value as ConversationOrganizationSnapshot;
+}
+
+/** Point reads use the same entry contract as directory pages, never a second origin projection. */
+export function parseConversationOrganizationEntry(value: unknown): ConversationOrganizationEntry {
+  return parseConversationOrganizationSnapshot({ initialized: true, revision: 0, rootRevision: 0, cursor: 0,
+    containers: [], conversations: [value], nextCursor: null }).conversations[0]!;
 }

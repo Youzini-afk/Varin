@@ -27,6 +27,9 @@ export class ConversationOrganizationService {
       });
     } catch (error) { throw new ConversationOrganizationError('projects_unavailable', error instanceof Error ? error.message : 'Saved projects are unavailable', 503); }
   }
+  async entry(principalId: string | null, conversation: import('@varin/application-client').ConversationOrganizationRef, signal?: AbortSignal) {
+    return this.deps.runtime.organizationEntry(principalId, conversation, signal);
+  }
   async read(principalId: string | null, query: ConversationOrganizationQuery = {}, signal?: AbortSignal) {
     // Search names belong to Settings, not copied navigation metadata. Resolve one
     // generation per request; the Catalog binds this trusted index into its cursor.
@@ -46,7 +49,21 @@ export class ConversationOrganizationService {
       return { conversation: { kind: 'native' as const, id: thread.thread_id }, projectId: ids.length === 1 ? ids[0]! : null };
     });
     const externalPositions = external.filter(value => !value.deleted && (value.principalId ?? null) === principalId).map(value => {
-      const matches = projects.filter(project => !project.source || project.source.resourceOwner.kind === 'local').filter(project => projectContainsPath(project, value.cwd));
+      const source = value.executionSource ?? value.nativeWorkspace;
+      const owner = source?.resource_owner ?? { kind: 'local' as const };
+      const workspace = source?.workspace_id ?? value.workspaceId;
+      const sameOwner = projects.filter(project => {
+        const candidate = project.source?.resourceOwner ?? { kind: 'local' as const };
+        return candidate.kind === owner.kind && (candidate.kind === 'local' ||
+          (owner.kind === 'managed_host' && candidate.hostId === owner.hostId &&
+            candidate.connectionId === owner.connectionId && candidate.endpointIdentity === owner.endpointIdentity));
+      });
+      // A typed source's logical workspace survives mount/cwd changes. Never infer
+      // its owner from a path, or fall back after a declared identity no longer matches.
+      const identified = workspace ? sameOwner.filter(project => project.source?.workspaceId === workspace ||
+        (project.versionedWorkspace?.state === 'ready' && project.versionedWorkspace.workspaceId === workspace)) : [];
+      const matches = source || identified.length ? identified : sameOwner.filter(project =>
+        (!workspace || !project.source) && projectContainsPath(project, value.cwd));
       return { conversation: { kind: 'external' as const, id: value.id }, projectId: matches.length === 1 ? matches[0]!.id : null };
     });
     signal?.throwIfAborted();

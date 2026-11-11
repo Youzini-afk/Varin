@@ -391,3 +391,71 @@ it('does not render an open destination picker against a cleared Host snapshot',
   expect(container.querySelector('form')).toBeNull();
   expect(container.textContent).not.toBe('');
 });
+
+it('keeps original partial metadata intent and receipts across full same-Host unmount and retries only unknown items', async () => {
+  await render();
+  for (const title of ['Task', 'Moved']) await act(async () => [...row(title).querySelectorAll('button')].find(button => button.textContent === '选择并批量整理')!.click());
+  transport.metadata.mockResolvedValueOnce({ items: [
+    { conversation: { kind: 'native', id: 'Task' }, status: 'succeeded' },
+    { conversation: { kind: 'native', id: 'Moved' }, status: 'unknown', message: 'Response was lost' },
+  ] });
+  await click('归档'); const first = structuredClone(transport.metadata.mock.calls[0][0]);
+  await act(async () => root.render(null));
+  // A later object joins the visible scope; the original fixed selection must not grow.
+  snapshot.conversations.push({ ...snapshot.conversations[0], conversation: { kind: 'native', id: 'Later' }, title: 'Later' });
+  await render(); expect(container.textContent).toContain('Task: succeeded'); expect(container.textContent).toContain('Moved: unknown');
+  transport.metadata.mockResolvedValueOnce({ items: [{ conversation: { kind: 'native', id: 'Moved' }, status: 'succeeded' }] });
+  await click('只重试未确认项');
+  expect(transport.metadata.mock.calls[1][0]).toEqual({ key: first.key, items: [first.items[1]] });
+  expect(useConversationOrganizationStore.getState().metadata[first.key]).toBeUndefined();
+  expect(container.textContent).not.toContain('只重试未确认项');
+  expect(container.textContent).not.toContain('Task: succeeded');
+});
+
+it('does not duplicate an in-flight batch on same-Host remount and retains unknown failure for original-key retry', async () => {
+  await render(); let reject!: (error: Error) => void;
+  transport.metadata.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  await act(async () => [...row('Task').querySelectorAll('button')].find(button => button.textContent === '归档会话')!.click());
+  const first = structuredClone(transport.metadata.mock.calls[0][0]);
+  await act(async () => root.render(null)); await render();
+  expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '只重试未确认项')?.disabled).toBe(true);
+  expect(transport.metadata).toHaveBeenCalledTimes(1);
+  await act(async () => reject(new Error('Disconnected after acceptance')));
+  expect(container.textContent).toContain('unknown');
+  transport.metadata.mockResolvedValueOnce({ items: [{ conversation: { kind: 'native', id: 'Task' }, status: 'succeeded' }] });
+  await click('只重试未确认项'); expect(transport.metadata.mock.calls[1][0]).toEqual(first);
+});
+
+it('retains ambiguous navigation commands across same-Host rebind but fences old metadata after a Host change', async () => {
+  await render(); await click('新建组');
+  const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
+  await act(async () => { input.value = 'Unknown group'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  transport.command.mockRejectedValueOnce(new Error('Response lost')); await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const command = transport.command.mock.calls[0][0];
+  await act(async () => root.render(null)); await render();
+  expect(useConversationOrganizationStore.getState().failed[command.key]).toEqual(command);
+  let finish!: (value: unknown) => void;
+  transport.metadata.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await act(async () => [...row('Task').querySelectorAll('button')].find(button => button.textContent === '归档会话')!.click());
+  await act(async () => root.render(null)); transport.generation++; await render();
+  expect(useConversationOrganizationStore.getState().failed).toEqual({}); expect(useConversationOrganizationStore.getState().metadata).toEqual({});
+  await act(async () => finish({ items: [{ conversation: { kind: 'native', id: 'Task' }, status: 'succeeded' }] }));
+  expect(useConversationOrganizationStore.getState().metadata).toEqual({});
+});
+
+it('settles an original in-flight navigation command after same-Host remount without duplicating acceptance', async () => {
+  await render(); await click('新建组');
+  const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
+  await act(async () => { input.value = 'Pending group'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  let reject!: (error: Error) => void;
+  transport.command.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const originalCommand = structuredClone(transport.command.mock.calls[0][0]);
+  await act(async () => root.render(null)); await render();
+  expect(useConversationOrganizationStore.getState().pending[originalCommand.key]).toEqual(originalCommand);
+  await act(async () => reject(new Error('Original receipt unknown')));
+  expect(useConversationOrganizationStore.getState().pending[originalCommand.key]).toBeUndefined();
+  expect(useConversationOrganizationStore.getState().failed[originalCommand.key]).toEqual(originalCommand);
+  transport.command.mockResolvedValueOnce({}); await click('用原受理键核对');
+  expect(transport.command.mock.calls[1][0]).toEqual(originalCommand);
+});

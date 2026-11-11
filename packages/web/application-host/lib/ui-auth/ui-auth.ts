@@ -639,7 +639,7 @@ export const createUiAuth = ({
     // Organization commands carry the authenticated subject into Catalog. They
     // only manage that subject's navigation, not Host-wide project registration.
     const conversationOrganization = req.method === 'POST'
-      && /^\/api\/conversation-organization\/(?:read|command|metadata|project)$/.test(pathname);
+      && /^\/api\/conversation-organization\/(?:read|entry|command|metadata|project)$/.test(pathname);
     const scoped = !privateResourceRoute && (pathname === '/api/varin/observations/ws' || pathname === '/api/threads' || pathname.startsWith('/api/threads/') || pathname.startsWith('/auth/')
       || conversationOrganization
       || /^\/api\/client-auth\/(?:clients|pairing\/(?:sessions|transports)|connection\/candidates)(?:\/|$)/.test(pathname)

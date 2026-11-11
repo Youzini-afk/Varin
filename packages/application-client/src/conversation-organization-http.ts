@@ -1,4 +1,4 @@
-import { parseConversationOrganizationQuery, parseConversationOrganizationSnapshot, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationFailureCode } from './conversation-organization.js';
+import { parseConversationOrganizationEntry, parseConversationOrganizationQuery, parseConversationOrganizationSnapshot, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationFailureCode } from './conversation-organization.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 import { createThreadsHttpAPI } from './threads-http.js';
@@ -26,6 +26,12 @@ export function createConversationOrganizationHttpAPI(): ConversationOrganizatio
     } finally { controller.abort(); changed(); published(); signal?.removeEventListener('abort', abort); }
   };
   return {
+    entry: async (conversation, signal) => {
+      const result = parseConversationOrganizationEntry(await post('entry', { conversation }, signal));
+      if (result.conversation.kind !== conversation.kind || result.conversation.id !== conversation.id)
+        throw new ConversationOrganizationError('invalid_response', 'Conversation metadata belongs to another object', 502);
+      return result;
+    },
     read: async (query = {}, signal) => {
       const request = parseConversationOrganizationQuery(query);
       const snapshot = parseConversationOrganizationSnapshot(await post('read', request, signal));

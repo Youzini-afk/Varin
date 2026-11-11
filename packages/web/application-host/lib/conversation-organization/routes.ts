@@ -13,7 +13,7 @@ const fields = (value: Record<string, unknown>, allowed: string[]) => {
 const text = (value: unknown) => { if (typeof value !== 'string' || !value.trim()) throw new ConversationOrganizationError('invalid_request', 'A non-empty identity is required'); return value; };
 export function registerConversationOrganizationRoutes(app: Express, service: ConversationOrganizationService, requireAuth: RequestHandler,
   resolveAuth: (request: Request, response: Response) => Promise<unknown>) {
-  for (const method of ['read', 'command', 'metadata', 'project'] as const) app.post(`/api/conversation-organization/${method}`, requireAuth, async (req, res) => {
+  for (const method of ['read', 'entry', 'command', 'metadata', 'project'] as const) app.post(`/api/conversation-organization/${method}`, requireAuth, async (req, res) => {
     const controller = new AbortController();
     const close = () => { if (!res.writableEnded) controller.abort(); }; res.on('close', close);
     try {
@@ -21,6 +21,11 @@ export function registerConversationOrganizationRoutes(app: Express, service: Co
       const principalId = typeof auth?.principalId === 'string' && auth.principalId ? auth.principalId : null;
       const body = object(req.body);
       const result = await withRequestPrincipal(principalId, async () => {
+        if (method === 'entry') {
+          fields(body, ['conversation']); const ref = object(body.conversation); fields(ref, ['kind', 'id']); text(ref.id);
+          if (ref.kind !== 'native' && ref.kind !== 'external') throw new ConversationOrganizationError('invalid_request', 'Unknown conversation kind');
+          return service.entry(principalId, { kind: ref.kind, id: String(ref.id) }, controller.signal);
+        }
         if (method === 'read') {
           return service.read(principalId, parseConversationOrganizationQuery(body), controller.signal);
         }

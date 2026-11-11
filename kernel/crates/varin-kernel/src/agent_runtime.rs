@@ -2954,6 +2954,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let p: OrganizationCommandParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(catalog.organization_receipt(p.principal_id.0.as_deref(), &p.command).map_err(domain)?)?);
     }
+    if method == "runtime.organization.entry" {
+        let p: OrganizationEntryParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_conversation(p.principal_id.0.as_deref(), &p.conversation).map_err(domain)?)?);
+    }
     if method == "runtime.organization.read" {
         let p: OrganizationReadParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(catalog.organization_snapshot(p.principal_id.0.as_deref(), p.query).map_err(domain)?)?);

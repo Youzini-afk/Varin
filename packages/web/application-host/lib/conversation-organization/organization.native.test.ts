@@ -42,8 +42,14 @@ it('round trips authenticated organization commands through the real kernel and 
     await runtime.createThread('thread:other-user', 'branch:other-user', undefined, 'bob');
     const current = await api.read(); expect(current.conversations.map(item => item.conversation.id)).toEqual([organized.threadId]);
     expect(current.conversations[0]?.position.containerId).toBe('group');
+    // Details can open without loading the navigation page that contains them.
+    expect((await api.read({ pageNodes: true, rootOnly: true })).conversations).toEqual([]);
+    expect(await api.entry({ kind: 'native', id: organized.threadId })).toEqual(current.conversations[0]);
+    await expect(api.entry({ kind: 'native', id: 'thread:other-user' })).rejects.toMatchObject({ code: 'not_found' });
+    await expect(api.entry({ kind: 'external', id: organized.threadId })).rejects.toMatchObject({ code: 'not_found' });
     const metadata = await api.metadata({ key: 'archive', items: [{ conversation: {kind:'native',id:organized.threadId}, expectedRevision: current.conversations[0]!.revision, patch: { archived: true } }] });
     expect(metadata.items[0]?.status).toBe('succeeded'); expect((await api.read()).conversations).toEqual([]);
+    expect((await api.entry({ kind: 'native', id: organized.threadId })).archived).toBe(true);
     await kernel.close(); kernel = launch();
     const reopened = new AgentRuntimeClient(kernel);
     const saved = await reopened.organizationRead('alice', { archived: 'include' });

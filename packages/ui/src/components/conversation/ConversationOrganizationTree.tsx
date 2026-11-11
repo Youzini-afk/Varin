@@ -10,8 +10,8 @@ import { openProjectFiles } from '@/lib/openProjectFiles';
 import React from 'react';
 import { DndContext, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
-import type { ConversationOrganizationContainer, ConversationOrganizationObject, ConversationOrganizationOperation, ConversationOrganizationMetadataResult, ConversationOrganizationQuery } from '@varin/application-client';
-import { useConversationOrganization, submitOrganization, refreshConversationOrganization, loadOrganizationPage, readOrganizationActionScope, organizationQueryKey, organizationViewSnapshot } from '@/stores/useConversationOrganizationStore';
+import type { ConversationOrganizationContainer, ConversationOrganizationObject, ConversationOrganizationOperation, ConversationOrganizationQuery } from '@varin/application-client';
+import { useConversationOrganization, submitOrganizationMetadata, unresolvedOrganizationMetadata, submitOrganization, refreshConversationOrganization, loadOrganizationPage, readOrganizationActionScope, organizationQueryKey, organizationViewSnapshot } from '@/stores/useConversationOrganizationStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useExternalAgentStore, useExternalAgents } from '@/stores/useExternalAgentStore';
@@ -91,15 +91,14 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
   const [drag, setDrag] = React.useState<OrganizationNode | null>(null);
   const [dropLabel, setDropLabel] = React.useState('');
   const [rename, setRename] = React.useState<{ node: OrganizationNode; title: string } | null>(null);
-  const [metadataResults, setMetadataResults] = React.useState<ConversationOrganizationMetadataResult[]>([]);
-  const [metadataPending, setMetadataPending] = React.useState(false);
-  const [metadataRetry, setMetadataRetry] = React.useState<Parameters<NonNullable<typeof apis.conversationOrganization>['metadata']>[0] | null>(null);
+  const metadataIntents = state.host === getRuntimeEndpointGeneration() ? Object.values(state.metadata) : [];
+  const metadataPending = metadataIntents.some(intent => intent.pending);
   const list = React.useRef<HTMLDivElement>(null);
   const activePanel = botWorkspace?.views.find(view => view.key === botWorkspace.activeKey);
   const selectedObject = viewKey === 'bot' ? activePanel?.kind === 'work' ? { kind: 'native' as const, id: activePanel.identity.threadId } : activePanel?.kind === 'external' ? { kind: 'external' as const, id: activePanel.id } : botEntry ? { kind: 'native' as const, id: botEntry.threadId } : null : selected ? { kind: 'native' as const, id: selected.threadId } : externalSelected ? { kind: 'external' as const, id: externalSelected } : null;
   useSelectionGlide(list, selectedObject ? organizationObjectKey(selectedObject) : null);
   useHoverPill(list);
-  React.useEffect(() => { setSelection(new Set()); setUndo(null); setMovingBusy(false); setEditor(null); setMove(null); setRename(null); setMetadataResults([]); setMetadataRetry(null); setMetadataPending(false); setProjectCreate(null); setNewBotId(''); setMoving(''); selectionTargets.current.clear(); }, [state.host, apis.conversationOrganization]);
+  React.useEffect(() => { setSelection(new Set()); setUndo(null); setMovingBusy(false); setEditor(null); setMove(null); setRename(null); setProjectCreate(null); setNewBotId(''); setMoving(''); selectionTargets.current.clear(); }, [state.host, apis.conversationOrganization]);
   const namedSnapshot = React.useMemo(() => snapshot ? { ...snapshot, containers: snapshot.containers.map(c => c.kind === 'project' ? { ...c, name: projects.find(p => p.id === c.projectId)?.label || projects.find(p => p.id === c.projectId)?.path || t('organization.missingProject', { id: c.projectId ?? '' }) } : c) } : null, [snapshot, projects, t]);
   const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(botId ? { botId, recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !botId ? { rootOnly: true } : {}) }), [archived, botId, query]);
   React.useEffect(() => { void loadOrganizationPage(scopeQuery); }, [scopeQuery, state.host]);
@@ -230,22 +229,8 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
     await startThreadFromNavigation({ directory: project?.path, projectId: projectId ?? undefined, organization: { containerId }, ...(botId || newBotId ? { botId: botId || newBotId } : {}) });
     onNavigate?.();
   });
-  const metadata = async (items: OrganizationNode[], patch: { archived?: boolean; deleted?: boolean; pinned?: boolean; title?: string }, retry = false) => {
-    if (!apis.conversationOrganization || metadataPending) return;
-    if (state.host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
-    const requestedItems = items.flatMap(n => n.conversation ? [{ conversation: n.conversation.conversation, expectedRevision: n.conversation.revision, patch }] : []);
-    const input = metadataRetry && (retry || JSON.stringify(metadataRetry.items) === JSON.stringify(requestedItems)) ? metadataRetry : { key: crypto.randomUUID(), items: requestedItems };
-    if (!input.items.length) return;
-    const host = state.host;
-    setMetadataPending(true); setMetadataRetry(input);
-    try {
-      const result = await apis.conversationOrganization.metadata(input);
-      if (host !== getRuntimeEndpointGeneration()) return;
-      setMetadataResults(result.items);
-      const unresolved = new Set(result.items.filter(i => i.status !== 'succeeded').map(i => organizationObjectKey(i.conversation)));
-      setMetadataRetry(unresolved.size ? { ...input, items: input.items.filter(i => unresolved.has(organizationObjectKey(i.conversation))) } : null);
-      await refreshConversationOrganization(); await useThreadStore.getState().loadCatalog(); await useExternalAgentStore.getState().refresh();
-    } finally { if (host === getRuntimeEndpointGeneration()) setMetadataPending(false); }
+  const metadata = async (items: OrganizationNode[], patch: { archived?: boolean; deleted?: boolean; pinned?: boolean; title?: string }) => {
+    await submitOrganizationMetadata(items.flatMap(n => n.conversation ? [{ conversation: n.conversation.conversation, expectedRevision: n.conversation.revision, patch }] : []));
   };
   const archiveContainer = async (containerId: string, recursive: boolean) => {
     const scope = await readOrganizationActionScope({ containerId, recursive, archived: archived ? 'only' : 'exclude' });
@@ -328,7 +313,7 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
     {move && namedSnapshot && <form className="mx-2 space-y-2 rounded-md border border-border p-2" onSubmit={e => { e.preventDefault(); act(() => moveNodes(move, { parentId: moving || null, before: null, label: '' })); }}><div className="typography-meta">{t('organization.moveCount', { count: move.length })}<OrganizationDestinationPicker value={moving} onChange={setMoving} snapshot={namedSnapshot} excluded={move.flatMap(node => node.container ? [node.container.id] : [])} disabled={movingBusy} /></div><Button type="submit" size="sm" disabled={movingBusy}>{t('organization.move')}</Button><Button type="button" variant="ghost" size="sm" disabled={movingBusy} onClick={() => { const key = move[0]?.key; setMove(null); [...(list.current?.querySelectorAll<HTMLElement>('[data-sidebar-row]') ?? [])].find(row => row.dataset.sidebarRow === key)?.focus(); }}>{t('organization.cancel')}</Button></form>}
     {rename && <form className="mx-2 flex gap-1" onSubmit={e => { e.preventDefault(); act(async () => { await metadata([rename.node], { title: rename.title }); setRename(null); }); }}><Input autoFocus aria-label={t('organization.conversationName')} value={rename.title} onChange={e => setRename({ ...rename, title: e.target.value })} onKeyDown={e => { if (composingKey(e)) return; if (e.key === 'Escape') setRename(null); }} /><Button type="submit" size="sm" disabled={metadataPending}>{t('organization.save')}</Button><Button type="button" variant="ghost" size="sm" onClick={() => setRename(null)}>{t('organization.cancel')}</Button></form>}
     {(selection.size > 0 || selectionMode) && <div className="flex flex-wrap items-center gap-1 px-2 py-1 typography-meta"><span>{t('organization.selectedCount', { count: selection.size })}</span><Button size="sm" variant="ghost" onClick={() => { setMove(selectedNodes); setMoving(''); }}>{t('organization.move')}</Button><Button size="sm" variant="ghost" disabled={metadataPending} onClick={() => act(() => metadata(selectedNodes.filter(n => n.conversation), { archived: !archived }))}>{archived ? t('organization.restore') : t('organization.archive')}</Button><Button size="sm" variant="ghost" disabled={metadataPending} onClick={() => act(() => metadata(selectedNodes.filter(n => n.conversation), { deleted: true }))}>{t('organization.deleteSelected')}</Button><Button size="sm" variant="ghost" onClick={() => { setSelection(new Set()); onExitSelection?.(); }}>{t('organization.endSelection')}</Button></div>}
-    {(metadataResults.some(r => r.status !== 'succeeded') || metadataRetry && !metadataPending) && <div role="status" className="px-3 typography-meta">{metadataRetry && !metadataResults.length && <p>{t('organization.unknown')}</p>}{metadataResults.map(r => <p key={organizationObjectKey(r.conversation)}>{r.conversation.id}: {r.status}{r.message && ` · ${r.message}`}</p>)}{metadataRetry && <button type="button" className="underline" disabled={metadataPending} onClick={() => act(() => metadata([], {}, true))}>{t('organization.retryUnconfirmed')}</button>}</div>}
+    {metadataIntents.filter(intent => unresolvedOrganizationMetadata(intent).length > 0).map(intent => <div key={intent.input.key} role="status" className="px-3 typography-meta">{!intent.results.length && !intent.pending && <p>{t('organization.unknown')}</p>}{intent.results.map(result => <p key={organizationObjectKey(result.conversation)}>{result.conversation.id}: {result.status}{result.message && ` · ${result.message}`}</p>)}<button type="button" className="underline" disabled={intent.pending} onClick={() => act(() => submitOrganizationMetadata([], intent.input.key))}>{t('organization.retryUnconfirmed')}</button></div>)}
     <DndContext sensors={sensors} onDragStart={e => setDrag(e.active.data.current as OrganizationNode)} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDrag(null); setDropLabel(''); }}>
       <FlipList containerRef={list} layoutKey={JSON.stringify([roots.map(node => node.key), [...prefs.collapsed], prefs.focus, snapshot?.revision])} instantKey={query} className="relative min-h-0 flex-1 overflow-auto px-2 pb-3"><div role="tree" aria-label={t('organization.directory')}>{shown.map(render)}{pageControls(viewQuery)}<DropTarget id="root:end" drop={{ parentId: prefs.focus, before: null, label: t('organization.currentEnd') }}><div className="min-h-8 px-2 py-2 typography-micro text-muted-foreground">{shown.length || !state.pages[organizationQueryKey(viewQuery)]?.snapshot ? '' : archived ? t('organization.emptyArchive') : t('organization.empty')}{drag && t('organization.dropEnd')}</div></DropTarget></div></FlipList>
       <DragOverlay>{drag ? <div className="rounded-md border border-border bg-popover px-3 py-2 text-sm shadow-md">{name(drag)}{dropLabel && <div className="typography-meta text-muted-foreground">{dropLabel}</div>}</div> : null}</DragOverlay>

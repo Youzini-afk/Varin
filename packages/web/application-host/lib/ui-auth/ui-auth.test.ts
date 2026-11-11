@@ -476,7 +476,7 @@ describe('stable UI user ownership', () => {
         ? { ok: true, clientId: 'alice-device', principalId: 'alice' } : null },
     });
     try {
-      for (const action of ['read', 'command', 'metadata', 'project']) {
+      for (const action of ['read', 'entry', 'command', 'metadata', 'project']) {
         const request = { method: 'POST', path: `/api/conversation-organization/${action}`, headers: { authorization: 'Bearer alice-client' } };
         const response = createResponse(); let admitted = false;
         await auth.requireAuth(request, response, () => { admitted = true; });

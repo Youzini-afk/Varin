@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createConversationOrganizationHttpAPI } from '@varin/application-client';
+import { createConversationOrganizationHttpAPI, type ExternalConversation } from '@varin/application-client';
 import { KernelClientError } from '../kernel/kernel-error.js';
 import { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
@@ -11,7 +11,7 @@ const snapshot = { initialized: true, revision: 4, rootRevision: 2, cursor: 9, c
 function fixture() {
   const requests = vi.fn(async (method: string, _params: unknown): Promise<unknown> => method === 'runtime.organization.receipt' ? null : method === 'runtime.organization.read' ? snapshot : { key: 'key', revision: 5, cursor: 10, containers: [], positions: [], removed: [] });
   const runtime = new AgentRuntimeClient({ subscribeExit() { return () => {}; }, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
-  const external = { list: vi.fn(async () => []), inspect: vi.fn(), update: vi.fn() }, threads = { update: vi.fn(), delete: vi.fn() };
+  const external = { list: vi.fn(async (): Promise<ExternalConversation[]> => []), inspect: vi.fn(), update: vi.fn() }, threads = { update: vi.fn(), delete: vi.fn() };
   const readSettings = vi.fn(async (): Promise<{projects?:unknown}> => ({ projects: [] }));
   const service = new ConversationOrganizationService({ runtime, external: external as never, threads: threads as never, readSettings });
   const routes = new Map<string, RequestHandler[]>();
@@ -193,4 +193,73 @@ it('initializes the full saved project generation before first dispatch without 
   f.readSettings.mockRejectedValue(new Error('Settings changed after initialization'));
   await f.service.read('alice',{limit:1});
   expect(f.readSettings).toHaveBeenCalledTimes(1);
+});
+
+it('migrates external positions by exact source owner and logical workspace before legacy local paths', async () => {
+  const f=fixture();let initialized=false;
+  const owner={kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'target-endpoint'};
+  const remoteSource={resource_owner:owner,workspace_id:'remote-workspace',execution_workspace_id:'isolated-copy',branch_id:'child-branch',revision:null,mode:'materialized' as const,live_root:null};
+  f.readSettings.mockResolvedValue({projects:[
+    {id:'local',path:'/same/path'},
+    {id:'remote',path:'/same/path',source:{resourceOwner:owner,workspaceId:'remote-workspace'}},
+    {id:'adopted',path:'/old/local/path',versionedWorkspace:{workspaceId:'logical-native',executionWorkspaceId:'native-root',branchId:'main',adoptionOperationId:'adopt',state:'ready'}},
+    {id:'registered-local',path:'/registered/local',source:{resourceOwner:{kind:'local'},workspaceId:'local-workspace'}},
+    {id:'ambiguous-one',path:'/ambiguous-one',source:{resourceOwner:owner,workspaceId:'shared-workspace'}},
+    {id:'ambiguous-two',path:'/ambiguous-two',source:{resourceOwner:owner,workspaceId:'shared-workspace'}},
+  ]});
+  const conversation=(id:string,patch:Partial<ExternalConversation>={}):ExternalConversation=>({
+    id,principalId:'alice',configurationId:'fixture',harness:'codex',title:id,cwd:'/same/path',revision:1,
+    createdAt:1,updatedAt:1,archived:false,pinned:false,deleted:false,...patch,
+  });
+  f.external.list.mockResolvedValue([
+    conversation('remote-exact',{cwd:'/runtime/mount',executionSource:remoteSource}),
+    conversation('remote-unknown',{executionSource:{...remoteSource,workspace_id:'unknown'}}),
+    conversation('other-host',{executionSource:{...remoteSource,resource_owner:{...owner,hostId:'other'}}}),
+    conversation('other-connection',{executionSource:{...remoteSource,resource_owner:{...owner,connectionId:'other'}}}),
+    conversation('other-endpoint',{executionSource:{...remoteSource,resource_owner:{...owner,endpointIdentity:'other'}}}),
+    conversation('local-typed',{executionSource:{...remoteSource,resource_owner:{kind:'local'},workspace_id:'local-workspace'}}),
+    conversation('native-adopted',{nativeWorkspace:{resource_owner:{kind:'local'},mode:'native_workspace',workspace_id:'logical-native',execution_workspace_id:'isolated-native',branch_id:'child',revision:null,live_root:null}}),
+    conversation('legacy-local'),
+    conversation('legacy-workspace',{cwd:'/not-registered',workspaceId:'local-workspace'}),
+    conversation('ambiguous',{executionSource:{...remoteSource,workspace_id:'shared-workspace'}}),
+    conversation('foreign',{principalId:'bob',executionSource:remoteSource}),
+    conversation('deleted',{deleted:true,executionSource:remoteSource}),
+  ]);
+  f.requests.mockImplementation(async method=>{
+    if(method==='runtime.organization.read')return {...snapshot,initialized};
+    if(method==='runtime.thread.catalog.list')return [];
+    if(method==='runtime.organization.initialize'){initialized=true;return {};}
+    throw new Error(`Unexpected source resolution: ${method}`);
+  });
+  await f.service.read('alice',{});
+  const initialization=f.requests.mock.calls.find(([method])=>method==='runtime.organization.initialize')![1] as {initial:{positions:Array<{conversation:{id:string};projectId:string|null}>}};
+  expect(Object.fromEntries(initialization.initial.positions.map(item=>[item.conversation.id,item.projectId]))).toEqual({
+    'remote-exact':'remote','remote-unknown':null,'other-host':null,'other-connection':null,'other-endpoint':null,
+    'local-typed':'registered-local','native-adopted':'adopted','legacy-local':'local','legacy-workspace':'registered-local','ambiguous':null,
+  });
+  // A later source/Settings generation cannot rewrite the already admitted migration.
+  f.external.list.mockRejectedValue(new Error('target disconnected'));
+  f.readSettings.mockRejectedValue(new Error('Settings unavailable'));
+  await f.service.read('alice',{});
+  expect(f.external.list).toHaveBeenCalledTimes(1);
+  expect(f.requests.mock.calls.filter(([method])=>method==='runtime.organization.initialize')).toHaveLength(1);
+});
+
+it('point reads original typed metadata without loading directory pages or project sources', async () => {
+  const f = fixture();
+  const conversation = { kind: 'external' as const, id: 'unloaded-task' };
+  const entry = { conversation, title: 'Unloaded task', archived: true, pinned: false, revision: 3,
+    position: { conversation, containerId: 'nested-group', order: 2, revision: 4, explicit: true, inheritedFrom: null }, path: ['nested-group'],
+    origin: { botId: 'original-bot', directBotId: null, conversation: { kind: 'native', id: 'original-session' } } };
+  f.requests.mockResolvedValue(entry);
+  expect(await f.api.entry(conversation)).toEqual(entry);
+  expect(f.requests.mock.calls).toEqual([['runtime.organization.entry', { principalId: 'alice', conversation }, expect.any(AbortSignal)]]);
+  expect(f.readSettings).not.toHaveBeenCalled(); expect(f.external.list).not.toHaveBeenCalled();
+  for (const input of [{ conversation, principalId: 'bob' }, { conversation: { ...conversation, principalId: 'bob' } }, { conversation: { kind: 'container', id: 'nested-group' } }]) {
+    expect((await f.request('/api/conversation-organization/entry', input)).status).toBe(400);
+  }
+  expect(f.requests).toHaveBeenCalledTimes(1);
+  await expect(f.api.entry({ kind: 'native', id: conversation.id })).rejects.toMatchObject({ code: 'invalid_response' });
+  f.requests.mockRejectedValue(new KernelClientError({ code: 'not-found', message: 'conversation unavailable in current organization' }));
+  await expect(f.api.entry(conversation)).rejects.toMatchObject({ code: 'not_found', status: 404 });
 });
