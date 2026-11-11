@@ -38,6 +38,24 @@ const editor = () => { const dom = container.querySelector<HTMLElement>('.cm-con
 const edit = async (text: string) => { await act(async () => { const view = editor()!; view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' }); }); };
 const emptyQuotes = { contentReferences: [], contentReferenceOccurrences: [] };
 
+it('shows accepted current-task input separately from a queued next Run', async () => {
+  const interjection: QueuedInput = { ...original, id: 'interjection', mode: 'interrupt', content: { text: 'Add to current work' } };
+  const next: QueuedInput = { ...original, id: 'next', mode: 'next_run', run_id: 'later-run', content: { text: 'A separate next turn' } };
+  const onSendNow = vi.fn(async () => {});
+  await act(async () => root.render(<ThreadInputQueue api={{ mediaRead: vi.fn() }} identity={identity}
+    inputs={[interjection, next]} pending={false} onSave={async () => true} onCancel={async () => {}} onSendNow={onSendNow} />));
+  const currentRow = container.querySelector('[data-queued-input="interjection"]')!;
+  const nextRow = container.querySelector('[data-queued-input="next"]')!;
+  expect(currentRow.textContent).toContain('Add to current work');
+  expect(currentRow.textContent).toContain('bot.workspace.accepted');
+  expect(currentRow.textContent).not.toContain('chat.queuedMessage.sendNow');
+  expect(nextRow.textContent).toContain('bot.workspace.queued');
+  expect(nextRow.textContent).toContain('chat.queuedMessage.sendNow');
+  await act(async () => currentRow.querySelector<HTMLButtonElement>('[aria-label="chat.queuedMessage.edit"]')!.click());
+  expect(container.querySelector('label')?.textContent).toBe('chat.queuedMessage.steering');
+  expect(onSendNow).not.toHaveBeenCalled();
+});
+
 it('keeps an edited queue draft after a newer revision and after delivery, without overwriting either', async () => {
   const onSave = vi.fn(async () => true), onCancel = vi.fn(async () => {});
   const render = async (inputs: QueuedInput[]) => act(async () => root.render(<ThreadInputQueue api={{ mediaRead: vi.fn() }} identity={identity} inputs={inputs} pending={false} onSave={onSave} onCancel={onCancel} />));

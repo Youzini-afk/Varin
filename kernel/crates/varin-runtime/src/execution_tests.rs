@@ -422,6 +422,116 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
     assert!(matches!(&history.last().unwrap().content,Content::Text{text} if text=="done"));
 }
 #[test]
+fn interjections_during_model_and_tool_wait_for_the_next_request() {
+    struct InterjectingWork {
+        catalog: Arc<Mutex<Catalog>>,
+        model_calls: AtomicUsize,
+        queued: Mutex<Vec<String>>,
+        next_run_input: Mutex<Option<String>>,
+        with_tool: bool,
+    }
+    impl InterjectingWork {
+        fn enqueue(&self, text: &str, cancel: &CancellationToken) {
+            let mut catalog = self.catalog.lock().unwrap();
+            let receipt = catalog.enqueue_input(&crate::catalog::inputs::EnqueueInput {
+                key: text.into(), thread_id: "thread".into(), branch_id: "main".into(),
+                mode: crate::InputMode::Interrupt, input: json!({"text":text}), configuration: None,
+            }).unwrap();
+            assert_eq!(catalog.queued_input(&receipt.input_id).unwrap().state, crate::InputState::Queued);
+            self.queued.lock().unwrap().push(receipt.input_id);
+            assert!(!cancel.is_cancelled(), "interjection must not cancel admitted work");
+        }
+    }
+    impl ModelProvider for InterjectingWork {
+        fn serialize(&self, view: &RequestView, _: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap().into())
+        }
+        fn generate(&self, request: &RequestSnapshot, cancel: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+            let turn = self.model_calls.fetch_add(1, Ordering::SeqCst);
+            if turn == 0 {
+                self.enqueue("during model", cancel);
+                let next = self.catalog.lock().unwrap().enqueue_input(&crate::catalog::inputs::EnqueueInput {
+                    key: "later turn".into(), thread_id: "thread".into(), branch_id: "main".into(),
+                    mode: crate::InputMode::NextRun, input: json!({"text":"after current run"}), configuration: None,
+                }).unwrap();
+                *self.next_run_input.lock().unwrap() = Some(next.input_id);
+                if !self.with_tool {
+                    emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                        id: "original-final-answer".into(), opaque: None,
+                        content: Content::Text { text: "original answer completed".into() },
+                    } }).unwrap();
+                    assert!(!cancel.is_cancelled());
+                    return Ok(FinishReason::Stop);
+                }
+                emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                    id: "original-tool-call".into(), opaque: None, content: Content::ToolCall { call: ToolCall {
+                        call_id: "original-read".into(), name: "read".into(), schema_version: "1".into(), arguments: json!({}),
+                    } },
+                } }).unwrap();
+                assert!(!cancel.is_cancelled());
+                Ok(FinishReason::ToolCalls)
+            } else {
+                assert_eq!(turn, 1, "queued interjections should share the next request");
+                let next_id = self.next_run_input.lock().unwrap().clone().unwrap();
+                assert_eq!(self.catalog.lock().unwrap().queued_input(&next_id).unwrap().state, crate::InputState::Queued);
+                for text in if self.with_tool { vec!["during model", "during tool"] } else { vec!["during model"] } {
+                    assert_eq!(request.view.history.iter().filter(|item| matches!(&item.content, Content::Text { text: value } if value == text)).count(), 1);
+                }
+                assert!(!request.view.history.iter().any(|item| matches!(&item.content, Content::Text { text } if text == "after current run")));
+                if self.with_tool {
+                    assert!(request.view.history.iter().any(|item| matches!(&item.content, Content::ToolResult { result }
+                        if result.call_id == "original-read" && matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Succeeded, .. }))));
+                } else {
+                    assert!(request.view.history.iter().any(|item| matches!(&item.content, Content::Text { text } if text == "original answer completed")));
+                }
+                emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                    id: "answer".into(), opaque: None, content: Content::Text { text: "updated answer".into() },
+                } }).unwrap();
+                Ok(FinishReason::Stop)
+            }
+        }
+    }
+    impl ToolExecutor for InterjectingWork {
+        fn plan(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolPreparation, ExecutionError> {
+            Tools::default().plan(call, context, cancel)
+        }
+        fn prepare(&self, call: &ToolCall, context: &FrozenToolContext, cancel: &CancellationToken) -> Result<ToolContract, ExecutionError> {
+            Tools::default().prepare(call, context, cancel)
+        }
+        fn authorize(&self, _: &ToolExecutionContext, _: &ToolCall, _: &ToolContract, _: &CancellationToken) -> Result<(), ExecutionError> { Ok(()) }
+        fn execute(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> ToolCompletion {
+            self.enqueue("during tool", cancel);
+            Tools::default().execute(context, call, contract, cancel)
+        }
+    }
+    for with_tool in [false, true] {
+        let fixture = Fixture::new();
+        let catalog = fixture.catalog();
+        let input = input(&catalog);
+        let current_run = input.run_id.clone();
+        let work = Arc::new(InterjectingWork { catalog: catalog.clone(), model_calls: AtomicUsize::new(0), queued: Mutex::new(Vec::new()),
+            next_run_input: Mutex::new(None), with_tool });
+        let engine = ExecutionEngine { persistence: catalog.clone(), provider: work.clone(), tools: work.clone(),
+            context_preparation: Arc::new(NoopContextPreparation), policy: Arc::new(DefaultAgentPolicy), progress: ProgressSink::default() };
+        let report = engine.run(input, CancellationToken::default()).unwrap();
+        assert_eq!(report.state, RunState::Completed);
+        assert_eq!(report.model_steps, 2);
+        let catalog = catalog.lock().unwrap();
+        for id in work.queued.lock().unwrap().iter() {
+            let input = catalog.queued_input(id).unwrap();
+            assert_eq!(input.state, crate::InputState::Delivered);
+            assert_eq!(input.run_id, current_run);
+        }
+        let next = catalog.queued_input(work.next_run_input.lock().unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(next.mode, crate::InputMode::NextRun);
+        // Only completion of the current Run promotes the separate next-Run input.
+        assert_eq!(next.state, crate::InputState::Delivered);
+        assert_ne!(next.run_id, current_run);
+    }
+}
+
+#[test]
 fn uncertain_tool_result_allows_another_tool_and_answer_while_retaining_original_operation() {
     let f=Fixture::new();let db=f.catalog();let input=input(&db);let run=input.run_id.clone();
     let cancel=CancellationToken::default();

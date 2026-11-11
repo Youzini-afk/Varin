@@ -278,6 +278,27 @@ fn reconciled_terminal_stop(op: &Operation) -> bool {
         })
 }
 
+/// Cancelling a foreground Result can end its observation without certifying that the
+/// original Host callback stopped. Keep its unknown Operation and resource occupancy
+/// available for the original owner's late receipt. Jobs, subscriptions and processes
+/// have independent lifetimes and cannot use this caller-only cancellation boundary.
+pub(super) fn cancellable_result_observation(op: &Operation) -> Result<bool> {
+    if op.phase != OperationPhase::Terminal
+        || op.outcome != Some(Outcome::Indeterminate)
+        || !matches!(op.effect, Effect::None | Effect::Unknown)
+        || !matches!(op.execution_owner, Some(ExecutorOwner::External { .. }))
+        || op.host_job.is_some()
+        || op.managed_process.is_some()
+        || op.mcp_resource_subscription.is_some()
+        || op.intent.get("kind").and_then(Value::as_str) != Some("tool")
+    {
+        return Ok(false);
+    }
+    let intent = super::tool_content::ToolIntent::from_operation(op)?;
+    Ok(intent.contract().completion == CompletionKind::Result
+        && intent.contract().lifetime == Lifetime::Run)
+}
+
 impl RecoveryPreparation {
     pub(crate) fn identity(&self) -> PreparationIdentity {
         PreparationIdentity {
@@ -490,6 +511,7 @@ impl RecoveryPreparation {
                     &self.execution.run.id,
                     step.clone(),
                     policy,
+                    self.execution.run.cancel_requested,
                 )?;
                 drop(snapshot_read);
                 let snapshot: RequestSnapshot =
@@ -785,13 +807,15 @@ impl Catalog {
             let (call, receipt) = row?;
             let key = format!("{request}:tool:{call}");
             if let Some(op) = optional_record::<Operation>(&self.db, "operations", &key)? {
+                let cancelled_observation = cancellable_result_observation(&op)?;
                 if !op.handed_off
                     && (op.effect == Effect::Unknown || op.outcome == Some(Outcome::Indeterminate))
                     && !reconciled_terminal_stop(&op)
+                    && !cancelled_observation
                 {
-                    // Caller completion can be durable before physical stop. Only the original
-                    // executor's stop fact, never a receipt/empty occupancy alone, releases this
-                    // cancelled foreground exchange for recovery.
+                    // Independent jobs/processes still need their original stop fact. A
+                    // foreground Result may only close its caller observation above; neither
+                    // path treats an empty occupancy record as physical stop evidence.
                     let owner = serde_json::to_value(&op.execution_owner)?;
                     let stopped: bool = self.db.query_row(
                         "SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='operation.invocation_executor_stopped' AND json_extract(data,'$.operationEpoch')=?2 AND json_extract(data,'$.executionOwner.kind') IS ?3 AND json_extract(data,'$.executionOwner.identity') IS ?4 AND json_extract(data,'$.executionOwner.epoch') IS ?5)",
@@ -807,7 +831,7 @@ impl Catalog {
                 }
                 if op.phase != OperationPhase::Terminal
                     || ((op.effect == Effect::Unknown || op.outcome == Some(Outcome::Indeterminate))
-                        && !reconciled_terminal_stop(&op))
+                        && !reconciled_terminal_stop(&op) && !cancelled_observation)
                 {
                     return Ok(None);
                 }
@@ -1186,6 +1210,7 @@ impl Catalog {
         run_id: &str,
         step: ModelStep,
         policy: &PolicyIdentity,
+        cancelling: bool,
     ) -> Result<ModelRecoveryPreparation> {
         let request_id = &step.id;
         let output: Option<String> = database
@@ -1285,10 +1310,12 @@ impl Catalog {
                 }
                 // A stopped original executor can truthfully leave its business effect unknown.
                 // That durable receipt closes the call without making it replayable or successful.
-                // Recovery's synthetic Unknown alone is insufficient, as is empty occupancy.
+                // Ordinary recovery cannot resume an unresolved effect. Explicit foreground
+                // cancellation may close only its observation and keeps the original occupancy.
                 if ((op.effect == Effect::Unknown
                     || op.outcome == Some(Outcome::Indeterminate))
-                    && !reconciled_terminal_stop(&op))
+                    && !reconciled_terminal_stop(&op)
+                    && !(cancelling && cancellable_result_observation(&op)?))
                     || (op.phase != OperationPhase::Terminal && op.effect != Effect::None)
                 {
                     return Err(RuntimeError::Conflict(

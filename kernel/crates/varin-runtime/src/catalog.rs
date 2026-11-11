@@ -1474,10 +1474,34 @@ impl Catalog {
         Ok(result)
     }
     fn recover(&mut self) -> Result<()> {
-        let interrupted_read: bool = self.db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none' AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ({}))", policy_body::ACTION_KINDS), [], |row|row.get(0))?;
+        let interrupted_body = json!({"reason":"executor interrupted"});
+        // Older recovery code stored this exact raw body for an interrupted kernel
+        // Result (including tool_invoke). Repair only its known content identity; arbitrary
+        // tool output and original caller receipts must never be rewritten on reopen.
+        let legacy_interrupted_result = crate::content::ContentStore::reference(&interrupted_body)?;
+        let interrupted_read: bool = self.db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM operations WHERE
+            (json_extract(body,'$.phase')='running' AND json_extract(body,'$.effect')='none'
+             AND coalesce(json_extract(body,'$.intent.kind'),'') NOT IN ({}))
+            OR (json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.phase')='terminal'
+             AND json_extract(body,'$.outcome')='failed' AND json_extract(body,'$.effect')='none'
+             AND json_extract(body,'$.result.reference.content_object')=?1))", policy_body::ACTION_KINDS),
+            [legacy_interrupted_result["content_object"].as_str()], |row| row.get(0))?;
         let interrupted_result = interrupted_read
-            .then(|| self.content.save(&json!({"reason":"executor interrupted"})))
+            .then(|| self.content.save_output(&interrupted_body.into()))
             .transpose()?;
+        // Older Catalogs retained an interrupted Host Result's owner but no result body.
+        // Preserve that uncertainty while giving explicit cancellation a truthful caller
+        // completion to pair. This is not an executor-stop receipt or a replay admission.
+        let interrupted_observation: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.execution_owner.kind')='external'
+             AND json_extract(body,'$.phase') IN ('running','terminal')
+             AND json_extract(body,'$.result') IS NULL
+             AND json_extract(body,'$.intent.contract.completion')='result'
+             AND json_extract(body,'$.intent.contract.lifetime')='run')", [], |row| row.get(0))?;
+        let interrupted_observation_result = interrupted_observation.then(|| self.content.save_output(&json!({
+            "error":"tool_result_unavailable",
+            "message":"The original call was interrupted before its result was recorded. Its executor has not been confirmed stopped; no retry was started."
+        }).into())).transpose()?;
         let tx = self.db.transaction()?;
         policy_switch::interrupt_candidates(&tx)?;
         tx.execute("UPDATE resumptions SET claimed=0 WHERE acknowledged=0", [])?;
@@ -1716,6 +1740,32 @@ impl Catalog {
                     "operation.recovered",
                     serde_json::to_value(&op)?,
                 )?;
+            }
+            if op.execution_owner == Some(ExecutorOwner::Kernel)
+                && op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Failed)
+                && op.effect == Effect::None && op.call_completion.is_none()
+                && op.intent.get("kind").and_then(Value::as_str) == Some("tool")
+                && tool_content::ToolIntent::from_operation(&op)?.contract().completion == crate::execution::CompletionKind::Result
+                && matches!(&op.result, Some(OperationResultMetadata::Content { reference }) if reference == &legacy_interrupted_result)
+            {
+                op.result = Some(OperationResultMetadata::Content {
+                    reference: interrupted_result.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("interrupted kernel result was not prepared".into())
+                    })?.clone(),
+                });
+                op.revision += 1;
+                put(&tx, "operations", &op.id, &op)?;
+                event(&tx, &op.id, op.revision, "operation.interrupted_result_repaired", Value::Null)?;
+            }
+            if op.result.is_none() && recovery::cancellable_result_observation(&op)? {
+                op.result = Some(OperationResultMetadata::Content {
+                    reference: interrupted_observation_result.as_ref().ok_or_else(|| {
+                        RuntimeError::Invalid("interrupted tool observation was not prepared".into())
+                    })?.clone(),
+                });
+                op.revision += 1;
+                put(&tx, "operations", &op.id, &op)?;
+                event(&tx, &op.id, op.revision, "operation.observation_interrupted", Value::Null)?;
             }
         }
         tx.commit()?;
