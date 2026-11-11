@@ -2906,8 +2906,9 @@ it.each(['shared','isolated_write'] as const)('a real parent model dispatches a 
   expect(await h.runtime.childExecutions()).toEqual([]);
   const conversation=await h.external!.inspect(child.conversation_id);
   expect(conversation.executionSource?.resource_owner).toEqual(resourceOwner);
-  if(workMode==='isolated_write')expect(conversation.cwd).not.toBe(target.directory);
-  else expect(conversation.cwd).toBe(target.directory);
+  const [executionDirectory,originalDirectory]=await Promise.all([fs.realpath(conversation.cwd),fs.realpath(target.directory)]);
+  if(workMode==='isolated_write')expect(executionDirectory).not.toBe(originalDirectory);
+  else expect(executionDirectory).toBe(originalDirectory);
   expect(await fs.readFile(path.join(conversation.cwd,'parent-result.txt'),'utf8')).toBe('Original parent transfer');
   expect(await fs.stat(path.join(f.workspace,'external-result.txt')).catch(()=>null)).toBeNull();
   expect(target.operations.filter(kind=>kind==='code_capture')).toHaveLength(workMode==='isolated_write'?2:0);

@@ -31,6 +31,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
+import { useProjectGit } from '@/hooks/useProjectGit';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 import { useTitlebarLeftInset } from '@/hooks/useTitlebarLeftInset';
@@ -247,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
     return openDirectory ? getActiveContextMode(state.contextPanelByDirectory[openDirectory]) : null;
   }, [openDirectory]));
 
-  const currentBranchLabel = useGitBranchLabel(openDirectory || null);
+  const currentBranchLabel = useGitBranchLabel(useProjectGit().directory ?? null);
 
   const currentSessionTitle = currentSessionSummary?.title || (identity ? t('sessions.sidebar.session.untitled') : activeProjectLabel ?? 'Varin');
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);

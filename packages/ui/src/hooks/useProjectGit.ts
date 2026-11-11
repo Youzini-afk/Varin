@@ -3,15 +3,14 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
 import { useEffectiveDirectory } from './useEffectiveDirectory';
 import { projectGitDirectory, scopedProjectGit } from '@/lib/worktrees/projectGit';
-import { projectGitLocation, projectGitDisplayPath, type GitIdentityProfile, type GitIdentitySummary } from '@varin/application-client';
+import { projectGitDisplayPath, type GitIdentityProfile, type GitIdentitySummary } from '@varin/application-client';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 
 export function useProjectGit(directoryOverride?: string | null) {
   const local = useRuntimeAPIs().git;
   const localDirectory = useEffectiveDirectory();
   const project = useProjectsStore(state => state.projects.find(project => project.id === state.activeProjectId));
-  const directory = React.useMemo(() => directoryOverride && projectGitLocation(directoryOverride) ? directoryOverride
-    : project?.source?.resourceOwner.kind === 'managed_host' ? projectGitDirectory(project) : directoryOverride ?? localDirectory,
+  const directory = React.useMemo(() => directoryOverride ?? (project?.source?.resourceOwner.kind === 'managed_host' ? projectGitDirectory(project) : localDirectory),
   [directoryOverride, project, localDirectory]);
   const lease = React.useMemo(() => {
     const key = directory;

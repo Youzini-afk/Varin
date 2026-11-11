@@ -159,3 +159,48 @@ it('overlays actual selected draft codecs on the checkpoint policy rather than s
     ...f.checkpointPolicy, files: { 'a.c': 'gbk' } } }), undefined);
   expect(f.textEncodingPolicy).not.toHaveBeenCalled();
 });
+
+
+it('shares the original filesystem grant across project adoption, frozen preparation and document/terminal consumers', async () => {
+  const ref = { workspaceId: 'original', executionWorkspaceId: 'execution', branchId: 'native', adoptionOperationId: 'adopt', state: 'preparing' as const };
+  let project = { id: 'managed', path: '/original', versionedWorkspace: ref } as ProjectEntry;
+  const view = { binding: { generation: 1 }, mount: { state: 'ready', path: '/mounted' }, rootId: 'mounted-root' };
+  let activeGrant: string | undefined;
+  const opened: string[] = [], closed: string[] = [];
+  const kernel = {
+    handshake: { kernelEpoch: 'epoch', hostId: 'host' },
+    issueGrant: async (input: { grantId: string }) => input,
+    revokeGrant: vi.fn(async () => undefined),
+    scoped: (grant: { grantId: string }) => ({
+      inspectWorkspaceBackend: async () => ({ dependenciesReady: true }),
+      getOperation: async () => ({ kind: 'workspace.adopt', state: 'committed', result: { branchId: ref.branchId, workspaceId: ref.workspaceId, adoption: { sourceRootId: 'physical' } } }),
+      fileRootRegister: async () => ({ rootId: 'physical' }),
+      openWorkspace: async () => {
+        if (activeGrant && activeGrant !== grant.grantId) throw new Error('workspace_owner_required');
+        activeGrant = grant.grantId; opened.push(activeGrant); return view;
+      },
+      mountWorkspace: async () => view, bindWorkspace: async () => view, inspectWorkspace: async () => view,
+      closeWorkspace: async () => { expect(grant.grantId).toBe(activeGrant); closed.push(grant.grantId); activeGrant = undefined; },
+    }),
+  };
+  const original = createNativeWorkspaceOwner({ kernel: kernel as never, documents: { admitWorkspaceRegistration: async () => ({ canonicalPath: '/original' }) } as never,
+    projects: async () => [], update: async () => { throw new Error('Do not copy a remote project into target Settings'); } });
+  const managed = original.projectLifecycle(async () => [project], async (_id, workspace) => { project = { ...project, versionedWorkspace: workspace }; });
+  await managed.enable(project.id);
+  const selection = { ...ref, mode: 'native_workspace' as const };
+  const [prepared, document] = await Promise.all([original.prepareSelection(selection, 'thread'), original.resolveId(ref.executionWorkspaceId)]);
+  expect(prepared.path).toBe('/mounted'); expect(document?.root).toBe('/mounted');
+  expect((await managed.inspectProject(project.id)).view).toEqual(view);
+  expect(opened).toHaveLength(1);
+  // A second coordinator adapter with its own configuration rejoins the same
+  // filesystem owner rather than opening another session with another grant.
+  const reconnected = original.projectLifecycle(async () => [project], async (_id, workspace) => { project = { ...project, versionedWorkspace: workspace }; });
+  await reconnected.enable(project.id);
+  expect(opened).toHaveLength(1);
+  await reconnected.disable(project.id);
+  expect(closed).toEqual(opened);
+  await managed.enable(project.id);
+  await original.prepareSelection(selection, 'next-thread');
+  expect(opened).toHaveLength(2);
+  expect(opened[1]).not.toBe(opened[0]);
+});

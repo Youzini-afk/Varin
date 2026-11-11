@@ -1,3 +1,4 @@
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,7 +60,7 @@ it('runs an adopted project action in its frozen native view and never writes it
     const { createManagedProjectManagementOwner } = await import('../projects/managed-project-management.js');
     await fs.writeFile(path.join(target.directory, 'baseline.txt'), 'original project');
     const registered = await target.documents.resolveWorkspace({ path: target.directory });
-    const management = createManagedProjectManagementOwner({ kernel: target.kernel, documents: target.documents });
+    const management = createManagedProjectManagementOwner({ kernel: target.kernel, documents: target.documents, nativeWorkspaces: target.nativeWorkspaces });
     const principal = { principalId: 'paired-parent', capabilities: ['filesystem:read','filesystem:write','terminal:use','process:control'] };
     const project = { coordinatorHostId: base.coordinatorHostId, projectId: 'terminal-project', workspaceId: registered.workspaceId };
     const planned = await management(principal, { ...project, command: { action: 'workspace-plan', input: {} } }) as import('@varin/application-client').VersionedProjectWorkspace;
@@ -77,7 +78,7 @@ it('runs an adopted project action in its frozen native view and never writes it
     }
     await management(principal, { ...project, workspace: planned, command: { action: 'enable', input: {} } });
     const created = await client.terminal(create);
-    expect(created.cwd).not.toBe(target.directory);
+    expect(normalizePathIdentity(await canonicalizePathIdentity(created.cwd))).not.toBe(normalizePathIdentity((await target.documents.admitWorkspaceRegistration(registered.workspaceId)).canonicalPath));
     const data = `"${process.execPath}" -e "require('node:fs').writeFileSync('adopted-action.txt','only-adopted-view')"\r`;
     await client.terminal({ ...base, command: { action: 'write', inputId: 'original-write', data } });
     await expect.poll(async () => fs.readFile(path.join(created.cwd, 'adopted-action.txt'), 'utf8').catch(() => null)).toBe('only-adopted-view');

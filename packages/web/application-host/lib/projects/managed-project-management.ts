@@ -5,7 +5,7 @@ import type { ProjectEntry, ProjectManagementCommand, VersionedProjectWorkspace 
 import type { ManagedSourcePrincipal } from '../harness/managed-remote-types.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
-import { createNativeWorkspaceOwner } from '../kernel/native-workspaces.js';
+import type { NativeProjectLifecycle } from '../kernel/native-workspaces.js';
 import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 import { runDirectoryMutation } from '../git/routes.js';
 import * as git from '../git/index.js';
@@ -19,8 +19,8 @@ export interface ManagedProjectManagementRequest {
 }
 /** An adapter over the original resource owners, not a second project registry.
  * The coordinator persists the adoption intent before asking this owner to run it. */
-export function createManagedProjectManagementOwner(options: { kernel: KernelClient; documents: DocumentAuthority; githubDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; gitDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; nativeWorkspaces?: Pick<import('../kernel/native-workspaces.js').NativeWorkspaceOwner, 'prepareSelection'>; resources?: (directory: string, command: import('@varin/application-client').NativeResourceManagementCommand, principal: ManagedSourcePrincipal, signal?: AbortSignal) => Promise<unknown>; trust?: import('../models/project-trust.js').ProjectTrustService; githubRead?: (command: import('../github/project-read.js').GitHubProjectReadCommand, directory: string, signal?: AbortSignal) => Promise<unknown> }) {
-  const adapters = new Map<string, { project: ProjectEntry; owner: ReturnType<typeof createNativeWorkspaceOwner> }>();
+export function createManagedProjectManagementOwner(options: { kernel: KernelClient; documents: DocumentAuthority; githubDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; gitDispatch?: import('../git/project-dispatch.js').ProjectGitDispatcher; nativeWorkspaces?: Pick<import('../kernel/native-workspaces.js').NativeWorkspaceOwner, 'prepareSelection' | 'projectLifecycle'>; resources?: (directory: string, command: import('@varin/application-client').NativeResourceManagementCommand, principal: ManagedSourcePrincipal, signal?: AbortSignal) => Promise<unknown>; trust?: import('../models/project-trust.js').ProjectTrustService; githubRead?: (command: import('../github/project-read.js').GitHubProjectReadCommand, directory: string, signal?: AbortSignal) => Promise<unknown> }) {
+  const adapters = new Map<string, { project: ProjectEntry; owner: NativeProjectLifecycle | undefined }>();
   return async (principal: ManagedSourcePrincipal, request: ManagedProjectManagementRequest, signal?: AbortSignal): Promise<unknown> => {
     if (!principal.principalId || !principal.capabilities.includes('filesystem:read')
       || !request.coordinatorHostId || !request.projectId || !request.workspaceId) throw new Error('Project management authority is required');
@@ -65,12 +65,15 @@ export function createManagedProjectManagementOwner(options: { kernel: KernelCli
     let adapter = adapters.get(key);
     if (!adapter) {
       const state = { project: { id: request.projectId, path: directory, ...(request.workspace ? { versionedWorkspace: request.workspace } : {}) } as ProjectEntry };
-      const owner = createNativeWorkspaceOwner({ ...options, projects: async () => [state.project], update: async (_id, workspace) => { state.project = { ...state.project, versionedWorkspace: workspace }; } });
+      const owner = options.nativeWorkspaces?.projectLifecycle(async () => [state.project], async (_id, workspace) => { state.project = { ...state.project, versionedWorkspace: workspace }; });
+      // Git-only callers do not need adoption, but never manufacture a second
+      // filesystem owner when a project lifecycle operation is requested.
       adapter = { get project() { return state.project; }, set project(project) { state.project = project; }, owner }; adapters.set(key, adapter);
     }
     // Keep the coordinator's durable intent; local cache only holds actual native views.
     adapter.project = { ...adapter.project, path: directory, ...(request.workspace ? { versionedWorkspace: request.workspace } : {}) };
     const command = request.command;
+    const lifecycle = () => { if (!adapter.owner) throw new Error('Original native workspace owner is unavailable'); return adapter.owner; };
     switch (command.action) {
       case 'git-branches': return git.getBranches(directory);
       case 'git-root-context': {
@@ -102,16 +105,16 @@ export function createManagedProjectManagementOwner(options: { kernel: KernelCli
         if (!entries.some(entry => entry.path === command.input.directory)) throw new Error('Worktree is not registered with this project repository');
         return git.getWorktreeBootstrapStatus(command.input.directory);
       }
-      case 'backend': return { ...await adapter.owner.inspectBackend(request.projectId, signal), canOpenSettings: false };
+      case 'backend': return { ...await lifecycle().inspectBackend(request.projectId, signal), canOpenSettings: false };
       case 'backend-settings': throw new Error('Open workspace backend settings on the source device. Remote requests cannot change device security settings.');
       case 'enable':
         if (!request.workspace) throw new Error('Persist the original workspace adoption intent before preparing it');
-        await adapter.owner.enable(request.projectId, signal); break;
-      case 'disable': await adapter.owner.disable(request.projectId); break;
+        await lifecycle().enable(request.projectId, signal); break;
+      case 'disable': await lifecycle().disable(request.projectId); break;
       case 'inspect': break;
       default: throw new Error('Unknown project management action');
     }
-    const latest = await adapter.owner.inspectProject(request.projectId, signal), view = latest.view;
+    const latest = await lifecycle().inspectProject(request.projectId, signal), view = latest.view;
     return { workspace: latest.workspace ?? null, executionPath: view?.mount?.path ?? null, mountState: view?.mount?.state ?? null,
       leases: view?.leases ?? 0, capabilities: view?.capabilities ?? null, progress: latest.progress, preparing: latest.preparing };
   };

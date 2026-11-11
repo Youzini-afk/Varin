@@ -428,7 +428,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     });
     const request = async <Method extends keyof ManagedSourceService>(method: Method, input: Parameters<ManagedSourceService[Method]>[1], signal?: AbortSignal): Promise<Awaited<ReturnType<ManagedSourceService[Method]>>> => {
       if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed source request belongs to another coordinator');
-      const result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {
+      let result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {
         if (error instanceof ManagedResponseError && typeof error.code === 'string' && threadSourceFailureMessage(error.code)) {
           throw new SourceAdmissionError(error.code as SourceFailureCode, { cause: error });
         }
@@ -436,7 +436,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       });
       if (method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
-      if (method === 'projectManagement') decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result, (input as Parameters<ManagedSourceService['projectManagement']>[1]).command.input);
+      if (method === 'projectManagement') result = decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result, (input as Parameters<ManagedSourceService['projectManagement']>[1]).command.input) as typeof result;
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
       if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
       return result;

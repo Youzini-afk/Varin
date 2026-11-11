@@ -1,5 +1,7 @@
 import { IdeSearchPanel } from './IdeSearchPanel';
 import React from 'react';
+import { projectGitDisplayPath } from '@varin/application-client';
+import { useProjectGit } from '@/hooks/useProjectGit';
 import {
   VARIN_WORKBENCH_SLOTS,
   type VarinWorkbenchActivityItemsSlotProps,
@@ -170,6 +172,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const workspace = useWorkbenchWorkspace();
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const directory = useEffectiveDirectory();
+  const workspaceGitDirectory = useProjectGit().directory ?? null;
   const projectActionsContext = useProjectActionsContext();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const selectedGitDirectory = useGitRepositorySelectionStore((state) => (
@@ -177,11 +180,11 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   ));
   const setSelectedGitDirectory = useGitRepositorySelectionStore((state) => state.setRepository);
   const containedSelectedGitDirectory = React.useMemo(() => (
-    directory && selectedGitDirectory
-      ? gitRepositoryRootWithinWorkspace(directory, selectedGitDirectory)
+    workspaceGitDirectory && selectedGitDirectory
+      ? gitRepositoryRootWithinWorkspace(workspaceGitDirectory, selectedGitDirectory)
       : null
-  ), [directory, selectedGitDirectory]);
-  const gitDirectory = containedSelectedGitDirectory || directory || null;
+  ), [workspaceGitDirectory, selectedGitDirectory]);
+  const gitDirectory = containedSelectedGitDirectory || workspaceGitDirectory;
   const branchLabel = useGitBranchLabel(gitDirectory);
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const titlebarLeftInset = useTitlebarLeftInset('0.5rem');
@@ -288,19 +291,19 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   workspaceSelectionRef.current = { directory, workspaceId };
 
   const handleGitDirectoryChange = React.useCallback(async (candidateDirectory: string) => {
-    if (!directory || !workspaceId) throw new Error(t('common.unavailable'));
+    if (!directory || !workspaceId || !workspaceGitDirectory) throw new Error(t('common.unavailable'));
     const repositoryRoot = await resolveGitTopLevel(candidateDirectory);
     if (
       workspaceSelectionRef.current.directory !== directory
       || workspaceSelectionRef.current.workspaceId !== workspaceId
     ) throw new Error(t('common.unavailable'));
-    const containedRoot = gitRepositoryRootWithinWorkspace(directory, repositoryRoot);
+    const containedRoot = gitRepositoryRootWithinWorkspace(workspaceGitDirectory, repositoryRoot);
     if (!containedRoot) throw new Error(t('filesView.document.outsideWorkspace'));
     setSelectedGitDirectory(
       workspaceId,
-      resourceIdFromWorkspacePath(directory, containedRoot) === '' ? null : containedRoot,
+      resourceIdFromWorkspacePath(directory, projectGitDisplayPath(containedRoot)) === '' ? null : containedRoot,
     );
-  }, [directory, setSelectedGitDirectory, t, workspaceId]);
+  }, [directory, workspaceGitDirectory, setSelectedGitDirectory, t, workspaceId]);
 
   const handleFollowWorkspaceGitDirectory = React.useCallback(() => {
     if (workspaceId) setSelectedGitDirectory(workspaceId, null);
@@ -358,18 +361,19 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
   // Git diffs belong in the editor area. The Agent profile routes them through its tabbed context
   // panel, which the IDE shell does not mount, so the IDE opens a pinned diff provider tab instead.
-  const openGitDiffInEditor = React.useCallback((gitPath: string, staged: boolean) => {
-    if (!workspaceId || !directory || !gitDirectory) return;
-    const resourceId = resolveIdeGitResourceId(directory, gitDirectory, gitPath);
+  const openGitDiffInEditor = React.useCallback((gitPath: string, staged: boolean, selectedRepository?: string) => {
+    if (!workspaceId || !directory || !gitDirectory || !workspaceGitDirectory) return;
+    const repository = selectedRepository ?? gitDirectory;
+    const resourceId = resolveIdeGitResourceId(workspaceGitDirectory, repository, gitPath);
     if (!resourceId) return;
     openWorkbenchEditor(workspaceId, resourceId, BUILTIN_EDITOR_PROVIDER_IDS.gitDiff, {
       viewState: {
         diffScope: staged ? 'staged' : 'working',
-        diffRepositoryResourceId: resourceIdFromWorkspacePath(directory, gitDirectory) ?? '',
+        diffRepositoryResourceId: resourceIdFromWorkspacePath(directory, projectGitDisplayPath(repository)) ?? '',
       },
     });
     if (readingFocus) setReadingFocus('editor');
-  }, [directory, gitDirectory, workspaceId, readingFocus]);
+  }, [directory, gitDirectory, workspaceGitDirectory, workspaceId, readingFocus]);
 
   const startResize = React.useCallback((side: 'primary' | 'secondary') => (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -693,7 +697,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                             isActive
                             directoryOverride={gitDirectory}
                             showDirectorySelector
-                            sessionDirectory={directory}
+                            sessionDirectory={workspaceGitDirectory}
                             isFollowingSessionDirectory={!containedSelectedGitDirectory}
                             followDirectoryLabel={t('workspace.git.workspace')}
                             onDirectoryChange={handleGitDirectoryChange}

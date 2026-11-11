@@ -1,4 +1,5 @@
 import React from 'react';
+import { projectGitDisplayPath } from '@varin/application-client';
 import { resolveGitPrimaryRoot, resolveGitTopLevel } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -60,7 +61,8 @@ export function useDetectedWorktreeMetadata(
       }
 
       const branch = currentBranch || '';
-      const name = worktreePath.split('/').filter(Boolean).pop() || worktreePath;
+      const displayPath = projectGitDisplayPath(worktreePath);
+      const name = displayPath.split('/').filter(Boolean).pop() || displayPath;
       const headState = !branch ? 'unborn' : 'branch';
 
       setDetected({

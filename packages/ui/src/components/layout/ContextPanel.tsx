@@ -15,6 +15,7 @@ import { ContextPanelGitNavigation } from './ContextPanelGitNavigation';
 import { useMainColumnGlide } from './railMotion';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useProjectGit } from '@/hooks/useProjectGit';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
@@ -405,7 +406,7 @@ export const ContextPanel: React.FC<{
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
   const panelKey = layoutScope ?? directoryKey;
   const currentSessionId = useThreadStore(state => state.selectedIdentity);
-  const gitSessionDirectory = effectiveDirectory || null;
+  const gitSessionDirectory = useProjectGit().directory ?? null;
   const gitDirectoryScopeKey = React.useMemo(() => {
     return contextPanelGitDirectoryScopeKey(currentSessionId ? threadComposerKey(useThreadStore.getState().hostKey, currentSessionId) : null, gitSessionDirectory);
   }, [currentSessionId, gitSessionDirectory]);

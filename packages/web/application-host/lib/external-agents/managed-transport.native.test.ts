@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {afterEach,expect,it,vi} from 'vitest';
 import express from 'express';
-import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {createNativeProcessTestHarness} from '../process/native-process.test-helper.js';
 import {createLiveSourceOwner} from '../kernel/live-source.js';
@@ -86,7 +86,8 @@ if(m.method==='turn/start'){if(m.params.input[0].text.startsWith('read:'))append
   await service.connect(conversation.id);
   const second=await service.send(conversation.id,'second',{text:'again'});
   await vi.waitFor(async()=>expect((await service.read(conversation.id)).turns.find(t=>t.id===second.id)?.status).toBe('completed'),{timeout:15000});
-  expect((await readFile(path.join(directory,'executions'),'utf8')).trim().split('\n').map(v=>JSON.parse(v))).toEqual([{cwd:directory,program:script},{cwd:directory,program:script}]);
+  const executionRoot=await realpath(directory);
+  expect((await readFile(path.join(directory,'executions'),'utf8')).trim().split('\n').map(v=>JSON.parse(v))).toEqual([{cwd:executionRoot,program:script},{cwd:executionRoot,program:script}]);
   expect(await readFile(path.join(directory,'sessions'),'utf8')).toBe('thread/start\nthread/resume\n');
   const current=(await service.read(conversation.id)).conversation;await service.update(conversation.id,current.revision,{deleted:true},'delete');
   const stored=await service.inspect(conversation.id) as typeof conversation & {transport:{state:string}};expect(stored.transport.state).toBe('closed');

@@ -1,3 +1,4 @@
+import { encodeProjectCommandResult } from '@varin/application-client';
 import {managedExternalCapture,cleanupManagedExternalCaptures} from '../external-agents/managed-capture.js';
 import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
 /** The target Host admits its own Source resources. Catalog execution facts stay
@@ -282,7 +283,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     async projectManagement(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       if (!options.projectManagement) throw new SourceAdmissionError('source_unavailable');
-      return options.projectManagement(principal, input, signal);
+      const value = await options.projectManagement(principal, input, signal);
+      const command = input.command;
+      return command.action === 'git-command' || command.action === 'github-command'
+        ? encodeProjectCommandResult(command.action, command.input.operation, value) : value;
     },
     async externalProjectSource(principal,input,signal){
       requireReadPrincipal(principal,input.coordinatorHostId);

@@ -1,3 +1,4 @@
+import { executeProjectGit, executeProjectGitHub } from '@varin/application-client';
 import { expect, it, vi } from 'vitest';
 import type { ProjectEntry, VersionedProjectWorkspace } from '@varin/application-client';
 import type { ManagedProjectManagementRequest } from './managed-project-management.js';
@@ -56,4 +57,33 @@ it('does not redirect a frozen remote observation to a newly rebound project', a
   const response = { writableEnded: false, destroyed: false, once: vi.fn(), removeListener: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
   await handler({ params: { projectId: 'project' }, body: { action: 'worktrees', input: {}, expectedSource: { ...source, workspaceId: 'old-workspace' } } }, response);
   expect(response.status).toHaveBeenCalledWith(409); expect(remote).not.toHaveBeenCalled();
+});
+
+
+it.each(['git-command', 'github-command'] as const)('delivers %s void, null and primitive results through the coordinator HTTP client', async action => {
+  let handler: (request: unknown, response: unknown) => Promise<void> = async () => {};
+  const source = { workspaceId: 'workspace', resourceOwner: { kind: 'managed_host' as const, hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' } };
+  let value: unknown;
+  const remote = { projectManagement: vi.fn(async () => value) };
+  registerProjectManagementRoutes({ post: (_path: string, _auth: unknown, fn: typeof handler) => { handler = fn; } } as never, {
+    requireAuth: vi.fn(), authorize: async () => true, coordinatorHostId: 'coordinator', projects: async () => [{ id: 'project', path: '/target', source } as ProjectEntry],
+    remote: async () => remote as never, update: vi.fn(),
+  });
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+    let status = 200, body: unknown;
+    const response = { writableEnded: false, destroyed: false, once: vi.fn(), removeListener: vi.fn(),
+      status(code: number) { status = code; return response; }, json(result: unknown) { body = result; return response; } };
+    await handler({ params: { projectId: 'project' }, body: JSON.parse(String(init?.body)) }, response);
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  });
+  try {
+    for (const expected of [undefined, null, false, 0, '', 'original', [], ['entry'], { original: true }]) {
+      value = expected;
+      const result = action === 'git-command'
+        ? await executeProjectGit('project', source, { mode: 'live_root' }, 'stageGitFile', ['/target', 'file'])
+        : await executeProjectGitHub('project', source, { mode: 'live_root' }, 'prStatus', ['/target', 'main']);
+      expect(result).toEqual(expected);
+    }
+    expect(remote.projectManagement).toHaveBeenCalledTimes(9);
+  } finally { fetch.mockRestore(); }
 });

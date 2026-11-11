@@ -419,7 +419,9 @@ Frozen project source selection is carried in original creation/child-dispatch m
 nodes. `native_workspace` includes the original adoption operation and logical workspace/branch IDs;
 `live_root` explicitly disables later automatic adoption selection. Missing selection retains old
 receipt behavior. The target `NativeWorkspaceOwner.prepareSelection` verifies the committed adoption
-against the admitted registration's original physical root, then uses the existing open/acquire owners. Project adoptions retain their original project lifecycle;
+against the admitted registration's original physical root, then uses the existing open/acquire owners. Managed project configuration adapters use `projectLifecycle` on that same Host owner, sharing original
+mount grants, in-flight opens, document views and retained references. They do not instantiate another
+filesystem owner for the same branch. Project adoptions retain their original project lifecycle;
 only derived temporary snapshots use conversation preparation retention. Managed preparation checks the authenticated target's allowed
 directories. The coordinating Host never registers target mount paths as local directories. Scoped
 child source snapshots retain their original native scope and use the existing snapshot owner.

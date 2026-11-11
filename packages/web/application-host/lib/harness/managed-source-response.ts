@@ -1,3 +1,4 @@
+import { decodeProjectCommandResult } from '@varin/application-client';
 import type { ManagedSourceReceiptRelease, ManagedSourceServiceCancelReceipt, SourceServiceOperation, SourceServiceResponse } from './managed-remote-types.js';
 import { parseExtensionSourceSnapshot } from '../kernel/extension-source.js';
 import { parseManagedExperimentInput } from './experiment-workspace.js';
@@ -108,9 +109,12 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
   return value as SourceServiceResponse<Operation>;
 }
 
-/** Project commands have a closed response envelope: only worktrees returns a
- * list. Keep unrelated Source methods on their object-only contract. */
+/** Other project commands retain their closed domain response contracts. */
 export function decodeManagedProjectManagementResponse(action: string, value: unknown, input?: unknown): unknown {
+  if (action === 'git-command' || action === 'github-command') {
+    if (!record(input) || !text(input.operation)) throw new Error('Managed project command input is unconfirmed');
+    return decodeProjectCommandResult(action, input.operation, value);
+  }
   if (action === 'resources' && record(input) && input.action === 'tools') {
     if (!Array.isArray(value) || !value.every(tool => record(tool) && text(tool.name) && text(tool.description) && record(tool.schema))) throw new Error('Managed project tool catalog is unconfirmed');
   } else if (action === 'worktrees') {

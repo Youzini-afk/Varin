@@ -104,19 +104,37 @@ function observe<T>(flight: Flight<T>, signal?: AbortSignal): Promise<T> {
             signal?.addEventListener('abort', abort, { once: true });
     });
 }
+/** Project configuration adapters share the Host's original filesystem sessions. */
+export interface NativeProjectLifecycle {
+    enable(projectId: string, signal?: AbortSignal): Promise<unknown>;
+    disable(projectId: string): Promise<void>;
+    inspectBackend(projectId: string, signal?: AbortSignal): ReturnType<KernelScopedClient['inspectWorkspaceBackend']>;
+    inspectProject(projectId: string, signal?: AbortSignal): Promise<{
+        workspace: VersionedProjectWorkspace | null;
+        view: KernelWorkspaceInspection | null;
+        progress: { phase: string; entries: number; bytes: number } | null;
+        preparing: boolean;
+    }>;
+}
+function createFilesystemSessions() {
+    return {
+        opened: new Map<string, Opened>(),
+        opening: new Map<string, Flight<Opened>>(),
+        known: new Map<string, Source>(),
+        documentViews: new Map<string, Source>(),
+        retiring: new Set<string>(),
+        references: new Map<string, Promise<{ epoch: string; grant: KernelGrantHandle; source: Source }>>(),
+    };
+}
 /** Host adapter only. Rust owns every byte, version, mount and execution lease. */
 export function createNativeWorkspaceOwner(owners: Owners) {
-    const opened = new Map<string, Opened>();
-    const opening = new Map<string, Flight<Opened>>();
+    return createWorkspaceOwner(owners, createFilesystemSessions());
+}
+function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof createFilesystemSessions>) {
+    const { opened, opening, known, documentViews, retiring, references } = sessions;
     const enabling = new Map<string, Flight<Awaited<ReturnType<typeof enableProject>>>>();
-    const known = new Map<string, Source>();
-    const documentViews = new Map<string, Source>();
-    const retiring = new Set<string>();
-    const references = new Map<string, Promise<{
-        epoch: string;
-        grant: KernelGrantHandle;
-        source: Source;
-    }>>();
+    const projectLifecycle = (projects: Owners['projects'], update: Owners['update']): NativeProjectLifecycle =>
+        createWorkspaceOwner({ ...owners, projects, update }, sessions);
     const documentId = (source: Source) => {
         if (!source.native_scope)
             return source.execution_workspace_id;
@@ -667,6 +685,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, prepareSelection, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { projectLifecycle, prepare, prepareSelection, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

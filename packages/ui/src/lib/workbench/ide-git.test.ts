@@ -1,3 +1,4 @@
+import { projectGitAddress } from '@varin/application-client';
 import { describe, expect, test } from 'vitest';
 import {
   gitRepositoryRootWithinWorkspace,
@@ -31,4 +32,14 @@ describe('IDE Git repository scope', () => {
     expect(resolveIdeGitResourceId('/workspace', '/workspace/repo', '/etc/passwd')).toBeNull();
     expect(resolveIdeGitResourceId('/workspace', '/workspace/repo', 'C:\\secret.ts')).toBeNull();
   });
+});
+
+test('keeps remote nested Git roots in their exact source while mapping editor resource paths', () => {
+  const address = (hostId: string, path: string) => projectGitAddress({ projectId: 'project', source: { workspaceId: 'documents', resourceOwner: { kind: 'managed_host', hostId, connectionId: hostId, endpointIdentity: `https://${hostId}.example` } }, selection: { mode: 'live_root' }, path });
+  const root = address('a', '/same'), nested = address('a', '/same/nested');
+  expect(gitRepositoryRootWithinWorkspace(root, nested)).toBe(nested);
+  expect(resolveIdeGitResourceId(root, nested, 'src/file.ts')).toBe('nested/src/file.ts');
+  expect(gitRepositoryRootWithinWorkspace(root, address('b', '/same/nested'))).toBeNull();
+  expect(gitRepositoryRootWithinWorkspace(root, '/same/nested')).toBeNull();
+  expect(gitRepositoryRootWithinWorkspace('/same', nested)).toBeNull();
 });

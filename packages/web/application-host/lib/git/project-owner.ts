@@ -4,14 +4,14 @@ import { createGitHttpClient, parseProjectSourceSelection, projectGitLocation, P
 import type { ManagedSourcePrincipal } from '../harness/managed-remote-types.js';
 import type { NativeWorkspaceOwner } from '../kernel/native-workspaces.js';
 import { assertResourcePathAllowed } from '../workspace/resource-access.js';
+import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
 import { resolvePrimaryWorktreeRoot } from './index.js';
 import type { ProjectGitDispatcher } from './project-dispatch.js';
 
 const operations = new Set(Object.keys(createGitHttpClient()));
-const contains = (root: string, candidate: string) => {
-  const relative = path.relative(root, candidate);
-  return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-};
+const contains = (root: string, candidate: string) => isPathWithinRoot(candidate, root);
+const canonical = (value: string) => canonicalizePathIdentity(value, { allowMissing: true });
+const samePath = (a: string, b: string) => normalizePathIdentity(a) === normalizePathIdentity(b);
 /** Project admission is separate from the original Git handler/writer. All
  * command paths are resolved on this target, including Windows path semantics. */
 export async function dispatchProjectGit(options: { dispatch: ProjectGitDispatcher; nativeWorkspaces?: Pick<NativeWorkspaceOwner, 'prepareSelection'> },
@@ -25,41 +25,44 @@ export async function dispatchProjectGit(options: { dispatch: ProjectGitDispatch
   if (includes(PROJECT_GIT_CONFIGURATION_WRITE)) require('config:write');
   const selection = parseProjectSourceSelection(command.selection);
   await assertResourcePathAllowed(registeredRoot, principal.allowedDirectories);
-  let directory = registeredRoot;
+  const logicalRoot = await canonical(selection.mode === 'native_workspace' && selection.nativeScope
+    ? path.resolve(registeredRoot, selection.nativeScope) : registeredRoot);
+  let directory = logicalRoot;
   if (selection.mode === 'native_workspace') {
     if (selection.workspaceId !== workspaceId || !options.nativeWorkspaces) throw new Error('Original project adoption is unavailable');
     directory = (await options.nativeWorkspaces.prepareSelection(selection, `project-git:${principal.principalId}:${workspaceId}`, signal)).path;
   }
+  const executionRoot = directory;
   const args: unknown[] = structuredClone(command.args);
   if (!includes(PROJECT_GIT_DIRECTORYLESS)) {
     if (typeof args[0] !== 'string') throw new Error('A project Git directory is required');
     // An opaque UI directory is a cache/selection key, never a target path.
     {
-      const requested = path.resolve(projectGitLocation(args[0])?.path ?? args[0]);
+      const requested = await canonical(projectGitLocation(args[0])?.path ?? args[0]);
       if (selection.mode === 'native_workspace' && contains(directory, requested)) { directory = requested; } else {
-      if (!contains(registeredRoot, requested)) {
+      if (!contains(logicalRoot, requested)) {
         // Linked worktrees share the original repository but retain independent
         // Documents roots. Never authorize an arbitrary same-named directory.
         if (selection.mode !== 'live_root') throw new Error('Choose the original adopted project view');
         await assertResourcePathAllowed(requested, principal.allowedDirectories);
         const [expected, actual] = await Promise.all([resolvePrimaryWorktreeRoot(registeredRoot), resolvePrimaryWorktreeRoot(requested)]);
-        if (path.resolve(expected.root) !== path.resolve(actual.root)) throw new Error('Git directory belongs to another project repository');
+        if (!samePath(await canonical(expected.root), await canonical(actual.root))) throw new Error('Git directory belongs to another project repository');
         directory = requested;
-      } else directory = path.resolve(directory, path.relative(registeredRoot, requested));
+      } else directory = path.resolve(directory, path.relative(logicalRoot, requested));
       }
     }
     const primary = await resolvePrimaryWorktreeRoot(directory);
-    if (!contains(directory, primary.root)) await assertResourcePathAllowed(primary.root, principal.allowedDirectories);
+    if (!contains(executionRoot, await canonical(primary.root))) await assertResourcePathAllowed(primary.root, principal.allowedDirectories);
     args[0] = directory;
   }
   if (includes(PROJECT_GIT_INTEGRATION)) {
     const mapPath = async (value: string): Promise<string> => {
-      const requested = path.resolve(projectGitLocation(value)?.path ?? value);
-      if (contains(registeredRoot, requested)) return path.resolve(directory, path.relative(registeredRoot, requested));
+      const requested = await canonical(projectGitLocation(value)?.path ?? value);
+      if (contains(logicalRoot, requested)) return path.resolve(directory, path.relative(logicalRoot, requested));
       if (selection.mode === 'native_workspace' && contains(directory, requested)) return requested;
       await assertResourcePathAllowed(requested, principal.allowedDirectories);
       const [original, linked] = await Promise.all([resolvePrimaryWorktreeRoot(directory), resolvePrimaryWorktreeRoot(requested)]);
-      if (path.resolve(original.root) !== path.resolve(linked.root)) throw new Error('Integration directory belongs to another project');
+      if (!samePath(await canonical(original.root), await canonical(linked.root))) throw new Error('Integration directory belongs to another project');
       return requested;
     };
     const normalize = async (value: unknown, key = ''): Promise<unknown> => {
@@ -84,7 +87,16 @@ export async function dispatchProjectGit(options: { dispatch: ProjectGitDispatch
     await assertResourcePathAllowed(args[1], principal.allowedDirectories);
   }
   signal?.throwIfAborted();
-  return options.dispatch({ ...command, args } as ProjectGitCommand, signal);
+  const result = await options.dispatch({ ...command, args } as ProjectGitCommand, signal);
+  // A mounted execution path is not the project's navigation/Documents root.
+  // Keep discovery in the original logical space so nested IDE repositories can
+  // retain this frozen adoption without treating its private mount as a project.
+  if (selection.mode === 'native_workspace' && ['resolveGitPrimaryRoot', 'resolveGitTopLevel'].includes(command.operation)
+    && result && typeof result === 'object' && 'root' in result && typeof result.root === 'string'
+    && contains(executionRoot, result.root)) {
+    return { ...result, root: path.resolve(logicalRoot, path.relative(executionRoot, result.root)) };
+  }
+  return result;
 }
 
 export async function dispatchProjectGitHub(options: { dispatch: ProjectGitDispatcher; nativeWorkspaces?: Pick<NativeWorkspaceOwner, 'prepareSelection'> },

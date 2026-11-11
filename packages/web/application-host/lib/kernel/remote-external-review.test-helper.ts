@@ -24,7 +24,7 @@ import {ExternalAgentsService} from '../external-agents/service.js';
 import {createKernelProcessService} from './process-service.js';
 import type {KernelClient} from './kernel-client.js';
 interface RemoteExternalReviewTarget {
-  directory: string; documents: DocumentAuthority; kernel: KernelClient; operations: string[]; script: string;
+  directory: string; documents: DocumentAuthority; kernel: KernelClient; nativeWorkspaces: NativeWorkspaceOwner; operations: string[]; script: string;
   registry(coordinator: KernelClient): ReturnType<typeof createManagedRemoteTargetRegistry>;
   close(): Promise<void>;
 }
@@ -81,7 +81,7 @@ if(m.method==='turn/start'){reply({turn:{id:'target-turn'}});writeFileSync('exte
     isExecutable:file=>{try{fsNative.accessSync(file,process.platform==='win32'?fsNative.constants.F_OK:fsNative.constants.X_OK);return true;}catch{return false;}},
     isRequestOriginAllowed:async()=>true,rejectWebSocketUpgrade:socket=>socket.destroy(),TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS:30_000});
   const endpoint=`http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
-  return {directory,documents,kernel,operations,script,registry:(coordinator:KernelClient)=>createManagedRemoteTargetRegistry({coordinatorHostId:'child-review-host',kernel:coordinator,resources:{} as never,
+  return {directory,documents,kernel,nativeWorkspaces,operations,script,registry:(coordinator:KernelClient)=>createManagedRemoteTargetRegistry({coordinatorHostId:'child-review-host',kernel:coordinator,resources:{} as never,
     readSettings:async()=>({desktopHosts:[{id:'target-review',apiUrl:endpoint}]})}),
     async close(){await external.close();await terminalOwner.current?.shutdown();await processes.dispose();await query.dispose();await new Promise<void>((resolve,reject)=>{server.close(e=>e?reject(e):resolve());server.closeAllConnections();});await native.dispose();await documents.dispose();}};
 }

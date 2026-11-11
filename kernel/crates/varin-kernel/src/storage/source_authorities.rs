@@ -139,9 +139,17 @@ impl Storage {
             {
                 return Err(denied("Private child source belongs to another Thread"));
             }
+            // An isolated child has its own deterministic native execution view.
+            // This is the same identity validated by the original Catalog receipt;
+            // fixed/shared sources continue to use the handoff execution workspace.
+            let execution_workspace = if p.source.mode == varin_runtime::SourceMode::NativeWorkspace {
+                varin_runtime::catalog::launches::native_execution_workspace_id(execution)
+            } else {
+                handoff.source.execution_workspace_id.clone()
+            };
             if p.source.resource_owner != creator.result.source.resource_owner
                 || p.source.workspace_id != creator.result.source.workspace_id
-                || p.source.execution_workspace_id != handoff.source.execution_workspace_id
+                || p.source.execution_workspace_id != execution_workspace
             {
                 return Err(denied(
                     "Private child source belongs to another original resource",

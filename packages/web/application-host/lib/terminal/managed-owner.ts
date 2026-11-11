@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {parseProjectSourceSelection} from '@varin/application-client';
-import {normalizePathIdentity, normalizeWorkspaceRelativePath} from '../workspace/path-safety.js';
+import {canonicalizePathIdentity, normalizePathIdentity, normalizeWorkspaceRelativePath} from '../workspace/path-safety.js';
 import type {ManagedTerminalRequest,ManagedTerminalResult} from '@varin/application-client';
 import type {ManagedSourcePrincipal} from '../harness/managed-remote-types.js';
 import type {TerminalSessionApi, TerminalSessionInfo, TerminalWorkspaceSource} from './session-api.js';
@@ -44,7 +44,10 @@ export function createManagedTerminalOwner(options:{terminal:()=>TerminalSession
           const original=await options.documents.admitWorkspaceRegistration(selection.workspaceId,signal);
           await assertResourcePathAllowed(original.canonicalPath,principal.allowedDirectories);
           const selectedPath=selection.nativeScope?path.join(original.canonicalPath,normalizeWorkspaceRelativePath(selection.nativeScope)):original.canonicalPath;
-          if(![original.canonicalPath,selectedPath].some(root=>normalizePathIdentity(root)===normalizePathIdentity(requestedCwd)))throw new Error('Terminal directory differs from its frozen project source');
+          // Compare filesystem identities, including Windows short-name aliases,
+          // without admitting a different root or widening the frozen scope.
+          const [requestedIdentity,...allowedIdentities]=await Promise.all([requestedCwd,original.canonicalPath,selectedPath].map(async directory=>normalizePathIdentity(await canonicalizePathIdentity(directory))));
+          if(!allowedIdentities.includes(requestedIdentity!))throw new Error('Terminal directory differs from its frozen project source');
           source={selection,canonicalRoot:original.canonicalPath};
           const existing=terminal.inspectSession(id);
           if(existing){

@@ -4,6 +4,24 @@ import type { GitHubAPI, ProjectSourceBinding } from './types.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 
+export type ProjectCommandResultEnvelope = {
+  kind: 'project-command-result'; action: 'git-command' | 'github-command'; operation: string;
+  result: { kind: 'void' } | { kind: 'value'; value: unknown };
+};
+/** A successful transport receipt, not a second Git result schema. */
+export function encodeProjectCommandResult(action: ProjectCommandResultEnvelope['action'], operation: string, value: unknown): ProjectCommandResultEnvelope {
+  return { kind: 'project-command-result', action, operation,
+    result: value === undefined ? { kind: 'void' } : { kind: 'value', value } };
+}
+export function decodeProjectCommandResult(action: ProjectCommandResultEnvelope['action'], operation: string, value: unknown): unknown {
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+  if (!record(value) || value.kind !== 'project-command-result' || value.action !== action || value.operation !== operation || !record(value.result))
+    throw new Error('Project command receipt is unconfirmed');
+  if (value.result.kind === 'void' && !Object.hasOwn(value.result, 'value')) return undefined;
+  if (value.result.kind === 'value' && Object.hasOwn(value.result, 'value') && value.result.value !== undefined) return value.result.value;
+  throw new Error('Project command result is unconfirmed');
+}
+
 export type ProjectGitOperation = keyof GitHttpClient;
 export type ProjectGitCommand = { [K in ProjectGitOperation]: {
   operation: K; args: Parameters<GitHttpClient[K]>; selection: ProjectSourceSelection;
@@ -30,7 +48,7 @@ export async function executeProjectGit<K extends ProjectGitOperation>(projectId
   const body = await response.json();
   if (host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed; Git result belongs to the original owner');
   if (!response.ok) throw new Error(body.message ?? body.error ?? 'The original project Git owner is unavailable');
-  return body;
+  return decodeProjectCommandResult('git-command', operation, body) as ProjectGitResult<K>;
 }
 
 export interface ProjectGitLocation {
@@ -59,5 +77,5 @@ export async function executeProjectGitHub<K extends ProjectGitHubOperation>(pro
   const body = await response.json();
   if (host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed; GitHub result belongs to the original owner');
   if (!response.ok) throw new Error(body.message ?? body.error ?? 'Original target GitHub owner unavailable');
-  return body;
+  return decodeProjectCommandResult('github-command', operation, body) as Awaited<ReturnType<NonNullable<GitHubAPI[K]>>>;
 }

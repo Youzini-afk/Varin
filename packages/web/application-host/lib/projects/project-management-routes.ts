@@ -1,7 +1,7 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import { isDeepStrictEqual } from 'node:util';
 import type { ProjectEntry, ProjectManagementCommand, VersionedProjectWorkspace } from '@varin/application-client';
-import { PROJECT_GIT_READ } from '@varin/application-client';
+import { PROJECT_GIT_READ, encodeProjectCommandResult } from '@varin/application-client';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 
 const actions = new Set(['github-command','git-command','resources','trust-read','trust-update','git-branches','git-root-context','github-auth','github-issues','github-prs','github-issue','github-issue-comments','github-pr-context','worktrees','worktree-create','worktree-validate','worktree-remove','worktree-remote-branch-delete','worktree-bootstrap','inspect','enable','disable','backend','backend-settings']);
@@ -48,7 +48,8 @@ export function registerProjectManagementRoutes(app: Express, options: {
         if (!['preparing','ready','disabled'].includes(workspace.state) || !project.versionedWorkspace || !isDeepStrictEqual({ ...workspace, state: 'preparing' }, { ...project.versionedWorkspace, state: 'preparing' })) throw new Error('Target workspace receipt differs from the original adoption');
         if (!isDeepStrictEqual(workspace, project.versionedWorkspace)) await options.update(project, workspace);
       }
-      response.json(result);
+      response.json(command.action === 'git-command' || command.action === 'github-command'
+        ? encodeProjectCommandResult(command.action, command.input.operation, result) : result);
     } catch (error) {
       if (!response.destroyed) response.status(409).json({ message: error instanceof Error ? error.message : 'Project management unavailable' });
     } finally { response.removeListener('close', close); }
