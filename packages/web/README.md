@@ -20,6 +20,12 @@ bun install --frozen-lockfile
 bun run dev:web:full
 ```
 
+Both root development launchers prepare shared package exports before starting consumers, reusing
+the build cache. `bun run dev` starts the HMR UI and API; `dev:web:full` waits for the first successful
+frontend build before starting the API. Preparation failure or cancellation does not start either.
+The Vite proxy preserves browser Host/Origin and upstream forwarding headers for HTTP and WebSockets.
+For TLS-terminating Nginx/NPM setup, see [development proxy configuration](../../docs/development.md#开发模式反向代理).
+
 Or build and start the production-like server:
 
 ```bash
