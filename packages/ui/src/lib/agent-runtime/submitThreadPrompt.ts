@@ -15,7 +15,7 @@ export async function submitThreadPrompt(identity: ThreadIdentity, text: string,
   if (previous?.firstSend) throw new Error('Resolve the first message before sending another request');
   let selectedModel = model ?? previous?.model;
   if (!selectedModel) {
-    const settings = await createModelConnectionsHttpAPI(owner).readSettings(directory);
+    const settings = await createModelConnectionsHttpAPI(owner).readSettings(previous?.sourceSelection?.resourceOwner.kind === 'managed_host' ? undefined : directory, undefined, previous?.projectId);
     const effective = { ...settings.global, ...(settings.projectTrusted ? settings.project : {}) };
     if (typeof effective.defaultProvider === 'string' && typeof effective.defaultModel === 'string') {
       selectedModel = { providerId: effective.defaultProvider, modelId: effective.defaultModel };
@@ -34,10 +34,21 @@ export async function submitThreadPrompt(identity: ThreadIdentity, text: string,
     if (owner !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
     if (snapshot.activeRun && !['completed', 'failed', 'cancelled'].includes(snapshot.activeRun.state)) throw new Error('This conversation has active work; send from its composer to choose queue or interrupt');
     let prepared = previous?.preparedSource;
-    if (directory && !prepared) {
-      const workspace = await api.sources.resolve(identity, { resourceOwner: { kind: 'local' }, path: directory });
+    const selected = previous?.sourceSelection ?? (directory ? { resourceOwner: { kind: 'local' as const }, path: directory,
+      mode: 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [] } : undefined);
+    if (selected && !prepared) {
+      if (selected.contentMode !== 'saved-files') throw new Error('Send from the composer to capture the selected editor drafts');
+      const selection = 'selection' in selected ? selected.selection : undefined;
+      const workspace = selection?.mode === 'native_workspace'
+        ? { resourceOwner: selected.resourceOwner, workspaceId: selection.workspaceId }
+        : await api.sources.resolve(identity, { resourceOwner: selected.resourceOwner, path: selected.path });
       if (owner !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
-      prepared = await api.prepareSource({ ...identity, key: crypto.randomUUID(), resourceOwner: workspace.resourceOwner, workspaceId: workspace.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] });
+      if ('expectedWorkspaceId' in selected && selected.expectedWorkspaceId && selected.expectedWorkspaceId !== workspace.workspaceId) {
+        throw new Error('The original project workspace has changed. Choose the source again before sending.');
+      }
+      prepared = await api.prepareSource({ ...identity, key: crypto.randomUUID(), resourceOwner: workspace.resourceOwner,
+        workspaceId: workspace.workspaceId, mode: selected.mode, content: { mode: 'saved-files' }, captureScopes: selected.captureScopes,
+        ...(selection ? { selection } : {}) });
       draft.patch(key, { preparedSource: prepared });
     }
     if (owner !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');

@@ -43,6 +43,7 @@ export interface WorktreeBootstrapState {
 }
 
 export interface GitRuntimeOptions {
+  authorizeDirectory?(directory: string): Promise<void>;
   documents?: GitDocumentAuthority;
   writerOwner?: MutationOwner;
 }

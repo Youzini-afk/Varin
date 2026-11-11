@@ -200,6 +200,14 @@ impl Storage {
             || grant.run_id.as_ref().is_some_and(|run| Some(run) != params.run_id.as_ref()) {
             return Err(KernelError::Authorization("Object view requires its actual native Run or external conversation".into()));
         }
+        if let Some(conversation) = params.external_conversation_id.as_deref() {
+            if grant.thread_id.as_deref() != Some(conversation) || grant.run_id.is_some()
+                || grant.external_transport_id.is_none() || grant.operation_id != grant.external_transport_id {
+                return Err(KernelError::Authorization("External object view requires its actual conversation and transport".into()));
+            }
+        } else if grant.external_transport_id.is_some() {
+            return Err(KernelError::Authorization("External grant cannot create a native Run object view".into()));
+        }
         let source = self.domain_record_get(&json!({"workspaceId":params.workspace_id,"recordId":params.record_id}), &grant.grant_id)?;
         let hash = source["references"].as_array().and_then(|refs| refs.iter().find(|r| r["slot"] == params.slot))
             .and_then(|r| r["objectHash"].as_str()).ok_or_else(|| KernelError::Authorization("Attachment record has no readable selected object".into()))?.to_owned();
@@ -209,12 +217,27 @@ impl Storage {
         if self.object_view_tasks.contains(&key) { return Err(fail("Object view preparation is already active; observe the original request")); }
         let mut record = json!({"workspaceId":params.workspace_id,"viewId":params.view_id,"sourceRecordId":params.record_id,"slot":params.slot,
             "executionWorkspaceId":params.execution_workspace_id,"filename":params.filename,"runId":params.run_id,"externalConversationId":params.external_conversation_id,
+            "externalTransportId":grant.external_transport_id,
             "threadId":source["threadId"],"objectHash":hash,"byteLength":length,"ownerGrantId":grant.grant_id,"kernelEpoch":grant.kernel_epoch,
             "path":format!("managed/object-views/{key_hash}"),"state":"preparing"});
         if let Some(old) = self.domain_record_value(&params.workspace_id, &key)? {
             let prior: Value = serde_json::from_str(old["payloadJson"].as_str().ok_or_else(||fail("Object view record missing"))?)?;
             for field in ["sourceRecordId","slot","objectHash","filename","executionWorkspaceId","runId","externalConversationId"] {
                 if prior[field] != record[field] { return Err(KernelError::Authorization("Object view identity was reused for a different attachment or consumer".into())); }
+            }
+            if let Some(transport) = prior["externalTransportId"].as_str() {
+                if Some(transport) != grant.external_transport_id.as_deref() {
+                    return Err(KernelError::Authorization("Object view belongs to another external transport".into()));
+                }
+            } else if prior["externalConversationId"].is_string() {
+                // Preserve the historical receipt verbatim. Its original grant
+                // proves the consumer; absent transport retains every live
+                // process of that conversation rather than inventing a binding.
+                let original = self.load_grant(field(&prior, "ownerGrantId")?)?;
+                if original.thread_id.as_deref() != prior["externalConversationId"].as_str()
+                    || original.thread_id != grant.thread_id || original.run_id.is_some() {
+                    return Err(KernelError::Authorization("Original external object view consumer is unavailable or changed".into()));
+                }
             }
             record = prior;
         }
@@ -228,6 +251,13 @@ impl Storage {
         if let Some(run) = record["runId"].as_str() {
             let active: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM process_records p JOIN grants g ON g.grant_id=p.grant_id WHERE json_extract(g.grant_json,'$.run_id')=?1 AND COALESCE(json_extract(p.status_json,'$.writerActive'),1)!=0)", [run], |row|row.get(0))?;
             if active { return Err(fail("Attachment path is still retained by an executing process")); }
+        }
+        if let Some(conversation) = record["externalConversationId"].as_str() {
+            // The immutable attachment is outside the process cwd. Retain it by
+            // its original typed consumer, not by a filesystem-prefix guess.
+            let active: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM process_records p JOIN grants g ON g.grant_id=p.grant_id WHERE json_extract(g.grant_json,'$.thread_id')=?1 AND (?2 IS NULL OR json_extract(g.grant_json,'$.external_transport_id')=?2) AND COALESCE(json_extract(p.status_json,'$.writerActive'),1)!=0)",
+                params![conversation, record["externalTransportId"].as_str()], |row| row.get(0))?;
+            if active { return Err(fail("Attachment path is still retained by its external process")); }
         }
         self.assert_process_directory_idle(&self.root.join(field(record,"path")?))
     }

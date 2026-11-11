@@ -778,7 +778,14 @@ export function createExtensionTools(
       refreshPending = true;
       return refreshing ??= (async () => {
         while (refreshPending && !closed) { refreshPending = false; await refreshOnce(); }
-      })().finally(() => { refreshing = undefined; });
+      })().finally(() => {
+        refreshing = undefined;
+        // A newer configuration/catalog notification can arrive while the old
+        // snapshot read is rejecting (or after its last loop check). Its pending
+        // read belongs to that notification, not to the failed snapshot. Drain
+        // it after releasing the old flight; never retry without a new event.
+        if (refreshPending && !closed) void refresh().catch(() => undefined);
+      });
     };
     let unsubscribe: () => void;
     try {

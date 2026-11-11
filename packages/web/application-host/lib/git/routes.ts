@@ -126,7 +126,7 @@ const runGitMutation = async <Result>({ documents, scopes, ownerId, purpose, ope
   }
 };
 
-const runDirectoryMutation = async <Result>(
+export const runDirectoryMutation = async <Result>(
   documents: GitDocumentAuthority | undefined,
   git: GitLibraries,
   directory: string,

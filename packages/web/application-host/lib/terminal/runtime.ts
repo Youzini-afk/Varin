@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { TERMINAL_PROTOCOL_VERSION } from '@varin/application-client';
 import { ManagedProcessLaunchError, managedExitConfirmed } from "../process/types.js";
 import { createHash, randomUUID } from 'node:crypto';
@@ -35,6 +36,7 @@ import type {
   TerminalSessionInfo,
   TerminalSessionOwner,
   TerminalSpawnSpec,
+  TerminalWorkspaceSource,
 } from './session-api.js';
 
 const MAX_SESSIONS = 20;
@@ -65,6 +67,9 @@ type TerminalEvent =
   | { exitCode: number | null; process: PtyProcess; signal: number; type: 'exit'; writerState: WriterState };
 
 interface TerminalSession {
+  source?: TerminalWorkspaceSource;
+  /** Original exit receipt retained after explicit managed close, without output buffers. */
+  retired?: boolean;
   backend?: string;
   closing: boolean;
   cols: number;
@@ -142,6 +147,7 @@ interface TerminalRuntimeDependencies {
 type SessionCreationSource = 'http' | 'programmatic' | 'adopted';
 
 type SessionCreationIdentity = {
+  source?: TerminalWorkspaceSource;
   owner: TerminalSessionOwner;
   creationSource: SessionCreationSource;
   loginShell: boolean;
@@ -204,7 +210,8 @@ const sameCreationIdentity = (
   && left.registerProcessWriter === right.registerProcessWriter
   && left.retainWhenDetached === right.retainWhenDetached
   && left.shell === right.shell
-  && sameSpawnSpec(left.spawn, right.spawn);
+  && sameSpawnSpec(left.spawn, right.spawn)
+  && isDeepStrictEqual(left.source, right.source);
 
 const sessionIdentityConflict = (id: string): Error & { statusCode: number } => {
   const error = new Error(`Terminal session ${id} already exists with a different owner or creation identity`) as Error & { statusCode: number };
@@ -413,9 +420,11 @@ export function createTerminalRuntime({
     runtime, ptyBackend: session.backend,
   });
 
+  const observers = new Map<string,Set<(frame:Record<string,unknown>)=>void>>();
   const publish = (session: TerminalSession, event: Record<string, unknown>): void => {
     session.sequence += 1;
     const message = { ...event, v: TERMINAL_PROTOCOL_VERSION, s: session.id, q: session.sequence };
+    for(const listener of observers.get(session.id)??[]){try{listener(message);}catch{observers.get(session.id)?.delete(listener);}}
     for (const connection of connections) {
       const attachment = connection.attachments.get(session.id);
       if (!attachment) continue;
@@ -621,7 +630,7 @@ export function createTerminalRuntime({
   const userSessionCount = (): number => {
     let count = 0;
     for (const session of sessions.values()) {
-      if (session.owner === 'user') count += 1;
+      if (session.owner === 'user' && !session.retired) count += 1;
     }
     for (const pending of pendingSessionCreates.values()) {
       if (pending.owner === 'user') count += 1;
@@ -644,6 +653,7 @@ export function createTerminalRuntime({
       id,
       cols,
       cwd: resolvedCwd,
+      ...(creationIdentity.source ? { source: structuredClone(creationIdentity.source) } : {}),
       commandListeners: new Set(),
       dataListeners: new Set(),
       integrationGeneration: 0,
@@ -698,7 +708,9 @@ export function createTerminalRuntime({
     if (!normalizedShell) throw new Error('Invalid terminal shell');
     const creationSource = options.creationSource ?? 'programmatic';
     const retainWhenDetached = options.allowSpawn === true && (input.retainWhenDetached === true || owner === 'harness');
+    const source = options.allowSpawn && input.source ? structuredClone(input.source as TerminalWorkspaceSource) : undefined;
     const creationIdentity: SessionCreationIdentity = {
+      ...(source ? { source } : {}),
       owner,
       creationSource,
       loginShell,
@@ -812,7 +824,7 @@ export function createTerminalRuntime({
     get id() { return session.id; },
     get cwd() { return session.cwd; },
     get status() { return session.status; },
-    write(data: string) { return writeSession(session, data); },
+    write(data: string, operationId?:string) { return writeSession(session, data,operationId); },
     async resize(nextCols: number, nextRows: number) {
       if (!validateSize(nextCols, 1000) || !validateSize(nextRows, 500)) throw new Error('Invalid terminal dimensions');
       if (session.status === 'running') await session.process?.resize(nextCols, nextRows);
@@ -912,6 +924,7 @@ export function createTerminalRuntime({
     const session = await createSession({
       sessionId: input.sessionId,
       cwd: input.cwd,
+      ...(input.source ? { source: input.source } : {}),
       cols: input.cols ?? 120,
       rows: input.rows ?? 40,
       shell: input.shell ?? 'auto',
@@ -973,7 +986,9 @@ export function createTerminalRuntime({
     if (!session) return null;
     return {
       id: session.id,
+      cols:session.cols,rows:session.rows,
       cwd: session.cwd,
+      ...(session.source ? { source: structuredClone(session.source) } : {}),
       integration: session.owner === 'user' ? session.integrationParser.status() : 'not-observed',
       ...(session.owner === 'user' ? { discardedIntegrationFrames: session.integrationParser.discardedFrames() } : {}),
       owner: session.owner,
@@ -1031,6 +1046,7 @@ export function createTerminalRuntime({
   app.post('/api/terminal/:sessionId/restart', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Terminal session not found' });
+    if (session.retired) return res.status(409).json({ error: 'Closed terminal identity cannot be restarted' });
     if (session.owner !== 'user') return res.status(409).json({ error: 'Owned process sessions cannot be restarted as another shell' });
     const cwd = req.body?.cwd ?? session.cwd;
     const workspacePath = req.body?.workspacePath;
@@ -1173,6 +1189,34 @@ export function createTerminalRuntime({
   };
 
   const api: TerminalSessionApi = {
+    async retireTerminalSession(id) {
+      const session = sessions.get(id);
+      if (!session) throw new Error('Original terminal session is unavailable');
+      if (session.status !== 'exited' || session.process) throw new Error('Terminal exit remains unconfirmed');
+      if (session.writerReleasePromise) await session.writerReleasePromise;
+      await releaseWriterState(session.writerState);
+      session.writerState = null;
+      session.history = '';
+      session.pendingHistoryControlSequence = '';
+      session.pendingThemeControlSequence = '';
+      session.eventQueue.length = 0;
+      session.integrationParser = createShellIntegrationParser({ terminalId: id });
+      session.dataListeners.clear();
+      session.commandListeners.clear();
+      session.errorListeners.clear();
+      session.retired = true;
+      closeAttachments(id, 'CLOSED', 'Terminal closed');
+      // Keep the original session's final status and identity. A lost close
+      // reply can be replayed, but this id can never start another process.
+    },
+    readTerminalSnapshot(id){const session=sessions.get(id);return session?snapshot(session):null;},
+    observeTerminalSession(id,listener){
+      const session=sessions.get(id);if(!session)return null;
+      const set=observers.get(id)??new Set();observers.set(id,set);set.add(listener);
+      listener(snapshot(session));
+      return {dispose(){set.delete(listener);if(!set.size)observers.delete(id);}};
+    },
+    updateTerminalAppearance(id,appearance){const session=sessions.get(id);if(!session)throw new Error('Original terminal session is unavailable');applyAppearance(session,appearance);},
     createTerminalSession,
     adoptTerminalSession,
     attachTerminalSession,

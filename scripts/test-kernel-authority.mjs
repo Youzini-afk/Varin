@@ -4,10 +4,12 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--build' && arg !== '--build-only' && arg !== '--platform' && !arg.startsWith('--vitest-file='))) {
-  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build | --build-only] [--platform] [--vitest-file=<path>]');
+if (args.some((arg) => arg !== '--build' && arg !== '--build-only' && arg !== '--platform' && !arg.startsWith('--vitest-file=') && !arg.startsWith('--vitest-test-name='))) {
+  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build | --build-only] [--platform] [--vitest-file=<path>] [--vitest-test-name=<pattern>]');
 }
 const vitestFiles = args.filter((arg) => arg.startsWith('--vitest-file=')).map((arg) => arg.slice('--vitest-file='.length));
+const vitestTestNames = args.filter((arg) => arg.startsWith('--vitest-test-name=')).map((arg) => arg.slice('--vitest-test-name='.length));
+if (vitestTestNames.some(name => !name.trim()) || vitestTestNames.length && !vitestFiles.length) throw new Error('A named native check requires a non-empty test pattern and an explicit test file.');
 const buildOnly = args.includes('--build-only');
 const env = { ...process.env, VARIN_REQUIRE_RELEASE_KERNEL: '1' };
 
@@ -63,5 +65,6 @@ if (vitestFiles.length === 0) {
 const config = args.includes('--platform') ? 'packages/web/vitest.kernel.platform.config.ts' : 'packages/web/vitest.kernel.config.ts';
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', config,
   ...vitestFiles,
+  ...vitestTestNames.flatMap(name => ['--testNamePattern', name]),
   '--no-file-parallelism',
 ], { collectFailure: true });

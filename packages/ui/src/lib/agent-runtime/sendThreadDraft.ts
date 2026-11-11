@@ -36,7 +36,9 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
     if (!selected?.path.trim()) return null;
     let pending = preparations.get(deliveryKey);
     if (!pending) {
-      const source = await api.sources.resolve(identity, { resourceOwner: selected.resourceOwner, path: selected.path });
+      const selection = 'selection' in selected ? selected.selection : undefined;
+      const source = selection?.mode === 'native_workspace' ? {resourceOwner:selected.resourceOwner, workspaceId:selection.workspaceId}
+        : await api.sources.resolve(identity, { resourceOwner: selected.resourceOwner, path: selected.path });
       assertHost();
       if ('expectedWorkspaceId' in selected && selected.expectedWorkspaceId && source.workspaceId !== selected.expectedWorkspaceId) {
         throw new Error('The original project workspace has changed. Choose the source again before sending.');
@@ -55,7 +57,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         content = { mode: 'surface-drafts', context };
       }
       pending = { input: { ...identity, key: `${request.key}:source`, resourceOwner: source.resourceOwner,
-        workspaceId: source.workspaceId, mode: selected.mode, content, captureScopes: selected.captureScopes }, release };
+        workspaceId: source.workspaceId, mode: selected.mode, content, captureScopes: selected.captureScopes, ...(selection ? {selection} : {}) }, release };
       preparations.set(deliveryKey, pending);
       if (release) pending.unsubscribe = registerRuntimeEndpointSwitchBlocker(releasePreparation);
     }

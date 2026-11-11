@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ConversationOrganizationError, ExternalAgentError, projectContainsPath, type ConversationOrganizationCommand, type ConversationOrganizationQuery, type ConversationOrganizationMetadataItem, type ConversationOrganizationMetadataResult, type ProjectEntry } from '@varin/application-client';
+import { ConversationOrganizationError, ExternalAgentError, freezeProjectSourceSelection, projectContainsPath, type ConversationOrganizationCommand, type ConversationOrganizationQuery, type ConversationOrganizationMetadataItem, type ConversationOrganizationMetadataResult, type ProjectEntry } from '@varin/application-client';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { ThreadAdapter } from '../kernel/thread-adapter.js';
 import type { ExternalAgentsService } from '../external-agents/service.js';
@@ -78,8 +78,8 @@ export class ConversationOrganizationService {
     if (projectId === null) return null;
     const project = (await this.projects()).find(project => project.id === projectId);
     if (!project) throw new ConversationOrganizationError('not_found', 'The selected project is no longer registered', 404);
-    return { projectId, source: { resourceOwner: project.source?.resourceOwner ?? { kind: 'local' }, path: project.path,
-      ...(project.source?.workspaceId ? { workspaceId: project.source.workspaceId } : {}) } };
+    return { projectId, source: { selection: freezeProjectSourceSelection(project), resourceOwner: project.source?.resourceOwner ?? { kind: 'local' }, path: project.path,
+      ...(project.source?.workspaceId || project.versionedWorkspace?.state === 'ready' ? { workspaceId: project.source?.workspaceId ?? project.versionedWorkspace!.workspaceId } : {}) } };
   }
   async command(principalId: string | null, input: ConversationOrganizationCommand, signal?: AbortSignal) {
     const receipt = await this.deps.runtime.organizationReceipt(principalId, input, signal);

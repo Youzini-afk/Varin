@@ -256,11 +256,11 @@ pub struct ChildDispatchCatalog {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct ChildProjectSource { pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
+pub struct ChildProjectSource { #[serde(default,skip_serializing_if="Option::is_none")] pub selection:Option<super::organization::ProjectSourceSelection>, pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
 impl ChildDispatchCatalog {
     pub fn validate(&self) -> Result<()> {
         validate_names(&self.projects.iter().map(|project|project.id.clone()).collect::<Vec<_>>())?;
-        if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')) {
+        if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')||project.selection.as_ref().is_some_and(|selection| !selection.valid(None))) {
             return Err(RuntimeError::Invalid("Registered project source is malformed".into()));
         }
         if self.identity.trim().is_empty() {

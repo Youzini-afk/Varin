@@ -201,3 +201,18 @@ it('opens, retries, dismisses and reopens a remote-only process without a local 
   expect(mocks.terminal.restartSession).not.toHaveBeenCalled();
   expect(mocks.terminal.close).not.toHaveBeenCalled();
 });
+
+it('creates and retries an owned action terminal with its frozen remote source, never the view key', async () => {
+  const directoryKey = 'project-action:owner-specific-view';
+  const selection = { mode: 'native_workspace' as const, workspaceId: 'workspace', executionWorkspaceId: 'execution', branchId: 'branch', adoptionOperationId: 'adoption' };
+  const source = { cwd: '/source/project', resourceOwner: managedOwner, selection };
+  useTerminalStore.getState().createTab(directoryKey, source);
+  mocks.terminal.createSession.mockResolvedValue({ sessionId: 'owned-action', cols: 80, rows: 24, status: 'running' });
+  mocks.terminal.restartSession.mockResolvedValue({ sessionId: 'owned-action-restarted', cols: 80, rows: 24, status: 'running' });
+  await act(async () => root.render(<TerminalView visible directoryOverride={directoryKey} />));
+  expect(mocks.terminal.createSession).toHaveBeenCalledWith(expect.objectContaining(source));
+  await act(async () => handlers.onError?.(new Error('retry transport'), false));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="terminalView.actions.restart"]')!.click());
+  expect(mocks.terminal.restartSession).toHaveBeenCalledWith('owned-action', expect.objectContaining(source));
+  expect(useTerminalStore.getState().getActiveTab(directoryKey)?.source).toEqual(source);
+});

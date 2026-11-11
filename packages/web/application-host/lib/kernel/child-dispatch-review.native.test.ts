@@ -2846,19 +2846,26 @@ it.each(['report', 'cancel'] as const)('a three-level child tree preserves origi
   expect(reopened.errors.map(String)).toEqual([]);
 }, 45_000);
 
-it('a real parent model dispatches a remote external handoff and exchanges frozen files on the original target owners',async()=>{
+it.each(['shared','isolated_write'] as const)('a real parent model dispatches a remote external %s handoff and exchanges files on the original target owners',async workMode=>{
   let step=0,preset='',operationId='',executionRef='';
   const replied=gate();
   const f=await fixture(async({body,response})=>{
     assertPairing(body);
     switch(++step){
-      case 1:return complete(response,[tool('dispatch',{preset,task:'Write the target result and report',workMode:'isolated_write'},'remote-external-dispatch')]);
+      case 1:return complete(response,[tool('dispatch',{preset,task:'Write the target result and report',workMode},'remote-external-dispatch')]);
       case 2:
         ({operationId,executionRef}=await acceptedDispatch(h,body));
         return complete(response,[tool('wait_child',{target:executionRef},'remote-external-wait')]);
-      case 3:
-        expect(JSON.stringify(body.input)).toContain('TARGET_EXTERNAL_RESULT');
+      case 3: {
+        const original=(await h.external!.children()).find(row=>row.operation_id===operationId);
+        const evidence={child:original,conversation:original?await h.external!.inspect(original.conversation_id):null,errors:h.errors};
+        expect(JSON.stringify(body.input),JSON.stringify(evidence)).toContain('TARGET_EXTERNAL_RESULT');
+        const reports=(Array.isArray(body.input)?body.input:[]).flatMap(row=>Array.isArray(row.content)?row.content:[]).flatMap(part=>{
+          try{return [JSON.parse(typeof part.text==='string'?part.text:'null')];}catch{return [];}
+        }).filter(value=>value?.kind==='child_report');
+        expect(reports.at(-1),JSON.stringify(evidence)).toMatchObject({status:'completed'});
         return complete(response,[tool('update',{source:executionRef,files:['external-result.txt']},'remote-external-update')]);
+      }
       case 4:
         expect(result(body,'update'),JSON.stringify(result(body,'update'))).toMatchObject({outcome:'succeeded'});
         expect(await fs.readFile(path.join(target.directory,'external-result.txt'),'utf8')).toBe('Original target external bytes');
@@ -2899,10 +2906,50 @@ it('a real parent model dispatches a remote external handoff and exchanges froze
   expect(await h.runtime.childExecutions()).toEqual([]);
   const conversation=await h.external!.inspect(child.conversation_id);
   expect(conversation.executionSource?.resource_owner).toEqual(resourceOwner);
-  expect(conversation.cwd).not.toBe(target.directory);
+  if(workMode==='isolated_write')expect(conversation.cwd).not.toBe(target.directory);
+  else expect(conversation.cwd).toBe(target.directory);
   expect(await fs.readFile(path.join(conversation.cwd,'parent-result.txt'),'utf8')).toBe('Original parent transfer');
   expect(await fs.stat(path.join(f.workspace,'external-result.txt')).catch(()=>null)).toBeNull();
-  expect(target.operations.filter(kind=>kind==='code_capture')).toHaveLength(2);
-  expect(target.operations.filter(kind=>kind==='external_code_apply')).toHaveLength(2);
+  expect(target.operations.filter(kind=>kind==='code_capture')).toHaveLength(workMode==='isolated_write'?2:0);
+  expect(target.operations.filter(kind=>kind==='external_code_apply')).toHaveLength(workMode==='isolated_write'?2:0);
   await h.external!.disconnect(child.conversation_id);
 },90_000);
+
+it('a real remote external failure reaches the parent model with its original status and detail even without an assistant report',async()=>{
+  let step=0,preset='',operationId='',executionRef='';
+  const f=await fixture(async({body,response})=>{
+    assertPairing(body);
+    if(++step===1)return complete(response,[tool('dispatch',{preset,task:'Exercise the target failure receipt',workMode:'shared'},'remote-failure-dispatch')]);
+    if(step===2){({operationId,executionRef}=await acceptedDispatch(h,body));return complete(response,[tool('wait_child',{target:executionRef},'remote-failure-wait')]);}
+    if(step!==3)throw new Error(`Unexpected remote failure step ${step}`);
+    const original=(await h.external!.children()).find(row=>row.operation_id===operationId)!;
+    const reports=(Array.isArray(body.input)?body.input:[]).flatMap(row=>Array.isArray(row.content)?row.content:[]).flatMap(part=>{
+      try{return [JSON.parse(typeof part.text==='string'?part.text:'null')];}catch{return [];}
+    }).filter(value=>value?.kind==='child_report');
+    expect(original.report,JSON.stringify(original)).toMatchObject({status:'interrupted',items:[]});
+    const originalReport=original.report as Record<string,unknown>;
+    expect(typeof originalReport.detail).toBe('string');
+    expect(originalReport.detail).not.toBe('');
+    expect(reports.at(-1)).toMatchObject({status:originalReport.status,detail:originalReport.detail});
+    return complete(response,[answer('The original target failure is visible','remote-failure-final')]);
+  });
+  const target=await remoteExternalReviewTarget(f.root);cleanup.push(()=>target.close());
+  const script=await fs.readFile(target.script,'utf8');
+  await fs.writeFile(target.script,script.replace("writeFileSync('external-result.txt'","throw new Error('TARGET_NATIVE_FAILURE');writeFileSync('external-result.txt'"));
+  const h=await f.openHost({external:true,managedFactory:target.registry});
+  const resourceOwner=(await h.managedRegistry!.sourceTargets()).targets[0]!.resourceOwner;
+  const profiles=await h.profiles.read({runtime:'agent'});
+  const saved=await h.profiles.save({runtime:'agent',expectedRevision:profiles.revision,config:{kind:'custom',key:'',agent:{
+    name:'Failing target worker',description:'Original failure receipt',instructions:'',enabled:true,workFocus:[],external:{configurationId:'fixture'}}},tools:[]});
+  const profile=saved.snapshot.profiles.find(row=>row.id===saved.profileId)!;
+  if(profile.config.kind!=='custom')throw new Error('Expected external preset');preset=`custom:${profile.config.key}`;
+  const identity=await h.api.create('remote-failure-source');
+  const workspace=(await target.documents.resolveWorkspace({path:target.directory})).workspaceId;
+  const prepared=await h.api.prepareSource({...identity,key:'remote-failure-parent-source',resourceOwner,workspaceId:workspace,
+    mode:'live_root',content:{mode:'saved-files'},captureScopes:[]});
+  const parent=await h.api.submit({...identity,key:'remote-failure-parent-input',expectedHead:null,text:'Observe the original target failure',model,source:prepared.source});
+  await combinedFixtureTerminal(h.runtime,parent.run_id).catch(async error=>{
+    console.error('Remote external failure evidence',{parent:await h.runtime.run(parent.run_id),children:await h.external!.children(),errors:h.errors});throw error;
+  });
+  expect(step).toBe(3);expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
+},45_000);

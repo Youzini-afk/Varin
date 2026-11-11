@@ -9,6 +9,8 @@ type WorktreeListEntry = {
   name?: string;
 };
 
+const management = vi.fn();
+vi.doMock('@varin/application-client', async () => ({ ...await vi.importActual<typeof import('@varin/application-client')>('@varin/application-client'), manageProject: management }));
 const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const createdWorktree = {
@@ -28,6 +30,8 @@ vi.doMock('@/lib/project-config', () => ({
 }));
 
 vi.doMock('@/lib/worktrees/worktreeBootstrap', () => ({
+  registerWorktreeBootstrapReader: vi.fn(),
+  waitForWorktreeBootstrap: vi.fn(),
   clearWorktreeBootstrapState: vi.fn(),
   markWorktreeBootstrapPending: vi.fn(),
   setWorktreeBootstrapState: vi.fn(),
@@ -60,6 +64,10 @@ vi.doMock('@/lib/gitApi', () => ({
 
 const {
   createWorktree,
+  removeProjectWorktree,
+  validateWorktreeCreate,
+  freezeWorktreeProject,
+  remoteWorktreeProject,
   getLatestWorktreeMetadata,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
@@ -251,4 +259,47 @@ describe('partitionWorktreesByRegisteredProject', () => {
     expect([...result.keys()]).toEqual(['/repo']);
     expect(result.get('/repo')?.map((entry) => entry.path)).toEqual(['/worktrees/loose']);
   });
+});
+
+
+describe('remote project worktree owner', () => {
+  const project = { id: 'remote-project', path: '/repo', source: { resourceOwner: { kind: 'managed_host' as const, hostId: 'device-b', connectionId: 'pair-b', endpointIdentity: 'endpoint-b' }, workspaceId: 'documents:root' } };
+  beforeEach(() => { management.mockReset(); bootstrapWatcherCalls.length = 0; });
+  test('lists and validates from the registered owner without local discovery', async () => {
+    management.mockResolvedValueOnce([{ path: '/repo-feature', name: 'feature', branch: 'refs/heads/feature', head: 'abc' }]).mockResolvedValueOnce({ ok: true, errors: [] });
+    const before = listCalls.length;
+    const entries = await listProjectWorktrees(project);
+    expect(entries[0]).toMatchObject({ path: '/repo-feature', branch: 'feature', projectDirectory: '/repo' });
+    await validateWorktreeCreate(project, { preferredName: 'feature' });
+    expect(management.mock.calls.map(call => call[1])).toEqual(['worktrees', 'worktree-validate']);
+    expect(listCalls).toHaveLength(before);
+  });
+  test('creates with source-scoped bootstrap identity rather than a local path watcher', async () => {
+    management.mockResolvedValueOnce(createdWorktree);
+    await createWorktree(project, { preferredName: 'feature' });
+    expect(management).toHaveBeenCalledWith(project.id, 'worktree-create', expect.any(Object), undefined, project.source);
+    expect(bootstrapWatcherCalls).toHaveLength(1);
+    expect(JSON.parse(bootstrapWatcherCalls[0])).toEqual(['project-worktree', project.id, project.source, '/repo-feature']);
+  });
+  test('retries only failed remote branch deletion after successful worktree removal', async () => {
+    const worktree: WorktreeMetadata = { source: 'sdk', name: 'partial', label: 'Partial', branch: 'partial', path: '/repo-partial', projectDirectory: '/repo' };
+    management.mockResolvedValueOnce({ success: true }).mockRejectedValueOnce(new Error('source offline'));
+    await expect(removeProjectWorktree(project, worktree, { deleteRemoteBranch: true })).rejects.toThrow('Worktree removed');
+    management.mockResolvedValueOnce({ success: true });
+    await removeProjectWorktree(project, worktree, { deleteRemoteBranch: true });
+    expect(management.mock.calls.map(call => call[1])).toEqual(['worktree-remove', 'worktree-remote-branch-delete', 'worktree-remote-branch-delete']);
+  });
+});
+
+
+test('an explicitly frozen local project cannot be reinterpreted as a newly bound remote owner', async () => {
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  const previous = useProjectsStore.getState().projects;
+  useProjectsStore.setState({ projects: [{ id: 'rebinding', path: '/same' }] });
+  const frozen = freezeWorktreeProject({ id: 'rebinding', path: '/same' });
+  try {
+    useProjectsStore.setState({ projects: [{ id: 'rebinding', path: '/same', source: { resourceOwner: { kind: 'managed_host', hostId: 'device-b', connectionId: 'pair-b', endpointIdentity: 'endpoint-b' }, workspaceId: 'documents' } }] });
+    expect(remoteWorktreeProject(frozen)).toBe(false);
+    expect(remoteWorktreeProject({ id: 'rebinding', path: '/same' })).toBe(true);
+  } finally { useProjectsStore.setState({ projects: previous }); }
 });

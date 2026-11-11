@@ -144,6 +144,7 @@ main push 与按提交发布均不更新 `latest`。新命名采用 `varin` 标�
 Node 测试包统一使用 `node --import tsx --test`，不额外启动 CLI 包装进程与 IPC listener；
 可用 `node --import tsx --test packages/<包>/test/<文件>.test.ts` 定向运行。
 原生 Host 定向验证用 `bun run test:kernel -- --vitest-file=application-host/lib/<文件>.native.test.ts`，
+同一文件内定位失败可再加 `--vitest-test-name=<测试名称模式>`，仍执行原协议与二进制门禁；定向通过不等于整个文件或完整平台通过。
 不会额外重跑 Node transport 全套。仅需要纯查询、排序或 mock owner 的验证应留在 portable suite；
 需要真实 IPC、文件存储、进程树的验证才进入 native 入口。
 
@@ -266,11 +267,16 @@ Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回
 
 组件测试可用原 managed resource API 的可控 owner 验证文件与 Documents 请求不回退本机，
 但不能据此声称物理双 Host、远端挂载、连接凭据、跨平台路径及真实编辑交互已经验收。
-workspace adoption、项目 action 和 worktree 的本机管理 API 不自动获得远端能力；验证时区分该管理界面
-确实缺少原 owner API，与既有 managed Source 文件、命令及隔离准备失败，不以统一“不可用”掩盖实际原因。
+workspace adoption、项目 action 和 worktree 的管理操作通过明确的来源 owner 路由；验证时同时检查目标
+准入、原操作回执、实际执行与断连恢复，不以界面能提交请求或统一“不可用”代替这些证据。
 
 远端外部 Harness 使用 `managed-transport.native.test.ts` 的两个真实 kernel、回环 HTTP managed 路由和
 目标专有 fixture 程序验证 cwd／程序归属、协议流、原生 session 续接、停止与删除；目标不生成第二份产品会话。
 恢复测试另外覆盖 dispatch 回应丢失、not-started 原 receipt、跨进程身份拒绝和 transport CAS。
 测试环境不能创建 Unix socket／回环监听时，应明确记录未能启动该原生测试，并在具备权限的 CI 执行，
 不能以 mock 结果替代双 Host 运行结论。
+
+远端项目管理另由 `managed-project-management.native.test.ts` 验证：目标真实 Documents 登记、Git worktree
+创建／初始化／移除、配对目录准入和协调端目录不变。版本工作区重试核对原 Storage adoption operation，
+不得生成新身份来绕过未知回执。若执行设备缺少挂载后端，记录目标返回的具体能力失败，仍完成 Git 与权限测试，
+不能把未运行的挂载验证计为通过。GitHub 列表与上下文使用目标原 reader／凭据，测试不得借协调端登录状态补齐。

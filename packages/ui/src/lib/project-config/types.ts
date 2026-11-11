@@ -1,6 +1,9 @@
 import type { DraftStarterRef } from '@/lib/draftStarters';
 
 export interface VarinProjectRef {
+  versionedWorkspace?: import('@varin/application-client').ProjectEntry['versionedWorkspace'];
+  source?: import('@varin/application-client').ProjectEntry['source'];
+  resourceOwner?: import('@varin/protocol').SourceResourceOwner;
   id: string;
   path: string;
 }

@@ -43,6 +43,7 @@ vi.doMock('@/lib/gitApiHttp', () => ({
 }));
 
 const {
+  registerWorktreeBootstrapReader,
   clearWorktreeBootstrapState,
   getWorktreeBootstrapState,
   markWorktreeBootstrapPending,
@@ -257,4 +258,20 @@ test('retires old Host observers without failing or overwriting the replacement 
   expect(getWorktreeBootstrapState('/same-path')?.status).toBe('pending');
   expect(toastErrors).toEqual([]);
   clearWorktreeBootstrapState('/same-path');
+});
+
+
+test('same directory on two source owners uses independent readers and state', async () => {
+  const a = JSON.stringify(['source-a', '/same/worktree']);
+  const b = JSON.stringify(['source-b', '/same/worktree']);
+  const readA = vi.fn(async () => ({ status: 'ready' as const, error: null, updatedAt: 1 }));
+  const readB = vi.fn(async () => ({ status: 'failed' as const, error: 'owner-b failure', updatedAt: 1 }));
+  registerWorktreeBootstrapReader(a, readA); registerWorktreeBootstrapReader(b, readB);
+  markWorktreeBootstrapPending(a); markWorktreeBootstrapPending(b);
+  const localReads = bootstrapStatusCalls.length;
+  await waitForWorktreeBootstrap(a);
+  await expect(waitForWorktreeBootstrap(b)).rejects.toThrow('owner-b failure');
+  expect(getWorktreeBootstrapState(a)?.status).toBe('ready');
+  expect(readA).toHaveBeenCalledOnce(); expect(readB).toHaveBeenCalledOnce();
+  expect(bootstrapStatusCalls).toHaveLength(localReads);
 });

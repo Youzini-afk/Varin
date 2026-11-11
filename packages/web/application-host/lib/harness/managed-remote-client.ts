@@ -1,3 +1,4 @@
+import {consumeManagedTerminalFrames} from '@varin/application-client';
 import { createHash, randomUUID } from "node:crypto";
 import { threadSourceFailureMessage } from '@varin/application-client';
 import type { StorageCleanupPreview, StorageCleanupReceipt, StorageDevice, StorageInventory, StorageScope } from '@varin/application-client';
@@ -30,7 +31,7 @@ import {
   type SourceServiceOperation,
   type SourceServiceResponse,
 } from "./managed-remote-types.js";
-import { decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
+import { decodeManagedProjectManagementResponse, decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
 import { consumeManagedProcessStream } from './managed-process-stream.js';
 
 const BASE_PATH = "/api/harness/managed-execution/v1";
@@ -433,8 +434,9 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         }
         throw error;
       });
-      if (method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
+      if (method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
+      if (method === 'projectManagement') decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result);
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
       if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
       return result;
@@ -471,9 +473,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       recovery: (input, signal) => request('recovery', input, signal),
       externalCapture:(input,signal)=>request('externalCapture',input,signal),
       externalChildSource: (input, signal) => request('externalChildSource', input, signal),
+      projectManagement: (input, signal) => request('projectManagement', input, signal),
       externalProjectSource: (input, signal) => request('externalProjectSource', input, signal),
       externalSettings: (input, signal) => request('externalSettings', input, signal),
       externalPrepare: (input, signal) => request('externalPrepare', input, signal),
+      terminal:(input,signal)=>request('terminal',input,signal),
+      terminalStream:async(input,emit,signal)=>{if(input.coordinatorHostId!==options.coordinatorHostId)throw new Error('Terminal coordinator changed');
+        const response=await client.response('/sources/terminalStream',{method:'POST',body:JSON.stringify(input),headers:{'Content-Type':'application/json'},signal});
+        return consumeManagedTerminalFrames(response,emit,signal);},
       externalBinding: (input, signal) => request('externalBinding', input, signal),
       externalSpawn: (input, signal) => request('externalSpawn', input, signal),
       externalControl: (input, signal) => request('externalControl', input, signal),

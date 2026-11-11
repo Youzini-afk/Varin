@@ -5,7 +5,7 @@ import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
 import { useDeviceInfo } from '@/lib/device';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { getRuntimeKey } from '@varin/application-client';
+import { getRuntimeKey, freezeProjectSourceSelection } from '@varin/application-client';
 import { ResourceFilesView } from './ResourceFilesView';
 import { useI18n } from '@/lib/i18n';
 
@@ -59,8 +59,8 @@ const LocalFilesView: React.FC = () => {
 export const FilesView: React.FC = () => {
   const project = useProjectsStore(state => state.projects.find(project => project.id === state.activeProjectId));
   if (project?.source?.resourceOwner.kind === 'managed_host') return <ResourceFilesView
-    key={`${getRuntimeKey()}:${project.id}:${JSON.stringify(project.source)}`}
-    view={{ kind: 'files', key: project.id, owner: project.source.resourceOwner, title: project.label ?? project.path, path: project.path }}
+    key={`${getRuntimeKey()}:${project.id}:${JSON.stringify([project.source,project.versionedWorkspace])}`}
+    view={{ kind: 'files', key: project.id, owner: project.source.resourceOwner, title: project.label ?? project.path, path: project.path, selection: freezeProjectSourceSelection(project) }}
     active />;
   return <LocalFilesView />;
 };

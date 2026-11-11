@@ -773,7 +773,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
   }
 });
 
-it.each(['settings', 'routing'] as const)('exact restoration defers unavailable current %s without blocking the committed directory', async unavailable => {
+it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exact restoration defers unavailable current %s without blocking the committed directory', async unavailable => {
   const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tool-exact-restore-'));
   const runtime = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: '0.9.44',
@@ -783,6 +783,7 @@ it.each(['settings', 'routing'] as const)('exact restoration defers unavailable 
   const listeners = new Set<() => void>();
   const selectedId = 'varin.script.close', omittedId = 'varin.script.run';
   let currentFailure: Error | undefined, currentReads = 0, staleReads = 0;
+  let deferFailure = false, releaseFailure: (() => void) | undefined;
   const readState = runtime.state.bind(runtime);
   const stateObserver = vi.spyOn(runtime, 'state').mockImplementation(async () => {
     const state = await readState();
@@ -804,7 +805,14 @@ it.each(['settings', 'routing'] as const)('exact restoration defers unavailable 
     const routingBytes = await fs.readFile(routingPath);
     const prepare = createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
       prepareConfiguration: async (_run, required) => {
-        if (!required.length) { currentReads++; if (currentFailure) throw currentFailure; }
+        if (!required.length) {
+          currentReads++;
+          if (currentFailure) {
+            const originalError = currentFailure;
+            if (deferFailure) await new Promise<void>(resolve => { releaseFailure = resolve; });
+            throw originalError;
+          }
+        }
         return Object.assign((descriptor: { id: string }, original?: string | null) => original === undefined
           ? descriptor.id === omittedId ? 'configuration' : null : original,
         { enabled: (descriptor: { id: string }) => required.length > 0 || [selectedId, omittedId].includes(descriptor.id) });
@@ -813,7 +821,7 @@ it.each(['settings', 'routing'] as const)('exact restoration defers unavailable 
     scopes.push(original); leases.push(...original.initial);
     const saved = structuredClone(original.initial.find(lease => lease.binding.serviceId === selectedId)!.binding);
     original.close();
-    if (unavailable === 'settings') currentFailure = new Error('current settings snapshot unavailable');
+    if (unavailable.startsWith('settings')) currentFailure = new Error('current settings snapshot unavailable');
     else await fs.writeFile(routingPath, '{truncated');
     // A new admission still requires current settings. Exact recovery does not.
     await expect(prepare({ ...input, runId: 'pending' }, [], new AbortController().signal))
@@ -825,6 +833,7 @@ it.each(['settings', 'routing'] as const)('exact restoration defers unavailable 
     expect(recovered.initial.map(lease => lease.binding)).toEqual([saved]);
     expect(recovered.initial[0]!.lease.available(saved.tool)).toBe(true);
     const publications: string[] = [], previousReads = currentReads, previousStaleReads = staleReads;
+    deferFailure = unavailable === 'settings while refresh rejects';
     recovered.start(async (_slot, lease) => { if (lease) { publications.push(lease.binding.serviceId); leases.push(lease); } });
     await expect.poll(() => currentReads).toBeGreaterThan(previousReads);
     if (unavailable === 'routing') await expect.poll(() => staleReads).toBeGreaterThan(previousStaleReads);
@@ -832,9 +841,20 @@ it.each(['settings', 'routing'] as const)('exact restoration defers unavailable 
     currentFailure = undefined;
     if (unavailable === 'routing') await fs.writeFile(routingPath, routingBytes);
     for (const listener of listeners) listener();
+    // A configuration notification may arrive while the previous snapshot read
+    // is still rejecting. It is a distinct current read, not permission to retry
+    // the rejected snapshot or alter the saved directory.
+    releaseFailure?.();
     // Current discovery resumes through the existing live subscription, without a fence.
-    await expect.poll(() => publications).toContain(selectedId);
-    await expect.poll(() => publications).toContain(omittedId);
+    try {
+      await expect.poll(() => publications).toContain(selectedId);
+      await expect.poll(() => publications).toContain(omittedId);
+    } catch (error) {
+      console.error('Exact extension directory refresh evidence', {
+        unavailable, currentReads, staleReads, publications, prepared: recovered.inspect(),
+      });
+      throw error;
+    }
   } finally {
     for (const scope of scopes) scope.close();
     for (const lease of leases) lease.lease.release();

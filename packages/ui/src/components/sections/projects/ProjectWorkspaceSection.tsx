@@ -1,6 +1,6 @@
 import React from 'react';
 import { RiArrowRightUpLine, RiLoader4Line } from '@remixicon/react';
-import type { ProjectEntry } from '@varin/application-client';
+import { manageProject, type ProjectEntry } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { SettingsSection } from '../shared/SettingsSection';
 import { projectWorkspaceRequest, inspectWorkspaceBackend, openWorkspaceBackendSettings, type ProjectWorkspaceStatus, type WorkspaceBackendStatus } from '@/lib/nativeWorkspace';
@@ -11,6 +11,10 @@ export function ProjectWorkspaceSection({ project }: {
     project: ProjectEntry;
 }) {
     const { t } = useI18n();
+    const remote = project.source?.resourceOwner.kind === 'managed_host';
+    const workspaceRequest = React.useCallback((action: 'enable' | 'disable' | 'inspect', signal?: AbortSignal) => remote
+        ? manageProject(project.id, action, {}, signal, project.source)
+        : projectWorkspaceRequest(project.id, action, signal), [project.id, project.source, remote]);
     const [status, setStatus] = React.useState<ProjectWorkspaceStatus | null>(null);
     const [backend, setBackend] = React.useState<WorkspaceBackendStatus | null>(null);
     const [checkingBackend, setCheckingBackend] = React.useState(false);
@@ -18,10 +22,10 @@ export function ProjectWorkspaceSection({ project }: {
     const pending = React.useRef<AbortController | null>(null);
     const refreshBackend = React.useCallback(async (signal?: AbortSignal) => {
         setCheckingBackend(true);
-        try { const next = await inspectWorkspaceBackend(project.id, signal); if (!signal?.aborted) setBackend(next); }
+        try { const next = await (remote ? manageProject(project.id, 'backend', {}, signal, project.source) : inspectWorkspaceBackend(project.id, signal)); if (!signal?.aborted) setBackend(next); }
         catch (reason) { if (!signal?.aborted) setError(reason instanceof Error ? reason.message : String(reason)); }
         finally { if (!signal?.aborted) setCheckingBackend(false); }
-    }, [project.id]);
+    }, [project.id, project.source, remote]);
     React.useEffect(() => {
         const controller = new AbortController(); setBackend(null); void refreshBackend(controller.signal);
         return () => controller.abort();
@@ -30,12 +34,12 @@ export function ProjectWorkspaceSection({ project }: {
         const controller = new AbortController();
         setStatus(null);
         setError(null);
-        if (project.versionedWorkspace)
-            void projectWorkspaceRequest(project.id, 'inspect', controller.signal).then(setStatus).catch(reason => { if (!controller.signal.aborted)
+        if (project.versionedWorkspace?.state)
+            void workspaceRequest('inspect', controller.signal).then(value => { if (!controller.signal.aborted) setStatus(value); }).catch(reason => { if (!controller.signal.aborted)
                 setError(String(reason.message ?? reason)); });
         return () => controller.abort();
-    }, [project.id, project.versionedWorkspace?.state]);
-    React.useEffect(() => () => pending.current?.abort(), []);
+    }, [workspaceRequest, project.versionedWorkspace?.state]);
+    React.useEffect(() => { pending.current?.abort(); pending.current = null; setBusy(false); return () => pending.current?.abort(); }, [workspaceRequest]);
     React.useEffect(() => {
         if (!busy && !status?.preparing)
             return;
@@ -43,7 +47,7 @@ export function ProjectWorkspaceSection({ project }: {
         let timer: ReturnType<typeof setTimeout>;
         const refresh = async () => {
             try {
-                const value = await projectWorkspaceRequest(project.id, 'inspect', controller.signal);
+                const value = await workspaceRequest('inspect', controller.signal);
                 if (!controller.signal.aborted)
                     setStatus(value);
             }
@@ -55,27 +59,27 @@ export function ProjectWorkspaceSection({ project }: {
         };
         void refresh();
         return () => { controller.abort(); clearTimeout(timer); };
-    }, [busy, status?.preparing, project.id]);
+    }, [busy, status?.preparing, workspaceRequest]);
     const apply = async (action: 'enable' | 'disable') => {
         const controller = new AbortController();
         pending.current = controller;
         setBusy(true);
         setError(null);
         try {
-            const next = await projectWorkspaceRequest(project.id, action, controller.signal);
+            const next = await workspaceRequest(action, controller.signal);
+            if (controller.signal.aborted) return;
             setStatus(next);
             const store = useProjectsStore.getState();
-            const projects = store.projects.map(entry => entry.id === project.id ? { ...entry, ...(next.workspace ? { versionedWorkspace: next.workspace } : {}) } : entry);
+            const projects = store.projects.map(entry => entry.id === project.id ? { ...entry, versionedWorkspace: next.workspace ?? undefined } : entry);
             useProjectsStore.setState({ projects });
-            if (store.activeProjectId === project.id)
+            if (!remote && store.activeProjectId === project.id)
                 useDirectoryStore.getState().setDirectory(next.executionPath ?? project.path, { showOverlay: false });
         }
         catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
+            if (pending.current === controller) setError(reason instanceof Error ? reason.message : String(reason));
         }
         finally {
-            pending.current = null;
-            setBusy(false);
+            if (pending.current === controller) { pending.current = null; setBusy(false); }
         }
     };
     const enabled = (status?.workspace ?? project.versionedWorkspace)?.state === 'ready';
@@ -91,7 +95,7 @@ export function ProjectWorkspaceSection({ project }: {
         </Button>
         {backend?.helpUrl && <a href={backend.helpUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{t('settings.projects.workspace.backendHelp')}</a>}
         {backend?.canOpenSettings && !backend.builtInExtension?.ready && <Button size="sm" variant="ghost" onClick={() => {
-            void openWorkspaceBackendSettings(project.id).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+            void (remote ? manageProject(project.id, 'backend-settings', {}, undefined, project.source) : openWorkspaceBackendSettings(project.id)).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
         }}>{t('settings.projects.workspace.extensionSettings')}</Button>}
       </div>
       {backend && !backend.dependenciesReady && backend.detail && <p className="typography-meta break-words text-muted-foreground">{backend.detail}</p>}

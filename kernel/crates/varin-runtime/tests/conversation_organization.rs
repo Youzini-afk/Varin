@@ -1202,6 +1202,10 @@ fn trusted_creation_source_descriptor_is_frozen_with_original_placement_and_iden
     let defaults = CreationDefaults {
         project_id: Some("project".into()),
         source: Some(CreationSource {
+            selection: Some(ProjectSourceSelection::NativeWorkspace {
+                workspace_id: "original-workspace".into(), execution_workspace_id: "adopted-view".into(),
+                branch_id: "adopted-branch".into(), adoption_operation_id: "original-adoption".into(), native_scope: None,
+            }),
             resource_owner: SourceResourceOwner::ManagedHost {
                 host_id: "resource-host".into(),
                 connection_id: "connection".into(),
@@ -1238,6 +1242,9 @@ fn trusted_creation_source_descriptor_is_frozen_with_original_placement_and_iden
         c.organization_creation_defaults("one").unwrap(),
         Some(defaults.clone())
     );
+    let mut changed_adoption = defaults.clone();
+    changed_adoption.source.as_mut().unwrap().selection = Some(ProjectSourceSelection::LiveRoot);
+    assert!(matches!(c.create_thread_with_organization_defaults("one", "main", Some("alice"), placement.clone(), Some(changed_adoption)), Err(RuntimeError::Conflict(_))));
     let mut different = defaults.clone();
     different.source.as_mut().unwrap().path = "/changed/project".into();
     assert!(matches!(

@@ -145,7 +145,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'source/draft-files': ['source', 'query', 'type', 'limit', 'cursor'],
     'source/list': ['runtime', 'threadId', 'branchId'],
     'source/resolve': ['runtime', 'threadId', 'branchId', 'resourceOwner', 'path'],
-    'source/prepare': ['resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
+    'source/prepare': ['selection', 'resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
     'context/history': ['runtime', 'threadId', 'branchId', 'runId', 'headId', 'beforeId'],
     'history/file': ['runtime', 'threadId', 'branchId', 'itemId', 'path'],
@@ -606,7 +606,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('source/prepare', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root'&&body.mode!=='native_workspace') throw new Error('Invalid source mode');
     return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), resourceOwner: parseSourceResourceOwner(body.resourceOwner), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
-      content: body.content, captureScopes: body.captureScopes } as import('@varin/application-client').ThreadPrepareSource), signal);
+      content: body.content, captureScopes: body.captureScopes, ...(body.selection !== undefined ? { selection: body.selection } : {}) } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
   post('context/compact', (body, signal) => {
     return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),

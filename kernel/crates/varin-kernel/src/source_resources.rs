@@ -656,12 +656,28 @@ pub(crate) struct SourceContinuation {
     pub root: String,
 }
 #[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum ExternalChildHandoffScope {
+    ExternalChild {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+    },
+}
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum SourceHandoffClaimScope {
+    Native(SourceAuthorityScope),
+    External(ExternalChildHandoffScope),
+}
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceHandoffClaimParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
     pub grant_id: String,
-    pub scope: SourceAuthorityScope,
+    pub scope: SourceHandoffClaimScope,
     pub source: SourceSelection,
     pub handoff: Option<varin_runtime::catalog::collaboration::ChildSourceHandoff>,
     pub continuation: Option<SourceContinuation>,

@@ -62,10 +62,10 @@ vi.mock('@/components/ui/context-menu', async () => {
 describe('project menu actions', () => {
   let container: HTMLDivElement;
   let root: Root;
-  const render = async () => {
+  const render = async (resourceOwner?:import('@varin/protocol').SourceResourceOwner, versionedWorkspace?:import('@varin/application-client').VersionedProjectWorkspace) => {
     await act(async () => {
       root.render(<ProjectActionsButton
-        projectRef={{ id: 'project', path: '/repo' }} directory="/repo" allowMobile
+        projectRef={{ id: 'project', path: '/repo',versionedWorkspace,...(resourceOwner?{resourceOwner}:{}) }} directory="/repo" allowMobile
         contextMenu={{ trigger: <div data-project="repo">Project</div>, children: <span>Edit project</span> }}
       />);
     });
@@ -107,6 +107,37 @@ describe('project menu actions', () => {
     await openMenu();
     expect(container.textContent).toContain('Edit project');
     expect(container.textContent).toContain('projectActions.actions.addNewAction');
+  });
+
+  it('passes the exact managed Host to terminal creation and isolates identical local action names',async()=>{
+    const resourceOwner={kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'endpoint'};
+    mocks.readActions.mockResolvedValue({actions:[{id:'dev',name:'Target dev',command:'target-command'}]});
+    await render(resourceOwner);await openMenu();
+    const launch=Array.from(container.querySelectorAll('button')).find(button=>button.textContent==='Target dev')!;
+    await act(async()=>launch.click());
+    expect(mocks.createSession).toHaveBeenCalledWith(expect.objectContaining({cwd:'/repo',resourceOwner}));
+    const [key]=Object.keys(useTerminalStore.getState().projectActionRuns);
+    expect(key).toContain('target');expect(key).toContain('endpoint');
+  });
+
+  it('isolates same-path owner tabs and freezes adopted selection in the tab source', async () => {
+    const first = { kind: 'managed_host' as const, hostId: 'device-b', connectionId: 'pair-b', endpointIdentity: 'endpoint-b' };
+    const second = { ...first, hostId: 'device-c', connectionId: 'pair-c' };
+    const versionedWorkspace = { state: 'ready' as const, workspaceId: 'workspace', executionWorkspaceId: 'execution', branchId: 'branch', adoptionOperationId: 'adoption' };
+    mocks.readActions.mockResolvedValue({ actions: [{ id: 'dev', name: 'Scoped action', command: 'echo source' }] });
+    for (const owner of [first, second]) {
+      await render(owner, versionedWorkspace); await openMenu();
+      await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Scoped action')!.click());
+    }
+    expect(mocks.createSession).toHaveBeenCalledTimes(2);
+    const entries = [...useTerminalStore.getState().sessions.entries()].filter(([key]) => key.startsWith('project-action:'));
+    expect(entries).toHaveLength(2);
+    expect(entries.map(([, value]) => value.tabs[0].source?.resourceOwner)).toEqual([first, second]);
+    for (const [, value] of entries) {
+      expect(value.tabs).toHaveLength(1);
+      expect(value.tabs[0].source).toMatchObject({ cwd: '/repo', selection: { mode: 'native_workspace', workspaceId: 'workspace', executionWorkspaceId: 'execution', branchId: 'branch', adoptionOperationId: 'adoption' } });
+    }
+    expect(mocks.createSession.mock.calls[0][0]).toMatchObject({ cwd: '/repo', selection: { mode: 'native_workspace' } });
   });
 
   it('opens the configured action output URL once after the menu closes', async () => {

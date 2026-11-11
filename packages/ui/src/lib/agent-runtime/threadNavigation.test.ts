@@ -161,3 +161,28 @@ it('freezes a remote project source but an explicit different source never inher
   expect(useThreadDraftStore.getState().drafts[override].projectId).toBeUndefined();
   expect(state.directory).toHaveBeenLastCalledWith('/explicit');
 });
+
+it('freezes native adoption identity and keeps previously live drafts live after enable', async()=>{
+  const resourceOwner={kind:'managed_host' as const,hostId:'remote',connectionId:'connection',endpointIdentity:'endpoint'};
+  const project={id:'project',path:'/physical',source:{resourceOwner,workspaceId:'registered'}};
+  useProjectsStore.setState({projects:[project]});
+  const live=await startThreadFromNavigation({projectId:'project',organization:{containerId:'node'}});
+  const versionedWorkspace={workspaceId:'registered',executionWorkspaceId:'view',branchId:'adopted',adoptionOperationId:'admission',state:'ready' as const};
+  useProjectsStore.setState({projects:[{...project,versionedWorkspace}]});
+  const native=await startThreadFromNavigation({projectId:'project',organization:{containerId:'node'}});
+  useProjectsStore.setState({projects:[{...project,versionedWorkspace:{...versionedWorkspace,state:'disabled'}}]});
+  expect(useThreadDraftStore.getState().drafts[live].sourceSelection?.selection).toEqual({mode:'live_root'});
+  expect(useThreadDraftStore.getState().drafts[native].sourceSelection).toMatchObject({mode:'native_workspace',selection:{mode:'native_workspace',workspaceId:'registered',executionWorkspaceId:'view',branchId:'adopted',adoptionOperationId:'admission'}});
+  expect(state.directory).not.toHaveBeenCalled();
+});
+
+it('keeps an owner-created sibling worktree project while freezing its independent live source', async () => {
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'target', connectionId: 'original', endpointIdentity: 'endpoint' };
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/repo', source: { resourceOwner, workspaceId: 'parent-root' } }] });
+  const sourceSelection = { resourceOwner, path: '/worktrees/new', expectedWorkspaceId: 'new-root', mode: 'live_root' as const, selection: { mode: 'live_root' as const }, contentMode: 'saved-files' as const, captureScopes: [] };
+  const key = await startThreadFromNavigation({ projectId: 'project', organization: { containerId: 'project-node' }, worktreeProject: true, sourceSelection });
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'project', sourceSelection });
+  const otherOwner = await startThreadFromNavigation({ projectId: 'project', organization: { containerId: 'project-node' }, worktreeProject: true,
+    sourceSelection: { ...sourceSelection, resourceOwner: { kind: 'local' } } });
+  expect(useThreadDraftStore.getState().drafts[otherOwner].projectId).toBeUndefined();
+});

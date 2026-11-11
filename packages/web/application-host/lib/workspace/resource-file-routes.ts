@@ -44,7 +44,7 @@ export function registerResourceFileRoutes(app: Express, options: {
     const owner = parseSourceResourceOwner(location.resourceOwner);
     const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
     return {
-      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, coordinatorHostId: options.runtime.coordinatorHostId, command }) : options.local.request({ ...location, command }),
+      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command }) : options.local.request({ ...location, command }),
       upload: (request: ResourceWorkspaceUpload, body: AsyncIterable<Uint8Array>) => remote ? remote.workspaceUpload({ ...request, coordinatorHostId: options.runtime.coordinatorHostId }, body) : options.local.upload(request, body),
     };
   };
@@ -65,7 +65,7 @@ export function registerResourceFileRoutes(app: Express, options: {
     try {
       const input = request.body as ResourceFileRequest;
       const { resourceOwner, taskSource } = await route(input);
-      const command = { command: input.command, ...(input.root ? { root: input.root } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), ...(taskSource ? { taskSource } : {}) };
+      const command = { command: input.command, ...(input.selection !== undefined ? {selection:input.selection} : {}), ...(input.root ? { root: input.root } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), ...(taskSource ? { taskSource } : {}) };
       const result = resourceOwner.kind === 'local' ? await options.local.request(command)
         : await (await options.remote(resourceOwner)).workspace({ ...command, coordinatorHostId: options.runtime.coordinatorHostId });
       response.json(result);
@@ -98,7 +98,7 @@ export function registerResourceFileRoutes(app: Express, options: {
       }
       const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
       const read = (offset: number) => remote
-        ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, coordinatorHostId: options.runtime.coordinatorHostId, command: { kind: 'bytes', path, offset } })
+        ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command: { kind: 'bytes', path, offset } })
         : options.local.request({ ...location, command: { kind: 'bytes', path, offset } });
       const first = await read(0);
       if (first.kind !== 'bytes') throw new Error('The original file could not be read');
@@ -124,9 +124,14 @@ export function registerResourceFileRoutes(app: Express, options: {
       if (!input.key || !input.path || !input.destinationPath) throw new Error('Source and destination are required');
       const [source, target] = await Promise.all([endpoint(input.source), endpoint(input.destination)]);
       // Reject a directory copying into itself before creating any entries.
-      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner)) {
+      const sourceNative = input.source.selection?.mode === 'native_workspace' ? input.source.selection : undefined;
+      const targetNative = input.destination.selection?.mode === 'native_workspace' ? input.destination.selection : undefined;
+      const sameView = sourceNative || targetNative ? sourceNative && targetNative
+        && sourceNative.workspaceId === targetNative.workspaceId && sourceNative.executionWorkspaceId === targetNative.executionWorkspaceId
+        && sourceNative.branchId === targetNative.branchId : true;
+      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner) && sameView) {
         const normalize = (root: string, relative: string) => path.posix.normalize(`${root.replaceAll('\\', '/')}/${relative}`).replace(/\/$/, '');
-        const from = normalize(input.source.root, input.path), to = normalize(input.destination.root, input.destinationPath);
+        const from = normalize(sourceNative?.nativeScope ?? (sourceNative ? '/' : input.source.root), input.path), to = normalize(targetNative?.nativeScope ?? (targetNative ? '/' : input.destination.root), input.destinationPath);
         const folded = /^[a-z]:/i.test(from) ? [from.toLowerCase(), to.toLowerCase()] : [from, to];
         if (folded[1] === folded[0] || folded[1]!.startsWith(`${folded[0]}/`)) throw new Error('Choose a destination outside the source');
       }
@@ -167,7 +172,7 @@ export function registerResourceFileRoutes(app: Express, options: {
             page = next;
           }
         };
-        await target.upload({ root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
+        await target.upload({ ...(input.destination.selection !== undefined ? {selection:input.destination.selection} : {}), root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
         if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedHash: `sha256-${hash.digest('hex')}` }); removed++; }
       };
       const parent = path.posix.dirname(input.path), name = path.posix.basename(input.path);

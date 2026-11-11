@@ -5,6 +5,7 @@ import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
 /** A user-selected file view. It never changes a Run's accepted source. */
 export interface ResourceFileLocation {
+  selection?: import('./threads.js').ProjectSourceSelection;
   resourceOwner: SourceResourceOwner;
   root: string;
   workspaceId: string;
@@ -31,7 +32,7 @@ export type ResourceFileResult =
   | { kind: 'bytes'; bytesBase64: string; nextOffset: number; eof: boolean; byteLength: number; version: string }
   | { kind: 'link'; target: string }
   | { kind: 'done' };
-export interface ResourceFileRequest { resourceOwner: SourceResourceOwner; root?: string; workspaceId?: string; task?: ThreadIdentity; command: ResourceFileCommand }
+export interface ResourceFileRequest { selection?: import('./threads.js').ProjectSourceSelection; resourceOwner: SourceResourceOwner; root?: string; workspaceId?: string; task?: ThreadIdentity; command: ResourceFileCommand }
 export interface ResourceFileTransfer { source: ResourceFileLocation; path: string; destination: ResourceFileLocation; destinationPath: string; move: boolean; key: string }
 
 export function createResourceFilesHttpAPI() {

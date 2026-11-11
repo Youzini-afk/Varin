@@ -4,7 +4,7 @@ import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
  * with the coordinator; this adapter stores neither operations nor grants. */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { ThreadPrepareSource, ThreadPreparedSource } from '@varin/application-client';
+import { parseProjectSourceSelection, type ThreadPrepareSource, type ThreadPreparedSource } from '@varin/application-client';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { KernelClientError, type KernelClient } from '../kernel/kernel-client.js';
 import type { LiveSourceResolver } from '../kernel/live-source.js';
@@ -28,7 +28,9 @@ import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-rec
 export interface ManagedSourceServiceOptions {
   prepareExternalLiveSource?: (workspaceId:string,executionWorkspaceId:string,conversationId:string,signal?:AbortSignal)=>Promise<import('../kernel/protocol.generated.js').LiveRoot>;
   externalChildSource?: ReturnType<typeof import('../external-agents/managed-child-source.js').createManagedExternalChildSourceOwner>;
+  projectManagement?: ReturnType<typeof import('../projects/managed-project-management.js').createManagedProjectManagementOwner>;
   externalProjectSource?: ReturnType<typeof import('../external-agents/managed-project-source.js').createManagedExternalProjectSourceOwner>;
+  terminal?:ReturnType<typeof import('../terminal/managed-owner.js').createManagedTerminalOwner>;
   externalSettings?:(signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
   externalLaunch?: (configurationId: string, harness: import('@varin/application-client').ExternalHarness, sessionId?: string, signal?: AbortSignal) => Promise<{binding:import('./managed-remote-types.js').ManagedExternalLaunchBinding;command:string;args:string[];env:NodeJS.ProcessEnv}>;
   workspaceFiles?: import('../workspace/resource-files.js').ResourceFilesOwner;
@@ -277,6 +279,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if(!options.externalChildSource)throw new SourceAdmissionError('source_unavailable');
       return options.externalChildSource(principal,input,signal);
     },
+    async projectManagement(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (!options.projectManagement) throw new SourceAdmissionError('source_unavailable');
+      return options.projectManagement(principal, input, signal);
+    },
     async externalProjectSource(principal,input,signal){
       requireReadPrincipal(principal,input.coordinatorHostId);
       if(!options.externalProjectSource)throw new SourceAdmissionError('source_unavailable');
@@ -303,6 +310,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       return {resource_owner:input.resourceOwner,mode:'live_root',workspace_id:resolved.workspaceId,execution_workspace_id:resolved.workspaceId,
         branch_id:null,revision:null,live_root:liveRoot};
     },
+    async terminal(principal,input,signal){requireReadPrincipal(principal,input.coordinatorHostId);if(!options.terminal)throw new SourceAdmissionError('source_unavailable');return options.terminal.command(principal,input,signal);},
+    async terminalStream(principal,input,emit,signal){requireReadPrincipal(principal,input.coordinatorHostId);if(!options.terminal)throw new SourceAdmissionError('source_unavailable');return options.terminal.stream(principal,input,emit,signal);},
     async externalBinding(principal, input, signal) {
       requireReadPrincipal(principal,input.coordinatorHostId);
       if (!['terminal:use','process:control'].every(c => principal.capabilities.includes(c)) || !options.externalLaunch) throw new SourceAdmissionError('source_authority_denied');
@@ -431,16 +440,21 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if (!['open', 'locations', 'list', 'bytes', 'readlink'].includes(input.command?.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
       if (!options.workspaceFiles) throw new SourceAdmissionError('source_unavailable');
       const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
-      if (input.root && principal.allowedDirectories?.length) {
+      const selection = input.selection === undefined ? undefined : parseProjectSourceSelection(input.selection);
+      if (selection?.mode === 'native_workspace') {
+        const registration = await documents.admitWorkspaceRegistration(selection.workspaceId, signal);
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
+      if (selection?.mode !== 'native_workspace' && input.root && principal.allowedDirectories?.length) {
         const workspace = await documents.resolveWorkspace({ path: input.root });
         const registration = await documents.admitWorkspaceRegistration(workspace.workspaceId, signal);
         await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
       }
-      if (input.command.kind === 'open' && input.command.path) await assertResourcePathAllowed(input.command.path, principal.allowedDirectories);
+      if (selection?.mode !== 'native_workspace' && input.command.kind === 'open' && input.command.path) await assertResourcePathAllowed(input.command.path, principal.allowedDirectories);
       const selected = input.command.kind === 'open' && !input.command.path && !input.taskSource && principal.allowedDirectories?.length
         ? { ...input, command: { ...input.command, path: principal.allowedDirectories[0]! } } : input;
       const result = await options.workspaceFiles.request(selected, signal);
-      if (result.kind === 'opened') {
+      if (result.kind === 'opened' && selection?.mode !== 'native_workspace') {
         const registration = await documents.admitWorkspaceRegistration(result.workspaceId, signal);
         await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
       }
@@ -453,7 +467,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if (!options.workspaceFiles) throw new SourceAdmissionError('source_unavailable');
       const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
       if (principal.allowedDirectories?.length) {
-        const registration = await documents.admitWorkspaceRegistration(input.workspaceId, signal);
+        const selection = input.selection === undefined ? undefined : parseProjectSourceSelection(input.selection);
+        const registration = await documents.admitWorkspaceRegistration(selection?.mode === 'native_workspace' ? selection.workspaceId : input.workspaceId, signal);
         await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
       }
       return options.workspaceFiles.upload(input, body, signal);
@@ -480,6 +495,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requireReadPrincipal(principal, input.coordinatorHostId);
       const selection = normalizeThreadSourcePreparation(input.input);
       if (selection.resourceOwner.kind !== 'managed_host' || selection.resourceOwner.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
+      const registration = await documents.admitWorkspaceRegistration(selection.workspaceId, signal);
+      if (registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
+      if (principal.allowedDirectories?.length) {
+        const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: selection.mode }, signal);
       const key = createHash('sha256').update(JSON.stringify([principal.principalId, input.coordinatorHostId, selection.key])).digest('hex');
       const prepared = await options.prepareSource({ ...selection, resourceOwner: { kind: 'local' }, key }, signal);

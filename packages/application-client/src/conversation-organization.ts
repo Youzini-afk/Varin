@@ -5,7 +5,7 @@ export interface ConversationOrganizationPlacement { containerId: string | null 
 /** Creation-time source intent. Later project/tree edits do not rewrite this original receipt. */
 export interface ConversationCreationDefaults {
   projectId: string | null;
-  source?: { resourceOwner: import('@varin/protocol').SourceResourceOwner; path: string; workspaceId?: string | null };
+  source?: { selection?: import('./threads.js').ProjectSourceSelection; resourceOwner: import('@varin/protocol').SourceResourceOwner; path: string; workspaceId?: string | null };
 }
 export interface ConversationOrganizationContainer {
   id: string; kind: 'group' | 'project'; parentId: string | null; order: number;

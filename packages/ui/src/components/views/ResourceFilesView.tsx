@@ -17,7 +17,7 @@ import { useI18n } from '@/lib/i18n';
 import type { BotWorkItem, ThreadIdentity, ThreadSourceTargets } from '@varin/application-client';
 import type { SourceResourceOwner } from '@varin/protocol';
 const workKey = (identity: ThreadIdentity) => `${identity.threadId}\u0000${identity.branchId}`;
-export interface ResourceFilesViewLocation { kind: 'files'; key: string; owner: SourceResourceOwner; title: string; task?: ThreadIdentity; path?: string }
+export interface ResourceFilesViewLocation { selection?: import('@varin/application-client').ProjectSourceSelection; kind: 'files'; key: string; owner: SourceResourceOwner; title: string; task?: ThreadIdentity; path?: string }
 export interface ResourceFilesNavigation { sources: ThreadSourceTargets | null; cite(location: ResourceFileLocation, path: string, target?: ThreadIdentity): Promise<void> }
 
 const join = (...parts: string[]) => parts.filter(Boolean).join('/').replace(/\/{2,}/g, '/');
@@ -74,15 +74,15 @@ export function ResourceFilesView({ view, active, setCloseGuard, workItems, navi
     try { await action(); } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { operation.current = false; setBusy(false); }
   };
-  const openRoot = async (path?: string, task?: typeof view.task) => {
+  const openRoot = async (path?: string, task?: typeof view.task, selection?: ResourceFileLocation['selection']) => {
     if (!mayLeave()) return;
     const version = ++generation.current;
-    const result = await api.request({ resourceOwner: view.owner, ...(task ? { task } : {}), command: { kind: 'open', ...(path ? { path } : {}) } });
+    const result = await api.request({ resourceOwner: view.owner, ...(selection ? {selection} : {}), ...(task ? { task } : {}), command: { kind: 'open', ...(path ? { path } : {}) } });
     if (version !== generation.current || result.kind !== 'opened') return;
-    setLocation({ resourceOwner: view.owner, root: result.root, workspaceId: result.workspaceId, ...(task ? { task } : {}) });
+    setLocation({ resourceOwner: view.owner, root: result.root, workspaceId: result.workspaceId, ...(selection ? {selection} : {}), ...(task ? { task } : {}) });
     setRoots(result.locations); setRootDraft(result.root); setDirectory(''); setQuery(''); setSelected(undefined); setEditing(false); setPage(undefined);
   };
-  React.useEffect(() => { if (active && !location && !error && !operation.current) void perform(() => openRoot(view.path, view.task)); });
+  React.useEffect(() => { if (active && !location && !error && !operation.current) void perform(() => openRoot(view.path, view.task, view.selection)); });
   React.useEffect(() => {
     if (!location || !active) return;
     const abort = new AbortController();

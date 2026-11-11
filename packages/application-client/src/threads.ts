@@ -117,7 +117,27 @@ export type ThreadSource = ThreadSourceBase & (
   | { mode: 'live_root'; liveRoot: LiveRoot; branchId?: never; revision?: never; environmentRunId?: never }
   | { mode: 'native_workspace'; branchId: string; nativeScope?:string; revision?: never; liveRoot?: never; environmentRunId?: never }
 );
+/** A creation-time project choice, independent of later enable/disable or navigation changes. */
+export type ProjectSourceSelection = { mode: 'live_root' } | {
+  mode: 'native_workspace'; workspaceId: string; executionWorkspaceId: string; branchId: string; adoptionOperationId: string; nativeScope?: string;
+};
+export function parseProjectSourceSelection(value: unknown): ProjectSourceSelection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid project source selection');
+  const input = value as Record<string,unknown>;
+  const fields = input.mode === 'live_root' ? ['mode'] : ['mode','workspaceId','executionWorkspaceId','branchId','adoptionOperationId','nativeScope'];
+  if (!['live_root','native_workspace'].includes(String(input.mode)) || Object.keys(input).some(key => !fields.includes(key))
+    || input.mode === 'native_workspace' && fields.slice(1,5).some(key => typeof input[key] !== 'string' || !(input[key] as string).trim() || (input[key] as string).includes('\0'))
+    || input.nativeScope !== undefined && (typeof input.nativeScope !== 'string' || input.nativeScope.includes('\0') || input.nativeScope.includes('\\') || input.nativeScope.startsWith('/') || /^[a-zA-Z]:/.test(input.nativeScope) || input.nativeScope.split('/').some(part => part === '..')))
+    throw new Error('Invalid project source selection');
+  return structuredClone(value) as ProjectSourceSelection;
+}
+export function freezeProjectSourceSelection(project: Pick<import('./types.js').ProjectEntry, 'versionedWorkspace'>): ProjectSourceSelection {
+  const ref = project.versionedWorkspace;
+  return ref?.state === 'ready' ? parseProjectSourceSelection({ mode: 'native_workspace', workspaceId: ref.workspaceId,
+    executionWorkspaceId: ref.executionWorkspaceId, branchId: ref.branchId, adoptionOperationId: ref.adoptionOperationId }) : { mode: 'live_root' };
+}
 export interface ThreadPrepareSource extends ThreadIdentity {
+  selection?: ProjectSourceSelection;
   resourceOwner: SourceResourceOwner;
   key: string;
   workspaceId: string;

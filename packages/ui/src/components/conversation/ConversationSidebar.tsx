@@ -738,7 +738,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     setSettingsProjectsSelectedId,
   ]);
 
-  const canRevealProject = Boolean(files.revealPath)
+  const canRevealLocalProject = Boolean(files.revealPath)
     && isDesktopLocalOriginActive();
 
   const showUpdateButton = autoUpdateChecksEnabled
@@ -931,10 +931,13 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     const sourceGroup = workspaceGroups.find((candidate) => candidate.id === group.id);
     const projectSessionIds = sourceGroup ? collectConversationSessionForestIds(sourceGroup.forest) : [];
     const project = group.project;
+    const registeredProject = project ? projects.find(entry => entry.id === project.id) : undefined;
     const projectIndex = project
       ? projects.findIndex((candidate) => candidate.id === project.id)
       : -1;
     const canManageProject = project !== null;
+    const canRevealProject = canRevealLocalProject
+      && registeredProject?.source?.resourceOwner.kind !== 'managed_host';
     const toggleGroup = () => setTreeExpansion({ groups: { [group.id]: !(treeExpansion.groups[group.id] ?? true) } });
     const groupHeaderContent = (
       <>
@@ -976,10 +979,10 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     );
     return (
       <section key={group.id} className="group/workspace mb-2" data-flip-key={`group:${group.id}`} data-collapsed={expanded ? undefined : ''}>
-      {project ? (
+      {registeredProject ? (
         <ProjectActionsButton
-          projectRef={{ id: project.id, path: project.path }}
-          directory={project.path}
+          projectRef={{ ...registeredProject, resourceOwner: registeredProject.source?.resourceOwner }}
+          directory={registeredProject.path}
           allowMobile
           contextMenu={{
             trigger: (
@@ -994,7 +997,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               >{groupHeaderContent}</div>
             ),
             leading: <>
-              <ContextMenuItem onClick={() => void handleCreate(project.id)}>
+              <ContextMenuItem onClick={() => void handleCreate(registeredProject.id)}>
                 <Icon name="chat-new" className="size-4" />
                 {t('sessions.sidebar.header.actions.newSession')}
               </ContextMenuItem>
@@ -1018,14 +1021,14 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
                   <Icon name="pushpin" className="mr-2 size-4" />
                   {t('sessions.sidebar.project.actions.pin')}
                 </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleOpenProjectSettings(project.id)}>
+                <ContextMenuItem onClick={() => handleOpenProjectSettings(registeredProject.id)}>
                   <Icon name="pencil-ai" className="mr-2 size-4" />
                   {t('sessions.sidebar.project.actions.edit')}
                 </ContextMenuItem>
               </>
             ) : null}
             <ContextMenuItem onClick={() => {
-              void copyTextToClipboard(project.path).then(result => {
+              void copyTextToClipboard(registeredProject.path).then(result => {
                 if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
                 else toast.error(result.error);
               });
@@ -1036,7 +1039,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             {canRevealProject ? (
               <>
                 {canManageProject ? <ContextMenuSeparator /> : null}
-                <ContextMenuItem onClick={() => void handleRevealProject(project.path)}>
+                <ContextMenuItem onClick={() => void handleRevealProject(registeredProject.path)}>
                   <Icon name="folder-open" className="mr-2 size-4" />
                   {t(getRevealLabelKey())}
                 </ContextMenuItem>
@@ -1064,7 +1067,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
                   onClick={() => setConfirmation({
                     scope: 'project',
                     action: 'remove',
-                    projectId: project.id,
+                    projectId: registeredProject.id,
                     title: group.label,
                   })}
                   className="text-destructive focus:text-destructive"

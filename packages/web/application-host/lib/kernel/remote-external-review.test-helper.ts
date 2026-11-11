@@ -1,3 +1,6 @@
+import fsNative from 'node:fs';
+import {createTerminalRuntime} from '../terminal/runtime.js';
+import {createManagedTerminalOwner} from '../terminal/managed-owner.js';
 /** Two original resource owners; only the external Harness bytes are controlled. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -59,8 +62,9 @@ const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');createInterface({inp
 if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'target-real-session'}});if(m.method==='model/list')reply({data:[]});
 if(m.method==='turn/start'){reply({turn:{id:'target-turn'}});writeFileSync('external-result.txt','Original target external bytes');send({method:'item/completed',params:{threadId:'target-real-session',turnId:'target-turn',item:{id:'target-answer',type:'agentMessage',text:'TARGET_EXTERNAL_RESULT'}}});send({method:'turn/completed',params:{threadId:'target-real-session',turn:{id:'target-turn',status:'completed'}}});}});`);
   const settings=await external.settings();await external.configure({defaultAgent:null,agents:[{id:'fixture',name:'External fixture',harness:'codex',enabled:true,command:process.execPath,args:[script]}]},settings.revision,'target-preset');
+  const terminalOwner: { current?: ReturnType<typeof createTerminalRuntime> } = {};
   const operations:string[]=[];
-  const source=createManagedSourceService({kernel,hostId,documents,validateLiveSource:live.validate,prepareExternalLiveSource:live.prepare,
+  const source=createManagedSourceService({kernel,hostId,documents,terminal:createManagedTerminalOwner({terminal:()=>terminalOwner.current??null,documents,nativeWorkspaces}),validateLiveSource:live.validate,prepareExternalLiveSource:live.prepare,
     prepareSource:createThreadSourcePreparer({documents,workingStates,liveSources:live,nativeWorkspaces,inspectInventory:capture.inspectInventory,
       prepareResources:resources.prepareSourceCapture,sourceTools:mode=>kernel.agentRuntimeRequest('runtime.source.tools',{mode})}),
     externalSettings:signal=>external.settings(signal),externalLaunch:(id,harness,session,signal)=>external.managedLaunch(id,harness,session,signal),
@@ -72,8 +76,12 @@ if(m.method==='turn/start'){reply({turn:{id:'target-turn'}});writeFileSync('exte
     identity:async()=>({protocolVersion:1,hostId,capabilities:['sources'],machine:{machineId:'managed:'+hostId,kind:'managed-remote',state:'available'}})} as never,
     resolveAuthContext:async()=>({type:'client',clientId:'paired-parent',client:{capabilities:['filesystem:read','filesystem:write','terminal:use','process:control','logs:read']}} as never)});
   const server=await new Promise<import('node:http').Server>(resolve=>{const server=app.listen(0,'127.0.0.1',()=>resolve(server));});
+  terminalOwner.current=createTerminalRuntime({app,server,fs:fsNative,path,documents,loadPtyProvider:async()=>processes.ptyProvider,
+    buildAugmentedPath:()=>process.env.PATH??'',searchPathFor:(name,paths)=>paths.split(path.delimiter).map(dir=>path.join(dir,name+(process.platform==='win32'?'.exe':''))).find(file=>fsNative.existsSync(file))??null,
+    isExecutable:file=>{try{fsNative.accessSync(file,process.platform==='win32'?fsNative.constants.F_OK:fsNative.constants.X_OK);return true;}catch{return false;}},
+    isRequestOriginAllowed:async()=>true,rejectWebSocketUpgrade:socket=>socket.destroy(),TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS:30_000});
   const endpoint=`http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
   return {directory,documents,kernel,operations,script,registry:(coordinator:KernelClient)=>createManagedRemoteTargetRegistry({coordinatorHostId:'child-review-host',kernel:coordinator,resources:{} as never,
     readSettings:async()=>({desktopHosts:[{id:'target-review',apiUrl:endpoint}]})}),
-    async close(){await external.close();await processes.dispose();await query.dispose();await new Promise<void>((resolve,reject)=>{server.close(e=>e?reject(e):resolve());server.closeAllConnections();});await native.dispose();await documents.dispose();}};
+    async close(){await external.close();await terminalOwner.current?.shutdown();await processes.dispose();await query.dispose();await new Promise<void>((resolve,reject)=>{server.close(e=>e?reject(e):resolve());server.closeAllConnections();});await native.dispose();await documents.dispose();}};
 }

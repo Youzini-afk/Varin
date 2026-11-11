@@ -50,3 +50,16 @@ it('uses the registered managed owner and target backend, never the coordinator 
   await expect(owner({ ...selected, resource_owner: { kind: 'local' } }, identity, 'wrong-owner', 'shared', null, new AbortController().signal)).rejects.toMatchObject({ code: 'project_source_changed' });
   expect(resolve).toHaveBeenCalledTimes(1);
 });
+
+it('prepares the frozen adopted project without resolving a coordinator path or rereading current adoption', async()=>{
+  const resourceOwner={kind:'managed_host' as const,hostId:'remote',connectionId:'connection',endpointIdentity:'endpoint'};
+  const selection={mode:'native_workspace' as const,workspaceId:'registered',executionWorkspaceId:'original-view',branchId:'original-branch',adoptionOperationId:'adoption'};
+  const prepare=vi.fn(async()=>({path:'/remote/mount',source:{resourceOwner,...selection,tools:[]}})),resolve=vi.fn(),inspectBackend=vi.fn();
+  const owner=createChildProjectSourcePreparer({projects:async()=>[{id:'project',path:'/physical',source:{resourceOwner,workspaceId:'registered'}}],sources:{resolve},prepare,inspectBackend});
+  const identity={runtime:'agent' as const,threadId:'child',branchId:'main'},signal=new AbortController().signal;
+  await owner({id:'project',name:'Project',path:'/physical',resource_owner:resourceOwner,selection},identity,'dispatch','shared',null,signal);
+  expect(prepare).toHaveBeenLastCalledWith(expect.objectContaining({resourceOwner,workspaceId:'registered',selection,mode:'native_workspace'}),signal);
+  await owner({id:'project',name:'Project',path:'/physical',resource_owner:resourceOwner,selection},identity,'isolated','isolated_write','docs',signal);
+  expect(prepare).toHaveBeenLastCalledWith(expect.objectContaining({mode:'materialized',selection:{...selection,nativeScope:'docs'}}),signal);
+  expect(resolve).not.toHaveBeenCalled();expect(inspectBackend).not.toHaveBeenCalled();
+});

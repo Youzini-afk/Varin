@@ -380,3 +380,14 @@ it('keeps a Bot-matching container page visible before its matching child page i
   expect(transport.read.mock.calls.some(([query]) => query.containerId === 'Bot scope' && query.botId === 'bot-a')).toBe(true);
   expect(row('Bot child')).toBeTruthy();
 });
+
+
+it('does not render an open destination picker against a cleared Host snapshot', async () => {
+  snapshot = { ...original(), containers: [group('Moving group', 0)], conversations: [] };
+  mixedPages(); await render();
+  await act(async () => [...row('Moving group').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '移动到…')!.click());
+  expect(container.querySelector('form')).toBeTruthy();
+  await act(async () => useConversationOrganizationStore.setState({ snapshot: null, pages: {} }));
+  expect(container.querySelector('form')).toBeNull();
+  expect(container.textContent).not.toBe('');
+});

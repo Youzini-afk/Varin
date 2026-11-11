@@ -13,6 +13,8 @@ import { record, text } from './transport.js';
 import { createPhysicalSourceCapture } from '../kernel/child-source-capture.js';
 import { requireNativeWorkspaceBackend } from '../kernel/native-workspaces.js';
 
+export interface ManagedChildSourceAuthority { principalId: string; coordinatorHostId: string }
+
 export interface ExternalPreparedSource {cwd:string;workspaceId:string;executionWorkspaceId:string;[key:string]:unknown}
 
 export function createExternalSourceOwner(deps: {
@@ -32,6 +34,7 @@ export function createExternalSourceOwner(deps: {
       store: KernelWorkingStateRootStore,
       grant: Awaited<ReturnType<KernelClient['claimChildSource']>>,
     ) => Promise<T>,
+    managedAuthority?: ManagedChildSourceAuthority,
   ) => {
     const handoff = child.handoff;
     if (!handoff) throw new Error('External delegate has no source handoff');
@@ -40,7 +43,12 @@ export function createExternalSourceOwner(deps: {
     await deps.capture.documents.admitWorkspaceRegistration(handoff.source.workspace_id, signal);
     if (handoff.source.execution_workspace_id !== handoff.source.workspace_id)
       await deps.capture.documents.admitWorkspaceRegistration(handoff.source.execution_workspace_id, signal);
-    const grant = await deps.kernel.claimChildSource(
+    const grant = managedAuthority ? await deps.kernel.claimManagedChildSource({
+      ...managedAuthority,
+      grantId: `external-source:${randomUUID()}`,
+      scope: { kind: 'external_child', conversationId: child.conversation_id, operationId: child.dispatch_operation_id ?? child.operation_id },
+      source: handoff.source, handoff,
+    }, signal) : await deps.kernel.claimChildSource(
       {
         handoffOperationId: handoff.operation_id,
         grantId: `external-source:${randomUUID()}`,
@@ -71,7 +79,7 @@ export function createExternalSourceOwner(deps: {
     const client=await deps.managed.source(owner,signal);
     return client.externalChildSource({coordinatorHostId:deps.managed.coordinatorHostId,action,child,...(unstarted?{unstarted}:{})},signal);
   };
-  const prepare = async (child: ExternalChild, signal: AbortSignal):Promise<ExternalPreparedSource> => {
+  const prepare = async (child: ExternalChild, signal: AbortSignal, managedAuthority?: ManagedChildSourceAuthority):Promise<ExternalPreparedSource> => {
     if(!child.project_source&&remoteHandoff(child)) {
       const result=await remoteCommand(child,'prepare',signal);
       if(result.status!=='prepared')throw new Error('Original external source preparation is unavailable');
@@ -159,7 +167,7 @@ export function createExternalSourceOwner(deps: {
         return { ...existing, cwd, workspaceId, executionWorkspaceId };
       }
       if (child.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(deps.kernel.scoped(grant), signal);
-      if(child.work_mode==='isolated_write'&&deps.kernel.nativeWorkspaces)await deps.kernel.nativeWorkspaces.retainPrepared({...handoff.source,branch_id:`child-source:${child.operation_id}`},child.parent_thread_id,false,signal);
+      if(!managedAuthority&&child.work_mode==='isolated_write'&&deps.kernel.nativeWorkspaces)await deps.kernel.nativeWorkspaces.retainPrepared({...handoff.source,branch_id:`child-source:${child.operation_id}`},child.parent_thread_id,false,signal);
       const prepared = await prepareDispatchSourceStore(
         {
           execution_id: child.operation_id,
@@ -232,11 +240,11 @@ export function createExternalSourceOwner(deps: {
         throw new Error('External Agent source materialization requires reconciliation');
       const cwd = await admitMaterializedRoot(location.targetPath, signal);
       return { cwd, workspaceId, executionWorkspaceId, kind: 'isolated' as const, baseline: prepared };
-    });
+    }, managedAuthority);
   };
   // Retain an isolated baseline while its conversation owns the editable copy. Only the
   // original temporary handoff pin is released after execution; result/recovery uses baseline.
-  const release = (child: ExternalChild, signal: AbortSignal) =>
+  const release = (child: ExternalChild, signal: AbortSignal, managedAuthority?: ManagedChildSourceAuthority) =>
     child.project_source ? Promise.resolve() : remoteHandoff(child) ? remoteCommand(child,'release',signal).then(result=>{
       if(result.status!=='released')throw new Error('Original external handoff release is unconfirmed');
     }) : withSource(child, signal, async (_store, grant) => {
@@ -253,7 +261,7 @@ export function createExternalSourceOwner(deps: {
             signal,
           );
       if(root.kind==='native')await deps.kernel.scoped(grant).deleteBranch({operationId:`external-handoff-delete:${child.operation_id}`,branchId:root.pin.source.branch_id!},signal);
-    });
+    }, managedAuthority);
   const remove = async (child: ExternalChild, unstarted = false) => {
     if(!child.project_source&&remoteHandoff(child)) {
       const result=await remoteCommand(child,'remove',undefined,unstarted);

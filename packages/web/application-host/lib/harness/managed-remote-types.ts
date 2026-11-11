@@ -186,6 +186,10 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  terminal(principal:ManagedSourcePrincipal,input:import('@varin/application-client').ManagedTerminalRequest,signal?:AbortSignal):Promise<import('@varin/application-client').ManagedTerminalResult>;
+  terminalStream(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string;sessionId:string},emit:(frame:Record<string,unknown>)=>void|Promise<void>,signal:AbortSignal):Promise<void>;
+
+  projectManagement(principal: ManagedSourcePrincipal, input: import('../projects/managed-project-management.js').ManagedProjectManagementRequest, signal?: AbortSignal): Promise<unknown>;
   workspace(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceRequest & { coordinatorHostId: string }, signal?: AbortSignal): Promise<import('@varin/application-client').ResourceFileResult>;
   workspaceUpload(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceUpload & { coordinatorHostId: string }, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<{ kind: 'done' }>;
   attachmentBegin(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<{ retained: true; complete: boolean }>;

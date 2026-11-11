@@ -74,7 +74,13 @@ const storePolledState = (
   return next;
 };
 
-const bootstrapReader = (): ((directory: string) => Promise<GitWorktreeBootstrapStatus>) => {
+const scopedReaders = new Map<string, () => Promise<GitWorktreeBootstrapStatus>>();
+/** Explicit owner-scoped observation keys are never interpreted as local paths. */
+export const registerWorktreeBootstrapReader = (key: string, read: () => Promise<GitWorktreeBootstrapStatus>): void => { scopedReaders.set(getKey(key), read); };
+
+const bootstrapReader = (directory: string): ((directory: string) => Promise<GitWorktreeBootstrapStatus>) => {
+  const scoped = scopedReaders.get(getKey(directory));
+  if (scoped) return () => scoped();
   const git = getRegisteredRuntimeAPIs()?.git;
   const worktree = git?.worktree; const bootstrapStatus = worktree?.bootstrapStatus;
   if (bootstrapStatus) return directory => bootstrapStatus.call(worktree, directory);
@@ -84,7 +90,7 @@ const bootstrapReader = (): ((directory: string) => Promise<GitWorktreeBootstrap
 const observationRetired = () => new Error('Application Host changed or worktree observation retired; original work continues');
 subscribeRuntimeEndpointWillChange(() => {
   for (const watcher of watchers.values()) watcher.cancelled = true;
-  watchers.clear(); waiters.clear(); lifecycleVersions.clear(); state.clear();
+  watchers.clear(); waiters.clear(); lifecycleVersions.clear(); state.clear(); scopedReaders.clear();
 });
 
 export const markWorktreeBootstrapPending = (directory: string): void => {
@@ -165,7 +171,7 @@ const pollWorktreeBootstrapUntilSettled = async (
 ): Promise<void> => {
   const startedAt = Date.now();
   const host = getRuntimeEndpointGeneration();
-  const read = bootstrapReader();
+  const read = bootstrapReader(directory);
   const currentOwner = () => host === getRuntimeEndpointGeneration() && isCurrentLifecycle(key, lifecycleVersion);
   while (Date.now() - startedAt < timeoutMs) {
     if (!currentOwner()) throw observationRetired();
@@ -203,7 +209,7 @@ const pollWorktreeBootstrapInBackground = async (
 ): Promise<void> => {
   const startedAt = Date.now();
   const host = getRuntimeEndpointGeneration();
-  const read = bootstrapReader();
+  const read = bootstrapReader(directory);
   const currentOwner = () => !watcher.cancelled && host === getRuntimeEndpointGeneration() && isCurrentLifecycle(key, watcher.lifecycleVersion);
   while (currentOwner() && Date.now() - startedAt < timeoutMs) {
     const result = await read(directory);

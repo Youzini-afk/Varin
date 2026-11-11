@@ -48,6 +48,7 @@ type SmartSearchDependencies = Parameters<typeof registerSmartSearchRoutes>[1];
 type SmartSearchSpawn = NonNullable<SmartSearchDependencies['spawn']>;
 
 export interface PlatformRouteDependencies {
+  onGitHubProjectReader?(reader: import('../github/project-read.js').GitHubProjectReader): void;
   isDraining?: () => boolean;
   modelText: ModelTextService;
   __dirname: string;
@@ -254,7 +255,8 @@ export const createPlatformRoutesRuntime = ({
       ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
     registerModelTextRoutes(app, { service: dependencies.modelText });
-    registerGitHubRoutes(app);
+    const projectGitHubReader = registerGitHubRoutes(app);
+    dependencies.onGitHubProjectReader?.(projectGitHubReader);
     registerGitRoutes(app, { ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
     registerWorkspaceRoutes(app, {
       fsPromises,

@@ -107,3 +107,21 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
   if (!valid) throw new Error(`Managed source ${operation.kind} response is unconfirmed`);
   return value as SourceServiceResponse<Operation>;
 }
+
+/** Project commands have a closed response envelope: only worktrees returns a
+ * list. Keep unrelated Source methods on their object-only contract. */
+export function decodeManagedProjectManagementResponse(action: string, value: unknown): unknown {
+  if (action === 'worktrees') {
+    if (!Array.isArray(value) || !value.every(entry => record(entry)
+      && ['head', 'name', 'branch', 'path'].every(key => text(entry[key])))) {
+      throw new Error('Managed project worktree listing is unconfirmed');
+    }
+  } else if (!record(value)) {
+    throw new Error('Managed project management response is unconfirmed');
+  } else if (action === 'worktree-create' && !['head', 'name', 'branch', 'path'].every(key => text(value[key]))) {
+    throw new Error('Managed project worktree creation is unconfirmed');
+  } else if (['worktree-remove', 'worktree-remote-branch-delete'].includes(action) && typeof value.success !== 'boolean') {
+    throw new Error('Managed project mutation is unconfirmed');
+  }
+  return value;
+}

@@ -428,7 +428,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
                 setConnecting(directory, tabId, true);
                 try {
                     const session = await terminal.createSession({
-                        cwd: directory,
+                        cwd: tab.source?.cwd ?? directory,
+                        ...(tab.source ? { resourceOwner: tab.source.resourceOwner, selection: tab.source.selection } : {}),
                         sessionId: tabId,
                         cols: initialSize.cols,
                         rows: initialSize.rows,
@@ -603,7 +604,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
             }
             return;
         }
-        if (attachedOnly || !originalSessionId || !terminal.restartSession) return;
+        if ((attachedOnly && originalTab?.closePolicy !== 'destroy') || !originalSessionId || !terminal.restartSession) return;
 
         setIsRestarting(true);
         setConnectionError(null);
@@ -614,7 +615,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
 
         try {
             const size = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;
-            const restarted = await terminal.restartSession(originalSessionId, { cwd: effectiveDirectory, shell: terminalShell, loginShell: terminalLoginShell, ...size, ...terminalAppearanceRef.current });
+            const restarted = await terminal.restartSession(originalSessionId, { cwd: originalTab?.source?.cwd ?? effectiveDirectory, ...(originalTab?.source ? { resourceOwner: originalTab.source.resourceOwner, selection: originalTab.source.selection } : {}), shell: terminalShell, loginShell: terminalLoginShell, ...size, ...terminalAppearanceRef.current });
             const owningTab = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId);
             if (owningTab?.terminalSessionId !== originalSessionId) return;
             setTabSessionId(effectiveDirectory, tabId, restarted.sessionId);

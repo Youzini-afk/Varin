@@ -1497,13 +1497,16 @@ impl Storage {
         use varin_runtime::catalog::collaboration::{
             ChildSourceAuthority, ChildSourceHandoff, ChildSourcePin, ChildSourceRoot,
         };
-        let SourceAuthorityScope::SourceRead {
-            thread_id,
-            branch_id,
-            ..
-        } = &p.scope
-        else {
-            return Err(denied("Child preparation has no model Run"));
+        let (thread_id, branch_id, external_dispatch) = match &p.scope {
+            SourceHandoffClaimScope::Native(SourceAuthorityScope::SourceRead { thread_id, branch_id, .. }) =>
+                (thread_id.clone(), branch_id.clone(), None),
+            SourceHandoffClaimScope::External(ExternalChildHandoffScope::ExternalChild { conversation_id, operation_id }) => {
+                if operation_id.is_empty() || *conversation_id != format!("external:child:{operation_id}") || p.continuation.is_some() {
+                    return Err(denied("External child preparation identity invalid"));
+                }
+                (conversation_id.clone(), format!("external-source:{operation_id}"), Some(operation_id.clone()))
+            }
+            _ => return Err(denied("Child preparation scope is invalid")),
         };
         let (handoff, dispatch) = match (p.handoff, p.continuation) {
             (Some(handoff), None) => {
@@ -1526,8 +1529,11 @@ impl Storage {
                     .strip_prefix("child-source-handoff:")
                     .ok_or_else(|| denied("Handoff operation identity invalid"))?
                     .to_string();
-                if *thread_id != format!("thread:child:{dispatch}")
-                    || *branch_id != format!("branch:child:{dispatch}")
+                let identity_matches = match &external_dispatch {
+                    Some(operation) => operation == &dispatch,
+                    None => thread_id == format!("thread:child:{dispatch}") && branch_id == format!("branch:child:{dispatch}"),
+                };
+                if !identity_matches
                     || authority.result.source.workspace_id != handoff.source.workspace_id
                     || authority.result.source.resource_owner != handoff.source.resource_owner
                     || handoff.source != p.source

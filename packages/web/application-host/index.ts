@@ -1,3 +1,8 @@
+import { freezeProjectSourceSelection } from '@varin/application-client';
+import {createManagedTerminalOwner} from './lib/terminal/managed-owner.js';
+import {authorizeManagedTerminal,registerManagedTerminalRoutes} from './lib/terminal/managed-routes.js';
+import { createManagedProjectManagementOwner } from './lib/projects/managed-project-management.js';
+import { registerProjectManagementRoutes } from './lib/projects/project-management-routes.js';
 import {createManagedExternalChildSourceOwner} from './lib/external-agents/managed-child-source.js';
 import {createManagedExternalProjectSourceOwner} from './lib/external-agents/managed-project-source.js';
 import { readConversationOrganizationLabels } from './lib/conversation-organization/labels.js';
@@ -2335,15 +2340,34 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
-      projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, resource_owner: project.source?.resourceOwner ?? { kind: 'local' as const } })),
+      projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, selection: freezeProjectSourceSelection(project), resource_owner: project.source?.resourceOwner ?? { kind: 'local' as const } })),
       externalAgents: () => externalAgents.settings(),
       settings: () => modelsService.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   projectSourceDirectory = sourceDirectory;
+  registerProjectManagementRoutes(app, { requireAuth: uiAuthController.requireAuth,
+    authorize: async (req, res) => {
+      const auth = await uiAuthController!.resolveAuthContext(req, res);
+      return !!auth && (await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null) ?? false);
+    },
+    coordinatorHostId: agentRuntime.coordinatorHostId,
+    projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    remote: (owner, signal) => agentRuntime.managedSource(owner, signal),
+    update: async (expected, workspace) => { await updateSettingsOnDisk(current => {
+      const projects = sanitizeProjects(current.projects) ?? [], project = projects.find(entry => entry.id === expected.id);
+      if (!project || project.path !== expected.path || !isDeepStrictEqual(project.source, expected.source)
+        || !isDeepStrictEqual(project.versionedWorkspace, expected.versionedWorkspace)) throw new Error('The registered project changed while its workspace operation was in progress');
+      return { ...current, projects: projects.map(entry => entry.id === expected.id ? { ...entry, versionedWorkspace: workspace } : entry) };
+    }); },
+  });
   app.post('/api/projects/sources/resolve', uiAuthController.requireAuth, async (req, res) => {
     try {
+      const auth = await uiAuthController!.resolveAuthContext(req, res);
+      if (!auth || !await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null)) {
+        res.status(403).json({ error: 'Project resources are not available to this user' }); return;
+      }
       if (!req.body || typeof req.body.path !== 'string' || !req.body.path.trim()) throw new Error('Project folder path is required');
       const result = await sourceDirectory.resolve({ resourceOwner: parseSourceResourceOwner(req.body.resourceOwner), path: req.body.path });
       res.json(result);
@@ -2387,10 +2411,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const firstInput = true;
     const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId);
     if (defaults?.source) {
-      const selected = await sourceDirectory.resolve({ resourceOwner: defaults.source.resourceOwner, path: defaults.source.path });
+      const selected = defaults.source.selection?.mode === 'native_workspace'
+        ? {resourceOwner:defaults.source.resourceOwner, workspaceId:defaults.source.selection.workspaceId}
+        : await sourceDirectory.resolve({ resourceOwner: defaults.source.resourceOwner, path: defaults.source.path });
       if (defaults.source.workspaceId && selected.workspaceId !== defaults.source.workspaceId) throw new Error('The conversation’s original project registration changed. Select a source explicitly.');
       return (await threads.prepareSource({ ...identity, key: `creation-project:${identity.threadId}`,
-        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: 'live_root',
+        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: defaults.source.selection?.mode ?? 'live_root',
+        ...(defaults.source.selection ? { selection: defaults.source.selection } : {}),
         content: { mode: 'saved-files' }, captureScopes: [],
       })).source;
     }
@@ -2420,7 +2447,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, validateLiveSource: liveSources.validate, nativeWorkspaces });
   threads.bindFileResolver(userFileTarget);
   // User mutations share Documents' native gate and its lease context.
-  const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget);
+  const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget, async (selection, signal) => {
+    const registration = await documentsAuthority.admitWorkspaceRegistration(selection.workspaceId, signal);
+    const prepared = await nativeWorkspaces!.prepareSelection(selection, 'project-files', signal);
+    return { path: prepared.path, originalRoot: registration.canonicalPath };
+  });
   registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
@@ -2479,7 +2510,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projectTrusted: cwd => projectTrust.trusted(cwd),
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
+  let projectGitHubReader: import('./lib/github/project-read.js').GitHubProjectReader | undefined;
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    terminal:createManagedTerminalOwner({terminal:()=>terminalRuntime,documents:documentsAuthority,nativeWorkspaces}),
+    projectManagement: createManagedProjectManagementOwner({ kernel: kernelClient, documents: documentsAuthority,
+      githubRead: (command, directory, signal) => { if (!projectGitHubReader) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader(command, directory, signal); } }),
     externalChildSource:createManagedExternalChildSourceOwner({kernel:kernelClient,hostId,sources:createExternalSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,
       capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
     externalProjectSource:createManagedExternalProjectSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,hostId}),
@@ -3145,6 +3180,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayService.registerRoutes(app);
 
   await platformRoutesRuntime.registerRoutes(app, {
+    onGitHubProjectReader: reader => { projectGitHubReader = reader; },
     pluginFetch: (url, init) => {
       const { dispatcher: _dispatcher, ...request } = init ?? {};
       return egressRuntime.fetch(url, request);
@@ -3218,6 +3254,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     normalizePwaAppName,
     normalizePwaOrientation,
   });
+  registerManagedTerminalRoutes(app,{requireAuth:uiAuthController.requireAuth,coordinatorHostId:agentRuntime.coordinatorHostId,
+    source:(owner,signal)=>agentRuntime.managedSource(owner,signal),authorize:async(req,res)=>{
+      return authorizeManagedTerminal(await uiAuthController!.resolveAuthContext(req,res),
+        async principal=>await agentRuntime.principalCanUseHostResources?.(principal)??false);
+    }});
   const startupResult = await startupPipelineRuntime.run({
     isDraining: () => isShuttingDown,
     app,
@@ -3258,6 +3299,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
+
   await botService.reconcile();
   const terminalCommandSubscription = terminalRuntime.subscribeCommands((record) => {
     void terminalCommandProjector.project(record);

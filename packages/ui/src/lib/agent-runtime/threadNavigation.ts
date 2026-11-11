@@ -1,3 +1,4 @@
+import { freezeProjectSourceSelection } from '@varin/application-client';
 import { getRuntimeEndpointGeneration, projectResourceOwnerKey, projectContainsPath, type ThreadIdentity } from '@varin/application-client';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
@@ -65,6 +66,9 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
 export interface NewConversationTarget {
   directory?: string | null; projectId?: string; organization?: ConversationOrganizationPlacement;
   sourceSelection?: DraftSourceSelection; botId?: string;
+  /** Set only for a worktree returned by the original project Git owner.
+   * Retains model/project metadata, not filesystem authority. */
+  worktreeProject?: boolean;
 }
 export async function startThreadFromNavigation(target: NewConversationTarget = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
@@ -88,12 +92,13 @@ export async function startThreadFromNavigation(target: NewConversationTarget = 
   const sourceSelection = target.sourceSelection ?? (project && path ? {
     resourceOwner: project.source?.resourceOwner ?? { kind: 'local' as const }, path,
     ...(project.source?.workspaceId && path === project.path ? { expectedWorkspaceId: project.source.workspaceId } : {}),
-    mode: 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [],
+    ...(path === project.path ? { selection: freezeProjectSourceSelection(project) } : {selection: {mode:'live_root' as const}}),
+    mode: path === project.path ? freezeProjectSourceSelection(project).mode : 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [],
   } : undefined);
   const remote = sourceSelection?.resourceOwner.kind === 'managed_host';
   const projectDefaultsApply = project && (!target.sourceSelection ||
     projectResourceOwnerKey(project) === projectResourceOwnerKey({ source: { resourceOwner: target.sourceSelection.resourceOwner, workspaceId: '' } })
-    && projectContainsPath(project, target.sourceSelection.path));
+    && (target.worktreeProject === true || projectContainsPath(project, target.sourceSelection.path)));
   const draftKey = useThreadStore.getState().openDraft({ workspacePath: remote ? undefined : path ?? undefined,
     ...(sourceSelection ? { sourceSelection: structuredClone(sourceSelection) } : {}),
     ...(organization ? { organization: { ...organization } } : {}),

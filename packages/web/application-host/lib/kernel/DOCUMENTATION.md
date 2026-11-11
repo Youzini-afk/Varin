@@ -414,3 +414,12 @@ generation only if needed. User handoff performs the same preparation after orig
 Receipt replay precedes this work, so later Settings/device unavailability cannot invalidate accepted
 work. Initialization reads registration metadata only; it does not mount or prepare every project.
 An initialized space with a missing project node remains a conflict, not an implicit recreation.
+
+Frozen project source selection is carried in original creation/child-dispatch metadata, not navigation
+nodes. `native_workspace` includes the original adoption operation and logical workspace/branch IDs;
+`live_root` explicitly disables later automatic adoption selection. Missing selection retains old
+receipt behavior. The target `NativeWorkspaceOwner.prepareSelection` verifies the committed adoption
+against the admitted registration's original physical root, then uses the existing open/acquire owners. Project adoptions retain their original project lifecycle;
+only derived temporary snapshots use conversation preparation retention. Managed preparation checks the authenticated target's allowed
+directories. The coordinating Host never registers target mount paths as local directories. Scoped
+child source snapshots retain their original native scope and use the existing snapshot owner.

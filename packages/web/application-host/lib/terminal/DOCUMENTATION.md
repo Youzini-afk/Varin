@@ -75,3 +75,22 @@ its command writer stays retained. Reconnect sees the error in the snapshot. Unk
 never become zero; an uncertain launch never falls back to another interpreter. Host `beginDraining()` synchronously fences new admissions and terminal writes while allowing
 existing snapshots/output and close/kill controls. Shutdown drains pending creates, retains failed owners and closes transports without clearing the
 session map before native receipts. See [process ownership](../process/DOCUMENTATION.md).
+
+## Managed project actions
+
+Actions configuration remains in the coordinator's original project document. Execution uses the
+selected `resourceOwner` and target directory: the managed source transport invokes that Host's
+original TerminalRuntime, Documents authorization and native process writer. Session references bind
+the target Host/connection/endpoint and original session; both Hosts namespace the session by their
+trusted principal. Reusing a create identity with another directory or shell is rejected.
+
+Managed observation carries original v4 sequence/history frames. Each HTTP hop waits for drain;
+a slow target observer rebases from the existing bounded terminal snapshot instead of accumulating
+a second output queue. Disconnect closes only observation. Reconnect observes the same live session,
+never starts a replacement process. A restarted Host explicitly reports its missing session.
+
+Stop waits for the original process exit. Explicit close additionally awaits writer release and
+retires output/attachments in the original session owner. Its final identity/status remains replayable
+if the close reply is lost; retired sessions do not consume active terminal capacity and cannot be
+recreated under the old identity. An unconfirmed stop retains ownership and cannot clear an Action's
+running session. Input retries carry the same original native operation identity.

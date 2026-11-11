@@ -11,15 +11,20 @@ it.each(['external', 'run'] as const)('attributes %s attachment imports and clea
     getRecord: vi.fn(async () => null), putRecord,
     listRecords: vi.fn(async () => ({ records: [], nextCursor: null })),
   }) } as unknown as KernelClient;
-  const scope = {
+  const scope: ManagedSourceLocalScope = {
     principal: { principalId: 'paired', capabilities: ['filesystem:read'] },
     coordinatorHostId: 'coordinator', authorityId: 'original-authority', resourceEpoch: 'epoch',
     scope: kind === 'external'
       ? { kind, conversationId: 'external:conversation', transportId: 'external-process:original' }
-      : { kind, threadId: 'native-thread', runId: 'native-run' },
-    source: { workspace_id: 'workspace', execution_workspace_id: 'execution' },
+      : { kind, threadId: 'native-thread', runId: 'native-run', epoch: 1 },
+    source: { resource_owner: { kind: 'local' }, workspace_id: 'workspace', execution_workspace_id: 'execution', mode: 'live_root', branch_id: null, revision: null, live_root: { hostId: 'target', rootId: 'root', canonicalRoot: '/target/source' } },
+    physicalRoot: { hostId: 'target', rootId: 'root', canonicalRoot: '/target/source' },
+    grant: { grantId: 'original-grant', kernelEpoch: 'epoch', hostGeneration: 'generation', authorityInstanceId: null, workerId: null, workerGeneration: null, sessionId: null,
+      threadId: kind === 'external' ? 'external:conversation' : 'native-thread', runId: kind === 'run' ? 'native-run' : null,
+      operationId: kind === 'external' ? 'external-process:original' : null, owningWorkspace: 'workspace', executionWorkspace: 'execution',
+      capabilities: ['storage.read', 'storage.write'], pathScopes: [], storageIdentity: 'target-storage' },
     operationId: kind === 'external' ? 'external-process:original' : null,
-  } as ManagedSourceLocalScope;
+  };
   const owner = createManagedAttachmentImport(kernel);
   const request = { coordinatorHostId: 'coordinator', authorityId: 'original-authority', resourceEpoch: 'epoch',
     operationId: 'attachment-delivery',

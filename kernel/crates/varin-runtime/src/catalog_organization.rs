@@ -218,8 +218,33 @@ pub struct CreationDefaults {
     pub source: Option<CreationSource>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProjectSourceSelection {
+    LiveRoot,
+    NativeWorkspace {
+        #[serde(rename = "workspaceId")] workspace_id: String,
+        #[serde(rename = "executionWorkspaceId")] execution_workspace_id: String,
+        #[serde(rename = "branchId")] branch_id: String,
+        #[serde(rename = "adoptionOperationId")] adoption_operation_id: String,
+        #[serde(rename = "nativeScope", default, skip_serializing_if = "Option::is_none")] native_scope: Option<String>,
+    },
+}
+impl ProjectSourceSelection {
+    pub fn valid(&self, workspace: Option<&str>) -> bool {
+        match self {
+            Self::LiveRoot => true,
+            Self::NativeWorkspace { workspace_id, execution_workspace_id, branch_id, adoption_operation_id, native_scope } =>
+                [workspace_id, execution_workspace_id, branch_id, adoption_operation_id].iter().all(|id| !id.trim().is_empty() && !id.contains('\0'))
+                && workspace.is_none_or(|id| id == workspace_id)
+                && native_scope.as_deref().is_none_or(|scope| !scope.contains('\0') && !scope.starts_with('/') && !scope.contains('\\') && scope.split('/').all(|part| part != "..")),
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreationSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<ProjectSourceSelection>,
     pub resource_owner: launches::SourceResourceOwner,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1949,6 +1974,7 @@ fn admit_with_defaults(
         match (&defaults.project_id, &defaults.source) {
             (Some(_), Some(source))
                 if source.resource_owner.validate()
+                    && source.selection.as_ref().is_none_or(|selection| selection.valid(source.workspace_id.as_deref()))
                     && !source.path.trim().is_empty()
                     && !source.path.contains('\0')
                     && source

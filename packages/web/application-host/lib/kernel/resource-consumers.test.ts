@@ -444,8 +444,8 @@ it.each(['agent', 'bot'] as const)('discovers a new HOME skill for fresh %s inpu
 
 it('source-free organization requests use exact invocation authority without granting file resources',async()=>{
   const original=request('unused');
-  const run={id:original.runId,thread_id:identity.threadId,branch_id:identity.branchId,state:'running',revision:1,epoch:1,
-    waiting_on:null,configuration:{},cancel_requested:false} as Run;
+  const run: Run={id:original.runId,thread_id:identity.threadId,branch_id:identity.branchId,state:'runnable',revision:1,epoch:1,
+    waiting_on:null,configuration:{},cancel_requested:false};
   const organizationInvocation=vi.fn(async()=>run),resourceSnapshot=vi.fn(async()=>{throw new Error('No filesystem snapshot exists');});
   const organization=vi.fn(async()=>({result:{bots:[],projects:[]}}));
   const owner=createResourceOwner({runtime:{run:async()=>run,resourceSnapshot,organizationInvocation},resources:{} as never,organization});

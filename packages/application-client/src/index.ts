@@ -71,3 +71,7 @@ export * from "./documents-edits.js";
 
 export * from './conversation-organization.js';
 export * from './conversation-organization-http.js';
+
+export * from './project-management.js';
+
+export * from './managed-terminal.js';

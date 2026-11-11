@@ -451,9 +451,19 @@ revision 检查和全局继承；界面明确标识这是协调端配置。原�
 `.varin/settings.json`。模型请求指定登记项目 ID，由 Host 核验原记录，不接收 renderer 自选的内部配置路径。
 显式模型选择、Bot 模型及已有执行绑定仍由原优先级处理，不从分类树另建配置叠加规则。
 
-目标设备的文件准入与信任仍由目标 owner 判断。当前本机 workspace adoption、项目 action 和 worktree
-管理页没有对应的远端管理 API，远端项目显示该能力不可用，不把远端路径送给本机服务。
-这不禁止通过已准备的远端 Source 进行文件操作、运行命令或按原资源合同准备隔离工作区。
+目标设备的文件准入与信任仍由目标 owner 判断。项目管理请求携带登记项目与预期来源，协调 Host 先核验
+真实登录用户的资源权限及原 Settings 绑定，再通过已有 managed-host 连接交给目标 Documents、Git 和
+NativeWorkspaceOwner。来源绑定改变后，旧观察或重试拒绝重定向，不以同名本机目录、分支或配置替代。
+Git worktree 的发现、创建、初始化观察与移除沿目标 Git service 及原 Documents writer；目标不可用与空列表不同。
+删除 worktree 后若另选的远端分支删除失败，保留已完成的本地效果并报告剩余失败，不伪造回滚。
+
+启用项目版本工作区先取得目标原身份规划，再由协调 Settings 保存 preparing 的 workspace、execution workspace、
+branch 与 adoption operation，最后交给目标原 Storage 受理。未知结果重试继续同一操作，完成回执按原项目绑定核验后
+更新 ready；导航、草稿与源准备引用该原身份，不把目标挂载路径写入协调端 DirectoryStore。
+后端能力由目标报告；需要打开操作系统或扩展设置的交互仍在源设备完成，不由远端项目请求修改设备安全设置。
+项目动作定义保留协调 Host 原项目配置，命令执行与终端观察、恢复、停止使用所选来源 Host 的原终端与进程 owner。
+已采用的版本工作区动作携带冻结的逻辑 selection，目标用原 adoption 回执准备实际工作视图。该选择与原物理根
+保存在原终端创建身份中；之后观察、输入和关闭核验原 session，不因项目重绑、切换标签或挂载路径变化重选来源。
 远端外部 Harness 在显式选择或准备时读取目标 Host 的已配置 Agent 列表；不可用时不显示协调端同名配置作替代。
 目标程序与环境在该设备解析、执行，产品会话与原生 session 续接回执仍留在协调 Host 原 Catalog。
 仅浏览分类与历史不会探测程序、启动远端进程或切换来源。

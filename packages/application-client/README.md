@@ -506,3 +506,17 @@ For native submission, omit `source` to inherit the existing source or the conve
 creation default. Pass `source: null` for an explicit chat-only selection. `creationDefaults`
 is a read-only creation intent: moving a conversation does not change its source, and clients
 must not infer execution authority from its current navigation parent.
+
+New project-based drafts and creation receipts freeze `ProjectSourceSelection`. A ready adoption
+records its original workspace, execution workspace, branch and adoption-operation IDs; an unadopted
+project records explicit `live_root`. Later enable/disable changes do not redirect that selection.
+`ThreadPrepareSource.selection` follows the same contract; omission retains legacy automatic source
+selection. Native selections go directly to the selected source Host rather than resolving a mount
+path on the coordinator. Preparation verifies the original committed adoption and physical registration
+before reopening the original native workspace. Explicit source selection and accepted input receipts
+still take precedence over creation defaults.
+
+Remote project file views carry the same logical selection through ResourceFiles requests, uploads
+and transfers. The target opens its original native Documents view, while the UI retains the original
+project path for display. Switching the file browser to an explicitly chosen directory clears that
+selection. File browsing does not mutate any conversation's accepted source or creation defaults.

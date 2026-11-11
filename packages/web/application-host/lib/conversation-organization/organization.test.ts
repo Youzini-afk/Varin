@@ -111,7 +111,7 @@ it('freezes the selected project source without contacting the remote device and
   });
   f.readSettings.mockResolvedValue({ projects: [{ id:'project', path:'/remote/original', label:'Research', source }] });
   const defaults = await f.service.creationDefaults('alice', 'new-thread', {containerId:'group'});
-  expect(defaults).toEqual({projectId:'project',source:{...source,path:'/remote/original'}});
+  expect(defaults).toEqual({projectId:'project',source:{...source,path:'/remote/original',selection:{mode:'live_root'}}});
   f.readSettings.mockRejectedValue(new Error('Settings unreadable after admission'));
   f.requests.mockImplementation(async method => method === 'runtime.thread.inspect' ? {principal_id:'alice'} : defaults);
   expect(await f.service.creationDefaults('alice', 'new-thread', {containerId:'group'})).toEqual(defaults);

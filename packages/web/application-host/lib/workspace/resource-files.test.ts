@@ -25,3 +25,25 @@ it('opens an independent workspace at its admitted physical view, not its origin
     expect(listed.kind === 'list' && listed.page.entries.map(entry => entry.name)).toEqual(['isolated.txt']);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+it('keeps native project selection logical while files and editor identities use the original target Documents view', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-adopted-files-'));
+  const original = path.join(directory, 'physical'), mounted = path.join(directory, 'native');
+  await fs.mkdir(original);await fs.mkdir(mounted);
+  await fs.writeFile(path.join(original,'physical.txt'),'physical');await fs.writeFile(path.join(mounted,'adopted.txt'),'adopted');
+  const selection={mode:'native_workspace' as const,workspaceId:'physical-registration',executionWorkspaceId:'adopted-documents',branchId:'adopted',adoptionOperationId:'original-adoption'};
+  const documents={resolveWorkspace:async ({path:root}:{path:string})=>{expect(root).toBe(mounted);return {workspaceId:'adopted-documents'};},
+    admitWorkspaceRegistration:async()=>({hostId:'target',canonicalPath:original}),inspectWorkspace:async()=>({root:mounted})} as unknown as DocumentAuthority;
+  const files=createResourceFilesOwner(documents,{} as KernelFileResourceBackend,undefined,async selected=>{
+    expect(selected).toEqual(selection);return {path:mounted,originalRoot:original};
+  });
+  try {
+    const opened=await files.request({selection,command:{kind:'open',path:original}});
+    expect(opened).toMatchObject({kind:'opened',root:original,workspaceId:'adopted-documents'});
+    const listed=await files.request({selection,root:original,workspaceId:'adopted-documents',command:{kind:'list',path:''}});
+    expect(listed.kind==='list' && listed.page.entries.map(entry=>entry.name)).toEqual(['adopted.txt']);
+    const bytes=await files.request({selection,root:original,workspaceId:'adopted-documents',command:{kind:'bytes',path:'adopted.txt',offset:0}});
+    expect(bytes.kind==='bytes' && Buffer.from(bytes.bytesBase64,'base64').toString()).toBe('adopted');
+    await expect(files.request({selection,root:original,workspaceId:'physical-registration',command:{kind:'list',path:''}})).rejects.toThrow('location changed');
+  } finally {await fs.rm(directory,{recursive:true,force:true});}
+});

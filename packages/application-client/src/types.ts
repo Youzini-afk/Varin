@@ -91,6 +91,9 @@ export interface TerminalError extends Error {
 }
 
 export interface CreateTerminalOptions {
+  /** Frozen logical project source; never a target mount path. */
+  selection?: import('./threads.js').ProjectSourceSelection;
+  resourceOwner?: import('@varin/protocol').SourceResourceOwner;
   cwd?: string;
   workspacePath?: string;
   sessionId?: string;

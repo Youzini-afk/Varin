@@ -234,7 +234,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       ...(selected.resourceOwner.kind !== 'managed_host' ? { workspacePath: selected.path } : {}),
       sourceSelection: { resourceOwner: selected.resourceOwner, path: selected.path,
         ...(defaultSource?.workspaceId ? { expectedWorkspaceId: defaultSource.workspaceId } : {}),
-        mode: 'live_root', contentMode: 'saved-files', captureScopes: [] },
+        ...(defaultSource?.selection ? {selection:defaultSource.selection} : {}),
+        mode: defaultSource?.selection?.mode ?? 'live_root', contentMode: 'saved-files', captureScopes: [] },
     });
   }, [defaultSource, defaultProjectId, defaultProject, snapshot, draftKey, identity]);
   const activityObserver = React.useRef(onActivity);

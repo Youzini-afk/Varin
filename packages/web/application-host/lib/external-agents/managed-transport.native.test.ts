@@ -70,6 +70,15 @@ if(m.method==='turn/start'){if(m.params.input[0].text.startsWith('read:'))append
   await remote.attachmentBegin(imported);
   await remote.attachmentPut({...address,operationId:imported.operationId,ref:attachment.ref,contentHash,objectHash:contentHash,byteLength:bytes.length},(async function*(){yield bytes;})());
   const view=await remote.attachmentPath(imported);expect(view.readOnly).toBe(true);
+  // A recovery/maintenance caller cannot reclaim an immutable attachment merely
+  // because it lives outside the still-running Harness cwd.
+  const retentionGrant=await target.client.issueGrant({grantId:'external-view-retention-check',threadId:conversation.id,
+    externalTransportId:saved.transport.id,operationId:saved.transport.id,
+    owningWorkspace:conversation.executionSource!.workspace_id,executionWorkspace:conversation.executionSource!.execution_workspace_id,
+    capabilities:['storage.read','storage.write','storage.maintenance'],pathScopes:[]});
+  try { await expect(target.client.scoped(retentionGrant).objectViewRelease({workspaceId:conversation.executionSource!.workspace_id,viewId:view.viewId})).rejects.toThrow(/retained by its external process/); }
+  finally { await target.client.retireGrant(retentionGrant.grantId); }
+
   const delivery=await service.send(conversation.id,'delivery',{text:`read:${view.path}`});
   await vi.waitFor(async()=>expect((await service.read(conversation.id)).turns.find(t=>t.id===delivery.id)?.status).toBe('completed'),{timeout:15000});
   expect(await readFile(path.join(directory,'delivered'),'utf8')).toBe(bytes.toString());

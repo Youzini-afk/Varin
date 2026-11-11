@@ -207,6 +207,27 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         return { path: actual.path, source: { resourceOwner: { kind: 'local' }, workspaceId: selected.workspace_id,
                 executionWorkspaceId: selected.execution_workspace_id, mode: 'native_workspace', branchId: selected.branch_id!, ...(selected.native_scope ? { nativeScope: selected.native_scope } : {}), tools: [] } };
     };
+    /** Reopen exactly the admitted project adoption, never infer it from current Settings. */
+    const prepareSelection = async (selection: Extract<import('@varin/application-client').ProjectSourceSelection,{mode:'native_workspace'}>, _threadId: string, signal?: AbortSignal) => {
+        const registration = await owners.documents.admitWorkspaceRegistration(selection.workspaceId, signal);
+        const source: Source = {workspace_id:selection.workspaceId, execution_workspace_id:selection.executionWorkspaceId, branch_id:selection.branchId,...(selection.nativeScope ? {native_scope:selection.nativeScope} : {})};
+        const grant = await owners.kernel.issueGrant({grantId:`workspace-selection:${randomUUID()}`, owningWorkspace:selection.workspaceId,
+            executionWorkspace:selection.executionWorkspaceId, capabilities:['storage.read','storage.write'], pathScopes:['']}, signal);
+        try {
+            const actor = owners.kernel.scoped(grant);
+            const operation = await actor.getOperation(selection.adoptionOperationId, signal);
+            const result = operation?.result as {branchId?:string;workspaceId?:string;adoption?:{sourceRootId?:string}} | undefined;
+            if (operation?.kind !== 'workspace.adopt' || operation.state !== 'committed' || result?.branchId !== selection.branchId || result.workspaceId !== selection.workspaceId)
+                throw new Error('The frozen project adoption no longer matches its original receipt');
+            const root = await actor.fileRootRegister({workspaceId:selection.workspaceId, executionWorkspaceId:selection.executionWorkspaceId, canonicalRoot:registration.canonicalPath}, signal);
+            if (result.adoption?.sourceRootId !== root.rootId) throw new Error('The frozen project adoption belongs to another physical source');
+        } finally { await owners.kernel.revokeGrant(grant.grantId); }
+        // Project adoption has its original project lifecycle, unlike temporary source:
+        // branches. Do not claim it as conversation-owned source.preparation.
+        const entry = await open(source, signal), actual = await acquire(source, entry.grant, signal);
+        return {path:actual.path, source:{resourceOwner:{kind:'local' as const},workspaceId:selection.workspaceId,
+            executionWorkspaceId:selection.executionWorkspaceId,branchId:selection.branchId,...(selection.nativeScope ? {nativeScope:selection.nativeScope} : {}),mode:'native_workspace' as const,tools:[]}};
+    };
     const acquire = async (source: Source, grant: KernelGrantHandle, signal?: AbortSignal) => {
         const entry = await open(source, signal);
         const address = { branchId: source.branch_id!, generation: entry.view.binding.generation, ...(source.native_scope ? { sourcePath: source.native_scope } : {}) };
@@ -646,6 +667,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { prepare, prepareSelection, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

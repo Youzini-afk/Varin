@@ -608,7 +608,7 @@ pub fn deliver_waits(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
             let mut output:crate::output::OutputBody=report.clone().into();
             if !model_contract.preserve_original {
             output.model_data=Some(json!({"kind":"child_report","agentId":agent_id,"name":child.name,"ref":reference,"executionRef":if is_execution {Some(&reference)} else {None},
-                "status":report["report"]["outcome"],"previewPartial":report["page"]["next_offset"].is_number(),
+                "status":report["report"]["status"],"detail":report["report"]["detail"],"previewPartial":report["page"]["next_offset"].is_number(),
                 "read":if model_contract.report {Some(read)} else {None}}));
             }
             output.parts.push(crate::output::OutputPart::Text{text});

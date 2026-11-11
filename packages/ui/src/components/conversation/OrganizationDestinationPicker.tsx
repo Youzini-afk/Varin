@@ -14,6 +14,8 @@ export function OrganizationDestinationPicker({ value, onChange, snapshot, exclu
   const { t } = useI18n();
   const [scope, setScope] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
+  const destinationSelect = React.useRef<HTMLSelectElement>(null);
+  React.useEffect(() => { destinationSelect.current?.focus(); }, [scope]);
   const query = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: 'include', ...(search.trim() ? { query: search.trim(), recursive: true } : scope ? { containerId: scope } : { rootOnly: true }) }), [scope, search]);
   const page = useConversationOrganizationStore(state => state.pages[organizationQueryKey(query)]);
   React.useEffect(() => { void loadOrganizationPage(query); }, [query]);
@@ -23,12 +25,12 @@ export function OrganizationDestinationPicker({ value, onChange, snapshot, exclu
   const label = (id: string) => `${organizationContainerPath(snapshot, id).map(container => container.name ?? t('organization.untitled')).join(' / ')} · ${id}`;
   const options = [...new Set([...(value ? [value] : []), ...(scope && allowed(scope) ? [scope] : []), ...choices.map(container => container.id)])];
   return <div className="space-y-2">
-    <Input type="search" aria-label={t('organization.searchTargets')} value={search} disabled={disabled} onChange={event => setSearch(event.target.value)} />
+    <Input type="search" aria-label={t('organization.searchTargets')} placeholder={t('organization.searchTargets')} value={search} disabled={disabled} onChange={event => setSearch(event.target.value)} />
     <nav aria-label={t('organization.targetPath')} className="flex flex-wrap gap-1 typography-micro">
       <button type="button" disabled={disabled} onClick={() => { setScope(null); setSearch(''); }}>{t('organization.root')}</button>
       {organizationContainerPath(snapshot, scope).map(container => <button type="button" disabled={disabled} key={container.id} title={label(container.id)} onClick={() => { setScope(container.id); setSearch(''); }}> / {container.name ?? container.id}</button>)}
     </nav>
-    <select autoFocus aria-label={t('organization.target')} className="w-full min-w-0 rounded border border-border bg-background p-1" value={value} disabled={disabled} onChange={event => onChange(event.target.value)}>
+    <select ref={destinationSelect} autoFocus aria-label={t('organization.target')} className="w-full min-w-0 rounded border border-border bg-background p-1" value={value} disabled={disabled} onChange={event => onChange(event.target.value)}>
       <option value="">{t('organization.root')}</option>
       {options.map(id => <option key={id} value={id} disabled={!allowed(id)}>{label(id)}</option>)}
     </select>

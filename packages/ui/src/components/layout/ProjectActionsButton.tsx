@@ -1,3 +1,5 @@
+import { freezeProjectSourceSelection } from '@varin/application-client';
+import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import React from 'react';
 import { getRuntimeKey } from '@varin/application-client';
 import {
@@ -245,6 +247,14 @@ export const ProjectActionsButton = ({
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
   }, [directory, stableProjectRef?.path]);
 
+  const remoteSelection = React.useMemo(() => projectRef?.resourceOwner?.kind === 'managed_host'
+    ? normalizedDirectory === normalizeProjectActionDirectory(projectRef.path) ? freezeProjectSourceSelection(projectRef) : { mode: 'live_root' as const }
+    : undefined, [normalizedDirectory, projectRef]);
+  const terminalSource = React.useMemo(() => projectRef?.resourceOwner?.kind === 'managed_host'
+    ? { cwd: normalizedDirectory, resourceOwner: projectRef.resourceOwner, selection: remoteSelection }
+    : undefined, [normalizedDirectory, projectRef?.resourceOwner, remoteSelection]);
+  const terminalDirectory = terminalSource ? `project-action:${JSON.stringify([terminalSource.resourceOwner, normalizedDirectory, remoteSelection])}` : normalizedDirectory;
+
   const selectedAction = React.useMemo(() => {
     if (!selectedActionId) {
       return null;
@@ -296,7 +306,8 @@ export const ProjectActionsButton = ({
       const terminalSessions = terminalStore.sessions;
       const currentRuns = terminalStore.projectActionRuns;
       for (const [runKey, entry] of Object.entries(currentRuns)) {
-        if (entry.directory !== normalizedDirectory) continue;
+        if(runKey!==toProjectActionRunKey(normalizedDirectory,entry.actionId,projectRef?.resourceOwner,remoteSelection))continue;
+        if (entry.directory !== terminalDirectory) continue;
         const directoryState = terminalSessions.get(entry.directory);
         const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
         if (!tab || tab.terminalSessionId !== entry.sessionId) {
@@ -341,18 +352,18 @@ export const ProjectActionsButton = ({
     return useTerminalStore.subscribe((state, previousState) => {
       if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
-  }, [actions, menuActivated, normalizedDirectory, openExternal, projectActionRuns, removeProjectActionRun, setProjectActionRun, t]);
+  }, [actions, menuActivated, normalizedDirectory, projectRef?.resourceOwner, remoteSelection, terminalDirectory, openExternal, projectActionRuns, removeProjectActionRun, setProjectActionRun, t]);
 
   const getOrCreateActionTab = React.useCallback(async (action: VarinProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
       throw new Error(t('projectActions.error.noActiveDirectory'));
     }
 
-    const key = toProjectActionRunKey(normalizedDirectory, action.id);
-    ensureDirectory(normalizedDirectory);
+    const key = toProjectActionRunKey(normalizedDirectory, action.id, projectRef?.resourceOwner, remoteSelection);
+    if (!terminalSource) ensureDirectory(terminalDirectory);
 
     const currentStore = useTerminalStore.getState();
-    const existingDirectoryState = currentStore.getDirectoryState(normalizedDirectory);
+    const existingDirectoryState = currentStore.getDirectoryState(terminalDirectory);
 
     let tabId = tabByKeyRef.current[key] || null;
     const hasTab = tabId
@@ -360,18 +371,19 @@ export const ProjectActionsButton = ({
       : false;
 
     if (!tabId || !hasTab) {
-      tabId = currentStore.createTab(normalizedDirectory);
+      tabId = currentStore.createTab(terminalDirectory, terminalSource);
       tabByKeyRef.current[key] = tabId;
     }
 
-    setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`);
-    setTabIconKey(normalizedDirectory, tabId, action.icon || 'play');
-    setActiveTab(normalizedDirectory, tabId);
+    setTabLabel(terminalDirectory, tabId, `Action: ${action.name}`);
+    setTabIconKey(terminalDirectory, tabId, action.icon || 'play');
+    setActiveTab(terminalDirectory, tabId);
     if (options.revealTerminal !== false) {
-      useUIStore.getState().openContextPanelTab(normalizedDirectory, { mode: 'terminal' });
+      if (terminalSource) useWorkspaceStore.getState().openAttachedTerminal(terminalDirectory, `${projectRef?.resourceOwner?.kind === 'managed_host' ? projectRef.resourceOwner.hostId : ''} · ${normalizedDirectory}`);
+      else useUIStore.getState().openContextPanelTab(terminalDirectory, { mode: 'terminal' });
     }
 
-    const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory);
+    const stateAfterTab = useTerminalStore.getState().getDirectoryState(terminalDirectory);
     const tab = stateAfterTab?.tabs.find((entry) => entry.id === tabId);
     return {
       key,
@@ -381,6 +393,10 @@ export const ProjectActionsButton = ({
   }, [
     ensureDirectory,
     normalizedDirectory,
+    projectRef?.resourceOwner,
+    remoteSelection,
+    terminalDirectory,
+    terminalSource,
     setActiveTab,
     setTabIconKey,
     setTabLabel,
@@ -397,7 +413,7 @@ export const ProjectActionsButton = ({
       return;
     }
 
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id, projectRef?.resourceOwner, remoteSelection);
     const existingRun = projectActionRuns[runKey];
     if (existingRun && existingRun.status === 'running') {
       return;
@@ -413,10 +429,12 @@ export const ProjectActionsButton = ({
       let activeSessionId = sessionId;
 
       if (!activeSessionId) {
-        setConnecting(normalizedDirectory, tabId, true);
+        setConnecting(terminalDirectory, tabId, true);
         try {
           const created = await terminal.createSession({
             cwd: normalizedDirectory,
+            ...(remoteSelection ? { selection: remoteSelection } : {}),
+            ...(projectRef?.resourceOwner?{resourceOwner:projectRef.resourceOwner}:{}),
             sessionId: tabId,
             shell: terminalShell,
             loginShell: terminalLoginShell,
@@ -425,9 +443,9 @@ export const ProjectActionsButton = ({
             terminalForeground: currentTheme.colors.syntax.base.foreground,
           });
           activeSessionId = created.sessionId;
-          setTabSessionId(normalizedDirectory, tabId, activeSessionId);
+          setTabSessionId(terminalDirectory, tabId, activeSessionId);
         } finally {
-          setConnecting(normalizedDirectory, tabId, false);
+          setConnecting(terminalDirectory, tabId, false);
         }
       }
 
@@ -436,30 +454,30 @@ export const ProjectActionsButton = ({
       }
 
       streamCleanupByRunKeyRef.current[key]?.();
-      setConnecting(normalizedDirectory, tabId, true);
+      setConnecting(terminalDirectory, tabId, true);
       const subscription = terminal.connect(
           activeSessionId,
           { onEvent: (event) => {
             if (event.type === 'snapshot') {
-              useTerminalStore.getState().replaceBuffer(normalizedDirectory, tabId, event.data ?? '', event.sequence ?? 0);
-              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+              useTerminalStore.getState().replaceBuffer(terminalDirectory, tabId, event.data ?? '', event.sequence ?? 0);
+              useTerminalStore.getState().setConnecting(terminalDirectory, tabId, false);
             }
             if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
-              useTerminalStore.getState().appendToBuffer(normalizedDirectory, tabId, event.data, event.sequence, event.replayData);
+              useTerminalStore.getState().appendToBuffer(terminalDirectory, tabId, event.data, event.sequence, event.replayData);
             }
             if (event.type === 'exit') {
-              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited');
-              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+              useTerminalStore.getState().setTabLifecycle(terminalDirectory, tabId, 'exited');
+              useTerminalStore.getState().setConnecting(terminalDirectory, tabId, false);
               useTerminalStore.getState().removeProjectActionRun(key);
               delete urlWatchByRunKeyRef.current[key];
               streamCleanupByRunKeyRef.current[key]?.();
               delete streamCleanupByRunKeyRef.current[key];
             }
           }, onError: (_error, fatal) => {
-            useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+            useTerminalStore.getState().setConnecting(terminalDirectory, tabId, false);
             if (fatal) {
-              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited');
-              useTerminalStore.getState().setTabSessionId(normalizedDirectory, tabId, null);
+              useTerminalStore.getState().setTabLifecycle(terminalDirectory, tabId, 'exited');
+              useTerminalStore.getState().setTabSessionId(terminalDirectory, tabId, null);
               useTerminalStore.getState().removeProjectActionRun(key);
             }
           } },
@@ -476,7 +494,7 @@ export const ProjectActionsButton = ({
 
       setProjectActionRun({
         key,
-        directory: normalizedDirectory,
+        directory: terminalDirectory,
         actionId: action.id,
         tabId,
         sessionId: activeSessionId,
@@ -523,6 +541,9 @@ export const ProjectActionsButton = ({
     isMobile,
     isDesktopShellApp,
     normalizedDirectory,
+    projectRef?.resourceOwner,
+    remoteSelection,
+    terminalDirectory,
     terminalLoginShell,
     terminalShell,
     openExternal,
@@ -537,7 +558,7 @@ export const ProjectActionsButton = ({
   ]);
 
   const stopAction = React.useCallback(async (action: VarinProjectAction) => {
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id, projectRef?.resourceOwner, remoteSelection);
     const activeRun = projectActionRuns[runKey];
     if (!activeRun) {
       return;
@@ -561,18 +582,15 @@ export const ProjectActionsButton = ({
     const sessionStillSame = afterTab?.terminalSessionId === activeRun.sessionId;
 
     if (sessionStillSame && !exitObserved) {
-      if (typeof terminal.forceKill === 'function') {
-        try {
-          await terminal.forceKill({ sessionId: activeRun.sessionId });
-        } catch {
-          // noop
-        }
-      } else {
-        try {
-          await terminal.close(activeRun.sessionId);
-        } catch {
-          // noop
-        }
+      try {
+        if (typeof terminal.forceKill === 'function') await terminal.forceKill({sessionId:activeRun.sessionId});
+        else await terminal.close(activeRun.sessionId);
+      } catch(error) {
+        // A disconnected observer is not the original process's exit receipt.
+        // Keep the original run/session so a later stop reconciles that owner.
+        updateProjectActionRunStatus(runKey,'running');
+        toast.error(error instanceof Error?error.message:t('projectActions.error.failedToRunAction'));
+        return;
       }
       setTabSessionId(activeRun.directory, activeRun.tabId, null);
     }
@@ -581,14 +599,14 @@ export const ProjectActionsButton = ({
     delete urlWatchByRunKeyRef.current[runKey];
     streamCleanupByRunKeyRef.current[runKey]?.();
     delete streamCleanupByRunKeyRef.current[runKey];
-  }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
+  }, [normalizedDirectory, remoteSelection, projectRef?.resourceOwner, t, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
   const handlePrimaryClick = React.useCallback(() => {
     const action = selectedAction ?? actions[0];
     if (!action) {
       return;
     }
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id, projectRef?.resourceOwner, remoteSelection);
     const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
@@ -598,7 +616,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [actions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+  }, [actions, normalizedDirectory, remoteSelection, projectRef?.resourceOwner, runAction, projectActionRuns, selectedAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: VarinProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -608,7 +626,7 @@ export const ProjectActionsButton = ({
       return;
     }
 
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id, projectRef?.resourceOwner, remoteSelection);
     const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
@@ -618,7 +636,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [normalizedDirectory, runAction, projectActionRuns, stopAction]);
+  }, [normalizedDirectory, remoteSelection, projectRef?.resourceOwner, runAction, projectActionRuns, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
     if (!stableProjectRef?.id) {
@@ -637,7 +655,7 @@ export const ProjectActionsButton = ({
 
   const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
   const selectedIconName = PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : '';
+  const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id, projectRef?.resourceOwner, remoteSelection) : '';
   const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
   const MenuItem = contextMenu ? ContextMenuItem : DropdownMenuItem;
@@ -645,7 +663,7 @@ export const ProjectActionsButton = ({
   const menuItems = (
     <>
       {actions.map((entry) => {
-        const run = projectActionRuns[toProjectActionRunKey(normalizedDirectory, entry.id)];
+        const run = projectActionRuns[toProjectActionRunKey(normalizedDirectory, entry.id, projectRef?.resourceOwner, remoteSelection)];
         const waiting = run?.status === 'stopping';
         const iconName = PROJECT_ACTION_ICON_MAP[(entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP] || 'play';
         return (

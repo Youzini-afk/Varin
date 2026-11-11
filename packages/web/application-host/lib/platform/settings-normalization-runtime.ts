@@ -23,6 +23,7 @@ export interface SettingsNormalizationDependencies {
 }
 
 export interface NormalizedProject extends Record<string, unknown> {
+  versionedWorkspace?: import('@varin/application-client').VersionedProjectWorkspace;
   source?: import('@varin/application-client').ProjectSourceBinding;
   id: string;
   path: string;

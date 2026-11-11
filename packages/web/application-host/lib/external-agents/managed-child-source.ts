@@ -17,10 +17,11 @@ export function createManagedExternalChildSourceOwner(deps:{kernel:KernelClient;
       coordinatorHostId:input.coordinatorHostId,operationId:execution,parentRunId:handoff.source_run_id??child.parent_run_id,
       parentThreadId:child.parent_thread_id,source:handoff.source},signal);
     if(!isDeepStrictEqual(original,handoff))throw new Error('External child has no original authenticated handoff');
+    const authority = { principalId: principal.principalId, coordinatorHostId: input.coordinatorHostId };
     if(input.action==='prepare') {
       // Reconstruct from the authenticated handoff. A request's cached cwd or
       // nativeSource is not permission to open an arbitrary target directory.
-      const prepared=await deps.sources.prepare({...child,source:null,resources_released:false},signal??new AbortController().signal);
+      const prepared=await deps.sources.prepare({...child,source:null,resources_released:false},signal??new AbortController().signal,authority);
       const native=prepared.nativeSource as import('../kernel/protocol.generated.js').LaunchSource|undefined;
       const executionSource=native??(child.work_mode==='shared' ? {...handoff.source,
         ...(handoff.source.mode==='live_root'&&(handoff.root.kind==='physical'||handoff.root.kind==='derived')?{live_root:handoff.root.root}:{})}
@@ -32,7 +33,7 @@ export function createManagedExternalChildSourceOwner(deps:{kernel:KernelClient;
     if(input.action==='remove'&&child.work_mode==='isolated_write'&&cached.mode==='native_workspace'&&(cached.branch_id!==`child-source:${execution}`
       ||cached.workspace_id!==handoff.source.workspace_id||cached.execution_workspace_id!==nativeExecutionWorkspaceId(`child-source:${execution}`)))
       throw new Error('External cleanup source differs from its original preparation');
-    if(input.action==='release')await deps.sources.release(child,signal??new AbortController().signal);
+    if(input.action==='release')await deps.sources.release(child,signal??new AbortController().signal,authority);
     else await deps.sources.remove(child,input.unstarted??false);
     return {status:'released'};
   };
