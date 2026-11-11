@@ -168,6 +168,7 @@ fn unsupported_catalog_versions_preserve_original_database_and_content() {
         let path = fixture.0.join("conversation.sqlite");
         let db = Connection::open(&path).unwrap();
         db.execute_batch("CREATE TABLE original_rows(id TEXT PRIMARY KEY,body TEXT NOT NULL); INSERT INTO original_rows VALUES('retained','opaque original')").unwrap();
+        if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db); }
         db.pragma_update(None, "user_version", version).unwrap();
         drop(db);
         let original = fs::read(&path).unwrap();

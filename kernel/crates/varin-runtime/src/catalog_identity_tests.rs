@@ -36,7 +36,7 @@ fn delete(c: &mut Catalog, thread: &str) -> Value {
 }
 fn downgrade(c: &Catalog) {
     followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
-    c.db.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations; DROP TABLE calendar_legacy_manual_boundaries; PRAGMA user_version=87;").unwrap();
+    c.db.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations; DROP TABLE calendar_legacy_manual_boundaries; DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;PRAGMA user_version=87;").unwrap();
 }
 #[test]
 fn public_creation_replay_retains_owner_branch_and_receipt_after_collection() {
@@ -343,6 +343,7 @@ fn malformed_legacy_creation_is_rejected_without_committing_upgrade() {
 fn partial_new_identity_schema_under_legacy_marker_is_not_overwritten() {
     let f = Fixture::new();
     let c = f.open();
+    if 87 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&c.db); }
     c.db.pragma_update(None, "user_version", 87).unwrap();
     drop(c);
     assert!(matches!(Catalog::open(&f.0), Err(RuntimeError::Invalid(_))));

@@ -488,6 +488,7 @@ impl Fixture {
             db.create_thread("thread:parent", "branch:parent").unwrap();
         }
         let mut input = DispatchInput {
+            organization: None,
             attachments: Vec::new(),
             model: None,
             thinking: None,

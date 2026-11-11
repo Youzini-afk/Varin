@@ -501,18 +501,22 @@ impl Catalog {
         branch_id: &str,
         bot_id: &str,
     ) -> Result<()> {
-        self.create_thread_with_bot(thread_id, branch_id, Some(bot_id))
+        self.create_bot_thread_with_placement(thread_id, branch_id, bot_id, None, None)
     }
 
     /// Resolve navigation at the same Catalog commit boundary as fallback creation.
     /// Host retries this original request after an unknown response; it never allocates
     /// another candidate. The exclusive Catalog owner also serializes other processes.
     pub fn resolve_bot_entry(&mut self, thread_id: &str, branch_id: &str, bot_id: &str) -> Result<forks::BranchForkReceipt> {
+        self.resolve_bot_entry_with_principal(thread_id,branch_id,bot_id,None)
+    }
+    pub fn resolve_bot_entry_with_principal(&mut self,thread_id:&str,branch_id:&str,bot_id:&str,principal:Option<&str>)->Result<forks::BranchForkReceipt> {
+        let principal=creation_principal(&self.db,thread_id,principal)?;
         let tx = self.db.transaction()?;
         let original: Option<(Option<i64>, bool)> = tx.query_row(
             "SELECT deleted_at_ms,archived FROM threads WHERE id=?1", [thread_id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((deleted, archived)) = original {
-            match identity::validate_public(&tx, thread_id, branch_id, Some(bot_id), None) {
+            match identity::validate_public(&tx, thread_id, branch_id, Some(bot_id), principal.as_deref()) {
                 Ok(()) => (),
                 // Missing legacy facts do not grant ownership. A deleted identity is
                 // skipped only after all surviving principal/Bot/branch facts match.
@@ -523,18 +527,19 @@ impl Catalog {
                 return Ok(forks::BranchForkReceipt { thread_id: thread_id.into(), branch_id: branch_id.into() });
             }
         } else {
-            identity::create_public(&tx, thread_id, branch_id, Some(bot_id), None, self.epoch)?;
+            identity::create_public(&tx, thread_id, branch_id, Some(bot_id), principal.as_deref(), self.epoch)?;
+            organization::admit(&tx,principal.as_deref(),&organization::ConversationRef::Native{id:thread_id.into()},None,None,&format!("create:{thread_id}"))?;
             tx.commit()?;
             return Ok(forks::BranchForkReceipt { thread_id: thread_id.into(), branch_id: branch_id.into() });
         }
         let active: Option<(String,Option<String>)> = tx.query_row(
             "SELECT t.id,c.initial_branch_id FROM bot_thread_bindings binding JOIN threads t ON t.id=binding.thread_id
              LEFT JOIN thread_creations c ON c.thread_id=t.id
-             WHERE binding.bot_id=?1 AND t.deleted_at_ms IS NULL AND t.archived=0
-             ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", [bot_id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+             WHERE binding.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0
+             ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", params![bot_id,principal], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((thread_id, branch_id)) = active {
             let branch_id = branch_id.ok_or_else(|| RuntimeError::IdentityUnavailable(thread_id.clone()))?;
-            identity::validate_public(&tx, &thread_id, &branch_id, Some(bot_id), None)?;
+            identity::validate_public(&tx, &thread_id, &branch_id, Some(bot_id), principal.as_deref())?;
             let branch_owner: Option<String> = tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [&branch_id], |r|r.get(0)).optional()?;
             if branch_owner.as_deref() != Some(thread_id.as_str()) {
                 return Err(RuntimeError::Conflict("Bot session initial branch has another owner".into()));
@@ -545,7 +550,8 @@ impl Catalog {
         let key = id();
         let thread_id = format!("thread:bot:{bot_id}:{key}");
         let branch_id = format!("branch:bot:{bot_id}:{key}");
-        identity::create_public(&tx, &thread_id, &branch_id, Some(bot_id), None, self.epoch)?;
+        identity::create_public(&tx, &thread_id, &branch_id, Some(bot_id), principal.as_deref(), self.epoch)?;
+        organization::admit(&tx,principal.as_deref(),&organization::ConversationRef::Native{id:thread_id.clone()},None,None,&format!("create:{thread_id}"))?;
         tx.commit()?;
         Ok(forks::BranchForkReceipt { thread_id, branch_id })
     }
@@ -840,4 +846,13 @@ impl Catalog {
             operation_ids,
         })
     }
+}
+
+/// Background entry resolution retains an existing identity. New background sessions use the
+/// persisted Host authentication owner, never the principal of an arbitrary first reader.
+pub(super) fn creation_principal(db:&Connection,thread:&str,principal:Option<&str>)->Result<Option<String>> {
+    if let Some(principal)=principal {principals::validate(principal)?;return Ok(Some(principal.into()));}
+    let existing:Option<Option<String>>=db.query_row("SELECT principal_id FROM threads WHERE id=?1",[thread],|r|r.get(0)).optional()?;
+    if let Some(existing)=existing{return Ok(existing);}
+    Ok(db.query_row("SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1",[],|r|r.get(0)).optional()?)
 }

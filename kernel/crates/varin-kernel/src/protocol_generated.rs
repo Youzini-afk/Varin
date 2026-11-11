@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 89;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 90;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -267,6 +267,49 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InputSubmitParams {
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
+    pub(crate) expected_context_checkpoint: Option<String>,
+    pub(crate) initial_context: Option<InitialContext>,
+    pub(crate) launch: Option<SubmitLaunch>,
+    pub(crate) key: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) expected_head: RequiredNullable<String>,
+    pub(crate) input: Value,
+    pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OrganizationCommandParams {
+    pub(crate) principal_id: RequiredNullable<String>,
+    pub(crate) command: varin_runtime::catalog::organization::OrganizationCommand,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ThreadParams {
+    pub(crate) thread_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OrganizationInitializeParams {
+    pub(crate) principal_id: RequiredNullable<String>,
+    pub(crate) initial: varin_runtime::catalog::organization::OrganizationInitialization,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OrganizationReadParams {
+    pub(crate) principal_id: RequiredNullable<String>,
+    pub(crate) query: varin_runtime::catalog::organization::OrganizationQuery,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -651,6 +694,8 @@ pub(crate) struct BotThreadCreateParams {
     pub(crate) bot_id: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
+    pub(crate) organization: Option<varin_runtime::catalog::organization::Placement>,
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1210,12 +1255,6 @@ pub(crate) struct GoalControlParams {
     pub(crate) branch_id: String,
     pub(crate) expected_revision: i64,
     pub(crate) action: varin_runtime::catalog::goals::GoalControlAction,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ThreadParams {
-    pub(crate) thread_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1868,6 +1907,7 @@ pub(crate) struct ThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
     pub(crate) principal_id: Option<RequiredNullable<String>>,
+    pub(crate) organization: Option<varin_runtime::catalog::organization::Placement>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1875,22 +1915,6 @@ pub(crate) struct ThreadCreateParams {
 pub(crate) struct PrincipalInitializeParams {
     pub(crate) owner_principal_id: String,
     pub(crate) claim_legacy: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct InputSubmitParams {
-    pub(crate) input_preparation:
-        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
-    pub(crate) expected_context_checkpoint: Option<String>,
-    pub(crate) initial_context: Option<InitialContext>,
-    pub(crate) launch: Option<SubmitLaunch>,
-    pub(crate) key: String,
-    pub(crate) thread_id: String,
-    pub(crate) branch_id: String,
-    pub(crate) expected_head: RequiredNullable<String>,
-    pub(crate) input: Value,
-    pub(crate) configuration: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3831,6 +3855,27 @@ pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAc
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InitialContext {
+    pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
+    pub(crate) personalization: Option<ContextPersonalization>,
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SubmitLaunch {
+    pub(crate) agent: Option<varin_runtime::catalog::launches::AgentSelection>,
+    pub(crate) inherit_source: Option<bool>,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
+    pub(crate) enabled_tools: Vec<String>,
+    pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LaunchSource {
     #[serde(rename = "native_scope")]
     pub(crate) native_scope: Option<String>,
@@ -3875,27 +3920,6 @@ pub(crate) struct ModelAdapterContribution {
     pub(crate) protocol_family: String,
     pub(crate) binding_id: String,
     pub(crate) headers: std::collections::BTreeMap<String, String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SubmitLaunch {
-    pub(crate) agent: Option<varin_runtime::catalog::launches::AgentSelection>,
-    pub(crate) inherit_source: Option<bool>,
-    pub(crate) source: RequiredNullable<LaunchSourceParams>,
-    pub(crate) enabled_tools: Vec<String>,
-    pub(crate) credential_scope: Option<CredentialScope>,
-    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct InitialContext {
-    pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
-    pub(crate) personalization: Option<ContextPersonalization>,
-    pub(crate) effective_system_prompt: String,
-    pub(crate) instruction_sources: Vec<String>,
-    pub(crate) memory_checkpoint: RequiredNullable<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4401,6 +4425,36 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.input.inheritedReceipt" => {
+            serde_json::from_value::<InputSubmitParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.receipt" => {
+            serde_json::from_value::<OrganizationCommandParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.creationDefaults" => {
+            serde_json::from_value::<ThreadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.initialize" => {
+            serde_json::from_value::<OrganizationInitializeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.command" => {
+            serde_json::from_value::<OrganizationCommandParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.read" => {
+            serde_json::from_value::<OrganizationReadParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.model_reference.export" => {
             serde_json::from_value::<ModelReferenceExportParams>(params.clone())
                 .map(|_| ())

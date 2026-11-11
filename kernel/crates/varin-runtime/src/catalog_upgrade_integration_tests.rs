@@ -110,7 +110,7 @@ fn genuine_v81_capture_and_import_assets_keep_original_receipts_digests_and_depe
     let raw = fixture.raw();
     context_observations::check_format(&raw).unwrap();
     followups::events::restore_pre_arrangement_fixture(&raw).unwrap();
-        raw.execute_batch("BEGIN;DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals;ALTER TABLE threads DROP COLUMN principal_id;DROP TABLE catalog_principal_owner;UPDATE runs SET body=json_remove(body,'$.principal_id');DROP TABLE attachment_deliveries;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE history SET body=json_remove(body,'$.content.history_text','$.content.history_call_id');UPDATE input_history_content SET body=json_remove(body,'$.history_text','$.history_call_id');PRAGMA user_version=81;COMMIT;").unwrap();
+        raw.execute_batch("BEGIN;DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals;ALTER TABLE threads DROP COLUMN principal_id;DROP TABLE catalog_principal_owner;UPDATE runs SET body=json_remove(body,'$.principal_id');DROP TABLE attachment_deliveries;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE history SET body=json_remove(body,'$.content.history_text','$.content.history_call_id');UPDATE input_history_content SET body=json_remove(body,'$.history_text','$.history_call_id');DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;PRAGMA user_version=81;COMMIT;").unwrap();
     let captures = rows(&raw, "context_observation_captures");
     let imports = rows(&raw, "context_observation_imports");
     let schema = zone2_objects(&raw);
@@ -300,6 +300,7 @@ fn mismatched_layouts_and_unknown_versions_are_rejected_without_repair() {
         (84, Fixture::v82()),
     ] {
         let raw = fixture.raw();
+        if label < 95 { crate::catalog::organization::remove_for_legacy_fixture(&raw); }
         raw.pragma_update(None, "user_version", label).unwrap();
         let history = rows(&raw, "history");
         let schema = zone2_objects(&raw);

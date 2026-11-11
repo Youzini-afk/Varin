@@ -35,6 +35,8 @@ pub enum ExternalCommand {
         value: Value,
     },
     Create {
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        organization: Option<super::organization::Placement>,
         key: String,
         id: String,
         configuration_id: String,
@@ -49,6 +51,9 @@ pub enum ExternalCommand {
         principal_id: Option<Option<String>>,
     },
     List,
+    /// Trusted owner metadata, including tombstones; does not read Harness history.
+    Inspect { id: String },
+    UpdateReceipt { command: Box<ExternalCommand> },
     ArrangementPending,
     Defer { id: String, turn_id: String, reason: String },
     CleanupList,
@@ -61,6 +66,8 @@ pub enum ExternalCommand {
         limit: Option<u64>,
     },
     Update {
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        key: Option<String>,
         id: String,
         expected_revision: u64,
         title: Option<String>,
@@ -699,6 +706,7 @@ impl Catalog {
             ExternalCommand::Configure { key, .. } => Some(format!("configure:{key}")),
             ExternalCommand::Create { key, .. } => Some(format!("create:{key}")),
             ExternalCommand::Admit { id, key, .. } => Some(format!("admit:{id}:{key}")),
+            ExternalCommand::Update { id, key:Some(key), .. } => Some(format!("update:{id}:{key}")),
             _ => None,
         };
         if let Some(key) = &key {
@@ -724,6 +732,14 @@ impl Catalog {
         }
         let result = match p.command {
             ExternalCommand::Settings => external_settings(&tx)?,
+            ExternalCommand::Inspect { id } => record::<Value>(&tx,"external_conversations",&id)?,
+            ExternalCommand::UpdateReceipt { command } => {
+                use sha2::{Digest,Sha256};
+                let ExternalCommand::Update{id,key:Some(key),..}=command.as_ref() else{return Err(RuntimeError::Invalid("metadata receipt requires the original keyed Update command".into()));};
+                let intent=hex::encode(Sha256::digest(serde_json::to_vec(command.as_ref())?));
+                let old:Option<(String,String)>=tx.query_row("SELECT intent,receipt FROM external_commands WHERE id=?1",[format!("update:{id}:{key}")],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+                if let Some((original,receipt))=old {if original!=intent{return Err(RuntimeError::Conflict("external command key was reused with different input".into()));}serde_json::from_str(&receipt)?}else{Value::Null}
+            },
             ExternalCommand::ArrangementPending => json!(followups::external::pending(&tx)?),
             ExternalCommand::Defer { id,turn_id,reason } => followups::external::deferred(&tx,&id,&turn_id,&reason)?,
             ExternalCommand::InspectCapabilities { configuration_id, configuration } => {
@@ -819,6 +835,7 @@ impl Catalog {
                 external_settings(&tx)?
             }
             ExternalCommand::Create {
+                organization,
                 id,
                 configuration_id,
                 harness,
@@ -852,6 +869,7 @@ impl Catalog {
                 } else if let Some(principal)=principal_id { if let Some(value)=&principal {principals::validate(value)?;} principal }
                 else { tx.query_row("SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1",[],|r|r.get::<_,String>(0)).optional()? };
                 v["principalId"]=json!(owner);
+                let organization_parent = parent.as_ref().and_then(|p|p["threadId"].as_str()).map(|id|super::organization::ConversationRef::Native{id:id.into()});
                 if let Some(parent) = parent { v["parent"] = parent; }
                 if private_workspace == Some(true) {
                     v["privateWorkspace"] = json!(true);
@@ -860,6 +878,7 @@ impl Catalog {
                     "INSERT INTO external_conversations VALUES(?1,?2)",
                     params![id, encode(&v)?],
                 )?;
+                super::organization::admit(&tx,owner.as_deref(),&super::organization::ConversationRef::External{id:id.clone()},organization.as_ref(),organization_parent.as_ref(),&format!("external-create:{id}"))?;
                 super::model_references::admit_external_agent(&tx,&id)?;
                 event(
                     &tx,
@@ -945,6 +964,7 @@ impl Catalog {
                 pinned,
                 archived,
                 deleted,
+                ..
             } => {
                 let mut v = conversation(&tx, &id)?;
                 if v["revision"].as_u64() != Some(expected_revision) {

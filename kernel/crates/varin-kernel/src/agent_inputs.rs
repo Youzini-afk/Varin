@@ -8,9 +8,21 @@ fn submit_input(
     order: Option<varin_runtime::resource_admission::ResourceReservation>,
     receipt_only: bool,
 ) -> Result<Value, KernelError> {
+    submit_input_with_original_source(catalog, params, cancelled, order, receipt_only, false)
+}
+
+fn submit_input_with_original_source(
+    catalog: Arc<Mutex<Catalog>>,
+    params: Value,
+    cancelled: Arc<AtomicBool>,
+    order: Option<varin_runtime::resource_admission::ResourceReservation>,
+    receipt_only: bool,
+    original_inherited_source: bool,
+) -> Result<Value, KernelError> {
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
     }
+    if original_inherited_source && !receipt_only { return Err(KernelError::Protocol("original source lookup is read-only".into())); }
     let mut params = params;
     if !receipt_only {
         let object = params
@@ -114,9 +126,11 @@ fn submit_input(
         }
     }
     if receipt_only {
-        let receipt = preparation
-            .existing_receipt(&launch, inherit_source)
-            .map_err(domain)?;
+        let receipt = if original_inherited_source {
+            preparation.existing_receipt_inheriting_source(&launch, inherit_source)
+        } else {
+            preparation.existing_receipt(&launch, inherit_source)
+        }.map_err(domain)?;
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
         }
@@ -366,12 +380,13 @@ pub(super) fn execute(
                 return Err(KernelError::Cancelled);
             }
             owner
-                .create_thread_with_principal(&p.thread_id, &p.branch_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()))
+                .create_thread_with_placement(&p.thread_id, &p.branch_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()), p.organization)
                 .map_err(domain)?;
             Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
         }
         "runtime.input.submit" => submit_input(catalog, params, cancelled, order, false),
         "runtime.input.receipt" => submit_input(catalog, params, cancelled, None, true),
+        "runtime.input.inheritedReceipt" => submit_input_with_original_source(catalog, params, cancelled, None, true, true),
         "runtime.child.prepare" => prepare_child_input(catalog, params, cancelled),
         "runtime.input.enqueue" | "runtime.input.enqueueReceipt" => {
             let receipt_only = method == "runtime.input.enqueueReceipt";
@@ -606,6 +621,30 @@ fn prepare_child_input(
 #[cfg(test)]
 mod resource_receipt_tests {
     use super::*;
+    #[test]
+    fn inherited_receipt_reuses_only_the_original_prepared_fallback_and_checks_full_intent() {
+        let root = std::env::temp_dir().join(format!("varin-inherited-receipt-{}", uuid::Uuid::new_v4()));
+        let mut owner = Catalog::open(&root).unwrap();
+        owner.create_thread("thread", "branch").unwrap();
+        let catalog = Arc::new(Mutex::new(owner));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let input = json!({"key":"original","threadId":"thread","branchId":"branch","expectedHead":null,"input":"same user intent",
+          "configuration":{"providerFamily":"openai-responses","model":"fixture","endpoint":"https://fixture.invalid","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1},
+          "launch":{"inheritSource":true,"source":null,"enabledTools":[]}});
+        assert!(submit_input_with_original_source(catalog.clone(),input.clone(),cancel.clone(),None,true,true).unwrap().is_null());
+        let receipt = submit_input(catalog.clone(),input.clone(),cancel.clone(),None,false).unwrap();
+        let mut retry = input.clone();
+        retry["launch"]["source"] = json!({"resourceOwner":{"kind":"local"},"workspaceId":"later","executionWorkspaceId":"later","branchId":null,"revision":null,"mode":"live_root","liveRoot":{"host_id":"host","canonical_root":"/later-project","root_id":"later"}});
+        assert!(submit_input(catalog.clone(),retry.clone(),cancel.clone(),None,true).is_err());
+        assert_eq!(submit_input_with_original_source(catalog.clone(),retry.clone(),cancel.clone(),None,true,true).unwrap(),receipt);
+        retry["input"] = json!("changed user intent");
+        assert!(submit_input_with_original_source(catalog.clone(),retry,cancel.clone(),None,true,true).is_err());
+        let mut explicit = input;
+        explicit["launch"]["inheritSource"] = json!(false);
+        assert!(submit_input_with_original_source(catalog.clone(),explicit,cancel,None,true,true).is_err());
+        drop(catalog); let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn receipt_read_reuses_submit_identity_without_consuming_context_or_admitting_a_run() {
         let root =

@@ -443,6 +443,11 @@ impl Catalog {
                 "external dispatch is no longer admitted".into(),
             ));
         }
+        super::organization::admit(&tx,run.principal_id.as_deref(),
+            &super::organization::ConversationRef::External{id:child.conversation_id.clone()},
+            p.admission.expected_input.organization.as_ref(),
+            Some(&super::organization::ConversationRef::Native{id:child.parent_thread_id.clone()}),
+            &format!("external-child:{}",child.operation_id))?;
         child.cursor = event(
             &tx,
             &op.id,

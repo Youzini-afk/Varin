@@ -412,7 +412,7 @@ impl RunAssembly {
             declarations.extend(crate::capability_tools::declarations(runtime.catalog()));
             declarations.extend(crate::family_tools::declarations_with_attachments(runtime.catalog(), self.resource.clone()));
             declarations.push(crate::message_tools::declaration_with_attachments(runtime.catalog(), self.resource.clone()));
-            if is_bot { declarations.push(crate::bot_work_tools::declaration(runtime.catalog())); }
+            if is_bot { declarations.push(crate::bot_work_tools::declaration(runtime.catalog())); declarations.push(crate::organization_tools::declaration(runtime.catalog(),self.resource.clone())); }
             declarations.push(crate::followup_tools::declaration(
                 runtime.catalog(),
                 collaboration_source.clone(),

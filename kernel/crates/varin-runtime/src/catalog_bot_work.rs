@@ -71,6 +71,15 @@ pub(super) fn ordinary_conversation(db: &Connection, caller: &str, target: &str)
         params![caller, target], |row| row.get(0),
     ).map_err(Into::into)
 }
+/// Read authority is deliberately separate from messaging and memory links.
+/// Only a directly bound Bot conversation gains the principal-wide product view;
+/// delegated Agents retain their original family and explicit-background authority.
+pub(super) fn readable_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM bot_thread_bindings bot JOIN threads caller ON caller.id=bot.thread_id JOIN threads target ON target.id=?2 WHERE bot.thread_id=?1 AND caller.principal_id IS target.principal_id AND target.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=target.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=target.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=target.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1'))",
+        params![caller, target], |row| row.get(0),
+    ).map_err(Into::into)
+}
 pub(super) fn can_message(
     db: &Connection,
     sender: &str,

@@ -677,6 +677,7 @@ pub(crate) fn spawn(
                             "runtime.thread.create"
                                 | "runtime.input.submit"
                                 | "runtime.input.receipt"
+                                | "runtime.input.inheritedReceipt"
                                 | "runtime.input.enqueueReceipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
@@ -1363,6 +1364,7 @@ pub(crate) fn spawn(
                             "runtime.thread.create"
                                 | "runtime.input.submit"
                                 | "runtime.input.receipt"
+                                | "runtime.input.inheritedReceipt"
                                 | "runtime.input.enqueueReceipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
@@ -2847,12 +2849,12 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     if method == "runtime.bot.entry.resolve" {
         let p: BotThreadCreateParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(
-            catalog.resolve_bot_entry(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?,
+            catalog.resolve_bot_entry_with_principal(&p.thread_id, &p.branch_id, &p.bot_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref())).map_err(domain)?,
         )?);
     }
     if method == "runtime.bot.thread.create" {
         let p: BotThreadCreateParams = serde_json::from_value(params)?;
-        catalog.create_bot_thread(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?;
+        catalog.create_bot_thread_with_placement(&p.thread_id, &p.branch_id, &p.bot_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()), p.organization).map_err(domain)?;
         return Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}));
     }
 
@@ -2902,6 +2904,26 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     if method == "runtime.thread.inspect" {
         let p: ThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);
+    }
+    if method == "runtime.organization.creationDefaults" {
+        let p: ThreadParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_creation_defaults(&p.thread_id).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.receipt" {
+        let p: OrganizationCommandParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_receipt(p.principal_id.0.as_deref(), &p.command).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.read" {
+        let p: OrganizationReadParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_snapshot(p.principal_id.0.as_deref(), p.query).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.command" {
+        let p: OrganizationCommandParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_command(p.principal_id.0.as_deref(), p.command).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.initialize" {
+        let p: OrganizationInitializeParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.initialize_organization(p.principal_id.0.as_deref(), p.initial).map_err(domain)?)?);
     }
     if method == "runtime.thread.catalog.list" {
         let query: ThreadCatalogQuery = serde_json::from_value(params)?;
@@ -3565,7 +3587,7 @@ impl FamilyCommand {
                     varin_runtime::catalog::family::FamilyListQuery{file_path:p.file_path,parent_thread_id:p.parent_thread_id,parent_branch_id:p.parent_branch_id,workspace_id:p.workspace_id,
                         updated_after_ms:p.updated_after_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedAfterMs".into()))?,
                         updated_before_ms:p.updated_before_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedBeforeMs".into()))?,
-                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20))},
+                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20)),..Default::default()},
                 )
             }
             "runtime.family.runs" => {
