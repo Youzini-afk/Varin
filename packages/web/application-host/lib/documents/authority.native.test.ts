@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDocumentAuthorityHarness, type DocumentAuthorityHarness } from './contract-fixtures.js';
 import type { WatchEvent, WatchPosition } from './watch.js';
+import { createNativeProcessTestHarness } from '../process/native-process.test-helper.js';
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -134,5 +135,30 @@ it('excludes the dispatching round admission without ignoring real writer activi
   } finally {
     await round.close();
     await harness.cleanup();
+  }
+});
+
+it('drains fixture-owned Documents watches before the original kernel exits', async () => {
+  const native = createNativeProcessTestHarness();
+  const f = await native.get();
+  let unsubscribe = () => {};
+  try {
+    const directory = path.join(f.root, 'watched-workspace');
+    await fs.promises.mkdir(directory);
+    const { workspaceId } = await f.documents.resolveWorkspace({ path: directory });
+    const subscription = f.documents.watch(workspaceId, () => {});
+    expect(await subscription.ready).toBe(true);
+    await subscription.settle();
+    expect(f.documents.hasWatch(workspaceId)).toBe(true);
+    let watchAtKernelExit: boolean | undefined;
+    unsubscribe = f.client.subscribeExit(() => { watchAtKernelExit = f.documents.hasWatch(workspaceId); });
+    // Do not close the subscription in the test: its original fixture owner
+    // must do so before kernel shutdown, and then remove the actual directory.
+    await native.dispose();
+    expect(watchAtKernelExit).toBe(false);
+    expect(fs.existsSync(f.root)).toBe(false);
+  } finally {
+    unsubscribe();
+    await native.dispose();
   }
 });

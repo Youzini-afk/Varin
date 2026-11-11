@@ -89,3 +89,39 @@ it.each(['external:child:dispatch','coordinator-child-thread'])(
     expect(deleteBranch.mock.invocationCallOrder[0]).toBeLessThan(released.mock.invocationCallOrder[0]!);
     expect(released).toHaveBeenCalledTimes(1);
   });
+
+it.each([undefined,'different-branch','different-environment'] as const)(
+  'applies to the original external source across native optional-field serialization (%s)',async changed=>{
+    // External preparation keeps its native Source in JSON. Rust's original
+    // authority round-trip emits the optional absent environment as null.
+    const externalSource={resource_owner:{kind:'managed_host' as const,hostId:'target',connectionId:'connection',endpointIdentity:'endpoint'},
+      workspace_id:'workspace',execution_workspace_id:'private-view',mode:'native_workspace' as const,branch_id:'child-source:dispatch',revision:null,live_root:null};
+    const source={...externalSource,environment_run_id:null};
+    const origin={kind:'model_step' as const,request_id:'request'};
+    const invocation:ToolInvocationAuthority={invocationId:'call',runId:'parent-run',threadId:'parent',callId:'exchange',origin,
+      operationId:toolOperationId(origin,'exchange'),executorOwner:{kind:'kernel'},source,toolName:'submit_code',operation:'effect',completion:'result',arguments:{}};
+    const result:WorkingResult={branchId:`code-exchange:${invocation.operationId}`,root:'retained-root',resultRevision:1,
+      changedPaths:['parent-result.txt'],baseStates:{},pathStates:{},diffStats:{files:1,insertions:1,deletions:0},createdAt:'2026-11-11T00:00:00Z'};
+    const receipt={status:'applied',changedFiles:['parent-result.txt'],effect:'confirmed',executorStopped:true};
+    const mergeResult=vi.fn(async()=>receipt),release=vi.fn(async()=>{});
+    mocks.open.mockResolvedValue({store:{},directory:'/original-target',documentWorkspaceId:'original-document-workspace',workingStates:{},release} as unknown as ExchangeScope);
+    const scope:ManagedSourceLocalScope={principal:{principalId:'paired',capabilities:['filesystem:write']},coordinatorHostId:'coordinator',authorityId:'original',resourceEpoch:'epoch',source,
+      scope:{kind:'source_read',threadId:'external:child:dispatch',branchId:source.branch_id,key:'exchange'},
+      physicalRoot:{hostId:'target',rootId:'native-root',canonicalRoot:'/original-target'},
+      grant:{grantId:'original-reader',kernelEpoch:'epoch',hostGeneration:'generation',authorityInstanceId:null,workerId:null,workerGeneration:null,sessionId:null,
+        threadId:'external:child:dispatch',runId:null,operationId:null,owningWorkspace:'workspace',executionWorkspace:'private-view',capabilities:['storage.read','storage.write'],pathScopes:[''],storageIdentity:'target-storage'}};
+    const service=createManagedCodeExchangeService({coordinator:{mergeResult}} as never);
+    const child={operation_id:'dispatch',dispatch_operation_id:null,conversation_id:'external:child:dispatch'} as import('./protocol.generated.js').ExternalChild;
+    const self={branchId:'parent-branch',source} as import('./code-exchange.js').CodeParticipant;
+    const expected={...externalSource,...(changed==='different-branch'?{branch_id:'another-branch'}:{}),
+      ...(changed==='different-environment'?{environment_run_id:'different-original-view'}:{})};
+    const settled=service(scope,{kind:'external_code_apply',invocation,self,child,direction:'send',externalSource:expected,result},new AbortController().signal);
+    if(changed){await expect(settled).rejects.toThrow('External exchange original source changed');expect(mergeResult).not.toHaveBeenCalled();}
+    else {
+      await expect(settled).resolves.toBe(receipt);
+      expect(mergeResult).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({operationId:`integration:${invocation.operationId}`,
+        operationBinding:expect.objectContaining({kind:'external_code_exchange',direction:'send',target:externalSource,
+          targetThreadId:'external:child:dispatch',parentRunId:'parent-run'})}));
+    }
+    expect(release).toHaveBeenCalledOnce();
+  });

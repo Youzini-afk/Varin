@@ -8,9 +8,17 @@ import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from '.
 import { acknowledgedCode, captureCodeSelection, codeBaseline, codeIntegration, openCodeTarget, openFixedCodeSource,
   type CodeExchangeOwners, type CodeParticipant, type CodeSelection } from './code-exchange.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
-import { toolOperationId, validToolOrigin } from './protocol.generated.js';
+import { toolOperationId, validToolOrigin, type LaunchSource } from './protocol.generated.js';
 import { sourcePathMap } from './source-path-map.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
+
+// SourceSelection accepts an omitted environment and serializes None as null.
+// Compare that single nullable field canonically, without changing any owner,
+// workspace, branch, native scope or original materialized-view identity.
+const sameSource = (a: LaunchSource, b: LaunchSource) => isDeepStrictEqual(
+  { ...a, environment_run_id: a.environment_run_id ?? null },
+  { ...b, environment_run_id: b.environment_run_id ?? null },
+);
 
 export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:ToolInvocationAuthority,branchId:string,
   source:CodeParticipant,target:CodeParticipant,files:CodeSelection[]|undefined,signal:AbortSignal,onApply:()=>void,
@@ -123,7 +131,7 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
         acknowledged:await acknowledgedCode(target.store,operation.sourceThreadId,operation.targetThreadId),signal});
       if(operation.kind==='external_code_apply') {
         const expected=operation.direction==='receive'?operation.self.source:operation.externalSource;
-        if(!isDeepStrictEqual(expected,scope.source)
+        if(!sameSource(expected,scope.source)
           ||operation.child.conversation_id!==`external:child:${operation.child.dispatch_operation_id??operation.child.operation_id}`
           ||operation.externalSource.workspace_id!==scope.source.workspace_id
           ||!isDeepStrictEqual(operation.externalSource.resource_owner,scope.source.resource_owner)
@@ -132,7 +140,7 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
         try{return await owners.coordinator.mergeResult(input);}
         catch(error){const inspection={...input};delete inspection.signal;const receipt=await owners.coordinator.inspectIntegration(inspection);if(receipt)return receipt;throw error;}
       }
-      if(!isDeepStrictEqual(operation.target.source,scope.source))throw new Error('The exchange target source changed');
+      if(!sameSource(operation.target.source,scope.source))throw new Error('The exchange target source changed');
       const input=codeIntegration(invocation,operation.branchId,operation.source,operation.target,operation.result,target,signal);
       try{return await owners.coordinator.mergeResult(input);}
       catch(error){const inspection={...input};delete inspection.signal;const receipt=await owners.coordinator.inspectIntegration(inspection);if(receipt)return receipt;throw error;}

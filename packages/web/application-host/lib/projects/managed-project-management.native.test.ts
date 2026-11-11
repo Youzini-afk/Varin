@@ -25,18 +25,27 @@ import { createNativeWorkspaceOwner } from '../kernel/native-workspaces.js';
 import { createThreadSourcePreparer } from '../kernel/thread-sources.js';
 import { createManagedProjectManagementOwner } from './managed-project-management.js';
 const cleanups: Array<() => Promise<unknown>> = [];
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.unstubAllEnvs(); });
+afterEach(async () => {
+  const errors: unknown[] = [];
+  try {
+    for (const close of cleanups.splice(0).reverse()) {
+      try { await close(); } catch (error) { errors.push(error); }
+    }
+  } finally { vi.unstubAllEnvs(); }
+  if (errors.length) throw new AggregateError(errors, 'Managed project fixture cleanup failed');
+});
 it('manages the real target Git workspace and joins its original adoption intent without touching the coordinator', async () => {
   const a = createNativeProcessTestHarness(undefined, { hostId: 'management-coordinator' });
   const documentRoot = await mkdtemp(path.join(os.tmpdir(),'varin-managed-documents-'));
+  cleanups.push(() => rm(documentRoot, { recursive: true, force: true }));
   const nativeOwner: { current?: ReturnType<typeof createNativeWorkspaceOwner> } = {};
   const documentAuthority = createDocumentAuthority({ hostId:'management-target',dataDir:documentRoot,isAllowedRoot:async()=>true,isTrusted:async()=>true,
     nativeWorkspaces:{resolveId:(id,signal,ref)=>nativeOwner.current?.resolveId(id,signal,ref)??Promise.resolve(undefined),
       resolvePath:(directory,containing)=>nativeOwner.current?.resolvePath(directory,containing)??Promise.resolve(undefined),
       retainReference:(source,key)=>nativeOwner.current!.retainReference(source,key),releaseReference:key=>nativeOwner.current!.releaseReference(key)} });
-  cleanups.push(async()=>{await documentAuthority.dispose();await rm(documentRoot,{recursive:true,force:true});});
   const b = createNativeProcessTestHarness(documentAuthority, { hostId: 'management-target' });
-  cleanups.push(() => a.dispose(), () => b.dispose());
+  // Caller-owned Documents must drain while its original storage/kernel lives.
+  cleanups.push(() => a.dispose(), () => b.dispose(), () => documentAuthority.dispose());
   const coordinator = await a.get(), target = await b.get();
   // Assemble the target's existing native text owner, as the Application Host
   // does. A remote Documents read must not silently rely on another fixture.

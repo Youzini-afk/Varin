@@ -92,13 +92,16 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
       });
       cleanups.push(() => client.close());
       const documents = authority ?? createDocumentAuthority({ hostId: options.hostId ?? "process-consumer", dataDir: path.join(root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
-      if (!authority) cleanups.splice(cleanups.length - 1, 0, () => documents.dispose());
+      // Documents owns native watches and may still use the original storage
+      // during disposal. Register its storage cleanup below it, never above it.
+      const storageCleanupIndex = cleanups.length;
+      if (!authority) cleanups.push(() => documents.dispose());
       await client.start();
       const adapter = new KernelStorageAdapter({
         client, hostId: options.hostId ?? "process-consumer", storageRoot: path.join(root, "storage"),
         resolveWorkspaceRoot: async (workspaceId) => (await documents.inspectWorkspace(workspaceId)).root,
       });
-      cleanups.push(() => adapter.dispose());
+      cleanups.splice(storageCleanupIndex, 0, () => adapter.dispose());
       const backend = new KernelFileResourceBackend(adapter, {
         authorityPurpose: "recovery-maintenance", authorityCapabilities: ["recovery.maintenance"],
         resolveExecutionRoot: async (directory) => {
