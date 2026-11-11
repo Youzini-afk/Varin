@@ -9,6 +9,7 @@ import { createFsSearchRuntime } from '../fs/search.js';
 import { createWorkspaceContentSearch } from '../search/content.js';
 import os from 'node:os';
 import { createDocumentAuthority } from '../documents/authority.js';
+import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createResourceFilesOwner } from '../workspace/resource-files.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
@@ -37,6 +38,10 @@ it('manages the real target Git workspace and joins its original adoption intent
   const b = createNativeProcessTestHarness(documentAuthority, { hostId: 'management-target' });
   cleanups.push(() => a.dispose(), () => b.dispose());
   const coordinator = await a.get(), target = await b.get();
+  // Assemble the target's existing native text owner, as the Application Host
+  // does. A remote Documents read must not silently rely on another fixture.
+  const releaseTextCodec = bindDocumentTextCodec(target.client);
+  cleanups.push(async () => { releaseTextCodec(); });
   vi.stubEnv('VARIN_DATA_DIR', path.join(target.root, 'target-config'));
   const directory = path.join(target.root, 'project'), local = path.join(coordinator.root, 'project');
   await mkdir(directory); await mkdir(local); await writeFile(path.join(local, 'sentinel'), 'coordinator untouched');
@@ -97,6 +102,9 @@ it('manages the real target Git workspace and joins its original adoption intent
   const physicalBody=Buffer.from('physical target upload through the original Documents lease');
   await remote.workspaceUpload({...physicalLocation,path:'physical-upload.txt',key:'physical-file-write',byteLength:physicalBody.length},(async function*(){yield physicalBody;})());
   expect(await readFile(path.join(directory,'physical-upload.txt'),'utf8')).toBe(physicalBody.toString());
+  const physicalDocument = await remote.documents('read', 'POST', { resource: { workspaceId: workspace.workspaceId, resourceId: 'physical-upload.txt' } });
+  expect(physicalDocument.status).toBe(200);
+  expect(JSON.stringify(await physicalDocument.json())).toContain(physicalBody.toString());
   await mkdir(path.join(directory,'nested'));await writeFile(path.join(directory,'nested','search.txt'),'actual target search content');
   expect(await remote.workspace({...physicalLocation,command:{kind:'filename-search',path:'',query:'search'}})).toMatchObject({kind:'filename-search',results:[{path:'nested/search.txt'}],enumerationStatus:'complete'});
   expect(await remote.workspace({...physicalLocation,command:{kind:'content-search',path:'',query:'actual target',fixedStrings:true}})).toMatchObject({kind:'content-search',result:{status:'ready',hits:[{resource:{workspaceId:workspace.workspaceId,resourceId:'nested/search.txt'},line:1,column:1,revision:expect.any(String)}]}});
