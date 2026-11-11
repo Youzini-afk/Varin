@@ -20,6 +20,33 @@ bun run dev
 已打包 UI 路径使用 `bun run electron:dev:bundled`。平台细节见 [Web](../packages/web/README.md)、
 [Electron](../packages/electron/README.md)、[Mobile](../packages/mobile/README.md)。
 
+`dev` / `dev:web:hmr` 在启动 Vite 与 API 前先完成共享 runtime 包准备，复用现有构建缓存；
+首次 checkout 或清理输出后无需另行手动 build。`dev:web:full` 使用相同准备，再等待前端首次成功构建后
+启动 API。准备失败不会启动消费者；准备期间退出也会停止准备进程，不会随后自动启动服务。
+
+### 开发模式反向代理
+
+HMR 默认 UI 为 `127.0.0.1:5180`，API 为 `127.0.0.1:3902`，分别可由
+`VARIN_HMR_HOST`、`VARIN_HMR_UI_PORT`、`VARIN_HMR_API_PORT` 调整。Nginx Proxy Manager
+等代理应转发到 UI 端口并启用 WebSocket，而不是将浏览器实时观察请求单独指向另一来源。
+使用自定义域名时，可通过 Vite 原生的 `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` 指定该域名；
+远程访问继续使用 Host 原有认证配置，不需要关闭来源校验。
+
+Vite 保留浏览器的 `Host` 和 `Origin`，同时透传上游的转发头。TLS 在反向代理终止时，代理须提供
+原始主机（含非默认端口）和协议。例如 Nginx 面向浏览器的代理层：
+
+```nginx
+proxy_set_header Host $http_host;
+proxy_set_header X-Forwarded-Host $http_host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+保留原始 `Origin`，不要改成内部 HTTP 地址。多层代理应保留受信上游记录的外部来源，而非覆盖成最后
+一跳的内部地址。Host 仍独立校验认证与来源；本地直连与 HTTPS 反代不需要不同的源码补丁。
+
 ## 修改与验证
 
 先确定实际 owner、输入路径和消费者。Renderer 状态、Host 服务、Catalog、Storage、扩展配置及 Knowledge 各自有职责。
