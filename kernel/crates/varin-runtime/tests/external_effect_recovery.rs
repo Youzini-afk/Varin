@@ -461,105 +461,101 @@ fn unknown_effect_without_stop_stays_blocked_and_rejects_another_owner_epoch() {
     supervisor.shutdown().unwrap();
 }
 
-#[test]
-fn precrash_cancel_with_late_original_stop_receipt_finishes_without_launch() {
-    let f = Fixture::dispatched(true);
-    let catalog = Catalog::open(&f.root).unwrap();
-    let supervisor = RunSupervisor::new(catalog);
-    assert_eq!(supervisor.cancel(&f.run).unwrap().state, RunState::Waiting);
-    {
-        let owner = supervisor.catalog();
-        let mut catalog = owner.lock().unwrap();
-        assert!(!catalog.run_startable(&f.run).unwrap());
-        catalog
-            .record_external_receipt_with_stop(OPERATION, f.receipt(), false)
-            .unwrap();
-    }
-    supervisor.reconcile_message_requests().unwrap();
-    assert!(supervisor.status().unwrap().is_empty());
-    assert_eq!(f.occupancy(), 1);
-    {
-        let owner = supervisor.catalog();
-        let mut catalog = owner.lock().unwrap();
-        catalog
-            .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
-            .unwrap();
-    }
-    // The same real continuation pass used at startup/on receipts owns the cleanup.
-    supervisor.reconcile_message_requests().unwrap();
-    supervisor.advance_pending().unwrap();
-    supervisor.shutdown().unwrap();
-    let owner = supervisor.catalog();
-    let catalog = owner.lock().unwrap();
+fn assert_cancelled_original_observation(catalog: &Catalog, f: &Fixture) {
     assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
     assert!(!catalog.run_startable(&f.run).unwrap());
     let operation = catalog.operation(OPERATION).unwrap();
+    assert_eq!(operation.epoch, f.epoch);
+    assert_eq!(operation.execution_owner, Some(ExecutorOwner::External {
+        identity: "original-owner".into(), epoch: "original-epoch".into(),
+    }));
     assert_eq!(operation.outcome, Some(Outcome::Indeterminate));
     assert_eq!(operation.effect, Effect::Unknown);
-    assert!(operation.external_receipt.unwrap().executor_stopped);
-    assert_eq!(
-        catalog
-            .execution_history("branch")
-            .unwrap()
-            .iter()
-            .filter(|item| matches!(item.content, Content::ToolResult { .. }))
-            .count(),
-        1
-    );
-    assert_eq!(f.occupancy(), 0);
+    let history = catalog.execution_history("branch").unwrap();
+    let results = history.iter().filter_map(|item| match &item.content {
+        Content::ToolResult { result } => Some(result), _ => None,
+    }).collect::<Vec<_>>();
+    assert_eq!(results.len(), 1);
+    assert!(matches!(&results[0].completion, ToolCompletion::Result {
+        outcome: Outcome::Indeterminate, effect: Effect::Unknown, ..
+    }));
+    let attention = catalog.capture_attention_read().load(&|| false).unwrap();
+    let branch = attention.branches.iter().find(|branch| branch.branch_id == "branch").unwrap();
+    assert!(branch.active_run_id.is_none());
+    assert!(branch.has_unsettled_work);
+    assert!(attention.items.iter().any(|item| item.operation_id.as_deref() == Some(OPERATION)
+        && item.kind == "effect_unknown"));
     f.assert_no_replay();
 }
 
 #[test]
-fn cancelled_canonical_unknown_requires_original_executor_stop_even_with_call_receipt() {
+fn precrash_cancel_finishes_observation_before_late_original_stop_without_launch() {
+    let f = Fixture::dispatched(true);
+    let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
+    assert!(supervisor.cancel(&f.run).unwrap().cancel_requested);
+    // Startup's real continuation pass settles only the foreground observation. It
+    // must not wait indefinitely for a callback lost with the previous Host.
+    supervisor.reconcile_message_requests().unwrap();
+    supervisor.shutdown().unwrap();
+    assert!(supervisor.execution_failure(&f.run).unwrap().is_none());
+    let owner = supervisor.catalog();
+    let mut catalog = owner.lock().unwrap();
+    assert_cancelled_original_observation(&catalog, &f);
+    assert!(catalog.operation(OPERATION).unwrap().external_receipt.is_none());
+    assert_eq!(f.occupancy(), 1, "cancelled Run retains the original writer");
+    let history = catalog.execution_history("branch").unwrap();
+    catalog.record_external_receipt_with_stop(OPERATION, f.receipt(), false).unwrap();
+    assert_eq!(f.occupancy(), 1, "a late caller receipt is still not physical stop");
+    let mut foreign = f.receipt();
+    foreign.epoch = "replacement-epoch".into();
+    assert!(catalog.record_external_receipt_with_stop(OPERATION, foreign, true).is_err());
+    assert_eq!(f.occupancy(), 1);
+    catalog.record_external_receipt_with_stop(OPERATION, f.receipt(), true).unwrap();
+    assert_cancelled_original_observation(&catalog, &f);
+    assert!(catalog.operation(OPERATION).unwrap().external_receipt.unwrap().executor_stopped);
+    assert_eq!(f.occupancy(), 0);
+    assert_eq!(catalog.execution_history("branch").unwrap(), history,
+        "late executor evidence cannot replace the already committed observation");
+    drop(catalog); drop(owner); drop(supervisor);
+    let catalog = Catalog::open(&f.root).unwrap();
+    assert_cancelled_original_observation(&catalog, &f);
+    assert_eq!(catalog.execution_history("branch").unwrap(), history);
+    assert_eq!(f.occupancy(), 0);
+}
+
+#[test]
+fn cancelled_canonical_unknown_closes_observation_but_keeps_original_stop_responsibility() {
     for originally_stopped in [false, true] {
         let f = Fixture::interrupted(true, Some(originally_stopped));
         let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
         supervisor.reconcile_message_requests().unwrap();
-        if !originally_stopped {
-            assert!(supervisor.status().unwrap().is_empty());
-            assert_eq!(f.occupancy(), 1);
-            let owner = supervisor.catalog();
-            let mut catalog = owner.lock().unwrap();
-            assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Waiting);
-            assert!(
-                catalog
-                    .operation(OPERATION)
-                    .unwrap()
-                    .call_completion
-                    .is_some()
-            );
-            assert!(
-                !catalog
-                    .execution_history("branch")
-                    .unwrap()
-                    .iter()
-                    .any(|item| matches!(item.content, Content::ToolResult { .. }))
-            );
-            catalog
-                .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
-                .unwrap();
-        }
-        supervisor.reconcile_message_requests().unwrap();
         supervisor.shutdown().unwrap();
+        assert!(supervisor.execution_failure(&f.run).unwrap().is_none());
         let owner = supervisor.catalog();
-        let catalog = owner.lock().unwrap();
-        assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
-        assert_eq!(
-            catalog.operation(OPERATION).unwrap().effect,
-            Effect::Unknown
-        );
-        assert_eq!(
-            catalog
-                .execution_history("branch")
-                .unwrap()
-                .iter()
-                .filter(|item| matches!(item.content, Content::ToolResult { .. }))
-                .count(),
-            1
-        );
+        let mut catalog = owner.lock().unwrap();
+        assert_cancelled_original_observation(&catalog, &f);
+        let operation = catalog.operation(OPERATION).unwrap();
+        assert!(operation.call_completion.is_some());
+        assert_eq!(f.occupancy(), i64::from(!originally_stopped));
+        let history = catalog.execution_history("branch").unwrap();
+        let completion = history.iter().find_map(|item| match &item.content {
+            Content::ToolResult { result } => Some(&result.completion), _ => None,
+        }).unwrap();
+        assert_eq!(completion, &ToolCompletion::Result {
+            outcome: Outcome::Indeterminate, effect: Effect::Unknown, content: f.receipt().result,
+        }, "pair the actual precrash caller receipt rather than a synthetic replacement");
+        if !originally_stopped {
+            assert!(operation.external_receipt.is_none());
+            assert!(!catalog.capture_attention_read().load(&|| false).unwrap()
+                .stopped_executors.iter().any(|stopped| stopped.operation_id == OPERATION));
+            catalog.record_external_receipt_with_stop(OPERATION, f.receipt(), false).unwrap();
+            assert_eq!(f.occupancy(), 1);
+            catalog.record_external_receipt_with_stop(OPERATION, f.receipt(), true).unwrap();
+            assert!(catalog.operation(OPERATION).unwrap().external_receipt.unwrap().executor_stopped);
+        }
+        assert_cancelled_original_observation(&catalog, &f);
+        assert_eq!(catalog.execution_history("branch").unwrap(), history);
         assert_eq!(f.occupancy(), 0);
-        f.assert_no_replay();
     }
 }
 
