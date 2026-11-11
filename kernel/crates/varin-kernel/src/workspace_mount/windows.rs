@@ -204,14 +204,49 @@ fn path(name: &U16CStr) -> winfsp::Result<String> {
     Ok(value)
 }
 type Writers = Arc<Mutex<BTreeMap<u64, (std::sync::Weak<Node>, usize)>>>;
-/// Lifecycle counts only, never paths or file contents. Cleanup does not release
-/// a native handle: Windows may still own a mapped section until original Close.
+/// Native Close remains the sole release boundary, including after Cleanup.
+/// Weak inode references request cache invalidation without becoming new owners.
 #[derive(Default)]
 struct NativeHandles {
     total: std::sync::atomic::AtomicUsize,
     directories: std::sync::atomic::AtomicUsize,
     cleanup_completed: std::sync::atomic::AtomicUsize,
     closing_callbacks: std::sync::atomic::AtomicUsize,
+    files: Mutex<BTreeMap<u64, NativeFile>>,
+    #[cfg(test)]
+    invalidation_observer: Mutex<Option<std::sync::mpsc::Sender<u64>>>,
+}
+struct NativeFile {
+    node: std::sync::Weak<Node>,
+    handles: usize,
+    cleaned: usize,
+}
+impl NativeHandles {
+    fn retain_file(&self, node: &Arc<Node>) {
+        let mut files = self.files.lock().unwrap_or_else(|p| p.into_inner());
+        let file = files.entry(node.id).or_insert_with(|| NativeFile {
+            node: Arc::downgrade(node), handles: 0, cleaned: 0,
+        });
+        file.handles += 1;
+    }
+    fn clean_file(&self, id: u64) {
+        if let Some(file) = self.files.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&id) {
+            file.cleaned += 1;
+        }
+    }
+    fn release_file(&self, id: u64, cleaned: bool) {
+        let mut files = self.files.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(file) = files.get_mut(&id) {
+            file.handles -= 1;
+            file.cleaned -= usize::from(cleaned);
+            if file.handles == 0 { files.remove(&id); }
+        }
+    }
+    fn cleaned_files(&self) -> Vec<Arc<Node>> {
+        self.files.lock().unwrap_or_else(|p| p.into_inner()).values()
+            .filter(|file| file.handles == file.cleaned)
+            .filter_map(|file| file.node.upgrade()).collect()
+    }
 }
 pub(super) struct Handle {
     node: Arc<Node>,
@@ -238,7 +273,9 @@ impl Drop for Handle {
         if self.directory {
             self.opens.directories.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
         }
-        if self.cleanup_completed.load(std::sync::atomic::Ordering::Acquire) {
+        let cleaned = self.cleanup_completed.load(std::sync::atomic::Ordering::Acquire);
+        if !self.directory { self.opens.release_file(self.node.id, cleaned); }
+        if cleaned {
             self.opens.cleanup_completed.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
         }
         if self.close_started {
@@ -436,6 +473,8 @@ impl FileSystemContext for Backend {
         self.opens.total.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         if directory {
             self.opens.directories.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        } else {
+            self.opens.retain_file(&node);
         }
         Ok(Handle {
             node,
@@ -525,6 +564,8 @@ impl FileSystemContext for Backend {
         self.opens.total.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         if directory {
             self.opens.directories.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        } else {
+            self.opens.retain_file(&node);
         }
         Ok(Handle {
             node,
@@ -646,6 +687,7 @@ impl FileSystemContext for Backend {
             self.remember(&context.node, false, &self.session.flush(&context.node));
         }
         if !context.cleanup_completed.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            if !context.directory { self.opens.clean_file(context.node.id); }
             self.opens.cleanup_completed.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
     }
@@ -967,6 +1009,10 @@ impl Mount {
         })
     }
     pub(crate) fn path(&self) -> &Path { &self.path }
+    #[cfg(test)]
+    pub(crate) fn observe_cache_invalidation(&self, observer: std::sync::mpsc::Sender<u64>) {
+        *self.opens.invalidation_observer.lock().unwrap() = Some(observer);
+    }
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
         self.session.check_mounted()
     }

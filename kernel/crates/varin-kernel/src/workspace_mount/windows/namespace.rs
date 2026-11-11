@@ -8,7 +8,8 @@ use std::sync::{
     RwLock, Weak,
 };
 use winfsp::{
-    host::{FileSystemHost, MountPoint, VolumeParams},
+    host::{FileSystemHost, FileSystemParams, MountPoint, VolumeParams},
+    notify::{Notifier, NotifyInfo, NotifyingFileSystemContext},
     U16CString,
 };
 
@@ -58,8 +59,10 @@ impl Volume {
             .unicode_on_disk(true)
             .reparse_points(true)
             .flush_and_purge_on_cleanup(true);
-        let mut host = FileSystemHost::<Namespace>::new(
-            params,
+        // The WinFsp notification dispatcher services pending cache invalidations;
+        // its cadence is not a close deadline or a retry of a workspace command.
+        let mut host = FileSystemHost::<Namespace>::new_with_timer::<_, 100>(
+            FileSystemParams::default_params(params),
             Namespace {
                 entries: entries.clone(),
                 security,
@@ -200,6 +203,42 @@ fn root_info(info: &mut FileInfo) {
 struct Namespace {
     entries: Entries,
     security: Vec<u8>,
+}
+impl NotifyingFileSystemContext<Vec<(String, Arc<Backend>)>> for Namespace {
+    fn should_notify(&self) -> Option<Vec<(String, Arc<Backend>)>> {
+        let entries = self.entries.read().unwrap_or_else(|p| p.into_inner());
+        let closing = entries.iter().filter(|(_, backend)| {
+            backend.closing.load(Ordering::Acquire) && !backend.opens.cleaned_files().is_empty()
+        }).map(|(name, backend)| (name.clone(), backend.clone())).collect::<Vec<_>>();
+        // Do not consume work before NotifyBegin has acquired the rename fence.
+        (!closing.is_empty()).then_some(closing)
+    }
+    fn notify(&self, closing: Vec<(String, Arc<Backend>)>, notifier: &Notifier) {
+        // WinFsp v2.1 file.c::FspFileNodeInvalidateCachesAndNotifyChangeByName
+        // flushes then CcPurgeCacheSection(..., FALSE). Filter=0/Action=0 only
+        // invalidates caches, never fabricates a change or disconnects a mapping.
+        // https://github.com/winfsp/winfsp/blob/v2.1/src/sys/file.c#L2372
+        // Notify is asynchronous and may fail to purge a live mapping. Retain
+        // each original inode in this work set until its actual Close callback.
+        // This also lets an unmapped file leave standby after an earlier purge
+        // could not complete. No successful notification releases a handle.
+        // Every pathname admitted by WinFsp fits its native request buffer.
+        const NAME_UNITS: usize = winfsp_sys::FSP_FSCTL_TRANSACT_REQ_SIZEMAX as usize / 2;
+        for (name, backend) in closing {
+            for node in backend.opens.cleaned_files() {
+                if let Ok(Some(path)) = node.path() {
+                    let mut info = NotifyInfo::<NAME_UNITS>::new();
+                    if info.set_name(format!("\\{}\\{}", name, path.replace('/', "\\"))).is_ok() {
+                        notifier.notify(&info);
+                        #[cfg(test)]
+                        if let Some(observer) = &*backend.opens.invalidation_observer.lock().unwrap() {
+                            let _ = observer.send(node.id);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 enum Context {
     Root,

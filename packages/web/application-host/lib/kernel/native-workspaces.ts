@@ -49,6 +49,7 @@ interface Opened {
     view: KernelWorkspaceInspection;
     source: Source;
     originalPath: string;
+    closing?: Promise<void>;
 }
 interface Flight<T> {
     work: Promise<T>;
@@ -126,6 +127,32 @@ function createFilesystemSessions() {
         references: new Map<string, Promise<{ epoch: string; grant: KernelGrantHandle; source: Source }>>(),
     };
 }
+/** A pending native close is not a failed detach. Only the original Close
+ * notification authorizes another attempt; unrelated errors and process exit
+ * preserve the original grant and pending cleanup for inspection/recovery. */
+async function closeAfterNativeIdle(kernel: KernelClient, actor: KernelScopedClient,
+    address: Parameters<KernelScopedClient['closeWorkspace']>[0], pending: () => Promise<void>): Promise<void> {
+    let revision = 0, exited: Error | undefined, wake: (() => void) | undefined;
+    const changed = () => { revision++; wake?.(); };
+    const unobserve = kernel.onWorkspaceIdle(changed);
+    const unobserveExit = kernel.subscribeExit(error => { exited = error; changed(); });
+    try {
+        for (;;) {
+            if (exited) throw exited;
+            const observed = revision;
+            try { await actor.closeWorkspace(address); return; }
+            catch (error) {
+                if (!(error instanceof KernelClientError) || error.code !== 'workspace_native_handles_active') throw error;
+            }
+            await pending();
+            if (exited) throw exited;
+            // Subscribe before dispatch, including Close delivered before the
+            // pending response. Never lose that original idle transition.
+            if (revision === observed) await new Promise<void>(resolve => { wake = resolve; });
+            wake = undefined;
+        }
+    } finally { unobserve(); unobserveExit(); }
+}
 /** Host adapter only. Rust owns every byte, version, mount and execution lease. */
 export function createNativeWorkspaceOwner(owners: Owners) {
     return createWorkspaceOwner(owners, createFilesystemSessions());
@@ -146,6 +173,27 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
     };
     const sourceOf = (workspace: VersionedProjectWorkspace): Source => ({ workspace_id: workspace.workspaceId,
         execution_workspace_id: workspace.executionWorkspaceId, branch_id: workspace.branchId });
+    const closeEntry = async (entry: Opened, waitForIdle = true): Promise<void> => {
+        if (entry.closing) {
+            if (!waitForIdle) throw new KernelClientError({ code: 'workspace_native_handles_active', message: 'Original native workspace close is still pending' });
+            try { await entry.closing; return; }
+            catch (error) {
+                if (!(error instanceof KernelClientError) || error.code !== 'workspace_native_handles_active') throw error;
+            }
+        }
+        const work = (async () => {
+            const actor = owners.kernel.scoped(entry.grant);
+            const address = { branchId: entry.source.branch_id!, generation: entry.view.binding.generation };
+            if (waitForIdle) await closeAfterNativeIdle(owners.kernel, actor, address, async () => {
+                entry.view = await actor.inspectWorkspace(address).catch(() => entry.view);
+            });
+            else await actor.closeWorkspace(address);
+            await owners.kernel.revokeGrant(entry.grant.grantId);
+            if (opened.get(address.branchId) === entry) opened.delete(address.branchId);
+        })().finally(() => { if (entry.closing === work) delete entry.closing; });
+        entry.closing = work;
+        return work;
+    };
     const open = async (source: Source, signal?: AbortSignal): Promise<Opened> => {
         if (!source.branch_id)
             throw new Error('Native workspace branch is missing');
@@ -166,6 +214,10 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
             return entry;
         }
         const prior = opened.get(branch);
+        if (prior?.epoch === handshake.kernelEpoch && prior.closing) {
+            await prior.closing;
+            return open(source, signal);
+        }
         if (prior?.epoch === handshake.kernelEpoch) {
             if (prior.source.workspace_id !== source.workspace_id || prior.source.execution_workspace_id !== source.execution_workspace_id)
                 throw new Error('Native workspace source identity changed');
@@ -175,9 +227,7 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         const controller = new AbortController(), ownerSignal = controller.signal;
         const work = (async () => {
             if (prior?.epoch === handshake.kernelEpoch) {
-                await owners.kernel.scoped(prior.grant).closeWorkspace({ branchId: branch, generation: prior.view.binding.generation });
-                await owners.kernel.revokeGrant(prior.grant.grantId);
-                opened.delete(branch);
+                await closeEntry(prior);
             }
             const grant = await owners.kernel.issueGrant({ grantId: `native-project:${randomUUID()}`, owningWorkspace: source.workspace_id,
                 executionWorkspace: source.execution_workspace_id, capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }, ownerSignal);
@@ -394,14 +444,12 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         const entry = opened.get(ref.branchId);
         if (entry && entry.epoch === owners.kernel.handshake?.kernelEpoch) {
             try {
-                await owners.kernel.scoped(entry.grant).closeWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation });
+                await closeEntry(entry);
             }
             catch (error) {
                 entry.view = await owners.kernel.scoped(entry.grant).inspectWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation }).catch(() => entry.view);
                 throw error;
             }
-            await owners.kernel.revokeGrant(entry.grant.grantId);
-            opened.delete(ref.branchId);
         }
         known.delete(ref.executionWorkspaceId);
         await owners.update(projectId, { ...ref, state: 'disabled' });
@@ -543,7 +591,7 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
     };
     /** Retire a mount only after its original resources have drained. The branch
      * and its saved versions remain owned by their existing references. */
-    const releaseSource = async (source: Source) => {
+    const releaseOpenedSource = async (source: Source, waitForIdle: boolean) => {
         if ((await owners.projects()).some(project => project.versionedWorkspace?.branchId === source.branch_id && project.versionedWorkspace.state !== 'disabled'))
             return;
         const branch = source.branch_id;
@@ -555,7 +603,7 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         const actor = owners.kernel.scoped(entry.grant);
         await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation });
         try {
-            await actor.closeWorkspace({ branchId: branch, generation: entry.view.binding.generation });
+            await closeEntry(entry, waitForIdle);
         }
         catch (error) {
             if (error instanceof KernelClientError && error.code === 'workspace_in_use')
@@ -563,9 +611,8 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
             entry.view = await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation }).catch(() => entry.view);
             throw error;
         }
-        await owners.kernel.revokeGrant(entry.grant.grantId);
-        opened.delete(branch);
     };
+    const releaseSource = (source: Source) => releaseOpenedSource(source, true);
     const retainReference = async (source: Source, key: string, signal?: AbortSignal) => {
         let held = references.get(key);
         if (held) {
@@ -637,7 +684,9 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
             claimed = true;
             const original = opened.get(branch);
             try {
-                await releaseSource(original?.source ?? source);
+                // Maintenance is woken by the original idle event and must not
+                // block other source retirements while this mount is draining.
+                await releaseOpenedSource(original?.source ?? source, false);
             }
             catch (error) {
                 if (error instanceof KernelClientError && ['workspace_in_use', 'workspace_native_handles_active'].includes(error.code))
