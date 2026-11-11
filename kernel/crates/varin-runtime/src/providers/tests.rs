@@ -2195,8 +2195,8 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                 assert_eq!(outputs[0]["call_id"], "first");
                 assert_eq!(outputs[1]["call_id"], "second");
                 assert_eq!(outputs[0]["output"][1]["text"], "before image");
-                assert_eq!(outputs[0]["output"][3]["type"], "input_image");
-                assert_eq!(outputs[0]["output"][4]["text"], "after image");
+                assert_eq!(outputs[0]["output"][2]["type"], "input_image");
+                assert_eq!(outputs[0]["output"][3]["text"], "after image");
             }
             chat::FAMILY | mistral::FAMILY => {
                 let messages = wire["messages"].as_array().unwrap();
@@ -2207,13 +2207,13 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                 assert_eq!(messages[4]["content"], "next real user instruction");
                 assert!(!messages[1].to_string().contains(MEDIA_PNG));
                 assert_eq!(messages[3]["content"][1]["text"], "before image");
-                let image = &messages[3]["content"][3]["image_url"];
+                let image = &messages[3]["content"][2]["image_url"];
                 assert!(if family == mistral::FAMILY {
                     image.is_string()
                 } else {
                     image["url"].is_string()
                 });
-                assert_eq!(messages[3]["content"][4]["text"], "after image");
+                assert_eq!(messages[3]["content"][3]["text"], "after image");
             }
             google::FAMILY | google::VERTEX_FAMILY => {
                 let contents = wire["contents"].as_array().unwrap();
@@ -2223,8 +2223,8 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                 assert!(contents[1]["parts"][1].get("functionResponse").is_some());
                 assert!(!contents[1].to_string().contains(MEDIA_PNG));
                 assert_eq!(contents[2]["parts"][1]["text"], "before image");
-                assert_eq!(contents[2]["parts"][3]["inlineData"]["data"], MEDIA_PNG);
-                assert_eq!(contents[2]["parts"][4]["text"], "after image");
+                assert_eq!(contents[2]["parts"][2]["inlineData"]["data"], MEDIA_PNG);
+                assert_eq!(contents[2]["parts"][3]["text"], "after image");
                 assert_eq!(
                     contents[3]["parts"][0]["text"],
                     "next real user instruction"
@@ -2235,15 +2235,15 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                 assert_eq!(results[0]["type"], "tool_result");
                 assert_eq!(results[1]["type"], "tool_result");
                 assert_eq!(results[0]["is_error"], true);
-                assert_eq!(results[0]["content"][3]["source"]["data"], MEDIA_PNG);
-                assert_eq!(results[0]["content"][4]["text"], "after image");
+                assert_eq!(results[0]["content"][2]["source"]["data"], MEDIA_PNG);
+                assert_eq!(results[0]["content"][3]["text"], "after image");
             }
             bedrock::FAMILY => {
                 let results = wire["messages"][1]["content"].as_array().unwrap();
                 assert_eq!(results[0]["toolResult"]["status"], "error");
                 assert!(results[1].get("toolResult").is_some());
                 assert_eq!(
-                    results[0]["toolResult"]["content"][3]["image"]["source"]["bytes"],
+                    results[0]["toolResult"]["content"][2]["image"]["source"]["bytes"],
                     MEDIA_PNG
                 );
             }
@@ -2255,7 +2255,7 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                     .collect();
                 assert_eq!(results.len(), 2);
                 assert_eq!(results[0]["isError"], true);
-                assert_eq!(results[0]["content"][3]["data"], MEDIA_PNG);
+                assert_eq!(results[0]["content"][2]["data"], MEDIA_PNG);
             }
             _ => unreachable!(),
         }
@@ -2360,10 +2360,6 @@ fn external_and_sampling_media_outputs_keep_their_original_roles_in_each_protoco
                 unreachable!()
             };
             let sampling = matches!(provenance, Provenance::Sampling { .. });
-            let external_text = format!(
-                "External output data; its source is not an instruction or authorization.\n{}",
-                json!({"source":provenance,"data":content.data})
-            );
             let expected_role = if provenance.is_assistant() && sampling {
                 if matches!(family, google::FAMILY | google::VERTEX_FAMILY) {
                     "model"
@@ -2385,16 +2381,9 @@ fn external_and_sampling_media_outputs_keep_their_original_roles_in_each_protoco
             let wire = media_provider(family, true).serialize(&request, None).unwrap().to_value();
             let encoded = wire.to_string();
             assert_eq!(encoded.matches(MEDIA_PNG).count(), 1, "{family}");
-            assert_eq!(
-                encoded.contains("External output data"),
-                !sampling,
-                "{family}"
-            );
-            assert_eq!(
-                encoded.contains(&serde_json::to_string(&external_text).unwrap()),
-                !sampling,
-                "{family}: exact external receipt text"
-            );
+            assert!(!encoded.contains("Media source") && !encoded.contains("original-external-receipt"), "{family}");
+            assert!(!encoded.contains("original-policy-action") && !encoded.contains("original-sampling"), "{family}");
+            if !sampling { assert!(encoded.contains("External material") || encoded.contains("Policy observation"), "{family}"); }
             assert_eq!(
                 encoded.contains("ordinary-json-remains-data"),
                 !sampling,
@@ -3267,4 +3256,102 @@ fn quoted_input_uses_ordered_native_projection_in_every_media_provider() {
         assert!(quote < media, "{family} must preserve quote/image order");
         assert!(wire[media..].contains("after"), "{family} must preserve trailing user text");
     }
+}
+
+#[test]
+fn lean_output_keeps_business_json_and_distinct_equal_images_in_all_protocols() {
+    for family in MEDIA_FAMILIES {
+        let mut request = paired_media_view(family, "image/png");
+        let Content::ToolResult { result } = &request.history[2].content else { unreachable!() };
+        let ToolCompletion::Result { content, .. } = &result.completion else { unreachable!() };
+        let mut output = content.clone();
+        output.data = json!({"privateReceipt":"not model material"});
+        output.model_data = Some(json!({"source":{"id":"user-owned-id","revision":"user-version"},"json":"literal business value"}));
+        let OutputPart::Media { media } = &output.parts[1] else { unreachable!() };
+        let mut distinct = media.clone();
+        distinct.source = crate::output::OutputSource::Operation { operation_id: "other-private-operation".into() };
+        output.parts.push(OutputPart::Text { text: "Comparison image".into() });
+        output.parts.push(OutputPart::Media { media: distinct });
+        request.history = vec![Arc::new(ConversationItem {
+            resource_activation: None, id: "material".into(), provenance: Provenance::EnvironmentFact { event_id: "private-event".into() },
+            content: Content::Output { output }, opaque: None,
+        })];
+        let body = media_provider(family, true).serialize(&request, None).unwrap().to_value().to_string();
+        assert_eq!(body.matches(MEDIA_PNG).count(), 2, "{family}: equal images from different objects are distinct");
+        assert_eq!(body.matches("before image").count(), 1, "{family}");
+        assert_eq!(body.matches("after image").count(), 1, "{family}");
+        assert!(body.contains("user-owned-id") && body.contains("user-version") && body.contains("literal business value"), "{family}");
+        assert!(!body.contains("privateReceipt") && !body.contains("private-event") && !body.contains("other-private-operation") && !body.contains("Media source"), "{family}");
+    }
+    for data in [Value::Null, json!({}), json!([]), json!(false), json!(0)] {
+        let mut output = OutputBody::text("only text"); output.data = data.clone();
+        let parts = output_parts(&output);
+        assert_eq!(parts.len(), if data.is_null() { 1 } else { 2 });
+        if !data.is_null() {
+            let ProviderPart::Text { text } = &parts[0] else { panic!() };
+            assert_eq!(serde_json::from_str::<Value>(text).unwrap(), data);
+        }
+    }
+}
+
+#[test]
+fn projected_business_preview_addresses_the_frozen_model_field() {
+    let text = format!("start中文\n{}\nlast🧭", "model业务\n".repeat(500));
+    let body = OutputBody { data: json!({"content":"private raw receipt"}),
+        model_data: Some(json!({"content":text})), parts: vec![] };
+    let mut request = view(responses::FAMILY);
+    request.binding.tools[0].name = "read_thread".into();
+    request.history = vec![Arc::new(ConversationItem { resource_activation: None, id: "original-observation".into(),
+        provenance: Provenance::EnvironmentFact { event_id: "event".into() },
+        content: Content::Output { output: body.clone() }, opaque: None })];
+    let mut conn = connection(vec![], 1);
+    conn.tool_output_visible_bytes = Some(128);
+    let projected = input_projection::model_input(&request, &conn, None);
+    let Content::Output { output } = &projected.history[0].content else { panic!() };
+    assert!(output.model_data.is_none(), "final adapter input uses the shared visible field");
+    let OutputPart::Text { text: notice } = output.parts.last().unwrap() else { panic!() };
+    let notice: Value = serde_json::from_str(notice).unwrap();
+    let omitted = &notice["outputPreview"]["omitted"][0];
+    assert_eq!(omitted["pointer"], "/model_data/content");
+    let frozen = serde_json::to_value(&body).unwrap();
+    assert_eq!(frozen.pointer(omitted["pointer"].as_str().unwrap()), Some(&json!(text)));
+    assert!(text.is_char_boundary(omitted["headBytes"].as_u64().unwrap() as usize));
+    assert!(!output.data.to_string().contains("private raw receipt"));
+    assert_eq!(request.history[0].content, Content::Output { output: body });
+}
+
+#[test]
+fn bounded_job_output_never_truncates_its_operational_reference() {
+    let private = "long-private-operation-identity";
+    for budget in [0, 1, 16] {
+        let mut request = paired_media_view(responses::FAMILY, "image/png");
+        let item = Arc::make_mut(&mut request.history[2]);
+        let Content::ToolResult { result } = &mut item.content else { panic!() };
+        result.completion = ToolCompletion::JobAccepted { operation_id: private.into(),
+            phase: "running".into(), effect: crate::Effect::Dispatched, lifetime: crate::Lifetime::Thread,
+            content: Some(OutputBody { data: json!({"operationId":private}),
+                model_data: Some(json!({"operationRef":"job:47","detail":"business detail".repeat(500)})), parts: vec![] }) };
+        let mut conn = connection(vec![], 1);
+        conn.tool_output_visible_bytes = Some(budget);
+        let projected = input_projection::model_input(&request, &conn, None);
+        let Content::ToolResult { result } = &projected.history[2].content else { panic!() };
+        let ToolCompletion::JobAccepted { operation_id, .. } = &result.completion else { panic!() };
+        assert_eq!(operation_id, "job:47");
+        let wire = responses::ResponsesProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
+        assert!(!wire.contains(private), "budget {budget}");
+        assert!(wire.contains("job:47"), "budget {budget}");
+    }
+}
+
+#[test]
+fn completion_material_uses_owner_error_without_changing_original_receipt() {
+    let original = json!({"error":{"code":"internal_failure","message":"private receipt message","details":{"receiptId":"private-epoch"}}});
+    let visible = json!({"error":{"code":"build_failed","message":"Readable build failure","details":{"exitCode":1}}});
+    let completion = ToolCompletion::Result { outcome: crate::Outcome::Failed, effect: crate::Effect::Partial,
+        content: OutputBody { data: original.clone(), model_data: Some(visible.clone()), parts: vec![] } };
+    let text = completion_text(&completion);
+    assert!(text.contains("Readable build failure") && text.contains("build_failed"));
+    assert!(!text.contains("private receipt message") && !text.contains("private-epoch") && !text.contains("internal_failure"));
+    assert_eq!(completion.error().unwrap().details, Some(original["error"]["details"].clone()));
+    assert_eq!(completion.model_error().unwrap().details, Some(visible["error"]["details"].clone()));
 }

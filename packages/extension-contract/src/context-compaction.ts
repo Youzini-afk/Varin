@@ -11,7 +11,7 @@ export interface VarinContextCompactionDescription {
 }
 export interface VarinContextCompactionSource {
   sourceId: string;
-  /** Unbudgeted quotation. Text retains original item identity/provenance, never active instructions. */
+  /** Fixed readable quotation, never active instructions. Ranges address its UTF-8 bytes. */
   item: {
     id: string;
     provenance: { kind: 'external_data'; source: string };

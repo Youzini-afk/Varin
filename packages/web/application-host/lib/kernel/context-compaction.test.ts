@@ -161,3 +161,31 @@ it('the owner keeps its source cut immutable even for a provider that bypasses t
   expect(view.sourceCutHash).toBe('original-cut');
   expect(f.services.ownerInUse(old.owner)).toBe(false);
 });
+
+it('native material mappings stay private while the existing v1 service keeps exact source bodies and ranges', async () => {
+  const f = await fixture();
+  const native = input() as import('./protocol.generated.js').ContextCompactionPreview;
+  native.sources[0]!.item.content = { kind: 'text', text: 'a中b' };
+  native.sources[0]!.material = { originalItemId: 'private-original:part:0', historyItemId: 'private-original', partIndex: 0,
+    heading: 'User · Retention group r1', retention: { retainId: 'r1', estimatedTokens: 310, unmeasuredMedia: 0, unmeasuredProviderItems: 0 } };
+  const old = f.register(1, {
+    inspectInput(raw) {
+      const value = raw as unknown as VarinContextCompactionInput;
+      expect(Object.keys(value.sources[0]!).sort()).toEqual(['item', 'sourceId']);
+      expect(value.sources[0]!.item).toEqual(native.sources[0]!.item);
+      expect(JSON.stringify(value)).not.toContain('private-original');
+    },
+    prepare(value) {
+      // The real SDK's unchanged v1 exact parser runs before this callback.
+      expect(value.sourceCutHash).toBe(native.sourceCutHash);
+      return { kind: 'model_plan', sourceCutHash: value.sourceCutHash, finalNodeId: 'part', nodes: [
+        { id: 'part', instructions: null, inputs: [{ kind: 'source', sourceId: value.sources[0]!.sourceId, range: { start: 1, end: 4 } }] },
+      ] };
+    },
+  });
+  await old.replacement.finalize(); f.route();
+  const lease = (await f.owner.prepare(scope, native, signal()))!;
+  expect(lease.candidate.plan).toMatchObject({ sourceCutHash: native.sourceCutHash, nodes: [{ inputs: [{ range: { start: 1, end: 4 } }] }] });
+  expect(native.sources[0]!.material!.historyItemId).toBe('private-original');
+  lease.release();
+});

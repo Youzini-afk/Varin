@@ -7,7 +7,7 @@ export function renderSkillMetadata(snapshot: PromptResources, readToolName: str
   if (available.length === 0) return '';
   return `Available skills. Read a selected skill with ${readToolName} using kind "skill" and its resourceId.\n`
     + available.map(skill => JSON.stringify({ resourceId: skill.id, name: skill.name, description: skill.description,
-      origin: skill.origin, version: skill.reference.version })).join('\n');
+      origin: skill.origin })).join('\n');
 }
 /** Only original resource sections. Existing personalization and Context Transform owners apply later. */
 export function resourceSections(snapshot: PromptResources, runtimePreamble: string, readToolName: string): Record<string, string> {

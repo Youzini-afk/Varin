@@ -157,7 +157,7 @@ fn metric_edges_use_revisions_preserve_unknown_holding_and_survive_reopen() {
             facts["evidence"],
             serde_json::to_value(&occurrence.evidence).unwrap()
         );
-        assert_eq!(facts["sourceRunId"], original);
+        assert!(facts.get("sourceRunId").is_none());
     }
     let mut f = f.reopen();
     assert!(f.reconcile().is_empty());

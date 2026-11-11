@@ -130,7 +130,12 @@ Bot and shared-user changes have separate owners. Explicit `organize` remains av
 organization is disabled; session reviews are registered under their actual Bot and Thread. Sleep and
 model-disable gates retain their original semantics.
 
-The model receives relevant accounts, versions, provenance and the reason for review. It may preserve,
+The model receives the same explicit account projection for initial candidates and later reads: content,
+applicability, nature, validity, chronology and memory relationships. Original keys, execution identities,
+version hashes and recall statistics remain in the frozen recipe/store, not in its reading material.
+Complete read results remain structured; partial UTF-16 windows preserve literal text and safe Unicode
+boundaries. Re-reading an earlier account never substitutes a newer row for its original CAS input.
+The model also receives the reason for review. It may preserve,
 merge, split, revise, retire or create an overview. It can request further scoped memory/search/source
 reads rather than treating initial candidates as complete. Each continuation freezes its actual material
 in another original MemoryWork; completed output is reused after restart. Capacity-sized source windows

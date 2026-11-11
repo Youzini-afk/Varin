@@ -52,7 +52,6 @@ fn chat_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError
                     &["image/png", "image/jpeg", "image/webp", "image/gif"],
                     FAMILY,
                 )?;
-                blocks.push(json!({"type":"text","text":media_label(media)}));
                 let mut block = json!({"type":"image_url","image_url":{}});
                 block["image_url"]["url"] = Value::String(inline_image(media));
                 blocks.push(block);

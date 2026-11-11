@@ -315,7 +315,31 @@ pub struct ContextCompactionCandidate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextCompactionSource {
     pub source_id: String,
+    /// Fixed readable body. Ranges address these UTF-8 bytes, never a serialized history item.
     pub item: ConversationItem,
+    /// Absent only for already-frozen quotations from the earlier representation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<ContextCompactionMaterial>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionMaterial {
+    pub original_item_id: String,
+    /// Verified Catalog history target for summary_read, distinct from a projected part ID.
+    pub history_item_id: Option<String>,
+    /// Position in this original item's ordered readable material, including media.
+    pub part_index: u64,
+    /// Prepared once with the source, not recovered by interpreting its body.
+    pub heading: String,
+    pub retention: Option<ContextCompactionRetention>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionRetention {
+    pub retain_id: String,
+    pub estimated_tokens: u64,
+    pub unmeasured_media: usize,
+    pub unmeasured_provider_items: usize,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -1267,3 +1267,50 @@ fn process_reference_registers_original_followup_target_without_rewriting_instru
     assert_eq!(f.db.capture_followup(&accepted.id).unwrap().load().unwrap().instruction.as_deref(),Some(format!("Read the literal code {reference}, not a rewritten ID").as_str()));
     f.cleanup();
 }
+
+#[test]
+fn stopped_process_projects_each_business_part_once_and_keeps_original_receipt() {
+    use varin_runtime::output::{IncomingMedia, OutputPart, OutputSource};
+    let mut f = Fixture::new();
+    f.register();
+    let mut receipt = f.receipt();
+    receipt.outcome = Outcome::Failed;
+    receipt.result.data = json!({"exitCode":1,"source":{"id":"business-log-id","revision":"user-log-version"}});
+    receipt.result.parts = vec![
+        OutputPart::Text { text: "unique compiler failure 中文".into() },
+        OutputPart::Media { media: IncomingMedia { media_type: "image/png".into(), data_base64: "iVBORw0KGgo=".into() }
+            .admit(OutputSource::Operation { operation_id: f.process.clone() }).unwrap() },
+        OutputPart::Text { text: "last error detail".into() },
+    ];
+    f.db.record_external_receipt_with_stop(&f.process.clone(), receipt.clone(), true).unwrap();
+    f.reconcile();
+    let prepared = f.db.prepare_input_delivery(&f.run, f.db.epoch(), f.db.head("branch").unwrap().as_deref()).unwrap().load().unwrap();
+    let delivered = f.db.admit_input_delivery(prepared).unwrap().unwrap();
+    let Content::Output { output } = &delivered.items[0].content else { panic!() };
+    assert_eq!(output.data["processes"][0]["outcome"], "failed");
+    assert_eq!(output.data["processes"][0]["result"]["exitCode"], 1);
+    assert!(output.data["processes"][0]["executorStopped"].as_bool().unwrap());
+    assert_eq!(output.data["processes"][0]["outputReader"]["name"], "process_read");
+    assert_eq!(output.parts.iter().filter(|part| matches!(part, OutputPart::Media { .. })).count(), 1);
+    let shown = serde_json::to_string(output).unwrap();
+    assert_eq!(shown.matches("unique compiler failure 中文").count(), 1);
+    assert_eq!(shown.matches("last error detail").count(), 1);
+    assert!(shown.contains("business-log-id") && shown.contains("user-log-version"));
+    assert!(output.data["processes"][0].get("receiptIdentity").is_none());
+    let reference = output.model_data()["processes"][0]["processId"].as_str().unwrap().to_owned();
+    assert!(reference.starts_with("proc:"));
+    let target = f.db.resolve_model_reference(varin_runtime::catalog::model_references::ReferenceKind::Process, &reference).unwrap();
+    assert_eq!(target.target["operationId"], f.process);
+    let read = f.db.capture_family_read("thread", Some("thread"), Some("branch")).unwrap().output(
+        varin_runtime::catalog::family::OutputRequest { run_id: None, anchor: None,
+            item_id: delivered.items[0].id.clone(), pointer: "/model_data/processes/0/result".into(), offset: None, max_bytes: None }, &||false).unwrap();
+    assert!(read.to_string().contains("business-log-id"));
+    let original = f.db.operation(&f.process).unwrap().external_receipt.unwrap();
+    assert_eq!(original.identity, receipt.identity);
+    assert_eq!(original.epoch, receipt.epoch);
+    let mut f = f.reopen();
+    assert!(f.reconcile().is_empty());
+    let prepared = f.db.prepare_input_delivery(&f.run, f.db.epoch(), f.db.head("branch").unwrap().as_deref()).unwrap().load().unwrap();
+    assert!(f.db.admit_input_delivery(prepared).unwrap().unwrap().items.is_empty());
+    f.cleanup();
+}

@@ -179,11 +179,29 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
         };
         let key = Arc::as_ptr(source) as usize;
         let item = previous.remove(&key).map(|(_, projected)| projected).unwrap_or_else(|| {
-            let mut content = owner_projection(&source.content);
+            // Operation identity is a control handle, not previewable body text.
+            let original_operation = match &source.content {
+                Content::ToolResult { result } => match &result.completion {
+                    ToolCompletion::JobAccepted { content: Some(output), .. } => projected_operation(output),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let mut content = None;
             if process { if let Some(projected)=process_text(content.as_ref().unwrap_or(&source.content)) {content=Some(projected);} }
             if let Some(bounded) = connection.tool_output_visible_bytes.or(snippet_limit.map(|_| usize::MAX)).filter(|_| !explicit_read)
                 .and_then(|budget| bounded_content(content.as_ref().unwrap_or(&source.content), budget, &source.id, can_read, snippet_limit)) {
                 content=Some(bounded);
+            }
+            // Keep the durable model_data address through preview generation. Moving it to
+            // data earlier would make continuation pointers read a different raw field.
+            if let Some(mut projected) = owner_projection(content.as_ref().unwrap_or(&source.content)) {
+                if let (Some(reference), Content::ToolResult { result }) = (original_operation, &mut projected) {
+                    if let ToolCompletion::JobAccepted { operation_id, .. } = &mut result.completion {
+                        *operation_id = reference;
+                    }
+                }
+                content = Some(projected);
             }
             let attached_gif=google_gif && (gif_attachment(&source.content) || match &source.provenance {
                 Provenance::UserInstruction{input_id}=>user_gif_inputs.contains(input_id.as_str()),_=>false,

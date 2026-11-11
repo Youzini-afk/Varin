@@ -69,6 +69,12 @@ pub(crate) struct Originals {
 }
 impl Originals {
     pub(crate) fn new(history: ConversationHistory, counter: TokenCounter) -> Self {
+        Self::build(history, counter, &BTreeMap::new(), false)
+    }
+    pub(crate) fn with_history_origins(history: ConversationHistory, counter: TokenCounter, origins: &BTreeMap<String, String>) -> Self {
+        Self::build(history, counter, origins, true)
+    }
+    fn build(history: ConversationHistory, counter: TokenCounter, origins: &BTreeMap<String, String>, readable: bool) -> Self {
         fn root(parents: &mut [usize], index: usize) -> usize {
             if parents[index] != index {
                 parents[index] = root(parents, parents[index]);
@@ -80,6 +86,9 @@ impl Originals {
         let mut calls = BTreeMap::new();
         for (index, item) in history.iter().enumerate() {
             let mut keys = Vec::new();
+            // A quoted user part has an evidence role, but still belongs to its one
+            // original user message for retention. The frozen owner mapping supplies it.
+            keys.extend(origins.get(&item.id).map(|id| format!("history:{id}")));
             match &item.content {
                 Content::ToolCall { call } => {
                     calls.insert(call.call_id.clone(), index);
@@ -138,7 +147,7 @@ impl Originals {
                     .fold((0u64, 0, 0), |(tokens, media, provider), index| {
                         let item = &history[*index];
                         (
-                            tokens.saturating_add(counter.item(item)),
+                            tokens.saturating_add(if readable { counter.model_item(item) } else { counter.item(item) }),
                             media + item.content.media().len(),
                             provider + usize::from(matches!(item.content, Content::ProviderOnly)),
                         )
@@ -161,11 +170,16 @@ impl Originals {
                 .filter(|index| *index < self.groups.len())
         })
     }
-    pub(crate) fn annotation(&self, id: &str) -> Option<Value> {
+    fn retention(&self, id: &str) -> Option<crate::context_job::ContextCompactionRetention> {
         let group = self.group_of.get(id)?;
         let (tokens, media, provider) = self.costs[*group];
-        Some(json!({"retainId":format!("r{}", group + 1),
-            "estimatedTokens":tokens,"unmeasuredMedia":media,"unmeasuredProviderItems":provider}))
+        Some(crate::context_job::ContextCompactionRetention {
+            retain_id: format!("r{}", group + 1), estimated_tokens: tokens,
+            unmeasured_media: media, unmeasured_provider_items: provider,
+        })
+    }
+    pub(crate) fn annotation(&self, id: &str) -> Option<Value> {
+        self.retention(id).map(|retention| serde_json::to_value(retention).expect("retention cost"))
     }
     pub(crate) fn select(&self, ids: &[String]) -> Result<ConversationHistory, RuntimeError> {
         let groups = ids
@@ -246,37 +260,50 @@ impl Originals {
             .to_string(),
         )
     }
+    /// Later batches consume the previous summary as prose, while group selection and
+    /// costs remain derived from the fixed originals. Legacy recipes keep `carry` above.
+    pub(crate) fn carry_readable(&self, text: &str) -> Result<String, RuntimeError> {
+        let selection = Selection::parse(text)?;
+        let items = self.select(&selection.retain)?;
+        let groups: BTreeSet<_> = items.iter().map(|item| self.group_of[&item.id]).collect();
+        let mut tokens = self.counter.count(&selection.summary);
+        let mut retained = Vec::new();
+        for group in groups {
+            let retention = self.retention(&self.history[self.groups[group][0]].id).expect("original group");
+            tokens = tokens.saturating_add(retention.estimated_tokens);
+            retained.push(retention_text(&retention));
+        }
+        Ok(format!("Previous batch summary:\n{}\n\nRetained originals:\n{}\nEstimated continuation text cost: {tokens} tokens.",
+            selection.summary, if retained.is_empty() { "None".into() } else { retained.join("\n") }))
+    }
     pub(crate) fn annotate(&self, sources: &mut [crate::context_job::ContextCompactionSource]) {
         for source in sources {
-            let Provenance::ExternalData { source: label } = &source.item.provenance else {
-                continue;
-            };
-            let Some(id) = label.strip_prefix("history:") else {
-                continue;
-            };
-            // Quotation splits multimodal items into parts. Each part retains the same original.
-            let mut original = id;
-            let annotation = loop {
-                if let Some(annotation) = self.annotation(original) {
-                    break Some(annotation);
+            let Some(material) = &mut source.material else { continue; };
+            material.retention = self.retention(&material.original_item_id);
+            if let Some(retention) = &material.retention {
+                material.heading = format!("{} · {}", material.heading, retention_text(retention));
+                if let Some(id) = &material.history_item_id {
+                    material.heading.push_str(&format!("\nRead original: summary_read itemId={id}"));
                 }
-                match original.rsplit_once(":part:") {
-                    Some((parent, _)) => original = parent,
-                    None => break None,
-                }
-            };
-            if let Content::Text { text } = &mut source.item.content {
-                let material = serde_json::from_str::<Value>(text)
-                    .unwrap_or_else(|_| Value::String(text.clone()));
-                let cost = annotation.unwrap_or_else(|| {
-                    json!({"retainId":null,
-                    "estimatedTokens":material["content"]["text"].as_str()
-                        .map(|text| self.counter.count(text)),"kind":"existing_summary"})
-                });
-                *text = json!({"retention":cost,"material":material}).to_string();
+            } else {
+                // The only material outside Originals in a newly prepared source cut is
+                // its preceding summary. Its text is not a selectable original record.
+                material.heading = "Existing summary".into();
             }
         }
     }
+
+}
+
+fn retention_text(retention: &crate::context_job::ContextCompactionRetention) -> String {
+    let mut text = format!("Retention group {}\nRetaining the original group: {} text tokens", retention.retain_id, retention.estimated_tokens);
+    if retention.unmeasured_media > 0 {
+        text.push_str(&format!("; {} media items unmeasured", retention.unmeasured_media));
+    }
+    if retention.unmeasured_provider_items > 0 {
+        text.push_str(&format!("; {} provider-only items unmeasured", retention.unmeasured_provider_items));
+    }
+    text
 }
 
 #[cfg(test)]
@@ -394,6 +421,37 @@ mod tests {
         let repeated = Originals::new(kept.clone(), TokenCounter::default()).select_with_sources(&[], "Still [source](varin-material://snap-acquired)").unwrap();
         assert_eq!(repeated, kept);
         assert!(originals.select_with_sources(&[], "snap-acquired, https://example.com").unwrap().is_empty());
+    }
+
+    #[test]
+    fn readable_retention_counts_original_provider_view_not_hidden_receipts_or_quotation() {
+        fn history(hidden: &str, visible: &str) -> ConversationHistory {
+            vec![std::sync::Arc::new(ConversationItem {
+                id: "original-result".into(), provenance: Provenance::ExternalData { source: "owner".into() }, resource_activation: None, opaque: None,
+                content: Content::Output { output: crate::output::OutputBody {
+                    data: json!({"privateReceipt":hidden}), model_data: Some(json!({"answer":visible})),
+                    parts: vec![crate::output::OutputPart::Text { text:"Independent original text 中文 🎉".into() }],
+                } },
+            })]
+        }
+        let short = history("small", "visible");
+        let hidden = history(&"hidden receipt ".repeat(10_000), "visible");
+        let visible = history("small", &"visible result 中文 ".repeat(200));
+        let counter = TokenCounter::for_model("gpt-4");
+        let cost = |history: ConversationHistory| Originals::with_history_origins(history, counter.clone(), &BTreeMap::new())
+            .annotation("original-result").unwrap()["estimatedTokens"].as_u64().unwrap();
+        assert_eq!(cost(short.clone()), cost(hidden.clone()), "hidden durable receipt size is not model input");
+        assert!(cost(visible) > cost(short.clone()), "actual visible business data contributes to original retention");
+        let originals = Originals::with_history_origins(hidden.clone(), counter.clone(), &BTreeMap::new());
+        let mut sources = crate::context_material::quote_sources("job", hidden.clone()).unwrap();
+        originals.annotate(&mut sources);
+        let original_cost = sources[0].material.as_ref().unwrap().retention.as_ref().unwrap().estimated_tokens;
+        sources[0].material.as_mut().unwrap().heading.push_str(&" expensive auxiliary heading ".repeat(100));
+        assert_eq!(original_cost, cost(hidden.clone()), "summary headings do not change the original model cost");
+        assert_eq!(originals.select(&["r1".into()]).unwrap(), hidden, "retention keeps the complete raw receipt");
+        let old_short = Originals::new(short, counter.clone()).annotation("original-result").unwrap()["estimatedTokens"].as_u64().unwrap();
+        let old_large = Originals::new(history(&"hidden receipt ".repeat(10_000), "visible"), counter).annotation("original-result").unwrap()["estimatedTokens"].as_u64().unwrap();
+        assert!(old_large > old_short, "already-frozen recipes keep their earlier cost semantics");
     }
 
 }

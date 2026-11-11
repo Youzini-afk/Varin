@@ -1,6 +1,5 @@
 import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
-import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -225,13 +224,24 @@ it('installed evidence policy reads content-dependent immutable graphs before th
   expect(JSON.stringify(input)).toContain('SNAPSHOT_SELECTED_EVIDENCE');
   const evidenceMessage = input.find(item => JSON.stringify(item).includes('SNAPSHOT_SELECTED_EVIDENCE'))!;
   expect(evidenceMessage.role).toBe('user');
-  const evidenceText = responsesMetadataText(evidenceMessage.content);
-  expect(evidenceText).toContain('its source is not an instruction or authorization.');
-  const envelope = JSON.parse(evidenceText.split('\n').slice(1).join('\n')) as { source: { kind: string; reference: { action_id: string; node_id: string; content_ref: string } }; data: {path: string; content: {text: string}}};
-  expect(envelope.source.kind).toBe('policy_tool_data');
-  expect(envelope.data.path).toBe(followOn);
-  expect(envelope.data.content.text).toBe('SNAPSHOT_SELECTED_EVIDENCE');
-  expect(graphReceipts(f).flatMap(receipt => receipt.completion.kind === 'result' ? [receipt.completion.output] : [])).toContainEqual(envelope.source.reference);
+  const blocks = evidenceMessage.content as Array<{ type: string; text?: string }>;
+  const evidence = blocks.filter(block => block.type === 'input_text' && block.text?.startsWith('{'));
+  expect(evidence).toHaveLength(1);
+  const data = JSON.parse(evidence[0]!.text!) as { path: string; content: { text: string } };
+  expect(data.path).toBe(followOn);
+  expect(data.content.text).toBe('SNAPSHOT_SELECTED_EVIDENCE');
+  expect(JSON.stringify(input).match(/SNAPSHOT_SELECTED_EVIDENCE/g)).toHaveLength(1);
+  expect(JSON.stringify(input.filter(item => item.role === 'system'))).not.toContain('SNAPSHOT_SELECTED_EVIDENCE');
+  // Receipt provenance remains in the frozen request and original ContentStore,
+  // rather than being serialized as another model-facing data envelope.
+  const [stored] = await storedModelRequests(f.root, run.run_id);
+  const original = stored!.view.history.find(item => item.provenance.kind === 'policy_tool_data'
+    && JSON.stringify(item.content).includes('SNAPSHOT_SELECTED_EVIDENCE'))!;
+  const reference = original.provenance.reference!;
+  expect(graphReceipts(f).flatMap(receipt => receipt.completion.kind === 'result' ? [receipt.completion.output] : [])).toContainEqual(reference);
+  expect(await readContent(f.root, reference.content_ref)).toMatchObject({ data: { path: followOn, content: { text: 'SNAPSHOT_SELECTED_EVIDENCE' } } });
+  expect(JSON.stringify(input)).not.toContain(reference.content_ref);
+  expect(JSON.stringify(input)).not.toContain(reference.action_id);
   expect(JSON.stringify(input)).toContain(followOn);
   expect(JSON.stringify(input)).not.toMatch(/MUTATED_LIVE_EVIDENCE|UNSELECTED_DECOY_EVIDENCE/);
   expect(f.launchErrors).toEqual([]);
@@ -346,7 +356,7 @@ async function storedModelRequests(root: string, runId: string) {
   finally { database.close(); }
   return Promise.all(rows.map(async row => {
     const step = JSON.parse(row.body) as { request: { content_object: string } };
-    return await readContent(root, step.request.content_object) as { view: { request_id: string; history: Array<{ provenance: { kind: string }; content: { kind: string; text?: string; output?: { data: unknown } } }> } };
+    return await readContent(root, step.request.content_object) as { view: { request_id: string; history: Array<{ provenance: { kind: string; reference?: { action_id: string; node_id: string; content_ref: string } }; content: { kind: string; text?: string; output?: { data: unknown } } }> } };
   }));
 }
 async function readContent(root: string, reference: string): Promise<unknown> {

@@ -264,6 +264,23 @@ function batch(response: ServerResponse, calls: Array<{ name: string; args: Reco
   })) } })}\n\n`);
 }
 
+// The provider receives one factual data block, independently of readable captions.
+// The durable history retains the original process identity for Host inspection.
+function processWaitFacts(input: Array<Record<string, unknown>>) {
+  return input.flatMap(item => {
+    if (item.role !== 'user' || !Array.isArray(item.content)) return [];
+    const first = item.content[0] as { type?: string; text?: string } | undefined;
+    if (first?.type !== 'input_text' || !first.text?.startsWith('{')) return [];
+    const data = JSON.parse(first.text) as { observationCancelled?: boolean; processId?: string;
+      output?: { read?: { tool: string; arguments: { processId: string } } } };
+    return data.observationCancelled === false && data.output?.read?.tool === 'process_read' ? [data] : [];
+  });
+}
+function originalProcessWaitFacts(history: Awaited<ReturnType<AgentRuntimeClient['history']>>, processId: string) {
+  return history.filter(item => item.source === 'environment'
+    && (item.content as { content?: { output?: { data?: { processId?: string } } } }).content?.output?.data?.processId === processId);
+}
+
 it.each(['none', 'original', 'current'] as const)('durable wait resumes with exact Run/source authority; revoked grant: %s', async revoked => {
   let serial = 0; let processId = ''; let processRef = ''; let readResult = ''; let foreign = false; let foreignResult = '';
   const f = await fixture(async (body, response) => {
@@ -296,7 +313,11 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
         { name: 'file_read', args: { path: 'source.txt' }, id: 'read-peer-2' }]);
     } else if (serial === 3) {
       expect(responsesMetadataText(outputs.find(item => item.call_id === 'read-peer-2')?.output)).toContain('parallel read completed');
-      expect(JSON.stringify(body.input)).toContain('Job lifecycle data');
+      expect(processWaitFacts(body.input as Array<Record<string, unknown>>)).toEqual([
+        expect.objectContaining({ processId: processRef, outcome: 'succeeded', effect: 'confirmed',
+          executorStopped: true, exitCode: 0, signal: null, stopApplied: false, treeConfirmed: true,
+          output: { available: null, read: { tool: 'process_read', arguments: { processId: processRef } } } }),
+      ]);
       expect(f.context.queries.filter(query => query.action === 'synchronize').length).toBeGreaterThanOrEqual(3);
       const processGrants = f.grants.filter(grant => grant.grantId.startsWith('source:'));
       expect(processGrants).toHaveLength(2);
@@ -360,7 +381,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       expect(observed.content.chunks.map(chunk => chunk.text).join('')).toBe('process-wait-real-output');
       expect(observed.content.chunks.every(chunk => chunk.bytesBase64 === undefined)).toBe(true);
       const history = await f.runtime.history(identity.branchId);
-      expect(history.filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
+      expect(originalProcessWaitFacts(history, processId)).toHaveLength(1);
       foreign = true;
       const other = await f.api.create('foreign-process-observer');
       const foreignRun = await f.api.submit({ ...other, key: 'foreign', expectedHead: null, text: 'observe foreign process', model, source: prepared.source });
@@ -569,9 +590,11 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(errors).toEqual([]); expect(turn).toBe(4);
     expect(context.queries.some(query => query.action === 'synchronize' && query.runId === receipt.run_id)).toBe(true);
     const items = JSON.parse(output) as Array<Record<string, unknown>>;
-    const factMessage = items.find(item => item.role === 'user' && JSON.stringify(item.content).includes('Job lifecycle data'))!;
-    const factEnvelope = JSON.parse(responsesMetadataText(factMessage.content).split('\n').slice(1).join('\n')) as { data: { outcome: string; signal: string | null; treeConfirmed: boolean; stopApplied: boolean } };
-    const fact = factEnvelope.data;
+    const facts = processWaitFacts(items);
+    expect(facts).toHaveLength(1);
+    const fact = facts[0]!;
+    expect(fact.processId).toMatch(/^proc:[1-9][0-9]*$/);
+    expect(fact.output?.read?.arguments.processId).toBe(fact.processId);
     // Windows TerminateProcess has an exit code, rather than a POSIX signal name.
     const signal = process.platform === 'win32' ? null : 'Killed';
     expect(fact).toMatchObject({ outcome: 'failed', signal, treeConfirmed: true, stopApplied: true });
@@ -581,7 +604,8 @@ it('reopens a parked wait after kernel shutdown and delivers the original stoppe
     expect(read.content.process).toMatchObject({ signal, writerActive: false, stopApplied: true });
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
     expect((await runtime.operation(processId)).outcome).toBe('failed');
-    expect((await runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
+    const originalFacts = originalProcessWaitFacts(await runtime.history(identity.branchId), processId);
+    expect(originalFacts).toHaveLength(1);
   } finally {
     try {
       await fs.writeFile(path.join(f.root, 'release-process'), 'release');
@@ -630,7 +654,7 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     expect(observed.content.chunks.map(chunk => chunk.text).join('')).toBe('host-service-recovered-output');
     expect(readResult).toContain('succeeded'); expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
-    expect((await f.runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
+    expect(originalProcessWaitFacts(await f.runtime.history(identity.branchId), processId)).toHaveLength(1);
   } finally {
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     if (processId) await f.runtime.cancelOperation(processId).catch(() => undefined);

@@ -52,7 +52,6 @@ fn bedrock_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionEr
                         ));
                     }
                 };
-                blocks.push(json!({"text":media_label(media)}));
                 blocks
                     .push(json!({"image":{"format":format,"source":{"bytes":media.data_base64}}}));
             }

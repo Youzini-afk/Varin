@@ -43,7 +43,6 @@ fn response_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionE
                     &["image/png", "image/jpeg", "image/webp", "image/gif"],
                     FAMILY,
                 )?;
-                blocks.push(json!({"type":"input_text","text":media_label(media)}));
                 let mut block = json!({"type":"input_image"});
                 block["image_url"] = Value::String(inline_image(media));
                 blocks.push(block);

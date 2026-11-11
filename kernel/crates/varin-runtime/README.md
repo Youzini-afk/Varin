@@ -45,8 +45,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
+  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -67,6 +67,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
   accepts either the quote-only layout with all seven index tables and both external item columns
   absent, or the complete validated collaboration index. Existing spaces, references and allocation
   high waters survive unchanged; partial or malformed layouts are rejected before writable recovery.
+  Format 94 protects the separate frozen source mappings in readable compaction recipes. Old recipes
+  keep their original source slicing, quotation and retention semantics without rewriting their bodies.
   Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
   bodies. This startup work scales with history records; typed index validation remains at use and
   malformed indexes never trigger request-time repair or a full-body fallback.
@@ -165,6 +167,17 @@ and per-Agent admission sequences. They contain no resource bytes and grant no a
 retain the original source/version/format; accepted controls retain their selected execution across retries.
 OutputBody keeps the original data and an optional stable model_data projection. Providers consume that
 projection without rewriting historical bodies or introducing another receipt authority.
+The shared provider composition includes non-null business data and ordered text/media once; empty
+objects, false and zero remain meaningful. Source types retain role/permission boundaries without printing
+internal provenance chains beside every result or image. Output previews address the frozen raw or
+model_data field before adapters receive their semantic view, so continuation reads select the same bytes.
+
+Follow-up preparation captures original operation/follow-up references under the publication guard,
+then hydrates result bodies off-lock. Process and Host Job data remain separate from their text/media;
+a final Job result supersedes only identical acceptance details from that same original Job. Event inputs
+show useful source/object/sender/time facts once. Identity, transport cursors, receipt epochs and scheduling
+controls remain in the original Catalog records. Existing consumption-boundary event sharing and ordered
+state replacement still use those original identities, never text similarity or image hashes.
 
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped
@@ -203,7 +216,15 @@ Numeric versions stay intact, conflicting encodings remain unmatched, and explic
 take precedence. The original provider request model is unchanged. Unmatched models use the o200k reference.
 No model-specific vocabularies or parallel encoding tables are bundled. Immutable request fragments cache counts; changed
 tokenizer bindings invalidate calibration/reuse identities. Summary input uses its own model tokenizer;
-retained material uses the frozen conversation tokenizer.
+retained material uses the frozen conversation tokenizer. New summary sources contain readable text and
+actual ordered media, with frozen source/part, retention-group and verified history-read relationships
+kept separately. UTF-8 ranges address that fixed text, not serialized conversation records; each
+fragment carries its prepared role, group cost and existing `summary_read` target. User quotes remain
+evidence while sharing their original message's retention group. The continuation estimate covers the
+complete original exchange's common provider view, including actions, arguments, statuses and all
+visible parts, without counting hidden receipts or auxiliary quotation headings. Original records,
+media owners and read permissions remain unchanged. Already-frozen recipes retain their earlier
+quotation bytes, ranges, group assignments and cost interpretation when reopened.
 Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;
 forking or navigation that discards the summary also discards its selection.
 Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related

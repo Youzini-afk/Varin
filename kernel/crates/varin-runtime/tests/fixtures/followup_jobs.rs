@@ -612,3 +612,55 @@ fn workspace_subject(binding: &HostJobBinding) -> &str {
         _ => panic!("research fixture requires workspace"),
     }
 }
+
+#[test]
+fn job_terminal_keeps_new_acceptance_details_and_each_media_source_once() {
+    use varin_runtime::output::{IncomingMedia, OutputBody, OutputPart, OutputSource};
+    use varin_runtime::catalog::model_references::ReferenceKind;
+    let mut f = Fixture::new();
+    let binding = job(&mut f, "mixed-business", false);
+    let media = IncomingMedia { media_type: "image/png".into(), data_base64: "iVBORw0KGgo=".into() }
+        .admit(OutputSource::Operation { operation_id: binding.operation_id.clone() }).unwrap();
+    let shared = OutputPart::Text { text: "shared accepted and final text".into() };
+    let accepted = OutputBody { model_data: None,
+        data: json!({"source":{"id":"business-id","revision":"business-version"},"acceptedOnly":false}),
+        parts: vec![shared.clone(), OutputPart::Media { media: media.clone() }, OutputPart::Text { text: "acceptance-only detail".into() }] };
+    let prepared = f.db.prepare_result_content().write_output(&accepted).unwrap();
+    f.db.accept_host_job(binding.clone(), prepared).unwrap();
+    register(&mut f, "mixed-job-followup", trigger(&binding));
+    let mut other_media = media.clone();
+    other_media.source = OutputSource::Operation { operation_id: "another-original-object".into() };
+    let terminal = OutputBody { model_data: None,
+        data: json!({"source":{"id":"business-id","revision":"business-version"},"result":{"value":0}}),
+        parts: vec![shared, OutputPart::Media { media }, OutputPart::Text { text: "acceptance-only detail".into() }, OutputPart::Text { text: "final-only detail".into() }, OutputPart::Media { media: other_media }] };
+    let op = f.db.operation(&binding.operation_id).unwrap();
+    let ExecutorOwner::External { epoch, .. } = &binding.execution_owner else { panic!() };
+    let prepared = f.db.prepare_result_content().write_external_receipt(ExternalReceipt {
+        executor: op.executor.unwrap(), identity: op.id, epoch: epoch.clone(), outcome: Outcome::Indeterminate,
+        effect: Effect::Unknown, result: terminal.clone() }).unwrap();
+    f.db.record_host_job_terminal(&binding, prepared, true).unwrap();
+    let prepared = f.db.capture_followup_continuations().unwrap().pop().unwrap().load().unwrap();
+    assert_eq!(f.db.prepare_content_collection(Arc::new(AtomicBool::new(false))).run().status, ContentCollectionStatus::Deferred);
+    f.db.admit_followup_continuation(prepared).unwrap();
+    let items = deliver(&mut f);
+    let Content::Output { output } = &items[0].content else { panic!() };
+    let model = output.model_data();
+    assert_eq!(model["jobs"][0]["accepted"], json!({"acceptedOnly":false}));
+    assert_eq!(model["jobs"][0]["result"], terminal.data);
+    assert_eq!(model["jobs"][0]["executorStopped"], true);
+    assert_eq!(model["jobs"][0]["outcome"], "indeterminate");
+    assert_eq!(model["jobs"][0]["effect"], "unknown");
+    let shown = serde_json::to_string(&output.parts).unwrap();
+    for text in ["shared accepted and final text", "acceptance-only detail", "final-only detail"] { assert_eq!(shown.matches(text).count(), 1); }
+    assert_eq!(output.parts.iter().filter(|part| matches!(part, OutputPart::Media { .. })).count(), 2);
+    let reference = model["jobs"][0]["operationId"].as_str().unwrap().to_owned();
+    let followup = model["followupId"].as_str().unwrap().to_owned();
+    assert_eq!(f.db.resolve_model_reference(ReferenceKind::Job, &reference).unwrap().target["operationId"], binding.operation_id);
+    assert_eq!(f.db.resolve_model_reference(ReferenceKind::Followup, &followup).unwrap().target["followupId"], "mixed-job-followup");
+    assert_eq!(f.db.prepare_content_collection(Arc::new(AtomicBool::new(false))).run().status, ContentCollectionStatus::Completed);
+    let f = f.reopen();
+    assert_eq!(f.db.resolve_model_reference(ReferenceKind::Job, &reference).unwrap().target["operationId"], binding.operation_id);
+    let (_, original) = f.db.capture_operation_read(f.db.operation(&binding.operation_id).unwrap()).load_with_external_receipt().unwrap();
+    assert_eq!(original.unwrap().result, terminal);
+    f.cleanup();
+}

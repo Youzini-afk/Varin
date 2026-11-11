@@ -44,6 +44,7 @@ export const attachActiveEditorContext = (input: {
         endColumn: file.selection.endColumn ?? 1,
       },
       label: file.relativePath,
+      sourceLabel: input.workspaceRoot,
       text: file.selection.text,
     });
     if (!('status' in fromRegistry) || fromRegistry.status !== 'missing-document') return fromRegistry;
@@ -54,6 +55,7 @@ export const attachActiveEditorContext = (input: {
       workspaceId: input.workspaceId,
       resourceId,
       label: file.relativePath,
+      sourceLabel: input.workspaceRoot,
       documentInstanceId: file.documentInstanceId,
       documentRevision: null,
       localEditRevision: 0,
@@ -75,6 +77,7 @@ export const attachActiveEditorContext = (input: {
     resourceId,
     kind: 'editor',
     label: file.relativePath,
+    sourceLabel: input.workspaceRoot,
   });
   if (!('status' in fromRegistry) || fromRegistry.status !== 'missing-document') return fromRegistry;
   return addEditorContextAttachment({
@@ -84,6 +87,7 @@ export const attachActiveEditorContext = (input: {
     workspaceId: input.workspaceId,
     resourceId,
     label: file.relativePath,
+    sourceLabel: input.workspaceRoot,
     documentInstanceId: file.documentInstanceId,
     documentRevision: null,
     localEditRevision: 0,

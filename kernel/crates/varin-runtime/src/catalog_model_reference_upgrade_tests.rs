@@ -149,13 +149,13 @@ fn upgrade_events(db: &Connection) -> i64 {
 
 #[test]
 fn supported_generations_include_both_published_catalog_92_layouts() {
-    for from in 78..=93 {
+    for from in 78..=FORMAT {
         assert!(upgrades::supports(from), "source {from}");
     }
-    for from in [0, 77, 94] {
+    for from in [0, 77, FORMAT + 1] {
         assert!(!upgrades::supports(from), "source {from}");
     }
-    for (from, retained) in [(90, true), (91, false), (92, false), (92, true)] {
+    for (from, retained) in [(90, true), (91, false), (92, false), (92, true), (93, true)] {
         let (root, db, run, reference) = seed();
         let history = db.history("main").unwrap();
         let space = db.model_reference_space().unwrap();
@@ -245,7 +245,7 @@ fn catalog_partial_or_malformed_reference_indexes_are_read_only_rejections() {
         format!("{DROP_INDEX}{DROP_COLUMNS} CREATE INDEX model_reference_holder_lookup ON events(kind);"),
         format!("{DROP_INDEX}{DROP_COLUMNS} CREATE VIEW model_reference_holder_lookup AS SELECT 1;"),
     ]);
-    for version in [92, FORMAT] {
+    for version in [92, 93, FORMAT] {
         for sql in &corruptions {
             let (root, db, _, _) = seed();
             db.db.execute_batch(sql).unwrap();
@@ -329,7 +329,7 @@ fn catalog_92_upgrade_failure_rolls_back_both_layouts_then_retries_once() {
 
 #[test]
 fn current_or_newer_catalog_never_accepts_quote_only_reference_layout() {
-    for version in [FORMAT, FORMAT + 1] {
+    for version in [93, FORMAT, FORMAT + 1] {
         let (root, db, _, _) = seed();
         db.db.execute_batch(DROP_INDEX).unwrap();
         db.db.execute_batch(DROP_COLUMNS).unwrap();
@@ -347,7 +347,7 @@ fn current_or_newer_catalog_never_accepts_quote_only_reference_layout() {
 
 #[test]
 fn empty_reference_indexes_preserve_valid_allocator_states_and_json_targets() {
-    for version in [92, FORMAT] {
+    for version in [92, 93, FORMAT] {
         for high_water in [None, Some(0), Some(37)] {
             let root = Fixture::new();
             let mut db = root.open();

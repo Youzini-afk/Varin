@@ -67,6 +67,8 @@ describe('Agent resource owner', () => {
     expect(rendered.workspace_instructions).not.toContain('ordinary root');
     expect(rendered.workspace_instructions).not.toContain('SIBLING');
     expect(rendered.skills).toContain('review description');
+    for (const skill of snapshot.skills) expect(rendered.skills).not.toContain(skill.reference.version);
+    expect(rendered.skills).toContain(snapshot.skills.find(item => item.name === 'review')!.id);
     expect(rendered.skills).not.toMatch(/SECRET BODY|quiet description/);
     expect(snapshot.skills.some(item => item.name === 'quiet')).toBe(true);
     const nested = await authority.read({ snapshot, readers: [] }, { kind: 'instruction-scope', targetPath: 'src/file.ts' });

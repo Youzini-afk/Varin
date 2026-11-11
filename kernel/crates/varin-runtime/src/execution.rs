@@ -991,11 +991,19 @@ impl<M> ToolCompletion<M> {
     /// Project only an original failure state. Successful opaque tool data is never
     /// reclassified because it happens to contain a property named `error`.
     pub fn error(&self) -> Option<ExecutionError> {
+        self.error_with_projection(false)
+    }
+    /// Model rendering respects the owner's fixed projection; the durable error accessor
+    /// above continues reading the exact original completion data.
+    pub(crate) fn model_error(&self) -> Option<ExecutionError> {
+        self.error_with_projection(true)
+    }
+    fn error_with_projection(&self, model: bool) -> Option<ExecutionError> {
         match self {
             Self::NotDispatched { reason, error } if reason != "cancelled" => Some(error.clone()
                 .unwrap_or_else(||ExecutionError::new("tool_not_dispatched", reason))),
             Self::Result { outcome: Outcome::Failed | Outcome::Indeterminate, content, .. } => {
-                let data=&content.data;
+                let data=if model {content.model_data()} else {&content.data};
                 let structured=data.get("error").filter(|value|value.is_object());
                 let code=structured.and_then(|value|value.get("code")).or_else(||data.get("code")).and_then(Value::as_str).unwrap_or("tool_failed");
                 let message=structured.and_then(|value|value.get("message")).or_else(||data.get("message")).or_else(||data.get("reason")).and_then(Value::as_str)

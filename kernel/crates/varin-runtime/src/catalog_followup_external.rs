@@ -63,7 +63,7 @@ fn input_value(item: ConversationItem, history: &Value) -> Result<Value> {
     let mut images = vec![];
     match item.content {
         Content::Output { output } => {
-            texts.push(serde_json::to_string(&output.data)?);
+            if !output.model_data().is_null() { texts.push(serde_json::to_string(output.model_data())?); }
             for part in output.parts { match part {
                 crate::output::OutputPart::Text { text } => texts.push(text),
                 crate::output::OutputPart::Attachment { attachment } => files.push(attachment),

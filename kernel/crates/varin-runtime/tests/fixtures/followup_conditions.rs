@@ -191,7 +191,7 @@ fn any_at_is_one_active_input_without_a_missing_process_body_or_late_second_occu
     let Content::Output { output } = &batch.items[0].content else {
         panic!("fact")
     };
-    assert_eq!(output.data["processes"], json!([]));
+    assert!(output.data.get("processes").is_none());
     stopped(&mut f, &process, true);
     assert!(f.reconcile().is_empty());
     assert_eq!(
