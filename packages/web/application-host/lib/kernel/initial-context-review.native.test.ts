@@ -352,6 +352,7 @@ it('a real Bot model consumes organization observations, moves the original conv
     },
   }));
   const original = await f.api.create('Original work');
+  await f.api.update({runtime:'agent',threadId:original.threadId,key:'original-work-title',expectedRevision:(await f.runtime.thread(original.threadId)).revision,title:'Original work'});
   await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish', { botId: 'recovery-bot', profileRevision: 1, activityOperationId: null, permitted: true });
   const identity = { runtime: 'agent' as const, ...await f.runtime.createBotThread('recovery-bot', 'thread:organization-bot', 'branch:organization-main') };
   const run = await f.api.submit({ ...identity, key: 'organize', expectedHead: null, text: 'Group and archive the existing conversation.', model });

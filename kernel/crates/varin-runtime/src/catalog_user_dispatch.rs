@@ -266,6 +266,7 @@ impl UserChildDispatchSelection {
         };
         Ok(PreparedChildAdmission {
             organization: p.command.input.organization.clone(),
+            organization_project_id: p.command.input.project_id.clone(),
             model_contract: super::collaboration::ModelContract::default(),
             attachments: self.attachments,
             attachment_input_ref,

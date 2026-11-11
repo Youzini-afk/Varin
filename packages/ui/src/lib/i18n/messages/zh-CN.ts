@@ -15,6 +15,7 @@ import { usageMessages } from './usage';
 import { imageAnnotationsZhCN } from './imageAnnotations';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...conversationOrganizationZhCN,
   'filesView.encoding.search': '搜索编码…',
   'filesView.encoding.noMatches': '没有匹配的编码',
   'filesView.encoding.retry': '编码列表加载失败 · 重试',

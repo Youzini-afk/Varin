@@ -80,6 +80,11 @@ pub struct ConversationEntry {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrganizationQuery {
     pub container_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub page_nodes: bool,
+    /// Ephemeral names supplied by the trusted Settings owner, never model arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_names: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub root_only: bool,
     #[serde(default)]
@@ -101,6 +106,8 @@ pub struct OrganizationSnapshot {
     pub containers: Vec<Container>,
     pub conversations: Vec<ConversationEntry>,
     pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<OrganizationObject>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1155,6 +1162,47 @@ impl Catalog {
     ) -> Result<ConversationEntry> {
         conversation(&self.db, principal, reference)
     }
+    pub fn organization_observation(
+        &self,
+        principal: Option<&str>,
+        reference: &str,
+        run_id: &str,
+    ) -> Result<OrganizationSnapshot> {
+        let saved =
+            self.resolve_model_reference(model_references::ReferenceKind::Read, reference)?;
+        if saved.owner != "organization_observation"
+            || saved.target["principal"] != json!(principal)
+            || self.run(run_id)?.principal_id.as_deref() != principal
+        {
+            return Err(RuntimeError::Conflict(
+                "Organization observation belongs to another owner".into(),
+            ));
+        }
+        let number = reference
+            .strip_prefix("read:")
+            .and_then(|n| n.parse::<i64>().ok())
+            .ok_or_else(|| RuntimeError::Invalid("Invalid observation reference".into()))?;
+        let held:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM model_reference_holders WHERE reference_id=?1 AND holder=?2)",params![number,run_id],|r|r.get(0))?;
+        if !held {
+            return Err(RuntimeError::Conflict(
+                "Organization observation belongs to another tool run; reread its directory".into(),
+            ));
+        }
+        Ok(serde_json::from_value(saved.target["snapshot"].clone())?)
+    }
+    pub fn organization_initialized(&self,principal:Option<&str>)->Result<bool> {
+        let scope=scope(principal)?;
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM organization_spaces WHERE scope=?1 AND initialization IS NOT NULL)",[scope],|r|r.get(0))?)
+    }
+    pub fn organization_project_ids(&self, principal: Option<&str>) -> Result<Vec<String>> {
+        let scope = scope(principal)?;
+        Ok(containers(&self.db, &scope)?
+            .into_iter()
+            .filter_map(|c| c.project_id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect())
+    }
     pub fn organization_snapshot(
         &self,
         principal: Option<&str>,
@@ -1472,9 +1520,41 @@ fn snapshot(
     metadata.extend(db.prepare("SELECT id,coalesce(json_extract(body,'$.title'),''),coalesce(json_extract(body,'$.archived'),0),coalesce(json_extract(body,'$.pinned'),0),coalesce(json_extract(body,'$.revision'),1) FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|Ok((ConversationRef::External{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?);
     let all_containers = containers(db, &scope)?;
     let mut directory = DirectoryMetadata::load(db, principal, &scope, &all_containers)?;
+    // Names are a request-local projection from Settings. Keep only identities
+    // which can enter this query, so unrelated project edits neither leak into
+    // continuation recipes nor invalidate an independent subtree's pagination.
+    if query.query.as_ref().is_none_or(|q| q.trim().is_empty()) {
+        query.project_names = None;
+    }
+    if let Some(names) = &mut query.project_names {
+        let relevant = all_containers
+            .iter()
+            .filter(|c| {
+                if let Some(parent) = &query.container_id {
+                    c.parent_id.as_ref() == Some(parent)
+                        || (query.recursive
+                            && c.id != *parent
+                            && directory
+                                .paths
+                                .get(&c.id)
+                                .is_some_and(|path| path.contains(parent)))
+                } else {
+                    !query.root_only || query.recursive || c.parent_id.is_none()
+                }
+            })
+            .filter_map(|c| c.project_id.clone())
+            .collect::<BTreeSet<_>>();
+        names.retain(|id, _| relevant.contains(id));
+    }
+
     let by_id: BTreeMap<_, _> = all_containers.iter().map(|c| (&c.id, c)).collect();
-    let search = query.query.as_ref().map(|s| s.to_lowercase());
+    let search = query
+        .query
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_lowercase());
     let mut entries = Vec::new();
+    let mut bot_paths = BTreeSet::new();
     for (r, title, archived, pinned, revision) in metadata {
         let entry = directory.entry(r, title, archived, pinned, revision)?;
         if (query.archived.as_deref().unwrap_or("exclude") == "exclude" && entry.archived)
@@ -1489,6 +1569,7 @@ fn snapshot(
                 continue;
             }
         }
+        bot_paths.extend(entry.path.iter().cloned());
         if let Some(container) = &query.container_id {
             if entry.position.container_id.as_ref() != Some(container)
                 && !(query.recursive && entry.path.contains(container))
@@ -1500,12 +1581,13 @@ fn snapshot(
         }
         if let Some(search) = &search {
             if !entry.title.to_lowercase().contains(search)
-                && !entry.path.iter().any(|id| {
-                    by_id
-                        .get(id)
-                        .and_then(|c| c.name.as_ref())
-                        .is_some_and(|n| n.to_lowercase().contains(search))
-                })
+                && (query.page_nodes
+                    || !entry.path.iter().any(|id| {
+                        by_id
+                            .get(id)
+                            .and_then(|c| c.name.as_ref())
+                            .is_some_and(|n| n.to_lowercase().contains(search))
+                    }))
             {
                 continue;
             }
@@ -1519,6 +1601,55 @@ fn snapshot(
             &b.conversation,
         ))
     });
+    let mut nodes: Vec<(Option<String>, u64, String, OrganizationObject)> = Vec::new();
+    if query.page_nodes {
+        for c in &all_containers {
+            let in_scope = if let Some(parent) = &query.container_id {
+                c.parent_id.as_ref() == Some(parent)
+                    || (query.recursive
+                        && c.id != *parent
+                        && directory
+                            .paths
+                            .get(&c.id)
+                            .is_some_and(|p| p.contains(parent)))
+            } else {
+                !query.root_only || query.recursive || c.parent_id.is_none()
+            };
+            if !in_scope || (query.bot_id.is_some() && !bot_paths.contains(&c.id)) {
+                continue;
+            }
+            let name = c.name.as_ref().or_else(|| {
+                c.project_id
+                    .as_ref()
+                    .and_then(|id| query.project_names.as_ref().and_then(|names| names.get(id)))
+            });
+            if search
+                .as_ref()
+                .is_some_and(|q| !name.is_some_and(|name| name.to_lowercase().contains(q)))
+            {
+                continue;
+            }
+            nodes.push((
+                c.parent_id.clone(),
+                c.order,
+                format!("c:{}", c.id),
+                OrganizationObject::Container { id: c.id.clone() },
+            ));
+        }
+        for e in &entries {
+            let object = match &e.conversation {
+                ConversationRef::Native { id } => OrganizationObject::Native { id: id.clone() },
+                ConversationRef::External { id } => OrganizationObject::External { id: id.clone() },
+            };
+            nodes.push((
+                e.position.container_id.clone(),
+                e.position.order,
+                format!("{}:{}", e.conversation.kind(), e.conversation.id()),
+                object,
+            ));
+        }
+        nodes.sort_by(|a, b| (&a.0, a.1, &a.2).cmp(&(&b.0, b.1, &b.2)));
+    }
     // Freeze the actual directory projection, not unrelated model/run activity or a different
     // principal's global event cursor. Each continuation rechecks the current visible facts.
     use sha2::Digest;
@@ -1529,7 +1660,10 @@ fn snapshot(
                 c.id == *parent
                     || c.parent_id.as_ref() == Some(parent)
                     || (query.recursive
-                        && path(db, &scope, Some(&c.id)).is_ok_and(|path| path.contains(parent)))
+                        && directory
+                            .paths
+                            .get(&c.id)
+                            .is_some_and(|path| path.contains(parent)))
             } else if query.root_only && !query.recursive {
                 c.parent_id.is_none()
             } else {
@@ -1542,9 +1676,42 @@ fn snapshot(
     } else {
         None
     };
-    let generation = hex::encode(sha2::Sha256::digest(
-        encode(&(root_generation, &relevant_containers, &entries))?.as_bytes(),
-    ));
+    let generation = if query.page_nodes {
+        let mut context = BTreeSet::new();
+        if let Some(id) = &query.container_id {
+            if let Some(path) = directory.paths.get(id) {
+                context.extend(path.iter().cloned());
+            }
+        }
+        for (_, _, _, object) in &nodes {
+            if let OrganizationObject::Container { id } = object {
+                if let Some(path) = directory.paths.get(id) {
+                    context.extend(path.iter().cloned());
+                }
+            }
+        }
+        for entry in &entries {
+            context.extend(entry.path.iter().cloned());
+        }
+        let context = all_containers
+            .iter()
+            .filter(|c| context.contains(&c.id))
+            .collect::<Vec<_>>();
+        hex::encode(sha2::Sha256::digest(
+            encode(&(
+                root_generation,
+                &relevant_containers,
+                &context,
+                &entries,
+                &nodes,
+            ))?
+            .as_bytes(),
+        ))
+    } else {
+        hex::encode(sha2::Sha256::digest(
+            encode(&(root_generation, &relevant_containers, &entries))?.as_bytes(),
+        ))
+    };
     let offset = if let Some(page) = continuation {
         if page.scope != scope || page.query != query || page.generation != generation {
             return Err(RuntimeError::Conflict(
@@ -1556,14 +1723,19 @@ fn snapshot(
     } else {
         0
     };
-    if offset > entries.len() {
+    let total = if query.page_nodes {
+        nodes.len()
+    } else {
+        entries.len()
+    };
+    if offset > total {
         return Err(RuntimeError::Conflict(
             "organization continuation outside generation".into(),
         ));
     }
     let limit = usize::try_from(query.limit.unwrap_or(100)).unwrap_or(usize::MAX);
-    let end = offset.saturating_add(limit).min(entries.len());
-    let next_cursor = if end < entries.len() {
+    let end = offset.saturating_add(limit).min(total);
+    let next_cursor = if end < total {
         Some(encode(&PageCursor {
             scope,
             generation,
@@ -1573,14 +1745,55 @@ fn snapshot(
     } else {
         None
     };
+    let (containers, conversations, items) = if query.page_nodes {
+        let items = nodes
+            .drain(offset..end)
+            .map(|(_, _, _, o)| o)
+            .collect::<Vec<_>>();
+        let selected = items
+            .iter()
+            .filter_map(object_reference)
+            .collect::<BTreeSet<_>>();
+        let conversations = entries
+            .into_iter()
+            .filter(|e| selected.contains(&e.conversation))
+            .collect::<Vec<_>>();
+        let mut context = BTreeSet::new();
+        if let Some(id) = &query.container_id {
+            if let Some(path) = directory.paths.get(id) {
+                context.extend(path.iter().cloned());
+            }
+        }
+        for item in &items {
+            if let OrganizationObject::Container { id } = item {
+                if let Some(path) = directory.paths.get(id) {
+                    context.extend(path.iter().cloned());
+                }
+            }
+        }
+        for e in &conversations {
+            context.extend(e.path.iter().cloned());
+        }
+        (
+            all_containers
+                .into_iter()
+                .filter(|c| context.contains(&c.id))
+                .collect(),
+            conversations,
+            Some(items),
+        )
+    } else {
+        (all_containers, entries.drain(offset..end).collect(), None)
+    };
     Ok(OrganizationSnapshot {
         initialized,
         revision,
         root_revision,
         cursor,
-        containers: all_containers,
-        conversations: entries.drain(offset..end).collect(),
+        containers,
+        conversations,
         next_cursor,
+        items,
     })
 }
 
@@ -1635,6 +1848,37 @@ pub(super) fn admit(
     key: &str,
 ) -> Result<()> {
     admit_with_defaults(tx, principal, reference, placement, parent, key, None)
+}
+/// Explicit execution-project selection supplies navigation only when the caller
+/// did not independently choose an organization container. Resolve at the original
+/// admission transaction, never by moving an already accepted conversation later.
+pub(super) fn admit_dispatch(
+    tx: &Transaction<'_>,
+    principal: Option<&str>,
+    reference: &ConversationRef,
+    placement: Option<&Placement>,
+    project_id: Option<&str>,
+    parent: &ConversationRef,
+    key: &str,
+) -> Result<()> {
+    let project_placement = if placement.is_none() {
+        project_id.map(|project| {
+            let scope=scope(principal)?;
+            let container:Option<String>=tx.query_row("SELECT id FROM organization_containers WHERE scope=?1 AND json_extract(body,'$.projectId')=?2",params![scope,project],|r|r.get(0)).optional()?;
+            let container=container.ok_or_else(||RuntimeError::Conflict(format!("Explicit project {project} has no registered navigation entry in this principal's organization; initialize or restore its project entry before dispatch")))?;
+            Ok::<_,RuntimeError>(Placement{container_id:Some(container)})
+        }).transpose()?
+    } else {
+        None
+    };
+    admit(
+        tx,
+        principal,
+        reference,
+        placement.or(project_placement.as_ref()),
+        Some(parent),
+        key,
+    )
 }
 fn admit_with_defaults(
     tx: &Transaction<'_>,

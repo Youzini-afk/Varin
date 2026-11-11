@@ -1,4 +1,4 @@
-import { parseConversationOrganizationSnapshot, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationFailureCode } from './conversation-organization.js';
+import { parseConversationOrganizationQuery, parseConversationOrganizationSnapshot, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationFailureCode } from './conversation-organization.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 import { createThreadsHttpAPI } from './threads-http.js';
@@ -26,7 +26,12 @@ export function createConversationOrganizationHttpAPI(): ConversationOrganizatio
     } finally { controller.abort(); changed(); published(); signal?.removeEventListener('abort', abort); }
   };
   return {
-    read: async (query = {}, signal) => parseConversationOrganizationSnapshot(await post('read', query, signal)),
+    read: async (query = {}, signal) => {
+      const request = parseConversationOrganizationQuery(query);
+      const snapshot = parseConversationOrganizationSnapshot(await post('read', request, signal));
+      if (request.pageNodes && snapshot.items === undefined) throw new ConversationOrganizationError('invalid_response', 'Mixed conversation directory response is missing page items', 502);
+      return snapshot;
+    },
     command: (input, signal) => post('command', input, signal),
     project: (input, signal) => post('project', input, signal),
     metadata: (input, signal) => post('metadata', input, signal),

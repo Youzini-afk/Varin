@@ -535,3 +535,41 @@ fn managed_attachment_capture_intent_has_exact_native_identity() {
     assert!(invoke(&mut storage,"storage.record.put",&changed).is_err());
     drop(storage);fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn attachment_import_requires_exact_native_or_external_consumer() {
+    let (mut storage, root) = fixture();
+    let mut external = grant_params("external-actor");
+    external["threadId"] = json!("external-conversation");
+    external["runId"] = Value::Null;
+    external["operationId"] = json!("external-transport");
+    external["externalTransportId"] = json!("external-transport");
+    storage.issue_grant(&external,"host","generation",&root.to_string_lossy(),"epoch").unwrap();
+    let payload = json!({"principalId":"paired","coordinatorHostId":"coordinator","authorityId":"authority",
+        "threadId":"external-conversation","externalTransportId":"external-transport","operationId":"delivery",
+        "ref":"attachment:original","attachment":{"ref":"attachment:original","filename":"input.txt","mimeType":"text/plain","byteLength":0},
+        "contentHash":format!("sha256-{}","0".repeat(64))});
+    let input = json!({"operationId":"import","workspaceId":"workspace","recordId":"attachment-import:original",
+        "recordType":"attachment.import","state":"preparing","threadId":"external-conversation",
+        "payloadJson":payload.to_string(),"ownerIds":[],"references":[]});
+    storage.domain_record_put(&input,"external-actor").unwrap();
+    for (field,value) in [("externalTransportId",json!("foreign")),("threadId",json!("foreign")),("runId",json!("fake-run"))] {
+        let mut changed = input.clone();
+        changed["operationId"] = json!(format!("reject:{field}"));
+        changed["recordId"] = json!(format!("attachment-import:reject:{field}"));
+        let mut changed_payload = payload.clone();changed_payload[field] = value;
+        changed["payloadJson"] = json!(changed_payload.to_string());
+        assert!(storage.domain_record_put(&changed,"external-actor").is_err(),"{field}");
+    }
+    let mut native = input.clone();native["threadId"] = json!("thread");native["runId"] = json!("run");
+    native["recordId"] = json!("attachment-import:native");native["operationId"] = json!("native-import");
+    let mut native_payload = payload.clone();native_payload.as_object_mut().unwrap().remove("externalTransportId");
+    native_payload["threadId"] = json!("thread");native_payload["runId"] = json!("run");
+    native["payloadJson"] = json!(native_payload.to_string());
+    storage.domain_record_put(&native,"actor").unwrap();
+    native_payload.as_object_mut().unwrap().remove("runId");native.as_object_mut().unwrap().remove("runId");
+    native["operationId"] = json!("missing-native-run");native["recordId"] = json!("attachment-import:missing-native-run");
+    native["payloadJson"] = json!(native_payload.to_string());
+    assert!(storage.domain_record_put(&native,"actor").is_err());
+    drop(storage);fs::remove_dir_all(root).unwrap();
+}

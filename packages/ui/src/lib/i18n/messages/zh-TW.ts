@@ -10,6 +10,7 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...conversationOrganizationZhTW,
   'bot.groups.create': '新增分組',
   'bot.appearance.title': "形象",
   'bot.appearance.custom': "自訂形象",

@@ -434,7 +434,7 @@ function artifactConversationFixture() {
   };
   const open = async () => {
     await renderConversation();
-    expect(mocks.readModelSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal));
+    expect(mocks.readModelSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal), undefined);
     // Research details mount on first inspection, just like the real overview path.
     expect(f.api.scopes).not.toHaveBeenCalled();
     const overview = container.querySelector<HTMLElement>('.workbench-overview-control')!;

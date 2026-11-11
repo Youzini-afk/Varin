@@ -1,3 +1,4 @@
+import { OrganizationDestinationPicker } from './OrganizationDestinationPicker';
 import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
@@ -10,7 +11,7 @@ import React from 'react';
 import { DndContext, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ConversationOrganizationContainer, ConversationOrganizationObject, ConversationOrganizationOperation, ConversationOrganizationMetadataResult, ConversationOrganizationQuery } from '@varin/application-client';
-import { useConversationOrganization, submitOrganization, refreshConversationOrganization, loadOrganizationPage, readOrganizationActionScope, organizationQueryKey } from '@/stores/useConversationOrganizationStore';
+import { useConversationOrganization, submitOrganization, refreshConversationOrganization, loadOrganizationPage, readOrganizationActionScope, organizationQueryKey, organizationViewSnapshot } from '@/stores/useConversationOrganizationStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useExternalAgentStore, useExternalAgents } from '@/stores/useExternalAgentStore';
@@ -36,7 +37,7 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { openBotEntryFor, useBotNavigation } from '@/lib/bots';
 
 type Drop = { parentId: string | null; before: ConversationOrganizationObject | null; label: string };
-const viewPreferences = new Map<string, { collapsed: Set<string>; focus: string | null }>();
+const viewPreferences = new Map<string, { collapsed: Set<string>; known: Set<string>; focus: string | null }>();
 const icons: IconName[] = ['folder', 'stack', 'book', 'briefcase', 'star', 'rocket', 'chat-3', 'lightbulb', 'code'];
 const colors = ['', '#64748b', '#2563eb', '#7c3aed', '#db2777', '#b45309', '#15803d'];
 const safeIcon = (icon: string | null): IconName => icon && Object.hasOwn(iconSpriteData, icon) ? icon as IconName : 'folder';
@@ -71,10 +72,13 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
   const externalChildren = useExternalAgentStore(s => s.children);
   const external = useExternalAgentStore(s => s.conversations);
   const externalSelected = useExternalAgentStore(s => s.selectedId);
+  const snapshot = state.host === getRuntimeEndpointGeneration() ? state.snapshot : null;
   const prefKey = `${state.host}:${viewKey}`;
-  const [preference, setPreference] = React.useState(() => ({ key: prefKey, initialized: viewPreferences.has(prefKey), ...(viewPreferences.get(prefKey) ?? { collapsed: new Set<string>(), focus: null }) }));
-  const prefs = preference.key === prefKey ? preference : { key: prefKey, initialized: false, collapsed: new Set<string>(), focus: null };
-  const updatePrefs = (patch: Partial<typeof prefs>) => { const next = { ...prefs, collapsed: prefs.initialized ? prefs.collapsed : new Set([...(snapshot?.containers ?? []).map(c => organizationObjectKey({ kind: 'container', id: c.id })), ...(snapshot?.conversations ?? []).map(e => organizationObjectKey(e.conversation))]), ...patch, initialized: true }; viewPreferences.set(prefKey, next); setPreference(next); };
+  const [preference, setPreference] = React.useState(() => ({ key: prefKey, initialized: viewPreferences.has(prefKey), ...(viewPreferences.get(prefKey) ?? { collapsed: new Set<string>(), known: new Set<string>(), focus: null }) }));
+  const savedPrefs = React.useMemo(() => preference.key === prefKey ? preference : { key: prefKey, initialized: false, collapsed: new Set<string>(), known: new Set<string>(), focus: null }, [preference, prefKey]);
+  const knownKeys = new Set([...(snapshot?.containers ?? []).map(c => organizationObjectKey({ kind: 'container', id: c.id })), ...(snapshot?.conversations ?? []).map(e => organizationObjectKey(e.conversation))]);
+  const prefs = { ...savedPrefs, collapsed: new Set([...savedPrefs.collapsed, ...[...knownKeys].filter(key => !savedPrefs.known.has(key))]) };
+  const updatePrefs = (patch: Partial<typeof prefs>) => { const next = { ...prefs, collapsed: prefs.initialized ? prefs.collapsed : new Set([...(snapshot?.containers ?? []).map(c => organizationObjectKey({ kind: 'container', id: c.id })), ...(snapshot?.conversations ?? []).map(e => organizationObjectKey(e.conversation))]), ...patch, known: knownKeys, initialized: true }; viewPreferences.set(prefKey, next); setPreference(next); };
   const selectionTargets = React.useRef(new Map<string, OrganizationNode>());
   const [selection, setSelection] = React.useState<Set<string>>(new Set());
   const [editor, setEditor] = React.useState<{ id: string; container?: ConversationOrganizationContainer; parentId: string | null; name: string; icon: string; color: string } | null>(null);
@@ -96,11 +100,17 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
   useSelectionGlide(list, selectedObject ? organizationObjectKey(selectedObject) : null);
   useHoverPill(list);
   React.useEffect(() => { setSelection(new Set()); setUndo(null); setMovingBusy(false); setEditor(null); setMove(null); setRename(null); setMetadataResults([]); setMetadataRetry(null); setMetadataPending(false); setProjectCreate(null); setNewBotId(''); }, [state.host]);
-  const snapshot = state.host === getRuntimeEndpointGeneration() ? state.snapshot : null;
   const namedSnapshot = React.useMemo(() => snapshot ? { ...snapshot, containers: snapshot.containers.map(c => c.kind === 'project' ? { ...c, name: projects.find(p => p.id === c.projectId)?.label || projects.find(p => p.id === c.projectId)?.path || t('organization.missingProject', { id: c.projectId ?? '' }) } : c) } : null, [snapshot, projects, t]);
+  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(botId ? { botId, recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !botId ? { rootOnly: true } : {}) }), [archived, botId, query]);
+  React.useEffect(() => { void loadOrganizationPage(scopeQuery); }, [scopeQuery, state.host]);
+  const containerQuery = React.useCallback((containerId: string): ConversationOrganizationQuery => ({ pageNodes: true, containerId, archived: archived ? 'only' : 'exclude', ...(botId ? { botId } : {}) }), [archived, botId]);
+  const viewQuery = React.useMemo(() => prefs.focus && !query.trim() ? containerQuery(prefs.focus) : scopeQuery, [prefs.focus, query, containerQuery, scopeQuery]);
+  React.useEffect(() => { void loadOrganizationPage(viewQuery); }, [viewQuery, state.host]);
+  const visibleSnapshot = React.useMemo(() => organizationViewSnapshot(state.pages, viewQuery, id => { const key = organizationObjectKey({ kind: 'container', id }); return savedPrefs.initialized && savedPrefs.known.has(key) && !savedPrefs.collapsed.has(key); }), [state.pages, viewQuery, savedPrefs]);
+  const namedVisibleSnapshot = React.useMemo(() => visibleSnapshot ? { ...visibleSnapshot, containers: visibleSnapshot.containers.map(c => namedSnapshot?.containers.find(named => named.id === c.id) ?? c) } : null, [visibleSnapshot, namedSnapshot]);
   const roots = React.useMemo(() => {
-    if (!namedSnapshot) return [];
-    const nodes = projectOrganization(namedSnapshot, { query, archived, botId, flat });
+    if (!namedVisibleSnapshot) return [];
+    const nodes = projectOrganization(namedVisibleSnapshot, { query, archived, botId, flat });
     const byProject = new Map(projects.map(project => [project.id, project]));
     const times = new Map([...threads.map(thread => [organizationObjectKey({ kind: 'native', id: thread.thread_id }), thread.updated_at_ms] as const), ...external.map(c => [organizationObjectKey({ kind: 'external', id: c.id }), c.updatedAt] as const)]);
     const latestCache = new Map<string, number>();
@@ -116,22 +126,19 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
       return items.map(node => node.container ? containers[index++] : node).map(node => ({ ...node, children: sort(node.children) }));
     };
     return sort(nodes.filter(node => showRoot || query.trim() || node.container));
-  }, [namedSnapshot, query, archived, botId, flat, projects, threads, external, sortOrder, showRoot]);
+  }, [namedVisibleSnapshot, query, archived, botId, flat, projects, threads, external, sortOrder, showRoot]);
   const expandedRevision = React.useRef(0);
   React.useEffect(() => {
     if (!snapshot || !expansion || expansion.revision === expandedRevision.current) return;
     expandedRevision.current = expansion.revision;
     const collapsed = new Set<string>();
     if (!expansion.expanded) { for (const c of snapshot.containers) collapsed.add(organizationObjectKey({ kind: 'container', id: c.id })); for (const entry of snapshot.conversations) collapsed.add(organizationObjectKey(entry.conversation)); }
-    const next = { key: prefKey, initialized: true, collapsed, focus: null }; viewPreferences.set(prefKey, next); setPreference(next);
+    const next = { key: prefKey, initialized: true, collapsed, known: new Set([...(snapshot.containers).map(c => organizationObjectKey({ kind: 'container', id: c.id })), ...snapshot.conversations.map(e => organizationObjectKey(e.conversation))]), focus: null }; viewPreferences.set(prefKey, next); setPreference(next);
   }, [snapshot, expansion, prefKey]);
   const nodes = new Map<string, OrganizationNode>();
   const walk = (items: OrganizationNode[]) => { for (const node of items) { nodes.set(node.key, node); walk(node.children); } }; walk(roots);
   const focused = prefs.focus ? nodes.get(organizationObjectKey({ kind: 'container', id: prefs.focus })) : null;
   const shown = focused ? focused.children : roots;
-  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ archived: archived ? 'only' : 'exclude', ...(botId ? { botId, recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !botId ? { rootOnly: true } : {}) }), [archived, botId, query]);
-  React.useEffect(() => { void loadOrganizationPage(scopeQuery); }, [scopeQuery, state.host]);
-  const containerQuery = React.useCallback((containerId: string): ConversationOrganizationQuery => ({ containerId, archived: archived ? 'only' : 'exclude', ...(botId ? { botId } : {}) }), [archived, botId]);
   const openedContainers: string[] = [];
   const collectOpened = (items: OrganizationNode[]) => { for (const node of items) { const expanded = prefs.initialized && !prefs.collapsed.has(node.key); if (expanded) { if (node.container) openedContainers.push(node.container.id); collectOpened(node.children); } } };
   if (!query.trim()) { if (focused?.container) openedContainers.push(focused.container.id); collectOpened(shown); }
@@ -152,7 +159,26 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
     const host = state.host; setMovingBusy(true);
     try {
       // The explicit move captures real sibling anchors for undo, including unread pages.
-      const originalScopes = await Promise.all([...new Set(items.map(node => node.parentId))].map(parentId => readOrganizationActionScope({ ...(parentId ? { containerId: parentId } : { rootOnly: true }), archived: 'include' })));
+      const originalParents = [...new Set(items.map(node => node.parentId))];
+      const originalScopes = await Promise.all(originalParents.map(parentId => readOrganizationActionScope({ ...(parentId ? { containerId: parentId } : { rootOnly: true }), archived: 'include' })));
+      if (host !== getRuntimeEndpointGeneration()) return;
+      // Never apply anchors from a changed parent or silently upgrade the selected object's CAS.
+      for (const node of items) if (!originalScopes.some(scope => node.container ? scope.items?.some(item => item.kind === 'container' && item.id === node.object.id) ?? scope.containers.some(container => container.id === node.object.id) : scope.conversations.some(entry => organizationObjectKey(entry.conversation) === node.key))) throw new Error(t('organization.scopeChanged'));
+      for (const scope of originalScopes) {
+        for (const node of items) {
+          const current = node.container ? scope.containers.find(container => container.id === node.object.id) : scope.conversations.find(entry => organizationObjectKey(entry.conversation) === node.key);
+          if (!current) continue;
+          const revision = 'position' in current ? current.position.revision : current.revision;
+          const parentId = 'position' in current ? current.position.containerId : current.parentId;
+          if (revision !== (node.container?.revision ?? node.conversation!.position.revision) || parentId !== node.parentId) throw new Error(t('organization.scopeChanged'));
+        }
+      }
+      for (const parentId of [...new Set(items.map(node => node.parentId))]) {
+        const scope = originalScopes[originalParents.indexOf(parentId)]!;
+        const revision = parentId ? scope.containers.find(container => container.id === parentId)?.childrenRevision : scope.rootRevision;
+        const expected = parentId ? snapshot.containers.find(container => container.id === parentId)?.childrenRevision : snapshot.rootRevision;
+        if (revision === undefined || revision !== expected) throw new Error(t('organization.scopeChanged'));
+      }
       const receipt = await command({ action: 'move', items: items.map(n => ({ object: n.object, expectedRevision: n.container?.revision ?? n.conversation!.position.revision, expectedParentId: n.parentId })), parentId: drop.parentId, before: drop.before, parents: parents([...items.map(n => n.parentId), drop.parentId]) });
       if (host !== getRuntimeEndpointGeneration()) return;
       if (receipt) {
@@ -169,6 +195,7 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
             const original = originalScopes.flatMap(scope => scope.conversations).find(entry => organizationObjectKey(entry.conversation) === node.key);
             const inherit = Boolean(original && !original.position.explicit && original.position.inheritedFrom);
             const index = ordered.findIndex(item => organizationObjectKey(item.object) === node.key);
+            if (!inherit && index < 0) throw new Error(t('organization.scopeChanged'));
             const before = inherit ? null : ordered.slice(index + 1).find(item => !selectedKeys.has(organizationObjectKey(item.object)))?.object ?? null;
             const position = receipt.positions.find(position => organizationObjectKey(position.conversation) === node.key);
             const container = receipt.containers.find(container => node.object.kind === 'container' && container.id === node.object.id);
@@ -238,7 +265,7 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
     const panelView = botWorkspace?.views.find(view => view.key === botWorkspace.activeKey);
     const active = entry && (viewKey === 'bot' ? (entry.origin.directBotId ? botEntry?.threadId === node.object.id : panelView?.kind === 'work' ? panelView.identity.threadId === node.object.id : panelView?.kind === 'external' && panelView.id === node.object.id) : node.object.kind === 'native' ? selected?.threadId === node.object.id : externalSelected === node.object.id);
     const pathLabel = entry && namedSnapshot ? organizationContainerPath(namedSnapshot, entry.position.containerId).map(c => c.name).join(' / ') : '';
-    const originatingTitle = entry?.origin.conversation ? snapshot?.conversations.find(c => organizationObjectKey(c.conversation) === organizationObjectKey(entry.origin.conversation!))?.title : null;
+    const originatingTitle = entry?.origin.conversation ? snapshot?.conversations.find(c => organizationObjectKey(c.conversation) === organizationObjectKey(entry.origin.conversation!))?.title ?? (entry.origin.conversation.kind === 'native' ? threadById.get(entry.origin.conversation.id)?.title : externalById.get(entry.origin.conversation.id)?.title) : null;
     const open = () => entry ? act(async () => {
       const rows = [...(list.current?.querySelectorAll('[data-sidebar-row]') ?? [])]; const from = rows.findIndex(row => row.getAttribute('data-current') === 'true'); const to = rows.findIndex(row => row.getAttribute('data-sidebar-row') === node.key); noteSwitchDirection(from >= 0 && to >= 0 ? to - from : 0);
       if (viewKey === 'bot' && botWorkspace && !entry.origin.directBotId) {
@@ -298,12 +325,12 @@ export function ConversationOrganizationTree({ query = '', archived = false, bot
       <div className="flex gap-2" aria-label={t('organization.groupColor')}>{colors.map(color => <button type="button" key={color} aria-label={color || t('organization.theme')} aria-pressed={editor.color === color} className={cn('size-5 rounded-full border border-border', editor.color === color && 'ring-2 ring-primary ring-offset-1')} style={{ backgroundColor: color || 'var(--muted-foreground)' }} onClick={() => setEditor({ ...editor, color })} />)}</div>
       <div className="flex gap-1"><Button type="submit" size="sm" disabled={!editor.name.trim() || Object.keys(state.pending).length > 0}>{t('organization.save')}</Button><Button type="button" variant="ghost" size="sm" onClick={() => setEditor(null)}>{t('organization.cancel')}</Button></div>
     </form>}
-    {move && <form className="mx-2 space-y-2 rounded-md border border-border p-2" onSubmit={e => { e.preventDefault(); act(() => moveNodes(move, { parentId: moving || null, before: null, label: '' })); }}><label className="typography-meta">{t('organization.moveCount', { count: move.length })}<select aria-label={t('organization.target')} className="mt-1 w-full rounded border border-border bg-background p-1" value={moving} onChange={e => setMoving(e.target.value)}><option value="">{t('organization.root')}</option>{namedSnapshot?.containers.filter(c => !move.some(n => n.container && organizationContainerPath(snapshot!, c.id).some(p => p.id === n.container!.id))).map(c => <option key={c.id} value={c.id}>{organizationContainerPath(namedSnapshot, c.id).map(p => p.name).join(' / ')}</option>)}</select></label><Button type="submit" size="sm" disabled={movingBusy}>{t('organization.move')}</Button><Button type="button" variant="ghost" size="sm" onClick={() => setMove(null)}>{t('organization.cancel')}</Button></form>}
+    {move && <form className="mx-2 space-y-2 rounded-md border border-border p-2" onSubmit={e => { e.preventDefault(); act(() => moveNodes(move, { parentId: moving || null, before: null, label: '' })); }}><div className="typography-meta">{t('organization.moveCount', { count: move.length })}<OrganizationDestinationPicker value={moving} onChange={setMoving} snapshot={namedSnapshot!} excluded={move.flatMap(node => node.container ? [node.container.id] : [])} disabled={movingBusy} /></div><Button type="submit" size="sm" disabled={movingBusy}>{t('organization.move')}</Button><Button type="button" variant="ghost" size="sm" disabled={movingBusy} onClick={() => setMove(null)}>{t('organization.cancel')}</Button></form>}
     {rename && <form className="mx-2 flex gap-1" onSubmit={e => { e.preventDefault(); act(async () => { await metadata([rename.node], { title: rename.title }); setRename(null); }); }}><Input autoFocus aria-label={t('organization.conversationName')} value={rename.title} onChange={e => setRename({ ...rename, title: e.target.value })} onKeyDown={e => { if (composingKey(e)) return; if (e.key === 'Escape') setRename(null); }} /><Button type="submit" size="sm" disabled={metadataPending}>{t('organization.save')}</Button><Button type="button" variant="ghost" size="sm" onClick={() => setRename(null)}>{t('organization.cancel')}</Button></form>}
     {(selection.size > 0 || selectionMode) && <div className="flex flex-wrap items-center gap-1 px-2 py-1 typography-meta"><span>{t('organization.selectedCount', { count: selection.size })}</span><Button size="sm" variant="ghost" onClick={() => { setMove(selectedNodes); setMoving(''); }}>{t('organization.move')}</Button><Button size="sm" variant="ghost" disabled={metadataPending} onClick={() => act(() => metadata(selectedNodes.filter(n => n.conversation), { archived: !archived }))}>{archived ? t('organization.restore') : t('organization.archive')}</Button><Button size="sm" variant="ghost" disabled={metadataPending} onClick={() => act(() => metadata(selectedNodes.filter(n => n.conversation), { deleted: true }))}>{t('organization.deleteSelected')}</Button><Button size="sm" variant="ghost" onClick={() => { setSelection(new Set()); onExitSelection?.(); }}>{t('organization.endSelection')}</Button></div>}
     {(metadataResults.some(r => r.status !== 'succeeded') || metadataRetry && !metadataPending) && <div role="status" className="px-3 typography-meta">{metadataRetry && !metadataResults.length && <p>{t('organization.unknown')}</p>}{metadataResults.map(r => <p key={organizationObjectKey(r.conversation)}>{r.conversation.id}: {r.status}{r.message && ` · ${r.message}`}</p>)}{metadataRetry && <button type="button" className="underline" disabled={metadataPending} onClick={() => act(() => metadata([], {}, true))}>{t('organization.retryUnconfirmed')}</button>}</div>}
     <DndContext sensors={sensors} onDragStart={e => setDrag(e.active.data.current as OrganizationNode)} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDrag(null); setDropLabel(''); }}>
-      <FlipList containerRef={list} layoutKey={JSON.stringify([roots.map(node => node.key), [...prefs.collapsed], prefs.focus, snapshot?.revision])} instantKey={query} className="relative min-h-0 flex-1 overflow-auto px-2 pb-3"><div role="tree" aria-label={t('organization.directory')}>{shown.map(render)}{pageControls(focused?.container ? containerQuery(focused.container.id) : scopeQuery)}<DropTarget id="root:end" drop={{ parentId: prefs.focus, before: null, label: t('organization.currentEnd') }}><div className="min-h-8 px-2 py-2 typography-micro text-muted-foreground">{shown.length || !state.pages[organizationQueryKey(focused?.container ? containerQuery(focused.container.id) : scopeQuery)]?.snapshot ? '' : archived ? t('organization.emptyArchive') : t('organization.empty')}{drag && t('organization.dropEnd')}</div></DropTarget></div></FlipList>
+      <FlipList containerRef={list} layoutKey={JSON.stringify([roots.map(node => node.key), [...prefs.collapsed], prefs.focus, snapshot?.revision])} instantKey={query} className="relative min-h-0 flex-1 overflow-auto px-2 pb-3"><div role="tree" aria-label={t('organization.directory')}>{shown.map(render)}{pageControls(viewQuery)}<DropTarget id="root:end" drop={{ parentId: prefs.focus, before: null, label: t('organization.currentEnd') }}><div className="min-h-8 px-2 py-2 typography-micro text-muted-foreground">{shown.length || !state.pages[organizationQueryKey(viewQuery)]?.snapshot ? '' : archived ? t('organization.emptyArchive') : t('organization.empty')}{drag && t('organization.dropEnd')}</div></DropTarget></div></FlipList>
       <DragOverlay>{drag ? <div className="rounded-md border border-border bg-popover px-3 py-2 text-sm shadow-md">{name(drag)}{dropLabel && <div className="typography-meta text-muted-foreground">{dropLabel}</div>}</div> : null}</DragOverlay>
     </DndContext>
     <span role="status" aria-live="polite" className="sr-only">{dropLabel}</span>

@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 91;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 92;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -311,6 +311,15 @@ pub(crate) struct ThreadParams {
 pub(crate) struct OrganizationInitializeParams {
     pub(crate) principal_id: RequiredNullable<String>,
     pub(crate) initial: varin_runtime::catalog::organization::OrganizationInitialization,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OrganizationInvocationParams {
+    pub(crate) run_id: String,
+    pub(crate) origin: varin_runtime::execution::ToolOrigin,
+    pub(crate) call_id: String,
+    pub(crate) operation_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4471,6 +4480,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.organization.command" => {
             serde_json::from_value::<OrganizationCommandParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.organization.invocation" => {
+            serde_json::from_value::<OrganizationInvocationParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

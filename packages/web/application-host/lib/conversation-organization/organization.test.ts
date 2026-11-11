@@ -128,3 +128,69 @@ it('does not replay another principal’s external tombstone receipt', async () 
   expect(result.items[0]).toMatchObject({ status: 'failed', code: 'forbidden' });
   expect(f.external.update).not.toHaveBeenCalled();
 });
+
+it('admits mixed-node pagination unchanged and rejects unknown or mistyped fields before Catalog access', async () => {
+  const f = fixture();
+  const query = { pageNodes: true, containerId: 'parent', recursive: false, limit: 100000, cursor: 'opaque-cursor' };
+  f.requests.mockResolvedValue({ ...snapshot, items: [] });
+  expect((await f.api.read(query)).items).toEqual([]);
+  expect(f.requests).toHaveBeenLastCalledWith('runtime.organization.read', { principalId: 'alice', query }, expect.any(AbortSignal));
+  f.requests.mockClear();
+  for (const body of [{ pageNodes: 'true' }, { pageNodes: null }, { page_nodes: true }, { principalId: 'bob', pageNodes: true }, { limit: 0 }]) {
+    expect((await f.request('/api/conversation-organization/read', body)).status).toBe(400);
+  }
+  expect(f.requests).not.toHaveBeenCalled();
+  expect((await f.request('/api/conversation-organization/read', { pageNodes: false })).status).toBe(200);
+  expect(f.requests).toHaveBeenLastCalledWith('runtime.organization.read', { principalId: 'alice', query: { pageNodes: false } }, expect.any(AbortSignal));
+});
+
+it('injects original Settings names once per search request and preserves them for continuation', async () => {
+  const f = fixture();
+  f.readSettings.mockResolvedValue({ projects: [
+    { id: 'named', path: '/work/named', label: 'Research' },
+    { id: 'path-only', path: '/work/fallback', label: '' },
+  ] });
+  const query = { pageNodes: true, query: 'Research', limit: 1 };
+  f.requests.mockResolvedValue({ ...snapshot, items: [], nextCursor: 'original-name-generation' });
+  await f.api.read(query);
+  await f.api.read({ ...query, cursor: 'original-name-generation' });
+  expect(f.readSettings).toHaveBeenCalledTimes(2);
+  expect(f.requests).toHaveBeenLastCalledWith('runtime.organization.read', {
+    principalId: 'alice', query: { ...query, cursor: 'original-name-generation', projectNames: { named: 'Research', 'path-only': '/work/fallback' } },
+  }, expect.any(AbortSignal));
+  f.readSettings.mockResolvedValue({ projects: [{ id: 'named', path: '/work/named', label: 'Renamed' }] });
+  f.requests.mockRejectedValue(new KernelClientError({ code: 'conflict', message: 'conflict: query generation changed' }));
+  await expect(f.api.read({ ...query, cursor: 'original-name-generation' })).rejects.toMatchObject({ code: 'conflict' });
+  expect(f.requests).toHaveBeenLastCalledWith('runtime.organization.read', {
+    principalId: 'alice', query: { ...query, cursor: 'original-name-generation', projectNames: { named: 'Renamed' } },
+  }, expect.any(AbortSignal));
+});
+
+it('rejects caller project-name indices and reports unavailable Settings without publishing search results', async () => {
+  const f = fixture();
+  expect((await f.request('/api/conversation-organization/read', { query: 'name', projectNames: { fake: 'Injected' } })).status).toBe(400);
+  expect(f.requests).not.toHaveBeenCalled(); expect(f.readSettings).not.toHaveBeenCalled();
+  f.readSettings.mockRejectedValue(new Error('Settings unavailable'));
+  await expect(f.api.read({ query: 'name' })).rejects.toMatchObject({ code: 'projects_unavailable' });
+  expect(f.requests).not.toHaveBeenCalled();
+  f.readSettings.mockClear();
+  expect(await f.api.read()).toEqual(snapshot);
+  expect(await f.api.read({ query: '   ' })).toEqual(snapshot);
+  expect(f.readSettings).not.toHaveBeenCalled();
+});
+
+it('initializes the full saved project generation before first dispatch without resolving device sources', async () => {
+  const f=fixture(); let initialized=false;
+  f.readSettings.mockResolvedValue({ projects: [{id:'one',path:'/one'}, {id:'two',path:'/offline',source:{resourceOwner:{kind:'managed_host',hostId:'offline',connectionId:'c',endpointIdentity:'e'},workspaceId:'w'}}] });
+  f.requests.mockImplementation(async method => {
+    if(method==='runtime.organization.read')return {...snapshot,initialized};
+    if(method==='runtime.thread.catalog.list')return [];
+    if(method==='runtime.organization.initialize'){initialized=true;return {};}
+    throw new Error(`Unexpected device or owner call: ${method}`);
+  });
+  await f.service.read('alice',{limit:1});
+  expect(f.requests).toHaveBeenCalledWith('runtime.organization.initialize',expect.objectContaining({principalId:'alice',initial:expect.objectContaining({projects:[{id:'one'},{id:'two'}]})}),undefined);
+  f.readSettings.mockRejectedValue(new Error('Settings changed after initialization'));
+  await f.service.read('alice',{limit:1});
+  expect(f.readSettings).toHaveBeenCalledTimes(1);
+});

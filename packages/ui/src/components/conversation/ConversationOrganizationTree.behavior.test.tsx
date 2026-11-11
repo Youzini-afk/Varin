@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ConversationOrganizationSnapshot, ConversationOrganizationCommand, ConversationOrganizationEvent } from '@varin/application-client';
 import { ConversationOrganizationTree } from './ConversationOrganizationTree';
-import { useConversationOrganizationStore } from '@/stores/useConversationOrganizationStore';
+import { useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization } from '@/stores/useConversationOrganizationStore';
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), command: vi.fn(), metadata: vi.fn(), observe: vi.fn(), listeners: new Set<(event: ConversationOrganizationEvent) => void>(), open: vi.fn(), create: vi.fn(), generation: 1 }));
 vi.mock('./sidebarHighlights', () => ({ useHoverPill: () => {}, useSelectionGlide: () => {} }));
@@ -154,7 +154,7 @@ it('loads only a root page and explicitly opened scopes, with continuation contr
   });
   await render();
   expect(transport.read.mock.calls).toHaveLength(1);
-  expect(transport.read.mock.calls[0][0]).toEqual({ rootOnly: true, archived: 'exclude' });
+  expect(transport.read.mock.calls[0][0]).toEqual({ pageNodes: true, rootOnly: true, archived: 'exclude' });
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="展开 Work"]')!.click());
   expect(transport.read.mock.calls.some(([query]) => query.containerId === 'work')).toBe(true);
   expect(transport.read.mock.calls.some(([query]) => query.containerId === 'project-node')).toBe(false);
@@ -226,4 +226,157 @@ it('keeps group and conversation editors open while an IME confirms or cancels c
   expect(transport.metadata).not.toHaveBeenCalled();
   await compositionKey(input, 'Escape', false);
   expect(container.contains(input)).toBe(false);
+});
+
+/** Stateful owner boundary with real mixed page membership and ancestor context. */
+function mixedPages(pageSize = 2) {
+  transport.read.mockImplementation(async (query: import('@varin/application-client').ConversationOrganizationQuery = {}) => {
+    const path = (id: string | null): string[] => { const result: string[] = []; while (id) { result.push(id); id = snapshot.containers.find(c => c.id === id)?.parentId ?? null; } return result; };
+    const scope = (id: string | null) => query.rootOnly ? id === null : query.containerId ? id === query.containerId || Boolean(query.recursive && path(id).includes(query.containerId)) : true;
+    const needle = query.query?.toLowerCase();
+    const nodes = [
+      ...snapshot.containers.filter(c => scope(c.parentId) && (!needle || c.name?.toLowerCase().includes(needle))).map(c => ({ object: { kind: 'container' as const, id: c.id }, order: c.order })),
+      ...snapshot.conversations.filter(c => scope(c.position.containerId) && (query.archived === 'include' || c.archived === (query.archived === 'only')) && (!needle || c.title.toLowerCase().includes(needle))).map(c => ({ object: c.conversation, order: c.position.order })),
+    ].sort((a, b) => a.order - b.order || JSON.stringify(a.object).localeCompare(JSON.stringify(b.object)));
+    const offset = Number(query.cursor ?? 0), items = nodes.slice(offset, offset + pageSize).map(node => node.object);
+    const conversations = snapshot.conversations.filter(entry => items.some(item => item.kind === entry.conversation.kind && item.id === entry.conversation.id));
+    const ids = new Set([...items.filter(item => item.kind === 'container').flatMap(item => path(item.id)), ...conversations.flatMap(entry => path(entry.position.containerId)), ...path(query.containerId ?? null)]);
+    return structuredClone({ ...snapshot, items, containers: snapshot.containers.filter(c => ids.has(c.id)), conversations, nextCursor: offset + pageSize < nodes.length ? String(offset + pageSize) : null });
+  });
+}
+const group = (id: string, order: number, parentId: string | null = null, name = id) => ({ ...original().containers[0], id, name, parentId, order });
+const task = (id: string, order: number, containerId: string | null = null) => ({ ...original().conversations[0], conversation: { kind: 'native' as const, id }, title: id, position: { ...original().conversations[0].position, conversation: { kind: 'native' as const, id }, order, containerId } });
+const toggle = async (title: string) => { await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="展开 ${title}"]`)!.click()); };
+
+it('pages more than a page of empty containers and refreshes only the loaded mixed-node window', async () => {
+  snapshot = { ...original(), containers: Array.from({ length: 7 }, (_, i) => group(`Empty ${i}`, i)), conversations: [] };
+  mixedPages(); await render();
+  expect([...container.querySelectorAll('[role="treeitem"]')]).toHaveLength(2);
+  expect(transport.read.mock.calls).toHaveLength(1);
+  await click('继续读取');
+  expect([...container.querySelectorAll('[role="treeitem"]')]).toHaveLength(4);
+  transport.read.mockClear();
+  await act(async () => refreshConversationOrganization());
+  expect(transport.read.mock.calls.map(([query]) => query.cursor ?? 'first')).toEqual(['first', '2']);
+  expect([...container.querySelectorAll('[role="treeitem"]')]).toHaveLength(4);
+  expect(transport.read.mock.calls.every(([query]) => query.pageNodes && query.rootOnly)).toBe(true);
+  await click('继续读取'); await click('继续读取');
+  expect([...container.querySelectorAll('[role="treeitem"]')]).toHaveLength(7);
+  expect(useConversationOrganizationStore.getState().snapshot?.containers).toHaveLength(7);
+  expect(container.textContent).not.toContain('继续读取');
+});
+
+it('merges mixed container/native/external pages, keeps newly discovered branches closed, and isolates search membership', async () => {
+  snapshot = { ...original(), containers: [group('A', 0), group('B', 2), group('Nested', 0, 'A'), group('Deeper', 0, 'Nested')], conversations: [task('Root native', 1), { ...task('Root external', 3), conversation: { kind: 'external', id: 'Root external' }, position: { ...task('Root external', 3).position, conversation: { kind: 'external', id: 'Root external' } } }, task('Needle', 1, 'Nested'), task('Other child', 1, 'A')] };
+  mixedPages(); await render(); await toggle('A');
+  expect(row('Nested').getAttribute('aria-expanded')).toBe('false');
+  expect(transport.read.mock.calls.some(([query]) => query.containerId === 'Nested')).toBe(false);
+  await click('继续读取');
+  expect(row('A')).toBeTruthy(); expect(row('B')).toBeTruthy(); expect(row('Root native')).toBeTruthy(); expect(row('Root external')).toBeTruthy();
+  await render('Needle');
+  expect(row('Needle')).toBeTruthy(); expect(row('A')).toBeTruthy(); expect(row('Nested')).toBeTruthy();
+  expect(row('B')).toBeUndefined(); expect(row('Other child')).toBeUndefined(); expect(row('Root native')).toBeUndefined();
+  await render();
+  expect(row('B')).toBeTruthy(); expect(row('Nested').getAttribute('aria-expanded')).toBe('false');
+  expect(row('Needle')).toBeUndefined();
+});
+
+it('browses an unloaded destination page and searches identical labels by stable identity without polluting navigation', async () => {
+  snapshot = { ...original(), containers: [group('first', 1), group('later', 2), group('deep-one', 0, 'later', 'Same'), group('deep-two', 1, 'later', 'Same')], conversations: [task('Move me', 0)] };
+  mixedPages(); await render();
+  const menu = [...row('Move me').querySelectorAll('button')].find(button => button.textContent === '移动到…')!;
+  await act(async () => menu.click());
+  const picker = () => container.querySelector('[aria-label="浏览目标分类"]')!;
+  expect(picker().textContent).not.toContain('later');
+  const more = [...container.querySelectorAll('form button')].find(button => button.textContent === '继续读取')!;
+  await act(async () => (more as HTMLButtonElement).click());
+  const browse = picker().querySelector<HTMLButtonElement>('button[aria-label="进入此分类: later · later"]')!;
+  await act(async () => browse.click());
+  expect(picker().textContent).toContain('later / Same · deep-one');
+  expect(picker().textContent).toContain('later / Same · deep-two');
+  const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索目标分类"]')!;
+  await act(async () => { search.value = 'Same'; search.dispatchEvent(new Event('input', { bubbles: true })); });
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
+  expect([...select.querySelectorAll('option')].map(option => option.value)).toEqual(['', 'later', 'deep-one', 'deep-two']);
+  await click('取消');
+  expect(row('later')).toBeUndefined(); expect(row('Same')).toBeUndefined();
+  expect(transport.command).not.toHaveBeenCalled();
+});
+
+it('captures an unread mixed sibling anchor before moving and restores before its stable original identity', async () => {
+  snapshot = { ...original(), containers: [group('Before', 0), group('Unread anchor', 2), group('Destination', 3)], conversations: [task('Move me', 1)] };
+  mixedPages(); await render();
+  await act(async () => [...row('Move me').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '移动到…')!.click());
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('form button')].find(button => button.textContent === '继续读取')!.click());
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
+  await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'Destination' }); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  transport.command.mockImplementationOnce(async (command: ConversationOrganizationCommand) => {
+    expect(transport.read.mock.calls.some(([query]) => query.rootOnly && query.archived === 'include' && query.cursor === '2')).toBe(true);
+    const position = { ...snapshot.conversations[0].position, containerId: 'Destination', revision: 2 };
+    snapshot = { ...snapshot, revision: 2, cursor: 2, rootRevision: 2, conversations: [{ ...snapshot.conversations[0], position }] };
+    return { key: command.key, revision: 2, cursor: 2, containers: [], positions: [position], removed: [] };
+  });
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(transport.command).toHaveBeenCalledOnce();
+  transport.command.mockResolvedValueOnce({}); await click('撤销移动');
+  expect(transport.command.mock.calls[1][0].operation).toMatchObject({ action: 'restore', items: [{ object: { kind: 'native', id: 'Move me' }, parentId: null, before: { kind: 'container', id: 'Unread anchor' }, expectedRevision: 2 }] });
+});
+
+it('aborts explicit scope reads without continuing pages and fences a pending page after Host replacement', async () => {
+  snapshot = { ...original(), containers: [group('A', 0), group('B', 1), group('C', 2)], conversations: [] };
+  mixedPages(); await render();
+  let finish!: (snapshot: ConversationOrganizationSnapshot) => void;
+  transport.read.mockImplementationOnce((_query, signal: AbortSignal) => new Promise(resolve => { finish = resolve; expect(signal.aborted).toBe(false); }));
+  const controller = new AbortController();
+  const pending = readOrganizationActionScope({ rootOnly: true, archived: 'include' }, controller.signal);
+  controller.abort();
+  finish({ ...snapshot, items: [{ kind: 'container', id: 'A' }], nextCursor: 'next' });
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(transport.read.mock.calls.some(([query]) => query.cursor === 'next')).toBe(false);
+  transport.read.mockImplementationOnce((_query, signal: AbortSignal) => new Promise(resolve => { finish = resolve; signal.addEventListener('abort', () => expect(signal.aborted).toBe(true)); }));
+  let page!: Promise<void>;
+  await act(async () => { page = loadOrganizationPage({ rootOnly: true, archived: 'exclude' }, true); });
+  transport.generation++; snapshot = { ...original(), containers: [], conversations: [], items: [] };
+  mixedPages(); await render();
+  await act(async () => { finish({ ...original(), items: [{ kind: 'container', id: 'stale' }], containers: [group('stale', 0)], conversations: [], nextCursor: null }); await page; });
+  expect(useConversationOrganizationStore.getState().snapshot?.containers).toEqual([]);
+  expect(row('stale')).toBeUndefined();
+});
+
+it('accepts unrelated global revision changes across a scope cursor but refuses changed source-parent versions before dispatch', async () => {
+  snapshot = { ...original(), containers: [group('A', 0), group('B', 1), group('C', 3)], conversations: [task('Move me', 2)] };
+  mixedPages(); await render();
+  const read = transport.read.getMockImplementation()!;
+  transport.read.mockImplementation(async (query, signal) => ({ ...await read(query, signal), revision: query.cursor ? 9 : 1 }));
+  const scope = await readOrganizationActionScope({ rootOnly: true, archived: 'include' });
+  expect(scope.items).toHaveLength(4);
+  await click('继续读取');
+  await act(async () => [...row('Move me').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '移动到…')!.click());
+  transport.read.mockImplementation(async (query, signal) => ({ ...await read(query, signal), rootRevision: query.archived === 'include' ? 2 : 1 }));
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(transport.command).not.toHaveBeenCalled();
+  expect(row('Move me')).toBeTruthy();
+});
+
+it('does not let a newer picker read cursor hide an earlier durable event affecting the visible root page', async () => {
+  snapshot = { ...original(), containers: [group('Visible', 0)], conversations: [] };
+  mixedPages(); await render();
+  const read = transport.read.getMockImplementation()!;
+  transport.read.mockImplementation(async (query, signal) => ({ ...await read(query, signal), cursor: query.archived === 'include' ? 10 : 1 }));
+  await act(async () => loadOrganizationPage({ rootOnly: true, archived: 'include' }));
+  expect(useConversationOrganizationStore.getState().snapshot?.cursor).toBe(10);
+  snapshot = { ...snapshot, containers: [group('Visible', 0, null, 'Updated visible')] };
+  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 9, kind: 'organization', revision: 2, subject: '', data: null }); });
+  expect(row('Updated visible')).toBeTruthy();
+});
+
+it('keeps a Bot-matching container page visible before its matching child page is opened', async () => {
+  const entry = { ...task('Bot child', 0, 'Bot scope'), origin: { botId: 'bot-a', directBotId: null, conversation: null } };
+  const folder = group('Bot scope', 0);
+  transport.read.mockImplementation(async (query: import('@varin/application-client').ConversationOrganizationQuery = {}) => ({ ...original(), items: query.containerId ? [entry.conversation] : [{ kind: 'container', id: folder.id }], containers: [folder], conversations: query.containerId ? [entry] : [], nextCursor: null }));
+  await act(async () => root.render(<ConversationOrganizationTree botId="bot-a" />));
+  expect(row('Bot scope')).toBeTruthy(); expect(row('Bot child')).toBeUndefined();
+  await toggle('Bot scope');
+  expect(transport.read.mock.calls.some(([query]) => query.containerId === 'Bot scope' && query.botId === 'bot-a')).toBe(true);
+  expect(row('Bot child')).toBeTruthy();
 });

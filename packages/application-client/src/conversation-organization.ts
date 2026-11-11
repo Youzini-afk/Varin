@@ -23,11 +23,16 @@ export interface ConversationOrganizationEntry {
   path: string[];
 }
 export interface ConversationOrganizationQuery {
+  /** Page the mixed ordered node sequence; omitted/false retains the complete container metadata index. */
+  pageNodes?: boolean;
   containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string;
   botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string;
 }
 export interface ConversationOrganizationSnapshot {
   initialized: boolean; revision: number; rootRevision: number; cursor: number;
+  /** Present in mixed-node mode: exactly the ordered page, excluding ancestor context. */
+  items?: ConversationOrganizationObject[];
+  /** Mixed mode includes page containers and necessary ancestors; ancestors are not page items. */
   containers: ConversationOrganizationContainer[]; conversations: ConversationOrganizationEntry[]; nextCursor: string | null;
 }
 export interface ConversationOrganizationParentVersion { containerId: string | null; childrenRevision: number }
@@ -78,6 +83,22 @@ export function parseConversationOrganizationPlacement(value: unknown): Conversa
   return { containerId: input.containerId as string | null };
 }
 
+/** Strict public query boundary. Identity/principal fields never come from the caller. */
+export function parseConversationOrganizationQuery(value: unknown): ConversationOrganizationQuery {
+  const invalid = (): never => { throw new ConversationOrganizationError('invalid_request', 'Invalid conversation directory query'); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
+  const query = value as Record<string, unknown>;
+  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes'];
+  if (Object.keys(query).some(key => !allowed.includes(key))) invalid();
+  for (const field of ['pageNodes', 'rootOnly', 'recursive']) if (query[field] !== undefined && typeof query[field] !== 'boolean') invalid();
+  if (query.containerId !== undefined && query.containerId !== null && (typeof query.containerId !== 'string' || !query.containerId.trim())) invalid();
+  for (const field of ['botId', 'cursor']) if (query[field] !== undefined && (typeof query[field] !== 'string' || !(query[field] as string).trim())) invalid();
+  if (query.query !== undefined && typeof query.query !== 'string') invalid();
+  if (query.archived !== undefined && !['exclude', 'include', 'only'].includes(String(query.archived))) invalid();
+  if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || Number(query.limit) < 1)) invalid();
+  return query as ConversationOrganizationQuery;
+}
+
 /** Validate metadata at the product boundary before a shared store publishes a generation. */
 export function parseConversationOrganizationSnapshot(value: unknown): ConversationOrganizationSnapshot {
   const invalid = (): never => { throw new ConversationOrganizationError('invalid_response', 'Invalid conversation directory response', 502); };
@@ -101,6 +122,21 @@ export function parseConversationOrganizationSnapshot(value: unknown): Conversat
     for (const field of ['revision', 'order']) number(position[field]);
     if (typeof position.explicit !== 'boolean') invalid(); if (position.inheritedFrom !== null) reference(position.inheritedFrom);
     const origin = record(c.origin); nullable(origin.botId); nullable(origin.directBotId); if (origin.conversation !== null) reference(origin.conversation);
+  }
+  if (root.items !== undefined) {
+    if (!Array.isArray(root.items)) invalid();
+    const known = new Set(containers.map(raw => JSON.stringify(['container', record(raw).id])));
+    for (const raw of conversations) { const ref = record(record(raw).conversation); known.add(JSON.stringify([ref.kind, ref.id])); }
+    const seen = new Set<string>();
+    for (const raw of root.items as unknown[]) {
+      const item = record(raw);
+      if (Object.keys(item).some(key => key !== 'kind' && key !== 'id') || !['container', 'native', 'external'].includes(String(item.kind)) || typeof item.id !== 'string' || !item.id) invalid();
+      const key = JSON.stringify([item.kind, item.id]);
+      if (!known.has(key) || seen.has(key)) invalid();
+      seen.add(key);
+    }
+    // Containers outside the page are ancestor context, never extra rendered rows.
+    for (const raw of conversations) { const ref = record(record(raw).conversation); if (!seen.has(JSON.stringify([ref.kind, ref.id]))) invalid(); }
   }
   return value as ConversationOrganizationSnapshot;
 }

@@ -42,7 +42,7 @@ const receipt = (value: import('./protocol.generated.js').UserChildDispatchRecei
   if (value.actor.kind !== 'user') throw new Error('Handoff receipt has an unexpected author');
   return { ...value, actor: { kind: 'user' } };
 };
-export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; models: ModelsService; attachments: ThreadAttachmentOwner }) {
+export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; models: ModelsService; attachments: ThreadAttachmentOwner; ensureOrganization?: (signal?: AbortSignal) => Promise<void> }) {
   // Transient scheduling only. Catalog remains the identity/receipt owner. A failed
   // repeat must not announce "not started" while an earlier request can still commit.
   const pending = new Map<string, Promise<void>>();
@@ -78,6 +78,7 @@ export function createThreadUserDispatch(owners: { runtime: AgentRuntimeClient; 
       const targetThreadId = `thread:child:${operationId}`;
       let dispatched = false;
       try {
+        if (input.projectId !== null) await owners.ensureOrganization?.(signal);
         const catalog = await readDelegationModelCatalog(owners.models, { enabled: false }, input.model);
         const model = catalog.candidates.find(model => model.id === input.model);
         if (!model || input.thinking !== undefined && input.thinking !== 'default' && !model.thinkingLevels.includes(input.thinking as never)) return invalid('The selected handoff model or thinking option is no longer available');

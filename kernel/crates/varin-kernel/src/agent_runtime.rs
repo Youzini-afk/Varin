@@ -2004,6 +2004,38 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.organization.invocation" {
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let p: OrganizationInvocationParams = serde_json::from_value(params)?;
+                                    let context = varin_runtime::execution::ToolExecutionContext {
+                                        run_id: p.run_id, origin: p.origin, operation_id: p.operation_id,
+                                    };
+                                    let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                        .capture_tool_invocation(&context, &p.call_id).map_err(domain)?;
+                                    // Body decoding must not hold the Catalog owner lock.
+                                    let snapshot = read.load().map_err(domain)?;
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                    owner.validate_tool_invocation(&snapshot, true).map_err(domain)?;
+                                    Ok(serde_json::to_value(owner.run(&context.run_id).map_err(domain)?)?)
+                                })();
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.resources.refresh"
                             || method == "runtime.resources.snapshot"
                         {

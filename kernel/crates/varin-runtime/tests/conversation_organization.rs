@@ -1733,3 +1733,395 @@ fn large_metadata_directory_pages_and_moves_without_loading_history() {
     assert_eq!(raw(&f).query_row("SELECT count(*) FROM history",[],|r|r.get::<_,i64>(0)).unwrap(),0);
     eprintln!("organization scale: paging, subtree and move {:?}",started.elapsed());
 }
+
+#[test]
+fn mixed_node_pages_include_empty_containers_and_preserve_interleaved_order() {
+    let f = Fixture::new();
+    let mut c = f.open();
+    for n in 0..9 {
+        group(&mut c, &format!("empty-{n}"), None);
+        if n % 3 == 0 {
+            c.create_thread_with_placement(
+                &format!("thread-{n}"),
+                &format!("branch-{n}"),
+                Some("alice"),
+                Some(Placement { container_id: None }),
+            )
+            .unwrap();
+        }
+    }
+    let expected = siblings(&c);
+    let query = OrganizationQuery {
+        page_nodes: true,
+        root_only: true,
+        limit: Some(2),
+        ..Default::default()
+    };
+    let mut cursor = None;
+    let mut items = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = c
+            .organization_snapshot(
+                Some("alice"),
+                OrganizationQuery {
+                    cursor,
+                    ..query.clone()
+                },
+            )
+            .unwrap();
+        let actual = page.items.unwrap();
+        assert!(!actual.is_empty());
+        assert!(actual.len() <= 2);
+        assert_eq!(
+            page.containers.len() + page.conversations.len(),
+            actual.len()
+        );
+        items.extend(actual);
+        pages += 1;
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(pages, 6);
+    assert_eq!(items, expected);
+    // Legacy mode remains the explicit full metadata index, even with a tiny conversation page.
+    let old = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(old.items.is_none());
+    assert_eq!(old.containers.len(), 9);
+    assert_eq!(old.conversations.len(), 1);
+    assert!(serde_json::to_value(old).unwrap().get("items").is_none());
+}
+
+#[test]
+fn mixed_pages_keep_only_necessary_ancestors_and_search_does_not_expand_siblings() {
+    let f = Fixture::new();
+    let mut c = f.open();
+    group(&mut c, "root", None);
+    group(&mut c, "nested", Some("root"));
+    group(&mut c, "needle-group", Some("nested"));
+    group(&mut c, "unrelated-root", None);
+    group(&mut c, "unrelated-child", Some("unrelated-root"));
+    c.create_thread_with_placement(
+        "ordinary",
+        "ordinary-main",
+        Some("alice"),
+        Some(Placement {
+            container_id: Some("needle-group".into()),
+        }),
+    )
+    .unwrap();
+    let page = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                page_nodes: true,
+                container_id: Some("nested".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        page.items,
+        Some(vec![OrganizationObject::Container {
+            id: "needle-group".into()
+        }])
+    );
+    assert_eq!(
+        page.containers
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["root", "nested", "needle-group"])
+    );
+    assert!(page.conversations.is_empty());
+    assert!(page.next_cursor.is_none());
+    let search = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                page_nodes: true,
+                query: Some("needle-group".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(search.items, page.items);
+    assert!(search.conversations.is_empty());
+    assert!(search.next_cursor.is_none());
+    let children = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                page_nodes: true,
+                container_id: Some("needle-group".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        children.items,
+        Some(vec![OrganizationObject::Native {
+            id: "ordinary".into()
+        }])
+    );
+    assert_eq!(children.containers.len(), 3);
+    assert_eq!(children.conversations.len(), 1);
+}
+
+#[test]
+fn mixed_page_continuation_rejects_reorder_and_preserves_query_and_legacy_modes() {
+    let f = Fixture::new();
+    let mut c = f.open();
+    for id in ["a", "b", "c", "d"] {
+        group(&mut c, id, None);
+    }
+    let query = OrganizationQuery {
+        page_nodes: true,
+        root_only: true,
+        limit: Some(2),
+        ..Default::default()
+    };
+    let page = c
+        .organization_snapshot(Some("alice"), query.clone())
+        .unwrap();
+    let cursor = page.next_cursor.unwrap();
+    assert!(
+        c.organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                page_nodes: false,
+                cursor: Some(cursor.clone()),
+                ..query.clone()
+            }
+        )
+        .is_err()
+    );
+    let mut command = move_command(
+        &c,
+        "reorder",
+        vec![OrganizationObject::Container { id: "d".into() }],
+        None,
+    );
+    if let OrganizationOperation::Move { before, .. } = &mut command.operation {
+        *before = Some(OrganizationObject::Container { id: "a".into() });
+    }
+    c.organization_command(Some("alice"), command).unwrap();
+    assert!(
+        c.organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                cursor: Some(cursor),
+                ..query.clone()
+            }
+        )
+        .is_err()
+    );
+    let fresh = c
+        .organization_snapshot(Some("alice"), query.clone())
+        .unwrap();
+    assert_eq!(
+        fresh.items,
+        Some(vec![
+            OrganizationObject::Container { id: "d".into() },
+            OrganizationObject::Container { id: "a".into() }
+        ])
+    );
+    let rest = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                cursor: fresh.next_cursor,
+                ..query
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rest.items,
+        Some(vec![
+            OrganizationObject::Container { id: "b".into() },
+            OrganizationObject::Container { id: "c".into() }
+        ])
+    );
+    assert!(rest.next_cursor.is_none());
+    let legacy: OrganizationQuery =
+        serde_json::from_value(json!({"rootOnly":true,"limit":2})).unwrap();
+    assert!(!legacy.page_nodes);
+}
+
+#[test]
+fn mixed_bot_scope_exposes_only_matching_branches_and_exact_principal() {
+    let f = Fixture::new();
+    let mut c = f.open();
+    c.publish_bot_gate(bot::BotGate {
+        bot_id: "bot".into(),
+        profile_revision: 1,
+        activity_operation_id: None,
+        permitted: true,
+    })
+    .unwrap();
+    group(&mut c, "matched", None);
+    group(&mut c, "deep", Some("matched"));
+    group(&mut c, "empty-other", None);
+    c.create_bot_thread_with_placement(
+        "alice-session",
+        "alice-branch",
+        "bot",
+        Some("alice"),
+        Some(Placement {
+            container_id: Some("deep".into()),
+        }),
+    )
+    .unwrap();
+    c.create_bot_thread_with_placement("bob-session", "bob-branch", "bot", Some("bob"), None)
+        .unwrap();
+    let query = OrganizationQuery {
+        page_nodes: true,
+        root_only: true,
+        bot_id: Some("bot".into()),
+        limit: Some(1),
+        ..Default::default()
+    };
+    let root = c
+        .organization_snapshot(Some("alice"), query.clone())
+        .unwrap();
+    assert_eq!(
+        root.items,
+        Some(vec![OrganizationObject::Container {
+            id: "matched".into()
+        }])
+    );
+    assert_eq!(root.containers.len(), 1);
+    assert!(root.next_cursor.is_none());
+    let deep = c
+        .organization_snapshot(
+            Some("alice"),
+            OrganizationQuery {
+                container_id: Some("deep".into()),
+                ..query.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        deep.items,
+        Some(vec![OrganizationObject::Native {
+            id: "alice-session".into()
+        }])
+    );
+    assert_eq!(deep.containers.len(), 2);
+    let public = c.organization_snapshot(None, query).unwrap();
+    assert_eq!(public.items, Some(vec![]));
+    assert!(public.containers.is_empty());
+}
+
+#[test]
+fn mixed_project_search_uses_ephemeral_owner_names_and_binds_name_generation() {
+    let f=Fixture::new();let mut c=f.open();
+    c.initialize_organization(Some("alice"),OrganizationInitialization{key:"project-index".into(),projects:vec![InitialProject{id:"project-a".into()},InitialProject{id:"project-b".into()}],positions:vec![]}).unwrap();
+    let names=std::collections::BTreeMap::from([("project-a".into(),"Research alpha".into()),("project-b".into(),"Research beta".into()),("unrelated-host-project".into(),"Private unrelated name".into())]);
+    let query=OrganizationQuery{page_nodes:true,query:Some("Research".into()),project_names:Some(names),limit:Some(1),..Default::default()};
+    let first=c.organization_snapshot(Some("alice"),query.clone()).unwrap();
+    assert_eq!(first.items.as_ref().unwrap().len(),1);assert_eq!(first.containers.len(),1);assert!(first.containers[0].name.is_none());
+    let cursor=first.next_cursor.unwrap();
+    assert!(!cursor.contains("unrelated-host-project"));assert!(!cursor.contains("Private unrelated name"));
+    let mut unrelated=query.clone();unrelated.project_names.as_mut().unwrap().insert("unrelated-host-project".into(),"Changed unrelated name".into());unrelated.cursor=Some(cursor.clone());
+    assert!(c.organization_snapshot(Some("alice"),unrelated).is_ok());
+    let second=c.organization_snapshot(Some("alice"),OrganizationQuery{cursor:Some(cursor.clone()),..query.clone()}).unwrap();
+    assert_eq!(second.items.as_ref().unwrap().len(),1);assert_ne!(first.items,second.items);assert!(second.next_cursor.is_none());
+    let mut changed=query;changed.project_names.as_mut().unwrap().insert("project-a".into(),"Renamed elsewhere".into());changed.cursor=Some(cursor);
+    assert!(c.organization_snapshot(Some("alice"),changed).is_err());
+    assert!(c.organization_snapshot(Some("alice"),OrganizationQuery{page_nodes:true,query:Some("Research".into()),..Default::default()}).unwrap().items.unwrap().is_empty());
+    assert_eq!(c.organization_project_ids(Some("alice")).unwrap(),vec!["project-a","project-b"]);
+    assert!(c.organization_project_ids(Some("bob")).unwrap().is_empty());
+}
+
+#[test]
+fn organization_observation_owner_enforces_principal_and_original_run_holder() {
+    use varin_runtime::catalog::model_references::ReferenceKind;
+    let mut f=child_fixture::Fixture::new_in_bot("bot");
+    public_group(&mut f.db,"source");public_group(&mut f.db,"destination");
+    let snapshot=f.db.organization_snapshot(None,OrganizationQuery{page_nodes:true,root_only:true,limit:Some(1),..Default::default()}).unwrap();
+    let reference=f.db.register_model_reference(ReferenceKind::Read,"organization_observation",&json!({"principal":null,"snapshot":snapshot}),&f.context.run_id).unwrap();
+    assert!(f.db.organization_observation(None,&reference,&f.context.run_id).is_ok());
+    assert!(f.db.organization_observation(Some("alice"),&reference,&f.context.run_id).is_err());
+    let foreign=f.db.register_model_reference(ReferenceKind::Read,"organization_observation",&json!({"principal":null,"snapshot":snapshot,"differentObservation":true}),"foreign-run").unwrap();
+    assert!(f.db.organization_observation(None,&foreign,&f.context.run_id).is_err());
+    let wrong=f.db.register_model_reference(ReferenceKind::Read,"organization_page",&json!({"principal":null,"snapshot":snapshot}),&f.context.run_id).unwrap();
+    assert!(f.db.organization_observation(None,&wrong,&f.context.run_id).is_err());
+}
+
+fn dissolve_public(c:&mut Catalog,id:&str,key:&str) {
+    let container=c.resolve_organization_container(None,id).unwrap();
+    let root=c.organization_snapshot(None,OrganizationQuery::default()).unwrap().root_revision;
+    c.organization_command(None,OrganizationCommand{key:key.into(),operation:OrganizationOperation::Dissolve{id:id.into(),expected_revision:container.revision,parents:vec![ParentVersion{container_id:Some(id.into()),children_revision:container.children_revision},ParentVersion{container_id:container.parent_id,children_revision:root}]}}).unwrap();
+}
+#[test]
+fn actual_native_dispatch_explicit_project_classifies_atomically_and_placement_wins() {
+    use varin_runtime::execution::ToolCall;
+    let mut f=child_fixture::Fixture::new_project_dispatch();
+    let project=f.db.organization_snapshot(None,OrganizationQuery::default()).unwrap().containers.into_iter().find(|c|c.project_id.as_deref()==Some("project-B")).unwrap();
+    public_group(&mut f.db,"parent-group");public_group(&mut f.db,"explicit-group");
+    public_move(&mut f.db,"parent-location","thread:parent",Some("parent-group"));
+    let child=f.accept();
+    let entry=f.db.organization_conversation(None,&native(&child.child_thread_id)).unwrap();
+    assert!(entry.position.explicit);assert_eq!(entry.position.container_id,Some(project.id.clone()));
+    public_move(&mut f.db,"parent-moved","thread:parent",Some("explicit-group"));
+    assert_eq!(f.db.organization_conversation(None,&native(&child.child_thread_id)).unwrap().position.container_id,Some(project.id.clone()));
+    dissolve_public(&mut f.db,&project.id,"remove-project-entry");
+    // Original accepted operation returns before resolving today's missing project.
+    assert_eq!(f.accept().operation_id,child.operation_id);
+    f.settle_exchange();
+    f.input.organization=Some(Placement{container_id:Some("explicit-group".into())});
+    f.context=f.admit_policy_call(ToolCall{call_id:"explicit-organization".into(),name:"dispatch".into(),schema_version:"1".into(),arguments:serde_json::to_value(&f.input).unwrap()});
+    let explicit=f.accept();
+    assert_eq!(f.db.organization_conversation(None,&native(&explicit.child_thread_id)).unwrap().position.container_id.as_deref(),Some("explicit-group"));
+    assert!(matches!(explicit.source,varin_runtime::catalog::collaboration::ChildSource::Project{project,..} if project.id=="project-B"));
+}
+#[test]
+fn dispatch_missing_formal_explicit_project_rolls_back_original_child_admission() {
+    let mut f=child_fixture::Fixture::new_project_dispatch();
+    let project=f.db.organization_snapshot(None,OrganizationQuery::default()).unwrap().containers.into_iter().find(|c|c.project_id.as_deref()==Some("project-B")).unwrap();
+    dissolve_public(&mut f.db,&project.id,"removed-before-admission");
+    assert!(matches!(f.try_accept(),Err(RuntimeError::Conflict(message)) if message.contains("no registered navigation entry")));
+    assert!(f.db.inspect_thread(&format!("thread:child:{}",f.context.operation_id)).is_err());
+    assert!(f.db.organization_snapshot(None,OrganizationQuery::default()).unwrap().conversations.iter().all(|e|e.conversation==native("thread:parent")));
+}
+
+#[test]
+fn actual_external_dispatch_explicit_project_and_original_receipt_share_admission() {
+    use organization_input_admission::InputAdmission;
+    use varin_runtime::{catalog::dispatch::*,execution::*,*};
+    let mut f=child_fixture::Fixture::new_project_dispatch();
+    let project=f.db.organization_snapshot(None,OrganizationQuery::default()).unwrap().containers.into_iter().find(|c|c.project_id.as_deref()==Some("project-B")).unwrap();
+    let mut launch=f.db.launch_intent(&f.context.run_id).unwrap().unwrap().selection;
+    launch.child_dispatch.as_mut().unwrap().presets.push(ChildPreset{work_focus:vec![],external:Some(ExternalChildBinding{configuration_id:"codex".into(),harness:"codex".into(),model:None,launch:ExternalLaunch{command:"codex".into(),args:vec![]}}),description:None,avatar:None,id:"external".into(),name:"External worker".into(),instructions:String::new(),tools:vec![],tools_source:ChildPresetToolsSource::Explicit,retired_work_mode:None,model_source:ChildModelSource::Inherit,inherit_base:None,model:None,unavailable:None});
+    f.db.create_thread("external-parent","external-main").unwrap();
+    let configuration=f.db.run(&f.context.run_id).unwrap().configuration;
+    let run=f.db.submit_with_launch(&SubmitInput{key:"external-parent".into(),thread_id:"external-parent".into(),branch_id:"external-main".into(),expected_head:None,input:json!({"text":"Delegate external project work"}),configuration},Some(launch.clone())).unwrap();
+    let model=ChildModelBinding{configuration:serde_json::from_value(f.db.run(&run.run_id).unwrap().configuration).unwrap(),credential_scope:launch.credential_scope.clone()};
+    let prepared=f.db.prepare_child_dispatch_binding(&run.run_id,model,launch.tool_schema_generation,launch.tools.clone()).unwrap().load().unwrap();f.db.bind_child_dispatch(&run.run_id,prepared).unwrap();
+    f.context.run_id=run.run_id.clone();f.launch=launch;
+    let mut input=f.input.clone();input.preset=Some("external".into());input.tools=None;input.work_mode=Some(ChildWorkMode::Shared);
+    let context=f.admit_policy_call(ToolCall{call_id:"external-project".into(),name:"dispatch".into(),schema_version:"1".into(),arguments:serde_json::to_value(&input).unwrap()});
+    let selected=f.db.capture_child_dispatch_invocation(&context).unwrap().load().unwrap();let preset=selected.external_preset(&input).unwrap().unwrap();
+    let prepared=f.db.prepare_external_child(&context,&input,&selected,&preset,None).unwrap().load().unwrap();let child=f.db.accept_external_child(prepared).unwrap();
+    let command=serde_json::from_value(json!({"action":"create","id":child.conversation_id,"key":"external-conversation","configurationId":"codex","harness":"codex","title":"External worker","cwd":"/registered/project-B"})).unwrap();let prepared=f.db.prepare_external(command).load().unwrap();f.db.execute_external(prepared).unwrap().load().unwrap();
+    let reference=ConversationRef::External{id:child.conversation_id.clone()};
+    assert_eq!(f.db.organization_conversation(None,&reference).unwrap().position.container_id,Some(project.id.clone()));
+    dissolve_public(&mut f.db,&project.id,"external-project-dissolved");
+    let prepared=f.db.prepare_external_child(&context,&input,&selected,&preset,None).unwrap().load().unwrap();let replay=f.db.accept_external_child(prepared).unwrap();
+    assert_eq!(replay.conversation_id,child.conversation_id);assert_eq!(replay.operation_id,child.operation_id);
+    assert_eq!(f.db.organization_conversation(None,&reference).unwrap().position.container_id,None);
+}

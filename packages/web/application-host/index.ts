@@ -2256,11 +2256,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   app.use('/api/threads', uiAuthController.requireAuth, createThreadPrincipalMiddleware(agentRuntime,
     (req, res) => uiAuthController!.resolveAuthContext(req, res), id => hostPrincipals().isOwner(id)));
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
-  registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments }), uiAuthController.requireAuth);
+  registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments,
+    ensureOrganization: async signal => { await conversationOrganization.read(currentRequestPrincipal() ?? null, { limit: 1 }, signal); } }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments,
     organization: async (request, run, signal) => {
+      if (request.action === 'ensure_initialized') {
+        if (Object.keys(request.input).length) throw new Error('Invalid organization initialization request');
+        await conversationOrganization.read(run.principal_id ?? null, { limit: 1 }, signal);
+        return { result: { initialized: true } };
+      }
       if (request.action === 'labels') {
         const input = request.input;
         if (Object.keys(input).some(key => !['botIds', 'projectIds'].includes(key)) || !Array.isArray(input.botIds) || !Array.isArray(input.projectIds)

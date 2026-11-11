@@ -520,6 +520,19 @@ impl ToolExecutor for CollaborationTools {
                     Err(varin_runtime::RuntimeError::NotFound(_)) => (),
                     Err(failure) => return Err(error(failure)),
                 }
+                let needs_organization = if input.project_id.is_some() && input.organization.is_none() {
+                    let owner = self.catalog.lock().map_err(error)?;
+                    let run = owner.run(&c.run_id).map_err(error)?;
+                    !owner.organization_initialized(run.principal_id.as_deref()).map_err(error)?
+                } else { false };
+                if needs_organization {
+                    let bridge = self.attachments.as_ref().ok_or_else(|| error("Project organization owner unavailable"))?;
+                    let result = bridge.query(json!({"runId":c.run_id,"origin":c.origin,"callId":call.call_id,"resourceCheckpointId":null,
+                        "request":{"kind":"organization","operationId":c.operation_id,"action":"ensure_initialized","input":{}}}),cancel)?;
+                    if result["status"] != "ready" {
+                        return Err(error("Project organization initialization unavailable"));
+                    }
+                }
                 self.catalog.lock().map_err(error)?.freeze_dispatch_organization_default(c,&input).map_err(error)?;
                 let selection_read = self
                     .catalog

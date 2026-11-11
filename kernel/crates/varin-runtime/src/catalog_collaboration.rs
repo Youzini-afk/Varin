@@ -592,7 +592,7 @@ impl Catalog {
         super::threads::insert(&tx, &child_thread_id, &child_branch_id, "child", None)?;
         super::principals::assign_new(&tx, &child_thread_id, run.principal_id.as_deref())?;
         if !prepared.internal_retrieval {
-            super::organization::admit(&tx,run.principal_id.as_deref(),&super::organization::ConversationRef::Native{id:child_thread_id.clone()},prepared.organization.as_ref(),Some(&super::organization::ConversationRef::Native{id:run.thread_id.clone()}),&format!("child:{}",op.id))?;
+            super::organization::admit_dispatch(&tx,run.principal_id.as_deref(),&super::organization::ConversationRef::Native{id:child_thread_id.clone()},prepared.organization.as_ref(),prepared.organization_project_id.as_deref(),&super::organization::ConversationRef::Native{id:run.thread_id.clone()},&format!("child:{}",op.id))?;
         }
         let agent_id: String = tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?;
         let name = prepared.title.clone().unwrap_or_else(|| format!("Agent {agent_id}"));

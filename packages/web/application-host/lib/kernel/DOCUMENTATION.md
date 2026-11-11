@@ -385,3 +385,32 @@ check, so an original authorized deletion receipt remains recoverable. Pending d
 comes from its original parent Run, including before an external session exists. Host-shared
 program configuration and background lifecycle enumeration retain their original scope; global
 external observation carries invalidation only, not conversation identities or transcript data.
+
+### Mixed navigation pages
+
+The authenticated organization read route forwards the strict `pageNodes` boolean to the original
+Catalog query without imposing another page cap or sorting owner. In mixed mode, `items` alone
+identifies ordered page nodes; extra `containers` are ancestry/query context and not rendered page
+rows. Limits/cursors cover both container and conversation nodes. Omitted/false mode preserves
+the original complete container metadata index with conversation-only pagination. Neither mode
+accepts a caller-supplied principal; request authentication selects the Catalog scope.
+
+Non-empty navigation searches read one current Settings project-name index (`label || path`) before
+Catalog pagination. The index travels only over the trusted private query boundary and participates
+in continuation validation; public queries cannot supply `projectNames`. A changed name generation
+requires a fresh search cursor. Unreadable Settings produces `projects_unavailable`, not empty search
+results. Ordinary initialized directory reads do not load Settings or contact execution devices.
+
+Organization Host callbacks validate the original frozen tool invocation through
+`runtime.organization.invocation`, independently of file-source availability. The owner captures
+run/origin/call/operation identity, loads frozen content outside the Catalog lock, then revalidates
+the live epoch and invocation before returning the original Run. Read-only labels need no durable
+operation record. This does not relax `runtime.resources.snapshot` or file-resource checkpoint checks.
+
+Explicit-project dispatch without explicit organization placement uses the registered project's
+navigation node. Before first admission, the model dispatch checks its principal's initialization
+marker and asks the existing authenticated organization bridge to initialize the complete Settings
+generation only if needed. User handoff performs the same preparation after original receipt lookup.
+Receipt replay precedes this work, so later Settings/device unavailability cannot invalidate accepted
+work. Initialization reads registration metadata only; it does not mount or prepare every project.
+An initialized space with a missing project node remains a conflict, not an implicit recreation.

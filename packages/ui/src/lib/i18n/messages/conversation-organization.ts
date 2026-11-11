@@ -1,4 +1,8 @@
 export const conversationOrganizationEn = {
+  "organization.scopeChanged": "This category changed while reading its contents. Refresh and retry.",
+  "organization.searchTargets": "Search destination categories",
+  "organization.targetPath": "Destination path",
+  "organization.browseTargets": "Browse destination categories",
   "organization.loadMore": "Load more",
   "organization.moved": "Moved",
   "organization.undoMove": "Undo move",
@@ -82,6 +86,10 @@ export const conversationOrganizationEn = {
   "organization.openOrigin": "Open {name}’s origin conversation"
 } as const;
 export const conversationOrganizationZhCN = {
+  "organization.scopeChanged": "读取期间分类已变化，请刷新后重试。",
+  "organization.searchTargets": "搜索目标分类",
+  "organization.targetPath": "目标路径",
+  "organization.browseTargets": "浏览目标分类",
   "organization.loadMore": "继续读取",
   "organization.moved": "已移动",
   "organization.undoMove": "撤销移动",
@@ -165,6 +173,10 @@ export const conversationOrganizationZhCN = {
   "organization.openOrigin": "打开 {name} 的发起会话"
 } as const;
 export const conversationOrganizationZhTW = {
+  "organization.scopeChanged": "讀取期間分類已變更，請重新整理後重試。",
+  "organization.searchTargets": "搜尋目標分類",
+  "organization.targetPath": "目標路徑",
+  "organization.browseTargets": "瀏覽目標分類",
   "organization.loadMore": "繼續讀取",
   "organization.moved": "已移動",
   "organization.undoMove": "復原移動",

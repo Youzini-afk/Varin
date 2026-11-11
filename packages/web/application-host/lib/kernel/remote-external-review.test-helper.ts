@@ -27,14 +27,15 @@ interface RemoteExternalReviewTarget {
 }
 export async function remoteExternalReviewTarget(root:string): Promise<RemoteExternalReviewTarget> {
   const hostId='remote-external-review',directory=path.join(root,'target-work');await fs.mkdir(directory,{recursive:true});
-  let nativeWorkspaces:NativeWorkspaceOwner|undefined;
+  const workspaceOwner: { current?: NativeWorkspaceOwner } = {};
   const documents=createDocumentAuthority({hostId,dataDir:path.join(root,'target-documents'),isAllowedRoot:async()=>true,isTrusted:async()=>true,
-    nativeWorkspaces:{resolveId:(id,signal,reference)=>nativeWorkspaces?.resolveId(id,signal,reference)??Promise.resolve(undefined),
-      resolvePath:(value,containing)=>nativeWorkspaces?.resolvePath(value,containing)??Promise.resolve(undefined),
-      retainReference:(source,key)=>nativeWorkspaces!.retainReference(source,key),releaseReference:key=>nativeWorkspaces!.releaseReference(key)}});
+    nativeWorkspaces:{resolveId:(id,signal,reference)=>workspaceOwner.current?.resolveId(id,signal,reference)??Promise.resolve(undefined),
+      resolvePath:(value,containing)=>workspaceOwner.current?.resolvePath(value,containing)??Promise.resolve(undefined),
+      retainReference:(source,key)=>workspaceOwner.current!.retainReference(source,key),releaseReference:key=>workspaceOwner.current!.releaseReference(key)}});
   const native=await createAuthorityTestRuntime({documents,hostId,dataDir:path.join(root,'target-data')});
   const kernel=native.client,storage=native.adapter,workingStates=native.workingStates;
-  nativeWorkspaces=createNativeWorkspaceOwner({kernel,documents,projects:async()=>[],update:async()=>{throw new Error('No target project mutation expected');}});
+  const nativeWorkspaces=createNativeWorkspaceOwner({kernel,documents,projects:async()=>[],update:async()=>{throw new Error('No target project mutation expected');}});
+  workspaceOwner.current=nativeWorkspaces;
   kernel.nativeWorkspaces=nativeWorkspaces;
   const live=createLiveSourceOwner({kernel,documents});
   const resourceOwners:ThreadResourceScopeOwners={dataDirectory:path.join(root,'target-agent'),homeDir:path.join(root,'target-home'),workingStates,documents,

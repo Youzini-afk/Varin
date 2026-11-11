@@ -175,7 +175,13 @@ impl Storage {
             }
             "attachment.import" => {
                 state_in(&["preparing","ready"])?;
-                for field in ["principalId","coordinatorHostId","authorityId","threadId","runId","operationId"] {required(field)?;}
+                for field in ["principalId","coordinatorHostId","authorityId","threadId","operationId"] {required(field)?;}
+                if payload.get("externalTransportId").is_some() {
+                    required("externalTransportId")?;
+                    if !payload["runId"].is_null() {
+                        return Err(KernelError::Authorization("External attachment import cannot impersonate a native Run".into()));
+                    }
+                } else { required("runId")?; }
                 let attachment:varin_runtime::catalog::attachments::Attachment=serde_json::from_value(payload["attachment"].clone())?;
                 attachment.validate().map_err(|error|KernelError::Operation(error.to_string()))?;
                 if !super::file_content::valid_reference(required("contentHash")?)
@@ -1016,6 +1022,17 @@ impl Storage {
             }
         }
         if record_type=="attachment.import" {
+            let grant = self.load_grant(grant_id)?;
+            if let Some(transport) = payload["externalTransportId"].as_str() {
+                if grant.external_transport_id.as_deref() != Some(transport)
+                    || grant.operation_id.as_deref() != Some(transport)
+                    || grant.thread_id.as_deref() != payload["threadId"].as_str()
+                    || grant.run_id.is_some() || !params_value["runId"].is_null() {
+                    return Err(KernelError::Authorization("External attachment import requires its actual conversation and transport".into()));
+                }
+            } else if grant.external_transport_id.is_some() {
+                return Err(KernelError::Authorization("External grant cannot own a native attachment import".into()));
+            }
             if ["threadId","runId"].iter().any(|field| params_value[*field]!=payload[*field])
                 || (state=="ready" && (references.len()!=1 || references[0]["slot"]!="source" || references[0]["objectHash"]!=payload["objectHash"]))
                 || (state=="preparing" && !references.is_empty()) {

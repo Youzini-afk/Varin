@@ -141,8 +141,15 @@ message text and use their enclosing conversation's binary reader. Unknown forma
 `useConversationOrganizationStore` holds the current Host's Catalog navigation projection and one
 cursor observation. It reads the root's first page; opening a container, selecting a Bot scope, or
 searching adds a shared query page. Continuations are explicit, and refresh preserves only the window
-already loaded. A failed page retains its last good projection and reports the failure instead of an
-empty directory. Full descendant reads happen when a person explicitly selects that action's scope.
+already loaded. Navigation uses `pageNodes: true`: `items` is the mixed container/native/external
+page membership; `containers` includes only its container metadata and necessary ancestor context.
+Ancestors do not consume page slots. Stable IDs merge loaded pages, and refresh restores the loaded
+`items` window even when every item is an empty category. New branches remain closed until opened.
+Search, Bot views and destination browsing use their own query membership, not incidental global
+cache coverage. The observation cursor is independent of newer query reads, so loading a picker
+cannot suppress a durable change to an older visible page. A failed page retains its last good
+projection and reports the failure instead of an empty directory. Full descendant reads happen
+when a person explicitly selects that action's scope.
 
 `ConversationOrganizationTree` is shared by the workbench, IDE picker, archive and Bot navigator.
 Container identity, mixed order and effective placement come from the Catalog; local collapse, focus
@@ -151,6 +158,10 @@ move gives them one independent navigation row. Typed native/external keys preve
 Moves retain the original row until acceptance, preserve ambiguous acceptance keys, and derive undo
 from the original receipt. Undo is a new atomic restore with the receipt's object revisions, real
 sibling anchors and inheritance intent, so it cannot overwrite another client's subsequent move.
+Before moving, only the selected source parents' complete sibling pages are read; Catalog's scoped
+cursor and the captured parent/object revisions protect the original undo anchors without conflicting
+on unrelated branches. The inline destination picker browses and searches pages on demand and
+labels same-name targets with full paths and stable IDs; it never assumes every category was loaded.
 
 `ConversationOrigin` reads the same original provenance for normal, flat, search, archive and work
 detail views. Bot profiles are read together and their assets reuse the existing figure cache;

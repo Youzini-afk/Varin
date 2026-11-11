@@ -305,6 +305,7 @@ fn stale_head_run_source_or_foreign_background_never_create_a_child() {
 #[test]
 fn explicit_project_uses_original_catalog_and_failure_and_cancellation_settle_user_operation() {
     let mut f = Fixture::new();
+    f.db.initialize_organization(None,organization::OrganizationInitialization{key:"registered-project".into(),projects:vec![organization::InitialProject{id:"registered".into()}],positions:vec![]}).unwrap();
     f.command.input.project_id = Some("registered".into());
     f.command.input.work_mode = Some(dispatch::ChildWorkMode::IsolatedWrite);
     let child = f.accept();

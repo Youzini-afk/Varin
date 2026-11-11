@@ -1,5 +1,5 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
-import { ConversationOrganizationError, type ConversationOrganizationCommand, type ConversationOrganizationMetadataItem, type ConversationOrganizationQuery } from '@varin/application-client';
+import { ConversationOrganizationError, parseConversationOrganizationQuery, type ConversationOrganizationCommand, type ConversationOrganizationMetadataItem } from '@varin/application-client';
 import { withRequestPrincipal } from '../kernel/request-principal.js';
 import { KernelClientError } from '../kernel/kernel-error.js';
 import type { ConversationOrganizationService } from './service.js';
@@ -22,8 +22,7 @@ export function registerConversationOrganizationRoutes(app: Express, service: Co
       const body = object(req.body);
       const result = await withRequestPrincipal(principalId, async () => {
         if (method === 'read') {
-          fields(body, ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor']);
-          return service.read(principalId, body as ConversationOrganizationQuery, controller.signal);
+          return service.read(principalId, parseConversationOrganizationQuery(body), controller.signal);
         }
         if (method === 'project') { fields(body, ['projectId', 'command']); text(body.projectId); const command = object(body.command); fields(command, ['key', 'operation']); text(command.key); object(command.operation); return service.project(principalId, String(body.projectId), command as unknown as ConversationOrganizationCommand, controller.signal); }
         fields(body, method === 'command' ? ['key', 'operation'] : ['key', 'items']); text(body.key);

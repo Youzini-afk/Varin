@@ -12,39 +12,75 @@ interface OrganizationState {
   pending: Record<string, ConversationOrganizationCommand>; failed: Record<string, ConversationOrganizationCommand>;
   bots: BotSummary[] | null; botsError: string | null;
 }
-export const organizationQueryKey = (query: ConversationOrganizationQuery): string => JSON.stringify(Object.entries(query).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)));
-const rootQuery: ConversationOrganizationQuery = { rootOnly: true, archived: 'exclude' };
+export const organizationQueryKey = (query: ConversationOrganizationQuery): string => JSON.stringify(Object.entries({ ...query, pageNodes: true }).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)));
+const rootQuery: ConversationOrganizationQuery = { pageNodes: true, rootOnly: true, archived: 'exclude' };
 export const useConversationOrganizationStore = create<OrganizationState>(() => ({ host: -1, snapshot: null, loading: false, error: null, pages: {}, pending: {}, failed: {}, bots: null, botsError: null }));
 let binding: { host: number; api: ConversationOrganizationAPI; controller: AbortController; refresh(): Promise<void>; load(query: ConversationOrganizationQuery, more?: boolean): Promise<void>; users: number; stop(): void } | null = null;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-/** The newest directory metadata is authoritative; loaded query pages contribute only conversation refs. */
-function mergePages(pages: Record<string, OrganizationPage>): ConversationOrganizationSnapshot | null {
-  const snapshots = Object.values(pages).flatMap(page => page.snapshot ?? []).sort((a, b) => a.cursor - b.cursor);
-  const latest = snapshots.at(-1); if (!latest) return null;
+/** Stable identities merge light metadata; ancestor context never consumes a page slot. */
+export function mergeOrganizationSnapshots(snapshots: ConversationOrganizationSnapshot[]): ConversationOrganizationSnapshot | null {
+  const ordered = [...snapshots].sort((a, b) => a.cursor - b.cursor);
+  const latest = ordered.at(-1); if (!latest) return null;
+  const containers = new Map<string, ConversationOrganizationSnapshot['containers'][number]>();
   const entries = new Map<string, ConversationOrganizationSnapshot['conversations'][number]>();
-  for (const snapshot of snapshots) for (const entry of snapshot.conversations) {
-    const key = JSON.stringify(entry.conversation), previous = entries.get(key);
-    if (!previous || entry.position.revision >= previous.position.revision && entry.revision >= previous.revision) entries.set(key, entry);
+  const items = new Map<string, NonNullable<ConversationOrganizationSnapshot['items']>[number]>();
+  for (const snapshot of ordered) {
+    for (const container of snapshot.containers) {
+      const previous = containers.get(container.id);
+      if (!previous || container.revision >= previous.revision && container.childrenRevision >= previous.childrenRevision) containers.set(container.id, container);
+    }
+    for (const entry of snapshot.conversations) {
+      const key = JSON.stringify([entry.conversation.kind, entry.conversation.id]), previous = entries.get(key);
+      if (!previous || entry.position.revision >= previous.position.revision && entry.revision >= previous.revision) entries.set(key, entry);
+    }
+    for (const item of snapshot.items ?? []) items.set(JSON.stringify([item.kind, item.id]), item);
   }
-  return { ...latest, conversations: [...entries.values()], nextCursor: null };
+  return { ...latest, containers: [...containers.values()], conversations: [...entries.values()],
+    ...(ordered.some(snapshot => snapshot.items !== undefined) ? { items: [...items.values()] } : {}), nextCursor: null };
 }
+const mergePages = (pages: Record<string, OrganizationPage>) => mergeOrganizationSnapshots(Object.values(pages).flatMap(page => page.snapshot ?? []));
+/** A view uses only its own page membership, never another search/picker's cached results. */
+export function organizationViewSnapshot(pages: Record<string, OrganizationPage>, query: ConversationOrganizationQuery, expanded: (id: string) => boolean): ConversationOrganizationSnapshot | null {
+  const snapshots: ConversationOrganizationSnapshot[] = [];
+  const visited = new Set<string>();
+  const collect = (scope: ConversationOrganizationQuery) => {
+    const key = organizationQueryKey(scope); if (visited.has(key)) return; visited.add(key);
+    const snapshot = pages[key]?.snapshot; if (!snapshot) return; snapshots.push(snapshot);
+    if (query.query) return;
+    const memberIds = snapshot.items ? new Set(snapshot.items.filter(item => item.kind === 'container').map(item => item.id)) : null;
+    for (const container of snapshot.containers) if ((!memberIds || memberIds.has(container.id)) && expanded(container.id)) {
+      collect({ pageNodes: true, containerId: container.id, archived: query.archived, ...(query.botId ? { botId: query.botId } : {}) });
+    }
+  };
+  collect(query);
+  return mergeOrganizationSnapshots(snapshots);
+}
+const appendPage = (previous: ConversationOrganizationSnapshot, next: ConversationOrganizationSnapshot): ConversationOrganizationSnapshot => ({ ...mergeOrganizationSnapshots([previous, next])!, nextCursor: next.nextCursor });
+const pageLength = (snapshot: ConversationOrganizationSnapshot | null | undefined) => snapshot?.items?.length ?? snapshot?.conversations.length ?? 0;
 export async function refreshConversationOrganization(): Promise<void> { await binding?.refresh(); }
 export async function loadOrganizationPage(query: ConversationOrganizationQuery, more = false): Promise<void> {
   const owner = binding; if (!owner || owner.host !== getRuntimeEndpointGeneration()) return;
   const page = useConversationOrganizationStore.getState().pages[organizationQueryKey(query)];
   if (!more && (page?.snapshot || page?.loading)) return;
-  await owner.load(query, more);
+  await owner.load({ ...query, pageNodes: true }, more);
 }
 /** Full reads exist only for an explicit operation's fixed scope, not for background navigation. */
-export async function readOrganizationActionScope(query: ConversationOrganizationQuery): Promise<ConversationOrganizationSnapshot> {
+export async function readOrganizationActionScope(query: ConversationOrganizationQuery, signal?: AbortSignal): Promise<ConversationOrganizationSnapshot> {
   const owner = binding;
   if (!owner || owner.host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
-  let result = await owner.api.read(query, owner.controller.signal);
+  const requestSignal = signal ? AbortSignal.any([signal, owner.controller.signal]) : owner.controller.signal;
+  const valid = () => {
+    requestSignal.throwIfAborted();
+    if (binding !== owner || owner.host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
+  };
+  const scope = { ...query, pageNodes: true };
+  valid();
+  let result = await owner.api.read(scope, requestSignal); valid();
   while (result.nextCursor) {
-    const next = await owner.api.read({ ...query, cursor: result.nextCursor }, owner.controller.signal);
-    result = { ...next, conversations: [...result.conversations, ...next.conversations] };
+    const next = await owner.api.read({ ...scope, cursor: result.nextCursor }, requestSignal); valid();
+    // Catalog cursors bind the relevant scope generation; unrelated branch edits may proceed.
+    result = appendPage(result, next);
   }
-  if (binding !== owner) throw new Error('Application Host changed');
   return result;
 }
 /** Commands retain their original acceptance key on ambiguous failure; no optimistic authority. */
@@ -87,12 +123,12 @@ export function useConversationOrganization() {
           try {
             let page = await api.read({ ...query, ...(more ? { cursor: previous!.snapshot!.nextCursor! } : {}) }, controller.signal);
             // Refresh only the window the person already loaded, never every continuation.
-            while (!more && page.nextCursor && page.conversations.length < (previous?.snapshot?.conversations.length ?? 0) && valid()) {
+            while (!more && page.nextCursor && pageLength(page) < pageLength(previous?.snapshot) && valid()) {
               const next = await api.read({ ...query, cursor: page.nextCursor }, controller.signal);
-              page = { ...next, conversations: [...page.conversations, ...next.conversations] };
+              page = appendPage(page, next);
             }
             if (!valid()) return;
-            const snapshot = more ? { ...page, conversations: [...previous!.snapshot!.conversations, ...page.conversations] } : page;
+            const snapshot = more ? appendPage(previous!.snapshot!, page) : page;
             useConversationOrganizationStore.setState(state => { const pages = { ...state.pages, [key]: { query, snapshot, loading: false, error: null } }; return { pages, snapshot: mergePages(pages), loading: false }; });
           } catch (error) {
             if (valid()) useConversationOrganizationStore.setState(state => ({ loading: false, pages: { ...state.pages, [key]: { query, snapshot: previous?.snapshot ?? null, loading: false, error: message(error) } }, error: message(error) }));
@@ -117,7 +153,9 @@ export function useConversationOrganization() {
       const stopEvents = subscribeVarinEvents(event => { if (event.type === 'bot-changed' || event.type === 'stream-ready') void loadBots(); });
       const observe = async () => {
         await refresh(); await loadBots(); if (!valid()) return;
-        try { await api.observe(useConversationOrganizationStore.getState().snapshot?.cursor ?? 0, event => { if (valid() && event.cursor > (useConversationOrganizationStore.getState().snapshot?.cursor ?? 0)) void refresh(); }, { signal: controller.signal }); }
+        let observedCursor = Math.min(...Object.values(useConversationOrganizationStore.getState().pages).flatMap(page => page.snapshot ? [page.snapshot.cursor] : []));
+        if (!Number.isFinite(observedCursor)) observedCursor = 0;
+        try { await api.observe(observedCursor, event => { if (valid() && event.cursor > observedCursor) { observedCursor = event.cursor; void refresh(); } }, { signal: controller.signal }); }
         catch (error) { if (valid()) useConversationOrganizationStore.setState({ error: message(error) }); }
         if (valid()) timer = setTimeout(() => void observe(), 1500);
       };

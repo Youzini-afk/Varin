@@ -18,10 +18,13 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 const validHash = (value: string) => /^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(value);
 const scopeKey = (scope: Pick<ManagedSourceLocalScope, 'principal' | 'coordinatorHostId' | 'authorityId' | 'resourceEpoch'>) =>
   JSON.stringify([scope.principal.principalId, scope.coordinatorHostId, scope.authorityId, scope.resourceEpoch]);
-const identity = (scope: ManagedSourceCleanupScope | ManagedSourceLocalScope, operationId: string) => {
+const identity = (scope: ManagedSourceCleanupScope | ManagedSourceLocalScope, operationId: string): {
+  principalId: string; coordinatorHostId: string; authorityId: string; threadId: string;
+  runId?: string; externalTransportId?: string; operationId: string;
+} => {
   if (scope.scope.kind === 'source_read' || !operationId) throw new SourceAdmissionError('source_authority_denied');
   return { principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId,
-    threadId: scope.scope.kind === 'external' ? scope.scope.conversationId : scope.scope.threadId, ...(scope.scope.kind === 'run' ? {runId:scope.scope.runId} : {}), operationId };
+    threadId: scope.scope.kind === 'external' ? scope.scope.conversationId : scope.scope.threadId, ...(scope.scope.kind === 'run' ? {runId:scope.scope.runId} : {externalTransportId:scope.scope.transportId}), operationId };
 };
 const addresses = (owner: ReturnType<typeof identity>) => {
   const id = digest(owner);
@@ -38,7 +41,11 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
     const grant = await kernel.issueGrant({ grantId: `attachment-import:${randomUUID()}`,
       owningWorkspace: scope.source.workspace_id, executionWorkspace: scope.source.execution_workspace_id,
       threadId: scope.scope.kind === 'external' ? scope.scope.conversationId : scope.scope.threadId, ...(scope.scope.kind === 'run' ? {runId:scope.scope.runId} : {}),
-      ...(operationId ? { operationId: addresses(identity(scope, operationId)).recordId } : {}),
+      // External imports belong to the already admitted transport, not a native
+      // operation/Run. The per-attachment key stays in its original record intent.
+      ...(scope.scope.kind === 'external'
+        ? { externalTransportId: scope.scope.transportId, operationId: scope.scope.transportId }
+        : operationId ? { operationId: addresses(identity(scope, operationId)).recordId } : {}),
       capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [] });
     try { return await action(kernel.scoped(grant)); }
     finally { await kernel.retireGrant(grant.grantId); }

@@ -466,6 +466,15 @@ actual affected parents/objects. A failed or cancelled wait is not a reversal of
 The HTTP adapter aborts on Host replacement and fences decoded responses before publishing them.
 `observe` uses the existing multiplexed Thread durable-event channel, shared once per Host store.
 
+Use `read({ pageNodes: true, ...query })` for a navigable mixed page. `items` is the authoritative
+ordered page of `{ kind: 'container' | 'native' | 'external', id }` references; `limit` and
+`nextCursor` cover that mixed sequence, not conversations alone. `containers` contains the page's
+container metadata plus necessary ancestors/current query container. Context containers absent
+from `items` are not additional rows and do not consume the page limit. `conversations` contains
+only page conversations. Follow the query-bound cursor with the same filters. Omitted/false
+`pageNodes` retains the legacy full container metadata index and conversation-only pagination,
+without an `items` field. The public query parser rejects unknown fields and non-boolean mode flags.
+
 `metadata` accepts a fixed object selection and returns original-owner outcomes per item. Keep the
 same batch key, revision and patch when retrying unconfirmed items; confirmed successes need not be
 resent. External deletion still waits for its original turn/dispatch lifecycle. `project` coordinates

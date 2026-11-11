@@ -23,15 +23,16 @@ export function projectOrganization(snapshot: ConversationOrganizationSnapshot, 
     (parent?.children || node.parentId && containers.get(node.parentId)?.children || roots).push(node);
   }
   const needle = options.query?.trim().toLocaleLowerCase();
+  const pageKeys = snapshot.items ? new Set(snapshot.items.map(organizationObjectKey)) : null;
   const seen = new Set<string>();
   const visit = (nodes: OrganizationNode[], ancestorMatches = false): OrganizationNode[] => nodes.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key)).flatMap(node => {
     if (seen.has(node.key)) return [];
     seen.add(node.key);
-    const containerMatches = Boolean(needle && node.container?.name?.toLocaleLowerCase().includes(needle));
+    const containerMatches = Boolean(!pageKeys && needle && node.container?.name?.toLocaleLowerCase().includes(needle));
     const children = visit(node.children, ancestorMatches || containerMatches);
-    const hit = ancestorMatches || !needle || (node.container?.name ?? node.conversation?.title ?? '').toLocaleLowerCase().includes(needle);
+    const hit = !needle || (pageKeys ? pageKeys.has(node.key) : ancestorMatches || (node.container?.name ?? node.conversation?.title ?? '').toLocaleLowerCase().includes(needle));
     // A search keeps ancestors, not all siblings. A Bot scope omits unrelated empty containers.
-    if (!hit && !children.length || options.botId && node.container && !children.length) return [];
+    if (!hit && !children.length || options.botId && node.container && !children.length && !pageKeys?.has(node.key)) return [];
     return [{ ...node, children }];
   });
   return visit(roots);

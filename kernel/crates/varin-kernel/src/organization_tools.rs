@@ -2,7 +2,7 @@
 //! Stable object identities and immutable observation recipes are separate: names may
 //! change, while a delayed mutation still checks exactly the version the model read.
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::{
     model_references::ReferenceKind,
@@ -40,10 +40,7 @@ pub(crate) fn labels(
             .capture_tool_invocation(context, &call.call_id)
             .map_err(error)?;
         let invocation = capture.load().map_err(error)?;
-        let checkpoint = invocation
-            .frozen
-            .resource_checkpoint_id
-            .ok_or_else(|| error("Original resource snapshot unavailable"))?;
+        let checkpoint = invocation.frozen.resource_checkpoint_id;
         let result=bridge.query(json!({"runId":context.run_id,"origin":context.origin,"callId":call.call_id,"resourceCheckpointId":checkpoint,
             "request":{"kind":"organization","operationId":context.operation_id,"action":"labels","input":{"botIds":bots,"projectIds":projects}}}),cancel)?;
         if result["status"] != "ready" {
@@ -110,9 +107,11 @@ struct Input {
     operation: Option<String>,
     reference: Option<String>,
     observation: Option<String>,
+    #[serde(default)]
+    observations: Vec<String>,
     container: Option<String>,
     #[serde(default)]
-    root_only: bool,
+    root_only: Option<bool>,
     #[serde(default)]
     recursive: bool,
     query: Option<String>,
@@ -194,6 +193,9 @@ fn action_schema(action: &str) -> Result<Value, ExecutionError> {
         "archive" | "restore" | "delete" => &["observation", "reference"],
         _ => return Err(error("Unknown organization operation")),
     };
+    if !matches!(action, "describe" | "list") {
+        properties.insert("observations".into(),json!({"type":"array","minItems":1,"items":text,"description":"Combine original observations from separate pages or branches; conflicting versions of an actually used object or parent require rereading."}));
+    }
     for field in fields {
         properties.insert((*field).into(),match *field {
         "rootOnly"|"recursive"|"pinned"=>json!({"type":"boolean"}),
@@ -205,9 +207,7 @@ fn action_schema(action: &str) -> Result<Value, ExecutionError> {
         _=>text.clone(),
     });
     }
-    if !matches!(action, "describe" | "list") {
-        required.push("observation");
-    }
+
     if matches!(
         action,
         "update_group" | "dissolve" | "rename" | "pin" | "archive" | "restore" | "delete"
@@ -311,52 +311,97 @@ fn conversation(object: &OrganizationObject) -> Result<ConversationRef, Executio
         _ => Err(error("This operation requires a conversation")),
     }
 }
-fn observed<'a>(
-    snapshot: &'a OrganizationSnapshot,
+fn observed(
+    snapshots: &[OrganizationSnapshot],
     object: &OrganizationObject,
 ) -> Result<(u64, Option<String>), ExecutionError> {
-    match object {
-        OrganizationObject::Container { id } => snapshot
-            .containers
-            .iter()
-            .find(|c| c.id == *id)
-            .map(|c| (c.revision, c.parent_id.clone())),
-        _ => {
-            let r = conversation(object)?;
-            snapshot
-                .conversations
+    let mut selected = None;
+    for snapshot in snapshots {
+        let candidate = match object {
+            OrganizationObject::Container { id } => snapshot
+                .containers
                 .iter()
-                .find(|c| c.conversation == r)
-                .map(|c| (c.position.revision, c.position.container_id.clone()))
+                .find(|c| c.id == *id)
+                .map(|c| (c.revision, c.parent_id.clone())),
+            _ => {
+                let r = conversation(object)?;
+                snapshot
+                    .conversations
+                    .iter()
+                    .find(|c| c.conversation == r)
+                    .map(|c| (c.position.revision, c.position.container_id.clone()))
+            }
+        };
+        if let Some(candidate) = candidate {
+            if selected.as_ref().is_some_and(|prior| prior != &candidate) {
+                return Err(error(
+                    "Conflicting observations of this object; reread its directory",
+                ));
+            }
+            selected = Some(candidate);
         }
     }
-    .ok_or_else(|| error("Object was not in this observation; read the relevant directory first"))
+    selected.ok_or_else(|| {
+        error("Object was not in these observations; read the relevant directory first")
+    })
 }
 fn parents(
-    snapshot: &OrganizationSnapshot,
+    snapshots: &[OrganizationSnapshot],
     ids: Vec<Option<String>>,
 ) -> Result<Vec<ParentVersion>, ExecutionError> {
-    let ids = ids.into_iter().collect::<std::collections::BTreeSet<_>>();
     ids.into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .map(|id| {
-            let revision = match &id {
-                None => snapshot.root_revision,
-                Some(id) => {
-                    snapshot
+            let mut selected = None;
+            for snapshot in snapshots {
+                let revision = match &id {
+                    None => Some(snapshot.root_revision),
+                    Some(id) => snapshot
                         .containers
                         .iter()
                         .find(|c| c.id == *id)
-                        .ok_or_else(|| error("Destination was not in this observation"))?
-                        .children_revision
+                        .map(|c| c.children_revision),
+                };
+                if let Some(revision) = revision {
+                    if selected.is_some_and(|prior| prior != revision) {
+                        return Err(error(
+                            "Conflicting observations of an affected parent; reread its directory",
+                        ));
+                    }
+                    selected = Some(revision);
                 }
-            };
+            }
             Ok(ParentVersion {
                 container_id: id,
-                children_revision: revision,
+                children_revision: selected
+                    .ok_or_else(|| error("Affected parent was not in these observations"))?,
             })
         })
         .collect()
 }
+fn metadata_entry<'a>(
+    snapshots: &'a [OrganizationSnapshot],
+    target: &ConversationRef,
+) -> Result<&'a ConversationEntry, ExecutionError> {
+    let mut selected: Option<&ConversationEntry> = None;
+    for snapshot in snapshots {
+        if let Some(entry) = snapshot
+            .conversations
+            .iter()
+            .find(|e| &e.conversation == target)
+        {
+            if selected.is_some_and(|prior| prior.revision != entry.revision) {
+                return Err(error(
+                    "Conflicting observations of conversation metadata; reread it",
+                ));
+            }
+            selected = Some(entry);
+        }
+    }
+    selected.ok_or_else(|| error("Conversation is not in these observations"))
+}
+
 impl Tools {
     fn authorize_call(
         &self,
@@ -390,7 +435,9 @@ impl Tools {
             )
             .map_err(error)?;
         if entry.origin.direct_bot_id.is_none() {
-            return Err(error("Principal-wide organization belongs to a direct Bot conversation, not a delegated Agent"));
+            return Err(error(
+                "Principal-wide organization belongs to a direct Bot conversation, not a delegated Agent",
+            ));
         }
         Ok(invocation)
     }
@@ -409,9 +456,7 @@ impl Tools {
             .capture_tool_invocation(context, &call.call_id)
             .map_err(error)?;
         let invocation = capture.load().map_err(error)?;
-        let checkpoint = invocation.frozen.resource_checkpoint_id.ok_or_else(|| {
-            error("Organization Host operation has no frozen resource checkpoint")
-        })?;
+        let checkpoint = invocation.frozen.resource_checkpoint_id;
         let reply=self.bridge.query_draining(json!({"runId":context.run_id,"origin":context.origin,"callId":call.call_id,
             "resourceCheckpointId":checkpoint,"request":{"kind":"organization","operationId":context.operation_id,"action":action,"input":input}}),cancel).map_err(|mut failure|{failure.details=Some(json!({"effect":"unknown","reason":"Host response was not received; reconcile the original operation before retrying"}));failure})?;
         if reply["status"] != "ready" {
@@ -431,6 +476,7 @@ impl Tools {
         context: &ToolExecutionContext,
         principal: Option<&str>,
         input: Input,
+        project_names: Option<std::collections::BTreeMap<String, String>>,
     ) -> Result<Value, ExecutionError> {
         let mut query = OrganizationQuery {
             container_id: input
@@ -442,7 +488,11 @@ impl Tools {
                 })
                 .transpose()
                 .map_err(error)?,
-            root_only: input.root_only,
+            root_only: input
+                .root_only
+                .unwrap_or(input.query.is_none() && !input.recursive),
+            page_nodes: true,
+            project_names: None,
             recursive: input.recursive,
             query: input.query,
             bot_id: input.bot_id,
@@ -459,52 +509,57 @@ impl Tools {
             }
             query = serde_json::from_value(saved.target["query"].clone()).map_err(error)?;
         }
+        if query.query.as_ref().is_some_and(|q| !q.trim().is_empty()) {
+            query.project_names = project_names;
+        }
         let mut snapshot = db
             .organization_snapshot(principal, query.clone())
             .map_err(error)?;
-        // The owner retains a shared tree; a focused model read need not publish
-        // unrelated sibling branches. Keep matching nodes and necessary ancestors.
-        let mut visible = std::collections::BTreeSet::new();
-        for entry in &snapshot.conversations {
-            visible.extend(entry.path.iter().cloned());
-        }
-        if query.bot_id.is_none() {
-            for container in &snapshot.containers {
-                let mut ancestors = Vec::new();
-                let mut parent = container.parent_id.as_ref();
-                while let Some(id) = parent {
-                    ancestors.push(id.clone());
-                    parent = snapshot
-                        .containers
-                        .iter()
-                        .find(|c| c.id == *id)
-                        .and_then(|c| c.parent_id.as_ref());
-                }
-                let in_scope = if let Some(id) = &query.container_id {
-                    container.id == *id
-                        || container.parent_id.as_ref() == Some(id)
-                        || (query.recursive && ancestors.contains(id))
-                } else {
-                    !query.root_only || query.recursive || container.parent_id.is_none()
-                };
-                let matches = query.query.as_ref().is_none_or(|q| {
-                    container
-                        .name
-                        .as_ref()
-                        .is_some_and(|name| name.to_lowercase().contains(&q.to_lowercase()))
-                });
-                if in_scope && matches {
-                    visible.insert(container.id.clone());
-                    visible.extend(ancestors);
+        if !query.page_nodes {
+            // The owner retains a shared tree; a focused model read need not publish
+            // unrelated sibling branches. Keep matching nodes and necessary ancestors.
+            let mut visible = std::collections::BTreeSet::new();
+            for entry in &snapshot.conversations {
+                visible.extend(entry.path.iter().cloned());
+            }
+            if query.bot_id.is_none() {
+                for container in &snapshot.containers {
+                    let mut ancestors = Vec::new();
+                    let mut parent = container.parent_id.as_ref();
+                    while let Some(id) = parent {
+                        ancestors.push(id.clone());
+                        parent = snapshot
+                            .containers
+                            .iter()
+                            .find(|c| c.id == *id)
+                            .and_then(|c| c.parent_id.as_ref());
+                    }
+                    let in_scope = if let Some(id) = &query.container_id {
+                        container.id == *id
+                            || container.parent_id.as_ref() == Some(id)
+                            || (query.recursive && ancestors.contains(id))
+                    } else {
+                        !query.root_only || query.recursive || container.parent_id.is_none()
+                    };
+                    let matches = query.query.as_ref().is_none_or(|q| {
+                        container
+                            .name
+                            .as_ref()
+                            .is_some_and(|name| name.to_lowercase().contains(&q.to_lowercase()))
+                    });
+                    if in_scope && matches {
+                        visible.insert(container.id.clone());
+                        visible.extend(ancestors);
+                    }
                 }
             }
+            snapshot.containers.retain(|c| visible.contains(&c.id));
         }
-        snapshot.containers.retain(|c| visible.contains(&c.id));
         let observation = db
             .register_model_reference(
                 ReferenceKind::Read,
                 "organization_observation",
-                &json!({"principal":principal,"snapshot":snapshot}),
+                &json!({"principal":principal,"snapshot":snapshot,"runId":context.run_id}),
                 &context.run_id,
             )
             .map_err(error)?;
@@ -521,8 +576,29 @@ impl Tools {
                 "sourceBot":entry.origin.bot_id,"directBot":entry.origin.direct_bot_id}));
         }
         let mut result = json!({"observation":observation,"containers":containers,"conversations":conversations});
+        if let Some(items) = &snapshot.items {
+            let ordered = items
+                .iter()
+                .map(|item| match item {
+                    OrganizationObject::Container { id } => db
+                        .organization_container_reference(principal, id, &context.run_id)
+                        .map(|reference| json!({"kind":"container","ref":reference}))
+                        .map_err(error),
+                    OrganizationObject::Native { id } => {
+                        agent_ref(db, &ConversationRef::Native { id: id.clone() })
+                            .map(|reference| json!({"kind":"native","ref":reference}))
+                    }
+                    OrganizationObject::External { id } => {
+                        agent_ref(db, &ConversationRef::External { id: id.clone() })
+                            .map(|reference| json!({"kind":"external","ref":reference}))
+                    }
+                })
+                .collect::<Result<Vec<_>, ExecutionError>>()?;
+            result["items"] = json!(ordered);
+        }
         if let Some(cursor) = snapshot.next_cursor {
             query.cursor = Some(cursor);
+            query.project_names = None; // The owner continuation retains only its normalized scope names.
             let reference = db
                 .register_model_reference(
                     ReferenceKind::Read,
@@ -560,7 +636,65 @@ impl Tools {
         let run = db.run(&context.run_id).map_err(error)?;
         let principal = run.principal_id.as_deref();
         if args.action == "list" {
-            let mut page = self.list(&db, context, principal, input)?;
+            let searching = if let Some(cursor) = &input.cursor {
+                let saved = db
+                    .resolve_model_reference(ReferenceKind::Read, cursor)
+                    .map_err(error)?;
+                if saved.owner != "organization_page"
+                    || saved.target["principal"] != json!(principal)
+                {
+                    return Err(error("Directory continuation belongs to another owner"));
+                }
+                saved.target["query"]["query"]
+                    .as_str()
+                    .is_some_and(|q| !q.trim().is_empty())
+            } else {
+                input.query.as_ref().is_some_and(|q| !q.trim().is_empty())
+            };
+            let project_ids = if searching {
+                db.organization_project_ids(principal).map_err(error)?
+            } else {
+                Vec::new()
+            };
+            drop(db);
+            let search_names = if searching {
+                let value = self.host(
+                    context,
+                    call,
+                    "labels",
+                    json!({"botIds":[],"projectIds":project_ids}),
+                    cancel,
+                )?;
+                let names = value["projects"]
+                    .as_array()
+                    .ok_or_else(|| error("Project names unavailable for search"))?;
+                for id in &project_ids {
+                    let named = names
+                        .iter()
+                        .find(|v| v["id"].as_str() == Some(id.as_str()))
+                        .ok_or_else(|| error("Project names unavailable for search"))?;
+                    if named["status"] != "available" && named["status"] != "missing" {
+                        return Err(error("Project names unavailable for search"));
+                    }
+                }
+                Some(value)
+            } else {
+                None
+            };
+            let project_names = search_names.as_ref().map(|v| {
+                v["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| {
+                        Some((p["id"].as_str()?.to_owned(), p["name"].as_str()?.to_owned()))
+                    })
+                    .collect()
+            });
+            let db = self.catalog.lock().map_err(error)?;
+            db.validate_tool_invocation(&invocation, true)
+                .map_err(error)?;
+            let mut page = self.list(&db, context, principal, input, project_names)?;
             let mut bots = std::collections::BTreeSet::new();
             let mut projects = std::collections::BTreeSet::new();
             for item in page["conversations"].as_array().into_iter().flatten() {
@@ -576,15 +710,22 @@ impl Tools {
                 }
             }
             drop(db);
-            let names = labels(
+            let mut names = labels(
                 &self.catalog,
                 Some(&self.bridge),
                 context,
                 call,
                 bots.into_iter().collect(),
-                projects.into_iter().collect(),
+                if search_names.is_some() {
+                    Vec::new()
+                } else {
+                    projects.into_iter().collect()
+                },
                 cancel,
             );
+            if let Some(search_names) = search_names {
+                names["projects"] = search_names["projects"].clone();
+            }
             for key in ["containers", "conversations"] {
                 if let Some(items) = page[key].as_array_mut() {
                     for item in items {
@@ -595,26 +736,39 @@ impl Tools {
             self.authorize_call(context, call, cancel)?;
             return Ok(page);
         }
-        let observation = input
+        let refs = input
             .observation
-            .as_deref()
-            .ok_or_else(|| error("Use the observation reference returned with the directory"))?;
-        let saved = db
-            .resolve_model_reference(ReferenceKind::Read, observation)
-            .map_err(error)?;
-        if saved.owner != "organization_observation"
-            || saved.target["principal"] != json!(principal)
-        {
-            return Err(error("Organization observation belongs to another owner"));
+            .iter()
+            .chain(input.observations.iter())
+            .collect::<Vec<_>>();
+        if refs.is_empty() {
+            return Err(error(
+                "Use observation or observations returned with the directory",
+            ));
         }
-        let snapshot: OrganizationSnapshot =
-            serde_json::from_value(saved.target["snapshot"].clone()).map_err(error)?;
+        let observations = refs
+            .into_iter()
+            .map(|reference| {
+                db.organization_observation(principal, reference, &context.run_id)
+                    .map_err(error)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Merge descriptive metadata only. CAS values are selected separately from
+        // all original observations for each actually used object/parent below.
+        let mut snapshot = observations[0].clone();
+        for other in observations.iter().skip(1) {
+            for c in &other.containers {
+                if !snapshot.containers.iter().any(|old| old.id == c.id) {
+                    snapshot.containers.push(c.clone());
+                }
+            }
+        }
         let parent = input
             .container
             .as_deref()
             .map(|value| {
                 let object = reference(&db, principal, value)?;
-                observed(&snapshot, &object)?;
+                observed(&observations, &object)?;
                 match object {
                     OrganizationObject::Container { id } => Ok(id),
                     _ => Err(error("Destination must be a container")),
@@ -626,6 +780,12 @@ impl Tools {
             .as_deref()
             .map(|value| reference(&db, principal, value))
             .transpose()?;
+        if let Some(anchor) = &before {
+            let (_, anchor_parent) = observed(&observations, anchor)?;
+            if anchor_parent != parent {
+                return Err(error("Anchor was not observed in the destination parent"));
+            }
+        }
         let key = format!("organization-tool:{}", context.operation_id);
         if args.action == "create_bot_conversation" {
             let input = json!({"botId":input.bot_id.ok_or_else(||error("Select a Bot identity"))?,"key":key,"organization":{"containerId":parent}});
@@ -661,7 +821,7 @@ impl Tools {
             "create_group" => OrganizationOperation::Create {
                 id: format!("group:{}", context.operation_id),
                 kind: ContainerKind::Group,
-                parents: parents(&snapshot, vec![parent.clone()])?,
+                parents: parents(&observations, vec![parent.clone()])?,
                 parent_id: parent,
                 name: Some(input.name.ok_or_else(|| error("Group name required"))?),
                 icon: input.icon.flatten(),
@@ -677,7 +837,7 @@ impl Tools {
                 let mut affected = vec![parent.clone()];
                 for target in input.targets {
                     let object = reference(&db, principal, &target)?;
-                    let (expected_revision, expected_parent_id) = observed(&snapshot, &object)?;
+                    let (expected_revision, expected_parent_id) = observed(&observations, &object)?;
                     affected.push(expected_parent_id.clone());
                     items.push(MoveItem {
                         object,
@@ -689,7 +849,7 @@ impl Tools {
                     items,
                     parent_id: parent,
                     before,
-                    parents: parents(&snapshot, affected)?,
+                    parents: parents(&observations, affected)?,
                 }
             }
             action => {
@@ -701,7 +861,12 @@ impl Tools {
                         .as_deref()
                         .ok_or_else(|| error("Target reference required"))?,
                 )?;
-                let (revision, parent) = observed(&snapshot, &object)?;
+                let (revision, parent) =
+                    if matches!(action, "rename" | "pin" | "archive" | "restore" | "delete") {
+                        (0, None)
+                    } else {
+                        observed(&observations, &object)?
+                    };
                 match action {
                     "update_group" | "dissolve" => {
                         let OrganizationObject::Container { id } = object else {
@@ -721,7 +886,7 @@ impl Tools {
                             OrganizationOperation::Dissolve {
                                 id: id.clone(),
                                 expected_revision: revision,
-                                parents: parents(&snapshot, vec![Some(id), parent])?,
+                                parents: parents(&observations, vec![Some(id), parent])?,
                             }
                         } else {
                             OrganizationOperation::Update {
@@ -735,30 +900,26 @@ impl Tools {
                     }
                     "rename" | "pin" | "archive" | "restore" | "delete" => {
                         let target = conversation(&object)?;
-                        let entry = snapshot
-                            .conversations
-                            .iter()
-                            .find(|e| e.conversation == target)
-                            .ok_or_else(|| error("Conversation is not in this observation"))?;
+                        let entry = metadata_entry(&observations, &target)?;
                         if let ConversationRef::External { id } = target {
-                            db.organization_conversation(
-                                principal,
-                                &ConversationRef::External { id: id.clone() },
-                            )
-                            .map_err(error)?;
+                            // The original observation already binds the caller and target.
+                            // The Host metadata owner checks tombstone ownership before its
+                            // receipt lookup. A public-directory availability check here would
+                            // reject retrying a deletion that committed before ToolSettled.
                             let original_ref = db.external_agent_reference(&id).map_err(error)?;
                             let mut request = json!({"conversationId":id,"expectedRevision":entry.revision,"key":key});
                             match action {
                                 "delete" => request["delete"] = json!(true),
                                 "rename" => {
-                                    request["title"] = json!(input
-                                        .name
-                                        .ok_or_else(|| error("Conversation name required"))?)
+                                    request["title"] = json!(
+                                        input
+                                            .name
+                                            .ok_or_else(|| error("Conversation name required"))?
+                                    )
                                 }
                                 "pin" => {
-                                    request["pinned"] = json!(input
-                                        .pinned
-                                        .ok_or_else(|| error("pinned required"))?)
+                                    request["pinned"] =
+                                        json!(input.pinned.ok_or_else(|| error("pinned required"))?)
                                 }
                                 "archive" => request["archived"] = json!(true),
                                 "restore" => request["archived"] = json!(false),
@@ -832,7 +993,9 @@ impl Tools {
                     }
                 })
                 .collect(),
-            OrganizationOperation::Dissolve { .. } | OrganizationOperation::Restore { .. } => Vec::new(),
+            OrganizationOperation::Dissolve { .. } | OrganizationOperation::Restore { .. } => {
+                Vec::new()
+            }
         };
         let receipt = db
             .organization_command(principal, OrganizationCommand { key, operation })
@@ -938,3 +1101,168 @@ impl ToolExecutor for Tools {
         }
     }
 }
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    fn group(db: &mut Catalog, id: &str, parent: Option<&str>) {
+        let snapshot = db
+            .organization_snapshot(None, OrganizationQuery::default())
+            .unwrap();
+        let version = parent
+            .map(|id| {
+                snapshot
+                    .containers
+                    .iter()
+                    .find(|c| c.id == id)
+                    .unwrap()
+                    .children_revision
+            })
+            .unwrap_or(snapshot.root_revision);
+        db.organization_command(
+            None,
+            OrganizationCommand {
+                key: format!("create-{id}"),
+                operation: OrganizationOperation::Create {
+                    id: id.into(),
+                    kind: ContainerKind::Group,
+                    parent_id: parent.map(str::to_owned),
+                    name: Some(id.into()),
+                    icon: None,
+                    color: None,
+                    project_id: None,
+                    parents: vec![ParentVersion {
+                        container_id: parent.map(str::to_owned),
+                        children_revision: version,
+                    }],
+                    before: None,
+                },
+            },
+        )
+        .unwrap();
+    }
+    #[test]
+    fn separate_page_observations_move_to_observed_anchor_without_global_conflicts() {
+        let directory = std::env::temp_dir().join(format!(
+            "organization-observations-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut db = Catalog::open(&directory).unwrap();
+        group(&mut db, "a", None);
+        group(&mut db, "b", None);
+        group(&mut db, "source", Some("a"));
+        group(&mut db, "anchor", Some("b"));
+        let source_page = db
+            .organization_snapshot(
+                None,
+                OrganizationQuery {
+                    page_nodes: true,
+                    container_id: Some("a".into()),
+                    limit: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // A change in an unrelated root branch is not a dependency of this move.
+        group(&mut db, "unrelated", None);
+        let target_page = db
+            .organization_snapshot(
+                None,
+                OrganizationQuery {
+                    page_nodes: true,
+                    container_id: Some("b".into()),
+                    limit: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_ne!(source_page.root_revision, target_page.root_revision);
+        let observations = vec![source_page.clone(), target_page];
+        let source = OrganizationObject::Container {
+            id: "source".into(),
+        };
+        let anchor = OrganizationObject::Container {
+            id: "anchor".into(),
+        };
+        let (expected_revision, expected_parent_id) = observed(&observations, &source).unwrap();
+        assert_eq!(
+            observed(&observations, &anchor).unwrap().1,
+            Some("b".into())
+        );
+        let versions = parents(
+            &observations,
+            vec![expected_parent_id.clone(), Some("b".into())],
+        )
+        .unwrap();
+        db.organization_command(
+            None,
+            OrganizationCommand {
+                key: "move-across-pages".into(),
+                operation: OrganizationOperation::Move {
+                    items: vec![MoveItem {
+                        object: source.clone(),
+                        expected_revision,
+                        expected_parent_id,
+                    }],
+                    parent_id: Some("b".into()),
+                    before: Some(anchor),
+                    parents: versions,
+                },
+            },
+        )
+        .unwrap();
+        let moved = db.resolve_organization_container(None, "source").unwrap();
+        assert_eq!(moved.parent_id.as_deref(), Some("b"));
+        assert!(
+            moved.order
+                < db.resolve_organization_container(None, "anchor")
+                    .unwrap()
+                    .order
+        );
+        let reread = db
+            .organization_snapshot(
+                None,
+                OrganizationQuery {
+                    page_nodes: true,
+                    container_id: Some("b".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(observed(&[source_page, reread], &source).is_err());
+        drop(db);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn only_actual_parent_dependencies_conflict_across_observations() {
+        let snapshot = |version: u64| {
+            serde_json::from_value::<OrganizationSnapshot>(json!({"initialized":true,"revision":version,"rootRevision":version,"cursor":version,"containers":[{"id":"unused","kind":"group","parentId":null,"order":0,"revision":version,"childrenRevision":version,"name":"unused"},{"id":"used","kind":"group","parentId":null,"order":1,"revision":1,"childrenRevision":2,"name":"used"}],"conversations":[],"nextCursor":null})).unwrap()
+        };
+        let reads = vec![snapshot(1), snapshot(2)];
+        assert_eq!(
+            parents(&reads, vec![Some("used".into())]).unwrap()[0].children_revision,
+            2
+        );
+        assert!(parents(&reads, vec![Some("unused".into())]).is_err());
+        assert!(parents(&reads, vec![None]).is_err());
+        assert!(
+            observed(
+                &reads,
+                &OrganizationObject::Container {
+                    id: "unused".into()
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(
+            observed(&reads, &OrganizationObject::Container { id: "used".into() })
+                .unwrap()
+                .0,
+            1
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "organization_tools_review.rs"]
+mod review;

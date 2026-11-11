@@ -32,3 +32,49 @@ it('rejects a malformed snapshot rather than publishing a fabricated empty direc
   try { await assert.rejects(createConversationOrganizationHttpAPI().read(), error => !!error && typeof error === 'object' && 'code' in error && error.code === 'invalid_response'); }
   finally { globalThis.fetch = original; }
 });
+
+it('validates mixed page items separately from container ancestor context and preserves legacy snapshots', async () => {
+  const { parseConversationOrganizationSnapshot } = await import('../src/conversation-organization.js');
+  const container = (id: string, parentId: string | null) => ({ id, parentId, kind: 'group', order: 0, revision: 1, childrenRevision: 1, name: id, icon: null, color: null, projectId: null });
+  const legacy = { initialized: true, revision: 1, rootRevision: 1, cursor: 1, containers: [container('ancestor', null), container('child', 'ancestor')], conversations: [], nextCursor: null };
+  assert.equal(parseConversationOrganizationSnapshot(legacy), legacy);
+  const page = { ...legacy, items: [{ kind: 'container', id: 'child' }], nextCursor: 'next-page' };
+  assert.equal(parseConversationOrganizationSnapshot(page), page);
+  assert.equal(page.items.length, 1); // Ancestor metadata does not consume a row or limit slot.
+  const ref = { kind: 'native', id: 'thread' };
+  const conversation = { conversation: ref, title: 'Thread', archived: false, pinned: false, revision: 1,
+    position: { conversation: ref, containerId: 'ancestor', order: 1, revision: 1, explicit: true, inheritedFrom: null },
+    origin: { botId: null, directBotId: null, conversation: null }, path: ['ancestor'] };
+  const mixed = { ...page, conversations: [conversation], items: [...page.items, ref] };
+  assert.equal(parseConversationOrganizationSnapshot(mixed), mixed);
+  assert.throws(() => parseConversationOrganizationSnapshot({ ...mixed, items: page.items }), { code: 'invalid_response' });
+  for (const items of [null, [{ kind: 'container', id: 'missing' }], [...page.items, ...page.items], [{ kind: 'container', id: 'child', principalId: 'other' }], [{ kind: 'group', id: 'child' }]]) {
+    assert.throws(() => parseConversationOrganizationSnapshot({ ...page, items }), { code: 'invalid_response' });
+  }
+});
+
+it('forwards mixed pagination without reducing limits and rejects invalid or unknown query fields before fetch', async () => {
+  const original = globalThis.fetch;
+  const queries: unknown[] = [];
+  globalThis.fetch = async (_url, init) => {
+    queries.push(JSON.parse(String(init?.body)));
+    return Response.json({ initialized: true, revision: 1, rootRevision: 1, cursor: 1, containers: [], conversations: [], items: [], nextCursor: null });
+  };
+  try {
+    const api = createConversationOrganizationHttpAPI();
+    const query = { pageNodes: true, rootOnly: true, limit: 100000, cursor: 'original-cursor' };
+    assert.deepEqual((await api.read(query)).items, []);
+    assert.deepEqual(queries, [query]);
+    for (const bad of [{ pageNodes: 'true' }, { pageNodes: null }, { page_nodes: true }, { principalId: 'other' }, { projectNames: { fake: 'Injected' } }, { limit: 0 }, { recursive: 1 }]) {
+      await assert.rejects(api.read(bad as never), { code: 'invalid_request' });
+    }
+    assert.equal(queries.length, 1);
+  } finally { globalThis.fetch = original; }
+});
+
+it('does not silently interpret a legacy response as a requested mixed page', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ initialized: true, revision: 1, rootRevision: 1, cursor: 1, containers: [], conversations: [], nextCursor: null });
+  try { await assert.rejects(createConversationOrganizationHttpAPI().read({ pageNodes: true }), { code: 'invalid_response' }); }
+  finally { globalThis.fetch = original; }
+});

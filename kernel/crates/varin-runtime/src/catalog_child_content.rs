@@ -19,6 +19,7 @@ pub struct ChildAdmissionPreparation {
 }
 pub struct PreparedChildAdmission {
     pub(super) organization: Option<super::organization::Placement>,
+    pub(super) organization_project_id: Option<String>,
     pub(super) model_contract: collaboration::ModelContract,
     pub(super) attachments: Vec<super::attachments::Attachment>,
     pub(super) attachment_input_ref: Option<Value>,
@@ -163,6 +164,7 @@ impl ChildAdmissionPreparation {
         let parent_tools: Vec<crate::execution::ToolSchema> = serde_json::from_value(self.content.load(&self.launch.parent_tools_ref)?)?;
         Ok(PreparedChildAdmission {
             organization: self.input.organization.clone(),
+            organization_project_id: self.input.project_id.clone(),
             model_contract: collaboration::ModelContract::from_tools(&parent_tools),
             attachments: self.attachments,
             attachment_input_ref,

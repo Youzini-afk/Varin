@@ -22,16 +22,21 @@ export class ConversationOrganizationService {
       const ids = new Set<string>();
       return settings.projects.map(value => {
         if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !value.id.trim() || ids.has(value.id)
-          || typeof value.path !== 'string' || !value.path.trim()) throw new Error('Saved project identity or source is invalid');
+          || typeof value.path !== 'string' || !value.path.trim() || value.label !== undefined && typeof value.label !== 'string') throw new Error('Saved project identity or source is invalid');
         ids.add(value.id); return value as ProjectEntry;
       });
     } catch (error) { throw new ConversationOrganizationError('projects_unavailable', error instanceof Error ? error.message : 'Saved projects are unavailable', 503); }
   }
   async read(principalId: string | null, query: ConversationOrganizationQuery = {}, signal?: AbortSignal) {
-    const current = await this.deps.runtime.organizationRead(principalId, query, signal);
+    // Search names belong to Settings, not copied navigation metadata. Resolve one
+    // generation per request; the Catalog binds this trusted index into its cursor.
+    const searchProjects = query.query?.trim() ? await this.projects() : undefined;
+    const ownerQuery = searchProjects ? { ...query, projectNames: Object.fromEntries(searchProjects.map(project => [project.id, project.label || project.path])) } : query;
+    signal?.throwIfAborted();
+    const current = await this.deps.runtime.organizationRead(principalId, ownerQuery, signal);
     if (current.initialized) return current;
     // Only a successfully read, structurally valid generation can initialize the Catalog.
-    const projects = await this.projects();
+    const projects = searchProjects ?? await this.projects();
     const [threads, external] = await Promise.all([
       this.deps.runtime.threadCatalog({ archived: 'include', principalId }, signal), this.deps.external.list(signal),
     ]);
@@ -46,7 +51,7 @@ export class ConversationOrganizationService {
     });
     signal?.throwIfAborted();
     await this.deps.runtime.organizationInitialize(principalId, { key: 'initial-project-generation', projects: projects.map(({ id }) => ({ id })), positions: [...positions, ...externalPositions] }, signal);
-    return this.deps.runtime.organizationRead(principalId, query, signal);
+    return this.deps.runtime.organizationRead(principalId, ownerQuery, signal);
   }
   async creationDefaults(principalId: string | null, threadId: string, placement: import('@varin/application-client').ConversationOrganizationPlacement): Promise<import('@varin/application-client').ConversationCreationDefaults | null> {
     try {

@@ -2884,10 +2884,10 @@ it('a real parent model dispatches a remote external handoff and exchanges froze
   const prepared=await h.api.prepareSource({...identity,key:'target-parent-source',resourceOwner,workspaceId:workspace,
     mode:'live_root',content:{mode:'saved-files'},captureScopes:[]});
   const parent=await h.api.submit({...identity,key:'target-parent-input',expectedHead:null,text:'Delegate and exchange files on the target Host',model,source:prepared.source});
-  await replied.promise;
-  await expect.poll(async()=> (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error=>{
+  await combinedFixtureTerminal(h.runtime,parent.run_id).catch(async error=>{
     console.error('Remote external integration evidence',{parent:await h.runtime.run(parent.run_id),launch:await h.runtime.launch(parent.run_id),children:await h.external!.children(),errors:h.errors});throw error;
   });
+  await replied.promise;
   const child=(await h.external!.children()).find(row=>row.operation_id===operationId)!;
   expect(child.handoff?.resource_authority).toBeTruthy();
   expect(child.handoff?.source.resource_owner).toEqual(resourceOwner);

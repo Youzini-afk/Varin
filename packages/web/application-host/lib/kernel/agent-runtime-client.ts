@@ -1064,7 +1064,7 @@ export class AgentRuntimeClient {
   organizationReceipt(principalId: string | null, command: import('@varin/application-client').ConversationOrganizationCommand, signal?: AbortSignal): Promise<import('@varin/application-client').ConversationOrganizationReceipt|null> {
     return this.kernel.agentRuntimeRequest('runtime.organization.receipt', { principalId, command }, signal);
   }
-  organizationRead(principalId: string | null, query: import('@varin/application-client').ConversationOrganizationQuery, signal?: AbortSignal): Promise<import('@varin/application-client').ConversationOrganizationSnapshot> {
+  organizationRead(principalId: string | null, query: import('@varin/application-client').ConversationOrganizationQuery & { projectNames?: Record<string, string> }, signal?: AbortSignal): Promise<import('@varin/application-client').ConversationOrganizationSnapshot> {
     return this.kernel.agentRuntimeRequest('runtime.organization.read', { principalId, query }, signal);
   }
   organizationCommand(principalId: string | null, command: import('@varin/application-client').ConversationOrganizationCommand, signal?: AbortSignal): Promise<import('@varin/application-client').ConversationOrganizationReceipt> {
@@ -1169,6 +1169,9 @@ export class AgentRuntimeClient {
   }
   refreshResources(input: ResourceRefreshParams, signal?: AbortSignal): Promise<ContextCheckpoint> {
     return this.kernel.agentRuntimeRequest('runtime.resources.refresh', input, signal);
+  }
+  organizationInvocation(input: {runId:string;origin:ResourceSnapshotParams['origin'];callId:string;operationId:string},signal?:AbortSignal):Promise<Run> {
+    return this.kernel.agentRuntimeRequest('runtime.organization.invocation',input,signal);
   }
   resourceSnapshot(input: ResourceSnapshotParams, signal?: AbortSignal): Promise<ContextResources> {
     return this.kernel.agentRuntimeRequest('runtime.resources.snapshot', input, signal);
