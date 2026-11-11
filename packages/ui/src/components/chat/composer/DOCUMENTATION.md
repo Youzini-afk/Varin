@@ -87,6 +87,9 @@ no per-message delivery selector. A queued next-Run message can be sent now from
 native admission moves that same input to the current Run, preserves its captured media/materials,
 and retires its unstarted successor atomically. Both interjections and promoted inputs wait for the
 next model-request boundary without interrupting the current generation or any running tools.
+They belong to the current Run, not to the queued next-Run feature. Admission is immediately visible
+as an accepted input in the current conversation; it joins committed history at the next request
+boundary. Even an in-flight final answer without tools is followed by that request in the same Run.
 Retries retain the input identity and do not deliver it twice. Changing the default does not alter
 an outstanding send receipt.
 
