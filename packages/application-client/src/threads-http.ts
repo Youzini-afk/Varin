@@ -190,7 +190,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     deleteBranch: input => post('branch/delete', input),
     listModels: () => post('models', {}),
     selectModel: input => post('model/select',input),
-    create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', withClientTime(input)), enqueue: input => post('enqueue', withClientTime(input)),
+    create: (key, options) => post('create', { key, ...options }), fork: input => post('fork', input), submit: input => post('submit', withClientTime(input)), enqueue: input => post('enqueue', withClientTime(input)),
     prepareNavigation: input => post('navigation/prepare', input),
     recoverySource: input => post('recovery/source', input),
     navigate: input => post('navigate', input),

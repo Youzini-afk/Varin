@@ -1,3 +1,4 @@
+import { conversationOrganizationZhCN } from './conversation-organization';
 import { companionAttentionZh } from './companion-attention';
 import { dict as enDict, type I18nKey } from './en';
 import { externalAgentZh } from './external-agents';

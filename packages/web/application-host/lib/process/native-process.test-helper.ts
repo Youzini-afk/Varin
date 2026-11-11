@@ -54,6 +54,7 @@ function observeProcessDiagnostics(child: ChildProcess, observe: (event: NativeP
 
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
 export function createNativeProcessTestHarness(authority?: DocumentAuthority, options: {
+  hostId?: string;
   onProcessDiagnostic?: (event: NativeProcessDiagnostic) => void;
 } = {}) {
   let initialized: Promise<{
@@ -78,7 +79,7 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
       cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
       const buildVersion = (JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
       const observeDiagnostic = options.onProcessDiagnostic;
-      const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false,
+      const client = createKernelClient({ hostId: options.hostId ?? "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false,
         ...(observeDiagnostic ? {
           env: { VARIN_PROCESS_TRACE: '1' },
           spawnProcess: ((command: string, args: string[], spawnOptions: Parameters<typeof nodeSpawn>[2]) => {
@@ -89,11 +90,11 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
         } : {}),
       });
       cleanups.push(() => client.close());
-      const documents = authority ?? createDocumentAuthority({ hostId: "process-consumer", dataDir: path.join(root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
+      const documents = authority ?? createDocumentAuthority({ hostId: options.hostId ?? "process-consumer", dataDir: path.join(root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
       if (!authority) cleanups.splice(cleanups.length - 1, 0, () => documents.dispose());
       await client.start();
       const adapter = new KernelStorageAdapter({
-        client, hostId: "process-consumer", storageRoot: path.join(root, "storage"),
+        client, hostId: options.hostId ?? "process-consumer", storageRoot: path.join(root, "storage"),
         resolveWorkspaceRoot: async (workspaceId) => (await documents.inspectWorkspace(workspaceId)).root,
       });
       cleanups.push(() => adapter.dispose());

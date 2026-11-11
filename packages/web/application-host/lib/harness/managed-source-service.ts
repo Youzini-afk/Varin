@@ -1,3 +1,4 @@
+import {managedExternalCapture,cleanupManagedExternalCaptures} from '../external-agents/managed-capture.js';
 import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
 /** The target Host admits its own Source resources. Catalog execution facts stay
  * with the coordinator; this adapter stores neither operations nor grants. */
@@ -25,6 +26,11 @@ import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
 export interface ManagedSourceServiceOptions {
+  prepareExternalLiveSource?: (workspaceId:string,executionWorkspaceId:string,conversationId:string,signal?:AbortSignal)=>Promise<import('../kernel/protocol.generated.js').LiveRoot>;
+  externalChildSource?: ReturnType<typeof import('../external-agents/managed-child-source.js').createManagedExternalChildSourceOwner>;
+  externalProjectSource?: ReturnType<typeof import('../external-agents/managed-project-source.js').createManagedExternalProjectSourceOwner>;
+  externalSettings?:(signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
+  externalLaunch?: (configurationId: string, harness: import('@varin/application-client').ExternalHarness, sessionId?: string, signal?: AbortSignal) => Promise<{binding:import('./managed-remote-types.js').ManagedExternalLaunchBinding;command:string;args:string[];env:NodeJS.ProcessEnv}>;
   workspaceFiles?: import('../workspace/resource-files.js').ResourceFilesOwner;
   deviceFileAccess?: boolean;
   executionEnvironment?: () => Promise<import('../kernel/protocol.generated.js').ExecutionEnvironment>;
@@ -199,7 +205,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     await registration(authority.source, signal, authority.purpose === 'result');
     await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: authority.source.mode,
       enabledTools }, signal);
-    await kernel.sourceRequest('source.service.call', { ...address(principal, input), requestId: `validate:${randomUUID()}`,
+    if(authority.scope.kind === 'external') await kernel.assertGrantForScope(kernel.sourceAuthorityGrant(authority));
+    else await kernel.sourceRequest('source.service.call', { ...address(principal, input), requestId: `validate:${randomUUID()}`,
       clientCapabilities: [...principal.capabilities], operation: { kind: 'validate' } }, signal);
     if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
     return authority;
@@ -209,14 +216,14 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     if (!['filesystem:read', 'terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))
       throw new SourceAdmissionError('source_authority_denied');
     const authority = await admit(principal, input, signal);
-    if (!authority.physicalRoot || authority.scope.kind !== 'run' || !['process_view', 'script_environment'].includes(authority.purpose)
+    if (!authority.physicalRoot || !((authority.scope.kind === 'run' && ['process_view','script_environment'].includes(authority.purpose)) || (authority.scope.kind === 'external' && authority.purpose === 'external_harness'))
       || authority.operationId !== input.processId) throw new SourceAdmissionError('source_changed');
     const process = await kernel.sourceRequest<import('../kernel/protocol.generated.js').KernelProcessSnapshot>('source.process.access',
       { ...address(principal, input), processId: input.processId }, signal);
     // A reopened Host observes the original spool under its current view grant.
     // The process keeps its creation epoch; Storage still rejects old-epoch input.
     if (process.processId !== input.processId || !process.kernelEpoch
-      || process.workspaceId !== authority.source.workspace_id || process.mode !== (authority.purpose === 'script_environment' ? 'pipe' : 'pty')) throw new SourceAdmissionError('source_changed');
+      || process.workspaceId !== authority.source.workspace_id || process.mode !== (['script_environment','external_harness'].includes(authority.purpose) ? 'pipe' : 'pty')) throw new SourceAdmissionError('source_changed');
     return { authority, process };
   };
   const processViews = createManagedSourceProcesses({ kernel, access: async (principal, input, signal) => (await processAccess(principal, input, signal)).authority,
@@ -253,13 +260,84 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
 
   const attachmentScope = async (principal: ManagedSourcePrincipal, input: ManagedSourceAddress, signal?: AbortSignal) => {
     const authority = await admit(principal, input, signal);
-    if (authority.scope.kind !== 'run' || authority.purpose !== 'source') throw new SourceAdmissionError('source_authority_denied');
+    if (!(authority.scope.kind === 'run' && authority.purpose === 'source') && !(authority.scope.kind === 'external' && authority.purpose === 'external_harness')) throw new SourceAdmissionError('source_authority_denied');
     return localScope(principal, input.coordinatorHostId, authority);
   };
   return {
     async attachmentBegin(principal, input, signal) { return attachments.begin(await attachmentScope(principal, input, signal), input, signal); },
     async attachmentPut(principal, input, body, signal) { return attachments.put(await attachmentScope(principal, input, signal), input, body, signal); },
     async attachmentPath(principal, input, signal) { return attachments.path(await attachmentScope(principal, input, signal), input, signal); },
+    async externalCapture(principal,input,signal){
+      const authority=await admit(principal,input,signal);
+      if(authority.scope.kind!=='external'||authority.purpose!=='external_harness')throw new SourceAdmissionError('source_authority_denied');
+      return managedExternalCapture(kernel,localScope(principal,input.coordinatorHostId,authority),input,signal);
+    },
+    async externalChildSource(principal,input,signal){
+      if(input.action==='prepare')requireReadPrincipal(principal,input.coordinatorHostId);else requirePrincipal(principal,input.coordinatorHostId);
+      if(!options.externalChildSource)throw new SourceAdmissionError('source_unavailable');
+      return options.externalChildSource(principal,input,signal);
+    },
+    async externalProjectSource(principal,input,signal){
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if(!options.externalProjectSource)throw new SourceAdmissionError('source_unavailable');
+      if(input.action!=='remove')await registration(input.source,signal);
+      return options.externalProjectSource(principal,input,signal);
+    },
+    async externalSettings(principal,input,signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if(!options.externalSettings)throw new SourceAdmissionError('source_unavailable');
+      return options.externalSettings(signal);
+    },
+    async externalPrepare(principal,input,signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if (!options.prepareExternalLiveSource || input.resourceOwner.kind !== 'managed_host' || input.resourceOwner.hostId !== options.hostId
+        || !input.conversationId || !['terminal:use','process:control'].every(c=>principal.capabilities.includes(c))) throw new SourceAdmissionError('source_authority_denied');
+      const resolved = await documents.resolveWorkspace({path:input.path});
+      if(input.expectedWorkspaceId && input.expectedWorkspaceId!==resolved.workspaceId)throw new SourceAdmissionError('source_changed');
+      const workspace = await documents.admitWorkspaceRegistration(resolved.workspaceId,signal);
+      if (principal.allowedDirectories?.length) {
+        const {assertResourcePathAllowed}=await import('../workspace/resource-access.js');
+        await assertResourcePathAllowed(workspace.canonicalPath,principal.allowedDirectories);
+      }
+      const liveRoot = await options.prepareExternalLiveSource(resolved.workspaceId,resolved.workspaceId,input.conversationId,signal);
+      return {resource_owner:input.resourceOwner,mode:'live_root',workspace_id:resolved.workspaceId,execution_workspace_id:resolved.workspaceId,
+        branch_id:null,revision:null,live_root:liveRoot};
+    },
+    async externalBinding(principal, input, signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if (!['terminal:use','process:control'].every(c => principal.capabilities.includes(c)) || !options.externalLaunch) throw new SourceAdmissionError('source_authority_denied');
+      await registration(input.source,signal);
+      return (await options.externalLaunch(input.configurationId,input.harness,input.sessionId,signal)).binding;
+    },
+    async externalSpawn(principal,input,signal) {
+      if (!['terminal:use','process:control'].every(c => principal.capabilities.includes(c)) || !options.externalLaunch) throw new SourceAdmissionError('source_authority_denied');
+      const authority = await admit(principal,input,signal);
+      if (authority.purpose !== 'external_harness' || authority.scope.kind !== 'external' || authority.operationId !== input.processId || authority.scope.transportId !== input.processId || !authority.physicalRoot) throw new SourceAdmissionError('source_changed');
+      const launch = await options.externalLaunch(input.launch.configuration.id,input.launch.configuration.harness,input.sessionId,signal);
+      if (!isDeepStrictEqual(launch.binding,input.launch)) throw new Error('Original target external Harness configuration changed');
+      signal?.throwIfAborted();
+      // Once dispatched, retain its exact receipt even if the HTTP waiter disconnects.
+      return kernel.scoped(kernel.sourceAuthorityGrant(authority)).processSpawn({processId:input.processId,workspaceId:authority.source.workspace_id,
+        rootId:authority.physicalRoot.rootId,cwd:'',command:launch.command,args:launch.args,mode:'pipe',
+        env:Object.entries(launch.env).flatMap(([name,value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{name,value}])});
+    },
+    async externalControl(principal,input,signal) {
+      requirePrincipal(principal,input.coordinatorHostId); await kernel.start();
+      const {releaseCaptures,release,...control}=input;
+      let receipt = await kernel.sourceRequest<import('./managed-remote-types.js').ManagedExternalControlReceipt>('source.external.control',{...control,principalId:principal.principalId},signal);
+      if(receipt.executorStopped&&releaseCaptures)await cleanupManagedExternalCaptures(kernel,{principal,coordinatorHostId:input.coordinatorHostId,scope:{kind:'external',conversationId:input.conversationId,transportId:input.transportId}});
+      if (receipt.executorStopped) for (const address of receipt.authorities) {
+        const authority = await inspect(principal,{coordinatorHostId:input.coordinatorHostId,...address},signal);
+        await attachments.drain(cleanupScope(principal,input.coordinatorHostId,authority));
+        await attachments.cleanup(cleanupScope(principal,input.coordinatorHostId,authority));
+      }
+      if(release){
+        if(!receipt.executorStopped)throw new Error('Original external process output is still in use');
+        for(const authority of receipt.authorities)await processViews.release(principal,{coordinatorHostId:input.coordinatorHostId,...authority});
+        receipt=await kernel.sourceRequest<import('./managed-remote-types.js').ManagedExternalControlReceipt>('source.external.control',{...control,release:true,principalId:principal.principalId},signal);
+      }
+      return receipt;
+    },
     async scriptControl(principal, input, signal) {
       requirePrincipal(principal, input.coordinatorHostId);
       await kernel.start();
@@ -411,16 +489,17 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     async bind(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       const source = selectedSource(input);
+      if (input.purpose === 'external_harness' && (input.scope.kind !== 'external' || input.retention !== 'caller' || input.operationId !== input.scope.transportId)) throw new SourceAdmissionError('source_authority_denied');
       const resultOnly = input.purpose === 'result';
       if (input.purpose === 'mcp_owner' && (input.scope.kind !== 'run' || input.retention !== 'run' || input.operationId))
         throw new SourceAdmissionError('source_authority_denied');
       if (['process_view', 'script_environment'].includes(input.purpose) && (input.scope.kind !== 'run' || input.retention !== 'caller' || !input.operationId))
         throw new SourceAdmissionError('source_authority_denied');
-      if (['script_environment', 'mcp_owner'].includes(input.purpose) && (source.mode === 'fixed_branch'
+      if (['script_environment', 'mcp_owner', 'external_harness'].includes(input.purpose) && (source.mode === 'fixed_branch'
         || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))) throw new SourceAdmissionError('source_authority_denied');
       await registration(source, signal,resultOnly);
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: source.mode,
-        enabledTools: input.scope.kind === 'source_read' || resultOnly || input.purpose === 'mcp_owner' ? [] : input.source.tools }, signal);
+        enabledTools: input.scope.kind === 'source_read' || input.scope.kind === 'external' || resultOnly || input.purpose === 'mcp_owner' ? [] : input.source.tools }, signal);
       const integration = input.purpose === 'integration';
       if (integration && (input.scope.kind !== 'run' || !input.operationId || !principal.capabilities.includes('filesystem:write'))) throw new SourceAdmissionError('source_authority_denied');
       if (input.scope.kind === 'run' && input.retention === 'caller' && !input.operationId) throw new SourceAdmissionError('source_authority_denied');
@@ -433,10 +512,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         ...(input.handoff ? { handoff: input.handoff } : {}), ...(input.continuation ? { continuation: input.continuation } : {}),
       }, signal) : await kernel.issueGrant({ grantId,
         owningWorkspace: source.workspace_id, executionWorkspace: source.execution_workspace_id,
-        threadId: input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
+        ...(input.scope.kind === 'external' ? {externalTransportId:input.scope.transportId} : {}),
+        threadId: input.scope.kind === 'external' ? input.scope.conversationId : input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
         ...(input.operationId ? { operationId: input.operationId } : {}),
         capabilities: [...new Set([...selected.grantCapabilities, ...(source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []),
-          ...(resultOnly ? ['storage.write'] : []), ...(['script_environment', 'mcp_owner'].includes(input.purpose) ? ['process'] : [])])], pathScopes: [''] }, signal);
+          ...(resultOnly ? ['storage.write'] : []), ...(['script_environment', 'mcp_owner', 'external_harness'].includes(input.purpose) ? ['process'] : [])])], pathScopes: [''] }, signal);
       let opened: SourceAuthorityResult | undefined;
       try {
         opened = await kernel.sourceRequest<SourceAuthorityResult>('source.authority.open', {
@@ -490,9 +570,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           physicalRoot={hostId:options.hostId,rootId:native.rootId,canonicalRoot:native.path};
         }
         const fixed = { branchId: source.branch_id!, revision: source.revision! };
-        const textEncoding = opened.toolBinding?.textEncoding ?? (input.scope.kind === 'source_read' || resultOnly
+        const textEncoding = opened.toolBinding?.textEncoding ?? (input.scope.kind !== 'run' || resultOnly
           ? undefined : await resolveSourceTextPolicy(kernel, actor, source, physicalRoot, signal));
-        const toolBinding: SourceToolBinding | null = input.scope.kind === 'source_read' ? null : {
+        const toolBinding: SourceToolBinding | null = input.scope.kind !== 'run' ? null : {
           ...(textEncoding ? { textEncoding } : {}),
           executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()),
           resourceOwner: source.resource_owner, grantId: opened.grantId, runId: input.scope.runId, threadId: input.scope.threadId,
@@ -651,7 +731,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
                 scope.source.environment_run_id ?? scope.scope.runId);
               const operationId = `source-materialize:${location.key}`;
               let materialized = await actor.getOperation(operationId, controller.signal);
-              const needsPhysical = ['binary_write', 'code_capture', 'code_apply', 'integration', 'user_integration',
+              const needsPhysical = ['binary_write', 'code_capture', 'code_apply', 'external_code_apply', 'integration', 'user_integration',
                 'package_capture', 'experiment_admit', 'experiment_capture', 'attachment_capture'].includes(operation.kind)
                 || operation.kind === 'language' && operation.query.method !== 'structure';
               if (needsPhysical && (!materialized || materialized.state !== 'committed')) {

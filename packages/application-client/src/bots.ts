@@ -186,7 +186,7 @@ export interface BotsAPI {
   presence(botId: string, signal?: AbortSignal): Promise<BotPresence>;
   sessions: {
     list(botId: string, signal?: AbortSignal): Promise<BotSession[]>;
-    create(botId: string): Promise<BotSession>;
+    create(botId: string, options?: { key?: string; organization?: import('./conversation-organization.js').ConversationOrganizationPlacement }): Promise<BotSession>;
   };
   memory: {
     list(botId: string, signal?: AbortSignal, includeInactive?: boolean): Promise<BotMemoryItem[]>;

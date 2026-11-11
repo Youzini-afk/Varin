@@ -33,6 +33,7 @@ export class HarnessTransport {
   constructor(
     readonly child: KernelManagedProcess,
     private readonly protocol: 'rpc' | 'pi' = 'rpc',
+    private readonly closeOwner?: () => Promise<void>,
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
     child.stderr.resume();
@@ -46,7 +47,7 @@ export class HarnessTransport {
         ),
       ),
     );
-    void child.completion.then(() => child.release()).catch((error) => this.fail(error));
+    void child.completion.then(() => this.closeOwner ? this.closeOwner() : child.release()).catch((error) => this.fail(error));
   }
   onMessage(listener: (message: RecordValue) => void): () => void {
     this.listeners.add(listener);
@@ -106,6 +107,7 @@ export class HarnessTransport {
     const work = Promise.resolve().then(async () => {
       this.fail(new Error('External Agent connection closed'));
       this.child.discardOutput();
+      if(this.closeOwner){await this.closeOwner();return;}
       if (!this.child.exitConfirmed) await this.child.requestTermination(true);
       await this.child.completion;
       await this.child.release();

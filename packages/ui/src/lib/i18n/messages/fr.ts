@@ -1,3 +1,4 @@
+import { conversationOrganizationEn } from './conversation-organization';
 import { settingsDict } from './fr.settings';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -6,6 +7,7 @@ import { toolPurposeFr } from './tool-purpose-locales';
 
 import { companionLibraryMessages } from './companion-library';
 export const dict = {
+  ...conversationOrganizationEn,
   "ui.content.latest": "Voir la dernière révision",
   "ui.content.alreadyLatest": "Cette révision est la plus récente.",
   "ui.content.cyclicEmbed": "Référence de contenu circulaire",

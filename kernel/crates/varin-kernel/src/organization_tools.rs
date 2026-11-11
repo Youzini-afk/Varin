@@ -15,6 +15,68 @@ use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 fn error(value: impl ToString) -> ExecutionError {
     ExecutionError::new("organization", value.to_string())
 }
+/// A page obtains names once from the existing Host owners, without making a
+/// profile/configuration copy in Catalog. Missing owners are explicit presentation
+/// states; they do not erase a valid conversation or grant another capability.
+pub(crate) fn labels(
+    catalog: &Arc<Mutex<Catalog>>,
+    bridge: Option<&crate::host_query::OwnerChannel>,
+    context: &ToolExecutionContext,
+    call: &ToolCall,
+    bots: Vec<String>,
+    projects: Vec<String>,
+    cancel: &CancellationToken,
+) -> Value {
+    let fallback = json!({"bots":bots.iter().map(|id|json!({"id":id,"name":null,"status":"unavailable"})).collect::<Vec<_>>(),
+        "projects":projects.iter().map(|id|json!({"id":id,"name":null,"status":"unavailable"})).collect::<Vec<_>>()});
+    if bots.is_empty() && projects.is_empty() {
+        return fallback;
+    }
+    let result = (|| -> Result<Value, ExecutionError> {
+        let bridge = bridge.ok_or_else(|| error("Name owner unavailable"))?;
+        let capture = catalog
+            .lock()
+            .map_err(error)?
+            .capture_tool_invocation(context, &call.call_id)
+            .map_err(error)?;
+        let invocation = capture.load().map_err(error)?;
+        let checkpoint = invocation
+            .frozen
+            .resource_checkpoint_id
+            .ok_or_else(|| error("Original resource snapshot unavailable"))?;
+        let result=bridge.query(json!({"runId":context.run_id,"origin":context.origin,"callId":call.call_id,"resourceCheckpointId":checkpoint,
+            "request":{"kind":"organization","operationId":context.operation_id,"action":"labels","input":{"botIds":bots,"projectIds":projects}}}),cancel)?;
+        if result["status"] != "ready" {
+            return Err(error("Name owner unavailable"));
+        }
+        Ok(result["result"].clone())
+    })();
+    result.unwrap_or(fallback)
+}
+pub(crate) fn label(labels: &Value, domain: &str, id: &str) -> Value {
+    labels[domain]
+        .as_array()
+        .and_then(|values| values.iter().find(|v| v["id"] == id))
+        .cloned()
+        .unwrap_or_else(|| json!({"id":id,"name":null,"status":"unavailable"}))
+}
+pub(crate) fn apply_labels(value: &mut Value, labels: &Value) {
+    for key in ["sourceBot", "directBot"] {
+        if let Some(id) = value[key].as_str().map(str::to_owned) {
+            value[key] = label(labels, "bots", &id);
+        }
+    }
+    if let Some(project) = value["projectId"].as_str().map(str::to_owned) {
+        let named = label(labels, "projects", &project);
+        value["name"] = named["name"].clone();
+        value["availability"] = named["status"].clone();
+    }
+    if let Some(path) = value["path"].as_array_mut() {
+        for node in path {
+            apply_labels(node, labels);
+        }
+    }
+}
 const ACTIONS: &[&str] = &[
     "describe",
     "list",
@@ -59,16 +121,18 @@ struct Input {
     limit: Option<u64>,
     cursor: Option<String>,
     name: Option<String>,
-    #[serde(default,deserialize_with="nullable_text")]
+    #[serde(default, deserialize_with = "nullable_text")]
     icon: Option<Option<String>>,
-    #[serde(default,deserialize_with="nullable_text")]
+    #[serde(default, deserialize_with = "nullable_text")]
     color: Option<Option<String>>,
     before: Option<String>,
     #[serde(default)]
     targets: Vec<String>,
     pinned: Option<bool>,
 }
-fn nullable_text<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<Option<String>>,D::Error> {
+fn nullable_text<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
 }
 fn parse(call: &ToolCall) -> Result<(Arguments, Input), ExecutionError> {
@@ -77,7 +141,11 @@ fn parse(call: &ToolCall) -> Result<(Arguments, Input), ExecutionError> {
         return Err(error("Unknown organization action"));
     }
     if let Some(input) = args.input.as_object() {
-        if args.action=="list" && input.contains_key("cursor") && input.len()!=1 {return Err(error("Use the returned cursor alone to continue its original query"));}
+        if args.action == "list" && input.contains_key("cursor") && input.len() != 1 {
+            return Err(error(
+                "Use the returned cursor alone to continue its original query",
+            ));
+        }
         let description = action_schema(&args.action)?;
         for key in input.keys() {
             if description["properties"].get(key).is_none() {
@@ -210,8 +278,22 @@ fn reference(
             .into(),
     })
 }
-fn container_ref(db:&Catalog,principal:Option<&str>,id:&str,holder:&str)->Result<String,ExecutionError> {
-    db.register_model_reference(ReferenceKind::Container,&format!("organization:{}",serde_json::to_string(&principal).map_err(error)?),&json!({"containerId":id}),holder).map_err(error)
+fn container_ref(
+    db: &Catalog,
+    principal: Option<&str>,
+    id: &str,
+    holder: &str,
+) -> Result<String, ExecutionError> {
+    db.register_model_reference(
+        ReferenceKind::Container,
+        &format!(
+            "organization:{}",
+            serde_json::to_string(&principal).map_err(error)?
+        ),
+        &json!({"containerId":id}),
+        holder,
+    )
+    .map_err(error)
 }
 fn agent_ref(db: &Catalog, reference: &ConversationRef) -> Result<String, ExecutionError> {
     match reference {
@@ -333,12 +415,8 @@ impl Tools {
         let reply=self.bridge.query_draining(json!({"runId":context.run_id,"origin":context.origin,"callId":call.call_id,
             "resourceCheckpointId":checkpoint,"request":{"kind":"organization","operationId":context.operation_id,"action":action,"input":input}}),cancel).map_err(|mut failure|{failure.details=Some(json!({"effect":"unknown","reason":"Host response was not received; reconcile the original operation before retrying"}));failure})?;
         if reply["status"] != "ready" {
-            return Err(error(
-                reply
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Organization Host operation failed"),
-            ));
+            return Err(error(reply.get("reason").and_then(Value::as_str).unwrap_or("Organization Host operation failed"))
+                .with_details(json!({"status":reply["status"],"effect":if matches!(reply["status"].as_str(),Some("unavailable"|"cancelled")|None){"unknown"}else{"none"}})));
         }
         if action == "external_metadata" && reply["result"]["status"] != "succeeded" {
             return Err(ExecutionError::new(reply["result"]["code"].as_str().unwrap_or("organization_metadata"),
@@ -381,22 +459,47 @@ impl Tools {
             }
             query = serde_json::from_value(saved.target["query"].clone()).map_err(error)?;
         }
-        let mut snapshot = db.organization_snapshot(principal,query.clone()).map_err(error)?;
+        let mut snapshot = db
+            .organization_snapshot(principal, query.clone())
+            .map_err(error)?;
         // The owner retains a shared tree; a focused model read need not publish
         // unrelated sibling branches. Keep matching nodes and necessary ancestors.
-        let mut visible=std::collections::BTreeSet::new();
-        for entry in &snapshot.conversations {visible.extend(entry.path.iter().cloned());}
+        let mut visible = std::collections::BTreeSet::new();
+        for entry in &snapshot.conversations {
+            visible.extend(entry.path.iter().cloned());
+        }
         if query.bot_id.is_none() {
             for container in &snapshot.containers {
-                let mut ancestors=Vec::new();let mut parent=container.parent_id.as_ref();
-                while let Some(id)=parent {ancestors.push(id.clone());parent=snapshot.containers.iter().find(|c|c.id==*id).and_then(|c|c.parent_id.as_ref());}
-                let in_scope=if let Some(id)=&query.container_id {container.id==*id || container.parent_id.as_ref()==Some(id) || (query.recursive && ancestors.contains(id))}
-                    else {!query.root_only || query.recursive || container.parent_id.is_none()};
-                let matches=query.query.as_ref().is_none_or(|q|container.name.as_ref().is_some_and(|name|name.to_lowercase().contains(&q.to_lowercase())));
-                if in_scope && matches {visible.insert(container.id.clone());visible.extend(ancestors);}
+                let mut ancestors = Vec::new();
+                let mut parent = container.parent_id.as_ref();
+                while let Some(id) = parent {
+                    ancestors.push(id.clone());
+                    parent = snapshot
+                        .containers
+                        .iter()
+                        .find(|c| c.id == *id)
+                        .and_then(|c| c.parent_id.as_ref());
+                }
+                let in_scope = if let Some(id) = &query.container_id {
+                    container.id == *id
+                        || container.parent_id.as_ref() == Some(id)
+                        || (query.recursive && ancestors.contains(id))
+                } else {
+                    !query.root_only || query.recursive || container.parent_id.is_none()
+                };
+                let matches = query.query.as_ref().is_none_or(|q| {
+                    container
+                        .name
+                        .as_ref()
+                        .is_some_and(|name| name.to_lowercase().contains(&q.to_lowercase()))
+                });
+                if in_scope && matches {
+                    visible.insert(container.id.clone());
+                    visible.extend(ancestors);
+                }
             }
         }
-        snapshot.containers.retain(|c|visible.contains(&c.id));
+        snapshot.containers.retain(|c| visible.contains(&c.id));
         let observation = db
             .register_model_reference(
                 ReferenceKind::Read,
@@ -438,7 +541,7 @@ impl Tools {
         call: &ToolCall,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
-        let invocation=self.authorize_call(context, call, cancel)?;
+        let invocation = self.authorize_call(context, call, cancel)?;
         let (args, input) = parse(call)?;
         if args.action == "describe" {
             return match input.operation {
@@ -449,12 +552,48 @@ impl Tools {
             };
         }
         let mut db = self.catalog.lock().map_err(error)?;
-        db.validate_tool_invocation(&invocation,true).map_err(error)?;
-        if cancel.is_cancelled(){return Err(error("Organization command cancelled before commit"));}
+        db.validate_tool_invocation(&invocation, true)
+            .map_err(error)?;
+        if cancel.is_cancelled() {
+            return Err(error("Organization command cancelled before commit"));
+        }
         let run = db.run(&context.run_id).map_err(error)?;
         let principal = run.principal_id.as_deref();
         if args.action == "list" {
-            return self.list(&db, context, principal, input);
+            let mut page = self.list(&db, context, principal, input)?;
+            let mut bots = std::collections::BTreeSet::new();
+            let mut projects = std::collections::BTreeSet::new();
+            for item in page["conversations"].as_array().into_iter().flatten() {
+                for key in ["sourceBot", "directBot"] {
+                    if let Some(id) = item[key].as_str() {
+                        bots.insert(id.to_owned());
+                    }
+                }
+            }
+            for item in page["containers"].as_array().into_iter().flatten() {
+                if let Some(id) = item["projectId"].as_str() {
+                    projects.insert(id.to_owned());
+                }
+            }
+            drop(db);
+            let names = labels(
+                &self.catalog,
+                Some(&self.bridge),
+                context,
+                call,
+                bots.into_iter().collect(),
+                projects.into_iter().collect(),
+                cancel,
+            );
+            for key in ["containers", "conversations"] {
+                if let Some(items) = page[key].as_array_mut() {
+                    for item in items {
+                        apply_labels(item, &names);
+                    }
+                }
+            }
+            self.authorize_call(context, call, cancel)?;
+            return Ok(page);
         }
         let observation = input
             .observation
@@ -470,11 +609,18 @@ impl Tools {
         }
         let snapshot: OrganizationSnapshot =
             serde_json::from_value(saved.target["snapshot"].clone()).map_err(error)?;
-        let parent=input.container.as_deref().map(|value| {
-            let object=reference(&db,principal,value)?;
-            observed(&snapshot,&object)?;
-            match object {OrganizationObject::Container{id}=>Ok(id),_=>Err(error("Destination must be a container"))}
-        }).transpose()?;
+        let parent = input
+            .container
+            .as_deref()
+            .map(|value| {
+                let object = reference(&db, principal, value)?;
+                observed(&snapshot, &object)?;
+                match object {
+                    OrganizationObject::Container { id } => Ok(id),
+                    _ => Err(error("Destination must be a container")),
+                }
+            })
+            .transpose()?;
         let before = input
             .before
             .as_deref()
@@ -489,26 +635,27 @@ impl Tools {
                 .pointer("/identity/threadId")
                 .or_else(|| result.get("threadId"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| error("Bot owner returned no conversation identity"))?;
+                .ok_or_else(|| {
+                    error("Bot owner returned no conversation identity")
+                        .with_details(json!({"effect":"unknown"}))
+                })?;
             let db = self.catalog.lock().map_err(error)?;
             return Ok(
                 json!({"created":agent_ref(&db,&ConversationRef::Native{id:thread.into()})?,"bot":result.get("botId")}),
             );
         }
         if args.action == "create_conversation" {
-            let id = format!("conversation:{}", context.operation_id);
-            let branch = format!("branch:{}", context.operation_id);
-            db.create_thread_with_placement(
-                &id,
-                &branch,
-                principal,
-                Some(Placement {
-                    container_id: parent,
-                }),
-            )
-            .map_err(error)?;
-            let identity = db.agent_identity(&id).map_err(error)?;
-            return Ok(json!({"created":identity["agentId"],"empty":true}));
+            let request = json!({"key":key,"organization":{"containerId":parent}});
+            drop(db);
+            let result = self.host(context, call, "create_conversation", request, cancel)?;
+            let thread = result["threadId"].as_str().ok_or_else(|| {
+                error("Conversation owner returned no identity")
+                    .with_details(json!({"effect":"unknown"}))
+            })?;
+            let db = self.catalog.lock().map_err(error)?;
+            return Ok(
+                json!({"created":agent_ref(&db,&ConversationRef::Native{id:thread.into()})?,"empty":true}),
+            );
         }
         let operation = match args.action.as_str() {
             "create_group" => OrganizationOperation::Create {
@@ -671,21 +818,45 @@ impl Tools {
                 }
             }
         };
+        let changed_containers = match &operation {
+            OrganizationOperation::Create { id, .. } | OrganizationOperation::Update { id, .. } => {
+                vec![id.clone()]
+            }
+            OrganizationOperation::Move { items, .. } => items
+                .iter()
+                .filter_map(|item| {
+                    if let OrganizationObject::Container { id } = &item.object {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            OrganizationOperation::Dissolve { .. } | OrganizationOperation::Restore { .. } => Vec::new(),
+        };
         let receipt = db
             .organization_command(principal, OrganizationCommand { key, operation })
             .map_err(error)?;
         let mut changed = Vec::new();
-        // Only report this operation, not an unsolicited copy of the whole directory.
-        if args.action == "create_group" {
-            let id = format!("group:{}", context.operation_id);
-            changed.push(json!({"ref":container_ref(&db,principal,&id,&context.run_id)?}));
+        // Only report the selected objects, preserving the original receipt on retry.
+        for id in changed_containers {
+            let container = receipt
+                .containers
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| error("Organization receipt is missing its changed container"))?;
+            changed.push(json!({"ref":container_ref(&db,principal,&id,&context.run_id)?,"name":container.name,"kind":container.kind,
+                "parent":container.parent_id.as_deref().map(|id|container_ref(&db,principal,id,&context.run_id)).transpose()?,"icon":container.icon,"color":container.color}));
         }
         for p in receipt.positions {
             changed.push(json!({"ref":agent_ref(&db,&p.conversation)?,"container":p.container_id.as_deref().map(|id|container_ref(&db,principal,id,&context.run_id)).transpose()?}));
         }
-        Ok(
-            json!({"action":args.action,"changed":changed,"removedContainers":receipt.removed.len()}),
-        )
+        let removed = receipt
+            .removed
+            .iter()
+            .map(|id| container_ref(&db, principal, id, &context.run_id))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(json!({"action":args.action,"changed":changed,"removedContainers":removed}))
     }
 }
 impl ToolExecutor for Tools {
@@ -728,7 +899,7 @@ impl ToolExecutor for Tools {
         _: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        self.authorize_call(context, call, cancel).map(|_|())
+        self.authorize_call(context, call, cancel).map(|_| ())
     }
     fn execute(
         &self,

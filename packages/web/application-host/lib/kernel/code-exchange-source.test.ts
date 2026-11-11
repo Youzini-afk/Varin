@@ -88,3 +88,11 @@ it('freezes original code participants before recovery instead of selecting the 
   expect(retry.peer).toMatchObject({runId:'peer-one',branchId:'branch:peer-one',source:nativeSource});
   expect(sourceReads).toBe(1);
 });
+
+it('uses a target checkpoint coordinate root without inventing an external Run ancestry',async()=>{
+  const owner={kind:'managed_host' as const,hostId:'target',connectionId:'connection',endpointIdentity:'endpoint'};
+  const base:LaunchSource={workspace_id:'w',execution_workspace_id:'native',mode:'native_workspace',branch_id:'original',revision:null,live_root:null,resource_owner:owner};
+  const runtime={childExecutionForRun:async(runId:string)=>runId==='real-child'?{parent_run_id:'real-parent',source:{kind:'ready',handoff:{source:base,source_path:'src'}}}:null} as unknown as AgentRuntimeClient;
+  expect(await sourcePathMap(runtime,{runId:'real-child',source:{...base,native_scope:'src'},frozenOrigin:true},
+    {runId:'real-parent',source:base},new AbortController().signal)).toEqual({from:'',to:'src'});
+});

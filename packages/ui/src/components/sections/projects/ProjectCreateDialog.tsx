@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, projectPathKey, type ProjectEntry } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, projectPathKey, type ProjectEntry, type ConversationOrganizationCommand } from '@varin/application-client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -9,27 +9,36 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { changeProjectTrust, readProjectTrust, type ProjectTrust } from '@/lib/projectTrust';
 import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import type { SourceResourceOwner } from '@varin/protocol';
+import { ProjectSourceEditor } from './ProjectSourceEditor';
+import { resolveProjectFolders } from '@/lib/projectSource';
 import { useI18n } from '@/lib/i18n';
 
-type Review = { name: string; folders: string[]; roots: ProjectTrust[]; host: number };
-export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
-  open: boolean; onOpenChange: (open: boolean) => void; initialPath?: string | null;
+type Review = { name: string; folders: string[]; roots: ProjectTrust[]; host: number; source?: ProjectEntry['source'] };
+export function ProjectCreateDialog({ open, onOpenChange, initialPath, parentContainerId = null }: {
+  open: boolean; onOpenChange: (open: boolean) => void; initialPath?: string | null; parentContainerId?: string | null;
 }) {
   const { t } = useI18n();
   const addProject = useProjectsStore(state => state.addProject);
-  const { documents } = useRuntimeAPIs();
+  const { documents, conversationOrganization } = useRuntimeAPIs();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const [sourceOwner, setSourceOwner] = React.useState<SourceResourceOwner>({ kind: 'local' });
   const [name, setName] = React.useState('');
   const [folders, setFolders] = React.useState<string[]>([]);
   const [review, setReview] = React.useState<Review | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [registrationStarted, setRegistrationStarted] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const operation = React.useRef<AbortController | null>(null);
   const created = React.useRef<ProjectEntry | null>(null);
+  const registrationInput = React.useRef<Pick<Review, 'name' | 'folders' | 'source'> | null>(null);
+  const targetParent = React.useRef<string | null>(parentContainerId);
+  const classification = React.useRef<ConversationOrganizationCommand | null>(null);
+  const registrationId = React.useRef(`project_${crypto.randomUUID()}`);
   const owner = React.useRef({ open, host }); owner.current = { open, host };
   React.useEffect(() => {
-    operation.current?.abort(); operation.current = null; created.current = null;
-    setName(''); setFolders([]); setReview(null); setError(null); setBusy(false);
+    operation.current?.abort(); operation.current = null; created.current = null; registrationInput.current = null; targetParent.current = parentContainerId; classification.current = null; registrationId.current = `project_${crypto.randomUUID()}`;
+    setRegistrationStarted(false); setSourceOwner({ kind: 'local' }); setName(''); setFolders([]); setReview(null); setError(null); setBusy(false);
     return () => { operation.current?.abort(); operation.current = null; };
   }, [open, host]);
   const current = (controller: AbortController) => operation.current === controller && !controller.signal.aborted
@@ -42,14 +51,46 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
     catch (failure) { if (current(controller)) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { if (operation.current === controller) { operation.current = null; setBusy(false); } }
   };
-  const finish = async (input: Pick<Review, 'name' | 'folders'>, controller: AbortController) => {
+  const finish = async (input: Pick<Review, 'name' | 'folders' | 'source'>, controller: AbortController) => {
     if (!current(controller)) return;
+    setRegistrationStarted(true);
+    registrationInput.current ??= input;
+    input = registrationInput.current;
     // A failed navigation can retry opening the accepted project without creating another entry.
-    const project = created.current ?? await addProject(input.folders[0]!, { label: input.name, additionalPaths: input.folders.slice(1) });
+    // Initialize the directory before registration, so first-read migration cannot
+    // pre-empt the explicit parent selected for this new project.
+    if (!created.current && conversationOrganization) await conversationOrganization.read({}, controller.signal);
+    if (!current(controller)) return;
+    const project = created.current ?? await addProject(input.folders[0]!, { id: registrationId.current, label: input.name, additionalPaths: input.folders.slice(1), source: input.source });
     if (!current(controller)) return;
     if (!project) throw new Error(t('directoryExplorerDialog.toast.failedToAddProject'));
     created.current = project;
-    await startThreadFromNavigation({ directory: await projectExecutionPath(project) });
+    if (!conversationOrganization) throw new Error('Project registered; conversation organization is unavailable. Retry to finish classification.');
+    if (!classification.current) {
+      const snapshot = await conversationOrganization.read({}, controller.signal);
+      if (!current(controller)) return;
+      const existing = snapshot.containers.find(container => container.projectId === project.id);
+      if (!existing) {
+        const parentId = targetParent.current;
+        const parent = parentId === null ? null : snapshot.containers.find(container => container.id === parentId);
+        if (parentId !== null && !parent) throw new Error('Project registered; the target container no longer exists.');
+        classification.current = { key: `project-register:${registrationId.current}:${crypto.randomUUID()}`, operation: {
+          action: 'create', id: `project:${project.id}`, kind: 'project', projectId: project.id, parentId,
+          parents: [{ containerId: parentId, childrenRevision: parent?.childrenRevision ?? snapshot.rootRevision }],
+        } };
+      }
+    }
+    if (classification.current) {
+      const result = await conversationOrganization.project({ projectId: project.id, command: classification.current }, controller.signal);
+      if (!current(controller)) return;
+      if (result.navigation !== 'completed') {
+        // A known revision conflict permits a new explicit retry against a fresh
+        // snapshot. Unknown outcomes retain this exact command and key.
+        if (result.failure?.code === 'conflict') classification.current = null;
+        throw new Error(`Project registered; classification is pending. ${result.failure?.message ?? 'Retry to complete it.'}`);
+      }
+    }
+    await startThreadFromNavigation({ projectId: project.id, directory: project.path });
     if (current(controller)) onOpenChange(false);
   };
   const create = (event: React.FormEvent) => {
@@ -58,6 +99,11 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
     void run(async controller => {
       const input = { name: name.trim(), folders: [...folders] };
       if (created.current) { await finish(input, controller); return; }
+      if (sourceOwner.kind === 'managed_host') {
+        const resolved = await resolveProjectFolders(sourceOwner, input.folders, controller.signal);
+        if (current(controller)) await finish({ ...input, ...resolved }, controller);
+        return;
+      }
       const roots: ProjectTrust[] = [];
       for (const path of input.folders) {
         const workspace = await documents.resolveWorkspace({ path });
@@ -122,12 +168,13 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
       </div> : <form onSubmit={create} className="space-y-5">
         <label className="block space-y-2 typography-ui-label">
           <span>{t('projects.create.name')}</span>
-          <Input autoFocus aria-label={t('projects.create.name')} value={name} onChange={event => setName(event.target.value)} disabled={busy || !!created.current}
+          <Input autoFocus aria-label={t('projects.create.name')} value={name} onChange={event => setName(event.target.value)} disabled={busy || registrationStarted}
             placeholder={t('settings.projects.page.field.projectNamePlaceholder')} />
         </label>
+        <ProjectSourceEditor value={sourceOwner} onChange={value => { setSourceOwner(value); setFolders([]); }} disabled={busy || registrationStarted} />
         <div className="space-y-2">
           <p className="typography-ui-label">{t('projects.folders.title')}</p>
-          <ProjectFoldersEditor folders={folders} initialPath={initialPath} disabled={busy || !!created.current} onChange={next => {
+          <ProjectFoldersEditor remote={sourceOwner.kind === 'managed_host'} folders={folders} initialPath={initialPath} disabled={busy || registrationStarted} onChange={next => {
             setFolders(next);
             if (!name.trim() && next[0]) setName(next[0].replace(/\\/g, '/').split('/').filter(Boolean).at(-1) ?? '');
           }} />
@@ -143,4 +190,3 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
     </DialogContent>
   </Dialog>;
 }
-import { projectExecutionPath } from '@/lib/nativeWorkspace';

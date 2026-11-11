@@ -53,6 +53,7 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | HarnessKnowl
   | { type: 'bot-appearance-library-changed' }
   | { type: 'bot-work-changed' }
   | { type: 'bot-presence'; botId: string; presence: BotPresence }
+  | { type: 'bot-presence-changed'; botId: string }
   | ({ type: 'computer-activity' } & ComputerActivityEntry)
   | ({ type: 'computer-automation-invalidated' } & ComputerAutomationInvalidation)
   | { type: 'computer-automation'; state: ComputerAutomationState };
@@ -221,6 +222,10 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
   if (envelope.type === 'varin:bot-presence') {
     const properties = getEventProperties(envelope.properties);
+    if (typeof properties?.botId === 'string' && properties.presence === undefined) {
+      for (const listener of listeners) listener({ type: 'bot-presence-changed', botId: properties.botId });
+      return;
+    }
     try {
       const presence = decodeBotPresence(properties?.presence);
       if (properties?.botId === presence.botId) for (const listener of listeners) listener({ type: 'bot-presence', botId: presence.botId, presence });

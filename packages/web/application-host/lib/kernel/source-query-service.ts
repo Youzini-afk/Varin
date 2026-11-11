@@ -49,6 +49,8 @@ export type SourceQueryService = ManagedSourceServiceHandler & {
   dispose(): Promise<void>;
 };
 
+const scopeThreadId=(scope:Pick<ManagedSourceLocalScope,'scope'>)=>scope.scope.kind==='external'?scope.scope.conversationId:scope.scope.threadId;
+
 export function createSourceQueryService(options: SourceQueryServiceOptions): SourceQueryService {
   type Services = { scope: ManagedSourceLocalScope; sources: SourceQueryOwner; resources: ThreadResourceScope; language?: LanguageToolOwner;
     packages: Map<string, Promise<ExtensionSourceCapture>>; controller: AbortController; pending: Set<Promise<unknown>>;
@@ -60,12 +62,13 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
   const keyOf = (scope: ManagedSourceLocalScope) => JSON.stringify([scope.authorityId, scope.resourceEpoch, scope.grant.grantId]);
   const queryOf = (scope: ManagedSourceLocalScope): SourceQueryAccess => ({ source: scope.source, physicalRoot: scope.physicalRoot,
     ...(scope.textEncoding ? { textEncoding: scope.textEncoding } : {}),
-    threadId: scope.scope.threadId, ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId, grantId: scope.grant.grantId } : {}) });
+    threadId: scopeThreadId(scope), ...(scope.scope.kind === 'run' ? { runId: scope.scope.runId, grantId: scope.grant.grantId } : {}) });
   const verifyIdentity = (scope: ManagedSourceLocalScope, identity: ThreadIdentity) => {
-    if (identity.runtime !== 'agent' || identity.threadId !== scope.scope.threadId
+    if (scope.scope.kind === 'external' || identity.runtime !== 'agent' || identity.threadId !== scopeThreadId(scope)
       || scope.scope.kind === 'source_read' && identity.branchId !== scope.scope.branchId) throw new Error('Resource identity differs from its original source authority');
   };
   const get = (scope: ManagedSourceLocalScope): Services => {
+    if (scope.scope.kind === 'external') throw new Error('External Harness scope does not own native resource services');
     const key = keyOf(scope);
     const prior = services.get(key);
     if (prior) {
@@ -79,7 +82,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     }
     const assert = (query: SourceQueryAccess) => {
       if (!isDeepStrictEqual(query.source, scope.source) || !isDeepStrictEqual(query.physicalRoot, scope.physicalRoot)
-        || query.threadId !== scope.scope.threadId || scope.scope.kind === 'run' && query.runId !== scope.scope.runId) throw new Error('Source query differs from its admitted resource authority');
+        || query.threadId !== scopeThreadId(scope) || scope.scope.kind === 'run' && query.runId !== scope.scope.runId) throw new Error('Source query differs from its admitted resource authority');
       return options.kernel.assertGrantForScope(scope.grant);
     };
     const sources = createSourceQueryOwner({ kernel: options.kernel, documents: options.documents,
@@ -171,13 +174,13 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     const captureIdentity = (operationId: string, ref: string) => {
       if (scope.scope.kind !== 'run') throw new Error('Attachment capture requires its original Run');
       return createHash('sha256').update(JSON.stringify([scope.principal.principalId, scope.coordinatorHostId, stableIdentity(scope.source),
-        scope.scope.threadId, scope.scope.runId, operationId, ref])).digest('hex');
+        scopeThreadId(scope), scope.scope.runId, operationId, ref])).digest('hex');
     };
     const verifyFileReceipt = async (operationId: string, attachment: unknown, sourceGrantId: unknown) => {
       if (scope.scope.kind !== 'run' || typeof sourceGrantId !== 'string') throw new Error('Original file has no Source provenance');
       const result = await options.kernel.sourceRequest<{ state?: string; grantId?: string; receipt?: { attachment?: unknown } }>('source.file.receipt', {
         principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId, source: scope.source,
-        threadId: scope.scope.threadId, runId: scope.scope.runId, operationId,
+        threadId: scopeThreadId(scope), runId: scope.scope.runId, operationId,
       }, active);
       if (result.state !== 'committed' || result.grantId !== sourceGrantId || !isDeepStrictEqual(result.receipt?.attachment, attachment))
         throw new Error('Original file receipt differs from its Source owner');
@@ -214,7 +217,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           // authority without looking up a mutable path again on retry.
           await validateReceiptAuthority();
           const saved = JSON.parse(previous.payloadJson) as { attachment: { ref: string; filename: string; mimeType: string; byteLength: number }; contentHash: string; operationId: string; path: string; captureId: string; expectedReadVersion?:string };
-          if (previous.recordType !== 'attachment.file' || previous.state === 'released' || previous.threadId !== scope.scope.threadId || previous.runId !== scope.scope.runId
+          if (previous.recordType !== 'attachment.file' || previous.state === 'released' || previous.threadId !== scopeThreadId(scope) || previous.runId !== scope.scope.runId
             || saved.attachment.ref !== operation.ref || saved.operationId !== operation.operationId || saved.path !== operation.path || saved.captureId !== captureId || saved.expectedReadVersion !== operation.expectedReadVersion
             || !previous.references.some(item => item.slot === 'source' && item.objectHash === saved.contentHash)) throw new Error('Original attachment capture identity changed');
           if (await client.getRecord(workspaceId, retainedId)) await releaseCapture();
@@ -222,7 +225,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           if (await client.getRecord(workspaceId, staleIntent)) {
             if (path.isAbsolute(operation.path)) {
               const key = JSON.stringify(['absolute', `managed:${captureId}`, operation.operationId, operation.ref]);
-              const stale = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${captureId}` }, key, operation.path, active);
+              const stale = await restoreCapturedAttachment(options.kernel, { id: scopeThreadId(scope), captureScope: `managed:${captureId}` }, key, operation.path, active);
               if (stale) await stale.release(true);
             }
             await client.releaseRecord(`attachment-intent-release:${captureId}`, workspaceId, staleIntent);
@@ -232,7 +235,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const intentId = `attachment.managed-capture-intent:${captureId}`;
         if (operation.kind === 'attachment_capture') {
           await client.putRecord({ operationId: `attachment-intent:${captureId}`, recordId: intentId, workspaceId,
-            recordType: 'attachment.managed-capture-intent', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+            recordType: 'attachment.managed-capture-intent', state: 'temporary', threadId: scopeThreadId(scope), runId: scope.scope.runId,
             payloadJson: JSON.stringify({ captureId, operationId: operation.operationId, ref: operation.ref, path: operation.path }), ownerIds: [], references: [] }, active);
         }
         const retained = scope.source.mode === 'fixed_branch' ? null : await client.getRecord(workspaceId, retainedId, active);
@@ -248,8 +251,8 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
             const captureScope = `managed:${captureId}`;
             const key = JSON.stringify(['absolute', captureScope, operation.operationId, operation.ref]);
             const captured = operation.kind === 'attachment_recover'
-              ? await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope }, key, operation.path, active)
-              : await options.captureAbsoluteAttachment?.({ threadId: scope.scope.threadId, operationId: operation.operationId, ref: operation.ref, selectedPath: operation.path, captureScope }, active);
+              ? await restoreCapturedAttachment(options.kernel, { id: scopeThreadId(scope), captureScope }, key, operation.path, active)
+              : await options.captureAbsoluteAttachment?.({ threadId: scopeThreadId(scope), operationId: operation.operationId, ref: operation.ref, selectedPath: operation.path, captureScope }, active);
             if (!captured) {
               if (operation.kind === 'attachment_recover') return null;
               throw new Error('The original Host cannot admit this absolute attachment path');
@@ -262,7 +265,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
                 : await client.putBlobStream(captured.chunks, { operationId: `attachment-absolute-blob:${randomUUID()}`, byteLength: captured.byteLength, expectedHash: captured.contentHash }, active);
               const attachment = { ref: operation.ref, filename: captured.filename, mimeType: captured.mimeType, byteLength: captured.byteLength };
               await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
-                recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+                recordType: 'attachment.file', state: 'temporary', threadId: scopeThreadId(scope), runId: scope.scope.runId,
                 payloadJson: JSON.stringify({ attachment, contentHash: object.hash, operationId: operation.operationId, path: operation.path, captureId, ...(operation.expectedReadVersion ? {expectedReadVersion:operation.expectedReadVersion}:{}) }),
                 ownerIds: [object.ownerId], references: [{ slot: 'source', objectHash: object.hash }] }, active);
               committed = true;
@@ -285,7 +288,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         } else {
           if (retained && retained.state !== 'released') {
             const saved = JSON.parse(retained.payloadJson) as { path: string; stateJson: string; operationId: string; executionWorkspaceId: string; canonicalRoot: string; readVersion?:string };
-            if (retained.recordType !== 'attachment.capture' || retained.threadId !== scope.scope.threadId || saved.path !== selectedPath
+            if (retained.recordType !== 'attachment.capture' || retained.threadId !== scopeThreadId(scope) || saved.path !== selectedPath
               || saved.operationId !== `attachment-capture:${captureId}` || saved.executionWorkspaceId !== scope.source.execution_workspace_id
               || scope.physicalRoot && saved.canonicalRoot !== scope.physicalRoot.canonicalRoot) throw new Error('Original retained attachment selection changed');
             state = JSON.parse(saved.stateJson) as import('./protocol.generated.js').KernelBranchState;
@@ -309,7 +312,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const name = path.posix.basename(sourcePath.replaceAll('\\', '/'));
         const attachment = { ref: operation.ref, filename: name, mimeType: attachmentMimeType(name), byteLength: state.byteLength };
         await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
-          recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+          recordType: 'attachment.file', state: 'temporary', threadId: scopeThreadId(scope), runId: scope.scope.runId,
           payloadJson: JSON.stringify({ attachment, contentHash: state.objectHash, operationId: operation.operationId, path: operation.path, captureId, ...(operation.expectedReadVersion ? {expectedReadVersion:operation.expectedReadVersion}:{}) }),
           ownerIds: [], references: [{ slot: 'source', objectHash: state.objectHash }] }, active);
         if (scope.source.mode !== 'fixed_branch') await releaseCapture();
@@ -321,7 +324,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const encoded = operation.ref.slice('attachment:operation_'.length), operationId = Buffer.from(encoded, 'base64url').toString('utf8');
         if (!operationId || Buffer.from(operationId).toString('base64url') !== encoded) throw new Error('Invalid original file receipt');
         const record = await options.kernel.scoped(scope.grant).getRecord(scope.source.workspace_id, operation.ref, active);
-        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scope.scope.threadId) throw new Error('Original file receipt is unavailable');
+        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scopeThreadId(scope)) throw new Error('Original file receipt is unavailable');
         const value = JSON.parse(record.payloadJson) as { attachment: { ref: string }; contentHash: string; operationId: string; sourceGrantId?: string };
         if (value.operationId !== operationId || value.attachment.ref !== operation.ref || !record.references.some(item => item.slot === 'source' && item.objectHash === value.contentHash)) throw new Error('Original file receipt is invalid');
         await verifyFileReceipt(operationId, value.attachment, value.sourceGrantId);
@@ -337,12 +340,12 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const intent = await client.getRecord(workspaceId, intentId, active);
         if (intent && intent.state !== 'released') {
           const saved = JSON.parse(intent.payloadJson) as { captureId?: string; operationId?: string; ref?: string; path?: string };
-          if (intent.recordType !== 'attachment.managed-capture-intent' || intent.threadId !== scope.scope.threadId || intent.runId !== scope.scope.runId
+          if (intent.recordType !== 'attachment.managed-capture-intent' || intent.threadId !== scopeThreadId(scope) || intent.runId !== scope.scope.runId
             || saved.captureId !== id || saved.operationId !== operation.operationId || saved.ref !== operation.ref || saved.path !== operation.path)
             throw new Error('Original attachment discard intent changed');
           if (path.isAbsolute(operation.path)) {
             const key = JSON.stringify(['absolute', `managed:${id}`, operation.operationId, operation.ref]);
-            const original = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${id}` }, key, operation.path, active);
+            const original = await restoreCapturedAttachment(options.kernel, { id: scopeThreadId(scope), captureScope: `managed:${id}` }, key, operation.path, active);
             if (original) await original.release(true);
           }
           await client.releaseRecord(`attachment-discard-capture:${id}`, workspaceId, `attachment.capture:${id}`);
@@ -350,7 +353,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const formal = await client.getRecord(workspaceId, operation.ref, active);
         if (formal && formal.state !== 'released') {
           const saved = JSON.parse(formal.payloadJson) as { captureId?: string; operationId?: string; path?: string };
-          if (formal.recordType !== 'attachment.file' || formal.threadId !== scope.scope.threadId || formal.runId !== scope.scope.runId
+          if (formal.recordType !== 'attachment.file' || formal.threadId !== scopeThreadId(scope) || formal.runId !== scope.scope.runId
             || saved.captureId !== id || saved.operationId !== operation.operationId || saved.path !== operation.path) throw new Error('Original attachment discard owner changed');
           await client.releaseRecord(`attachment-discard-file:${id}`, workspaceId, operation.ref);
         }
@@ -365,16 +368,16 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const client = options.kernel.scoped(scope.grant), workspaceId = scope.source.workspace_id;
         const authorities = await options.kernel.sourceRequest<Array<{ purpose: string; grantId: string; source: unknown }>>('source.authority.inspect_scope', {
           principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId,
-          threadId: scope.scope.threadId, runId: scope.scope.runId,
+          threadId: scopeThreadId(scope), runId: scope.scope.runId,
         }, active);
         const originalGrants = new Set(authorities.filter(value => value.purpose === 'source' && isDeepStrictEqual(value.source, scope.source)).map(value => value.grantId));
         for (const recordType of ['attachment.managed-capture-intent', 'attachment.file']) {
           let cursor: number | undefined;
           const records: Array<{ recordId: string; captureId: string; operationId: string; ref: string; path?: string }> = [];
           do {
-            const page = await client.listRecords({ workspaceId, recordType, threadId: scope.scope.threadId, ...(cursor === undefined ? {} : { cursor }) });
+            const page = await client.listRecords({ workspaceId, recordType, threadId: scopeThreadId(scope), ...(cursor === undefined ? {} : { cursor }) });
             for (const record of page.records) {
-              if (record.state === 'released' || record.threadId !== scope.scope.threadId || record.runId && record.runId !== scope.scope.runId) continue;
+              if (record.state === 'released' || record.threadId !== scopeThreadId(scope) || record.runId && record.runId !== scope.scope.runId) continue;
               const value = JSON.parse(record.payloadJson) as { captureId?: string; operationId?: string; ref?: string; path?: string; sourceGrantId?: string; attachment?: unknown };
               const ref = recordType === 'attachment.file' ? record.recordId : value.ref;
               if (!ref || !value.operationId) continue;
@@ -394,12 +397,12 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
             if (recordType === 'attachment.managed-capture-intent') {
               if (record.path && path.isAbsolute(record.path)) {
                 const key = JSON.stringify(['absolute', `managed:${record.captureId}`, record.operationId, record.ref]);
-                const original = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${record.captureId}` }, key, record.path, active);
+                const original = await restoreCapturedAttachment(options.kernel, { id: scopeThreadId(scope), captureScope: `managed:${record.captureId}` }, key, record.path, active);
                 if (original) await original.release(true);
               }
               await client.releaseRecord(`attachment-thread-delete-capture:${record.captureId}`, workspaceId, `attachment.capture:${record.captureId}`);
             }
-            const releaseId = createHash('sha256').update(JSON.stringify([workspaceId, scope.scope.threadId, record.recordId])).digest('hex');
+            const releaseId = createHash('sha256').update(JSON.stringify([workspaceId, scopeThreadId(scope), record.recordId])).digest('hex');
             await client.releaseRecord(`attachment-thread-delete:${releaseId}`, workspaceId, record.recordId);
           }
         }
@@ -410,10 +413,10 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         const client = options.kernel.scoped(scope.grant);
         const record = await client.getRecord(scope.source.workspace_id, operation.ref, active);
         if (!record) return;
-        if (record.recordType !== 'attachment.file' || record.threadId !== scope.scope.threadId || record.runId !== scope.scope.runId) throw new Error('Original attachment release is outside its Run');
+        if (record.recordType !== 'attachment.file' || record.threadId !== scopeThreadId(scope) || record.runId !== scope.scope.runId) throw new Error('Original attachment release is outside its Run');
         const value = JSON.parse(record.payloadJson) as { operationId?: string; captureId?: string };
         if (!value.operationId || value.captureId !== captureIdentity(value.operationId, operation.ref)) throw new Error('Original attachment release changed its owner');
-        const releaseId = createHash('sha256').update(JSON.stringify([scope.source.workspace_id, scope.scope.threadId, scope.scope.runId, operation.ref])).digest('hex');
+        const releaseId = createHash('sha256').update(JSON.stringify([scope.source.workspace_id, scopeThreadId(scope), scope.scope.runId, operation.ref])).digest('hex');
         await client.releaseRecord(`attachment-release:${releaseId}`, scope.source.workspace_id, operation.ref);
         return;
       }
@@ -422,7 +425,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
           || !Number.isSafeInteger(operation.offset) || operation.offset < 0 || !Number.isSafeInteger(operation.length) || operation.length < 0 || operation.length > 256 * 1024) throw new Error('Invalid original attachment read');
         const client = options.kernel.scoped(scope.grant);
         const record = await client.getRecord(scope.source.workspace_id, operation.ref, active);
-        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scope.scope.threadId) throw new Error('Original attachment is unavailable');
+        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scopeThreadId(scope)) throw new Error('Original attachment is unavailable');
         const value = JSON.parse(record.payloadJson) as { attachment: { ref: string }; contentHash: string; operationId?: string; captureId?: string; sourceGrantId?: string };
         const originalFile = operation.ref.startsWith('attachment:operation_') && typeof value.operationId === 'string'
           && operation.ref === `attachment:operation_${Buffer.from(value.operationId).toString('base64url')}`;
@@ -553,7 +556,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         if (scope.scope.kind !== 'run') throw new Error('Language queries require an actual coordinator Run');
         if (!owner.language) return { status: 'unavailable', items: [], omissions: { outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 }, message: 'This source Host has no configured language service' };
         return owner.language({ ...operation.query, source: scope.source, physicalRoot: scope.physicalRoot,
-          runId: scope.scope.runId, threadId: scope.scope.threadId, grantId: scope.grant.grantId }, active);
+          runId: scope.scope.runId, threadId: scopeThreadId(scope), grantId: scope.grant.grantId }, active);
       }
       case 'original_source': {
         if (operation.branchId !== scope.source.branch_id) throw new Error('Original source read changed its selected branch');

@@ -30,6 +30,7 @@ import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { followupPanelEn } from '@/lib/i18n/messages/followups';
 import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { ChatView } from '@/components/views/ChatView';
@@ -238,6 +239,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
+  useProjectsStore.setState({ projects: [], activeProjectId: null });
   useMessageQueueStore.setState({ followUpBehavior: 'queue', botFollowUpBehavior: 'steer' });
   useTimelineViewStore.setState({ views: {} });
   useWorkOverviewStore.setState({ bySession: {} });
@@ -427,7 +429,7 @@ it('sends a new conversation from its captured project workspace, independent of
   expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('');
 });
 
-it('keeps Bot conversation independent of workspace drafts and saved work-overview disclosure', async () => {
+it('keeps a Bot conversation’s explicit source across Shells without inheriting work-overview disclosure', async () => {
   const f = fixture();
   f.view.thread.bot_id = 'bot';
   const key = threadComposerKey(threadHostKey(), identity);
@@ -441,7 +443,7 @@ it('keeps Bot conversation independent of workspace drafts and saved work-overvi
   expect(container.querySelector('[data-harness-overview-panel], [data-harness-overview-peek]')).toBeNull();
   await submitForm(composerForm());
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'Help me arrange this' }));
-  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('source');
+  expect(f.submit.mock.calls[0]![0]).toHaveProperty('source', source);
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('agent');
   expect(f.api.sources.resolve).not.toHaveBeenCalled();
   expect(f.api.prepareSource).not.toHaveBeenCalled();
@@ -4636,4 +4638,69 @@ it.each([false, true])('materializes a copied queued image through the original 
   const sent = active ? vi.mocked(f.api.enqueue).mock.calls[0]?.[0] : f.submit.mock.calls[0]?.[0];
   expect(sent).toMatchObject({ ...identity, text, images: [{ mimeType: 'image/png', data: imageData, reference: 1 }], contentReferenceOccurrences: [{ kind: 'image', reference: 1, start: 8, end: text.length }] });
   expect(useThreadDraftStore.getState().drafts[key].markerObjects).toEqual([]);
+});
+
+
+it('hydrates the original empty conversation project once and does not reapply it over a later source choice', async () => {
+  const f = fixture();
+  f.view.creationDefaults = { projectId: 'original-project' };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/original/project', label: 'Original', addedAt: 1 }] });
+  const preferredModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' as const };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preferredModel} />));
+  const key = threadComposerKey(threadHostKey(), identity);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ identity, projectId: 'original-project', creationDefaultsApplied: true,
+    sourceSelection: { path: '/original/project', resourceOwner: { kind: 'local' } } });
+  await act(async () => useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/later/project', label: 'Renamed', addedAt: 1 }] }));
+  expect(useThreadDraftStore.getState().drafts[key]?.sourceSelection?.path).toBe('/original/project');
+  await act(async () => useThreadDraftStore.getState().patch(key, { projectId: undefined, workspacePath: undefined, sourceSelection: undefined, preparedSource: null, creationDefaultsApplied: true }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preferredModel} />));
+  expect(useThreadDraftStore.getState().drafts[key]?.sourceSelection).toBeUndefined();
+  expect(useThreadDraftStore.getState().drafts[key]?.projectId).toBeUndefined();
+});
+
+it('uses the already-created Bot conversation when submitting its frozen project draft', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'original-bot';
+  f.view.creationDefaults = { projectId: 'original-project' };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/original/project', label: 'Original', addedAt: 1 }] });
+  f.api.create = vi.fn(f.api.create);
+  const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'original-workspace', executionWorkspaceId: 'original-workspace', branchId: 'source', revision: 0, mode: 'materialized' as const, tools: ['file_read'] };
+  f.api.prepareSource = vi.fn(async () => ({ path: '/original/project', source }));
+  const release = bindThreadStore(f.api);
+  try {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} surface="bot" preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+    await edit('textarea[aria-label="Message thread"]', 'Use the original project');
+    await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
+    await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce());
+    expect(f.api.create).not.toHaveBeenCalled();
+    expect(f.submit.mock.calls[0]?.[0]).toMatchObject({ ...identity, text: 'Use the original project', source });
+    expect(f.submit.mock.calls[0]?.[0].agent).toBeUndefined();
+  } finally { release(); }
+});
+
+
+it('opens a created conversation with its retained remote binding after the project registration changes', async () => {
+  const f = fixture();
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'original-host', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' };
+  f.view.creationDefaults = { projectId: 'original-project', source: { resourceOwner, path: '/remote/original', workspaceId: 'original-workspace' } };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/local/replacement', label: 'Edited project', addedAt: 1 }] });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  const key = threadComposerKey(threadHostKey(), identity);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'original-project', identity, sourceSelection: { path: '/remote/original', resourceOwner } });
+  expect(useThreadDraftStore.getState().drafts[key]?.workspacePath).toBeUndefined();
+});
+
+it('lets an explicit chat-only choice override the creation project without preparing or inheriting it', async () => {
+  const f = fixture();
+  f.view.creationDefaults = { projectId: 'project', source: { resourceOwner: { kind: 'local' }, path: '/creation/project' } };
+  f.api.prepareSource = vi.fn(f.api.prepareSource);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  await openOverview('workspace');
+  await act(async () => button('Chat only').click());
+  await edit('[aria-label="Message thread"]', 'Discuss without project files');
+  await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
+  expect(f.submit).toHaveBeenCalledOnce();
+  expect(f.submit.mock.calls[0]![0].source).toBeNull();
+  expect(f.api.prepareSource).not.toHaveBeenCalled();
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.sourceSelection).toBeUndefined();
 });

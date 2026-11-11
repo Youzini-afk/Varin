@@ -5,12 +5,13 @@ import {
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
 import { randomUUID } from 'node:crypto';
-import { projectFolders, projectPathKey } from '@varin/application-client';
+import { parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
   path: string;
   additionalPaths?: string[];
+  source?: import('@varin/application-client').ProjectSourceBinding;
 }
 
 interface ManagedTunnelPreset {
@@ -25,6 +26,7 @@ interface ManagedTunnelTokenUpdate extends ManagedTunnelPreset {
 
 export interface SettingsRuntimeDependencies {
   SETTINGS_FILE_PATH: string;
+  resolveProjectSource?: (request: { resourceOwner: import('@varin/protocol').SourceResourceOwner; path: string }) => Promise<{ workspaceId: string; path: string }>;
   formatSettingsResponse(settings: VarinSettingsDocument): VarinSettingsDocument;
   fsPromises: NonNullable<SettingsFileStoreOptions['fsPromises']>;
   mergePersistedSettings(
@@ -83,7 +85,20 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         return null;
       }
       const existing = Array.isArray(previous) ? previous.find((entry) => entry?.id === project.id) as ProjectEntry | undefined : undefined;
-      const known = new Set(existing ? projectFolders(existing).map(projectPathKey) : []);
+      const source = parseProjectSourceBinding(project.source);
+      if (!source && existing?.source?.resourceOwner.kind === 'managed_host') throw new Error('A saved remote project requires an explicit source binding');
+      const sameOwner = existing && projectResourceOwnerKey(existing) === projectResourceOwnerKey(project);
+      const known = new Set(sameOwner ? projectFolders(existing).map(projectPathKey) : []);
+      if (source) {
+        const unchanged = sameOwner && existing?.source?.workspaceId === source.workspaceId;
+        for (const directory of projectFolders(project)) {
+          if (unchanged && known.has(projectPathKey(directory))) continue;
+          if (!deps.resolveProjectSource) throw new Error('Project source owner is unavailable');
+          const resolved = await deps.resolveProjectSource({ resourceOwner: source.resourceOwner, path: directory });
+          if (directory === project.path && resolved.workspaceId !== source.workspaceId) throw new Error('Project source registration changed; select the folder again');
+        }
+        return project;
+      }
       for (const directory of projectFolders(project)) {
         // Removing/moving an existing folder must not erase the project on an
         // unrelated metadata save. New selections must name actual folders.

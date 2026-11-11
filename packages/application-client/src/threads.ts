@@ -181,7 +181,8 @@ export interface ThreadSubmit extends ThreadIdentity, ContentReferenceInput {
   attachmentImageReferences?: Record<string, number>;
   model: ThreadModel;
   agent?: ThreadAgentChoice;
-  source?: ThreadSource;
+  /** Omitted inherits the original/default source; null explicitly selects chat only. */
+  source?: ThreadSource | null;
 }
 export interface ThreadHistoryPage {
   head: string | null;
@@ -441,6 +442,8 @@ export interface ThreadGoalsAPI {
   list(identity: ThreadIdentity): Promise<Goal[]>;
 }
 export interface ThreadSnapshot {
+  /** Admission-time default project, unaffected by later classification moves. */
+  creationDefaults?: import('./conversation-organization.js').ConversationCreationDefaults | null;
   recovery?: {
     /** The owner could not establish current recovery metadata. */
     unavailable?: string;
@@ -599,7 +602,7 @@ export interface ThreadsAPI {
   deleteBranch(input: ThreadBranchDelete): Promise<ThreadSummary>;
   /** Acknowledge only the event cursor actually presented; concurrent activity remains unread. */
   markRead(input: ThreadRead): Promise<ThreadSummary>;
-  create(key: string): Promise<ThreadIdentity>;
+  create(key: string, options?: { organization?: import('./conversation-organization.js').ConversationOrganizationPlacement }): Promise<ThreadIdentity>;
   sources: ThreadSourcesAPI;
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */

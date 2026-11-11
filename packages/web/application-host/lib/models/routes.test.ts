@@ -64,3 +64,20 @@ test('an unclassified discovery failure stays sanitized without inventing a conf
   expect(response.body.code).toBe('model-settings-unavailable');
   expect(response.text).not.toMatch(/private-token|configuration file/);
 });
+
+test('registered remote model defaults use their original coordinator settings owner, not a supplied local cwd or forged namespace', async () => {
+  const { models } = await fixture(async () => { throw new Error('No network needed for settings'); });
+  const app = express(); app.use(express.json());
+  const source = { resourceOwner: { kind: 'managed_host' as const, hostId: 'remote', connectionId: 'saved', endpointIdentity: 'endpoint' }, workspaceId: 'remote-root' };
+  registerModelRoutes(app, models, (_req, _res, next) => next(), async () => { throw new Error('No network'); }, undefined,
+    async () => [{ id: 'remote-a', path: '/same', source }, { id: 'remote-b', path: '/same', source }]);
+  const initial = await request(app).post('/api/models/settings/read').send({ projectId: 'remote-a', cwd: '/same' }).expect(200);
+  expect(initial.body.project).toEqual({}); expect(initial.body.projectTrusted).toBe(true);
+  await request(app).post('/api/models/settings/update').send({ projectId: 'remote-a', cwd: '/same', registeredProjectId: 'remote-b', scope: 'project',
+    expectedRevision: initial.body.projectRevision, set: { defaultProvider: 'original', defaultModel: 'selected' }, remove: [] }).expect(200);
+  const other = await request(app).post('/api/models/settings/read').send({ projectId: 'remote-b', cwd: '/same' }).expect(200);
+  expect(other.body.project).toEqual({});
+  const own = await request(app).post('/api/models/settings/read').send({ projectId: 'remote-a' }).expect(200);
+  expect(own.body.project).toEqual({ defaultProvider: 'original', defaultModel: 'selected' });
+  await request(app).post('/api/models/settings/read').send({ projectId: 'not-registered', cwd: '/same' }).expect(404);
+});

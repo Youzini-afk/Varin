@@ -65,3 +65,24 @@ it('normalizes legacy search on the first real owner save without changing its c
   expect(saved.global).toMatchObject({ harness: { web: { search: { connections: [{ id: 'configured-brave', provider: 'brave', endpoint: legacy.endpoint, credentialRef: legacy.credentialRef, enabled: true }], defaultConnectionId: 'configured-brave', fallbackConnectionIds: [] } } } });
   expect((await new AgentSettingsService(root, () => false).read()).document).toEqual(saved.global);
 });
+
+it('keeps registered remote project defaults independent of one another and of a same-path local project', async () => {
+  const { root } = await fixture();
+  const directory = join(root, 'same');
+  await mkdir(join(directory, '.varin'), { recursive: true });
+  await writeFile(join(directory, '.varin', 'settings.json'), JSON.stringify({ defaultProvider: 'local', defaultModel: 'local-model' }));
+  const settings = new AgentSettingsService(root, cwd => cwd === directory);
+  const remoteA = await settings.snapshot(directory, 'remote-a');
+  const remoteB = await settings.snapshot(directory, 'remote-b');
+  expect(remoteA.project).toEqual({}); expect(remoteB.project).toEqual({});
+  const saved = await settings.update({ registeredProjectId: 'remote-a', scope: 'project', expectedRevision: remoteA.projectRevision,
+    set: { defaultProvider: 'provider-a', defaultModel: 'model-a' }, remove: [] });
+  expect(saved.project).toEqual({ defaultProvider: 'provider-a', defaultModel: 'model-a' });
+  expect((await settings.snapshot(directory)).project).toEqual({ defaultProvider: 'local', defaultModel: 'local-model' });
+  expect((await settings.snapshot(directory, 'remote-b')).project).toEqual({});
+  await expect(settings.update({ registeredProjectId: 'remote-a', scope: 'project', expectedRevision: remoteA.projectRevision,
+    set: { defaultModel: 'stale' }, remove: [] })).rejects.toMatchObject({ code: 'config_conflict' });
+  const reopened = new AgentSettingsService(root, () => false);
+  expect((await reopened.snapshot(undefined, 'remote-a')).project).toEqual(saved.project);
+  expect((await reopened.snapshot(undefined, 'remote-b')).project).toEqual({});
+});

@@ -9,10 +9,13 @@ const join = (left: string, right: string) => [left, right].filter(Boolean).join
 
 /** Catalog's original handoffs retain every scope, including nested dispatches
  * and continuations. Navigation folders and names are never coordinate evidence. */
-export async function sourcePathMap(runtime: Pick<AgentRuntimeClient, 'launch' | 'childExecutionForRun'>, sender: { runId: string; source: LaunchSource },
-  receiver: { runId: string; source: LaunchSource }, signal: AbortSignal): Promise<SourcePathMap> {
+export async function sourcePathMap(runtime: Pick<AgentRuntimeClient, 'launch' | 'childExecutionForRun'>, sender: { runId: string; source: LaunchSource; frozenOrigin?:boolean },
+  receiver: { runId: string; source: LaunchSource; frozenOrigin?:boolean }, signal: AbortSignal): Promise<SourcePathMap> {
   const origin = async (selected: typeof sender) => {
     let { runId, source } = selected;
+    // A target Storage checkpoint may supply its frozen coordinate root directly;
+    // the Run is attribution only, not a claim that the external peer has a Run.
+    if(selected.frozenOrigin)return {source,runId:source.environment_run_id??runId,prefix:source.native_scope??''};
     let prefix = '';
     const seen = new Set<string>();
     for (;;) {

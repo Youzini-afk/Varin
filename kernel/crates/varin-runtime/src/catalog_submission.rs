@@ -255,6 +255,7 @@ impl SubmissionPreparation {
             let saved = original.get("launch").ok_or_else(|| RuntimeError::Invalid("retained input launch missing".into()))?;
             selected.source = serde_json::from_value(saved.get("source").cloned().ok_or_else(|| RuntimeError::Invalid("retained input source missing".into()))?)?;
             selected.tools = serde_json::from_value(saved.get("tools").cloned().ok_or_else(|| RuntimeError::Invalid("retained input tools missing".into()))?)?;
+            selected.tool_schema_generation = saved.get("tool_schema_generation").and_then(Value::as_u64).ok_or_else(|| RuntimeError::Invalid("retained source tool generation missing".into()))?;
         }
         self.existing_receipt(&candidate, inherit_source)
     }

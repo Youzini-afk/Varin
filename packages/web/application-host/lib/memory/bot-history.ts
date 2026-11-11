@@ -1,3 +1,4 @@
+import { currentRequestPrincipal } from '../kernel/request-principal.js';
 import type { MemorySourceSpan } from '@varin/protocol';
 import { threadMemorySourceText, type ThreadIdentity } from '@varin/application-client';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
@@ -31,7 +32,7 @@ export function createBotHistory(runtime: AgentRuntimeClient) {
     const read = async (botId: string, span: Extract<MemorySourceSpan, {
         kind: 'history-item';
     }>, signal?: AbortSignal): Promise<HistoryMemoryMaterial> => {
-        const item = await runtime.botHistory({ botId, threadId: span.threadId, branchId: span.branchId, headId: span.headId, itemId: span.id }, signal);
+        const item = await runtime.botHistory({ botId, ...(currentRequestPrincipal() === undefined ? {} : { principalId: currentRequestPrincipal() ?? null }), threadId: span.threadId, branchId: span.branchId, headId: span.headId, itemId: span.id }, signal);
         const text = threadMemorySourceText(item);
         const body=item.content as { content?: { kind?: string; output?: { data?: { kind?: string; senderThreadId?: string; source?: { itemId?: string; sourceThreadId?: string; sourceBranchId?: string; matterId?: string } } } } } | null;
         const data=body?.content?.output?.data;

@@ -1,3 +1,5 @@
+import { ConversationOrganizationTree } from '@/components/conversation/ConversationOrganizationTree';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ConversationSidebar } from '../conversation/ConversationSidebar';
 import React from 'react';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -42,7 +44,7 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
   const hostKey = useThreadStore(state => state.hostKey);
   React.useEffect(() => { setRename(null); setDeleting(null); setDeletingExternal(null); setQuery(''); }, [hostKey]);
   const act = async (work: () => Promise<unknown>) => { setPending(true); try { await work(); } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); } finally { setPending(false); } };
-  const visible = React.useMemo(() => threads.filter(thread => !thread.bot_id && thread.deleted_at_ms === null && thread.archived === archived), [threads, archived]);
+  const visible = React.useMemo(() => threads.filter(thread => thread.deleted_at_ms === null && thread.archived === archived), [threads, archived]);
   const navigate = async (threadId?: string, branchId?: string, directory?: string) => {
     if (threadId) await openThreadFromNavigation({ threadId, branchId }); else await startThreadFromNavigation({ directory });
     if (mobileVariant) useUIStore.getState().setSessionSwitcherOpen(false);
@@ -112,5 +114,9 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
 }
 
 export function ThreadSidebar(props: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
+  const { t } = useI18n();
+  const apis = useRuntimeAPIs();
+  const [query, setQuery] = React.useState('');
+  if (props.archived && apis.conversationOrganization) return <div className="flex h-full min-h-0 flex-col"><div className="p-2"><Input aria-label={t('organization.searchArchive')} placeholder={t('organization.searchArchive')} value={query} onChange={e => setQuery(e.target.value)} /></div><ConversationOrganizationTree archived query={query} viewKey="archive" onNavigate={props.onNavigate} /></div>;
   return props.archived ? <ArchiveThreadSidebar {...props} /> : <ConversationSidebar isVisible={props.isVisible} mobileVariant={props.mobileVariant} onRequestClose={props.onNavigate} />;
 }

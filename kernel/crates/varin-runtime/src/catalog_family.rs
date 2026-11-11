@@ -751,7 +751,10 @@ impl FamilyRead {
     pub fn list(self, include_self: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         self.list_page(include_self, FamilyListQuery { scope:Some("all".into()),..Default::default() },cancel)
     }
-    pub fn list_page(self, include_self: bool, query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+    pub fn list_page(self, include_self: bool, mut query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+        // Existing family consumers use this view for task/resource authority and
+        // active-work summaries. Archiving changes browsing, never those rights.
+        query.archived.get_or_insert_with(||"include".into());
         let db = self.open(cancel)?;
         self.list_page_in(&db,include_self,query,true,cancel)
     }

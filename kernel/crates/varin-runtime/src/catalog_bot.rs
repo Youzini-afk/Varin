@@ -271,26 +271,33 @@ impl Catalog {
     }
 
     pub fn inspect_bot_scope_for(&self, bot_id: &str, history_only: bool) -> Result<Value> {
+        self.inspect_bot_scope_scoped(bot_id, history_only, None)
+    }
+
+    pub fn inspect_bot_scope_scoped(&self, bot_id: &str, history_only: bool, principal: Option<Option<String>>) -> Result<Value> {
         let mut query = self.db.prepare("WITH RECURSIVE scope(thread_id) AS (
             SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1
             UNION SELECT c.child_thread_id FROM child_tasks c JOIN scope s ON json_extract(c.body,'$.parent_thread_id')=s.thread_id
-        ) SELECT thread_id FROM scope s WHERE NOT ?2 OR (
+        ) SELECT thread_id FROM scope s JOIN threads t ON t.id=s.thread_id WHERE (NOT ?3 OR t.principal_id IS ?4) AND (NOT ?2 OR (
             NOT EXISTS(SELECT 1 FROM context_jobs c JOIN runs r ON r.id=c.run_id JOIN branches helper ON helper.id=r.branch_id WHERE helper.thread_id=s.thread_id)
             AND NOT EXISTS(SELECT 1 FROM runs r JOIN branches helper ON helper.id=r.branch_id JOIN operations o ON o.run_id=r.id WHERE helper.thread_id=s.thread_id AND json_extract(o.body,'$.intent.kind')='memory_work_v1')
-        ) ORDER BY thread_id")?;
+            AND NOT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=s.thread_id AND json_extract(o.body,'$.executor')='code_retrieval')
+        )) ORDER BY thread_id")?;
         let ids = query
-            .query_map(params![bot_id, history_only], |r| r.get::<_, String>(0))?
+            .query_map(params![bot_id, history_only || principal.is_some(), principal.is_some(), principal.as_ref().and_then(|p|p.as_deref())], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let threads = ids
             .iter()
             .map(|id| self.inspect_thread(id))
             .collect::<Result<Vec<_>>>()?;
         let run_ids = if history_only { Vec::new() } else { self.bot_scope_run_ids(bot_id)? };
-        let runs = run_ids.iter().map(|id| {
+        let runs = run_ids.iter().filter_map(|id| {
+            match self.run(id) { Ok(run) if principal.is_some() && !ids.contains(&run.thread_id) => None, _ => Some(id) }
+        }).map(|id| {
             let run = self.run(id)?;
             Ok(json!({"threadId":run.thread_id,"branchId":run.branch_id,"runId":run.id,"state":run.state,"cancelRequested":run.cancel_requested}))
         }).collect::<Result<Vec<_>>>()?;
-        Ok(json!({"botId":bot_id,"sessions":sessions(&self.db, bot_id)?,"threads":threads,"runs":runs}))
+        Ok(json!({"botId":bot_id,"sessions":sessions(&self.db, bot_id)?.into_iter().filter(|id| principal.is_none() || ids.contains(id)).collect::<Vec<_>>(),"threads":threads,"runs":runs}))
     }
 
     /// Delete only this Bot's original runtime records after its actual executors drained.
@@ -509,6 +516,24 @@ impl Catalog {
     /// another candidate. The exclusive Catalog owner also serializes other processes.
     pub fn resolve_bot_entry(&mut self, thread_id: &str, branch_id: &str, bot_id: &str) -> Result<forks::BranchForkReceipt> {
         self.resolve_bot_entry_with_principal(thread_id,branch_id,bot_id,None)
+    }
+    /// An HTTP principal is exact, including public null. A shared Bot's profile
+    /// entry may name another principal's session; never claim that identity.
+    pub fn resolve_bot_entry_scoped(&mut self, thread_id: &str, branch_id: &str, bot_id: &str, principal: Option<String>) -> Result<forks::BranchForkReceipt> {
+        if let Some(p)=&principal { principals::validate(p)?; }
+        let original: Option<(Option<String>,Option<i64>,bool)> = self.db.query_row("SELECT principal_id,deleted_at_ms,archived FROM threads WHERE id=?1", [thread_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        if let Some((owner,deleted,archived))=&original { if owner==&principal && deleted.is_none() && !archived && !threads::branch_deleted(&self.db,branch_id)? {
+            identity::validate_public(&self.db,thread_id,branch_id,Some(bot_id),principal.as_deref())?;
+            return Ok(forks::BranchForkReceipt{thread_id:thread_id.into(),branch_id:branch_id.into()});
+        } }
+        let active: Option<(String,String)> = self.db.query_row("SELECT t.id,c.initial_branch_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id JOIN thread_creations c ON c.thread_id=t.id WHERE b.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=c.initial_branch_id AND e.kind='branch.deleted') ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", params![bot_id,principal], |r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((thread_id,branch_id))=active { identity::validate_public(&self.db,&thread_id,&branch_id,Some(bot_id),principal.as_deref())?; return Ok(forks::BranchForkReceipt{thread_id,branch_id}); }
+        let (thread_id,branch_id)=if original.is_none() {(thread_id.to_owned(),branch_id.to_owned())} else {let key=id();(format!("thread:bot:{bot_id}:{key}"),format!("branch:bot:{bot_id}:{key}"))};
+        let tx=self.db.transaction()?;
+        identity::create_public(&tx,&thread_id,&branch_id,Some(bot_id),principal.as_deref(),self.epoch)?;
+        organization::admit(&tx,principal.as_deref(),&organization::ConversationRef::Native{id:thread_id.clone()},None,None,&format!("create:{thread_id}"))?;
+        tx.commit()?;
+        Ok(forks::BranchForkReceipt{thread_id,branch_id})
     }
     pub fn resolve_bot_entry_with_principal(&mut self,thread_id:&str,branch_id:&str,bot_id:&str,principal:Option<&str>)->Result<forks::BranchForkReceipt> {
         let principal=creation_principal(&self.db,thread_id,principal)?;

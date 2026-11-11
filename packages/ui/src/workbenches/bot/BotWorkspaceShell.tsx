@@ -1,3 +1,5 @@
+import { ThreadDraftConversation } from '@/components/thread/ThreadDraftConversation';
+import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import React from 'react';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import type { BotMatter } from '@varin/protocol';
@@ -140,6 +142,16 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { isMobile } = useDeviceInfo();
   const { threads, bots: botsAPI } = useRuntimeAPIs();
   const navigation = useBotNavigation();
+  const selectedDraftKey = useThreadStore(state => state.selectedDraftKey);
+  const selectedNativeIdentity = useThreadStore(state => state.selectedIdentity);
+  const selectedDraft = useThreadDraftStore(state => selectedDraftKey ? state.drafts[selectedDraftKey] : undefined);
+  const [dismissedDraftKey, setDismissedDraftKey] = React.useState<string | null>(null);
+  const [draftTransfer, setDraftTransfer] = React.useState<{ key: string; botId: string } | null>(null);
+  const transferredDraft = useThreadDraftStore(state => draftTransfer ? state.drafts[draftTransfer.key] : undefined);
+  const [messageHandoff] = React.useState(() => new MessageHandoff());
+  React.useLayoutEffect(() => () => messageHandoff.dispose(), [messageHandoff]);
+  const dismissDraft = React.useCallback(() => { setDismissedDraftKey(useThreadStore.getState().selectedDraftKey); setDraftTransfer(null); }, []);
+
   const catalog = useThreadStore(state => state.threads);
   const offline = useThreadStore(state => state.catalogError !== null);
   const appliedNavigation = React.useRef<string | null>(null);
@@ -149,6 +161,19 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [showArchived, setShowArchived] = React.useState(false);
   const [details, setDetails] = React.useState<{ id: string; name: string; tab: 'profile' | 'memory' } | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!committed || !selectedDraftKey || selectedDraftKey === dismissedDraftKey || !selectedDraft?.botId) return;
+    setSelectedId(selectedDraft.botId);
+    setDraftTransfer({ key: selectedDraftKey, botId: selectedDraft.botId });
+  }, [committed, selectedDraftKey, selectedDraft?.botId, dismissedDraftKey]);
+  const activeDraftKey = selectedDraftKey && selectedDraftKey !== dismissedDraftKey && selectedDraft?.botId === selectedId ? selectedDraftKey : null;
+  const materializedDraft = !selectedDraftKey && draftTransfer?.botId === selectedId && transferredDraft?.identity && transferredDraft.identity.threadId === selectedNativeIdentity?.threadId ? transferredDraft.identity : null;
+  React.useEffect(() => {
+    if (!committed || !materializedDraft || !draftTransfer) return;
+    if (!sameBotEntry(navigation.entry, materializedDraft) || navigation.botId !== draftTransfer.botId) void openBotConversation(draftTransfer.botId, materializedDraft);
+    if (catalog.some(thread => thread.thread_id === materializedDraft.threadId)) setDraftTransfer(null);
+  }, [committed, materializedDraft, draftTransfer, navigation.entry, navigation.botId, catalog]);
+
   const [workResult, setWorkResult] = React.useState<{ botId: string; items: BotWorkItem[] } | null>(null);
   const [sessionResult, setSessionResult] = React.useState<{ botId: string; items: BotSession[] } | { botId: string; error: string } | null>(null);
   const [matters, setMatters] = React.useState<{ botId: string; items: BotMatter[] } | null>(null);
@@ -300,7 +325,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setSelectedId(navigation.botId);
   }, [navigation.botId, navigation.entry, navigation.archived, bots]);
 
-  const selectedEntry = navigation.botId === selectedId ? navigation.entry : null;
+  const selectedEntry = materializedDraft ?? (navigation.botId === selectedId ? navigation.entry : null);
   const sessions = React.useMemo<BotSessionView[] | null>(() => {
     if (!selected) return null;
     const known = sessionItems ?? (sessionsError ? [] : null);
@@ -322,7 +347,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const sessionsWithWork = React.useMemo(() => sessions && selected ? sessionViews(sessions.map(view => ({ identity: view.identity, thread: view.thread, primary: view.primary })), catalog, work) : sessions, [sessions, selected, catalog, work]);
   const currentSession = sessionsWithWork?.find(session => session.identity.threadId === selectedEntry?.threadId) ?? null;
   const conversationArchived = currentSession?.thread.archived ?? catalog.find(thread => thread.thread_id === selectedEntry?.threadId)?.archived ?? false;
-  const ownsConversation = Boolean(selectedEntry && selected && (currentSession
+  const ownsConversation = Boolean(selectedEntry && selected && (materializedDraft || currentSession
     || (entryResolution?.botId === selected.id && sameBotEntry(entryResolution.entry, selectedEntry))
     || (!sessionItems && selectedEntry.threadId === selected.entry.threadId)
     || catalog.some(thread => thread.thread_id === selectedEntry.threadId && thread.bot_id === selected.id && !thread.parent_thread_id && thread.branches.some(branch => branch.branch_id === selectedEntry.branchId))));
@@ -342,7 +367,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   }, [committed, selected, profileModelKey, readOnly, conversationArchived, sessionEntry, entryResolution]);
 
   // "Listening" is the user typing into this conversation's composer.
-  const draftKey = selectedEntry ? threadComposerKey(threadHostKey(), selectedEntry) : null;
+  const draftKey = activeDraftKey ?? (selectedEntry ? threadComposerKey(threadHostKey(), selectedEntry) : null);
   const draftText = useThreadDraftStore(state => draftKey ? state.drafts[draftKey]?.text ?? '' : '');
   const lastDraft = React.useRef(draftText);
   React.useEffect(() => {
@@ -424,6 +449,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const openSession = React.useCallback((identity: ThreadIdentity) => {
     if (!selected) return;
+    dismissDraft();
     opening.current?.abort();
     setBusy(false);
     useUIStore.getState().setSessionSwitcherOpen(false);
@@ -432,7 +458,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     if (floating) setNarrowPanelOpen(false);
     if (floatingSidebar) useUIStore.getState().setSidebarOpen(false);
     void openBotConversation(selected.id, identity).catch((cause: unknown) => setError(message(cause)));
-  }, [selected, sessionsWithWork, selectedEntry, floating, floatingSidebar]);
+  }, [selected, sessionsWithWork, selectedEntry, floating, floatingSidebar, dismissDraft]);
 
   const openWork = React.useCallback((identity: ThreadIdentity, origin?: BotReturnPoint['focus']) => {
     if (!selected) return;
@@ -611,6 +637,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const newSession = React.useCallback(async () => {
     if (!selected) return;
+    dismissDraft();
     const host = getRuntimeEndpointGeneration();
     const bot = selected;
     setActionBusy(`session:${bot.id}`);
@@ -628,7 +655,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     } finally {
       if (alive.current) setActionBusy(null);
     }
-  }, [selected]);
+  }, [selected, dismissDraft]);
 
   const archiveMatter = React.useCallback((matter: BotMatter) => {
     if (!selected || !botsAPI) return;
@@ -641,6 +668,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   }, [selected, botsAPI]);
 
   const selectBot = (botId: string) => {
+    dismissDraft();
     useUIStore.getState().setSessionSwitcherOpen(false);
     setProfileOpen(false);
     // Keep the current conversation/page until the requested Bot entry is ready.
@@ -683,15 +711,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const isSidebarOpen = useUIStore(state => state.isSidebarOpen);
   const sidebarAttention = isSidebarOpen ? null : otherSessions.some(session => session.waiting) ? 'warn' : otherSessions.some(session => session.unread) ? 'info' : null;
   const branchIndex = currentSession ? currentSession.branches.findIndex(branch => branch.branchId === selectedEntry?.branchId) : -1;
-  const navigationTitle = currentSession ? sessionTitleOf(currentSession) : selected?.name ?? 'Varin';
-  const navigationSubtitle = currentSession && selected
+  const navigationTitle = activeDraftKey ? t('bot.session.new') : currentSession ? sessionTitleOf(currentSession) : selected?.name ?? 'Varin';
+  const navigationSubtitle = activeDraftKey ? selected?.name : currentSession && selected
     ? branchIndex >= 0 ? t('bot.session.branchOf', { bot: selected.name, session: sessionTitleOf(currentSession) }) : selected.name
     : undefined;
 
   const togglePanel = () => { if (floating) setNarrowPanelOpen(open => !open); else setPanelOpen(!panelOpen); };
   const panelLabel = t(panelVisible ? 'bot.panel.close' : 'bot.panel.open');
   const panelControl = isMobile ? undefined : <>
-    {selectedEntry && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
+    {selectedEntry && !activeDraftKey && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('chat.tree.title')} aria-expanded={Boolean(treeTab)}
       className="workbench-icon-button app-region-no-drag flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
       onClick={() => treeTab ? closeConversationPanel() : openConversationTree('bot')}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('chat.tree.title')}</TooltipContent></Tooltip>}
     <Tooltip>
@@ -705,7 +733,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     <TooltipContent side="bottom">{panelLabel}</TooltipContent>
   </Tooltip></>;
 
-  const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={ownsConversation ? selectedEntry : null}
+  const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={!activeDraftKey && ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
     onSelectBot={selectBot} onSelectSession={openSession} onNewSession={() => { void newSession(); }}
     onSessionAction={(session, identity, action) => { void sessionAction(session, identity, action); }}
@@ -720,9 +748,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('common.retry')}</Button>
     </div> : null}
     {sessionsError ? <p role="alert" className="border-b border-border px-4 py-2 typography-meta text-destructive">{sessionsError}</p> : null}
-    {ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads
+    {activeDraftKey && threads && active ? <div className="min-h-0 flex-1"><ThreadDraftConversation key={activeDraftKey} api={threads} draftKey={activeDraftKey} handoff={messageHandoff} /></div> : ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads
       ? <ChildNavigationContext.Provider value={childNavigation}><MemoryNavigationContext.Provider value={memoryNavigation}>
-        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork} onActivity={stage.onActivity}
+        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} messageHandoff={messageHandoff} onWorkChanged={refreshWork} onActivity={stage.onActivity}
           inheritWorkbenchModel={!selected?.model}
           preferredModel={selected && entryResolution?.botId === selected.id && entryResolution.profileModelKey === profileModelKey ? entryResolution.model : null} readOnly={readOnly || conversationArchived}
           emptyHero={selected ? { visual: <BotFigure bot={selected} state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}

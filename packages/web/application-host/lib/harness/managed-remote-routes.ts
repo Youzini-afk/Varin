@@ -149,8 +149,8 @@ export function registerManagedRemoteRoutes(
     registerDocumentRoutes(app, { documents, base: `${base}/documents` });
   }
 
-  const sourceMethods = ['workspace', 'attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
-  const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
+  const sourceMethods = ['externalChildSource', 'externalProjectSource', 'externalCapture','externalSettings','externalPrepare', 'externalBinding', 'externalSpawn', 'externalControl', 'workspace', 'attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['externalControl', 'scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
       const operation = value(value(request.body).operation);
@@ -179,7 +179,7 @@ export function registerManagedRemoteRoutes(
       // Cancellation and retirement have their own original-owner receipts.
       const sourceOperation = value(body.operation);
       const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
-      const result = !mcpObserver && (method === 'workspace' && !['open', 'locations', 'list', 'bytes', 'readlink'].includes(String(value(body.command).kind)) || method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
+      const result = !mcpObserver && (method === 'workspace' && !['open', 'locations', 'list', 'bytes', 'readlink'].includes(String(value(body.command).kind)) || method === 'recovery' || method === 'externalCapture' || method === 'externalChildSource' || method === 'externalProjectSource' || method === 'externalControl' || method === 'externalSpawn' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');

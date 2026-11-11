@@ -20,7 +20,7 @@ export * from "./language-support-errors.js";
 export * from "./run-errors.js";
 export * from "./search-errors.js";
 export * from "./transport/index.js";
-export { projectFolders, projectPathKey, projectContainsPath, parseVersionedProjectWorkspace } from './project-folders.js';
+export { projectFolders, projectPathKey, projectContainsPath, parseProjectSourceBinding, projectResourceOwnerKey, parseVersionedProjectWorkspace } from './project-folders.js';
 export type { ProjectFolders } from './project-folders.js';
 export * from "./threads.js";
 export { defaultConversationModel } from './default-conversation-model.js';
@@ -68,3 +68,6 @@ export * from "./plugin-install-intent.js";
 export * from './bot-appearance.js';
 
 export * from "./documents-edits.js";
+
+export * from './conversation-organization.js';
+export * from './conversation-organization-http.js';

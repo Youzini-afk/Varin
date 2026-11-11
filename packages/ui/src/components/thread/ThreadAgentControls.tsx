@@ -14,7 +14,8 @@ const workFocusIcons: Record<WorkFocusId, IconName> = {
 };
 
 /** Agent identifies the execution backend. Varin is the currently available backend. */
-export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusChange, onHarnessChange }: {
+export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusChange, onHarnessChange, harnessSelector }: {
+  harnessSelector?: Pick<React.ComponentProps<typeof HarnessSelector>, 'settings' | 'loading' | 'error' | 'onRetry' | 'onOpenChange' | 'sourceRemote'>;
   workFocus: WorkFocusId; disabled: boolean; pending?: boolean;
   onWorkFocusChange(workFocus: WorkFocusId): void;
   onHarnessChange?(id: string | null): void;
@@ -22,7 +23,7 @@ export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusC
   const { t } = useI18n();
   const buttonClass = 'flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40';
   return <>
-    <HarnessSelector disabled={disabled} onChange={onHarnessChange} />
+    <HarnessSelector {...harnessSelector} disabled={disabled} onChange={onHarnessChange} />
     <DropdownMenu><DropdownMenuTrigger asChild>
       <button type="button" disabled={disabled} className={buttonClass} aria-label={`${t('workFocus.label')}: ${t(`workFocus.${workFocus}`)}`} title={pending ? t('workFocus.nextTurn') : t(`workFocus.${workFocus}Description`)}>
         <Icon name={workFocusIcons[workFocus]} className="size-3.5 shrink-0" /><span className="whitespace-nowrap">{t(`workFocus.${workFocus}`)}</span><Icon name="arrow-down-s" className="size-3 shrink-0 opacity-60" />

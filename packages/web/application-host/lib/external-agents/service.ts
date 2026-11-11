@@ -1,3 +1,4 @@
+import { closeManagedExternalTransport, openManagedExternalTransport, type ManagedExternalOwner } from './managed-transport.js';
 import { prepareQuoteSelections } from '../kernel/thread-quotes.js';
 import { parseAttachmentImageReferences } from '../kernel/thread-images.js';
 import { randomUUID, createHash } from 'node:crypto';
@@ -47,6 +48,8 @@ const defaults: ExternalAgentConfiguration[] = [
 ];
 type Spawn = ReturnType<typeof createKernelProcessService>['spawn'];
 interface Live {
+  capture?: (key:string,path:string,signal?:AbortSignal)=>Promise<import('./attachments.js').ExternalCapturedFile>;
+  attachments?: ExternalAttachmentOwner;
   generation: string;
   configuration: ExternalAgentConfiguration;
   agentVersion?: string;
@@ -70,7 +73,7 @@ interface Live {
 }
 const ended = (turn: ExternalTurn) =>
   ['completed', 'failed', 'cancelled', 'interrupted'].includes(turn.status);
-const launchKey = (launch: Pick<ExternalAgentConfiguration, 'command' | 'args'>) =>
+const launchKey = (launch: (Pick<ExternalAgentConfiguration, 'command' | 'args'> & {configurationIdentity?:string})) =>
   JSON.stringify([launch.command, launch.args]);
 
 export class ExternalAgentsService {
@@ -110,6 +113,7 @@ export class ExternalAgentsService {
     owner.bindExternalPathCapture?.(async (identity, key, selectedPath, signal) => {
       const { conversation } = await this.read(identity.id, undefined, signal);
       if (this.retiring.has(identity.id)) throw new ExternalAgentError('conversation_busy', 'The original conversation is being deleted');
+      if(conversation.executionSource?.resource_owner.kind==='managed_host'){const live=await this.connection(conversation.id);if(!live.capture)throw new Error('Original target capture owner is unavailable');return live.capture(key,selectedPath,signal);}
       const retained = await restoreExternalCapture(this.deps.kernel, conversation, key, selectedPath, signal);
       if (retained) return retained;
       const source = await this.executionSource(conversation, signal ?? new AbortController().signal);
@@ -135,6 +139,7 @@ export class ExternalAgentsService {
   }
   constructor(
     private readonly deps: {
+      managed?: () => ManagedExternalOwner;
       kernel: KernelClient;
       spawn: Spawn;
       spawnAdmitted?: ReturnType<typeof createKernelProcessService>['spawnAdmitted'];
@@ -182,6 +187,12 @@ export class ExternalAgentsService {
   }
   async children(activeOnly = false) {
     return this.command<ExternalChild[]>({ action: 'child_list', activeOnly });
+  }
+  /** Original parent Run owns a delegate even before its external session exists. */
+  async childPrincipal(child: ExternalChild, signal?: AbortSignal): Promise<string | null> {
+    const run = await this.deps.kernel.agentRuntimeRequest<{ principal_id: string | null }, 'runtime.run.inspect'>(
+      'runtime.run.inspect', { runId: child.parent_run_id }, signal);
+    return run.principal_id;
   }
   async childPresentation(operationId: string, signal?: AbortSignal) {
     return this.command({ action: 'child_presentation', operationId }, signal);
@@ -233,7 +244,7 @@ export class ExternalAgentsService {
     const id = child.conversation_id;
     if (child.message_kind === 'inform' && !child.turn_id && !child.cancel_requested) return;
     if (child.report) {
-      if (!child.resources_released && child.handoff) {
+      if (!child.resources_released && (child.handoff || child.project_source)) {
         await this.sources!.release(child, signal);
         if (!child.turn_id) await this.sources!.remove(child, true);
       }
@@ -252,7 +263,7 @@ export class ExternalAgentsService {
       // The protocol ended this turn. The external conversation still owns its connection,
       // directory and retained baseline (including any legitimate background commands).
       // Release only the original preparation pin, not the conversation's working copy.
-      if (child.handoff && !child.resources_released) await this.sources!.release(child, signal);
+      if ((child.handoff || child.project_source) && !child.resources_released) await this.sources!.release(child, signal);
       await this.command({ action: 'child_finish', operationId: child.operation_id, released: true });
       this.notify(id);
       return;
@@ -261,7 +272,7 @@ export class ExternalAgentsService {
       if (child.cancel_requested) throw new Error('External delegation cancelled before input delivery');
       let source = record(child.source);
       if (!text(source.cwd)) {
-        source = child.handoff
+        source = (child.handoff || child.project_source)
           ? await this.sources!.prepare(child, signal)
           : await (async () => {
               const cwd = path.join(
@@ -278,6 +289,32 @@ export class ExternalAgentsService {
                 kind: 'private',
               };
             })();
+        // Retain this original preparation result for failure cleanup as well.
+        child = {...child, source};
+        // Resolve the actual target configuration once, at the same original
+        // preparation boundary as its source. Never reinterpret this on replay.
+        if (!source.executionSource && source.projectSource) {
+          const project = record(source.projectSource);
+          source = {...source, executionSource: {resource_owner:project.resourceOwner,mode:project.mode,
+            workspace_id:project.workspaceId,execution_workspace_id:project.executionWorkspaceId,
+            branch_id:project.branchId??null,revision:project.revision??null,live_root:project.liveRoot??null,
+            ...(project.nativeScope?{native_scope:project.nativeScope}:{})}};
+        }
+        const executionSource = record(source.executionSource);
+        const targetOwner = record(executionSource.resource_owner);
+        if (targetOwner.kind === 'managed_host') {
+          if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+          const owner = this.deps.managed();
+          const client = await owner.source(targetOwner as unknown as Extract<import('@varin/protocol').SourceResourceOwner,{kind:'managed_host'}>, signal);
+          const launch = await client.externalBinding({coordinatorHostId: owner.coordinatorHostId,
+            source: executionSource as unknown as import('../kernel/protocol.generated.js').LaunchSource,
+            configurationId: child.binding.configuration_id, harness: child.binding.harness as ExternalAgentConfiguration['harness']}, signal);
+          if (launch.configuration.id !== child.binding.configuration_id || launch.configuration.harness !== child.binding.harness || !launch.configuration.enabled)
+            throw new Error('Original target external Harness configuration changed');
+          source = {...source, executionBinding: {resourceOwner:targetOwner,configurationId:child.binding.configuration_id,
+            harness:child.binding.harness,configurationIdentity:launch.configurationIdentity,
+            launch:{command:launch.configuration.command,args:[...launch.configuration.args]}}};
+        }
         child = await this.command<ExternalChild>({
           action: 'child_source',
           operationId: child.operation_id,
@@ -294,6 +331,9 @@ export class ExternalAgentsService {
         title: child.name,
         cwd: source.cwd,
         workspaceId: source.workspaceId,
+        ...(record(source).executionSource ? {executionSource:record(source).executionSource} : record(source).projectSource ? {executionSource:(()=>{const s=record(record(source).projectSource);return {resource_owner:s.resourceOwner,mode:s.mode,
+          workspace_id:s.workspaceId,execution_workspace_id:s.executionWorkspaceId,branch_id:s.branchId??null,revision:s.revision??null,live_root:s.liveRoot??null,
+          ...(s.nativeScope?{native_scope:s.nativeScope}:{})};})()} : {}),
         privateWorkspace: source.kind === 'private',
         parent: {
           threadId: child.parent_thread_id,
@@ -320,7 +360,7 @@ export class ExternalAgentsService {
         return;
       }
       let cleanup: unknown;
-      if (child.handoff && !child.resources_released)
+      if ((child.handoff || child.project_source) && !child.resources_released)
         try {
           await this.sources!.release(child, new AbortController().signal);
         } catch (error) {
@@ -462,7 +502,11 @@ export class ExternalAgentsService {
     this.sweeping = work;
     return work;
   }
-  async settings(signal?: AbortSignal): Promise<ExternalAgentSettings> {
+  async settings(signal?: AbortSignal, resourceOwner?:import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentSettings> {
+    if(resourceOwner?.kind==='managed_host'){
+      if(!this.deps.managed)throw new Error('Managed external Source transport is unavailable');
+      const owner=this.deps.managed();return (await owner.source(resourceOwner,signal)).externalSettings({coordinatorHostId:owner.coordinatorHostId},signal);
+    }
     const value = await this.command<ExternalAgentSettings>({ action: 'settings' }, signal);
     return {
       ...value,
@@ -506,8 +550,8 @@ export class ExternalAgentsService {
     this.notify('*');
     return result;
   }
-  private async configuration(id: string) {
-    const config = (await this.settings()).agents.find((a) => a.id === id);
+  private async configuration(id: string,resourceOwner?:import('@varin/protocol').SourceResourceOwner) {
+    const config = (await this.settings(undefined,resourceOwner)).agents.find((a) => a.id === id);
     if (!config) throw new ExternalAgentError('agent_missing', 'External Agent configuration is unavailable');
     return config;
   }
@@ -599,15 +643,30 @@ export class ExternalAgentsService {
   list(signal?: AbortSignal) {
     return this.command<ExternalConversation[]>({ action: 'list' }, signal);
   }
-  async create(input: { key: string; configurationId: string; cwd?: string; title?: string }, principalId?: string | null) {
+  async create(input: { key: string; configurationId: string; source?: {resourceOwner:import("@varin/protocol").SourceResourceOwner;path:string;expectedWorkspaceId?:string}; cwd?: string; title?: string; organization?: import('@varin/application-client').ConversationOrganizationPlacement }, principalId?: string | null) {
+    const accepted=await this.command<ExternalConversation|null>({action:'create_receipt',key:input.key,configurationId:input.configurationId,
+      ...(input.cwd===undefined?{}:{cwd:input.cwd}),...(input.title===undefined?{}:{title:input.title}),
+      ...(input.source===undefined?{}:{source:input.source}),...(input.organization===undefined?{}:{organization:input.organization}),
+      ...(principalId===undefined?{}:{principalId})});
+    if(accepted)return accepted;
+    const id = `external:${createHash('sha256').update(principalId == null ? input.key : `${principalId}\0${input.key}`).digest('hex')}`;
+    if (input.source?.resourceOwner.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner=this.deps.managed(),client=await owner.source(input.source.resourceOwner);
+      const source=await client.externalPrepare({coordinatorHostId:owner.coordinatorHostId,conversationId:id,path:input.source.path,resourceOwner:input.source.resourceOwner,...(input.source.expectedWorkspaceId?{expectedWorkspaceId:input.source.expectedWorkspaceId}:{})});
+      // Catalog remains the only product writer; no target conversation is created.
+      const settings=await client.externalSettings({coordinatorHostId:owner.coordinatorHostId});
+      const selected=settings.agents.find(c=>c.id===input.configurationId);
+      if (!selected) throw new ExternalAgentError('agent_missing','Choose an external Harness configuration');
+      const target=await client.externalBinding({coordinatorHostId:owner.coordinatorHostId,source,configurationId:input.configurationId,harness:selected.harness});
+      const result=await this.command<ExternalConversation>({action:'create',key:input.key,id,configurationId:input.configurationId,harness:target.configuration.harness,
+        cwd:input.source.path,workspaceId:source.workspace_id,executionSource:source,title:input.title||target.configuration.name,
+        ...(input.organization?{organization:input.organization}:{}),...(principalId===undefined?{}:{principalId})});
+      this.notify(id,true);return result;
+    }
     const config = await this.configuration(input.configurationId);
-    if (!config.enabled)
-      throw new ExternalAgentError(
-        'agent_disabled',
-        'Enable this external Agent before starting a conversation',
-      );
-    const id = `external:${createHash('sha256').update(input.key).digest('hex')}`;
-    let cwd = input.cwd;
+    if (!config.enabled) throw new ExternalAgentError('agent_disabled','Enable this external Agent before starting a conversation');
+    let cwd = input.source?.path ?? input.cwd;
     if (!cwd) {
       cwd = path.join(this.deps.directory, 'workspaces', id.slice(9));
       await mkdir(cwd, { recursive: true });
@@ -618,7 +677,7 @@ export class ExternalAgentsService {
     const native=await this.deps.kernel.nativeWorkspaces?.resolvePath(cwd);
     const result = await this.command<ExternalConversation>({
       action: 'create',
-      ...input,
+      key:input.key,...(input.organization?{organization:input.organization}:{}),
       ...(principalId === undefined ? {} : { principalId }),
       id,
       configurationId: config.id,
@@ -626,7 +685,7 @@ export class ExternalAgentsService {
       cwd,
       workspaceId: source.workspaceId,
       ...(native?{nativeWorkspace:{...native.reference,resource_owner:{kind:'local'},mode:'native_workspace',revision:null,live_root:null}}:{}),
-      privateWorkspace: !input.cwd,
+      privateWorkspace: !input.cwd && !input.source,
       title: input.title || config.name,
     });
     this.notify(id, true);
@@ -647,7 +706,7 @@ export class ExternalAgentsService {
     if (before === undefined)
       for (const item of this.projectedItems.get(id)?.values() ?? []) items.set(item.id, item);
     const connected = Boolean(live && !live.closing && !live.failure && !live.peer.disconnected && !live.connection.failure);
-    const cached = connected ? undefined : (await this.settings(signal)).capabilityCache?.[value.conversation.configurationId];
+    const cached = connected || value.conversation.executionSource?.resource_owner.kind === 'managed_host' ? undefined : (await this.settings(signal)).capabilityCache?.[value.conversation.configurationId];
     const state = this.connectionStates.get(id);
     return {
       ...value,
@@ -691,6 +750,7 @@ export class ExternalAgentsService {
         for (const dispose of live.dispose) dispose();
         if (this.connections.get(id) === live) this.connections.delete(id);
       }
+      if(this.deps.managed)await closeManagedExternalTransport(this.deps.managed(),snapshot.conversation,input=>this.command(input));
       this.connectionStates.set(id, { status: 'disconnected' });
       this.notify(id);
     }).finally(() => {
@@ -726,7 +786,7 @@ export class ExternalAgentsService {
   }
   private async connection(
     id: string,
-    launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>,
+    launch?: (Pick<ExternalAgentConfiguration, 'command' | 'args'> & {configurationIdentity?:string}),
     authMethodId?: string,
   ): Promise<Live> {
     const reclaim = this.reclaiming.get(id);
@@ -773,7 +833,25 @@ export class ExternalAgentsService {
     this.connecting.set(id, opening);
     return opening;
   }
+  /** Called only by this Host's authenticated Source owner. No credentials cross the wire. */
+  async managedLaunch(configurationId: string, harness: ExternalAgentConfiguration['harness'], sessionId?: string, signal?: AbortSignal) {
+    const config = await this.configuration(configurationId);
+    if (!config.enabled || config.harness !== harness) throw new ExternalAgentError('agent_disabled', 'The target Host configuration is disabled or changed');
+    const launch = await this.executable(config);
+    const version = await this.probeVersion(launch, signal, getAcpProfile(config.id)).catch(error => {
+      if (signal?.aborted || config.harness === 'pi' || error instanceof AggregateError) throw error;
+      return undefined;
+    });
+    const command = harness === 'claude' ? process.execPath : launch.command;
+    const args = harness === 'claude' ? [fileURLToPath(new URL('./claude-worker.js', import.meta.url))]
+      : [...launch.args, ...(harness === 'codex' ? ['app-server'] : harness === 'pi' ? ['--mode','rpc',...(sessionId ? ['--session',sessionId] : [])] : [])];
+    const env = {...launch.env,...(harness === 'claude' ? {ELECTRON_RUN_AS_NODE:'1'} : {})};
+    const configurationIdentity = createHash('sha256').update(JSON.stringify([config,command,args,env,version])).digest('hex');
+    const binding = {configurationIdentity,configuration:config,command:launch.command,args:launch.args,...(version ? {version} : {})};
+    return {binding, command, args, env};
+  }
   private async executionSource(c: ExternalConversation, signal: AbortSignal) {
+    if (c.executionSource?.resource_owner.kind === 'managed_host') throw new ExternalAgentError('remote_source_required','This attachment requires the target Host source owner');
     let admittedSource:
       { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string } | undefined;
     let executionCwd=c.cwd;
@@ -782,7 +860,7 @@ export class ExternalAgentsService {
         (child) => child.operation_id === c.parent!.operationId && child.conversation_id === c.id,
       );
       if (!child) throw new Error('The original external delegation is unavailable');
-      const source = child.handoff
+      const source = (child.handoff || child.project_source)
         ? await this.sources.prepare(child, signal)
         : { ...(await this.deps.resolveWorkspace(c.cwd)), cwd: c.cwd };
       if (source.cwd !== c.cwd && record(record(source).nativeSource).mode!=='native_workspace') throw new Error('The external conversation source changed');
@@ -802,12 +880,26 @@ export class ExternalAgentsService {
   private async open(
     id: string,
     signal: AbortSignal,
-    frozenLaunch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>,
+    frozenLaunch?: (Pick<ExternalAgentConfiguration, 'command' | 'args'> & {configurationIdentity?:string}),
     authMethodId?: string,
   ): Promise<Live> {
     if (this.stopping) throw new Error('External Agent service is stopping');
     const { conversation: c } = await this.read(id);
-    const selected =
+    const prepared = await (async () => {
+      if (c.executionSource?.resource_owner.kind === 'managed_host') {
+        if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+        if (c.parent?.operationId) {
+          // Reconnect/capture/user-send must use the same prepared child owner,
+          // not reinterpret its profile from current settings after a restart.
+          const original = await this.command<{_launch:NonNullable<typeof frozenLaunch>}>({action:'child_input',operationId:c.parent.operationId});
+          if (!original._launch?.configurationIdentity) throw new Error('Original target executable preparation is unavailable');
+          frozenLaunch = original._launch;
+        }
+        const remote = await openManagedExternalTransport(this.deps.managed(),c,input=>this.command(input),error=>this.deps.onError?.(id,error),signal,frozenLaunch);
+        return {config:remote.launch.configuration, capabilityGeneration:null, launch:remote.launch,
+          version:remote.launch.version,child:remote.child,executionCwd:remote.executionCwd,start:remote.start,close:remote.close,capture:remote.capture,attachments:this.attachments ? remote.attachmentOwner(this.attachments) : undefined};
+      }
+      const selected =
       (await this.settings()).agents.find((agent) => agent.id === c.configurationId) ??
       (frozenLaunch
         ? { ...frozenLaunch, id: c.configurationId, name: c.harness, harness: c.harness, enabled: false }
@@ -847,8 +939,12 @@ export class ExternalAgentsService {
     const child = admittedSource
       ? await this.deps.spawnAdmitted!(async () => admittedSource!, command, args, spawnOptions)
       : await this.deps.spawn(command, args, spawnOptions);
-    const peer = new HarnessTransport(child, config.harness === 'pi' ? 'pi' : 'rpc');
+      return {config, capabilityGeneration, launch, version, child, executionCwd, start:async()=>{},close:undefined,capture:undefined,attachments:this.attachments};
+    })();
+    const {config, capabilityGeneration, launch, version, child, executionCwd} = prepared;
+    const peer = new HarnessTransport(child, config.harness === 'pi' ? 'pi' : 'rpc',prepared.close);
     try {
+      await prepared.start();
       const connection =
         config.harness === 'codex'
           ? await connectCodex(peer, executionCwd, c.sessionId)
@@ -861,7 +957,7 @@ export class ExternalAgentsService {
       signal.throwIfAborted();
       await this.command({ action: 'bind', id, sessionId: connection.sessionId });
       if (this.stopping) throw new Error('External Agent service stopped during connection');
-      const live: Live = { generation: randomUUID(), configuration: config, capabilityGeneration, ...(agentVersion ? { agentVersion } : {}),
+      const live: Live = { ...(prepared.capture?{capture:prepared.capture}:{}), ...(prepared.attachments ? {attachments:prepared.attachments} : {}), generation: randomUUID(), configuration: config, capabilityGeneration, ...(agentVersion ? { agentVersion } : {}),
         dispose: [], connection, peer, interactions: new Map(), launchKey: launchKey(config) };
       await this.cacheCapabilities(live);
       signal.throwIfAborted();
@@ -960,7 +1056,7 @@ export class ExternalAgentsService {
         );
       return previous;
     }
-    const config = await this.configuration(snapshot.conversation.configurationId);
+    const config = await this.configuration(snapshot.conversation.configurationId,snapshot.conversation.executionSource?.resource_owner);
     if (!config.enabled)
       throw new ExternalAgentError('agent_disabled', 'Enable this external Agent before sending');
     if (config.harness !== snapshot.conversation.harness)
@@ -1119,7 +1215,7 @@ export class ExternalAgentsService {
             _userInput?: boolean;
             senderThreadId?: string;
             messages?: Array<{ task: string; senderThreadId?: string; _arrangement?: boolean; attachments?: import('@varin/protocol').Attachment[] }>;
-            _launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
+            _launch?: (Pick<ExternalAgentConfiguration, 'command' | 'args'> & {configurationIdentity?:string});
           }
         >({ action: 'input', id, turnId: turn.id });
         includesArrangements ||= Boolean(input.messages?.some(message => message._arrangement));
@@ -1155,7 +1251,7 @@ export class ExternalAgentsService {
         this.attachmentPreparations.set(id, preparation);
         let harnessInput: Awaited<ReturnType<typeof prepareHarnessInput>>;
         try {
-          harnessInput = await prepareHarnessInput({ ...admitted, attachments: [...(input.messages ?? []).flatMap(message => message.attachments ?? []), ...(input.attachments ?? [])] }, snapshot.conversation, live.connection.capabilities, this.attachments, preparation.controller.signal);
+          harnessInput = await prepareHarnessInput({ ...admitted, attachments: [...(input.messages ?? []).flatMap(message => message.attachments ?? []), ...(input.attachments ?? [])] }, snapshot.conversation, live.connection.capabilities, live.attachments ?? this.attachments, preparation.controller.signal);
         } finally {
           if (this.attachmentPreparations.get(id) === preparation) this.attachmentPreparations.delete(id);
         }
@@ -1352,14 +1448,28 @@ export class ExternalAgentsService {
     waiter.resolve(response);
     this.notify(id);
   }
+  /** Original metadata includes tombstones for authorization and admission receipt lookup. */
+  inspect(id: string, signal?: AbortSignal): Promise<ExternalConversation> {
+    return this.command({ action: 'inspect', id }, signal);
+  }
   async update(
     id: string,
     expectedRevision: number,
     patch: { title?: string; pinned?: boolean; archived?: boolean; deleted?: boolean },
+    key?: string,
   ) {
+    if (key !== undefined) {
+      const receipt = await this.command<ExternalConversation | null>({ action: 'update_receipt', command: { action: 'update', id, key, expectedRevision, ...patch } });
+      if (receipt !== null) {
+        // A replay confirms the original metadata commit, but does not abandon its cleanup owner.
+        if (patch.deleted) { await this.cleanupDeleted(); this.maintenance?.(); }
+        return receipt;
+      }
+    }
     if (!patch.deleted) {
       const value = await this.command<ExternalConversation>({
         action: 'update',
+        ...(key === undefined ? {} : { key }),
         id,
         expectedRevision,
         ...patch,
@@ -1380,6 +1490,7 @@ export class ExternalAgentsService {
       this.connections.delete(id);
       const value = await this.command<ExternalConversation>({
         action: 'update',
+        ...(key === undefined ? {} : { key }),
         id,
         expectedRevision,
         ...patch,
@@ -1399,6 +1510,7 @@ export class ExternalAgentsService {
       while (this.cleanupDirty) {
         this.cleanupDirty = false;
         for (const c of await this.command<ExternalConversation[]>({ action: 'cleanup_list' })) {
+          if(this.deps.managed)await closeManagedExternalTransport(this.deps.managed(),c,input=>this.command(input));
           const child = c.parent
             ? (await this.children()).find((v) => v.conversation_id === c.id)
             : undefined;

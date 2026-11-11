@@ -177,3 +177,11 @@ describe('settings normalization runtime - symlink resolution', () => {
     });
   });
 });
+
+it('preserves a remote Documents binding and target-Host paths without resolving them locally', () => {
+  const source = { resourceOwner: { kind: 'managed_host', hostId: 'remote', connectionId: 'ssh', endpointIdentity: 'endpoint' }, workspaceId: 'registered-remote' };
+  const runtime = createTestRuntime({ realpathSync: () => { throw new Error('No local filesystem access for remote paths'); } });
+  const projects = runtime.sanitizeProjects([{ id: 'remote', path: 'C:\\work\\project', additionalPaths: ['C:\\shared'], source }]);
+  expect(projects).toEqual([{ id: 'remote', path: 'C:\\work\\project', additionalPaths: ['C:\\shared'], source }]);
+  expect(() => runtime.sanitizeProjects([{ id: 'bad', path: '/same', source: { ...source, resourceOwner: { kind: 'managed_host' } } }])).toThrow('malformed');
+});

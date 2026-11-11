@@ -52,7 +52,7 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   {props.onStop && <button type="button" onClick={props.onStop}>Stop</button>}
 </div>; } }));
 vi.mock('./ThreadSourcePicker', () => ({ ThreadSourcePicker: ({ onDraftSelection }: { onDraftSelection(value: object): void }) =>
-  <button type="button" onClick={() => onDraftSelection({ path: '/other', resourceOwner: { kind: 'local' }, mode: 'live_root', contentMode: 'working', captureScopes: [] })}>Choose another folder</button> }));
+  <><button type="button" onClick={() => onDraftSelection({ path: '/project', resourceOwner: { kind: 'managed_host', hostId: 'source-host', connectionId: 'source-connection', endpointIdentity: 'source-endpoint' }, mode: 'live_root', contentMode: 'saved-files', captureScopes: [] })}>Choose source Host</button><button type="button" onClick={() => onDraftSelection({ path: '/other', resourceOwner: { kind: 'local' }, mode: 'live_root', contentMode: 'working', captureScopes: [] })}>Choose another folder</button></> }));
 vi.mock('./WorkOverviewControl', () => ({ WorkOverviewControl: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
 vi.mock('./ExternalOverview', () => ({ ExternalOverview: () => null }));
 vi.mock('@/components/conversation/ConversationScrollbar', () => ({ ConversationScrollbar: () => null }));
@@ -92,6 +92,7 @@ function fixture() {
   const views = new Map<string, ExternalConversationSnapshot>([['prepared', snapshot()]]);
   let listener: ((event: ExternalObservation) => void) | undefined;
   const api = {
+    settings: vi.fn<ExternalAgentsAPI['settings']>(async () => structuredClone(f.settings!)),
     uploadAttachment: vi.fn<ExternalAgentsAPI['uploadAttachment']>(async (_id, file) => ({ ref: 'attachment:external-original', filename: file.filename, mimeType: file.mimeType, byteLength: file.data.size })),
     readAttachment: vi.fn<ExternalAgentsAPI['readAttachment']>(async () => new Blob(['original'])),
     create: vi.fn<ExternalAgentsAPI['create']>(async () => structuredClone(views.get('prepared')!.conversation)),
@@ -676,4 +677,47 @@ it('opens an original external turn in the existing read-only view and reads old
   await act(async () => root.render(<ExternalConversationView id="prepared" turnId="old-turn" readOnly />));
   expect(api.read).toHaveBeenCalledWith('prepared', 10, expect.any(AbortSignal)); expect(container.textContent).toContain('Original event result'); expect(container.textContent).not.toContain('Unrelated latest answer');
   expect(api.connect).not.toHaveBeenCalled(); expect(api.send).not.toHaveBeenCalled();
+});
+
+
+it('uses source Host configuration and model defaults, never the coordinating Host same-ID profile', async () => {
+  const { api } = fixture();
+  const owner = { kind: 'managed_host' as const, hostId: 'source-host', connectionId: 'source-connection', endpointIdentity: 'source-endpoint' };
+  api.settings.mockResolvedValue({ revision: 3, defaultAgent: 'agent', agents: [{ ...f.settings!.agents[0]!, name: 'Source Agent', defaults: { model: 'source-model' } }] });
+  useThreadDraftStore.getState().patch('draft', { sourceSelection: { resourceOwner: owner, path: '/project', mode: 'live_root', contentMode: 'saved-files', captureScopes: [] }, externalModels: { agent: 'coordinator-model' } });
+  await renderDraft();
+  expect(api.settings).toHaveBeenCalledWith(expect.any(AbortSignal), owner);
+  expect(f.composer?.external?.choice.model).toBe('source-model');
+  expect(api.create).not.toHaveBeenCalled();
+  await focusComposer();
+  expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ source: { resourceOwner: owner, path: '/project' }, title: 'Source Agent' }));
+});
+
+it('does not fall back to coordinating Host agents or cached capabilities when source settings fail', async () => {
+  const { api } = fixture();
+  api.settings.mockRejectedValue(new Error('Source Host unavailable'));
+  f.settings!.capabilityCache = { agent: { capabilities: capabilities(), cachedAt: 1 } };
+  useThreadDraftStore.getState().patch('draft', { sourceSelection: { resourceOwner: { kind: 'managed_host', hostId: 'offline', connectionId: 'offline-connection', endpointIdentity: 'offline-endpoint' }, path: '/project', mode: 'live_root', contentMode: 'saved-files', captureScopes: [] } });
+  await renderDraft();
+  expect(button('Send').disabled).toBe(true);
+  expect(f.composer?.external?.capabilities).toBeUndefined();
+  await focusComposer();
+  expect(api.create).not.toHaveBeenCalled();
+  expect(useThreadDraftStore.getState().drafts.draft?.text).toBe('Original question');
+});
+
+
+it('retains the original draft source and preparation key until source-switch cleanup is confirmed', async () => {
+  const { api } = fixture();
+  await renderDraft(); await focusComposer();
+  const key = useThreadDraftStore.getState().drafts.draft?.externalPreparationKey;
+  api.update.mockRejectedValueOnce(new Error('Cleanup outcome unknown'));
+  await click('Workspace'); await click('Choose source Host');
+  expect(useThreadDraftStore.getState().drafts.draft).toMatchObject({ externalPreparationKey: key, externalConversationId: 'prepared', workspacePath: '/project' });
+  expect(useThreadDraftStore.getState().drafts.draft?.sourceSelection).toBeUndefined();
+  expect(api.settings).not.toHaveBeenCalled();
+  await click('Choose source Host');
+  expect(useThreadDraftStore.getState().drafts.draft?.sourceSelection?.resourceOwner).toMatchObject({ kind: 'managed_host', hostId: 'source-host' });
+  expect(useThreadDraftStore.getState().drafts.draft?.externalPreparationKey).toBeUndefined();
+  expect(api.create).toHaveBeenCalledOnce();
 });

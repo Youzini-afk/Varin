@@ -243,6 +243,7 @@ pub struct BotHistoryRead {
     epoch: u64,
     content: crate::content::ContentStore,
     bot_id: String,
+    principal: Option<Option<String>>,
     thread_id: String,
     branch_id: String,
     head_id: String,
@@ -251,12 +252,16 @@ pub struct BotHistoryRead {
 }
 impl Catalog {
     pub fn capture_bot_history(&self, bot_id: &str, thread_id: &str, branch_id: &str, head_id: &str, item_id: &str) -> Result<BotHistoryRead> {
+        self.capture_bot_history_scoped(bot_id,thread_id,branch_id,head_id,item_id,None)
+    }
+    pub fn capture_bot_history_scoped(&self, bot_id: &str, thread_id: &str, branch_id: &str, head_id: &str, item_id: &str, principal: Option<Option<String>>) -> Result<BotHistoryRead> {
+        if let Some(principal)=&principal { if !self.db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1 AND principal_id IS ?2)", params![thread_id,principal], |r|r.get::<_,bool>(0))? { return Err(RuntimeError::Conflict("History source is outside this principal".into())); } }
         if (self.bot_for_thread(thread_id)?.as_deref() != Some(bot_id)
             && !super::bot_work::linked(&self.db, &super::bot_work::entry(&self.db, bot_id)?, thread_id, Some(branch_id), false, true)?) || self.branch_thread_id(branch_id)? != thread_id {
             return Err(RuntimeError::Conflict("History source is outside this Bot".into()));
         }
         Ok(BotHistoryRead { database: self.database_path.clone(), epoch: self.epoch, content: self.content.clone(),
-            bot_id: bot_id.into(), thread_id: thread_id.into(), branch_id: branch_id.into(), head_id: head_id.into(), item_id: item_id.into(),
+            principal, bot_id: bot_id.into(), thread_id: thread_id.into(), branch_id: branch_id.into(), head_id: head_id.into(), item_id: item_id.into(),
             _publication: self.content.begin_publication() })
     }
 }
@@ -264,6 +269,7 @@ impl BotHistoryRead {
     pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<HistoryItem> {
         let db = current_history_owner(&self.database, self.epoch)?;
         db.execute_batch("BEGIN")?;
+        if let Some(principal)=&self.principal { if !db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1 AND principal_id IS ?2)", params![self.thread_id,principal], |r|r.get::<_,bool>(0))? { return Err(RuntimeError::Conflict("History source principal changed".into())); } }
         if super::bot::thread_bot(&db, &self.thread_id)?.as_deref() != Some(&self.bot_id)
             && !super::bot_work::linked(&db, &super::bot_work::entry(&db, &self.bot_id)?, &self.thread_id, Some(&self.branch_id), false, true)? {
             return Err(RuntimeError::Conflict("History source Bot changed".into()));

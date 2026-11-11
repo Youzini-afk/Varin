@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { externalCodeIntegration } from '../external-agents/code-exchange.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 import type { IntegrationOperationReceipt } from '../harness/working-state/integration-coordinator.js';
@@ -77,7 +78,7 @@ export async function releaseManagedCodeResult(owners: CodeExchangeOwners, invoc
 
 export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,'kernel'|'storage'|'documents'|'recovery'|'metadataReader'|'coordinator'>):ManagedSourceServiceHandler {
   return async(scope,operation,suppliedSignal)=>{
-    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply'&&operation.kind!=='code_release')throw new Error('Unknown code exchange operation');
+    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply'&&operation.kind!=='external_code_apply'&&operation.kind!=='code_release')throw new Error('Unknown code exchange operation');
     const invocation=operation.invocation;
     if(!scope.principal.capabilities.includes('filesystem:write') || !validToolOrigin(invocation.origin)
       || toolOperationId(invocation.origin,invocation.callId)!==invocation.operationId
@@ -116,6 +117,17 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
         baselineRevision:operation.baselineRevision,...(operation.files?{files:operation.files}:{}),
         mapping: operation.mapping, baselineMapping: operation.baselineMapping,
         acknowledged:await acknowledgedCode(target.store,operation.sourceThreadId,operation.targetThreadId),signal});
+      if(operation.kind==='external_code_apply') {
+        const expected=operation.direction==='receive'?operation.self.source:operation.externalSource;
+        if(!isDeepStrictEqual(expected,scope.source)
+          ||operation.child.conversation_id!==`external:child:${operation.child.dispatch_operation_id??operation.child.operation_id}`
+          ||operation.externalSource.workspace_id!==scope.source.workspace_id
+          ||!isDeepStrictEqual(operation.externalSource.resource_owner,scope.source.resource_owner)
+          ||operation.result.branchId!==`code-exchange:${invocation.operationId}`)throw new Error('External exchange original source changed');
+        const input=externalCodeIntegration(invocation,operation.self,operation.child,operation.direction,operation.externalSource,operation.result,target,signal);
+        try{return await owners.coordinator.mergeResult(input);}
+        catch(error){const inspection={...input};delete inspection.signal;const receipt=await owners.coordinator.inspectIntegration(inspection);if(receipt)return receipt;throw error;}
+      }
       if(!isDeepStrictEqual(operation.target.source,scope.source))throw new Error('The exchange target source changed');
       const input=codeIntegration(invocation,operation.branchId,operation.source,operation.target,operation.result,target,signal);
       try{return await owners.coordinator.mergeResult(input);}

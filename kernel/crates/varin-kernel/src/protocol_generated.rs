@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 90;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 91;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -31,6 +31,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "source.mcp.holder",
     "source.mcp.delivery",
     "source.script.control",
+    "source.external.control",
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
@@ -267,6 +268,14 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+fn present_nullable<'de, D, T>(deserializer: D) -> Result<Option<RequiredNullable<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    RequiredNullable::<T>::deserialize(deserializer).map(Some)
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -648,6 +657,8 @@ pub(crate) struct BotWorkAdmitParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotScopeParams {
+    #[serde(default, deserialize_with = "present_nullable")]
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
     pub(crate) bot_id: String,
     pub(crate) history_only: Option<bool>,
 }
@@ -655,6 +666,8 @@ pub(crate) struct BotScopeParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotMatterUpdate {
+    #[serde(default, deserialize_with = "present_nullable")]
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
     pub(crate) bot_id: String,
     pub(crate) key: String,
     pub(crate) expected_revision: i64,
@@ -664,6 +677,8 @@ pub(crate) struct BotMatterUpdate {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotHistoryReadParams {
+    #[serde(default, deserialize_with = "present_nullable")]
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
     pub(crate) bot_id: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -674,6 +689,8 @@ pub(crate) struct BotHistoryReadParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotActivityParams {
+    #[serde(default, deserialize_with = "present_nullable")]
+    pub(crate) principal_id: Option<RequiredNullable<String>>,
     pub(crate) bot_id: String,
     pub(crate) before: Option<i64>,
     pub(crate) limit: Option<i64>,
@@ -695,7 +712,9 @@ pub(crate) struct BotThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
     pub(crate) organization: Option<varin_runtime::catalog::organization::Placement>,
+    #[serde(default, deserialize_with = "present_nullable")]
     pub(crate) principal_id: Option<RequiredNullable<String>>,
+    pub(crate) creation_defaults: Option<varin_runtime::catalog::organization::CreationDefaults>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1906,8 +1925,10 @@ pub(crate) struct AdmissionInspectParams {
 pub(crate) struct ThreadCreateParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
+    #[serde(default, deserialize_with = "present_nullable")]
     pub(crate) principal_id: Option<RequiredNullable<String>>,
     pub(crate) organization: Option<varin_runtime::catalog::organization::Placement>,
+    pub(crate) creation_defaults: Option<varin_runtime::catalog::organization::CreationDefaults>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2131,6 +2152,7 @@ pub(crate) struct KernelGrantIssueParams {
     pub(crate) thread_id: RequiredNullable<String>,
     pub(crate) run_id: RequiredNullable<String>,
     pub(crate) operation_id: Option<RequiredNullable<String>>,
+    pub(crate) external_transport_id: Option<RequiredNullable<String>>,
     pub(crate) owning_workspace: RequiredNullable<String>,
     pub(crate) execution_workspace: RequiredNullable<String>,
     pub(crate) storage_identity: String,
@@ -3605,6 +3627,8 @@ pub(crate) type SourceResourceCallParams = crate::source_resources::SourceResour
 pub(crate) type SourceProcessAccessParams = crate::source_resources::SourceProcessAccessParams;
 
 pub(crate) type SourceScriptControlParams = crate::source_resources::SourceScriptControlParams;
+
+pub(crate) type SourceExternalControlParams = crate::source_resources::SourceExternalControlParams;
 
 pub(crate) type SourceResourceControlParams = crate::source_resources::SourceResourceControlParams;
 
@@ -6446,6 +6470,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "source.script.control" => {
             serde_json::from_value::<SourceScriptControlParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.external.control" => {
+            serde_json::from_value::<SourceExternalControlParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

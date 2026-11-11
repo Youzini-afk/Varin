@@ -2275,6 +2275,7 @@ fn legacy_material_inheritance_is_converted_once_without_reinterpreting_new_pros
     let raw=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
     // Reconstruct v84 without newer ownership/creation tables, not a current Catalog with an old label.
     raw.execute_batch(include_str!("fixtures/catalog-pre-arrangements.sql")).unwrap();
+    raw.execute_batch("DROP TABLE IF EXISTS organization_retired_containers; DROP TABLE IF EXISTS organization_positions; DROP TABLE IF EXISTS organization_containers; DROP TABLE IF EXISTS organization_commands; DROP TABLE IF EXISTS organization_spaces;").unwrap();
     raw.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations;
         DROP TABLE calendar_legacy_manual_boundaries;
         DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id;

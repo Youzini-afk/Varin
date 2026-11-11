@@ -88,8 +88,13 @@ impl Storage {
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "integration" | "result" | "process_view" | "script_environment" | "mcp_owner"
+                "source" | "read" | "integration" | "result" | "process_view" | "script_environment" | "external_harness" | "mcp_owner"
             )
+            || (matches!(p.scope, SourceAuthorityScope::External { .. }) != (p.purpose == "external_harness"))
+            || (p.purpose == "external_harness" && (!p.enabled_tools.is_empty()
+                || p.operation_id.as_deref().is_none_or(str::is_empty)
+                || !matches!(&p.scope, SourceAuthorityScope::External { transport_id, .. } if p.operation_id.as_deref() == Some(transport_id.as_str()))
+                || p.source.mode == varin_runtime::SourceMode::FixedBranch))
             || (p.purpose == "mcp_owner" && (!p.enabled_tools.is_empty()
                 || !matches!(p.scope, SourceAuthorityScope::Run { .. })
                 || p.operation_id.is_some()
@@ -130,6 +135,7 @@ impl Storage {
             )?;
             if p.scope.thread_id() != creator.result.scope.thread_id()
                 && p.scope.thread_id() != format!("thread:child:{execution}")
+                && p.scope.thread_id() != format!("external:child:{execution}")
             {
                 return Err(denied("Private child source belongs to another Thread"));
             }
@@ -151,6 +157,9 @@ impl Storage {
             || grant.owning_workspace.as_deref() != Some(&p.source.workspace_id)
             || grant.execution_workspace.as_deref() != Some(&p.source.execution_workspace_id)
             || grant.operation_id != p.operation_id
+            || grant.external_transport_id.as_deref() != match &p.scope {
+                SourceAuthorityScope::External { transport_id, .. } => Some(transport_id.as_str()), _ => None,
+            }
         {
             return Err(denied(
                 "Source grant differs from its original admitted scope",
@@ -405,6 +414,8 @@ impl Storage {
                     return Err(denied("Tool root differs from admitted source"));
                 }
             }
+        } else if record.purpose == "external_harness" {
+            return Err(denied("External process requires its original physical root"));
         } else if record.purpose != "result"
             && p.tool_binding
                 .as_ref()
@@ -1147,6 +1158,110 @@ impl Storage {
             ));
         }
         Ok(Some((record, native, intent.address)))
+    }
+    /// External transports use their original process grant, never an invented Run binding.
+    pub(crate) fn external_process_access(
+        &mut self, address: &SourceAuthorityAddress, process_id: &str,
+        epoch: &str, host: &str, generation: &str,
+    ) -> Result<Value, KernelError> {
+        let record = self.source_authority(address, true, epoch)?;
+        if record.purpose != "external_harness" || record.result.phase != "ready"
+            || record.operation_id.as_deref() != Some(process_id)
+            || !matches!(record.result.scope, SourceAuthorityScope::External { .. }) {
+            return Err(denied("External process differs from its original authority"));
+        }
+        let root = record.result.physical_root.as_ref().map(|r| r.root_id.as_str());
+        let (grant, _) = self.authorize(Some(&record.result.grant_id), epoch, host, generation,
+            "process.interaction.inspect", &json!({"workspaceId":record.result.source.workspace_id,
+            "processId":process_id,"operationId":process_id,"rootId":root}))?;
+        let actor: String = self.conn.query_row("SELECT grant_id FROM process_records WHERE process_id=?1", [process_id], |r| r.get(0))?;
+        if actor != record.result.grant_id { return Err(denied("External process has another creation grant")); }
+        self.authorize_process_access(process_id, &record.result.source.workspace_id, &grant, root, false)?;
+        self.refresh_process_record(process_id)?.ok_or_else(|| denied("Original external process is unavailable"))
+    }
+    pub(crate) fn control_source_external(
+        &mut self, p: SourceExternalControlParams, epoch: &str, host: &str,
+    ) -> Result<Value, KernelError> {
+        let scope = SourceAuthorityScope::External { conversation_id:p.conversation_id.clone(), transport_id:p.transport_id.clone() };
+        if !scope.validate() || p.process_id.is_empty() || p.process_id != p.transport_id || p.principal_id.is_empty()
+            || p.coordinator_host_id.is_empty() || p.source.resource_owner.host_id() != Some(host) {
+            return Err(denied("Original external source identity is incomplete"));
+        }
+        p.source.validate().map_err(|e| denied(&e.to_string()))?;
+        let authorities = {
+            let mut query = self.conn.prepare("SELECT payload_json FROM domain_records WHERE record_type='source.authority'")?;
+            let rows = query.query_map([], |r| r.get::<_, String>(0))?;
+            let mut found = Vec::new();
+            for row in rows {
+                let a: AuthorityRecord = serde_json::from_str(&row?)?;
+                if a.principal_id == p.principal_id && a.coordinator_host_id == p.coordinator_host_id
+                    && a.result.scope == scope && a.purpose == "external_harness"
+                    && a.operation_id.as_deref() == Some(p.process_id.as_str()) && a.result.source == p.source {
+                    self.require_native_source_owner(&a)?;
+                    found.push(a.result);
+                }
+            }
+            found
+        };
+        let creation_grant: Option<String> = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1", [&p.process_id], |r| r.get(0)).optional()?;
+        let creation = creation_grant.as_ref().and_then(|grant| authorities.iter().find(|a| &a.grant_id == grant));
+        if creation_grant.is_some() && creation.is_none() {
+            return Err(denied("External process belongs to another original source"));
+        }
+        // A terminal stop fences this exact external transport, including an
+        // authority admission still in flight. It never closes another transport.
+        if p.stop {
+            let scope_id = format!("source-scope:{}", hash_json(&json!([
+                p.principal_id, p.coordinator_host_id, scope.identity()
+            ]))?);
+            let mut original = self.source_record::<ScopeRecord>("source.scope", &scope_id)?
+                .unwrap_or(ScopeRecord { source:p.source.clone(), epoch:0, ready:false, closed:false, mcp_closed_epoch:None });
+            if original.source != p.source { return Err(denied("External transport source changed")); }
+            original.closed = true;
+            self.save_source_record("source.scope", &scope_id, &p.source.workspace_id, "closed", &original)?;
+        }
+        let mut observed = Vec::new();
+        for authority in &authorities {
+            let phase = if p.stop {
+                self.release_source_authority(&SourceAuthorityAddress { principal_id:p.principal_id.clone(),
+                    coordinator_host_id:p.coordinator_host_id.clone(), authority_id:authority.authority_id.clone(),
+                    resource_epoch:authority.resource_epoch.clone() }, "revoke", host, epoch)?["phase"].clone()
+            } else { json!(authority.phase) };
+            observed.push(json!({"authorityId":authority.authority_id,"resourceEpoch":authority.resource_epoch,"phase":phase}));
+        }
+        let mut receipt = if let Some(creation) = creation {
+            self.observe_source_operation(&SourceAuthorityAddress { principal_id:p.principal_id.clone(),
+                coordinator_host_id:p.coordinator_host_id.clone(),authority_id:creation.authority_id.clone(),
+                resource_epoch:creation.resource_epoch.clone() }, &p.process_id, epoch, p.stop)?
+        } else {
+            // Process admission rechecks the live original grant in this same
+            // Storage actor and persists process_records before any OS spawn.
+            // With this scope fenced, absent acceptance is proven not-started.
+            let scope_id = format!("source-scope:{}", hash_json(&json!([p.principal_id,p.coordinator_host_id,scope.identity()]))?);
+            let closed = self.source_record::<ScopeRecord>("source.scope", &scope_id)?.is_some_and(|s| s.closed && s.source == p.source);
+            json!({"accepted":false,"executorStopped":closed,"notStarted":closed,"process":null})
+        };
+        if p.release {
+            let scope_id = format!("source-scope:{}", hash_json(&json!([p.principal_id,p.coordinator_host_id,scope.identity()]))?);
+            let closed = self.source_record::<ScopeRecord>("source.scope", &scope_id)?.is_some_and(|s| s.closed && s.source == p.source);
+            if !closed || receipt["executorStopped"] != true {
+                return Err(denied("External output is retained until its original executor and scope are closed"));
+            }
+            if receipt["process"].is_object() {
+                receipt["process"] = self.release_process_output(&p.process_id, receipt["process"].clone())?;
+            }
+        }
+        // Terminal guardian receipts predate output retirement. Do not let their
+        // historical status resurrect a spool already released by this owner.
+        if self.process_record(&p.process_id)?.is_some_and(|stored| stored["status"] == "released") {
+            receipt["process"]["status"] = json!("released");
+            receipt["process"]["outputAvailable"] = json!(false);
+        }
+        let output_released = receipt["process"]["status"] == "released" || receipt["notStarted"] == true;
+        Ok(json!({"conversationId":p.conversation_id,"transportId":p.transport_id,"processId":p.process_id,
+            "source":p.source,"accepted":receipt["accepted"],"executorStopped":receipt["executorStopped"],
+            "process":receipt["process"],"notStarted":receipt["notStarted"].as_bool().unwrap_or(false),"outputReleased":output_released,"authorities":observed}))
     }
     /// Recall only facts belonging to the authority's actual creation grant. Missing
     /// receipts are unknown, never evidence that executing the same intent is safe.

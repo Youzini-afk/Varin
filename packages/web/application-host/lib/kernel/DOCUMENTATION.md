@@ -334,3 +334,54 @@ and auto-rendered image media do not change that intent. Queue promotion uses th
 plain-text edits preserve objects while discarding obsolete ranges. Recovery exposes the original
 file/image binding so restoring a file-backed image does not duplicate its visual payload. A
 text-only model can receive the original image file with an explicit non-visual notice.
+
+## Conversation organization boundary
+
+`../conversation-organization/service.ts` initializes navigation only after a successful, validated
+Settings project read. Catalog owns the one-time generation, mixed tree, placement, CAS and admission
+receipts. The Host supplies the authenticated principal, never a client-selected user ID. Project
+registration/removal remains with Settings; navigation coordination returns its true partial result.
+Native and external metadata batches call their existing owners with per-object stable keys and retain
+busy, conflict, failure and unknown outcomes. No Host-side directory or receipt database is introduced.
+
+`resource-owner.ts` also carries the existing invocation-bound lifecycle bridge for organization tools:
+it validates the frozen resource checkpoint and original Run before reaching BotService or the external
+service. Bot creation keeps its gate, serialized session admission and principal; external mutations
+keep their turn cleanup and original Catalog receipt. Navigation events reuse Catalog durable observation.
+Organization command retries consult the original Catalog receipt before rechecking mutable project
+registration preconditions. External metadata authorization uses the original lightweight record,
+including tombstones; `update_receipt` resolves the retained key/intent before active-turn preflight.
+A confirmed deletion replay still asks the original external service to finish pending cleanup.
+
+Organization placement creation freezes the selected project's original source owner and path in
+its Catalog creation receipt. The Host resolves Settings metadata before admission, without
+starting a device or executing a tool. Subsequent folder moves or project-binding edits do not
+reinterpret that creation intent. An uncertain create retry reads the original receipt before
+consulting mutable Settings; legacy receipts are not retrofitted with a new intent.
+
+`runtime.input.inheritedReceipt` is a read-only original-input comparison, not admission or a
+key-only receipt lookup. It reuses only the retained Host-derived source, selected tools and tool
+schema generation for an inherited-source retry, then compares the complete original normalized
+input intent. Explicit source selection, model, input and credential changes still conflict.
+This allows an accepted first send to be recovered after its project/device goes offline.
+An omitted public submit source inherits; explicit `source: null` selects chat only and clears
+source resources through the original context preparation owner.
+
+Organization labels are a batched read through the existing frozen resource invocation bridge.
+Only requested source IDs are returned, with original Bot/Settings names or explicit missing /
+unavailable states. The label projection is neither a profile directory nor a new authority.
+
+Public Bot sessions, work, activity, matters and historical source reads carry the authenticated
+request's principal, including explicit null for public work. An omitted private principal is
+reserved for the existing whole-Bot lifecycle owner. Generated nullable principal fields preserve
+this distinction with a presence-aware decoder. Global presence events contain only an
+invalidation; clients re-read their scoped projection. Shared Bot configuration and its original
+entry identity are not a per-user registry. Public lifecycle profiles retain state but disclose
+only authorized work handles, not unattributed operation IDs from the shared lifecycle record.
+
+External Agent HTTP routes enforce the same request ownership boundary before reads, mutations,
+attachments or single-conversation progress subscription. Tombstone metadata is used for this
+check, so an original authorized deletion receipt remains recoverable. Pending delegate visibility
+comes from its original parent Run, including before an external session exists. Host-shared
+program configuration and background lifecycle enumeration retain their original scope; global
+external observation carries invalidation only, not conversation identities or transcript data.

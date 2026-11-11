@@ -3,6 +3,7 @@ import type { BotSummary } from '@varin/application-client';
 import { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { KernelClientError } from '../kernel/kernel-error.js';
+import { withRequestPrincipal } from '../kernel/request-principal.js';
 import { createBotSessions } from './bot-sessions.js';
 
 const bot: BotSummary = {
@@ -51,4 +52,23 @@ it('reopens with the original profile identity after an unknown response', async
   expect(await sessions.ensureEntry(bot)).toEqual({ runtime: 'agent', threadId: 'accepted', branchId: 'accepted-main' });
   expect(request).toHaveBeenCalledTimes(2);
   expect(request.mock.calls[0]).toEqual(request.mock.calls[1]);
+});
+
+
+it('passes trusted request ownership and the selected container through the real Bot creation RPC', async () => {
+  const { request, sessions } = fixture();
+  const identity = { runtime: 'agent' as const, threadId: 'session', branchId: 'main' };
+  request.mockImplementation(async (method: string) => method === 'runtime.bot.thread.create' ? identity : { thread_id: 'session', main_branch_id: 'main' });
+  await withRequestPrincipal('alice', () => sessions.createSession(bot, identity, { containerId: 'release' }));
+  expect(request.mock.calls[0]).toEqual(['runtime.bot.thread.create', { botId: 'bot', threadId: 'session', branchId: 'main', principalId: 'alice', organization: { containerId: 'release' } }, undefined]);
+});
+
+it('scopes public and authenticated session reads without narrowing background lifecycle scope', async () => {
+  const { request, sessions } = fixture(); request.mockResolvedValue({ sessions: [], threads: [], runs: [] });
+  await withRequestPrincipal('alice', () => sessions.listSessions(bot));
+  expect(request.mock.calls.at(-1)?.[1]).toEqual({ botId: 'bot', historyOnly: true, principalId: 'alice' });
+  await withRequestPrincipal(null, () => sessions.listSessions(bot));
+  expect(request.mock.calls.at(-1)?.[1]).toEqual({ botId: 'bot', historyOnly: true, principalId: null });
+  await sessions.listSessions(bot);
+  expect(request.mock.calls.at(-1)?.[1]).toEqual({ botId: 'bot', historyOnly: true });
 });

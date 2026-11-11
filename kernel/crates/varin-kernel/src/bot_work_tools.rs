@@ -166,7 +166,7 @@ impl ToolExecutor for Tools {
                 "get" => Ok((
                     serde_json::to_value(
                         owner
-                            .bot_matters(&bot)
+                            .bot_matters_scoped(&bot, Some(run.principal_id.clone()))
                             .map_err(error)?
                             .into_iter()
                             .find(|row| Some(&row.id) == args.id.as_ref())
@@ -177,7 +177,7 @@ impl ToolExecutor for Tools {
                 )),
                 _ => {
                     let rows = owner
-                        .bot_matters(&bot)
+                        .bot_matters_scoped(&bot, Some(run.principal_id.clone()))
                         .map_err(error)?
                         .into_iter()
                         .filter(|row| {

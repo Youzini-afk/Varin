@@ -65,9 +65,9 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
         { value: 'worktrees', label: t('settings.experience.projectWorktrees') },
       ]} /> : null}
       <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'identity'}><ProjectIdentityFields form={form} /></div>
-      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'folders'}><ProjectFoldersSettings project={project} /><ProjectWorkspaceSection project={project}/></div>
-      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'actions'}><ProjectActionsSection projectRef={projectRef} /></div>
-      {showWorktrees ? <div className="settings-tab-panel" hidden={tab !== 'worktrees'}><WorktreeSectionContent projectRef={projectRef} /></div> : null}
+      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'folders'}><ProjectFoldersSettings project={project} />{project.source?.resourceOwner.kind === 'managed_host' ? <p className="typography-meta text-muted-foreground">The source Host owns workspace preparation. Choose an isolated source when starting work; this Host’s local workspace adoption controls do not manage that device.</p> : <ProjectWorkspaceSection project={project}/>}</div>
+      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'actions'}>{project.source?.resourceOwner.kind === 'managed_host' ? <p className="typography-meta text-muted-foreground">Local project actions are not available for this remote source. Run commands from a conversation prepared on its source Host.</p> : <ProjectActionsSection projectRef={projectRef} />}</div>
+      {showWorktrees ? <div className="settings-tab-panel" hidden={tab !== 'worktrees'}>{project.source?.resourceOwner.kind === 'managed_host' ? <p className="typography-meta text-muted-foreground">Worktrees belong to the source Host. This local worktree manager cannot operate on that device.</p> : <WorktreeSectionContent projectRef={projectRef} />}</div> : null}
     </div>
   );
 };

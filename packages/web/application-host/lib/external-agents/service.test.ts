@@ -646,3 +646,69 @@ it('an unsent arrangement keeps its original turn when the harness preparation f
   expect(connection.prompt).toHaveBeenCalledOnce();
   expect(f.commands.some(c => c.action === 'observe' && c.status === 'failed')).toBe(false);
 });
+
+it('returns an accepted original creation receipt before querying a now-offline source or disabled configuration',async()=>{
+  const receipt={id:'external:legacy',configurationId:'removed-program',harness:'codex',cwd:'/original',title:'Accepted',revision:1};
+  const actions:string[]=[];
+  const kernel={agentRuntimeRequest:vi.fn(async(_method:string,input:{command:{action:string}})=>{
+    actions.push(input.command.action);if(input.command.action==='create_receipt')return receipt;
+    if(input.command.action==='cleanup_list')return[];throw new Error('Mutable readiness must not run during an accepted retry');
+  })} as unknown as KernelClient;
+  const resolveWorkspace=vi.fn(async()=>{throw new Error('offline');});
+  const managed=vi.fn(()=>{throw new Error('offline');});
+  const service=new ExternalAgentsService({kernel,spawn:vi.fn() as never,directory:'/unused',resolveWorkspace,managed});
+  cleanups.push(()=>service.close());
+  expect(await service.create({key:'old-key',configurationId:'removed-program',source:{resourceOwner:{kind:'managed_host',hostId:'remote',connectionId:'removed',endpointIdentity:'original'},path:'/original'}},'owner')).toEqual(receipt);
+  expect(actions).toEqual(['create_receipt']);expect(managed).not.toHaveBeenCalled();expect(resolveWorkspace).not.toHaveBeenCalled();
+});
+
+it.each([false,true])('prepares project-only external children on the target owner and preserves cleanup (binding failure: %s)',async(bindingFails)=>{
+  const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'external-project-owner-'));
+  cleanups.push(()=>fs.rm(directory,{recursive:true,force:true}));
+  const resourceOwner={kind:'managed_host' as const,hostId:'target',connectionId:'paired-target',endpointIdentity:'target-endpoint'};
+  let child={operation_id:'original-project-dispatch',parent_run_id:'parent-run',parent_thread_id:'parent',parent_branch_id:'main',
+    conversation_id:'external:child:original-project-dispatch',name:'Project work',binding:{configuration_id:'fixture',harness:'codex',launch:{command:'coordinator-program',args:[]}},
+    project_source:{kind:'project',project:{id:'registered-project'},source_path:null},handoff:null,source:null,turn_id:null,report:null,
+    dispatch_operation_id:null,message_kind:null,cancel_requested:false,resources_released:false,receipt_published:false,work_mode:'isolated_write'} as unknown as import('../kernel/protocol.generated.js').ExternalChild;
+  const prepared={cwd:'/target/original-project-copy',workspaceId:'project-workspace',executionWorkspaceId:'project-copy',kind:'isolated',
+    projectSource:{resourceOwner,workspaceId:'project-workspace',executionWorkspaceId:'project-copy',mode:'native_workspace',branchId:'original-project-branch'}};
+  const sources={prepare:vi.fn(async()=>prepared),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{})};
+  const targetBinding={configurationIdentity:'frozen-target-config',configuration:{id:'fixture',name:'Target',harness:'codex',enabled:true,command:'target-only-program',args:['target-profile']},command:'target-only-program',args:['target-profile']};
+  const externalBinding=vi.fn(async()=>{if(bindingFails)throw new Error('Target configuration unavailable');return targetBinding;});
+  const actions:Array<Record<string,unknown>>=[];
+  let notify:((event:{stream:string})=>void)|undefined;
+  const kernel={onAgentRuntimeEvent:(listener:typeof notify)=>{notify=listener;return()=>{};},agentRuntimeRequest:vi.fn(async(_method:string,params:{command:Record<string,unknown>})=>{
+    const c=params.command;actions.push(c);
+    if(c.action==='settings')return {revision:1,defaultAgent:null,agents:[targetBinding.configuration]};
+    if(c.action==='child_list')return [structuredClone(child)];
+    if(['cleanup_list','list','arrangement_pending'].includes(String(c.action)))return [];
+    if(c.action==='read')return {conversation:{id:child.conversation_id,needsReview:false},turns:child.turn_id?[{id:child.turn_id,status:'completed'}]:[],items:[]};
+    if(c.action==='child_source'){child={...child,source:c.source};return structuredClone(child);}
+    if(c.action==='create')return c;
+    if(c.action==='child_input')return {text:'Original accepted task',_launch:targetBinding};
+    if(c.action==='admit')return {id:'accepted-turn'};
+    if(c.action==='child_link'){child={...child,turn_id:'accepted-turn'};return child;}
+    if(c.action==='child_finish'){child={...child,report:{},resources_released:c.released===true,receipt_published:true};return child;}
+    throw new Error(`Unexpected product action ${String(c.action)}`);
+  })} as unknown as KernelClient;
+  const resolveWorkspace=vi.fn(async()=>{throw new Error('Coordinator workspace must not be resolved');});
+  const service=new ExternalAgentsService({kernel,directory,resolveWorkspace,spawn:vi.fn() as never,
+    managed:()=>({coordinatorHostId:'coordinator',source:async()=>({externalBinding}) as never})});
+  cleanups.push(()=>service.close());service.startChildren(sources);
+  await vi.waitFor(()=>expect(actions.some(c=>c.action===(bindingFails?'child_finish':'child_link'))).toBe(true));
+  expect(sources.prepare).toHaveBeenCalledOnce();
+  expect(externalBinding).toHaveBeenCalledWith(expect.objectContaining({configurationId:'fixture',harness:'codex',source:expect.objectContaining({resource_owner:resourceOwner})}),expect.any(AbortSignal));
+  expect(resolveWorkspace).not.toHaveBeenCalled();expect(await fs.readdir(directory)).toEqual([]);
+  if(bindingFails){
+    expect(sources.release).toHaveBeenCalledOnce();expect(sources.remove).toHaveBeenCalledWith(expect.objectContaining({source:prepared}),true);
+    expect(actions.find(c=>c.action==='child_finish')).toMatchObject({released:true,failure:'Target configuration unavailable'});
+    expect(actions.some(c=>c.action==='create')).toBe(false);
+  }else{
+    expect(actions.find(c=>c.action==='child_source')).toMatchObject({source:{executionBinding:{configurationIdentity:'frozen-target-config',launch:{command:'target-only-program',args:['target-profile']}}}});
+    expect(actions.find(c=>c.action==='create')).toMatchObject({cwd:prepared.cwd,executionSource:{resource_owner:resourceOwner}});
+    notify!({stream:'durable'});
+    await vi.waitFor(()=>expect(sources.release,JSON.stringify(actions)).toHaveBeenCalledOnce());
+    expect(sources.remove).not.toHaveBeenCalled();
+  }
+});

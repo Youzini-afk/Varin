@@ -52,9 +52,17 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 94；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 96；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
 Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
+
+项目登记仍由当前 Application Host 的 Settings 保存，同一 Host 的客户端共享这份配置；
+Catalog 中按可信 principal 隔离的会话分类只引用项目 ID，不把项目设置变成用户私有副本。
+`ProjectEntry.source` 引用原 `SourceResourceOwner` 与目标 Documents 的 workspace ID，缺省仍表示本机。
+来源绑定保留 Host、连接与 endpoint 身份；相同名称、目录字符串或 workspace ID 不跨 Host 合并。
+远端项目的文件、准备和执行回执沿原 managed-host 资源 owner，导航不持有凭据或文件副本。
+远端项目的模型默认值由协调 Host 的原 AgentSettingsService 按登记项目 ID 管理，不读取同名本机目录；
+这与目标设备自己的项目文件配置分别归属，见[项目与来源](workbench.md#项目登记与跨设备来源)。
 
 ## 受理、执行与观察
 
@@ -92,7 +100,10 @@ Thread/worktree 保留，供核对和后续处理。
 ## 数据与交付
 
 内部结构可以继续演进，由原存储 owner 在打开时自动升级已支持的旧版本，业务读取与执行随后使用当前结构。
-Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94，以及独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94；可从任一已支持的旧格式打开。
+Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96，以及独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96；可从任一已支持的旧格式打开。
+94 → 95 增加按可信主体分区的共享会话组织：混合容器、会话位置、局部排序代际、稳定受理回执与初始化代际。95 → 96 在原升级事务中区分明确位置和执行父任务的位置继承，保留已有分类、稳定引用与受理回执；恢复旧位置仍提交新的单调版本，不回退版本号。
+升级仅增加原 Catalog 结构并与格式号原子提交，不重建 Thread、分支、短引用、历史或已受理执行，不移动文件。
+初始项目来自成功读取的原 Settings 文档，损坏／不可读不等于空列表；第一次访问不会认领其他主体或旧公开会话。
 84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
 85 → 86 允许明确 User 派发保留空工具来源，并增加原子任务报告身份；旧工具派发正文和回执保持不变，不回放执行效果。
 86 → 87 为原 Thread/Run 及派生执行保存可信认证主体。Host 首次初始化时固定旧记录归属策略，之后启用认证不会自动认领原公开工作；该升级不重放执行。

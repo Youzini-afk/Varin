@@ -1,5 +1,5 @@
 import { createScheduledTasksHttpAPI } from '@varin/application-client';
-import { createAgentProfilesHttpAPI, createThreadsHttpAPI, createBotsHttpAPI } from '@varin/application-client';
+import { createConversationOrganizationHttpAPI, createAgentProfilesHttpAPI, createThreadsHttpAPI, createBotsHttpAPI } from '@varin/application-client';
 import type { RuntimeAPIs } from '@varin/application-client';
 import {
   createRuntimeUrlResolver,
@@ -52,6 +52,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   return {
     runtime: { platform: 'web', isDesktop: false, label: 'web' },
     threads: createThreadsHttpAPI(),
+    conversationOrganization: createConversationOrganizationHttpAPI(),
     bots: createBotsHttpAPI(),
     agentProfiles: createAgentProfilesHttpAPI(),
     schedules: createScheduledTasksHttpAPI(),

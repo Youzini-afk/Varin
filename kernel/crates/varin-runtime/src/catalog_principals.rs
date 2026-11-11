@@ -330,6 +330,7 @@ mod tests {
         create(&mut c, "legacy", None);
         let receipt = submit(&mut c, "legacy");
         followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
+        crate::catalog::organization::remove_for_legacy_fixture(&c.db);
         c.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id; DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id'); PRAGMA user_version=86;").unwrap();
         drop(c);
         let mut c = f.open();
@@ -371,6 +372,7 @@ mod tests {
         c.initialize_principals("alice", true).unwrap();
         create(&mut c, "private", Some("alice"));
         let receipt = submit(&mut c, "private");
+        crate::catalog::organization::remove_for_legacy_fixture(&c.db);
         c.db.pragma_update(None, "user_version", 86).unwrap();
         let before: String =
             c.db.query_row(

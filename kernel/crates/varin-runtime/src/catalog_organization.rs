@@ -123,6 +123,17 @@ pub struct MoveItem {
     pub expected_parent_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RestoreItem {
+    pub object: OrganizationObject,
+    pub expected_revision: u64,
+    pub expected_parent_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub before: Option<OrganizationObject>,
+    #[serde(default)]
+    pub inherit: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(
     tag = "action",
     rename_all = "snake_case",
@@ -145,15 +156,27 @@ pub enum OrganizationOperation {
         id: String,
         expected_revision: u64,
         name: Option<String>,
-        #[serde(default, skip_serializing_if="Option::is_none", deserialize_with="principals::optional_principal")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "principals::optional_principal"
+        )]
         icon: Option<Option<String>>,
-        #[serde(default, skip_serializing_if="Option::is_none", deserialize_with="principals::optional_principal")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "principals::optional_principal"
+        )]
         color: Option<Option<String>>,
     },
     Move {
         items: Vec<MoveItem>,
         parent_id: Option<String>,
         before: Option<OrganizationObject>,
+        parents: Vec<ParentVersion>,
+    },
+    Restore {
+        items: Vec<RestoreItem>,
         parents: Vec<ParentVersion>,
     },
     Dissolve {
@@ -184,6 +207,16 @@ pub struct OrganizationReceipt {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreationDefaults {
     pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<CreationSource>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreationSource {
+    pub resource_owner: launches::SourceResourceOwner,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -205,6 +238,15 @@ pub struct OrganizationInitialization {
 }
 
 pub(super) fn initialize(db: &Connection) -> Result<()> {
+    initialize_95(db)?;
+    upgrade_95(db)
+}
+pub(super) fn upgrade_95(db: &Connection) -> Result<()> {
+    db.execute_batch("ALTER TABLE organization_positions ADD COLUMN is_explicit INTEGER NOT NULL DEFAULT 1 CHECK(is_explicit IN(0,1));")?;
+    Ok(())
+}
+/// Published foundation generation. Never reconstruct a different schema under its marker.
+pub(super) fn initialize_95(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE organization_spaces(scope TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0,root_revision INTEGER NOT NULL DEFAULT 0,initialization TEXT);
         CREATE TABLE organization_retired_containers(scope TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(scope,id));
         CREATE TABLE organization_containers(scope TEXT NOT NULL,id TEXT NOT NULL,parent_id TEXT,sort_order INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id));
@@ -215,7 +257,7 @@ pub(super) fn initialize(db: &Connection) -> Result<()> {
         CREATE TABLE organization_commands(scope TEXT NOT NULL,key TEXT NOT NULL,intent TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(scope,key));")?;
     Ok(())
 }
-pub(super) fn check_format(db: &Connection) -> Result<()> {
+pub(super) fn check_format(db: &Connection, version: i64) -> Result<()> {
     db.prepare("SELECT scope,revision,root_revision,initialization FROM organization_spaces")?;
     db.prepare("SELECT scope,id,parent_id,sort_order,body FROM organization_containers")?;
     db.prepare(
@@ -223,7 +265,55 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     )?;
     db.prepare("SELECT scope,key,intent,receipt FROM organization_commands")?;
     db.prepare("SELECT scope,id FROM organization_retired_containers")?;
-    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM organization_containers c LEFT JOIN organization_spaces s ON s.scope=c.scope WHERE s.scope IS NULL OR c.sort_order<0 OR NOT json_valid(c.body) OR c.id!=json_extract(c.body,'$.id') OR c.parent_id IS NOT json_extract(c.body,'$.parentId') OR c.sort_order!=json_extract(c.body,'$.order') OR json_extract(c.body,'$.revision')<1 OR (c.parent_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM organization_containers p WHERE p.scope=c.scope AND p.id=c.parent_id))) OR EXISTS(SELECT 1 FROM organization_positions p WHERE p.kind NOT IN('native','external') OR p.revision<1 OR p.sort_order<0 OR (p.container_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM organization_containers c WHERE c.scope=p.scope AND c.id=p.container_id)))",[],|r|r.get(0))?;
+    for (table, expected) in [
+        ("organization_spaces", vec!["scope"]),
+        ("organization_containers", vec!["scope", "id"]),
+        ("organization_positions", vec!["scope", "kind", "id"]),
+        ("organization_commands", vec!["scope", "key"]),
+        ("organization_retired_containers", vec!["scope", "id"]),
+    ] {
+        let mut keys = db
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, u32>(5)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        keys.retain(|(_, position)| *position > 0);
+        keys.sort_by_key(|(_, position)| *position);
+        if keys
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            != expected
+        {
+            return Err(RuntimeError::Invalid(
+                "organization identity constraints are missing; assets preserved".into(),
+            ));
+        }
+    }
+    let indexes:u32=db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN('organization_project_identity','organization_container_parent','organization_position_parent')",[],|r|r.get(0))?;
+    if indexes != 3 {
+        return Err(RuntimeError::Invalid(
+            "organization indexes are missing; assets preserved".into(),
+        ));
+    }
+    let has_inheritance:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('organization_positions') WHERE name='is_explicit')",[],|r|r.get(0))?;
+    if has_inheritance != (version >= 96) {
+        return Err(RuntimeError::Invalid(
+            "organization inheritance schema does not match its published format; assets preserved"
+                .into(),
+        ));
+    }
+    if has_inheritance {
+        let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM organization_positions WHERE is_explicit NOT IN(0,1) OR (is_explicit=0 AND container_id IS NOT NULL))",[],|r|r.get(0))?;
+        if invalid {
+            return Err(RuntimeError::Invalid(
+                "invalid inherited organization position; assets preserved".into(),
+            ));
+        }
+    }
+
+    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM organization_containers c LEFT JOIN organization_spaces s ON s.scope=c.scope WHERE s.scope IS NULL OR c.sort_order<0 OR NOT json_valid(c.body) OR c.id!=json_extract(c.body,'$.id') OR c.parent_id IS NOT json_extract(c.body,'$.parentId') OR c.sort_order!=json_extract(c.body,'$.order') OR json_extract(c.body,'$.revision')<1 OR (c.parent_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM organization_containers p WHERE p.scope=c.scope AND p.id=c.parent_id))) OR EXISTS(SELECT 1 FROM organization_positions p WHERE NOT EXISTS(SELECT 1 FROM organization_spaces s WHERE s.scope=p.scope) OR p.kind NOT IN('native','external') OR p.revision<1 OR p.sort_order<0 OR (p.container_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM organization_containers c WHERE c.scope=p.scope AND c.id=p.container_id)))",[],|r|r.get(0))?;
     if invalid {
         return Err(RuntimeError::Invalid(
             "invalid conversation organization; assets preserved".into(),
@@ -322,13 +412,22 @@ fn explicit_position(
     scope: &str,
     r: &ConversationRef,
 ) -> Result<Option<Position>> {
-    Ok(db.query_row("SELECT container_id,sort_order,revision FROM organization_positions WHERE scope=?1 AND kind=?2 AND id=?3",params![scope,r.kind(),r.id()],|row|Ok(Position{conversation:r.clone(),container_id:row.get(0)?,order:read_number(row,1)?,revision:read_number(row,2)?,explicit:true,inherited_from:None})).optional()?)
+    Ok(db.query_row("SELECT container_id,sort_order,revision FROM organization_positions WHERE scope=?1 AND kind=?2 AND id=?3 AND is_explicit=1",params![scope,r.kind(),r.id()],|row|Ok(Position{conversation:r.clone(),container_id:row.get(0)?,order:read_number(row,1)?,revision:read_number(row,2)?,explicit:true,inherited_from:None})).optional()?)
 }
 fn position(db: &Connection, scope: &str, r: &ConversationRef) -> Result<Position> {
     if let Some(p) = explicit_position(db, scope, r)? {
         return Ok(p);
     }
-    let mut next = original_parent(db, r)?;
+    let own_revision = db
+        .query_row(
+            "SELECT revision FROM organization_positions WHERE scope=?1 AND kind=?2 AND id=?3",
+            params![scope, r.kind(), r.id()],
+            |r| read_number(r, 0),
+        )
+        .optional()?
+        .unwrap_or(0);
+    let immediate_parent = original_parent(db, r)?;
+    let mut next = immediate_parent.clone();
     let mut seen = BTreeSet::from([r.clone()]);
     while let Some(parent) = next {
         if !seen.insert(parent.clone()) {
@@ -348,9 +447,9 @@ fn position(db: &Connection, scope: &str, r: &ConversationRef) -> Result<Positio
                 conversation: r.clone(),
                 container_id: p.container_id,
                 order: p.order,
-                revision: 0,
+                revision: own_revision,
                 explicit: false,
-                inherited_from: Some(parent),
+                inherited_from: immediate_parent.clone(),
             });
         }
         next = original_parent(db, &parent)?;
@@ -359,13 +458,19 @@ fn position(db: &Connection, scope: &str, r: &ConversationRef) -> Result<Positio
         conversation: r.clone(),
         container_id: None,
         order: 0,
-        revision: 0,
+        revision: own_revision,
         explicit: false,
-        inherited_from: original_parent(db, r)?,
+        inherited_from: immediate_parent,
     })
 }
-fn save_position(db:&Connection,scope:&str,p:&Position)->Result<()> {
-    db.execute("INSERT INTO organization_positions(scope,kind,id,container_id,sort_order,revision) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(scope,kind,id) DO UPDATE SET container_id=excluded.container_id,sort_order=excluded.sort_order,revision=excluded.revision",params![scope,p.conversation.kind(),p.conversation.id(),p.container_id,sql_number(p.order)?,sql_number(p.revision)?])?;Ok(())
+fn save_position(db: &Connection, scope: &str, p: &Position) -> Result<()> {
+    let parent = if p.explicit {
+        p.container_id.as_deref()
+    } else {
+        None
+    };
+    db.execute("INSERT INTO organization_positions(scope,kind,id,container_id,sort_order,revision,is_explicit) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(scope,kind,id) DO UPDATE SET container_id=excluded.container_id,sort_order=excluded.sort_order,revision=excluded.revision,is_explicit=excluded.is_explicit",params![scope,p.conversation.kind(),p.conversation.id(),parent,sql_number(p.order)?,sql_number(p.revision)?,p.explicit])?;
+    Ok(())
 }
 fn parent_revision(db: &Connection, scope: &str, parent: Option<&str>) -> Result<u64> {
     match parent {
@@ -436,7 +541,7 @@ fn siblings(db: &Connection, scope: &str, parent: Option<&str>) -> Result<Vec<Or
             ));
         }
     }
-    let rows=db.prepare("SELECT kind,id,sort_order FROM organization_positions WHERE scope=?1 AND container_id IS ?2")?.query_map(params![scope,parent],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,read_number(r,2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+    let rows=db.prepare("SELECT kind,id,sort_order FROM organization_positions WHERE scope=?1 AND container_id IS ?2 AND is_explicit=1")?.query_map(params![scope,parent],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,read_number(r,2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
     for (kind, id, order) in rows {
         let o = if kind == "native" {
             OrganizationObject::Native { id: id.clone() }
@@ -581,7 +686,14 @@ impl Catalog {
                 }
                 check_parents(&tx, &scope, &parents, &BTreeSet::from([parent_id.clone()]))?;
                 path(&tx, &scope, parent_id.as_deref())?;
-                if let Some(project)=&project_id {let existing:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM organization_containers WHERE scope=?1 AND json_extract(body,'$.projectId')=?2)",params![scope,project],|r|r.get(0))?;if existing{return Err(RuntimeError::Conflict("project already has a formal organization entry".into()));}}
+                if let Some(project) = &project_id {
+                    let existing:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM organization_containers WHERE scope=?1 AND json_extract(body,'$.projectId')=?2)",params![scope,project],|r|r.get(0))?;
+                    if existing {
+                        return Err(RuntimeError::Conflict(
+                            "project already has a formal organization entry".into(),
+                        ));
+                    }
+                }
                 match kind {
                     ContainerKind::Group => {
                         if name.as_deref().is_none_or(|n| n.trim().is_empty())
@@ -650,10 +762,10 @@ impl Catalog {
                     c.name = Some(name);
                 }
                 if let Some(icon) = icon {
-                    c.icon = icon.filter(|value|!value.is_empty());
+                    c.icon = icon.filter(|value| !value.is_empty());
                 }
                 if let Some(color) = color {
-                    c.color = color.filter(|value|!value.is_empty());
+                    c.color = color.filter(|value| !value.is_empty());
                 }
                 c.revision += 1;
                 save_container(&tx, &scope, &c)?;
@@ -731,6 +843,132 @@ impl Catalog {
                     }
                 }
                 reorder(&tx, &scope, &order)?;
+                for parent in affected {
+                    bump_parent(&tx, &scope, parent.as_deref())?;
+                }
+            }
+            OrganizationOperation::Restore { items, parents } => {
+                if items.is_empty() {
+                    return Err(RuntimeError::Invalid("restore selection is empty".into()));
+                }
+                let mut selected = BTreeSet::new();
+                let mut affected = BTreeSet::new();
+                for item in &items {
+                    if !selected.insert(encode(&item.object)?) {
+                        return Err(RuntimeError::Invalid("duplicate restore selection".into()));
+                    }
+                    path(&tx, &scope, item.parent_id.as_deref())?;
+                    let (revision, parent) = match &item.object {
+                        OrganizationObject::Container { id } => {
+                            if item.inherit {
+                                return Err(RuntimeError::Invalid(
+                                    "containers cannot inherit execution placement".into(),
+                                ));
+                            }
+                            let c = container(&tx, &scope, id)?;
+                            (c.revision, c.parent_id)
+                        }
+                        _ => {
+                            let reference = object_reference(&item.object).unwrap();
+                            require_conversation(&tx, principal, &reference)?;
+                            let p = position(&tx, &scope, &reference)?;
+                            if item.inherit {
+                                if item.before.is_some() {
+                                    return Err(RuntimeError::Invalid(
+                                        "inherited tasks have no independent sibling anchor".into(),
+                                    ));
+                                }
+                                let original=original_parent(&tx,&reference)?.ok_or_else(||RuntimeError::Invalid("only original subtasks can restore inherited placement".into()))?;
+                                let owner = match &original {
+                                    ConversationRef::Native { id } => principals::thread(&tx, id)?,
+                                    ConversationRef::External { .. } => None,
+                                };
+                                if owner.as_deref() != principal
+                                    || direct_bot(&tx, &original)?.is_some()
+                                {
+                                    return Err(RuntimeError::Invalid(
+                                        "main tasks retain their independently admitted placement"
+                                            .into(),
+                                    ));
+                                }
+                            }
+                            (p.revision, p.container_id)
+                        }
+                    };
+                    if revision != item.expected_revision || parent != item.expected_parent_id {
+                        return Err(RuntimeError::Conflict(
+                            "restore object changed after the original move".into(),
+                        ));
+                    }
+                    affected.insert(parent);
+                    affected.insert(item.parent_id.clone());
+                }
+                check_parents(&tx, &scope, &parents, &affected)?;
+                for item in &items {
+                    if let Some(anchor) = &item.before {
+                        if selected.contains(&encode(anchor)?) {
+                            return Err(RuntimeError::Invalid(
+                                "restore anchor must be an unselected sibling".into(),
+                            ));
+                        }
+                    }
+                }
+                for item in &items {
+                    match &item.object {
+                        OrganizationObject::Container { id } => {
+                            let mut c = container(&tx, &scope, id)?;
+                            c.parent_id = item.parent_id.clone();
+                            c.revision += 1;
+                            save_container(&tx, &scope, &c)?;
+                        }
+                        _ => {
+                            let reference = object_reference(&item.object).unwrap();
+                            save_position(
+                                &tx,
+                                &scope,
+                                &Position {
+                                    conversation: reference.clone(),
+                                    container_id: item.parent_id.clone(),
+                                    order: 0,
+                                    revision: item.expected_revision + 1,
+                                    explicit: !item.inherit,
+                                    inherited_from: None,
+                                },
+                            )?;
+                            moved.push(reference);
+                        }
+                    }
+                }
+                // Validate the candidate graph, including cycles introduced by multiple mutually
+                // dependent moves and parents whose own effective placement changed in this batch.
+                for item in &items {
+                    match &item.object {
+                        OrganizationObject::Container { id } => {
+                            path(&tx, &scope, Some(id))?;
+                        }
+                        _ if item.inherit => {
+                            let p =
+                                position(&tx, &scope, &object_reference(&item.object).unwrap())?;
+                            if p.container_id != item.parent_id {
+                                return Err(RuntimeError::Conflict(
+                                    "original task's effective placement changed".into(),
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for parent in &affected {
+                    let mut order = siblings(&tx, &scope, parent.as_deref())?;
+                    order.retain(|object| !items.iter().any(|item| &item.object == object));
+                    for item in items
+                        .iter()
+                        .filter(|item| !item.inherit && &item.parent_id == parent)
+                    {
+                        insert_at(&mut order, vec![item.object.clone()], item.before.as_ref())?;
+                    }
+                    reorder(&tx, &scope, &order)?;
+                }
                 for parent in affected {
                     bump_parent(&tx, &scope, parent.as_deref())?;
                 }
@@ -922,7 +1160,8 @@ impl Catalog {
         principal: Option<&str>,
         query: OrganizationQuery,
     ) -> Result<OrganizationSnapshot> {
-        snapshot(&self.db, principal, query)
+        let read = self.db.unchecked_transaction()?;
+        snapshot(&read, principal, query)
     }
 }
 fn direct_bot(db: &Connection, r: &ConversationRef) -> Result<Option<String>> {
@@ -1006,6 +1245,200 @@ struct PageCursor {
     query: OrganizationQuery,
     offset: u64,
 }
+/// Ephemeral metadata projection for one Catalog read. No content bodies, secondary
+/// writer or persistent cache: every map is built from this read's SQLite snapshot.
+struct DirectoryMetadata {
+    owners: BTreeSet<String>,
+    parents: BTreeMap<ConversationRef, ConversationRef>,
+    bots: BTreeMap<String, String>,
+    positions: BTreeMap<ConversationRef, Position>,
+    effective: BTreeMap<ConversationRef, (Option<String>, u64)>,
+    origin_bots: BTreeMap<ConversationRef, Option<String>>,
+    paths: BTreeMap<String, Vec<String>>,
+}
+impl DirectoryMetadata {
+    fn load(
+        db: &Connection,
+        principal: Option<&str>,
+        scope: &str,
+        containers: &[Container],
+    ) -> Result<Self> {
+        let owners = db
+            .prepare("SELECT id FROM threads WHERE principal_id IS ?1")?
+            .query_map([principal], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        let native = db.prepare("SELECT c.child_thread_id,json_extract(c.body,'$.parent_thread_id') FROM child_tasks c JOIN threads t ON t.id=c.child_thread_id WHERE t.principal_id IS ?1 ORDER BY c.rowid")?.query_map([principal], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let external = db.prepare("SELECT e.id,json_extract(c.body,'$.parent_thread_id') FROM external_children c JOIN external_conversations e ON e.id=json_extract(c.body,'$.conversation_id') WHERE json_extract(e.body,'$.principalId') IS ?1 AND json_extract(c.body,'$.dispatch_operation_id') IS NULL AND json_extract(c.body,'$.message_kind') IS NULL ORDER BY c.rowid")?.query_map([principal], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut parents = BTreeMap::new();
+        // Preserve the original first relation, including a null first parent.
+        let mut seen = BTreeSet::new();
+        for (r, parent) in native
+            .into_iter()
+            .map(|(id, p)| (ConversationRef::Native { id }, p))
+            .chain(
+                external
+                    .into_iter()
+                    .map(|(id, p)| (ConversationRef::External { id }, p)),
+            )
+        {
+            if seen.insert(r.clone()) {
+                if let Some(id) = parent {
+                    parents.insert(r, ConversationRef::Native { id });
+                }
+            }
+        }
+        let bots=db.prepare("SELECT b.thread_id,b.bot_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id WHERE t.principal_id IS ?1")?.query_map([principal],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
+        let rows=db.prepare("SELECT kind,id,container_id,sort_order,revision,is_explicit FROM organization_positions WHERE scope=?1")?.query_map([scope],|r|{
+            let kind:String=r.get(0)?;let id:String=r.get(1)?;
+            let conversation=if kind=="native" {ConversationRef::Native{id}} else {ConversationRef::External{id}};
+            Ok((conversation.clone(),Position{conversation,container_id:r.get(2)?,order:read_number(r,3)?,revision:read_number(r,4)?,explicit:r.get(5)?,inherited_from:None}))
+        })?.collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
+        let by_id: BTreeMap<_, _> = containers.iter().map(|c| (c.id.clone(), c)).collect();
+        let mut paths: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for container in containers {
+            let mut next = Some(container.id.clone());
+            let mut chain = Vec::new();
+            let mut seen = BTreeSet::new();
+            let mut prefix = Vec::new();
+            while let Some(id) = next {
+                if let Some(path) = paths.get(&id) {
+                    prefix = path.clone();
+                    break;
+                }
+                if !seen.insert(id.clone()) {
+                    return Err(RuntimeError::Conflict("container ancestor cycle".into()));
+                }
+                let c = by_id
+                    .get(&id)
+                    .ok_or_else(|| RuntimeError::NotFound("organization container".into()))?;
+                chain.push(id);
+                next = c.parent_id.clone();
+            }
+            for id in chain.into_iter().rev() {
+                prefix.push(id.clone());
+                paths.insert(id, prefix.clone());
+            }
+        }
+        Ok(Self {
+            owners,
+            parents,
+            bots,
+            positions: rows,
+            effective: BTreeMap::new(),
+            origin_bots: BTreeMap::new(),
+            paths,
+        })
+    }
+    fn owns(&self, r: &ConversationRef) -> bool {
+        match r {
+            ConversationRef::Native { id } => self.owners.contains(id),
+            ConversationRef::External { .. } => false,
+        }
+    }
+    fn effective_position(&mut self, r: &ConversationRef) -> Result<(Option<String>, u64)> {
+        let mut next = r.clone();
+        let mut chain = Vec::new();
+        let mut seen = BTreeSet::new();
+        let base = loop {
+            if let Some(p) = self.effective.get(&next) {
+                break p.clone();
+            }
+            if !seen.insert(next.clone()) {
+                return Err(RuntimeError::Invalid("conversation parent cycle".into()));
+            }
+            chain.push(next.clone());
+            if let Some(p) = self.positions.get(&next).filter(|p| p.explicit) {
+                break (p.container_id.clone(), p.order);
+            }
+            match self.parents.get(&next) {
+                Some(parent) if self.owns(parent) => next = parent.clone(),
+                _ => break (None, 0),
+            }
+        };
+        for node in chain {
+            self.effective.insert(node, base.clone());
+        }
+        Ok(base)
+    }
+    fn ancestor_bot(&mut self, r: &ConversationRef) -> Result<Option<String>> {
+        let mut next = self.parents.get(r).cloned();
+        let mut chain = Vec::new();
+        let mut seen = BTreeSet::new();
+        let bot = loop {
+            let Some(node) = next else { break None };
+            if !self.owns(&node) {
+                break None;
+            }
+            if !seen.insert(node.clone()) {
+                return Err(RuntimeError::Invalid("origin ancestry cycle".into()));
+            }
+            if let Some(bot) = self.origin_bots.get(&node) {
+                break bot.clone();
+            }
+            chain.push(node.clone());
+            if let ConversationRef::Native { id } = &node {
+                if let Some(bot) = self.bots.get(id) {
+                    break Some(bot.clone());
+                }
+            }
+            next = self.parents.get(&node).cloned();
+        };
+        for node in chain {
+            self.origin_bots.insert(node, bot.clone());
+        }
+        Ok(bot)
+    }
+    fn entry(
+        &mut self,
+        r: ConversationRef,
+        title: String,
+        archived: bool,
+        pinned: bool,
+        revision: u64,
+    ) -> Result<ConversationEntry> {
+        let (container_id, order) = self.effective_position(&r)?;
+        let own = self.positions.get(&r);
+        let explicit = own.is_some_and(|p| p.explicit);
+        let position = Position {
+            conversation: r.clone(),
+            container_id: container_id.clone(),
+            order,
+            revision: own.map(|p| p.revision).unwrap_or(0),
+            explicit,
+            inherited_from: if explicit {
+                None
+            } else {
+                self.parents.get(&r).cloned()
+            },
+        };
+        let path = match container_id {
+            Some(id) => self
+                .paths
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| RuntimeError::NotFound("organization container".into()))?,
+            None => Vec::new(),
+        };
+        let origin = Origin {
+            bot_id: self.ancestor_bot(&r)?,
+            conversation: self.parents.get(&r).cloned(),
+            direct_bot_id: match &r {
+                ConversationRef::Native { id } => self.bots.get(id).cloned(),
+                _ => None,
+            },
+        };
+        Ok(ConversationEntry {
+            conversation: r,
+            title,
+            archived,
+            pinned,
+            revision,
+            position,
+            path,
+            origin,
+        })
+    }
+}
 fn snapshot(
     db: &Connection,
     principal: Option<&str>,
@@ -1035,21 +1468,15 @@ fn snapshot(
                 .map_err(|_| RuntimeError::Invalid("invalid organization continuation".into()))
         })
         .transpose()?;
-    let mut refs = Vec::new();
-    let native=db.prepare("SELECT t.id FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.principal_id IS ?1 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-    refs.extend(native.into_iter().map(|id| ConversationRef::Native { id }));
-    let external=db.prepare("SELECT id FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-    refs.extend(
-        external
-            .into_iter()
-            .map(|id| ConversationRef::External { id }),
-    );
+    let mut metadata = db.prepare("SELECT t.id,t.title,t.archived,t.pinned,t.revision FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.principal_id IS ?1 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|Ok((ConversationRef::Native{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+    metadata.extend(db.prepare("SELECT id,coalesce(json_extract(body,'$.title'),''),coalesce(json_extract(body,'$.archived'),0),coalesce(json_extract(body,'$.pinned'),0),coalesce(json_extract(body,'$.revision'),1) FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|Ok((ConversationRef::External{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?);
     let all_containers = containers(db, &scope)?;
+    let mut directory = DirectoryMetadata::load(db, principal, &scope, &all_containers)?;
     let by_id: BTreeMap<_, _> = all_containers.iter().map(|c| (&c.id, c)).collect();
     let search = query.query.as_ref().map(|s| s.to_lowercase());
     let mut entries = Vec::new();
-    for r in refs {
-        let entry = conversation(db, principal, &r)?;
+    for (r, title, archived, pinned, revision) in metadata {
+        let entry = directory.entry(r, title, archived, pinned, revision)?;
         if (query.archived.as_deref().unwrap_or("exclude") == "exclude" && entry.archived)
             || (query.archived.as_deref() == Some("only") && !entry.archived)
         {
@@ -1095,14 +1522,28 @@ fn snapshot(
     // Freeze the actual directory projection, not unrelated model/run activity or a different
     // principal's global event cursor. Each continuation rechecks the current visible facts.
     use sha2::Digest;
-    let relevant_containers=all_containers.iter().filter(|c| {
-        if let Some(parent)=query.container_id.as_ref() {
-            c.id==*parent || c.parent_id.as_ref()==Some(parent) || (query.recursive && path(db,&scope,Some(&c.id)).is_ok_and(|path|path.contains(parent)))
-        } else if query.root_only && !query.recursive {c.parent_id.is_none()} else {true}
-    }).collect::<Vec<_>>();
-    let root_generation=if query.container_id.is_none(){Some(root_revision)}else{None};
+    let relevant_containers = all_containers
+        .iter()
+        .filter(|c| {
+            if let Some(parent) = query.container_id.as_ref() {
+                c.id == *parent
+                    || c.parent_id.as_ref() == Some(parent)
+                    || (query.recursive
+                        && path(db, &scope, Some(&c.id)).is_ok_and(|path| path.contains(parent)))
+            } else if query.root_only && !query.recursive {
+                c.parent_id.is_none()
+            } else {
+                true
+            }
+        })
+        .collect::<Vec<_>>();
+    let root_generation = if query.container_id.is_none() {
+        Some(root_revision)
+    } else {
+        None
+    };
     let generation = hex::encode(sha2::Sha256::digest(
-        encode(&(root_generation,&relevant_containers, &entries))?.as_bytes(),
+        encode(&(root_generation, &relevant_containers, &entries))?.as_bytes(),
     ));
     let offset = if let Some(page) = continuation {
         if page.scope != scope || page.query != query || page.generation != generation {
@@ -1193,8 +1634,23 @@ pub(super) fn admit(
     parent: Option<&ConversationRef>,
     key: &str,
 ) -> Result<()> {
+    admit_with_defaults(tx, principal, reference, placement, parent, key, None)
+}
+fn admit_with_defaults(
+    tx: &Transaction<'_>,
+    principal: Option<&str>,
+    reference: &ConversationRef,
+    placement: Option<&Placement>,
+    parent: Option<&ConversationRef>,
+    key: &str,
+    defaults: Option<&CreationDefaults>,
+) -> Result<()> {
     let scope = scope(principal)?;
-    let intent = encode(&json!({"conversation":reference,"placement":placement,"parent":parent}))?;
+    let mut intent = json!({"conversation":reference,"placement":placement,"parent":parent});
+    if let Some(defaults) = defaults {
+        intent["creationDefaults"] = serde_json::to_value(defaults)?;
+    }
+    let intent = encode(&intent)?;
     let key = format!("admission:{key}");
     if replay(tx, &scope, &key, &intent)?.is_some() {
         return Ok(());
@@ -1233,9 +1689,37 @@ pub(super) fn admit(
                 break;
             }
         }
-        Some(CreationDefaults { project_id })
+        Some(CreationDefaults {
+            project_id,
+            source: None,
+        })
     } else {
         None
+    };
+    let creation_defaults = if let Some(defaults) = defaults {
+        if creation_defaults.as_ref().map(|d| &d.project_id) != Some(&defaults.project_id) {
+            return Err(RuntimeError::Conflict(
+                "creation source defaults no longer match the selected container's project".into(),
+            ));
+        }
+        match (&defaults.project_id, &defaults.source) {
+            (Some(_), Some(source))
+                if source.resource_owner.validate()
+                    && !source.path.trim().is_empty()
+                    && !source.path.contains('\0')
+                    && source
+                        .workspace_id
+                        .as_deref()
+                        .is_none_or(|id| !id.trim().is_empty()) => {}
+            (None, None) => {}
+            _ => return Err(RuntimeError::Invalid(
+                "creation defaults require the registered project's exact source owner and path"
+                    .into(),
+            )),
+        }
+        Some(defaults.clone())
+    } else {
+        creation_defaults
     };
     let positions = if let Some(target) = target {
         let p = Position {
@@ -1319,6 +1803,50 @@ impl Catalog {
         principal: Option<&str>,
         placement: Option<Placement>,
     ) -> Result<()> {
+        self.create_thread_owned_with_defaults(
+            thread_id, branch_id, bot_id, principal, placement, None,
+        )
+    }
+    pub fn create_thread_with_organization_defaults(
+        &mut self,
+        thread_id: &str,
+        branch_id: &str,
+        principal: Option<&str>,
+        placement: Option<Placement>,
+        defaults: Option<CreationDefaults>,
+    ) -> Result<()> {
+        self.create_thread_owned_with_defaults(
+            thread_id, branch_id, None, principal, placement, defaults,
+        )
+    }
+    pub fn create_bot_thread_with_organization_defaults(
+        &mut self,
+        thread_id: &str,
+        branch_id: &str,
+        bot_id: &str,
+        principal: Option<&str>,
+        placement: Option<Placement>,
+        defaults: Option<CreationDefaults>,
+    ) -> Result<()> {
+        let principal = bot::creation_principal(&self.db, thread_id, principal)?;
+        self.create_thread_owned_with_defaults(
+            thread_id,
+            branch_id,
+            Some(bot_id),
+            principal.as_deref(),
+            placement,
+            defaults,
+        )
+    }
+    fn create_thread_owned_with_defaults(
+        &mut self,
+        thread_id: &str,
+        branch_id: &str,
+        bot_id: Option<&str>,
+        principal: Option<&str>,
+        placement: Option<Placement>,
+        defaults: Option<CreationDefaults>,
+    ) -> Result<()> {
         let tx = self.db.transaction()?;
         let existed: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
@@ -1341,7 +1869,7 @@ impl Catalog {
                 ));
             }
         } else {
-            admit(
+            admit_with_defaults(
                 &tx,
                 principal,
                 &ConversationRef::Native {
@@ -1350,6 +1878,7 @@ impl Catalog {
                 placement.as_ref(),
                 None,
                 &format!("create:{thread_id}"),
+                defaults.as_ref(),
             )?;
         }
         tx.commit()?;

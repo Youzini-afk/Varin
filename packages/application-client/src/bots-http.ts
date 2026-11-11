@@ -266,7 +266,7 @@ export function createBotsHttpAPI(): BotsAPI {
     },
     sessions: {
       list: async (id, signal) => array((await request(`${path(id)}/sessions`, 'GET', undefined, signal)).sessions, decodeBotSession),
-      create: async id => decodeBotSession((await request(`${path(id)}/sessions`, 'POST')).session),
+      create: async (id, options) => decodeBotSession((await request(`${path(id)}/sessions`, 'POST', { key: crypto.randomUUID(), ...options })).session),
     },
     memory: {
       clearHistory: async (id, ids) => { await request(`${path(id)}/memory/history/clear`, 'POST', { ids }); },

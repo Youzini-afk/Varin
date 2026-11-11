@@ -1,3 +1,4 @@
+import { withRequestPrincipal } from '../kernel/request-principal.js';
 import { Router, type Express, type NextFunction, type Request, type Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { registerBotRoutes } from './bot-routes.js';
@@ -109,9 +110,9 @@ describe('Bot routes without a network listener', () => {
     const f = fixture();
     const first = await f.call('GET', '/api/harness/bots/bot/activity');
     expect(first).toEqual({ status: 200, body: { botId: 'bot', events: [], participants: [], before: null, eventCursor: 3 } });
-    expect(f.botActivity).toHaveBeenLastCalledWith({ botId: 'bot' });
+    expect(f.botActivity).toHaveBeenLastCalledWith({ botId: 'bot', principalId: null });
     await f.call('GET', '/api/harness/bots/bot/activity?before=40&limit=10');
-    expect(f.botActivity).toHaveBeenLastCalledWith({ botId: 'bot', before: 40, limit: 10 });
+    expect(f.botActivity).toHaveBeenLastCalledWith({ botId: 'bot', principalId: null, before: 40, limit: 10 });
     for (const query of ['before=-1', 'before=abc', 'limit=0', 'limit=1.5']) {
       expect((await f.call('GET', `/api/harness/bots/bot/activity?${query}`)).status).toBe(400);
     }
@@ -136,4 +137,21 @@ describe('Bot routes without a network listener', () => {
     expect((await f.call('POST', '/api/harness/bots/bot/update', { entry })).status).toBe(400);
     expect(f.update).not.toHaveBeenCalled();
   });
+});
+
+it('uses the authenticated Bot reader instead of a renderer-supplied principal selector', async () => {
+  const f = fixture();
+  await withRequestPrincipal('alice', () => f.call('GET', '/api/harness/bots/bot/presence?principalId=bob'));
+  expect(f.botScope).toHaveBeenLastCalledWith('bot', undefined, false, 'alice');
+  await withRequestPrincipal('alice', () => f.call('GET', '/api/harness/bots/bot/activity?principalId=bob'));
+  expect(f.botActivity).toHaveBeenLastCalledWith({ botId: 'bot', principalId: 'alice' });
+});
+
+it('forwards stable Bot session placement and key without accepting caller-selected authority', async () => {
+  const f = fixture(); const options = { key: 'stable-action', organization: { containerId: 'group' } };
+  expect((await f.call('POST', '/api/harness/bots/bot/sessions', options)).status).toBe(200);
+  expect(f.createSession).toHaveBeenLastCalledWith('bot', options);
+  expect((await f.call('POST', '/api/harness/bots/bot/sessions', { ...options, principalId: 'other' })).status).toBe(400);
+  expect((await f.call('POST', '/api/harness/bots/bot/sessions', { ...options, botId: 'other-bot' })).status).toBe(400);
+  expect(f.createSession).toHaveBeenCalledOnce();
 });

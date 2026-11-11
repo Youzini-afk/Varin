@@ -155,6 +155,22 @@ fn same_principal_direct_bots_discover_and_read_without_lending_agent_authority(
         )
         .unwrap();
     assert!(!directory.members.iter().any(|m| m.thread_id == "source"));
+    let related = db
+        .capture_family_read("reader", None, None)
+        .unwrap()
+        .list_page(
+            false,
+            FamilyListQuery {
+                scope: Some("all".into()),
+                ..Default::default()
+            },
+            &|| false,
+        )
+        .unwrap();
+    assert!(
+        related.members.iter().any(|m| m.thread_id == "source"),
+        "archive must not revoke the original family/resource view"
+    );
     let archives = db
         .capture_family_read("reader", None, None)
         .unwrap()

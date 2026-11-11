@@ -14,11 +14,12 @@ export type AttachmentOwnerRequest =
   | { kind: 'attachment_report'; refs: string[]; sourceThreadId?: string; sourceBranchId?: string }
   | { kind: 'attachment_release'; operationId: string; targetThreadId: string; targetBranchId?: string }
   | { kind: 'attachment'; ref: string; view?: 'path' | 'content' | 'bytes'; offset?: number; limit?: number };
-export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest | AttachmentOwnerRequest }
+export interface OrganizationOwnerRequest { kind: 'organization'; operationId: string; action: 'create_bot_conversation' | 'external_metadata' | 'labels' | 'create_conversation'; input: Record<string, unknown> }
+export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest | AttachmentOwnerRequest | OrganizationOwnerRequest }
 export type ResourceToolResult = (AgentResourceRead | ({ status: 'ready' } & Record<string, unknown>)) & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;
 export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string, code?: string): ResourceToolResult {
-  const target = query?.request.kind === 'attachment' ? query.request.ref : query?.request.kind === 'attachment_prepare' || query?.request.kind === 'attachment_release' || query?.request.kind === 'attachment_report' ? '' : query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
+  const target = query?.request.kind === 'organization' ? query.request.operationId : query?.request.kind === 'attachment' ? query.request.ref : query?.request.kind === 'attachment_prepare' || query?.request.kind === 'attachment_release' || query?.request.kind === 'attachment_report' ? '' : query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
     : query?.request.kind === 'skill-resource' ? query.request.relativePath : query?.request.resourceId ?? '';
   return { status, reason, ...(code ? { code } : {}), domainId: 'agent-resources', viewId: snapshotId ?? query?.resourceCheckpointId ?? 'unbound', path: target,
     ...(snapshotId ? { snapshotId } : {}), ...(query ? { resourceCheckpointId: query.resourceCheckpointId } : {}) };
@@ -29,6 +30,7 @@ export function createResourceOwner(options: {
   resources: ThreadResourceScope;
   ui?: InteractiveUiRuntime;
   attachments?: ThreadAttachmentOwner;
+  organization?: (request: OrganizationOwnerRequest, run: Awaited<ReturnType<AgentRuntimeClient['run']>>, signal: AbortSignal) => Promise<Record<string, unknown>>;
 }): ResourceOwner {
   const authority = createAgentResourceAuthority();
   return async (query, signal) => {
@@ -51,6 +53,14 @@ export function createResourceOwner(options: {
           catch { return { status: 'ready', attachment: chunk.attachment, content: { bytesBase64: chunk.bytesBase64, offset: chunk.offset, nextOffset: chunk.nextOffset, byteLength: chunk.attachment.byteLength, eof: chunk.eof } }; }
         }
         return { status: 'ready', ...chunk };
+      }
+      if (query.request.kind === 'organization') {
+        const frozen = await options.runtime.resourceSnapshot({ runId: query.runId, origin: query.origin, callId: query.callId, resourceCheckpointId: query.resourceCheckpointId }, signal);
+        const run = await options.runtime.run(query.runId, signal);
+        if (run.thread_id !== frozen.snapshot.scope.threadId) return resourceQueryFailure('denied', 'Organization invocation belongs to another Thread', query);
+        if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) return resourceQueryFailure('cancelled', 'Organization invocation Run is closed', query);
+        if (!options.organization) return resourceQueryFailure('unavailable', 'Organization lifecycle owner is unavailable', query);
+        return { status: 'ready', ...await options.organization(query.request, run, signal) };
       }
       if (query.request.kind === 'ui') {
         // Original Catalog invocation/checkpoint validation still precedes this domain read.

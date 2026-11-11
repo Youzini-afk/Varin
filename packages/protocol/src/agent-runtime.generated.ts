@@ -3,6 +3,8 @@
 export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory","capsule-sky","pillar-lilac","lozenge-mint","wedge-apricot","arch-butter","oval-rose","squircle-periwinkle","shield-sage","sail-ivory","lean-coral","bridge-aqua","crest-lilac","step-blue","offset-peach","orbit-sage","cushion-ochre","curve-mint","bevel-rose","drift-blue","stack-ivory","tilt-pistachio","fan-coral","mound-lavender","tab-butter","span-jade","ripple-peach","facet-blue","comma-lilac","inset-sage","pocket-rose","rise-ivory","sweep-aqua","bend-ochre","twin-periwinkle","arc-apricot","tuck-jade","plate-lavender","drop-melon","ribbon-blue","cove-sage","terrace-ivory","slide-rose","ramp-mint","echo-ochre","lens-lilac","ledge-aqua","swell-apricot","parcel-periwinkle","scoop-pistachio","beam-coral","chamfer-jade","float-butter"] as const;
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
+export interface OrganizationCreationDefaults { projectId: string | null; source?: {resourceOwner: SourceResourceOwner; path: string; workspaceId?: string | null} }
+
 export interface OrganizationPlacement { containerId: string | null }
 
 export interface KernelTextPolicy {defaultEncoding?:string;files?:Record<string,string>;root?:string;choiceRevisions?:Record<string,number>;}
@@ -24,6 +26,7 @@ export interface BotMatter {
 }
 
 export interface BotMatterUpdate {
+  principalId?: string | null;
   botId: string;
   key: string;
   expectedRevision: number;
@@ -1813,7 +1816,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 90; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 91; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2467,6 +2470,7 @@ export interface ThreadCreateParams {
   branchId: string;
   principalId?: string | null;
   organization?: OrganizationPlacement;
+  creationDefaults?: OrganizationCreationDefaults;
 }
 
 export interface PrincipalInitializeParams {

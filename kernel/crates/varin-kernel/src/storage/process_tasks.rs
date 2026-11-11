@@ -178,6 +178,9 @@ impl Task {
                 if !path_allowed(&grant, &relative) {
                     return Err(KernelError::Authorization("Process cwd scope changed during admission".into()));
                 }
+                if grant.external_transport_id.is_some() {
+                    s.prepare_process_spawn(&t.params, &grant, t.cancellation.clone())?;
+                }
                 s.begin_process_launch(&t.params, &t.root, &cwd, &relative, &canonical, &grant, &held)
             })
         })();
@@ -229,6 +232,20 @@ impl Storage {
         cancellation: Arc<AtomicBool>,
     ) -> Result<Task, KernelError> {
         let params = file_params_value(params);
+        if let Some(transport) = &grant.external_transport_id {
+            let original = self.source_authority_for_grant(&grant.grant_id)?
+                .ok_or_else(|| KernelError::Authorization("External process requires its original source authority".into()))?;
+            let authority = self.source_authority(&crate::source_resources::SourceAuthorityAddress {
+                principal_id:original.principal_id, coordinator_host_id:original.coordinator_host_id,
+                authority_id:original.result.authority_id, resource_epoch:original.result.resource_epoch,
+            }, true, &grant.kernel_epoch)?;
+            if authority.purpose != "external_harness" || authority.result.phase != "ready"
+                || params["processId"].as_str() != Some(transport.as_str())
+                || params["workspaceId"].as_str() != Some(authority.result.source.workspace_id.as_str())
+                || params["rootId"].as_str() != authority.result.physical_root.as_ref().map(|root| root.root_id.as_str()) {
+                return Err(KernelError::Authorization("External process differs from its admitted transport".into()));
+            }
+        }
         let id = params["processId"]
             .as_str()
             .ok_or_else(|| KernelError::Operation("process processId is required".into()))?;

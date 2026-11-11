@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   mergeHarnessSettings, parseHarnessWebSearchSettings, parseHarnessWebSourcePreferences, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
   parseHarnessImageSettings, resolveHarnessDelegationModelSelectionSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
@@ -74,43 +75,56 @@ export class AgentSettingsService {
   readonly #projects = new Map<string, ConfigurationFile<Record<string, JsonValue>>>();
   readonly #listeners = new Set<(scope: 'global' | 'project', cwd: string | undefined, revision: string) => void>();
   readonly #watches = new Map<string, () => void>();
-  constructor(dataDirectory: string, readonly projectTrusted: (cwd: string) => boolean) {
+  constructor(readonly dataDirectory: string, readonly projectTrusted: (cwd: string) => boolean) {
     this.global = new ConfigurationFile(join(dataDirectory, 'agent-settings.json'), validateAgentSettings);
   }
-  #project(cwd: string) {
+  #project(cwd: string, registeredProjectId?: string) {
+    // Remote project defaults are user-authored coordinator configuration. They
+    // do not trust or read a same-named path on this Host or execute remote config.
+    if (registeredProjectId !== undefined) {
+      const key = `registered:${registeredProjectId}`;
+      let file = this.#projects.get(key);
+      if (!file) {
+        const identity = createHash('sha256').update(registeredProjectId).digest('hex');
+        file = new ConfigurationFile(join(this.dataDirectory, 'project-settings', `${identity}.json`), validateAgentSettings);
+        this.#projects.set(key, file);
+      }
+      if (this.#listeners.size && !this.#watches.has(key)) this.#watch(file, 'project', key);
+      return file;
+    }
     let file = this.#projects.get(cwd);
     if (!file) { file = new ConfigurationFile(join(cwd, '.varin', 'settings.json'), validateAgentSettings); this.#projects.set(cwd, file); }
     if (this.#listeners.size && !this.#watches.has(cwd)) this.#watch(file, 'project', cwd);
     return file;
   }
-  async snapshot(cwd?: string): Promise<AgentSettingsSnapshot> {
-    const trusted = cwd !== undefined && this.projectTrusted(cwd);
-    const [global, project] = await Promise.all([this.global.read(), trusted ? this.#project(cwd!).read() : { document: {}, revision: 'unselected' }]);
-    if (trusted && !this.projectTrusted(cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while reading settings', 403);
+  async snapshot(cwd?: string, registeredProjectId?: string): Promise<AgentSettingsSnapshot> {
+    const trusted = registeredProjectId !== undefined || cwd !== undefined && this.projectTrusted(cwd);
+    const [global, project] = await Promise.all([this.global.read(), trusted ? this.#project(cwd ?? '', registeredProjectId).read() : { document: {}, revision: 'unselected' }]);
+    if (trusted && registeredProjectId === undefined && !this.projectTrusted(cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while reading settings', 403);
     return { global: global.document, globalRevision: global.revision, project: project.document, projectRevision: project.revision, projectTrusted: trusted };
   }
   async harness(cwd?: string) {
     const snapshot = await this.snapshot(cwd);
     return mergeHarnessSettings((snapshot.global.harness ?? {}) as HarnessSettingsInput, (snapshot.project.harness ?? {}) as HarnessSettingsInput);
   }
-  async update(input: { cwd?: string; scope: 'global' | 'project'; expectedRevision: string; set: Record<string, JsonValue>; remove: readonly string[] }) {
+  async update(input: { cwd?: string; registeredProjectId?: string; scope: 'global' | 'project'; expectedRevision: string; set: Record<string, JsonValue>; remove: readonly string[] }) {
     if (!['global', 'project'].includes(input.scope) || !object(input.set) || !Array.isArray(input.remove)
       || input.remove.some(key => typeof key !== 'string') || typeof input.expectedRevision !== 'string') throw new ModelConfigurationError('invalid_settings', 'Invalid settings update');
-    if (input.scope === 'project' && (!input.cwd || !this.projectTrusted(input.cwd))) throw new ModelConfigurationError('project_not_trusted', 'Project configuration requires a trusted workspace', 403);
+    if (input.scope === 'project' && input.registeredProjectId === undefined && (!input.cwd || !this.projectTrusted(input.cwd))) throw new ModelConfigurationError('project_not_trusted', 'Project configuration requires a trusted workspace', 403);
     // Resolve contextual layers before the commit; a later observation failure
     // must never hide a successful write or replace its receipt with another edit.
     let observed: AgentSettingsSnapshot;
-    try { observed = await this.snapshot(input.cwd); }
+    try { observed = await this.snapshot(input.cwd, input.registeredProjectId); }
     catch (error) {
       if (input.scope !== 'global' || !input.cwd) throw error;
       // A malformed/unavailable project cannot prevent an independent global edit.
       // Keep that missing observation explicit rather than inventing project defaults.
       observed = { ...await this.snapshot(), effectiveUnavailable: 'Project settings could not be read; effective configuration is unavailable.' };
     }
-    const file = input.scope === 'global' ? this.global : this.#project(input.cwd!);
+    const file = input.scope === 'global' ? this.global : this.#project(input.cwd ?? '', input.registeredProjectId);
     const committed = await file.update(input.expectedRevision, document => {
       const previousMode = permissionMode(document);
-      if (input.scope === 'project' && !this.projectTrusted(input.cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while saving settings', 403);
+      if (input.scope === 'project' && input.registeredProjectId === undefined && !this.projectTrusted(input.cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while saving settings', 403);
       for (const key of input.remove) delete document[key];
       Object.assign(document, input.set);
       assertSupportedPermissionChange(previousMode, document);

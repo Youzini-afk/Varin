@@ -224,7 +224,7 @@ fn live_unknown_or_wrong_principal_entry_never_creates_fallback() {
     )
     .unwrap();
     assert!(matches!(
-        c.resolve_bot_entry("original", "main", "bot"),
+        c.resolve_bot_entry_with_principal("original", "main", "bot", Some("bob")),
         Err(RuntimeError::Conflict(_))
     ));
     assert_eq!(
@@ -366,6 +366,15 @@ fn survivor_requires_the_same_complete_creation_authority_as_original() {
         delete(&mut c, "original");
         c.retire_deleted_threads(&[]).unwrap();
         c.db.execute(corrupt, []).unwrap();
+        if corrupt.contains("principal_id") {
+            // A foreign principal's survivor is not a fallback candidate. Keep it
+            // intact and create a distinct session for the original public scope.
+            let next=c.resolve_bot_entry("original","main","bot").unwrap();
+            assert_ne!(next.thread_id,"survivor");
+            assert_eq!(c.thread_principal(&next.thread_id).unwrap(),None);
+            assert_eq!(c.thread_principal("survivor").unwrap().as_deref(),Some("other"));
+            continue;
+        }
         assert!(matches!(
             c.resolve_bot_entry("original", "main", "bot"),
             Err(RuntimeError::IdentityUnavailable(_) | RuntimeError::Conflict(_))

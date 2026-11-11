@@ -256,3 +256,21 @@ Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回
 
 修改前检查 Git 状态，保留无关用户改动。将有完整证据的阶段提交并在获准后推送，确认远端实际 SHA；没有运行的验证不作
 成功声明。发行、部署和凭据变更继续遵守该操作的授权边界。
+
+### 跨设备项目验证
+
+修改项目接入时同时检查 Settings 归一化与准入、原 SourceDirectory、默认来源冻结、文件主界面和模型配置 owner。
+使用相同路径的本机与两个远端项目验证完整来源身份，不以 Host 标签或 DTO 构造代替远端访问证据。
+覆盖原资源断连、已登记元数据保存、注册成功但分类失败、移除登记后分类待完成及原受理键重试。
+模型配置检查协调 Host 的稳定项目 ID namespace、全局继承和 revision 冲突；本地项目仍走原受信任配置文件。
+
+组件测试可用原 managed resource API 的可控 owner 验证文件与 Documents 请求不回退本机，
+但不能据此声称物理双 Host、远端挂载、连接凭据、跨平台路径及真实编辑交互已经验收。
+workspace adoption、项目 action 和 worktree 的本机管理 API 不自动获得远端能力；验证时区分该管理界面
+确实缺少原 owner API，与既有 managed Source 文件、命令及隔离准备失败，不以统一“不可用”掩盖实际原因。
+
+远端外部 Harness 使用 `managed-transport.native.test.ts` 的两个真实 kernel、回环 HTTP managed 路由和
+目标专有 fixture 程序验证 cwd／程序归属、协议流、原生 session 续接、停止与删除；目标不生成第二份产品会话。
+恢复测试另外覆盖 dispatch 回应丢失、not-started 原 receipt、跨进程身份拒绝和 transport CAS。
+测试环境不能创建 Unix socket／回环监听时，应明确记录未能启动该原生测试，并在具备权限的 CI 执行，
+不能以 mock 结果替代双 Host 运行结论。

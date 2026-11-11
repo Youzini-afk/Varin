@@ -117,6 +117,8 @@ pub(crate) struct Grant {
     pub(crate) run_id: Option<String>,
     /// Independent operation lifetime; run_id remains original attribution.
     pub(crate) operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) external_transport_id: Option<String>,
     pub(crate) owning_workspace: Option<String>,
     pub(crate) execution_workspace: Option<String>,
     pub(crate) storage_identity: String,

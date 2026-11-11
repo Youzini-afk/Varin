@@ -47,3 +47,14 @@ describe("useProjectsStore settings synchronization", () => {
     expect(useProjectsStore.getState().activeProjectId).toBeNull()
   })
 })
+
+
+test('keeps remote identity, folders and offline metadata separate from the same local path', () => {
+  const source = { resourceOwner: { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'connection-b', endpointIdentity: 'endpoint-b' }, workspaceId: 'remote-workspace' };
+  useProjectsStore.getState().synchronizeFromSettings({ activeProjectId: 'remote', projects: [
+    { id: 'local', path: '/same', label: 'Same' },
+    { id: 'remote', path: '/same', additionalPaths: ['~/remote-only'], source, label: 'Same' },
+  ] });
+  expect(useProjectsStore.getState().projects).toHaveLength(2);
+  expect(useProjectsStore.getState().getActiveProject()).toMatchObject({ id: 'remote', path: '/same', additionalPaths: ['~/remote-only'], source });
+});
