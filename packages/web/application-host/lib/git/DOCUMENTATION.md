@@ -24,6 +24,10 @@ view, and maps discovered roots back into that project's navigation space. UI Gi
 carry the frozen owner and selection as cache/navigation metadata, never as executable paths.
 Successful cross-Host replies retain the original operation and distinguish `void` from JSON
 values, including `null`, arrays and primitive results.
+Managed worktree observation and removal match the target Git registry by canonical filesystem
+identity, not the spelling of its porcelain path. Bootstrap observations and removal waits share
+the original Git owner's path-identity key, including Windows separator, case and namespace aliases;
+they do not start another bootstrap or discard its pending/failed receipt.
 
 ## Public API
 

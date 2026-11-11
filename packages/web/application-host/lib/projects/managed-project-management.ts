@@ -7,8 +7,18 @@ import type { DocumentAuthority } from '../documents/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { nativeExecutionWorkspaceId, type NativeProjectLifecycle } from '../kernel/native-workspaces.js';
 import { assertResourcePathAllowed } from '../workspace/resource-access.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { runDirectoryMutation } from '../git/routes.js';
 import * as git from '../git/index.js';
+
+const registeredWorktreePath = async (repository: string, directory: string): Promise<string> => {
+  const identity = async (value: string) => normalizePathIdentity(await canonicalizePathIdentity(value, { allowMissing: true }));
+  const target = await identity(directory);
+  for (const entry of await git.getWorktrees(repository, { strict: true })) {
+    if (await identity(entry.path) === target) return entry.path;
+  }
+  throw new Error('Worktree is not registered with this project repository');
+};
 
 export interface ManagedProjectManagementRequest {
   coordinatorHostId: string;
@@ -93,17 +103,15 @@ export function createManagedProjectManagementOwner(options: { kernel: KernelCli
         return runDirectoryMutation(options.documents, git, directory, () => git.deleteRemoteBranch(directory, command.input), 'git-remote-branch-delete');
       }
       case 'worktree-remove': {
-        const entries = await git.getWorktrees(directory, { strict: true });
-        if (!entries.some(entry => entry.path === command.input.directory)) throw new Error('Worktree is not registered with this project repository');
         await assertResourcePathAllowed(command.input.directory, principal.allowedDirectories);
-        return { success: Boolean(await git.removeWorktree(directory, { ...command.input }, { documents: options.documents,
+        const registered = await registeredWorktreePath(directory, command.input.directory);
+        return { success: Boolean(await git.removeWorktree(directory, { ...command.input, directory: registered }, { documents: options.documents,
           writerOwner: { kind: 'git-route', id: `managed-project:${key}` } })) };
       }
       case 'worktree-bootstrap': {
         await assertResourcePathAllowed(command.input.directory, principal.allowedDirectories);
-        const entries = await git.getWorktrees(directory, { strict: true });
-        if (!entries.some(entry => entry.path === command.input.directory)) throw new Error('Worktree is not registered with this project repository');
-        return git.getWorktreeBootstrapStatus(command.input.directory);
+        const registered = await registeredWorktreePath(directory, command.input.directory);
+        return git.getWorktreeBootstrapStatus(registered);
       }
       case 'backend': return { ...await lifecycle().inspectBackend(request.projectId, signal), canOpenSettings: false };
       case 'backend-settings': throw new Error('Open workspace backend settings on the source device. Remote requests cannot change device security settings.');

@@ -63,6 +63,7 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
     documents: ReturnType<typeof createDocumentAuthority>;
     root: string;
     adapter: KernelStorageAdapter;
+    backend: KernelFileResourceBackend;
   }> | undefined;
   const cleanups: Array<() => void | Promise<void>> = [];
   const cleanup = async () => {
@@ -118,7 +119,7 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
         },
       });
       cleanups.push(() => service.dispose());
-      return { service, client, documents, root, adapter };
+      return { service, client, documents, root, adapter, backend };
     } catch (error) {
       try { await cleanup(); } catch (cleanupError) {
         throw new AggregateError([error, cleanupError], 'Native process fixture initialization failed');

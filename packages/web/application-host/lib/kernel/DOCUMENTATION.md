@@ -114,6 +114,10 @@ preparation; the last cancelled observer drains the original capture before its 
 replacement prepares context before publishing the new input/Run/source transaction. A failed or stale
 candidate leaves the active source/checkpoint intact.
 
+Managed code capture keeps coordinator Thread and external conversation IDs as attribution only.
+Its Source authority and Storage snapshot own the capture through publication and cleanup; those IDs
+do not identify local Catalog Threads and must not be used for native preparation retention.
+
 Pinned-source branch creation calls native `branch.fork`, preserving the exact pin and source
 provenance. Preparation grants admit only their original child target and handed-off source/pin;
 refreshed continuation forks only its owned merged revision. The Host does not select a later root

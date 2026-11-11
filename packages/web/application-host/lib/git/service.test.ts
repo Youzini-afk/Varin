@@ -38,6 +38,9 @@ import {
 const tempDirs: string[] = [];
 const normalizeEol = (value: string): string => value.replace(/\r\n/g, '\n');
 const normalizeGitPath = (value: string): string => value.replace(/\\/g, '/');
+const worktreePathAliases = (value: string): string[] => process.platform === 'win32'
+  ? [normalizeGitPath(value), value.toUpperCase(), path.toNamespacedPath(value)]
+  : [`${path.dirname(value)}/./${path.basename(value)}`];
 const canonicalGitPath = (value: string): string => normalizeGitPath(
   typeof fs.realpathSync.native === 'function'
     ? fs.realpathSync.native(value)
@@ -668,11 +671,16 @@ describe('createWorktree', () => {
       });
 
       await expect.poll(() => fs.existsSync(setupMarker), { timeout: 5_000 }).toBe(true);
-      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
+      const pending = await getWorktreeBootstrapStatus(created.path);
+      expect(pending).toMatchObject({
         status: 'pending',
         phase: 'git-ready',
         error: null,
       });
+      // Git for Windows emits slash paths; clients may also use drive/case or
+      // namespace aliases. Observation must join the original pending receipt,
+      // not fall through to the no-state ready result or start setup again.
+      for (const alias of worktreePathAliases(created.path)) expect(await getWorktreeBootstrapStatus(alias)).toBe(pending);
 
       await expect.poll(
         async () => (await getWorktreeBootstrapStatus(created.path)).phase,
@@ -725,7 +733,8 @@ describe('createWorktree', () => {
 
       await expect.poll(() => fs.existsSync(setupStarted), { timeout: 5_000 }).toBe(true);
       let removalCompleted = false;
-      const removal = removeWorktree(repo, { directory: created.path }).then(() => {
+      const removalPath = process.platform === 'win32' ? created.path.toUpperCase().replace(/\\/g, '/') : created.path;
+      const removal = removeWorktree(repo, { directory: removalPath }).then(() => {
         removalCompleted = true;
       });
 
@@ -933,10 +942,14 @@ describe('createWorktree', () => {
         closeCalls: 1,
       });
       expect(fs.existsSync(candidateDirectory)).toBe(false);
-      await expect(getWorktreeBootstrapStatus(candidateDirectory)).resolves.toMatchObject({
+      const failed = await getWorktreeBootstrapStatus(candidateDirectory);
+      expect(failed).toMatchObject({
         status: 'failed',
         phase: 'directory-created',
       });
+      // The failed directory is already gone. Aliases must still observe its
+      // retained failure, not manufacture a successful missing-state receipt.
+      for (const alias of worktreePathAliases(candidateDirectory)) expect(await getWorktreeBootstrapStatus(alias)).toBe(failed);
     } finally {
       if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
       else process.env.VARIN_DATA_DIR = previousVarinDataDir;

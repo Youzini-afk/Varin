@@ -43,3 +43,49 @@ it.each(['published','failure','cancelled'] as const)('retains the original capt
   else expect('error' in settled && settled.error.message).toMatch(outcome==='failure'?/Original publication failed/:/abort/i);
   expect(release).toHaveBeenCalledTimes(1);expect(active).toBe(false);
 });
+
+it.each(['external:child:dispatch','coordinator-child-thread'])(
+  'captures an unpublished native source for %s without claiming a target Catalog Thread',async sourceThreadId=>{
+    const source={resource_owner:{kind:'managed_host' as const,hostId:'target',connectionId:'connection',endpointIdentity:'endpoint'},
+      workspace_id:'workspace',execution_workspace_id:'private-view',mode:'native_workspace' as const,branch_id:'child-source:dispatch',revision:null,live_root:null};
+    const origin={kind:'model_step' as const,request_id:'request'};
+    const invocation:ToolInvocationAuthority={invocationId:'call',runId:'coordinator-parent-run',threadId:'coordinator-parent',callId:'exchange',origin,
+      operationId:toolOperationId(origin,'exchange'),executorOwner:{kind:'kernel'},
+      source,toolName:'update',operation:'effect',completion:'result',arguments:{}};
+    const branchId=`code-exchange:${invocation.operationId}`,snapshotBranch=`code-snapshot:${invocation.operationId}`;
+    const captured={'result.txt':{kind:'regular-file' as const,objectHash:'target-object',byteLength:20}};
+    const result:WorkingResult={branchId,root:'published-root',resultRevision:1,changedPaths:['result.txt'],baseStates:{'result.txt':{kind:'missing'}},
+      pathStates:captured,diffStats:{files:1,insertions:1,deletions:0},createdAt:'2026-11-11T00:00:00Z'};
+    const released=vi.fn(async()=>{}), snapshot=vi.fn(async()=>{}), retainPrepared=vi.fn(async()=>{
+      throw new Error('No coordinator Thread exists in the target Catalog');
+    });
+    const createBranch=vi.fn(async()=>{}),commitVirtualWrites=vi.fn(async()=>({status:'committed'})),deleteBranch=vi.fn(async()=>{});
+    const readStateSlice=vi.fn(async(branch:string)=>branch===snapshotBranch?captured:{'result.txt':{kind:'missing'}});
+    const publishHeadResult=vi.fn(async()=>result);
+    const store={resumeResultPublication:vi.fn(async()=>null),getBranchRoot:vi.fn().mockResolvedValueOnce(null).mockResolvedValue({writeRevision:0}),
+      readStateSlice,createBranch,commitVirtualWrites,publishHeadResult,deleteBranch};
+    mocks.open.mockResolvedValue({store,directory:'/target-private-view',release:released} as unknown as ExchangeScope);
+    const scope:ManagedSourceLocalScope={principal:{principalId:'paired',capabilities:['filesystem:write']},coordinatorHostId:'coordinator',
+      authorityId:'original-reader',resourceEpoch:'target-epoch',source,
+      scope:{kind:'source_read',threadId:sourceThreadId,branchId:'child-source:dispatch',key:'exchange'},
+      physicalRoot:{hostId:'target',rootId:'native-root',canonicalRoot:'/target-private-view'},
+      grant:{grantId:'original-reader',kernelEpoch:'target-epoch',hostGeneration:'generation',authorityInstanceId:null,workerId:null,workerGeneration:null,sessionId:null,
+        threadId:sourceThreadId,runId:null,operationId:null,owningWorkspace:'workspace',executionWorkspace:'private-view',capabilities:['storage.read','storage.write'],pathScopes:[''],storageIdentity:'target-storage'}};
+    const service=createManagedCodeExchangeService({kernel:{nativeWorkspaces:{snapshot,retainPrepared}}} as never);
+    const signal=new AbortController().signal;
+    expect(await service(scope,{kind:'code_capture',invocation,sourceThreadId,targetThreadId:'coordinator-parent',baselineBranchId:'baseline',baselineRevision:0,
+      mapping:{from:'',to:''},baselineMapping:{from:'',to:''},files:['result.txt']},signal)).toBe(result);
+    // This is a new capture, not the resumed-publication fast path above. The
+    // native snapshot receives no local Catalog deletion owner, but still reads
+    // the original native source and publishes selected bytes under this grant.
+    expect(snapshot).toHaveBeenCalledWith(source,snapshotBranch,snapshotBranch,signal,undefined,{});
+    expect(retainPrepared).not.toHaveBeenCalled();
+    expect(readStateSlice).toHaveBeenCalledWith(snapshotBranch,['result.txt'],{revision:0,signal});
+    expect(createBranch).toHaveBeenCalledWith('workspace',branchId,{'result.txt':{kind:'missing'}});
+    expect(commitVirtualWrites).toHaveBeenCalledWith(branchId,0,captured);
+    expect(publishHeadResult).toHaveBeenCalledWith(branchId,{publicationId:branchId,signal});
+    expect(deleteBranch).toHaveBeenCalledWith(snapshotBranch);
+    expect(publishHeadResult.mock.invocationCallOrder[0]).toBeLessThan(deleteBranch.mock.invocationCallOrder[0]!);
+    expect(deleteBranch.mock.invocationCallOrder[0]).toBeLessThan(released.mock.invocationCallOrder[0]!);
+    expect(released).toHaveBeenCalledTimes(1);
+  });

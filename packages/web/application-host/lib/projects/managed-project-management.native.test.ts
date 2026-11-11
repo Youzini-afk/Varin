@@ -9,7 +9,6 @@ import { createFsSearchRuntime } from '../fs/search.js';
 import { createWorkspaceContentSearch } from '../search/content.js';
 import os from 'node:os';
 import { createDocumentAuthority } from '../documents/authority.js';
-import { KernelFileResourceBackend } from '../kernel/file-resource-backend.js';
 import { createResourceFilesOwner } from '../workspace/resource-files.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
@@ -55,7 +54,9 @@ it('manages the real target Git workspace and joins its original adoption intent
     inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => target.client.agentRuntimeRequest('runtime.source.tools', { mode }) });
   const compute = createKernelComputeService({client:target.client,resolveIdentity:createKernelProcessIdentityResolver({documents:target.documents})});
   cleanups.push(() => compute.dispose());
-  const resourceFiles = createResourceFilesOwner(target.documents,new KernelFileResourceBackend(target.adapter),undefined,async(selection,signal)=>{
+  // Production Files and Documents share this exact backend and its original
+  // mutation lease. A second backend would compete with the enclosing writer.
+  const resourceFiles = createResourceFilesOwner(target.documents,target.backend,undefined,async(selection,signal)=>{
     const registration=await target.documents.admitWorkspaceRegistration(selection.workspaceId,signal);
     return {path:(await preparedNative.prepareSelection(selection,'project-files',signal)).path,originalRoot:registration.canonicalPath};
   }, {files:createFsSearchRuntime({compute}),content:createWorkspaceContentSearch({documents:target.documents,compute})});
@@ -93,6 +94,9 @@ it('manages the real target Git workspace and joins its original adoption intent
   const physicalLocation={coordinatorHostId:base.coordinatorHostId,root:directory,workspaceId:workspace.workspaceId};
   const originalAsset=await remote.workspaceAsset({...physicalLocation,path:'original.txt',asset:{kind:'raw'}});
   expect(await originalAsset.text()).toBe('target original');
+  const physicalBody=Buffer.from('physical target upload through the original Documents lease');
+  await remote.workspaceUpload({...physicalLocation,path:'physical-upload.txt',key:'physical-file-write',byteLength:physicalBody.length},(async function*(){yield physicalBody;})());
+  expect(await readFile(path.join(directory,'physical-upload.txt'),'utf8')).toBe(physicalBody.toString());
   await mkdir(path.join(directory,'nested'));await writeFile(path.join(directory,'nested','search.txt'),'actual target search content');
   expect(await remote.workspace({...physicalLocation,command:{kind:'filename-search',path:'',query:'search'}})).toMatchObject({kind:'filename-search',results:[{path:'nested/search.txt'}],enumerationStatus:'complete'});
   expect(await remote.workspace({...physicalLocation,command:{kind:'content-search',path:'',query:'actual target',fixedStrings:true}})).toMatchObject({kind:'content-search',result:{status:'ready',hits:[{resource:{workspaceId:workspace.workspaceId,resourceId:'nested/search.txt'},line:1,column:1,revision:expect.any(String)}]}});

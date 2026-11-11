@@ -64,7 +64,7 @@ const toBootstrapStateKey = (directory: unknown): string => {
   if (!normalized) {
     return '';
   }
-  return path.resolve(normalized);
+  return normalizePathIdentity(normalized);
 };
 
 const createWorktreeBootstrapState = (
