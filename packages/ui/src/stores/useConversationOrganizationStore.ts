@@ -153,10 +153,10 @@ export async function submitOrganizationMetadata(items: ConversationOrganization
     }
   }
 }
-export function useConversationOrganization() {
-  const apis = useRuntimeAPIs(); const hostKey = useThreadStore(state => state.hostKey);
+export function useConversationOrganization(active = true) {
+  const { conversationOrganization: api, bots } = useRuntimeAPIs(); const hostKey = useThreadStore(state => state.hostKey);
   React.useEffect(() => {
-    const api = apis.conversationOrganization; if (!api) return;
+    if (!api || !active) return;
     const host = getRuntimeEndpointGeneration();
     if (!binding || binding.host !== host || binding.api !== api) {
       binding?.stop(); const controller = new AbortController();
@@ -200,7 +200,7 @@ export function useConversationOrganization() {
       useConversationOrganizationStore.setState(state => state.host === host
         ? { loading: true }
         : { host, snapshot: null, pages: {}, loading: true, error: null, pending: {}, failed: {}, metadata: {}, bots: null, botsError: null });
-      const loadBots = async () => { try { const bots = await apis.bots?.list(controller.signal); if (valid()) useConversationOrganizationStore.setState({ bots: bots ?? [], botsError: null }); } catch (error) { if (valid()) useConversationOrganizationStore.setState({ botsError: message(error) }); } };
+      const loadBots = async () => { try { const values = await bots?.list(controller.signal); if (valid()) useConversationOrganizationStore.setState({ bots: values ?? [], botsError: null }); } catch (error) { if (valid()) useConversationOrganizationStore.setState({ botsError: message(error) }); } };
       const stopEvents = subscribeVarinEvents(event => { if (event.type === 'bot-changed' || event.type === 'stream-ready') void loadBots(); });
       const observe = async () => {
         await refresh(); await loadBots(); if (!valid()) return;
@@ -214,6 +214,6 @@ export function useConversationOrganization() {
     }
     const owner = binding; owner.users++;
     return () => { if (--owner.users === 0) { owner.stop(); if (binding === owner) binding = null; } };
-  }, [apis, hostKey]);
+  }, [api, bots, hostKey, active]);
   return useConversationOrganizationStore();
 }

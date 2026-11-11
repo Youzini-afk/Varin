@@ -1,4 +1,7 @@
 export const conversationOrganizationEn = {
+  "organization.location": "Classification",
+  "organization.executionWorkspace": "Execution workspace",
+  "organization.locationUnavailable": "Classification is unavailable",
   "organization.scopeChanged": "This category changed while reading its contents. Refresh and retry.",
   "organization.searchTargets": "Search destination categories",
   "organization.targetPath": "Destination path",
@@ -86,6 +89,9 @@ export const conversationOrganizationEn = {
   "organization.openOrigin": "Open {name}’s origin conversation"
 } as const;
 export const conversationOrganizationZhCN = {
+  "organization.location": "分类位置",
+  "organization.executionWorkspace": "执行工作区",
+  "organization.locationUnavailable": "分类位置不可用",
   "organization.scopeChanged": "读取期间分类已变化，请刷新后重试。",
   "organization.searchTargets": "搜索目标分类",
   "organization.targetPath": "目标路径",
@@ -173,6 +179,9 @@ export const conversationOrganizationZhCN = {
   "organization.openOrigin": "打开 {name} 的发起会话"
 } as const;
 export const conversationOrganizationZhTW = {
+  "organization.location": "分類位置",
+  "organization.executionWorkspace": "執行工作區",
+  "organization.locationUnavailable": "分類位置無法使用",
   "organization.scopeChanged": "讀取期間分類已變更，請重新整理後重試。",
   "organization.searchTargets": "搜尋目標分類",
   "organization.targetPath": "目標路徑",

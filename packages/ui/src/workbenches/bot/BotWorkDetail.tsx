@@ -1,5 +1,4 @@
-import { ConversationOrigin } from '@/components/conversation/ConversationOrigin';
-import { useConversationOrganizationEntry } from '@/hooks/useConversationOrganizationEntry';
+import { ConversationOrganizationDetails } from '@/components/conversation/ConversationOrganizationDetails';
 import React from 'react';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
@@ -27,8 +26,6 @@ import { runStatus, workKey } from './botPresentation';
 /** A focused observation of the original work, including its original questions and permissions. */
 export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; active: boolean }) {
   const { t } = useI18n();
-  const organization = useConversationOrganizationEntry({ kind: 'native', id: identity.threadId }, active);
-  const origin = organization.entry?.origin;
   const model = useBotPanel(), navigation = useBotWorkspaceNavigation();
   const api = model.threads;
   const [snapshot, setSnapshot] = React.useState<ThreadSnapshot>();
@@ -77,6 +74,7 @@ export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; 
   return <div className="bot-work-detail">
     <div className="bot-work-detail-scroll">
       <header><h2>{name}</h2><span className="bot-detail-state">{status ? <BotWorkStatusLabel status={status} /> : t(run?.state === 'completed' ? 'bot.workspace.roundEnded' : run?.state === 'failed' ? 'bot.workspace.failed' : run?.state === 'cancelled' ? 'bot.workspace.cancelled' : 'bot.workspace.idle')}</span></header>
+      <ConversationOrganizationDetails reference={{ kind: 'native', id: identity.threadId }} active={active} />
       {view?.sessionThreadId && <button type="button" className="bot-text-link" onClick={() => {
         const session = model.sessions.find(session => session.identity.threadId === view.sessionThreadId); if (session) model.openSession(session.identity);
       }}>{t('bot.workspace.fromSession', { name: model.sessionTitle(view.sessionThreadId) })}</button>}
@@ -99,12 +97,12 @@ export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; 
         const call = (operation.intent as { call?: { name?: string; arguments?: { path?: string; query?: string; command?: string } } })?.call;
         return <div key={operation.id}><Icon name={operation.phase === 'terminal' ? 'check' : 'time'} className="size-3.5" /><span>{call?.name ?? operation.executor}<small>{call?.arguments?.path ?? call?.arguments?.query ?? call?.arguments?.command}</small></span></div>;
       })}</div></section>}
-      {(source || item?.desktops?.length) && <section><h3>{t('bot.workspace.environment')}</h3>
-        {source && <button type="button" className="bot-detail-resource" onClick={() => navigation?.files(source.resource_owner, name, identity)}><Icon name="folder" className="size-4" /><span>{t('bot.workspace.files')}<small>{source.mode === 'live_root' ? source.live_root?.canonicalRoot : t('bot.workspace.sourceFixed')}</small></span><Icon name="arrow-right-s" className="size-4" /></button>}
+      {(snapshot || item?.desktops?.length) && <section><h3>{t('bot.workspace.environment')}</h3>
+        {source && <button type="button" className="bot-detail-resource" onClick={() => navigation?.files(source.resource_owner, name, identity)}><Icon name="folder" className="size-4" /><span>{t('organization.executionWorkspace')}<small>{source.mode === 'live_root' ? source.live_root?.canonicalRoot : t('bot.workspace.sourceFixed')}</small></span><Icon name="arrow-right-s" className="size-4" /></button>}
+        {snapshot && !source && <p className="typography-meta text-muted-foreground">{t('organization.executionWorkspace')}: {t('harness.overview.chatOnly')}</p>}
         {item?.desktops?.map(desktop => <button type="button" key={desktop.id} className="bot-detail-resource" onClick={() => navigation?.computer(desktop)}><Icon name="computer" className="size-4" /><span>{desktop.label}<small>{desktop.status}</small></span><Icon name="arrow-right-s" className="size-4" /></button>)}
       </section>}
-      <section><h3>{t('bot.workspace.team')}</h3><div className="bot-detail-person"><AgentAvatar identity={identity.threadId} avatar={view?.avatar} size={28} role="lead" /><span>{name}</span>{origin && <ConversationOrigin origin={origin} />}</div>
-        {organization.error && <p role="alert" className="text-destructive">{organization.error}</p>}
+      <section><h3>{t('bot.workspace.team')}</h3><div className="bot-detail-person"><AgentAvatar identity={identity.threadId} avatar={view?.avatar} size={28} role="lead" /><span>{name}</span></div>
         {snapshot?.children?.map(child => <button type="button" key={child.operation_id} className="bot-detail-person" onClick={() => navigation?.open({ kind: 'work', key: workKey({ ...identity, threadId: child.child_thread_id, branchId: child.child_branch_id }), identity: { ...identity, threadId: child.child_thread_id, branchId: child.child_branch_id }, title: child.name ?? child.child_thread_id })}><AgentAvatar identity={child.child_thread_id} size={24} /><span>{child.name ?? child.child_thread_id}</span></button>)}
       </section>
     </div>

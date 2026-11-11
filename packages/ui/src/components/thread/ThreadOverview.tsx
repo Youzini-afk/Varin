@@ -1,3 +1,4 @@
+import { ConversationOrganizationDetails } from '@/components/conversation/ConversationOrganizationDetails';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import React from 'react';
@@ -74,6 +75,9 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const [productError, setProductError] = React.useState<string>();
   const [plan, setPlan] = React.useState(emptyPlan);
   const [hasPlan, setHasPlan] = React.useState(false);
+  const executionSource = snapshot?.launch?.selection.source;
+  const executionPath = workspacePath ?? executionSource?.live_root?.canonicalRoot;
+  const executionLabel = executionPath ? formatDirectoryName(executionPath) : executionSource ? t('bot.workspace.sourceFixed') : t('harness.overview.chatOnly');
   const run = snapshot?.activeRun ?? snapshot?.thread.branches.find(branch => branch.branch_id === identity.branchId)?.latest_run;
   const rows = React.useMemo(() => childTaskRows(snapshot?.children ?? [], snapshot?.childExecutions ?? [], snapshot?.childActivity), [snapshot?.children, snapshot?.childExecutions, snapshot?.childActivity]);
   const currentChildren = rows.filter(row => snapshot?.childDirectory ? snapshot.childDirectory.members.some(member => member.current && member.threadId === row.child.child_thread_id) : !childEnded(row.state));
@@ -158,6 +162,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     detailTitle={detail ? t(detail === 'followups' && botWorkbench ? 'arrangements.title' : titles[detail] ?? 'harness.overview.title') : undefined} onBack={back} headerActions={more}
     compactContent={<>{hasPlan && action('plan', 'task', plan.items.find(item => item.status === 'in_progress')?.text ?? t('harness.overview.plan'), plan.total ? <span className="shrink-0 typography-micro text-muted-foreground">{plan.done}/{plan.total}</span> : undefined)}
       {runningChildren.map(row => <button type="button" key={row.child.operation_id} className="thread-overview-action typography-meta" onClick={() => show('threads')}><AgentAvatar identity={row.child.child_thread_id} avatar={row.child.avatar} size={22} /><span className="min-w-0 flex-1 truncate">{row.child.name || row.child.input.name || row.task}</span><ChildState state={row.state} /></button>)}{outputSummary}</>}>
+    <ConversationOrganizationDetails reference={{ kind: 'native', id: identity.threadId }} active={open && !compact} />
     <div hidden={Boolean(detail)}>{status}</div>
     <div hidden={Boolean(detail && detail !== 'plan')}>{api.plan && <ThreadPlan api={api.plan} identity={identity} readOnly={readOnly} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={setHasPlan} onSummaryChange={setPlan}
       summaryView={detail === 'plan' ? undefined : { onInspect: () => show('plan') }} />}</div>
@@ -174,7 +179,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
         {hasComputer && action('computer', 'computer', t('computer.automation.title'))}
       </section>}
       <footer className="mt-6 flex flex-wrap gap-x-3 gap-y-2 border-t border-border/50 pt-3 typography-micro text-muted-foreground">
-        <button type="button" onClick={() => show('sources')} className="flex min-w-0 items-center gap-1 rounded hover:text-foreground"><Icon name="folder" className="size-3.5" /><span className="truncate">{workspacePath ? formatDirectoryName(workspacePath) : t('harness.overview.chatOnly')}</span></button>
+        <button type="button" onClick={() => show('sources')} className="flex min-w-0 items-center gap-1 rounded hover:text-foreground"><Icon name="folder" className="size-3.5" /><span className="truncate">{t('organization.executionWorkspace')}: {executionLabel}</span></button>
         <button type="button" onClick={() => show('context')} title={contextPhase ? t(contextPhaseLabels[contextPhase]) : undefined} className="flex items-center gap-1 rounded hover:text-foreground"><Icon name={contextPhase === 'preparing' || contextPhase === 'waiting' ? 'loader-4' : 'donut-chart-fill'} className={contextPhase === 'preparing' || contextPhase === 'waiting' ? 'size-3.5 animate-spin' : 'size-3.5'} />{t('harness.overview.context')}{usage ? ` · ${Math.round(usage.percentage)}%` : ''}</button>
         {details.memory && <button type="button" onClick={() => show('memory')} className="flex items-center gap-1 rounded hover:text-foreground"><Icon name="book-open" className="size-3.5" />{t('harness.overview.memory')}</button>}
       </footer>
@@ -194,7 +199,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     {detail === 'operations' && <div className="thread-overview-detail">{selectedOperation ? <><div className="mb-3 flex items-center justify-between gap-3 typography-meta"><span className="break-words">{operationLabel(selectedOperation)}</span><ChildState state={selectedOperation.phase === 'terminal' ? selectedOperation.outcome === 'succeeded' ? 'completed' : selectedOperation.outcome ?? 'unknown' : selectedOperation.phase} /></div><ThreadOperationDetails api={api} identity={identity} operation={selectedOperation} readOnly={readOnly} pending={pending} waitingOn={run?.waiting_on} questionScope={{ run, launch: snapshot?.launch }} onCancel={() => void act(() => api.cancelOperation(selectedOperation.id))} onOpenTerminal={() => void act(() => openProcess(selectedOperation.id))} /></>
       : operations.map(operation => <button type="button" data-operation-id={operation.id} key={operation.id} className="thread-overview-action typography-meta" onClick={() => setOperationId(operation.id)}><span className="min-w-0 flex-1 truncate">{operationLabel(operation)}</span><ChildState state={operation.phase === 'terminal' ? operation.outcome === 'succeeded' ? 'completed' : operation.outcome ?? 'unknown' : operation.phase} /></button>)}</div>}
     {[...visited].filter(section => section !== 'plan' && section !== 'outputs' && section !== 'threads' && section !== 'operations').map(section => <div key={section} hidden={detail !== section} className="thread-overview-detail">
-      {section === 'sources' && <p className="mb-3 break-all typography-meta">{workspacePath ?? t('harness.overview.chatOnly')}</p>}
+      {section === 'sources' && <p className="mb-3 break-all typography-meta">{t('organization.executionWorkspace')}: {executionPath ?? executionLabel}</p>}
       {details[section]}
     </div>)}
   </WorkOverviewControl>;

@@ -1,5 +1,4 @@
-import { ConversationOrigin } from '@/components/conversation/ConversationOrigin';
-import { useConversationOrganizationEntry } from '@/hooks/useConversationOrganizationEntry';
+import { ConversationOrganizationDetails } from '@/components/conversation/ConversationOrganizationDetails';
 import React from 'react';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { useI18n } from '@/lib/i18n';
@@ -23,8 +22,6 @@ export const ExternalOverview = React.memo(function ExternalOverview({
   connected: boolean;
 }) {
   const { t } = useI18n();
-  const organization = useConversationOrganizationEntry({ kind: 'external', id });
-  const origin = organization.entry?.origin;
   const open = useWorkOverviewStore((state) => state.bySession[id]?.overview ?? false);
   const compact = useWorkOverviewStore((state) => state.bySession[id]?.compact ?? false);
   const disclosure = useWorkOverviewStore((state) => state.setDisclosure);
@@ -84,12 +81,11 @@ export const ExternalOverview = React.memo(function ExternalOverview({
       ) : (
         <>
           {state}
-          {origin && <div className="flex items-center gap-2 typography-meta"><span>{t('organization.origin')}</span><ConversationOrigin origin={origin} /></div>}
-          {organization.error && <p role="alert" className="typography-meta text-destructive">{organization.error}</p>}
+          <ConversationOrganizationDetails reference={{ kind: 'external', id }} active={open && !compact} />
           {preview}
           <div className="mt-4 flex min-w-0 items-start gap-2 border-t border-border/50 pt-3 typography-micro text-muted-foreground">
             <Icon name="folder" className="size-3.5 shrink-0" />
-            <span className="min-w-0 break-all">{cwd}</span>
+            <span className="min-w-0 break-all">{t('organization.executionWorkspace')}: {cwd}</span>
           </div>
         </>
       )}
