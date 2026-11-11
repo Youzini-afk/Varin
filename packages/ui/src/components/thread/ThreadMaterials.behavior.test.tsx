@@ -3,7 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DocumentReadRequest, ExperimentArtifactView, ExperimentAttemptView, FetchResult } from '@varin/protocol';
-import type { AgentSettingsSnapshot } from '@varin/application-client';
+import type { AgentSettingsSnapshot, RuntimeAPIs } from '@varin/application-client';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 
 const mocks = vi.hoisted(() => ({
   runtimeKey: 'runtime-a',
@@ -429,8 +430,11 @@ function artifactConversationFixture() {
       if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true });
     }),
   };
+  // The full conversation shares the Shell's runtime context, even when this
+  // fixture exercises only its original research/materials owner.
+  const runtime = { threads: api } as RuntimeAPIs;
   const renderConversation = async (selected = identity) => {
-    await act(async () => { root.render(<ThreadConversation api={api} identity={selected} />); await settle(); });
+    await act(async () => { root.render(<RuntimeAPIContext.Provider value={runtime}><ThreadConversation api={api} identity={selected} /></RuntimeAPIContext.Provider>); await settle(); });
   };
   const open = async () => {
     await renderConversation();
