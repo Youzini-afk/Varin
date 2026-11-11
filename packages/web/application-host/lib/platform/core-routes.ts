@@ -1136,6 +1136,7 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/agent-personalization') ||
       req.path.startsWith('/api/agent-profiles') ||
+      req.path.startsWith('/api/conversation-organization') ||
       req.path.startsWith('/api/resources') ||
       req.path.startsWith('/api/project-trust') ||
       req.path.startsWith('/api/models') ||

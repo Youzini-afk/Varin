@@ -14,6 +14,7 @@ import { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { ThreadAdapter } from '../kernel/thread-adapter.js';
 import { ConversationOrganizationService } from './service.js';
 import { registerConversationOrganizationRoutes } from './routes.js';
+import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as {version:string}).version;
@@ -26,7 +27,7 @@ it('round trips authenticated organization commands through the real kernel and 
   const threads = new ThreadAdapter(runtime, { resolveModel: unused, rebindModel: unused }, unused, unused);
   const service = new ConversationOrganizationService({ runtime, threads, external: { list: async () => [], inspect: unused, update: unused }, readSettings: async () => ({ projects: [] }) });
   threads.bindOrganizationCreation((identity, placement) => service.creationDefaults('alice', identity.threadId, placement));
-  const app = express(); app.use(express.json());
+  const app = express(); registerCommonRequestMiddleware(app, { express });
   registerThreadRoutes(app, threads, (_req, _res, next) => withRequestPrincipal('alice', next));
   registerConversationOrganizationRoutes(app, service, (_req, _res, next) => next(), async () => ({ principalId: 'alice' }));
   const server = createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');

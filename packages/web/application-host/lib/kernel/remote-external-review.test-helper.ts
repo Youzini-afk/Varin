@@ -5,6 +5,7 @@ import {createManagedTerminalOwner} from '../terminal/managed-owner.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
+import {registerCommonRequestMiddleware} from '../platform/core-routes.js';
 import {createDocumentAuthority,type DocumentAuthority} from '../documents/authority.js';
 import {createAuthorityTestRuntime} from './authority.test-helper.js';
 import {createNativeWorkspaceOwner,type NativeWorkspaceOwner} from './native-workspaces.js';
@@ -72,7 +73,7 @@ if(m.method==='turn/start'){reply({turn:{id:'target-turn'}});writeFileSync('exte
     externalProjectSource:createManagedExternalProjectSourceOwner({kernel,storage,hostId}),
     serviceOperation:async(scope,operation,signal)=>{operations.push(operation.kind);
       return ['code_capture','code_apply','external_code_apply','code_release'].includes(operation.kind)?exchange(scope,operation,signal):query(scope,operation,signal);}});
-  const app=express();app.use(express.json());registerManagedRemoteRoutes(app,{service:{hostId,sources:()=>source,
+  const app=express();registerCommonRequestMiddleware(app,{express});registerManagedRemoteRoutes(app,{service:{hostId,sources:()=>source,
     identity:async()=>({protocolVersion:1,hostId,capabilities:['sources'],machine:{machineId:'managed:'+hostId,kind:'managed-remote',state:'available'}})} as never,
     resolveAuthContext:async()=>({type:'client',clientId:'paired-parent',client:{capabilities:['filesystem:read','filesystem:write','terminal:use','process:control','logs:read']}} as never)});
   const server=await new Promise<import('node:http').Server>(resolve=>{const server=app.listen(0,'127.0.0.1',()=>resolve(server));});
