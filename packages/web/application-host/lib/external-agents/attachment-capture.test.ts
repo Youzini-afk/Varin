@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { KernelClient } from '../kernel/kernel-client.js';
+import type { KernelClient, KernelScopedClient } from '../kernel/kernel-client.js';
 import { captureExternalFile, releaseExternalCaptures, restoreExternalCapture } from './attachment-capture.js';
 import { createAbsoluteAttachmentCapture } from '../kernel/attachment-absolute.js';
 
@@ -13,7 +13,11 @@ function fixture() {
     return { hash, byteLength: 5, offset: range.offset, nextOffset: range.offset + bytes.length, eof: range.offset + bytes.length === 5, bytesBase64: bytes.toString('base64') };
   });
   const actor = {
-    getRecord: vi.fn(async () => retained), fileRootRegister: vi.fn(async (value: typeof source) => { registeredSource = value; return { rootId: 'original-root' }; }),
+    getRecord: vi.fn(async () => retained), fileRootRegister: vi.fn<KernelScopedClient['fileRootRegister']>(async value => {
+      registeredSource = value;
+      return { rootId: 'original-root', canonicalRoot: value.canonicalRoot, executionWorkspaceId: value.executionWorkspaceId,
+        reconciledOperations: 0, pendingOperations: 0 };
+    }),
     fileCapture: vi.fn(async (input: { retentionRecordId: string; path: string }) => {
       retained = { recordId: input.retentionRecordId, recordType: 'attachment.capture', state: 'retained', threadId: conversation.id, payloadJson: JSON.stringify({
         ...registeredSource, path: input.path, stateJson: JSON.stringify({ kind: 'regular-file', objectHash: 'sha256-original', byteLength: 5 }),

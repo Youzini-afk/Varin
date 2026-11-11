@@ -137,9 +137,10 @@ describe('terminal runtime', () => {
   it('keeps an adopted managed terminal on its frozen logical source while authorizing its physical registration', async () => {
     const f = createHarness();
     const selection = { mode: 'native_workspace' as const, workspaceId: 'original-project', executionWorkspaceId: 'adopted-execution', branchId: 'adopted-branch', adoptionOperationId: 'original-adoption' };
+    const nativePath = path.resolve('/managed/native-view');
     const resolveWorkspace = vi.fn(async () => { throw new Error('A mounted view must not be reinterpreted as a physical workspace'); });
     const registration = vi.fn(async () => ({ canonicalPath: '/repo' }));
-    const prepareSelection = vi.fn(async () => ({ path: '/managed/native-view', source: { ...selection, resourceOwner: { kind: 'local' as const }, tools: [] } }));
+    const prepareSelection = vi.fn(async () => ({ path: nativePath, source: { ...selection, resourceOwner: { kind: 'local' as const }, tools: [] } }));
     const owner = createManagedTerminalOwner({ terminal: () => f.runtime,
       documents: { resolveWorkspace, admitWorkspaceRegistration: registration } as never, nativeWorkspaces: { prepareSelection } });
     const principal = { principalId: 'paired', capabilities: ['terminal:use','process:control'], allowedDirectories: ['/repo'] };
@@ -147,8 +148,8 @@ describe('terminal runtime', () => {
     try {
       const create = { ...base, command: { action: 'create' as const, options: { cwd: '/repo', selection } } };
       const created = await owner.command(principal, create);
-      expect(created.cwd).toBe('/managed/native-view');
-      expect(f.processes[0]?.options.cwd).toBe('/managed/native-view');
+      expect(created.cwd).toBe(nativePath);
+      expect(f.processes[0]?.options.cwd).toBe(nativePath);
       await owner.command(principal, create);
       expect(prepareSelection).toHaveBeenCalledTimes(1); expect(f.processes).toHaveLength(1);
       await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: '/repo', selection: { ...selection, branchId: 'another-branch' } } } })).rejects.toThrow('another frozen source');
