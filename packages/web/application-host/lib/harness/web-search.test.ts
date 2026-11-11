@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mintSearchCursor } from "@varin/protocol";
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/client";
 import {
   createConfiguredSearchProvider,
   searchFilterApplication,
@@ -24,6 +25,92 @@ const mcpResponse = (result: unknown, status = 200): Response => jsonResponse({
 }, status);
 
 describe("configured web search providers", () => {
+  it.each(["\n", "\r", "\r\n"])("finishes a matching SSE response with %j delimiters without EOF", async (delimiter) => {
+    const cancel = vi.fn();
+    const rpc = { jsonrpc: "2.0", id: 1, result: { structuredContent: { results: [{ title: "分块结果", url: "https://exa.example/stream" }] } } };
+    const encoded = new TextEncoder().encode([
+      ": keepalive\r\n\r\n",
+      'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}\r\n\r\n',
+      'data: {"jsonrpc":"2.0","id":99,"result":{}}\r\n\r\n',
+      `event: message\r\ndata: ${JSON.stringify(rpc).replace(',"id":', ',\r\ndata: "id":')}\r\n\r\n`,
+    ].join("").replaceAll("\r\n", delimiter));
+    const fetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Includes split CRLF and every byte boundary of a multi-byte character.
+        for (const byte of encoded) controller.enqueue(new Uint8Array([byte]));
+        // Deliberately keep the SSE connection open after the complete reply.
+      },
+      cancel,
+    }), { headers: { "Content-Type": "text/event-stream; charset=utf-8" } }));
+    const resolved = resolveConfiguredSearchProvider({ auth: {}, fetch });
+    if ("unavailable" in resolved) throw new Error("default provider unavailable");
+    await expect(resolved.search("q", {})).resolves.toMatchObject({
+      providerId: "default-exa", results: [{ title: "分块结果", url: "https://exa.example/stream" }],
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["headers", "body"])("drains a stalled MCP %s attempt before trying its fallback", async (phase) => {
+    vi.useFakeTimers();
+    const stopped = vi.fn();
+    try {
+      const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+        if (fetch.mock.calls.length > 1) {
+          expect(stopped).toHaveBeenCalledTimes(1);
+          return mcpResponse({ structuredContent: { results: [{ title: "Fallback", url: "https://parallel.example/a" }] } });
+        }
+        if (phase === "headers") return new Promise<Response>((_resolve, reject) => {
+          init!.signal!.addEventListener("abort", () => { stopped(); reject(init!.signal!.reason); }, { once: true });
+        });
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { controller.enqueue(new TextEncoder().encode(': keepalive\n\n')); },
+          cancel: stopped,
+        }), { headers: { "Content-Type": "text/event-stream" } });
+      });
+      const resolved = resolveConfiguredSearchProvider({ auth: {}, fetch });
+      if ("unavailable" in resolved) throw new Error("default provider unavailable");
+      const result = resolved.search("q", {});
+      await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MSEC);
+      await expect(result).resolves.toMatchObject({ providerId: "default-parallel", attempts: [
+        { connectionId: "default-exa", status: "failed", failure: { kind: "network", message: expect.stringContaining("timed out") } },
+        { connectionId: "default-parallel", status: "ok" },
+      ] });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels a live SSE reader without starting a fallback", async () => {
+    const controller = new AbortController();
+    const stopped = vi.fn();
+    let reading!: () => void;
+    const started = new Promise<void>(resolve => { reading = resolve; });
+    const fetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      pull() { reading(); }, cancel: stopped,
+    }), { headers: { "Content-Type": "text/event-stream" } }));
+    const resolved = resolveConfiguredSearchProvider({ auth: {}, fetch });
+    if ("unavailable" in resolved) throw new Error("default provider unavailable");
+    const result = resolved.search("q", { signal: controller.signal });
+    await started;
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when SSE ends without a matching reply or returns malformed data", async () => {
+    for (const body of ['data: {"jsonrpc":"2.0","id":2,"result":{}}\n\n', 'data: not-json\n\n']) {
+      const fetch = vi.fn(async () => fetch.mock.calls.length === 1
+        ? new Response(body, { headers: { "Content-Type": "text/event-stream" } })
+        : mcpResponse({ structuredContent: { results: [] } }));
+      const resolved = resolveConfiguredSearchProvider({ auth: {}, fetch });
+      if ("unavailable" in resolved) throw new Error("default provider unavailable");
+      await expect(resolved.search("q", {})).resolves.toMatchObject({ providerId: "default-parallel", attempts: [
+        { failure: { kind: "protocol" } }, { status: "empty" },
+      ] });
+    }
+  });
+
   it("routes AnySearch anonymous and keyed searches through the shared service without treating snippets as page content", async () => {
     const fetch = vi.fn(async (_url: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ code: 0, data: {
       results: [{ title: "AnySearch result", url: "https://docs.example/guide", snippet: "Search excerpt" }], metadata: { total_results: 1 },

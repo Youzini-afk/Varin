@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/client";
 import {
   mergeHarnessWebDomainPolicy,
   parseHarnessWebSearchSettings,
@@ -207,10 +208,14 @@ const parseJson = (value: string): unknown => {
   }
 };
 
-/** Parse both ordinary JSON-RPC and the single-event SSE transport used by MCP. */
+const isMcpReply = (value: unknown): value is Record<string, unknown> => (
+  isRecord(value) && value.jsonrpc === "2.0" && value.id === 1 && ("result" in value || "error" in value)
+);
+
+/** JSON responses and finite compatibility bodies still use the same request identity. */
 const parseMcpTransport = (body: string, provider: string): Record<string, unknown> => {
   const direct = parseJson(body.trim());
-  if (isRecord(direct)) return direct;
+  if (isMcpReply(direct)) return direct;
 
   const events = body.split(/\r?\n\r?\n/u).flatMap((event) => {
     const data = event.split(/\r?\n/u)
@@ -221,9 +226,75 @@ const parseMcpTransport = (body: string, provider: string): Record<string, unkno
     const parsed = parseJson(data);
     return isRecord(parsed) ? [parsed] : [];
   });
-  const rpc = events.findLast((value) => "result" in value || "error" in value);
+  const rpc = events.find(isMcpReply);
   if (rpc) return rpc;
   throw new SearchProviderError({ kind: "protocol", message: `${provider} search returned malformed JSON/SSE` });
+};
+
+/** A tools/call response completes at its matching RPC event, not at SSE EOF.
+ * Notifications and unrelated responses may precede it on a still-open transport. */
+const readMcpTransport = async (response: Response, provider: string, signal?: AbortSignal): Promise<Record<string, unknown>> => {
+  if (!response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+    return parseMcpTransport(await response.text(), provider);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new SearchProviderError({ kind: "protocol", message: `${provider} search returned an empty SSE body` });
+  const decoder = new TextDecoder();
+  let pending = "";
+  let skipLF = false;
+  let data: string[] = [];
+  const abort = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  signal?.addEventListener("abort", abort, { once: true });
+  const event = () => {
+    const body = data.join("\n");
+    data = [];
+    if (!body || body === "[DONE]") return undefined;
+    const rpc = parseJson(body);
+    if (!isRecord(rpc)) throw new SearchProviderError({ kind: "protocol", message: `${provider} search returned malformed SSE data` });
+    return isMcpReply(rpc) ? rpc : undefined;
+  };
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const chunk = await reader.read();
+      signal?.throwIfAborted();
+      let decoded = decoder.decode(chunk.value, { stream: !chunk.done });
+      if (skipLF && decoded) {
+        if (decoded.startsWith("\n")) decoded = decoded.slice(1);
+        skipLF = false;
+      }
+      pending += decoded;
+      // CR is a complete SSE delimiter too; consume it immediately, and skip a
+      // possible LF in the next chunk rather than waiting for another byte.
+      let newline: RegExpExecArray | null;
+      while ((newline = /[\r\n]/u.exec(pending))) {
+        const line = pending.slice(0, newline.index);
+        pending = pending.slice(newline.index + 1);
+        if (newline[0] === "\r") {
+          if (pending.startsWith("\n")) pending = pending.slice(1);
+          else if (!pending) skipLF = true;
+        }
+        if (!line) {
+          const rpc = event();
+          if (rpc) return rpc;
+        } else if (line.startsWith("data:")) {
+          const value = line.slice(5);
+          data.push(value.startsWith(" ") ? value.slice(1) : value);
+        }
+      }
+      if (chunk.done) {
+        // Also accept providers that close their last event without a blank line.
+        if (pending.startsWith("data:")) data.push(pending.slice(5).replace(/^ /u, ""));
+        const rpc = event();
+        if (rpc) return rpc;
+        throw new SearchProviderError({ kind: "protocol", message: `${provider} search stream ended without its JSON-RPC response` });
+      }
+    }
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 };
 
 const callMcpTool = async (input: {
@@ -249,8 +320,7 @@ const callMcpTool = async (input: {
     ...(input.signal ? { signal: input.signal } : {}),
   });
   if (!response.ok) throw httpFailure(response, input.provider);
-  const body = await response.text();
-  const rpc = parseMcpTransport(body, input.provider);
+  const rpc = await readMcpTransport(response, input.provider, input.signal);
   if ("error" in rpc) throw new SearchProviderError({ kind: "protocol", message: `${input.provider} search returned a JSON-RPC error` });
   if (!isRecord(rpc.result)) throw new SearchProviderError({ kind: "protocol", message: `${input.provider} search returned malformed JSON-RPC` });
   if (rpc.result.isError === true) throw new SearchProviderError({ kind: "protocol", message: `${input.provider} search tool failed` });
@@ -415,6 +485,33 @@ const isCancellation = (error: unknown, signal: AbortSignal | undefined): boolea
   Boolean(signal?.aborted)
   || (error instanceof Error && error.name === "AbortError")
 );
+
+/** Apply the existing MCP request budget to each network provider attempt, not
+ * the user's Run. Abort and drain the failed attempt before trying its fallback. */
+const searchAttempt = async (provider: SearchProvider, query: string, options: SearchOptions): Promise<SearchProviderResponse> => {
+  const controller = new AbortController();
+  const cancel = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  if (options.signal?.aborted) cancel();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException("Search provider request timed out", "TimeoutError"));
+  }, DEFAULT_REQUEST_TIMEOUT_MSEC);
+  timer.unref?.();
+  try {
+    const result = await provider.search(query, { ...options, signal: controller.signal });
+    controller.signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (timedOut && !options.signal?.aborted) throw new SearchProviderError({ kind: "network", message: `${provider.id} search request timed out` });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", cancel);
+    controller.abort();
+  }
+};
 
 const conciseFailure = (error: unknown, fallback: string): string => {
   if (!(error instanceof Error)) return fallback;
@@ -720,7 +817,7 @@ export const resolveConfiguredSearchProvider = (input: {
           continue;
         }
         try {
-          const response = await entry.provider.search(query, options);
+          const response = await searchAttempt(entry.provider, query, options);
           attempts.push({ connectionId: id, providerId: entry.provider.id, status: response.results.length ? "ok" : "empty" });
           const appliedFilters = searchFilterApplication(entry.provider, options);
           const notices = [
