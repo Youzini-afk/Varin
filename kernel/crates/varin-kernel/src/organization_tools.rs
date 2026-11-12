@@ -479,6 +479,8 @@ impl Tools {
         project_names: Option<std::collections::BTreeMap<String, String>>,
     ) -> Result<Value, ExecutionError> {
         let mut query = OrganizationQuery {
+            kind: None,
+            sort: None,
             container_id: input
                 .container
                 .as_deref()
