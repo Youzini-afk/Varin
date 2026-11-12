@@ -22,6 +22,7 @@ import {
 
 const GITHUB_URL = 'https://github.com/Youzini-afk/Varin';
 const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
+const CONTACT_EMAIL = 'varin@astrmira.com';
 
 const MIN_CHECKING_DURATION = 800; // ms
 
@@ -179,7 +180,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         />
 
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex items-center justify-center gap-5">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -197,6 +198,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             >
               <Icon name="scales-3" className="size-5" />
               <span>AGPL-3.0</span>
+            </a>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex min-w-0 items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Icon name="send-plane" className="size-5 shrink-0" />
+              <span className="break-all">{CONTACT_EMAIL}</span>
             </a>
           </div>
         </div>
@@ -297,7 +307,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <InstanceServiceUrls />
         </div>
 
-        <div className="flex items-center gap-4 px-4 py-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4">
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -316,7 +326,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             <Icon name="scales-3" className="h-4 w-4" />
             <span>AGPL-3.0</span>
           </a>
-
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-w-0 items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
+          >
+            <Icon name="send-plane" className="h-4 w-4 shrink-0" />
+            <span className="break-all">{CONTACT_EMAIL}</span>
+          </a>
         </div>
       </div>
 

@@ -4,6 +4,7 @@
 
 | したいこと | 行き先 |
 | --- | --- |
+| Varin に連絡する | [varin@astrmira.com](mailto:varin@astrmira.com) |
 | 機能の仕組みや使い方を知りたい | [利用ガイド](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/ja/index.mdx)。まずは[クイックスタート](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/ja/quickstart.mdx)と[トラブルシューティング](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/ja/troubleshooting.mdx)から |
 | ガイドで答えが見つからない質問をしたい | ディスカッションの [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) |
 | アイデアや大きな変更について話し合いたい | [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) |

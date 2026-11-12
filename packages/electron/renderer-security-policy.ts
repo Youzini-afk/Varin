@@ -13,12 +13,12 @@ export const REMOTE_SAFE_DESKTOP_COMMANDS: ReadonlySet<VarinDesktopCommand> = ne
   VARIN_REMOTE_SAFE_DESKTOP_COMMANDS,
 );
 
-export const normalizeExternalHttpUrl = (raw: unknown): string | null => {
+export const normalizeExternalUrl = (raw: unknown): string | null => {
   const value = asTrimmedString(raw);
   if (!value) return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'mailto:') return null;
     return url.toString();
   } catch {
     return null;

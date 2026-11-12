@@ -4,6 +4,7 @@
 
 | 你想要 | 去哪里 |
 | --- | --- |
+| 联系 Varin | [varin@astrmira.com](mailto:varin@astrmira.com) |
 | 了解某个功能怎么用 | [使用指南](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/README.zh-CN.md)，可以从[快速开始](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/zh-cn/quickstart.mdx)和[问题排查](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/zh-cn/troubleshooting.mdx)看起 |
 | 问一个指南里没有答案的问题 | 讨论区的 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) |
 | 聊一个想法或较大的改动 | [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) |

@@ -72,7 +72,7 @@ import { updateWindowInitScript } from './window-init-script.js';
 import {
   createPreloadBootstrapPayload,
   isTrustedLocalRendererUrl,
-  normalizeExternalHttpUrl,
+  normalizeExternalUrl,
   REMOTE_SAFE_DESKTOP_COMMANDS,
 } from './renderer-security-policy.js';
 import {
@@ -2631,7 +2631,7 @@ const createBrowserWindow = ({
     if (isAllowedNavigationUrl(url)) {
       return { action: 'allow' };
     }
-    const externalUrl = normalizeExternalHttpUrl(url);
+    const externalUrl = normalizeExternalUrl(url);
     if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
     return { action: 'deny' };
   });
@@ -2640,7 +2640,7 @@ const createBrowserWindow = ({
     if (decorative && url !== browserWindow.webContents.getURL()) { event.preventDefault(); return; }
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
-    const externalUrl = normalizeExternalHttpUrl(url);
+    const externalUrl = normalizeExternalUrl(url);
     if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
   });
 
@@ -3132,7 +3132,7 @@ const createMiniChatWindow = async ({
   });
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const externalUrl = normalizeExternalHttpUrl(url);
+    const externalUrl = normalizeExternalUrl(url);
     if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
     return { action: 'deny' };
   });
@@ -3143,7 +3143,7 @@ const createMiniChatWindow = async ({
       localOrigins: [state.localOrigin, state.sidecarUrl],
     })) return;
     event.preventDefault();
-    const externalUrl = normalizeExternalHttpUrl(url);
+    const externalUrl = normalizeExternalUrl(url);
     if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {

@@ -10,6 +10,7 @@ import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@varin/application-client';
 
 const LICENSE_URL = 'https://github.com/Youzini-afk/Varin/blob/main/LICENSE';
+const CONTACT_EMAIL = 'varin@astrmira.com';
 
 interface AboutDialogProps {
   open: boolean;
@@ -84,7 +85,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           </div>
 
           <div className="flex flex-col items-center gap-2 pt-2">
-            <div className="flex items-center justify-center gap-4">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
               <a
                 href="https://github.com/Youzini-afk/Varin"
                 target="_blank"
@@ -102,6 +103,15 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               >
                 <Icon name="scales-3" className="h-4 w-4" />
                 <span>AGPL-3.0</span>
+              </a>
+              <a
+                href={`mailto:${CONTACT_EMAIL}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex min-w-0 items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="send-plane" className="h-4 w-4 shrink-0" />
+                <span className="break-all">{CONTACT_EMAIL}</span>
               </a>
             </div>
           </div>

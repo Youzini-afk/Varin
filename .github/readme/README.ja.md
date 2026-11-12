@@ -186,6 +186,7 @@ Varin、ワークベンチ、IDE の画面も、ブラウザー、Office、PC �
 - 質問は [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) へ、作ったものの共有やアイデアの提案は[ディスカッション](https://github.com/Youzini-afk/Varin/discussions)へどうぞ。[サポート窓口](../translations/SUPPORT.ja.md)に、問い合わせの種類ごとの行き先をまとめています。
 - ツールやコンテキスト処理、モデルプロバイダー、拡張機能、ドキュメントや翻訳、お使いのプラットフォームでのテスト報告など、貢献を歓迎します。[貢献ガイド](../translations/CONTRIBUTING.ja.md)では環境の準備と Pull Request の流れを説明しています。
 - [バグを報告](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [機能を提案](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [脆弱性を非公開で報告](../SECURITY.md)
+- 連絡先：[varin@astrmira.com](mailto:varin@astrmira.com)。
 
 [LinuxDO](https://linux.do) コミュニティの支援に感謝します。
 

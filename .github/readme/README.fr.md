@@ -186,6 +186,7 @@ Pour comprendre comment les éléments s'articulent, consultez l'[architecture](
 - Posez vos questions dans [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a), partagez vos créations et proposez des idées dans [Discussions](https://github.com/Youzini-afk/Varin/discussions). La page [Obtenir de l'aide](../translations/SUPPORT.fr.md) indique où adresser chaque type de demande.
 - Les contributions sont les bienvenues : outils et gestion du contexte, fournisseurs de modèles, extensions, documentation et traductions, ou comptes rendus de tests sur votre plateforme. Le [guide de contribution](../translations/CONTRIBUTING.fr.md) explique la préparation de l'environnement et l'envoi d'une pull request.
 - [Signaler un bug](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [Proposer une fonctionnalité](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [Signaler une vulnérabilité en privé](../SECURITY.md)
+- Contact : [varin@astrmira.com](mailto:varin@astrmira.com).
 
 Merci à la communauté [LinuxDO](https://linux.do) pour son soutien.
 

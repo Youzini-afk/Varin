@@ -4,6 +4,7 @@ English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/
 
 | You want to | Go to |
 | --- | --- |
+| Contact Varin | [varin@astrmira.com](mailto:varin@astrmira.com) |
 | Find out how something works | The [user guides](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/README.md), starting with the [quickstart](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/quickstart.mdx) and [troubleshooting](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/troubleshooting.mdx) |
 | Ask a question the guides don't answer | [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) in Discussions |
 | Talk through an idea or a larger change | [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) |

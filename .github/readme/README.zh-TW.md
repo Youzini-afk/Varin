@@ -186,6 +186,7 @@ bun run dev
 - 使用問題到 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) 提問，作品分享和想法建議在[討論區](https://github.com/Youzini-afk/Varin/discussions)交流。[取得協助](../translations/SUPPORT.zh-TW.md)列出了各類問題該去哪裡。
 - 歡迎貢獻：工具與上下文處理、模型服務商串接、擴充功能、文件與翻譯，以及各平台的實測報告。[貢獻指南](../translations/CONTRIBUTING.zh-TW.md)介紹了開發準備和 Pull Request 流程。
 - [回報問題](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
+- 聯絡信箱：[varin@astrmira.com](mailto:varin@astrmira.com)。
 
 感謝 [LinuxDO](https://linux.do) 社群的支持。
 

@@ -4,6 +4,7 @@
 
 | Vous voulez | Où aller |
 | --- | --- |
+| Contacter Varin | [varin@astrmira.com](mailto:varin@astrmira.com) |
 | Comprendre comment quelque chose fonctionne | Les [guides d'utilisation](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/fr/index.mdx), en commençant par le [démarrage rapide](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/fr/quickstart.mdx) et le [dépannage](https://github.com/Youzini-afk/Varin/blob/main/packages/docs/content/docs/fr/troubleshooting.mdx) |
 | Poser une question à laquelle les guides ne répondent pas | [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) dans les Discussions |
 | Discuter d'une idée ou d'un changement plus large | [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) |

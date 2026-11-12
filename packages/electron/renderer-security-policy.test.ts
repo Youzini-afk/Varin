@@ -4,7 +4,7 @@ import { test } from 'vitest';
 import {
   createPreloadBootstrapPayload,
   isTrustedLocalRendererUrl,
-  normalizeExternalHttpUrl,
+  normalizeExternalUrl,
   REMOTE_SAFE_DESKTOP_COMMANDS,
 } from './renderer-security-policy.js';
 
@@ -14,11 +14,12 @@ const trustOptions = {
   localOrigins: ['http://127.0.0.1:57123'],
 };
 
-test('opens only HTTP and HTTPS URLs through the operating system', () => {
-  assert.equal(normalizeExternalHttpUrl('https://varin.dev/docs'), 'https://varin.dev/docs');
-  assert.equal(normalizeExternalHttpUrl('http://127.0.0.1:57123/path'), 'http://127.0.0.1:57123/path');
-  for (const value of ['file:///C:/Windows/System32', 'javascript:alert(1)', 'mailto:user@example.com', 'not a url']) {
-    assert.equal(normalizeExternalHttpUrl(value), null);
+test('opens web links and email links through the operating system', () => {
+  assert.equal(normalizeExternalUrl('https://varin.dev/docs'), 'https://varin.dev/docs');
+  assert.equal(normalizeExternalUrl('http://127.0.0.1:57123/path'), 'http://127.0.0.1:57123/path');
+  assert.equal(normalizeExternalUrl('mailto:varin@astrmira.com'), 'mailto:varin@astrmira.com');
+  for (const value of ['file:///C:/Windows/System32', 'javascript:alert(1)', 'not a url']) {
+    assert.equal(normalizeExternalUrl(value), null);
   }
 });
 
