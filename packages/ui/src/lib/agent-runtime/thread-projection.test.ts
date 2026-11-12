@@ -388,3 +388,53 @@ it.each(['model.settled', 'inference.settled', 'usage.updated'])('refreshes same
     expect(h.report).not.toHaveBeenCalled();
   } finally { close(); h.projection.close(); }
 });
+
+
+it.each(['failed', 'cancelled'] as const)('refreshes a manual context helper becoming %s without a parent Run wake', async state => {
+  const view = snapshotView(false);
+  const helper = { ...snapshotView().activeRun!, id: 'manual-context-run',
+    thread_id: 'context-job-thread:manual', branch_id: 'context-job-branch:manual' };
+  const job: ThreadSnapshot['context']['jobs'][number] = {
+    run: helper,
+    job: {
+      compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'text', sourceCutHash: 'source', planHash: 'plan' },
+      request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin', name: 'fold', version: '1' },
+        mode: 'manual', configurationIdentity: null, additionalInstructions: null },
+        key: 'manual', branch_id: identity.branchId, through_id: 'parent-head', expected_revision: 0,
+        effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null },
+      receipt: { thread_id: helper.thread_id, branch_id: helper.branch_id, run_id: helper.id, input_id: 'manual-input', cursor: 7 },
+    },
+  };
+  const snapshot = vi.fn<ThreadsAPI['snapshot']>(async () => structuredClone(view));
+  const h = await startProjection(snapshot);
+  try {
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    view.context.jobs = [job]; view.eventCursor = 7;
+    h.listener({ cursor: 7, thread_id: identity.threadId, branch_id: identity.branchId,
+      subject: identity.branchId, revision: 1, kind: 'context.job_created', data: { run_id: helper.id } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(2);
+    h.listener({ cursor: 8, thread_id: 'context-job-thread:unrelated', branch_id: 'context-job-branch:unrelated',
+      subject: 'other-context-run', revision: 2, kind: `run.${state}`, data: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(2);
+    job.run = { ...helper, state, revision: 2 }; view.eventCursor = 9;
+    h.listener({ cursor: 9, thread_id: helper.thread_id, branch_id: helper.branch_id,
+      subject: helper.id, revision: 2, kind: `run.${state}`, data: job.run });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(3);
+    expect(h.publish.mock.lastCall![0].context.jobs[0].run.state).toBe(state);
+    expect(h.report).not.toHaveBeenCalled();
+    // Removing a job also removes its helper interest; retained old helper events
+    // must not keep refreshing the parent after that relationship disappears.
+    view.context.jobs = []; view.eventCursor = 10;
+    h.listener({ cursor: 10, thread_id: identity.threadId, branch_id: identity.branchId,
+      subject: identity.branchId, revision: 2, kind: 'context.published', data: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(4);
+    h.listener({ cursor: 11, thread_id: helper.thread_id, branch_id: helper.branch_id,
+      subject: helper.id, revision: 3, kind: 'run.changed', data: job.run });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(4);
+  } finally { h.projection.close(); }
+});

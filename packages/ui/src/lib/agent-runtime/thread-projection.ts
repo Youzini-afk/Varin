@@ -37,7 +37,7 @@ export class ThreadProjection {
   private fullRefresh = false;
   private snapshot?: ThreadSnapshot;
   private unsubscribe?: () => void;
-  private childSubscriptions = new Map<string, () => void>();
+  private relatedSubscriptions = new Map<string, () => void>();
   private activeRunId: string | null = null;
   private readonly progress = new Map<string, ProgressView>();
   private progressObservation = 0;
@@ -109,7 +109,7 @@ export class ThreadProjection {
           }
           const previous = this.snapshot;
           this.snapshot = snapshot;
-          this.syncChildSubscriptions(snapshot);
+          this.syncRelatedSubscriptions(snapshot);
           this.publishCurrentProgress();
           this.publish(snapshot);
           if (this.options.contextInspection !== false && (inspectContext || !previous || previous.historyPage.head !== snapshot.historyPage.head
@@ -152,19 +152,22 @@ export class ThreadProjection {
   }
   close(): void {
     this.removeEndpoint?.(); this.unsubscribe?.();
-    for (const unsubscribe of this.childSubscriptions.values()) unsubscribe();
-    this.childSubscriptions.clear();
+    for (const unsubscribe of this.relatedSubscriptions.values()) unsubscribe();
+    this.relatedSubscriptions.clear();
     this.abort.abort(); this.progress.clear(); this.toolProgress.clear();
   }
 
-  private syncChildSubscriptions(snapshot: ThreadSnapshot) {
-    const children = new Set((snapshot.children ?? []).map(child => child.child_thread_id));
-    for (const child of snapshot.childExecutions ?? []) children.add(child.child_thread_id);
-    children.delete(this.identity.threadId);
-    for (const [id, unsubscribe] of this.childSubscriptions) if (!children.has(id)) { unsubscribe(); this.childSubscriptions.delete(id); }
-    for (const threadId of children) if (!this.childSubscriptions.has(threadId)) {
+  private syncRelatedSubscriptions(snapshot: ThreadSnapshot) {
+    const relatedThreads = new Set((snapshot.children ?? []).map(child => child.child_thread_id));
+    for (const child of snapshot.childExecutions ?? []) relatedThreads.add(child.child_thread_id);
+    // Manual context jobs can finish without waking the parent Run. Their helper
+    // Run state is part of this snapshot, not only the expanded job history view.
+    for (const { run } of snapshot.context.jobs) relatedThreads.add(run.thread_id);
+    relatedThreads.delete(this.identity.threadId);
+    for (const [id, unsubscribe] of this.relatedSubscriptions) if (!relatedThreads.has(id)) { unsubscribe(); this.relatedSubscriptions.delete(id); }
+    for (const threadId of relatedThreads) if (!this.relatedSubscriptions.has(threadId)) {
       if (getThreadObservationBus(this.api).getThreadCursor(threadId) > snapshot.eventCursor) this.dirty = true;
-      this.childSubscriptions.set(threadId, getThreadObservationBus(this.api).subscribe({ threadId, kinds: ['thread.*', 'branch.*', 'run.*', 'launch.*', 'execution.*', 'child.*', 'operation.*'] }, event => {
+      this.relatedSubscriptions.set(threadId, getThreadObservationBus(this.api).subscribe({ threadId, kinds: ['thread.*', 'branch.*', 'run.*', 'launch.*', 'execution.*', 'child.*', 'operation.*'] }, event => {
         if (!('stream' in event) && event.kind !== 'thread.read') void this.refresh(false);
       }));
     }

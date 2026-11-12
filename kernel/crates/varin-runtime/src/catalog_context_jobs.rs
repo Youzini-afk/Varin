@@ -49,6 +49,9 @@ impl ContextJobAdmission {
                 params![run_id, node.id, sql_number(index as u64)?, encode(&node.dependencies)?],
             )?;
         }
+        // A manual job has no waiting parent Run. Notify the source branch so every
+        // client discovers the helper and can then observe its ordinary Run lifecycle.
+        event(tx, &self.branch_id, 0, "context.job_created", json!({"job_run_id":run_id}))?;
         Ok(())
     }
 }

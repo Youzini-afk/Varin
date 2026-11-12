@@ -4585,3 +4585,30 @@ fn legacy_summary_migration_preserves_internal_creation_domain() {
     assert!(matches!(db.create_thread(&job.receipt.thread_id,&job.receipt.branch_id),Err(RuntimeError::Conflict(_))));
     assert!(db.run(&job.receipt.run_id).is_ok());
 }
+
+
+#[test]
+fn manual_context_job_creation_notifies_original_branch_once() {
+    use crate::context_job::*;
+    use crate::execution::{AgentPolicy, DefaultAgentPolicy};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let source = submit(&mut db);
+    let launch = launches::LaunchSelection::from_binding(
+        &request_snapshot(&source).view.binding, DefaultAgentPolicy.identity(), None);
+    let request = ContextJobRequest {
+        compaction: None, summary_recipe: ContextSummaryRecipe::manual(), owner_run_id: None,
+        personalization: None, key: "observable-summary".into(), branch_id: source.branch_id.clone(),
+        through_id: source.input_id, expected_revision: 0, effective_system_prompt: "Summarize".into(),
+        instruction_sources: vec![], memory_checkpoint: None,
+    };
+    let job = db.create_context_job(request.clone(), launch.clone(), json!({})).unwrap();
+    let retried = db.create_context_job(request, launch, json!({})).unwrap();
+    assert_eq!(job.receipt.run_id, retried.receipt.run_id);
+    let events = db.events_after(0, 100).unwrap().into_iter()
+        .filter(|event| event.kind == "context.job_created").collect::<Vec<_>>();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].thread_id.as_deref(), Some(source.thread_id.as_str()));
+    assert_eq!(events[0].branch_id.as_deref(), Some(source.branch_id.as_str()));
+    assert_eq!(events[0].data["job_run_id"], json!(job.receipt.run_id));
+}
