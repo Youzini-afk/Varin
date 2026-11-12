@@ -327,3 +327,25 @@ After meaningful Git/PR store changes, verify manually:
 4. Thread navigation preserves the actual Host and branch.
 5. Failed or unknown multi-run attempts retain their Threads and worktrees.
 6. Hidden surfaces do not reintroduce live background work.
+
+### Scoped native catalog and organization observation
+
+The native sidebar subscribes to the shared Host observation bus. Initial load and
+resync read the complete catalog; scoped durable changes batch dirty Thread IDs
+through `inspectMany`, retain untouched summary references, and re-sort only the
+resulting catalog. Missing/hidden/deleted results remove only requested identities.
+Archive receipts, branch fallback, activity/read clocks and Host fencing retain their
+existing semantics. Creation and navigation resolve only the affected identities.
+Failed delta reads preserve current rows and retry; they are not empty successes.
+
+Organization navigation uses that same observation bus through its HTTP API.
+Classification/metadata changes refresh loaded query windows; native activity only
+invalidates loaded recent-sort windows. Neither token progress, read acknowledgements
+nor unrelated operation events reload the tree. Refreshes coalesce, and continuation
+reads stop once the already-loaded window has been reconstructed. Explicit action
+scope reads still follow all continuations when the selected operation requires them.
+A failed page retains its previous view and retries that page, not the entire tree.
+
+`useConversationOrganization()` manages shared binding lifetime without subscribing
+the caller to all store fields. Consumers that render data supply a selector; tree
+and detail views use shallow selections of the fields they actually display.

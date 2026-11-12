@@ -464,7 +464,9 @@ history or execution owner. `read` returns the durable cursor, container and par
 Bot provenance and a query-bound continuation. `command` retains an admission key and checks the
 actual affected parents/objects. A failed or cancelled wait is not a reversal of a committed move.
 The HTTP adapter aborts on Host replacement and fences decoded responses before publishing them.
-`observe` uses the existing multiplexed Thread durable-event channel, shared once per Host store.
+`observe` subscribes to the shared Host Thread observation bus, including resync notifications,
+without opening another transport or owning another reconnect loop. It forwards organization,
+conversation metadata and activity kinds; loaded navigation windows decide which changes matter.
 
 Use `read({ pageNodes: true, ...query })` for a navigable mixed page. `items` is the authoritative
 ordered page of `{ kind: 'container' | 'native' | 'external', id }` references; `limit` and
@@ -529,3 +531,27 @@ Skills CRUD and prompt/tool previews use the target's original resource owner.
 Project trust reads and revision-checked updates use the target trust store and
 canonical registered path. Paired capabilities and allowed roots still apply;
 Agent/Bot personalization and project model preferences retain their original owners.
+
+## Thread observation
+
+`getThreadObservationBus(api)` owns one observation transport per selected Host/API. The HTTP API is
+shared; consumers subscribe with optional thread, branch and kind interests instead of starting
+independent reconnect loops. Durable scopes come from Catalog, not renderer subject inference.
+Unscoped thread metadata applies to all branches, while a subscription's kind list can name an exact
+kind or namespace (`run.*`). Authorization remains on the Host; a gap in globally allocated cursors
+is not evidence of a lost authorized event.
+
+The bus replays its durable cursor after disconnects. Progress-interest changes use the same live
+subscription through `updateObservationInterests`, identified by its connection-scoped observation ID.
+Updates coalesce in flight and are checked against the original principal by the Host; adding a view
+does not interrupt another view’s provider stream or invalidate its snapshot. A real
+connection loss, restored connection, explicit cursor reset or kernel epoch change sends `resync`;
+progress is disposable and views rebuild without replaying commands. The first successful connection
+also emits one ready resync to cover commits racing the initial parallel snapshot read. `observe`'s `onReady` callback
+runs after successful response headers, so a quiet reconnection can recover even without a new event.
+Endpoint changes close the old bus and prevent cross-Host continuation.
+
+`snapshot(identity, signal, { afterHeadId })` requests append-only history. Only a returned
+`historyPage.afterHeadId` matching that request permits a delta merge; an omitted marker means a full
+replacement (navigation, fork or an unavailable ancestry cut). All non-history fields are complete
+snapshots in either case.

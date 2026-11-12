@@ -39,10 +39,24 @@ The Host provides private local control/content endpoints and a fresh bearer via
 Unix uses local sockets; Windows uses overlapped named pipes. Stderr is diagnostic only. Both channels
 authenticate the same epoch, and loss of either invalidates it.
 
-Control uses framed JSON. Content uses separately acknowledged stream/sequence chunks, credit and fair
-rotation. Frame bounds limit packets, not total content. Body encoding/decoding runs outside the control
-reader and domain owner sections. A request is registered before its body arrives, so cancellation can
-stop/discard incomplete admission without executing it.
+Control uses framed JSON independently of data backpressure. The data connection has typed frames:
+small messages encode and decode inline, without a worker or per-message handshake. Larger bodies use
+worker encoding/hydration and acknowledged stream chunks. A single writer alternates ready chunks with
+inline frames; packet bounds never limit total content. Thresholds and admission budgets are defined in
+[the protocol schema](protocol/schema.json), not product-level content limits.
+
+In-flight requests and large-body stream credits are independent. Stream credit includes hydration and
+returns only when the stream actually settles. Host requests, control-response requests and reverse
+bridge replies have independent body admission, so a nested Host↔Rust call cannot consume the credit
+needed to finish its parent. Rust codec workers follow available CPU parallelism rather than the
+request window. Progress batches enter a bounded FIFO with socket backpressure, not a remote round trip;
+the existing producer still coalesces deltas while its consumer is blocked.
+
+A monotonic arrival sequence orders inline requests and stream offers across the two sockets, before
+body work. The receiver registers cancellation and input ordering immediately at that arrival. A control
+cancel that overtakes an inline frame waits only for that arrival, with no unbounded retired-ID cache.
+Stream offers reserve input ordering before encoding or waiting for a body credit; only those streams
+need the pre-body cancellation handshake.
 
 Queued cancellation, observer cancellation and domain completion differ. Returning transport credit
 cannot prove an accepted executor stopped. Client/worker shutdown retains original requests, owner locks
@@ -56,8 +70,8 @@ and reuse limits are in [Documents observation](../packages/web/application-host
 ## Storage and file authority
 
 Storage has one OS-held `kernel.lock` and its own `catalog.sqlite`, separate from the Agent Catalog.
-[core.rs](crates/varin-kernel/src/storage/core.rs) accepts only the current Storage format (22), SQLite
-`user_version` (16) and schema fingerprint; it has no older-generation conversion chain. The format
+[core.rs](crates/varin-kernel/src/storage/core.rs) defines and accepts the current Storage format, SQLite
+`user_version` and schema fingerprint; it has no older-generation conversion chain. The format
 probe precedes opening the writer, and structural validation precedes staging/ephemeral-pin cleanup.
 Unsupported/future/malformed/corrupt stores are errors and their assets are preserved. Agent Catalog
 upgrades do not upgrade this domain. Workspace files, Git, native Pi data and external configuration
@@ -92,127 +106,60 @@ reselect a later parent head. All paths, source workspace and pin ownership are 
 Exact branch/pin blob reads use the actual path state as proof, rather than derived intermediate-root
 indexes that GC may release. These are namespace primitives, not mounted filesystem or open-handle APIs.
 
-`workspace_files.rs` provides the native private-byte generation primitive: immutable base objects,
-an append-only private log and a structurally shared ordered range map. Snapshotting retains ranges;
-later writes/truncation cannot modify an older view. Reads select only the required base gaps and
-overwritten ranges. A file worker seals a changed file, retaining its exact hash before installation;
-publication reuses path CAS and the original operation transaction. Successful idle publication can
-release obsolete ranges while older readers retain their backing; the publication finisher performs
-backing cleanup on the file worker after the Storage transaction returns. Revocation closes original handles,
-and failed temporary-file cleanup remains visible/retryable through Storage cleanup status.
-Durable success follows publication, while an unsealed generation is process-local state.
+Native filesystem implementation is split by owner; product behavior and current support are in
+[resources](../docs/resources.md#不可变工作状态与物理目录), rather than a second feature list here.
 
-`workspace_session.rs` supplies an in-process native filesystem session over that same Storage owner.
-Metadata uses a synchronous typed control port; range reads/writes use the admitted byte handles directly.
-Lookup/stat keeps metadata only. Actual opens retain byte descriptors; clean descriptors end with their
-native readers, while unsaved data retains its backing until publication. Directory walks do not open
-every file or retain an unbounded set of clean content descriptors. Storage selects/retains a base object
-without opening it; the actual native callback opens its read-only descriptor outside the control owner.
-One branch/owner reuses one session and one set of open identities. Rename retains handles; unlink and
-recreate are different identities. Checkpoints retain the namespace and only dirty range maps, then seal
-individual files on a worker while the parent continues writing. The resulting child root includes those
-dirty bytes in its actual baseline. Normal session closure preserves previously retained checkpoints;
-grant revocation invalidates original access. Generic branch mutations cannot bypass a live session.
+| Entry | Responsibility and non-obvious boundary |
+| --- | --- |
+| [workspace_files.rs](crates/varin-kernel/src/storage/workspace_files.rs) | Immutable bases, private append-only ranges and retained generations. Sealing and backing cleanup run on workers; durable success follows publication, not a process-local write. |
+| [workspace_session.rs](crates/varin-kernel/src/storage/workspace_session.rs) | One session per branch/owner; synchronous metadata commands and admitted byte handles. Directory lookup does not open every body. Rename keeps identity; unlink/recreate does not. |
+| [workspace_metadata.rs](crates/varin-kernel/src/storage/workspace_metadata.rs) | Original attributes, stable inode identity and paired immutable metadata roots. Equal body hashes do not justify borrowing another revision's attributes. |
+| [workspace_resources.rs](crates/varin-kernel/src/workspace_resources.rs) | Mount generations, leases, checkpoint/result publication and drain. Project filesystem ownership and Run/Operation leases have different lifetimes. |
+| [workspace_adoption.rs](crates/varin-kernel/src/workspace_adoption.rs) | One stabilized physical-source import, native attributes and private Git administration. Failure reclaims the unpublished candidate without changing the original directory. |
+| [workspace backend](crates/varin-kernel/src/workspace_backend.rs), [mount adapters](crates/varin-kernel/src/workspace_mount) | Explicit capability inspection and actual OS callbacks; compiled support is not installed/authorized platform capability. |
 
-`workspace_metadata.rs` stores persistent inode identity, permission bits, owners, nanosecond timestamps,
-xattrs and Windows security descriptors in an ordinary private immutable-tree branch. Its typed values
-are encoded in private directory leaves, not separate filesystem objects or project files. The existing
-branch/pin GC graph retains them without a format migration. Namespace bindings preserve lazy descendant
-identities across a directory rename. Creation, chmod and body publication save attributes in the same
-original SQLite transaction. Checkpoints pin both **current** roots, including native namespace changes
-since the last published revision, and fork dirty attributes with the selected bytes. Deleting the data
-branch releases its paired metadata branch; existing pins retain the selected versions. Native metadata
-branch identities (`workspace-metadata:<UUID>`) and control records cannot be overwritten/released through
-generic public branch/record methods. Stable adoption and file captures preserve recoverable native
-attributes; cross-Host entries import those values with fresh local file identities. Normal pins and
-published revisions retain their paired attribute roots independently of a WorkingResult's lifetime.
-Releasing a historical WorkingResult also releases its own revision and paired revision metadata;
-other explicitly retained pins continue to own their selected bytes and attributes. Root directory
-metadata uses `.` in result/import contracts and accepts only conditional directory attribute updates.
-Namespace replacement assigns a fresh local identity; explicit rebases select the filesystem sidecar
-from their original pin/revision instead of borrowing attributes from an equal body hash.
+Checkpoints retain the current namespace, attributes and dirty ranges before workers seal files; parent
+writes continue into a separate generation. Generic branch mutations cannot bypass a live session.
+Metadata uses the existing private-tree/GC graph, not user files or another database. Deleting a branch
+releases its paired metadata while retained pins/revisions continue owning their selected values.
+Privileged metadata branches/control records are not public mutation targets. Source/root, pin and
+operation identity remain authoritative through replay, revocation and publication.
 
-The default `workspace-mount` feature contains WinFsp and Linux/macOS FUSE adapters.
-It never installs OS components. New isolated writers use native workspace branches; project settings
-can explicitly adopt a primary workspace into a separate mounted directory. WinFsp is delay-loaded;
-the original installed DLL is located through its system registration only when starting a mount. Building
-this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
-FUSE character device and a permitted direct-mount/helper route for actual mounts. Linux negotiates
-writeback cache only when the connection offers and accepts FUSE_HAS_SYNCFS, then captures the
-checkpoint after its waiting syncfs call completes. An opcode version alone does not enable this
-capability on ordinary FUSE mounts. Other connections retain the scoped active-writer obstacle.
-Unmount helper errors
-retain the mount; detach does not silently become lazy/forced.
-macOS first uses the bundled path-resource FSKit executor when macOS 26+ reports the exact staged
-extension enabled; otherwise it admits the installed macFUSE VFS backend. Extension state inspection
-never opens settings or installs/enables components. The explicit project settings action opens the
-Host's bundled control app and system settings. See [native executor](../packages/workspace-driver/macos/README.md).
-macFUSE uses runtime loading of the installed libfuse3 session API, avoiding the compat25 break tracked at
-https://github.com/cberner/fuser/issues/752. An explicit `fuser/libfuse2` build retains the legacy path;
-the default macOS loader never selects compat25 because an SDK happens to contain `fuse.pc`.
-The libfuse3 owner retains the session while native callbacks use a duplicated fd and destroys it on
-setup failure or after detach. Native OS qualification of this selection is still pending.
-`wait_ready` checks the actual mount device/root inode after the dispatcher
-starts, while keeping the mount object available for cancellation and cleanup; this covers the asynchronous
-readiness distinction at https://github.com/cberner/fuser/issues/736.
-`kernel/vendor/fuser/VARIN_PATCHES.md` records the loader, capability and retryable-detach patch. macOS CI
-compiles the native Swift extension and Rust transport without enabling an extension. The product
-stages/signs the bundle next to the kernel; distribution signing preserves FSKit's dedicated entitlements.
-Dependency absence is reported at
-mount admission and does not prevent the ordinary application from starting.
+Mount startup, sealing, detach and executor shutdown wait on workers so the Storage owner can serve
+callbacks. Closing seals new open/create admission but retains the dispatcher until actual references
+close. Close events drive cleanup retries; an unfinished drain never becomes a successful detach.
+Result preparation compares persistent subtrees and seals changed ranges, not an entire recapture.
+Publication appends the selected immutable revision without overwriting subsequent live writes.
 
-The ignored `workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent`
-test starts a separate ordinary process and two real mount paths. Invoke it explicitly with
-`cargo test -p varin-kernel --lib --features workspace-mount native_workspace_mounts_share_storage_and_keep_fork_independent -- --ignored --nocapture`
-on a machine with that component already enabled. In addition to ordinary process I/O, Unix backends
-advertising a post-writeback boundary retain a dirty shared mmap across checkpoint/fork and modify it
-again on the parent. No msync/descriptor release substitutes for the native boundary. This opt-in OS
-test remains separate from the default Storage/executor suite and is not run by component-free CI.
+The default mount feature includes WinFsp and Linux/macOS FUSE, but never installs system components.
+Windows delay-loads the registered WinFsp DLL at mount admission and needs libclang to build bindings.
+Linux requires the actual FUSE device and permitted mount route. Writeback-cache checkpoints require
+negotiated FUSE_HAS_SYNCFS and completion of the original syncfs; an opcode version alone is not proof.
+Other backends keep their scoped active-writer obstacle while ordinary cached I/O and mmap stay enabled.
+Subtree fork checks real inode aliases under the namespace lock, so an unrelated writer does not block
+it and an outside hard-link alias cannot evade the selected fence.
 
-FUSE callbacks persist chmod/chown/times/xattrs. WinFsp callbacks persist basic attributes and merge
-the requested Windows security information with the original descriptor, preserving unrelated parts.
-These callbacks do not yet qualify complete ACL enforcement. Positioned resource-fork I/O returns
-an explicit unsupported error instead of silently ignoring an offset.
-Hard-link names share a live inode and durable metadata within a workspace; forks retain independent
-byte generations. Directory moves update stable parent identities instead of rewriting every link.
-The FUSE adapter implements link. WinFsp's native protocol has no hard-link operation, and its runtime
-capability reports that limitation. Writable native references (including possible mappings) prevent
-an unfenceable snapshot within the selected scope; cached I/O and mmap remain enabled.
-`workspace.fork` accepts `sourcePath`. It selects a persistent subtree without enumerating its files,
-seals only its dirty content, preserves directory origins and filters external hard-link names.
-Native writable references are checked against actual inode names under the same namespace lock as
-the checkpoint, so unrelated writers do not block it and an outside alias cannot evade the fence.
+macOS selects the staged, enabled [FSKit executor](../packages/workspace-driver/macos/README.md) when
+supported, otherwise installed macFUSE. Inspection does not enable extensions or open settings;
+only the explicit user action does. macFUSE uses the installed libfuse3 session API, not accidental
+compat25 selection. Native callbacks retain the original session/fd until setup failure or actual detach.
+See [fuser patches](vendor/fuser/VARIN_PATCHES.md) for loading, capability and retryable-detach details.
+The bundled extension is staged/signed with its own entitlements; CI compilation does not enable it.
+Missing components fail mount admission, not ordinary application startup.
 
-`workspace_resources.rs` connects these sessions to real Kernel requests and the Host scoped client.
-The project filesystem owner and Run/Operation leases have separate lifetimes. Native callbacks return
-metadata commands to the one Storage owner; mount startup, sealing, detach and executor shutdown wait
-on workers while that owner continues serving callbacks. Inspect stays available during mount/detach.
-Shutdown seals native open/create admission and retains the dispatcher until actual file/directory
-references close. Its original response remains pending during this drainage. Close/executor events
-trigger retries and a wake arriving before the cleanup continuation is retained, without polling.
-`workspace.result.prepare` captures only dirty native ranges into the existing WorkingResult pipeline.
-Publication appends its selected immutable revision while preserving subsequent writes to the live head.
-Its worker compares persistent trees and skips equal path/index subtrees instead of listing both entire
-namespaces. Equal content hashes also avoid redundant reads for text line statistics.
-Filesystem metadata has independent candidate/result retention; releasing a result or its branch releases
-the corresponding metadata record and pins for both the selected attributes and their baseline. Empty
-native objects reuse their known content identity without writing/fsyncing an empty staging per inode.
-Temporary checkpoint pins recover with the existing ephemeral
-pin cleanup. Snapshot pins explicitly identify an immutable root without claiming a published revision.
+Mount callbacks preserve native metadata, but that does not qualify complete ACL enforcement.
+Positioned resource-fork I/O remains explicitly unsupported. FUSE supports hard links; WinFsp's protocol
+does not. Windows symlinks/junctions keep their actual reparse data; unsupported tags or conversion of
+nonempty/multiple-name inodes fail rather than discard hidden data. Remaining native-name, mapping and
+reparse representation limits are reported honestly. Restore/reopen cannot preserve old OS handles
+or unpublished process-local writes.
 
-`workspace.adopt` stabilizes an admitted physical source once on a worker and atomically publishes
-its namespace and native metadata. Hardlinks, timestamps, Unix xattrs and Windows descriptors survive
-the import. Git common/private administration and local object alternates become a standalone private
-`.git`; external administration needs its original admitted root. The original operation reports actual
-phase/entry/byte progress. Failed/cancelled candidates and interrupted imports are reclaimed without
-changing the original directory. Internal native syscalls do not accumulate a receipt per operation;
-lookup-cache eviction follows actual native references while preserving inode numbers and dirty data.
-
-Windows source symlinks and junctions retain their original REPARSE_DATA_BUFFER. WinFsp resolves,
-reads, creates, sets and deletes these standard points through the same inode/metadata transaction,
-including directory enumeration. Converting a nonempty file/directory or a multiple-name inode is
-explicitly rejected because the current shared representation cannot retain hidden backing data.
-Unknown reparse tags still require a corresponding shared representation.
+The ignored `native_workspace_mounts_share_storage_and_keep_fork_independent` test in
+[workspace_mount](crates/varin-kernel/src/workspace_mount) uses real processes and mount paths.
+Run it explicitly with the mount feature on a host where the component is already enabled; the
+[verification entry](#verification-entry-points) explains ignored tests. Cache-fence cases keep a dirty
+shared mapping across fork and modify the parent again; msync or closing a descriptor is not substituted
+for the native boundary. Component-free CI and compilation do not establish real-platform acceptance.
 
 Current consumer binding is implemented: the Host [native workspace owner](../packages/web/application-host/lib/kernel/native-workspaces.ts)
 opens logical branch identities into an epoch-specific mount generation; Documents and
@@ -248,7 +195,7 @@ semantic inventory/filter/worktree adapter and never becomes a parallel body wri
 
 ## Process authority
 
-`process/` and `storage/process_resources.rs` own admitted pipes/PTYs, raw channel output, sequence-bound
+[process/](crates/varin-kernel/src/process) and [storage/process_resources.rs](crates/varin-kernel/src/storage/process_resources.rs) own admitted pipes/PTYs, raw channel output, sequence-bound
 input, resize, kill, release and durable process outcomes. A guardian is the same executable in another
 mode and has no SQLite connection. Windows uses named kill-on-close Jobs; Linux uses managed sessions
 with subreaper tracking; other Unix platforms retain their supported session observation.
@@ -293,57 +240,29 @@ for commands and CI selection.
 
 ## File text representation
 
-`text.rs` is the shared strict file codec for native tools, Compute and Host Documents. The
-`text.decode` and `text.serialize` RPCs are pure body-worker operations over the existing chunked
-content transport, not a second file writer or a single-frame whole-file limit. UTF-8 decoding can
-borrow the original text. `text/codecs.rs` owns the shared catalog, alias resolution and explicit
-profiles: Unicode, GB18030/GBK, Big5, Japanese/Korean, Windows code pages, ISO-8859, KOI8 and Macintosh.
-`text.encodings` exposes actual read/write/BOM capabilities to Documents and every editor, including
-remote file owners. No Host/renderer encoding whitelist duplicates it. `gb2312` retains its browser
-GBK alias; `gb2312-strict` uses the complete attributed GB2312-80 mapping with its real repertoire.
-UTF-16LE/BE use real UTF-16 writers. All encoders reject unmappable characters without replacement.
+[text.rs](crates/varin-kernel/src/text.rs) and [codecs](crates/varin-kernel/src/text/codecs.rs) own the
+shared strict codec catalog, aliases, detection and serialization. Documents and native tools consume
+that catalog rather than maintaining encoding whitelists. Pure text RPCs use the existing body workers
+and streaming transport; they are neither a second writer nor a whole-file frame limit.
 
-Detection is separate from codec support: explicit choice, BOM and recognized header declarations
-precede normal strict UTF-8; a valid project default then precedes the statistical `chardetng` guess.
-ASCII retains a compatible project default. A detector guess is validated against the complete stream,
-not accepted because a sample decodes. Very short ambiguous content can still need an explicit
-reinterpretation; detection never claims to prove the intended target character repertoire.
+The [file representation contract](../docs/resources.md#文件准入与观察) describes detection priority,
+version binding, paging and conversion. A guess must decode the entire stream. Encoders reject
+unmappable characters; edits preserve original raw segments, codec, BOM and line endings where possible.
+A bounded diff may coarsen a replacement, never truncate or silently substitute text. Stateful and
+multi-scalar codecs use real decoder boundaries, not guessed byte-width tables; late legacy pages may
+still cost O(offset). Recovery before-images remain original bytes.
 
-A text read version binds both the raw CAS version and its resolved codec. Normal saves retain the
-original codec, BOM and line endings. Exact editor edits preserve unchanged raw segments, including
-non-bijective GBK bytes and mixed line endings. Full replacement uses a bounded multi-hunk diff only
-when the reversible uniform-format fast path is insufficient. A diff deadline may coarsen replacement
-semantics, never truncate or silently substitute text. Recovery before-images are original bytes.
-
-Physical reads combine the existing full raw-hash pass with bounded codec validation. UTF-8 range
-alignment seeks within three bytes; other pages walk a continuous decoder from a known boundary
-using bounded buffers. GB18030 four-byte sequences, multi-scalar Big5 emissions and ISO-2022-JP state
-are not approximated with a GBK/UTF-16 byte-width table. Exact edits expand only touched multi-scalar
-units; modified stateful files use continuous strict serialization while preserving original EOLs.
-Unchanged stateful files retain the original bytes. A late or repeated legacy page is therefore still O(offset), without a whole-file text buffer
-or a claimed sparse index. Raw line requests must resolve line boundaries and cannot silently become
-an unbounded whole-file response when decoding fails.
-
-Committed format evidence lives in original file operation receipts and a small current source/path
-fact in the existing Storage metadata, updated together. These facts retain no file bodies and survive
-receipt release without resurrecting older same-byte choices. A disposable scoped projection allows
-subsequent reads in the same grant/Run/root to honor a successful conversion only while its raw hash
-matches. The projection distinguishes retained operation evidence from the current path fact: replacing
-a fact reclaims its already-released predecessor, and release updates only the affected root, branch,
-operation and recovery histories. It neither rebuilds the whole index nor invalidates immutable
-snapshots already admitted by readers. Source cleanup removes the remaining current facts and their
-unretained projections using canonical Storage paths, even after the physical view is gone.
-WorkingResult publication freezes the candidate's matching base/child formats and its exact
-branch/revision/root projection; new Runs read that small projection under existing branch authority,
-not an older Run's private result body. Recovery projects matching before/after formats without changing
-raw-state equality. `file.text.conversions`
-provides bounded, source-scoped metadata for Host preference reconciliation, which separately checks
-current raw hash and the original user-choice revision. No document database or codec-global hash map
-is introduced.
+Format evidence is committed with the original operation and current source/path fact in Storage.
+Receipt release cannot resurrect an older same-byte codec choice. Disposable scoped projections reuse
+evidence only while the raw hash matches; they do not create a document database or global hash map.
+WorkingResult publication freezes matching base/child formats with the actual branch/revision/root.
+Source cleanup releases the associated facts using canonical Storage identity even if its physical view
+has gone. `file.text.conversions` exposes scoped metadata; Host reconciliation separately checks current
+bytes and the original user-choice revision.
 
 ## Fixed file attachments
 
-`storage/object_views.rs` owns one-file read-only execution views. Worker I/O does not hold the
+[storage/object_views.rs](crates/varin-kernel/src/storage/object_views.rs) owns one-file read-only execution views. Worker I/O does not hold the
 Storage actor, and files are copied rather than hard-linked to immutable object storage. Each view
 retains the exact source record, current generation and actual Run or external consumer; release
 waits for real process exit and preserves unexpected or modified files.

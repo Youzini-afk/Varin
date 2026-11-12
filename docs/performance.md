@@ -31,10 +31,14 @@ WAL 配合 `synchronous=NORMAL` 满足这个要求，前提是正文先写入，
 
 各模块已经做过的具体优化写在对应的模块文档里，这里不重复，以免两处描述不一致。
 
-## 进行中的整改
+## 当前实现入口
 
-当前的主要瓶颈（观察放大、快照逐项 IPC、传输握手与窗口、Catalog 单线程读取、鉴权文件事务）和文档分层整理见
-[性能整改计划](design/performance-overhaul.md)。计划完成后删除本节。
+- [鉴权与主体](../packages/web/application-host/lib/ui-auth/DOCUMENTATION.md)、
+  [设置缓存](../packages/settings-store/DOCUMENTATION.md)：热读取复用状态，写入仍走原耐久 owner。
+- [Rust 读取](../kernel/crates/varin-runtime/README.md)、[私有传输](../kernel/README.md#transport-lifetime)：
+  组合视图、独立读取连接与控制/正文调度。
+- [客户端观察](../packages/application-client/README.md)、[UI 状态](../packages/ui/src/stores/DOCUMENTATION.md)：
+  共享连接、精确失效与流式增量，不削减历史、列表或输出内容。
 
 ## 测量
 
@@ -49,10 +53,10 @@ node --import tsx packages/web/scripts/perf-knowledge-recall.ts 1000 8 2048 engi
 node --import tsx packages/web/scripts/perf-knowledge-recall.ts 1000 8 2048 ipc
 ```
 
-`measure-interaction-hotpaths.mjs` 可用同一脚本读取基线与修改后的 checkout，记录 Host Documents 文件操作、
+[measure-interaction-hotpaths.mjs](../scripts/measure-interaction-hotpaths.mjs) 可用同一脚本读取基线与修改后的 checkout，记录 Host Documents 文件操作、
 前端嵌入解析/位置计算及快照调用计数。Documents fixture 未绑定 Rust 耐久存储；快照计数使用替身 native port，
 不能当作完整保存或服务端执行时间。Catalog 的手动基准运行真实 SQLite owner。
-`scripts/measure-kernel.mjs` 接受 `--compute-hotpaths`、输出 JSON 路径和 staged release executable。
+[scripts/measure-kernel.mjs](../scripts/measure-kernel.mjs) 接受 `--compute-hotpaths`、输出 JSON 路径和 staged release executable。
 实际浏览器 profiling 见 [scripts/profile-browser.md](../scripts/profile-browser.md)。
 
 工作量计数（IPC 次数、快照与列表读取次数、渲染次数）通常比挂钟时间稳定，适合放进回归测试；挂钟数字受

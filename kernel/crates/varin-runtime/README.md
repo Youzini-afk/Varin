@@ -43,38 +43,23 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 ## Boundaries to preserve
 
-- One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
-  events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
-  and standalone 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94. The first two steps initialize external-agent records and the usage ledger;
-  old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
-  capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
-  already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
-  Preflight recognizes each actual layout rather than assuming all generations >=81 contain Zone2.
-  Original content identities, captures and paid receipts survive. Conversion, marker and upgrade
-  event commit atomically before epoch changes or recovery. Format 89 extends the original follow-up
-  owner with Bot-owned arrangements, source receipts, per-arrangement matching watermarks, object routes
-  and remote consumers. Existing work follow-ups retain their source Runs and original receipts;
-  event delivery reuses native ingress or the real external turn ledger without synthetic Runs.
-  Format 90 adds pending/prepared extension admission only to new automatic roots. Existing launches
-  retain their exact semantics with no marker; the upgrade does not rewrite identities or receipts.
-  Format 91 restores missing Responses cache-write counts from retained raw ModelStep/planning receipts
-  and their matching existing ledger rows, preserving frozen pricing and settlement identity. Missing
-  evidence stays unknown; conversion never creates historical charges or replays execution effects.
-  Format 92 protects frozen quote relations in original input bodies from readers that cannot project
-  them. It does not rewrite historical bodies, resource identities or idempotency receipts.
-  Format 93 adds Catalog-local typed model references and execution numbering. Catalog 92
-  accepts either the quote-only layout with all seven index tables and both external item columns
-  absent, or the complete validated collaboration index. Existing spaces, references and allocation
-  high waters survive unchanged; partial or malformed layouts are rejected before writable recovery.
-  Format 94 protects the separate frozen source mappings in readable compaction recipes. Old recipes
-  keep their original source slicing, quotation and retention semantics without rewriting their bodies.
-  Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
-  bodies. This startup work scales with history records; typed index validation remains at use and
-  malformed indexes never trigger request-time repair or a full-body fallback.
-  Failure or process interruption before commit rolls back the conversion; reopening retries it.
-  Existing immutable bodies, identities and original receipts remain in place without a full database copy.
-  A failed open cannot turn history into an empty cache or replay a dispatched effect.
+- One `runtime.owner` lock protects the writer of `conversation.sqlite`. WAL/NORMAL transactions
+  commit facts and events atomically. A power loss can discard recent commits, not leave a committed
+  reference to a body that was never durably installed: content files and their containing directories
+  are synced before references publish. The same ordering applies to kernel Storage metadata.
+  Read-only preflight rejects unsupported or malformed generations before recovery. Supported layouts
+  and their atomic conversions live in [catalog_upgrade.rs](src/catalog_upgrade.rs); original history,
+  identities and receipts survive, and failure rolls back the conversion and its format marker.
+- Independent [read views](src/catalog_reads.rs) open SQLite read-only and share immutable content and
+  live registries, but hold no writer mutex or `runtime.owner` lease. The kernel's configurable reader
+  pool dispatches the schema's read methods without waiting on the command actor. Composed
+  [thread views](src/catalog_thread_view.rs) read one WAL snapshot; ownership and navigation updates
+  are batched, and [context inspection](src/catalog_context_inspection.rs) reuses immutable scanned heads
+  while rereading mutable model usage. Internal-thread classification is recorded at creation and
+  backfilled by upgrade, so directory reads need no per-thread operation probes.
+- Worker completion wakes drive reaping. A sparse fallback runs only while executor workers exist;
+  ordinary reads never reconcile execution, scan live operations, or clean up workers. Admission
+  paths that truly depend on ownership release retain their explicit supervisor checks.
 - Catalog owns references and identity/CAS checks. Providers, tools, extension callbacks, filesystem
   scans, body hydration/serialization and network work execute outside its lock. Capture the relevant
   epoch/revision/head, prepare on a worker, then recheck at publication.
