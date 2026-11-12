@@ -23,6 +23,7 @@ export function OrganizationRow({ id, title, icon, origin, active, container, ex
 }) {
   const { t } = useI18n();
   const status = waiting ? 'waiting' : busy ? 'busy' : attention?.kind ?? (pinned ? 'pinned' : 'none');
+  const rowActions = <div className="organization-row-actions">{actions}</div>;
   return <div ref={pauseLoopsOffscreen} role="treeitem" tabIndex={0} data-sidebar-row={id} data-current={active || undefined}
     data-container={container || undefined} data-recent={recent || undefined} aria-expanded={expandable ? expanded : undefined}
     aria-selected={selected || !!active} onKeyDown={onKeyDown}
@@ -45,7 +46,9 @@ export function OrganizationRow({ id, title, icon, origin, active, container, ex
             : attention ? <span className="mx-1 size-1.5 rounded-full bg-primary" aria-label={t('sessions.sidebar.session.status.unread')} />
               : pinned ? <Icon name="pushpin" className="size-3 text-muted-foreground/70" /> : null}
     </SwapIcon>
-    {recent && time && <span className="shrink-0 pl-0.5 typography-micro text-muted-foreground">{time}</span>}
-    <div className="organization-row-actions">{actions}</div>
+    {recent ? <div className="organization-row-trailing">
+      {time && <span className="organization-row-time typography-micro text-muted-foreground">{time}</span>}
+      {rowActions}
+    </div> : rowActions}
   </div>;
 }

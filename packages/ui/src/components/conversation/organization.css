@@ -12,6 +12,15 @@
 .organization-row-actions { position: absolute; right: 3px; top: 4px; display: flex; gap: 1px; align-items: center; padding-left: 4px; opacity: 0; pointer-events: none; border-radius: 6px; background: var(--sidebar); transition: opacity var(--motion-dur-snap) var(--motion-ease-snap); }
 .organization-row:hover .organization-row-actions, .organization-row:focus-within .organization-row-actions, .organization-row:has([data-popup-open]) .organization-row-actions, [data-popup-open] > .organization-row .organization-row-actions { opacity: 1; pointer-events: auto; background: var(--interactive-hover); }
 .organization-row[data-current=true] .organization-row-actions, .organization-row[aria-selected=true] .organization-row-actions { background: var(--interactive-selection); }
+.organization-row-trailing { --organization-swap-duration: calc(var(--motion-dur-snap) / 2); display: grid; flex: none; align-items: center; justify-items: end; min-height: 28px; }
+.organization-row-trailing > * { grid-area: 1 / 1; }
+.organization-row-time { white-space: nowrap; pointer-events: none; transition: opacity var(--organization-swap-duration) var(--motion-ease-snap) var(--organization-swap-duration); }
+.organization-row[data-recent=true] .organization-row-actions { position: static; padding-left: 0; background: transparent; transition-duration: var(--organization-swap-duration); transition-delay: 0s; }
+.organization-row[data-recent=true]:has(.organization-row-path) .organization-row-trailing { align-self: flex-start; margin-top: 2px; }
+.organization-row:is(:hover, :focus-within, :has([data-popup-open])) .organization-row-time, [data-popup-open] > .organization-row .organization-row-time { opacity: 0; transition-delay: 0s; }
+.organization-row[data-recent=true]:is(:hover, :focus-within, :has([data-popup-open])) .organization-row-actions, [data-popup-open] > .organization-row[data-recent=true] .organization-row-actions { transition-delay: var(--organization-swap-duration); }
+.organization-row-more { width: 28px; height: 28px; border-radius: 5px; background: transparent; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), color var(--motion-dur-snap) var(--motion-ease-snap); }
+.organization-row-more:is(:hover, :focus-visible, [data-popup-open]) { background: color-mix(in srgb, var(--foreground) 6%, transparent); color: var(--foreground); }
 .organization-tabs { display: flex; gap: 17px; align-items: center; height: 32px; }
 .organization-tabs button { position: relative; height: 100%; font-size: 12px; color: var(--muted-foreground); }
 .organization-tabs button[aria-selected=true] { color: var(--foreground); font-weight: 500; }
@@ -24,4 +33,9 @@
 .organization-picker-path { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 38px; padding: 7px 3px; font-size: 11px; color: var(--muted-foreground); }
 .organization-picker-path button { padding: 3px 5px; border-radius: 4px; }
 .organization-picker-path button:hover { color: var(--foreground); background: var(--interactive-hover); }
-@media (pointer: coarse) { .organization-row-actions { position: static; opacity: 1; pointer-events: auto; padding-left: 0; background: transparent; } .organization-row-actions .organization-drag, .organization-row-actions .organization-row-new { display: none; } }
+@media (pointer: coarse) {
+  .organization-row-actions { position: static; opacity: 1; pointer-events: auto; padding-left: 0; background: transparent; }
+  .organization-row-actions .organization-drag, .organization-row-actions .organization-row-new { display: none; }
+  .organization-row-trailing { display: flex; gap: 4px; }
+  .organization-row[data-recent=true] .organization-row-time { opacity: 1; }
+}
