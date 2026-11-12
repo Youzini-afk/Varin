@@ -322,7 +322,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           sendDisabled={sendDisabled} pending={sending} active={false} retrying={locked} hasInput={hasInput}
           onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}
-          onWorkspace={() => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}
+          onWorkspace={draft.botId ? undefined : () => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}
           workspacePath={!draft.sourceSelection || draft.sourceSelection.resourceOwner.kind === 'local' ? sourcePath : undefined}
           imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
           <div className="space-y-2 px-3 empty:hidden">

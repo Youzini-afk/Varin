@@ -4,6 +4,7 @@
 through the shared CodeMirror editor, model/thinking controls, dictation, file attachments and
 editor context. This directory holds reusable attachment, text, language and editor helpers; the
 editor does not own Thread submission. Work controls live in the conversation's work overview.
+Direct Bot chats and Bot drafts do not offer the project selector beneath the composer.
 
 The footer's permission shield edits the Host's global `harness.permissions.mode` through the shared
 settings controller. It remains available during execution and preserves existing rules. Its displayed

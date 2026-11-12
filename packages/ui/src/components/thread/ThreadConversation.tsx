@@ -737,7 +737,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         imageReferences={draftImageReferences(draft)} attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}
-        onWorkspace={() => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
+        onWorkspace={botSurface || botSession ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
         workspacePath={localWorkspacePath}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>
         <div className="space-y-2 px-3 empty:hidden">{!botSurface && emptyWorkspacePath && <ActiveEditorSuggestion threadKey={draftKey} />}      <EditorContextAttachmentChips threadKey={draftKey} /><DraftContentReferences draftKey={draftKey} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} />
