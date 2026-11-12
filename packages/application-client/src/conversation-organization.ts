@@ -19,12 +19,15 @@ export interface ConversationOrganizationPosition {
 export interface ConversationOrganizationEntry {
   conversation: ConversationOrganizationRef; title: string; archived: boolean; pinned: boolean;
   revision: number; position: ConversationOrganizationPosition;
+  /** Supplied by activity-sorted reads; classification pagination is independent of activity. */
+  updatedAtMs?: number;
   origin: { botId: string | null; conversation: ConversationOrganizationRef | null; directBotId: string | null };
   path: string[];
 }
 export interface ConversationOrganizationQuery {
   /** Page the mixed ordered node sequence; omitted/false retains the complete container metadata index. */
   pageNodes?: boolean;
+  kind?: 'containers' | 'conversations'; sort?: 'manual' | 'recent';
   containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string;
   botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string;
 }
@@ -90,13 +93,15 @@ export function parseConversationOrganizationQuery(value: unknown): Conversation
   const invalid = (): never => { throw new ConversationOrganizationError('invalid_request', 'Invalid conversation directory query'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const query = value as Record<string, unknown>;
-  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes'];
+  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes', 'kind', 'sort'];
   if (Object.keys(query).some(key => !allowed.includes(key))) invalid();
   for (const field of ['pageNodes', 'rootOnly', 'recursive']) if (query[field] !== undefined && typeof query[field] !== 'boolean') invalid();
   if (query.containerId !== undefined && query.containerId !== null && (typeof query.containerId !== 'string' || !query.containerId.trim())) invalid();
   for (const field of ['botId', 'cursor']) if (query[field] !== undefined && (typeof query[field] !== 'string' || !(query[field] as string).trim())) invalid();
   if (query.query !== undefined && typeof query.query !== 'string') invalid();
   if (query.archived !== undefined && !['exclude', 'include', 'only'].includes(String(query.archived))) invalid();
+  if (query.kind !== undefined && query.kind !== 'containers' && query.kind !== 'conversations') invalid();
+  if (query.sort !== undefined && query.sort !== 'manual' && query.sort !== 'recent') invalid();
   if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || Number(query.limit) < 1)) invalid();
   return query as ConversationOrganizationQuery;
 }
@@ -119,6 +124,7 @@ export function parseConversationOrganizationSnapshot(value: unknown): Conversat
   }
   for (const raw of conversations) {
     const c = record(raw); reference(c.conversation); number(c.revision);
+    if (c.updatedAtMs !== undefined) number(c.updatedAtMs);
     if (typeof c.title !== 'string' || typeof c.archived !== 'boolean' || typeof c.pinned !== 'boolean' || !Array.isArray(c.path) || c.path.some(id => typeof id !== 'string')) invalid();
     const position = record(c.position); reference(position.conversation); nullable(position.containerId);
     for (const field of ['revision', 'order']) number(position[field]);

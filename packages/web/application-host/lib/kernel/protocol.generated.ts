@@ -523,7 +523,7 @@ export interface OrganizationCreationDefaults { projectId: string | null; source
 
 export interface OrganizationPlacement { containerId: string | null }
 
-export interface OrganizationQuery { pageNodes?: boolean; projectNames?: Record<string, string>; containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string; botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string }
+export interface OrganizationQuery { pageNodes?: boolean; kind?: 'containers' | 'conversations'; sort?: 'manual' | 'recent'; projectNames?: Record<string, string>; containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string; botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string }
 
 export interface OrganizationCommand { key: string; operation: OrganizationOperation }
 

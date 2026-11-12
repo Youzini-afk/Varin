@@ -152,16 +152,32 @@ projection and reports the failure instead of an empty directory. Full descendan
 when a person explicitly selects that action's scope.
 
 `ConversationOrganizationTree` is shared by the workbench, IDE picker, archive and Bot navigator.
-Container identity, mixed order and effective placement come from the Catalog; local collapse, focus
-and display sorting do not rewrite them. Inherited tasks remain under their real parent; an explicit
+The workbench assembles the full sidebar, the IDE uses its compact picker, and the Bot navigator
+retains its assistant identity list with an explicit entry into shared conversations/work.
+`OrganizationRow` preserves the original avatar, attention, extension-decoration and highlight contracts.
+Recent reads use `kind: 'conversations', sort: 'recent'` so the Catalog orders across categories before
+pagination. Those pages never collect cached expanded category pages. Destination browsing uses
+`kind: 'containers'`, so conversation rows do not consume its page slots. Optional activity timestamps
+participate only in recent-page continuations; normal directory cursors remain independent of activity.
+
+Container identity, mixed order and effective placement come from the Catalog; container-first display,
+pin segments, local collapse, focus and project sorting do not rewrite them. Reorder drop lines respect
+the visible type/pin segments, while moving into a location remains independent of display sorting.
+`useOrganizationNavigation` stores view/focus/expansion in the existing persisted display preferences,
+scoped by stable Host identity and shell view. Inherited tasks remain under their real parent; an explicit
 move gives them one independent navigation row. Typed native/external keys prevent ID collisions.
 Moves retain the original row until acceptance, preserve ambiguous acceptance keys, and derive undo
 from the original receipt. Undo is a new atomic restore with the receipt's object revisions, real
 sibling anchors and inheritance intent, so it cannot overwrite another client's subsequent move.
+Undo reads a bounded metadata page for each affected parent, including an old location no longer
+present in a Recent page; these reads do not replace the receipt's original object revisions or anchors.
 Before moving, only the selected source parents' complete sibling pages are read; Catalog's scoped
 cursor and the captured parent/object revisions protect the original undo anchors without conflicting
-on unrelated branches. The inline destination picker browses and searches pages on demand and
-labels same-name targets with full paths and stable IDs; it never assumes every category was loaded.
+on unrelated branches. The move dialog has one paged/searchable directory picker with breadcrumbs;
+same-name targets use readable paths and ordinals while retaining stable internal identities.
+It never assumes every category was loaded. `OrganizationGroupDialog` retains its closing contents
+and protects composition keys. Unknown admissions expose original-key result checking outside the
+editor; partial metadata results retain names, translated outcomes and only unresolved retries.
 
 `ConversationOrigin` reads the same original provenance for normal, flat, search, archive and work
 detail views. Bot profiles are read together and their assets reuse the existing figure cache;

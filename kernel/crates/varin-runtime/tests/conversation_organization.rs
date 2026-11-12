@@ -2,6 +2,44 @@ use rusqlite::Connection;
 use serde_json::json;
 use std::collections::BTreeSet;
 use varin_runtime::catalog::{bot, organization::*, Catalog, RuntimeError};
+
+#[test]
+fn recent_directory_orders_across_containers_and_keeps_manual_cursors_independent_of_activity() {
+    let fixture = Fixture::new();
+    let mut catalog = fixture.open();
+    group(&mut catalog, "first-category", None);
+    group(&mut catalog, "second-category", None);
+    let db = raw(&fixture);
+    for (id, updated, pinned, principal) in [
+        ("pinned", 10, true, "alice"),
+        ("latest-native", 30, false, "alice"),
+        ("older-native", 20, false, "alice"),
+        ("another-user", 100, true, "bob"),
+    ] {
+        db.execute("INSERT INTO threads(id,principal_id,agent_code,title,updated_at_ms,pinned) VALUES(?1,?2,?1,?1,?3,?4)", rusqlite::params![id, principal, updated, pinned]).unwrap();
+    }
+    db.execute("INSERT INTO external_conversations(id,body) VALUES('latest-external',?1)", [json!({"id":"latest-external","title":"External","principalId":"alice","revision":1,"updatedAt":40}).to_string()]).unwrap();
+    db.execute("INSERT INTO organization_positions(scope,kind,id,container_id,sort_order,revision,is_explicit) VALUES(?1,'native','latest-native','first-category',0,1,1)", [serde_json::to_string(&Some("alice")).unwrap()]).unwrap();
+    let query = OrganizationQuery { page_nodes: true, kind: Some("conversations".into()), sort: Some("recent".into()), limit: Some(2), ..Default::default() };
+    let first = catalog.organization_snapshot(Some("alice"), query.clone()).unwrap();
+    assert_eq!(first.conversations.iter().map(|entry| entry.conversation.id()).collect::<Vec<_>>(), vec!["pinned", "latest-external"]);
+    assert_eq!(first.conversations[1].updated_at_ms, Some(40));
+    let next = catalog.organization_snapshot(Some("alice"), OrganizationQuery { cursor: first.next_cursor.clone(), ..query.clone() }).unwrap();
+    assert_eq!(next.conversations.iter().map(|entry| entry.conversation.id()).collect::<Vec<_>>(), vec!["latest-native", "older-native"]);
+    assert!(next.next_cursor.is_none());
+    assert!(first.items.as_ref().unwrap().iter().all(|item| !matches!(item, OrganizationObject::Container { .. })));
+    let containers = OrganizationQuery { page_nodes: true, kind: Some("containers".into()), limit: Some(1), ..Default::default() };
+    let category_page = catalog.organization_snapshot(Some("alice"), containers.clone()).unwrap();
+    assert!(category_page.conversations.is_empty());
+    assert_eq!(category_page.items.as_ref().unwrap().len(), 1);
+    let manual = OrganizationQuery { sort: None, ..query.clone() };
+    let manual_page = catalog.organization_snapshot(Some("alice"), manual.clone()).unwrap();
+    db.execute("UPDATE threads SET updated_at_ms=200 WHERE id='pinned'", []).unwrap();
+    assert!(catalog.organization_snapshot(Some("alice"), OrganizationQuery { cursor: category_page.next_cursor, ..containers }).is_ok());
+    assert!(catalog.organization_snapshot(Some("alice"), OrganizationQuery { cursor: manual_page.next_cursor, ..manual }).is_ok());
+    assert!(matches!(catalog.organization_snapshot(Some("alice"), OrganizationQuery { cursor: first.next_cursor, ..query }), Err(RuntimeError::Conflict(_))));
+}
+
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -2012,6 +2050,11 @@ fn mixed_bot_scope_exposes_only_matching_branches_and_exact_principal() {
     );
     assert_eq!(root.containers.len(), 1);
     assert!(root.next_cursor.is_none());
+    let folders = c.organization_snapshot(Some("alice"), OrganizationQuery {
+        kind: Some("containers".into()), ..query.clone()
+    }).unwrap();
+    assert_eq!(folders.items, root.items);
+    assert!(folders.conversations.is_empty());
     let deep = c
         .organization_snapshot(
             Some("alice"),

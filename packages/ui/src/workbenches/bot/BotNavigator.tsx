@@ -1,5 +1,7 @@
-import { useConversationOrganization } from '@/stores/useConversationOrganizationStore';
-import { ConversationOrganizationTree } from '@/components/conversation/ConversationOrganizationTree';
+import { useConversationOrganization, refreshConversationOrganization } from '@/stores/useConversationOrganizationStore';
+import { ConversationOrganizationTree, type OrganizationNavigationHandle } from '@/components/conversation/ConversationOrganizationTree';
+import { OrganizationCreateMenu } from '@/components/conversation/OrganizationCreateMenu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import React from 'react';
 import type { BotSummary, ThreadIdentity } from '@varin/application-client';
@@ -63,6 +65,8 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   useConversationOrganization();
   const [conversationArchived, setConversationArchived] = React.useState(false);
   const [conversationScope, setConversationScope] = React.useState<'bots' | 'current' | 'all'>('bots');
+  React.useEffect(() => { if (!selectedId && conversationScope === 'current') setConversationScope('bots'); }, [selectedId, conversationScope]);
+  const organizationRef = React.useRef<OrganizationNavigationHandle>(null);
   const list = React.useRef<HTMLDivElement>(null);
   const [query, setQuery] = React.useState('');
   const [searching, setSearching] = React.useState(false);
@@ -126,9 +130,9 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
       <Tooltip>
         <TooltipTrigger asChild>
           <span className={cn(!isMobile && 'flex-1')}>
-            <button type="button" disabled={!canStart || busy} onClick={onNewSession}
+            <button type="button" disabled={!canStart || busy} onClick={() => { if (apis.conversationOrganization && conversationScope !== 'bots') organizationRef.current?.newConversation(selectedId ?? undefined); else onNewSession(); }}
               className="flex h-[34px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[13.5px] text-foreground transition-colors hover:bg-interactive-hover disabled:opacity-50">
-              <Icon name="chat-new" className="size-4 shrink-0" /><span className="truncate">{t('bot.session.new')}</span>
+              <Icon name="chat-new" className="size-4 shrink-0" /><span className="truncate">{selected && apis.conversationOrganization ? t('organization.newWithName', { name: selected.name }) : t('bot.session.new')}</span>
             </button>
           </span>
         </TooltipTrigger>
@@ -138,20 +142,20 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
         onClick={() => { setSearching(value => !value); setQuery(''); }}>
         <Icon name="search" className="size-4" />
       </Button>
-      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={busy} aria-label={t('tasksHub.refresh')} onClick={onRefresh}>
+      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={busy} aria-label={t('tasksHub.refresh')} onClick={() => { onRefresh(); if (conversationScope !== 'bots') void refreshConversationOrganization(); }}>
         <Icon name="refresh" className="size-4" />
       </Button>
-      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={!organization.ready || organization.pending} aria-label={t('bot.groups.create')} title={t('bot.groups.create')} onClick={() => setOrganizationDialog({ kind: 'create' })}>
+      {conversationScope === 'bots' && <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={!organization.ready || organization.pending} aria-label={t('bot.groups.create')} title={t('bot.groups.create')} onClick={() => setOrganizationDialog({ kind: 'create' })}>
         <Icon name="folder-add" className="size-4" />
-      </Button>
+      </Button>}
     </div>
     {searching ? <div className="px-2.5 pb-2">
       <input autoFocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { setSearching(false); setQuery(''); } }}
         placeholder={t('bot.session.search')} aria-label={t('bot.session.search')}
         className="h-8 w-full rounded-md border border-border bg-transparent px-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" />
     </div> : null}
-    {apis.conversationOrganization && <div className="flex gap-1 px-2.5 pb-2" role="group" aria-label={t('organization.scope')}>{([['bots', t('organization.bots')], ['current', t('organization.currentBot')], ['all', t('organization.allConversations')]] as const).map(([scope, label]) => <Button key={scope} variant={conversationScope === scope ? 'secondary' : 'ghost'} size="sm" disabled={scope === 'current' && !selectedId} onClick={() => setConversationScope(scope)}>{label}</Button>)}</div>}
-    {apis.conversationOrganization && conversationScope !== 'bots' ? <><Button variant="ghost" size="sm" onClick={() => setConversationArchived(value => !value)}>{conversationArchived ? t('organization.activeConversations') : t('organization.archivedConversations')}</Button><ConversationOrganizationTree archived={conversationArchived} query={query} botId={conversationScope === 'current' ? selectedId ?? undefined : undefined} viewKey="bot" /></> : <>
+    {apis.conversationOrganization && (conversationScope === 'bots' ? <div className="flex items-center justify-between px-4 pb-2 typography-micro text-muted-foreground"><span>{t('organization.bots')}</span><button type="button" className="organization-icon-button" disabled={!selectedId} title={t('organization.botWork')} aria-label={t('organization.botWork')} onClick={() => setConversationScope('current')}><Icon name="folder-open" className="size-3.5" /></button></div> : <div className="flex items-center gap-1 px-3 pb-1"><button type="button" className="organization-icon-button" aria-label={t('organization.backToBots')} onClick={() => setConversationScope('bots')}><Icon name="arrow-left-s" className="size-4" /></button><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="flex min-w-0 flex-1 items-center gap-1 typography-meta"><span className="truncate">{conversationScope === 'current' ? t('organization.botWorkNamed', { name: selected?.name ?? t('organization.currentBot') }) : t('organization.allConversations')}</span><Icon name="arrow-down-s" className="size-3 shrink-0 text-muted-foreground" /></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem disabled={!selectedId} onClick={() => setConversationScope('current')}>{t('organization.currentBot')}</DropdownMenuItem><DropdownMenuItem onClick={() => setConversationScope('all')}>{t('organization.allConversations')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu><button type="button" className="organization-icon-button" title={t(conversationArchived ? 'organization.activeConversations' : 'organization.archivedConversations')} aria-label={t(conversationArchived ? 'organization.activeConversations' : 'organization.archivedConversations')} onClick={() => setConversationArchived(value => !value)}><Icon name={conversationArchived ? 'arrow-go-back' : 'inbox-archive'} className="size-3.5" /></button><OrganizationCreateMenu onCreate={botId => organizationRef.current?.newConversation(botId)} /></div>)}
+    {apis.conversationOrganization && conversationScope !== 'bots' ? <ConversationOrganizationTree ref={organizationRef} archived={conversationArchived} query={query} onSearchReset={() => setQuery('')} botId={conversationScope === 'current' ? selectedId ?? undefined : undefined} defaultBotId={selectedId ?? undefined} viewKey="bot" /> : <>
     <div ref={list} className="bot-nav-list min-h-0 flex-1 overflow-y-auto px-2.5">
       {organization.error && <p role="alert" className="px-2 py-2 typography-meta text-destructive">{organization.error} <button type="button" className="underline" onClick={() => { void organization.refresh(); }}>{t('common.retry')}</button></p>}
       <BotOrganizationList bots={shownBots} organization={organization} selectedId={selectedId} query={query} scope={scope} onDialog={setOrganizationDialog} renderBot={bot => {
@@ -200,12 +204,13 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
     </div>
     </>}
     <div className="border-t border-border px-2.5 py-2">
-      <button type="button" disabled={busy || !bots} onClick={onCreateBot} className={rowClass}>
+      {apis.conversationOrganization && conversationScope === 'bots' && <button type="button" className={rowClass} onClick={() => setConversationScope('all')}><Icon name="stack" className="size-4 shrink-0" />{t('organization.browseAll')}<Icon name="arrow-right-s" className="ml-auto size-3" /></button>}
+      {conversationScope === 'bots' && <><button type="button" disabled={busy || !bots} onClick={onCreateBot} className={rowClass}>
         <Icon name="add" className="size-4 shrink-0" />{t('settings.bots.create')}
       </button>
       <button type="button" onClick={onToggleArchived} className={rowClass}>
         <Icon name={showArchived ? 'robot' : 'archive'} className="size-4 shrink-0" />{t(showArchived ? 'settings.bots.activeList' : 'settings.bots.archivedList')}
-      </button>
+      </button></>}
       <button type="button" onClick={onOpenSettings} className={rowClass}>
         <Icon name="settings-3" className="size-4 shrink-0" />{t('sessions.sidebar.footer.actions.settings')}
       </button>

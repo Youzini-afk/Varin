@@ -13,6 +13,8 @@ export type ConversationTreeExpansion = {
   sessions: Record<string, boolean>;
 };
 export const EMPTY_CONVERSATION_TREE: ConversationTreeExpansion = { groups: {}, sessions: {} };
+export type OrganizationNavigationPreference = { view: 'classified' | 'recent'; expanded: Record<string, boolean>; focus: string | null };
+export const EMPTY_ORGANIZATION_NAVIGATION: OrganizationNavigationPreference = { view: 'classified', expanded: {}, focus: null };
 
 type SessionDisplayStore = {
   sessionGroupingMode: SessionGroupingMode;
@@ -30,6 +32,8 @@ type SessionDisplayStore = {
   /** Explicit choices only: project groups start open, child task trees start closed. */
   conversationTreeByHost: Record<string, ConversationTreeExpansion>;
   setConversationTreeExpansion: (host: string, changes: Partial<ConversationTreeExpansion>) => void;
+  organizationNavigationByHost: Record<string, Record<string, OrganizationNavigationPreference>>;
+  setOrganizationNavigation: (host: string, view: string, changes: Partial<OrganizationNavigationPreference>) => void;
 };
 
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
@@ -47,6 +51,14 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
       conversationTreeByHost: {},
+      organizationNavigationByHost: {},
+      setOrganizationNavigation: (host, view, changes) => set(state => {
+        const views = state.organizationNavigationByHost[host] ?? {};
+        const previous = views[view] ?? EMPTY_ORGANIZATION_NAVIGATION;
+        return { organizationNavigationByHost: { ...state.organizationNavigationByHost, [host]: {
+          ...views, [view]: { ...previous, ...changes, expanded: { ...previous.expanded, ...changes.expanded } },
+        } } };
+      }),
       setConversationTreeExpansion: (host, changes) => set(state => {
         const previous = state.conversationTreeByHost[host] ?? EMPTY_CONVERSATION_TREE;
         return { conversationTreeByHost: { ...state.conversationTreeByHost, [host]: {

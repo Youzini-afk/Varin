@@ -9,6 +9,7 @@ import { useExternalAgentStore } from './useExternalAgentStore';
 export interface OrganizationPage { query: ConversationOrganizationQuery; snapshot: ConversationOrganizationSnapshot | null; loading: boolean; error: string | null }
 export interface OrganizationMetadataIntent {
   input: { key: string; items: ConversationOrganizationMetadataItem[] };
+  names?: Record<string, string>;
   results: ConversationOrganizationMetadataResult[]; pending: boolean;
 }
 interface OrganizationState {
@@ -52,7 +53,7 @@ export function organizationViewSnapshot(pages: Record<string, OrganizationPage>
   const collect = (scope: ConversationOrganizationQuery) => {
     const key = organizationQueryKey(scope); if (visited.has(key)) return; visited.add(key);
     const snapshot = pages[key]?.snapshot; if (!snapshot) return; snapshots.push(snapshot);
-    if (query.query) return;
+    if (query.query || query.kind === 'conversations') return;
     const memberIds = snapshot.items ? new Set(snapshot.items.filter(item => item.kind === 'container').map(item => item.id)) : null;
     for (const container of snapshot.containers) if ((!memberIds || memberIds.has(container.id)) && expanded(container.id)) {
       collect({ pageNodes: true, containerId: container.id, archived: query.archived, ...(query.botId ? { botId: query.botId } : {}) });
@@ -104,7 +105,12 @@ export async function submitOrganization(operation: ConversationOrganizationOper
   } catch (error) {
     if (!currentMutationHost(owner.host)) return;
     const known = error instanceof ConversationOrganizationError && !['unknown_outcome', 'unavailable'].includes(error.code);
-    useConversationOrganizationStore.setState(state => ({ error: message(error), failed: known ? state.failed : { ...state.failed, [command.key]: command } }));
+    useConversationOrganizationStore.setState(state => {
+      const failed = { ...state.failed };
+      if (known) delete failed[command.key];
+      else failed[command.key] = command;
+      return { error: message(error), failed };
+    });
     await refreshConversationOrganization(); throw error;
   } finally {
     if (currentMutationHost(owner.host)) useConversationOrganizationStore.setState(state => { const pending = { ...state.pending }; delete pending[command.key]; return { pending }; });
@@ -120,7 +126,10 @@ export async function submitOrganizationMetadata(items: ConversationOrganization
   const state = useConversationOrganizationStore.getState();
   const existing = retryKey ? state.metadata[retryKey] : Object.values(state.metadata).find(intent => unresolvedOrganizationMetadata(intent).length && (JSON.stringify(intent.input.items) === JSON.stringify(items) || JSON.stringify(unresolvedOrganizationMetadata(intent)) === JSON.stringify(items)));
   if (retryKey && !existing) throw new Error('The original metadata intent is unavailable on this Host');
-  const intent: OrganizationMetadataIntent = existing ?? { input: { key: crypto.randomUUID(), items: structuredClone(items) }, results: [], pending: false };
+  const intent: OrganizationMetadataIntent = existing ?? { input: { key: crypto.randomUUID(), items: structuredClone(items) }, names: Object.fromEntries(items.flatMap(item => {
+    const entry = state.snapshot?.conversations.find(entry => metadataKey(entry) === metadataKey(item));
+    return entry ? [[metadataKey(item), entry.title]] : [];
+  })), results: [], pending: false };
   if (intent.pending) return;
   const remaining = unresolvedOrganizationMetadata(intent); if (!remaining.length) return;
   const key = intent.input.key;

@@ -113,10 +113,10 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
   </nav>;
 }
 
-export function ThreadSidebar(props: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
+export function ThreadSidebar(props: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; compact?: boolean; onNavigate?(): void }) {
   const { t } = useI18n();
   const apis = useRuntimeAPIs();
   const [query, setQuery] = React.useState('');
-  if (props.archived && apis.conversationOrganization) return <div className="flex h-full min-h-0 flex-col"><div className="p-2"><Input aria-label={t('organization.searchArchive')} placeholder={t('organization.searchArchive')} value={query} onChange={e => setQuery(e.target.value)} /></div><ConversationOrganizationTree archived query={query} viewKey="archive" onNavigate={props.onNavigate} /></div>;
-  return props.archived ? <ArchiveThreadSidebar {...props} /> : <ConversationSidebar isVisible={props.isVisible} mobileVariant={props.mobileVariant} onRequestClose={props.onNavigate} />;
+  if (props.archived && apis.conversationOrganization) return <div className="flex h-full min-h-0 flex-col"><div className="p-2"><Input aria-label={t('organization.searchArchive')} placeholder={t('organization.searchArchive')} value={query} onChange={e => setQuery(e.target.value)} /></div><ConversationOrganizationTree archived query={query} onSearchReset={() => setQuery('')} viewKey="archive" onNavigate={props.onNavigate} /></div>;
+  return props.archived ? <ArchiveThreadSidebar {...props} /> : <ConversationSidebar compact={props.compact} isVisible={props.isVisible} mobileVariant={props.mobileVariant} onRequestClose={props.onNavigate} />;
 }

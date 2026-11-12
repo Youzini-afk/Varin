@@ -836,7 +836,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                         <ErrorBoundary>
                           <WorkbenchReplacement
                             target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                            fallback={<ThreadSidebar />}
+                            fallback={<ThreadSidebar compact onNavigate={() => setSessionPickerOpen(false)} />}
                           />
                         </ErrorBoundary>
                       </div>

@@ -72,6 +72,8 @@ pub struct ConversationEntry {
     pub archived: bool,
     pub pinned: bool,
     pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<u64>,
     pub position: Position,
     pub origin: Origin,
     pub path: Vec<String>,
@@ -79,6 +81,10 @@ pub struct ConversationEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrganizationQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
     pub container_id: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub page_nodes: bool,
@@ -1306,6 +1312,7 @@ pub(super) fn conversation(
         archived,
         pinned,
         revision,
+        updated_at_ms: None,
         path: path(db, &scope, p.container_id.as_deref())?,
         position: p,
         origin: origin(db, principal, r)?,
@@ -1506,6 +1513,7 @@ impl DirectoryMetadata {
             archived,
             pinned,
             revision,
+            updated_at_ms: None,
             position,
             path,
             origin,
@@ -1521,6 +1529,14 @@ fn snapshot(
     let page = query.cursor.take();
     if query.limit == Some(0) {
         return Err(RuntimeError::Invalid("page limit must be positive".into()));
+    }
+    if !matches!(
+        query.kind.as_deref(),
+        None | Some("containers" | "conversations")
+    )
+        || !matches!(query.sort.as_deref(), None | Some("manual" | "recent"))
+    {
+        return Err(RuntimeError::Invalid("invalid organization view".into()));
     }
     if !matches!(
         query.archived.as_deref(),
@@ -1541,8 +1557,8 @@ fn snapshot(
                 .map_err(|_| RuntimeError::Invalid("invalid organization continuation".into()))
         })
         .transpose()?;
-    let mut metadata = db.prepare("SELECT t.id,t.title,t.archived,t.pinned,t.revision FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.principal_id IS ?1 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|Ok((ConversationRef::Native{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-    metadata.extend(db.prepare("SELECT id,coalesce(json_extract(body,'$.title'),''),coalesce(json_extract(body,'$.archived'),0),coalesce(json_extract(body,'$.pinned'),0),coalesce(json_extract(body,'$.revision'),1) FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|Ok((ConversationRef::External{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?);
+    let mut metadata = db.prepare("SELECT t.id,t.title,t.archived,t.pinned,t.revision,t.updated_at_ms FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.principal_id IS ?1 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|Ok((ConversationRef::Native{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?,read_number(r,5)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+    metadata.extend(db.prepare("SELECT id,coalesce(json_extract(body,'$.title'),''),coalesce(json_extract(body,'$.archived'),0),coalesce(json_extract(body,'$.pinned'),0),coalesce(json_extract(body,'$.revision'),1),coalesce(json_extract(body,'$.updatedAt'),0) FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|Ok((ConversationRef::External{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?,read_number(r,5)?)))?.collect::<std::result::Result<Vec<_>,_>>()?);
     let all_containers = containers(db, &scope)?;
     let mut directory = DirectoryMetadata::load(db, principal, &scope, &all_containers)?;
     // Names are a request-local projection from Settings. Keep only identities
@@ -1580,8 +1596,17 @@ fn snapshot(
         .map(|s| s.to_lowercase());
     let mut entries = Vec::new();
     let mut bot_paths = BTreeSet::new();
-    for (r, title, archived, pinned, revision) in metadata {
-        let entry = directory.entry(r, title, archived, pinned, revision)?;
+    let recent = query.sort.as_deref() == Some("recent");
+    let containers_only = query.kind.as_deref() == Some("containers");
+    for (r, title, archived, pinned, revision, updated_at_ms) in metadata {
+        if containers_only && query.bot_id.is_none() {
+            continue;
+        }
+        let mut entry = directory.entry(r, title, archived, pinned, revision)?;
+        // Activity changes invalidate activity ordering, never a manual directory cursor.
+        if recent {
+            entry.updated_at_ms = Some(updated_at_ms);
+        }
         if (query.archived.as_deref().unwrap_or("exclude") == "exclude" && entry.archived)
             || (query.archived.as_deref() == Some("only") && !entry.archived)
         {
@@ -1595,6 +1620,9 @@ fn snapshot(
             }
         }
         bot_paths.extend(entry.path.iter().cloned());
+        if containers_only {
+            continue;
+        }
         if let Some(container) = &query.container_id {
             if entry.position.container_id.as_ref() != Some(container)
                 && !(query.recursive && entry.path.contains(container))
@@ -1620,6 +1648,11 @@ fn snapshot(
         entries.push(entry);
     }
     entries.sort_by(|a, b| {
+        if recent {
+            return b.pinned.cmp(&a.pinned)
+                .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
+                .then_with(|| a.conversation.cmp(&b.conversation));
+        }
         (&a.position.container_id, a.position.order, &a.conversation).cmp(&(
             &b.position.container_id,
             b.position.order,
@@ -1629,6 +1662,9 @@ fn snapshot(
     let mut nodes: Vec<(Option<String>, u64, String, OrganizationObject)> = Vec::new();
     if query.page_nodes {
         for c in &all_containers {
+            if query.kind.as_deref() == Some("conversations") {
+                continue;
+            }
             let in_scope = if let Some(parent) = &query.container_id {
                 c.parent_id.as_ref() == Some(parent)
                     || (query.recursive
@@ -1661,19 +1697,21 @@ fn snapshot(
                 OrganizationObject::Container { id: c.id.clone() },
             ));
         }
-        for e in &entries {
+        for (index, e) in entries.iter().enumerate() {
             let object = match &e.conversation {
                 ConversationRef::Native { id } => OrganizationObject::Native { id: id.clone() },
                 ConversationRef::External { id } => OrganizationObject::External { id: id.clone() },
             };
             nodes.push((
                 e.position.container_id.clone(),
-                e.position.order,
+                if recent { index as u64 } else { e.position.order },
                 format!("{}:{}", e.conversation.kind(), e.conversation.id()),
                 object,
             ));
         }
-        nodes.sort_by(|a, b| (&a.0, a.1, &a.2).cmp(&(&b.0, b.1, &b.2)));
+        if !recent {
+            nodes.sort_by(|a, b| (&a.0, a.1, &a.2).cmp(&(&b.0, b.1, &b.2)));
+        }
     }
     // Freeze the actual directory projection, not unrelated model/run activity or a different
     // principal's global event cursor. Each continuation rechecks the current visible facts.

@@ -42,11 +42,12 @@ it('validates mixed page items separately from container ancestor context and pr
   assert.equal(parseConversationOrganizationSnapshot(page), page);
   assert.equal(page.items.length, 1); // Ancestor metadata does not consume a row or limit slot.
   const ref = { kind: 'native', id: 'thread' };
-  const conversation = { conversation: ref, title: 'Thread', archived: false, pinned: false, revision: 1,
+  const conversation = { conversation: ref, title: 'Thread', archived: false, pinned: false, revision: 1, updatedAtMs: 100,
     position: { conversation: ref, containerId: 'ancestor', order: 1, revision: 1, explicit: true, inheritedFrom: null },
     origin: { botId: null, directBotId: null, conversation: null }, path: ['ancestor'] };
   const mixed = { ...page, conversations: [conversation], items: [...page.items, ref] };
   assert.equal(parseConversationOrganizationSnapshot(mixed), mixed);
+  assert.throws(() => parseConversationOrganizationSnapshot({ ...mixed, conversations: [{ ...conversation, updatedAtMs: -1 }] }), { code: 'invalid_response' });
   assert.throws(() => parseConversationOrganizationSnapshot({ ...mixed, items: page.items }), { code: 'invalid_response' });
   for (const items of [null, [{ kind: 'container', id: 'missing' }], [...page.items, ...page.items], [{ kind: 'container', id: 'child', principalId: 'other' }], [{ kind: 'group', id: 'child' }]]) {
     assert.throws(() => parseConversationOrganizationSnapshot({ ...page, items }), { code: 'invalid_response' });
@@ -62,10 +63,10 @@ it('forwards mixed pagination without reducing limits and rejects invalid or unk
   };
   try {
     const api = createConversationOrganizationHttpAPI();
-    const query = { pageNodes: true, rootOnly: true, limit: 100000, cursor: 'original-cursor' };
+    const query = { pageNodes: true, kind: 'conversations' as const, sort: 'recent' as const, recursive: true, limit: 100000, cursor: 'original-cursor' };
     assert.deepEqual((await api.read(query)).items, []);
     assert.deepEqual(queries, [query]);
-    for (const bad of [{ pageNodes: 'true' }, { pageNodes: null }, { page_nodes: true }, { principalId: 'other' }, { projectNames: { fake: 'Injected' } }, { limit: 0 }, { recursive: 1 }]) {
+    for (const bad of [{ pageNodes: 'true' }, { pageNodes: null }, { page_nodes: true }, { principalId: 'other' }, { projectNames: { fake: 'Injected' } }, { limit: 0 }, { recursive: 1 }, { kind: 'unknown' }, { sort: 'unknown' }, { kind: ['containers'] }, { sort: ['recent'] }]) {
       await assert.rejects(api.read(bad as never), { code: 'invalid_request' });
     }
     assert.equal(queries.length, 1);

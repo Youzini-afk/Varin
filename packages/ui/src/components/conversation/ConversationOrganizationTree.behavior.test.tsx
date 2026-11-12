@@ -4,13 +4,14 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ConversationOrganizationSnapshot, ConversationOrganizationCommand, ConversationOrganizationEvent } from '@varin/application-client';
 import { ConversationOrganizationTree } from './ConversationOrganizationTree';
-import { useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization } from '@/stores/useConversationOrganizationStore';
+import { useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization, submitOrganization } from '@/stores/useConversationOrganizationStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
-const transport = vi.hoisted(() => ({ read: vi.fn(), command: vi.fn(), metadata: vi.fn(), observe: vi.fn(), listeners: new Set<(event: ConversationOrganizationEvent) => void>(), open: vi.fn(), create: vi.fn(), generation: 1 }));
+const transport = vi.hoisted(() => ({ read: vi.fn(), command: vi.fn(), metadata: vi.fn(), observe: vi.fn(), listeners: new Set<(event: ConversationOrganizationEvent) => void>(), open: vi.fn(), create: vi.fn(), generation: 1, undo: undefined as (() => void) | undefined }));
 vi.mock('./sidebarHighlights', () => ({ useHoverPill: () => {}, useSelectionGlide: () => {} }));
 vi.mock('@/lib/desktop', () => ({ canUseElectronDesktopIPC: () => false, invokeDesktop: vi.fn() }));
 vi.mock('@/workbenches/bot/botWorkspaceViews', () => ({ useBotWorkspaceNavigation: () => null }));
-vi.mock('@/workbenches/bot/botPresentation', () => ({ workKey: (identity: { threadId: string; branchId: string }) => `${identity.threadId}:${identity.branchId}` }));
+vi.mock('@/workbenches/bot/botPresentation', () => ({ workKey: (identity: { threadId: string; branchId: string }) => `${identity.threadId}:${identity.branchId}`, isWaitingStatus: () => false, runStatus: () => null }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', async () => { const { conversationOrganizationZhCN } = await import('@/lib/i18n/messages/conversation-organization'); return { useI18n: () => ({ t: (key: keyof typeof conversationOrganizationZhCN, params: Record<string, unknown> = {}) => Object.entries(params).reduce<string>((text, [name, value]) => text.replace(`{${name}}`, String(value)), conversationOrganizationZhCN[key] ?? key) }) }; });
 vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { conversationOrganization: { read: transport.read, command: transport.command, metadata: transport.metadata, observe: transport.observe }, bots: { list: async () => [] } }; return { useRuntimeAPIs: () => apis }; });
@@ -24,14 +25,24 @@ vi.mock('@/components/layout/ProjectActionsButton', () => ({ ProjectActionsButto
 vi.mock('@/components/sections/projects/ProjectCreateDialog', () => ({ ProjectCreateDialog: () => null }));
 vi.mock('@/lib/projectMeta', () => ({ ProjectIconImage: ({ fallback }: { fallback: React.ReactNode }) => fallback, PROJECT_ICON_MAP: {}, PROJECT_COLOR_MAP: {} }));
 vi.mock('@/lib/workspaceEvents', () => ({ workspaceEvents: { requestDirectoryDialog: vi.fn() } }));
-vi.mock('@/components/ui', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: (_message: string, data: { action: { onClick(): void } }) => { transport.undo = data.action.onClick; return 'undo'; }, dismiss: () => {} } }));
+vi.mock('@/components/ui/dialog', () => {
+  const Part = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
+  return { Dialog: ({ open, children }: React.PropsWithChildren<{ open: boolean }>) => open ? <div role="dialog">{children}</div> : null, DialogContent: Part, DialogHeader: Part, DialogTitle: Part, DialogDescription: Part, DialogFooter: Part };
+});
+vi.mock('@/components/ui/context-menu', () => {
+  const Part = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
+  const Item = ({ children, onClick }: React.PropsWithChildren<{ onClick?(): void }>) => <button onClick={onClick}>{children}</button>;
+  return { ContextMenu: Part, ContextMenuTrigger: Part, ContextMenuContent: () => null, ContextMenuItem: Item, ContextMenuSeparator: () => <hr />, ContextMenuSub: Part, ContextMenuSubTrigger: Item, ContextMenuSubContent: Part };
+});
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => <span /> }));
 vi.mock('@/workbenches/bot/BotFigure', () => ({ BotFigure: () => <span /> }));
 vi.mock('./FlipList', () => ({ FlipList: ({ children, containerRef }: React.PropsWithChildren<{ containerRef: React.Ref<HTMLDivElement> }>) => <div ref={containerRef}>{children}</div> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/dropdown-menu', () => {
   const Menu = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
-  return { DropdownMenu: Menu, DropdownMenuTrigger: Menu, DropdownMenuContent: Menu, DropdownMenuSeparator: () => <hr />, DropdownMenuItem: ({ children, onClick }: React.PropsWithChildren<{ onClick?(): void }>) => <button onClick={onClick}>{children}</button> };
+  const Item = ({ children, onClick }: React.PropsWithChildren<{ onClick?(): void }>) => <button onClick={onClick}>{children}</button>;
+  return { DropdownMenu: Menu, DropdownMenuTrigger: Menu, DropdownMenuContent: Menu, DropdownMenuSeparator: () => <hr />, DropdownMenuItem: Item, DropdownMenuSub: Menu, DropdownMenuSubTrigger: Item, DropdownMenuSubContent: Menu };
 });
 const original = (): ConversationOrganizationSnapshot => ({ initialized: true, revision: 1, rootRevision: 1, cursor: 1, nextCursor: null, containers: [
   { id: 'work', kind: 'group', parentId: null, order: 0, revision: 1, childrenRevision: 1, name: 'Work', icon: null, color: null, projectId: null },
@@ -44,24 +55,36 @@ beforeEach(() => {
   vi.stubGlobal('navigator', { userAgent: 'test' }); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('getComputedStyle', () => ({ position: 'static', transform: 'none', getPropertyValue: () => '' }));
   transport.generation++; snapshot = original(); transport.read.mockReset().mockImplementation(async () => structuredClone(snapshot)); transport.command.mockReset(); transport.metadata.mockReset(); transport.open.mockReset().mockResolvedValue(undefined); transport.create.mockReset().mockResolvedValue(undefined); transport.listeners.clear();
+  transport.undo = undefined;
+  useSessionDisplayStore.setState({ organizationNavigationByHost: {} });
   transport.observe.mockReset().mockImplementation((_cursor: number, listener: (event: ConversationOrganizationEvent) => void, { signal }: { signal: AbortSignal }) => { transport.listeners.add(listener); return new Promise<void>(resolve => signal.addEventListener('abort', () => { transport.listeners.delete(listener); resolve(); })); });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 const render = async (query = '') => { await act(async () => root.render(<ConversationOrganizationTree query={query} />)); };
-const click = async (label: string) => { const button = [...container.querySelectorAll('button')].find(b => b.textContent === label)!; expect(button).toBeTruthy(); await act(async () => button.click()); };
+const revealResults = async () => { const trigger = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '部分操作需要处理'); if (trigger?.getAttribute('aria-expanded') !== 'true') await act(async () => trigger?.click()); };
+const click = async (label: string) => { if (label === '撤销移动') { expect(transport.undo).toBeTypeOf('function'); await act(async () => transport.undo!()); return; } if (label === '只重试未确认项') await revealResults(); const button = [...container.querySelectorAll('button')].find(b => b.textContent === label)!; expect(button).toBeTruthy(); await act(async () => button.click()); };
+const destination = async (id: string) => {
+  const name = snapshot.containers.find(container => container.id === id)?.name ?? 'Project';
+  const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索目标分类"]')!;
+  await act(async () => { search.value = name; search.dispatchEvent(new Event('input', { bubbles: true })); });
+  const target = container.querySelector<HTMLButtonElement>(`button[data-organization-id="${id}"]`)!;
+  expect(target).toBeTruthy(); await act(async () => target.click());
+};
 const row = (name: string) => [...container.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(r => [...r.querySelectorAll('button')].some(b => b.title === name))!;
 
 it('keeps one observation for multiple views and nests inherited children only once', async () => {
   await act(async () => root.render(<><ConversationOrganizationTree /><ConversationOrganizationTree viewKey="ide" /></>));
   expect(transport.observe).toHaveBeenCalledTimes(1);
   expect(container.querySelectorAll('button[title="Child"]')).toHaveLength(2);
-  expect(row('Task').parentElement?.parentElement?.parentElement?.textContent).toContain('Child');
+  for (const title of ['Work', 'Project', 'Task']) await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="展开 ${title}"]`)!.click());
+  expect(row('Task').getAttribute('aria-expanded')).toBe('true');
+  expect(row('Child').closest('[inert]')).toBeNull();
   expect(row('Moved')).toBeTruthy();
 });
 it('opens original identity and locks the nearest project and explicit container for a new draft', async () => {
   await render(); await click('Task'); expect(transport.open).toHaveBeenCalledWith({ threadId: 'Task' });
-  await click('Project'); await click('新建');
+  await act(async () => [...row('Project').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '新建会话')!.click());
   expect(transport.create).toHaveBeenCalledWith({ directory: '/project', projectId: 'project', organization: { containerId: 'project-node' } });
 });
 it('search exposes only matching ancestry and restores collapsed state when cleared', async () => {
@@ -70,8 +93,8 @@ it('search exposes only matching ancestry and restores collapsed state when clea
   await render('Child'); expect(row('Work').getAttribute('aria-expanded')).toBe('true'); expect(container.querySelector('button[title="Moved"]')).toBeNull();
   await render(); expect(row('Work').getAttribute('aria-expanded')).toBe('false');
 });
-it('submits inline group edits with parent versions and keeps an ambiguous key for retry', async () => {
-  await render(); await click('新建组');
+it('submits group dialog edits with parent versions and keeps an ambiguous key for retry', async () => {
+  await render(); await click('新建分组');
   const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
   await act(async () => { input.value = 'Release'; input.dispatchEvent(new Event('input', { bubbles: true })); });
   transport.command.mockRejectedValueOnce(new Error('response lost'));
@@ -79,7 +102,7 @@ it('submits inline group edits with parent versions and keeps an ambiguous key f
   const first = transport.command.mock.calls[0][0] as ConversationOrganizationCommand;
   expect(first.operation).toMatchObject({ action: 'create', name: 'Release', parentId: null, parents: [{ containerId: null, childrenRevision: 1 }] });
   expect(useConversationOrganizationStore.getState().failed[first.key]).toEqual(first);
-  transport.command.mockResolvedValueOnce({}); await click('用原受理键核对'); expect(transport.command.mock.calls[1][0]).toEqual(first);
+  transport.command.mockResolvedValueOnce({}); await click('检查结果'); expect(transport.command.mock.calls[1][0]).toEqual(first);
 });
 it('refreshes another client’s move without opening or recreating the selected conversation', async () => {
   await render(); await click('Task'); transport.open.mockClear();
@@ -88,12 +111,26 @@ it('refreshes another client’s move without opening or recreating the selected
   expect(container.querySelectorAll('button[title="Child"]')).toHaveLength(1); expect(transport.open).not.toHaveBeenCalled(); expect(transport.create).not.toHaveBeenCalled();
 });
 
+it('retires an ambiguous command when its original-key check returns a definitive conflict', async () => {
+  const { ConversationOrganizationError } = await import('@varin/application-client');
+  await render();
+  const operation = { action: 'create' as const, id: 'new-group', kind: 'group' as const, parentId: null, name: 'Group', parents: [{ containerId: null, childrenRevision: 1 }] };
+  transport.command.mockRejectedValueOnce(new Error('Response lost'));
+  await act(async () => { await expect(submitOrganization(operation)).rejects.toThrow('Response lost'); });
+  const command = Object.values(useConversationOrganizationStore.getState().failed)[0];
+  transport.command.mockRejectedValueOnce(new ConversationOrganizationError('conflict', 'Parent changed', 409));
+  await act(async () => { await expect(submitOrganization(command.operation, command)).rejects.toThrow('Parent changed'); });
+  expect(transport.command.mock.calls[1][0]).toEqual(command);
+  expect(useConversationOrganizationStore.getState().failed).toEqual({});
+  expect(container.textContent).toContain('Parent changed');
+  expect(container.textContent).not.toContain('检查结果');
+});
+
 it('moves through the keyboard-accessible menu with source and destination CAS, leaving the old row until committed', async () => {
   await render();
   const menu = [...row('Task').querySelectorAll('button')].find(b => b.textContent === '移动到…')!;
   await act(async () => menu.click());
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
-  await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'work' }); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await destination('work');
   let finish!: () => void;
   transport.command.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
   await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -115,7 +152,8 @@ it('retains partial metadata outcomes and retries only the unresolved original i
   ] });
   await click('归档');
   const first = transport.metadata.mock.calls[0][0];
-  expect(first.items).toHaveLength(2); expect(container.textContent).toContain('busy');
+  await revealResults();
+  expect(first.items).toHaveLength(2); expect(container.textContent).toContain('当前正在执行');
   transport.metadata.mockResolvedValueOnce({ items: [{ conversation: { kind: 'native', id: 'Moved' }, status: 'succeeded' }] });
   await click('只重试未确认项');
   expect(transport.metadata.mock.calls[1][0]).toEqual({ key: first.key, items: [first.items.find((item: { conversation: { id: string } }) => item.conversation.id === 'Moved')] });
@@ -130,7 +168,7 @@ it('shows a missing origin Bot honestly and still follows its original typed con
 });
 
 it('fences a previous Host’s pending response and clears its mutation targets without touching drafts', async () => {
-  await render(); await click('新建组');
+  await render(); await click('新建分组');
   const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
   await act(async () => { input.value = 'Old Host group'; input.dispatchEvent(new Event('input', { bubbles: true })); });
   let finish!: () => void;
@@ -180,8 +218,7 @@ it('undo restores inheritance using the original move receipt revision, never a 
   await render();
   const menu = [...row('Child').querySelectorAll('button')].find(b => b.textContent === '移动到…')!;
   await act(async () => menu.click());
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
-  await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'work' }); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await destination('work');
   transport.command.mockImplementationOnce(async (command: ConversationOrganizationCommand) => {
     const position = { ...snapshot.conversations[1].position, containerId: 'work', explicit: true, inheritedFrom: null, revision: 2 };
     snapshot = { ...snapshot, revision: 2, cursor: 2, conversations: snapshot.conversations.map(e => e.title === 'Child' ? { ...e, position } : e) };
@@ -191,9 +228,12 @@ it('undo restores inheritance using the original move receipt revision, never a 
   const first = transport.command.mock.calls[0][0];
   snapshot = { ...snapshot, revision: 3, cursor: 3, conversations: snapshot.conversations.map(e => e.title === 'Child' ? { ...e, position: { ...e.position, revision: 3, containerId: null } } : e) };
   await act(async () => { for (const listener of transport.listeners) listener({ cursor: 3, kind: 'organization', revision: 3, subject: '', data: null }); });
+  // Recent can stop caching the old parent once the entry has moved elsewhere.
+  await act(async () => useConversationOrganizationStore.setState(state => ({ snapshot: { ...state.snapshot!, containers: state.snapshot!.containers.filter(container => container.id !== 'project-node') } })));
   const { ConversationOrganizationError } = await import('@varin/application-client');
   transport.command.mockRejectedValueOnce(new ConversationOrganizationError('conflict', 'Another client moved the task'));
   await click('撤销移动');
+  expect(transport.read.mock.calls.some(([query]) => query.containerId === 'project-node' && query.limit === 1)).toBe(true);
   const inverse = transport.command.mock.calls[1][0];
   expect(inverse.key).not.toBe(first.key);
   expect(inverse.operation).toMatchObject({ action: 'restore', items: [{ object: { kind: 'native', id: 'Child' }, expectedRevision: 2, expectedParentId: 'work', parentId: 'project-node', before: null, inherit: true }] });
@@ -202,7 +242,7 @@ it('undo restores inheritance using the original move receipt revision, never a 
 });
 
 it('keeps group and conversation editors open while an IME confirms or cancels composition', async () => {
-  await render(); await click('新建组');
+  await render(); await click('新建分组');
   const compositionKey = async (input: HTMLInputElement, key: string, composing: boolean, keyCode = 0) => {
     const event = new Event('keydown', { bubbles: true, cancelable: true });
     Object.defineProperties(event, { key: { value: key }, isComposing: { value: composing }, keyCode: { value: keyCode } });
@@ -235,8 +275,8 @@ function mixedPages(pageSize = 2) {
     const scope = (id: string | null) => query.rootOnly ? id === null : query.containerId ? id === query.containerId || Boolean(query.recursive && path(id).includes(query.containerId)) : true;
     const needle = query.query?.toLowerCase();
     const nodes = [
-      ...snapshot.containers.filter(c => scope(c.parentId) && (!needle || c.name?.toLowerCase().includes(needle))).map(c => ({ object: { kind: 'container' as const, id: c.id }, order: c.order })),
-      ...snapshot.conversations.filter(c => scope(c.position.containerId) && (query.archived === 'include' || c.archived === (query.archived === 'only')) && (!needle || c.title.toLowerCase().includes(needle))).map(c => ({ object: c.conversation, order: c.position.order })),
+      ...snapshot.containers.filter(c => query.kind !== 'conversations' && scope(c.parentId) && (!needle || c.name?.toLowerCase().includes(needle))).map(c => ({ object: { kind: 'container' as const, id: c.id }, order: c.order })),
+      ...snapshot.conversations.filter(c => query.kind !== 'containers' && scope(c.position.containerId) && (query.archived === 'include' || c.archived === (query.archived === 'only')) && (!needle || c.title.toLowerCase().includes(needle))).map(c => ({ object: c.conversation, order: c.position.order })),
     ].sort((a, b) => a.order - b.order || JSON.stringify(a.object).localeCompare(JSON.stringify(b.object)));
     const offset = Number(query.cursor ?? 0), items = nodes.slice(offset, offset + pageSize).map(node => node.object);
     const conversations = snapshot.conversations.filter(entry => items.some(item => item.kind === entry.conversation.kind && item.id === entry.conversation.id));
@@ -282,7 +322,7 @@ it('merges mixed container/native/external pages, keeps newly discovered branche
 });
 
 it('browses an unloaded destination page and searches identical labels by stable identity without polluting navigation', async () => {
-  snapshot = { ...original(), containers: [group('first', 1), group('later', 2), group('deep-one', 0, 'later', 'Same'), group('deep-two', 1, 'later', 'Same')], conversations: [task('Move me', 0)] };
+  snapshot = { ...original(), containers: [group('first', 1), group('second', 2), group('later', 3), group('deep-one', 0, 'later', 'Same'), group('deep-two', 1, 'later', 'Same')], conversations: [task('Move me', 0)] };
   mixedPages(); await render();
   const menu = [...row('Move me').querySelectorAll('button')].find(button => button.textContent === '移动到…')!;
   await act(async () => menu.click());
@@ -290,14 +330,14 @@ it('browses an unloaded destination page and searches identical labels by stable
   expect(picker().textContent).not.toContain('later');
   const more = [...container.querySelectorAll('form button')].find(button => button.textContent === '继续读取')!;
   await act(async () => (more as HTMLButtonElement).click());
-  const browse = picker().querySelector<HTMLButtonElement>('button[aria-label="进入此分类: later · later"]')!;
+  const browse = picker().querySelector<HTMLButtonElement>('button[data-organization-id="later"]')!;
   await act(async () => browse.click());
-  expect(picker().textContent).toContain('later / Same · deep-one');
-  expect(picker().textContent).toContain('later / Same · deep-two');
+  expect(picker().querySelector('button[data-organization-id="deep-one"]')).toBeTruthy();
+  expect(picker().querySelector('button[data-organization-id="deep-two"]')).toBeTruthy();
+  expect(picker().textContent).not.toContain('deep-one');
   const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索目标分类"]')!;
   await act(async () => { search.value = 'Same'; search.dispatchEvent(new Event('input', { bubbles: true })); });
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
-  expect([...select.querySelectorAll('option')].map(option => option.value)).toEqual(['', 'later', 'deep-one', 'deep-two']);
+  expect([...picker().querySelectorAll<HTMLButtonElement>('[data-organization-id]')].map(option => option.dataset.organizationId)).toEqual(['deep-one', 'deep-two']);
   await click('取消');
   expect(row('later')).toBeUndefined(); expect(row('Same')).toBeUndefined();
   expect(transport.command).not.toHaveBeenCalled();
@@ -308,8 +348,7 @@ it('captures an unread mixed sibling anchor before moving and restores before it
   mixedPages(); await render();
   await act(async () => [...row('Move me').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '移动到…')!.click());
   await act(async () => [...container.querySelectorAll<HTMLButtonElement>('form button')].find(button => button.textContent === '继续读取')!.click());
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="目标分类"]')!;
-  await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'Destination' }); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await destination('Destination');
   transport.command.mockImplementationOnce(async (command: ConversationOrganizationCommand) => {
     expect(transport.read.mock.calls.some(([query]) => query.rootOnly && query.archived === 'include' && query.cursor === '2')).toBe(true);
     const position = { ...snapshot.conversations[0].position, containerId: 'Destination', revision: 2 };
@@ -381,6 +420,28 @@ it('keeps a Bot-matching container page visible before its matching child page i
   expect(row('Bot child')).toBeTruthy();
 });
 
+it('uses the owner’s recent page order without leaking expanded category pages, and retains display choices on remount', async () => {
+  const folder = group('Work', 0);
+  const first = { ...task('Recent first', 1, 'Work'), updatedAtMs: 20 };
+  const second = { ...task('Recent second', 0, 'Work'), updatedAtMs: 10 };
+  const categoryOnly = task('Outside recent page', 2, 'Work');
+  transport.read.mockImplementation(async (query: import('@varin/application-client').ConversationOrganizationQuery = {}) => {
+    const entries = query.sort === 'recent' ? [first, second] : query.containerId ? [categoryOnly] : [];
+    return { ...original(), containers: [folder], conversations: entries, items: query.rootOnly ? [{ kind: 'container', id: folder.id }] : entries.map(entry => entry.conversation), nextCursor: null };
+  });
+  await render(); await toggle('Work'); expect(row('Outside recent page')).toBeTruthy();
+  await click('最近');
+  expect(transport.read.mock.calls.some(([query]) => query.kind === 'conversations' && query.sort === 'recent' && query.recursive)).toBe(true);
+  expect([...container.querySelectorAll<HTMLButtonElement>('[role="treeitem"] button[title]')].map(button => button.title)).toEqual(['Recent first', 'Recent second']);
+  expect(row('Outside recent page')).toBeUndefined();
+  await act(async () => root.render(null)); await render();
+  expect(container.querySelector('button[role="tab"][aria-selected="true"]')?.textContent).toBe('最近');
+  await click('分类');
+  expect(row('Work').getAttribute('aria-expanded')).toBe('true');
+  expect(row('Outside recent page')).toBeTruthy();
+  expect(transport.open).not.toHaveBeenCalled(); expect(transport.create).not.toHaveBeenCalled();
+});
+
 
 it('does not render an open destination picker against a cleared Host snapshot', async () => {
   snapshot = { ...original(), containers: [group('Moving group', 0)], conversations: [] };
@@ -403,13 +464,14 @@ it('keeps original partial metadata intent and receipts across full same-Host un
   await act(async () => root.render(null));
   // A later object joins the visible scope; the original fixed selection must not grow.
   snapshot.conversations.push({ ...snapshot.conversations[0], conversation: { kind: 'native', id: 'Later' }, title: 'Later' });
-  await render(); expect(container.textContent).toContain('Task: succeeded'); expect(container.textContent).toContain('Moved: unknown');
+  await render(); await revealResults();
+  expect(container.textContent).toContain('Task'); expect(container.textContent).toContain('已完成'); expect(container.textContent).toContain('Moved'); expect(container.textContent).toContain('结果待确认');
   transport.metadata.mockResolvedValueOnce({ items: [{ conversation: { kind: 'native', id: 'Moved' }, status: 'succeeded' }] });
   await click('只重试未确认项');
   expect(transport.metadata.mock.calls[1][0]).toEqual({ key: first.key, items: [first.items[1]] });
   expect(useConversationOrganizationStore.getState().metadata[first.key]).toBeUndefined();
   expect(container.textContent).not.toContain('只重试未确认项');
-  expect(container.textContent).not.toContain('Task: succeeded');
+  expect(container.textContent).not.toContain('结果待确认');
 });
 
 it('does not duplicate an in-flight batch on same-Host remount and retains unknown failure for original-key retry', async () => {
@@ -417,17 +479,17 @@ it('does not duplicate an in-flight batch on same-Host remount and retains unkno
   transport.metadata.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
   await act(async () => [...row('Task').querySelectorAll('button')].find(button => button.textContent === '归档会话')!.click());
   const first = structuredClone(transport.metadata.mock.calls[0][0]);
-  await act(async () => root.render(null)); await render();
+  await act(async () => root.render(null)); await render(); await revealResults();
   expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '只重试未确认项')?.disabled).toBe(true);
   expect(transport.metadata).toHaveBeenCalledTimes(1);
   await act(async () => reject(new Error('Disconnected after acceptance')));
-  expect(container.textContent).toContain('unknown');
+  expect(container.textContent).toContain('结果待确认');
   transport.metadata.mockResolvedValueOnce({ items: [{ conversation: { kind: 'native', id: 'Task' }, status: 'succeeded' }] });
   await click('只重试未确认项'); expect(transport.metadata.mock.calls[1][0]).toEqual(first);
 });
 
 it('retains ambiguous navigation commands across same-Host rebind but fences old metadata after a Host change', async () => {
-  await render(); await click('新建组');
+  await render(); await click('新建分组');
   const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
   await act(async () => { input.value = 'Unknown group'; input.dispatchEvent(new Event('input', { bubbles: true })); });
   transport.command.mockRejectedValueOnce(new Error('Response lost')); await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -444,7 +506,7 @@ it('retains ambiguous navigation commands across same-Host rebind but fences old
 });
 
 it('settles an original in-flight navigation command after same-Host remount without duplicating acceptance', async () => {
-  await render(); await click('新建组');
+  await render(); await click('新建分组');
   const input = container.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')!;
   await act(async () => { input.value = 'Pending group'; input.dispatchEvent(new Event('input', { bubbles: true })); });
   let reject!: (error: Error) => void;
@@ -456,6 +518,6 @@ it('settles an original in-flight navigation command after same-Host remount wit
   await act(async () => reject(new Error('Original receipt unknown')));
   expect(useConversationOrganizationStore.getState().pending[originalCommand.key]).toBeUndefined();
   expect(useConversationOrganizationStore.getState().failed[originalCommand.key]).toEqual(originalCommand);
-  transport.command.mockResolvedValueOnce({}); await click('用原受理键核对');
+  transport.command.mockResolvedValueOnce({}); await click('检查结果');
   expect(transport.command.mock.calls[1][0]).toEqual(originalCommand);
 });

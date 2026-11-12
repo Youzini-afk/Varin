@@ -1,5 +1,6 @@
 import { ConversationOrigin } from './ConversationOrigin';
-import { ConversationOrganizationTree } from './ConversationOrganizationTree';
+import { ConversationOrganizationTree, type OrganizationNavigationHandle } from './ConversationOrganizationTree';
+import { OrganizationCreateMenu } from './OrganizationCreateMenu';
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
@@ -80,6 +81,7 @@ import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
 interface ConversationSessionSidebarProps {
+  compact?: boolean;
   isVisible?: boolean;
   mobileVariant?: boolean;
   /**
@@ -453,12 +455,15 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
 };
 
 export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
+  compact = false,
   isVisible = true,
   mobileVariant = false,
   onRequestClose,
 }) => {
   const { t } = useI18n();
   const apis = useRuntimeAPIs();
+  const organizationRef = React.useRef<OrganizationNavigationHandle>(null);
+  const [organizationFocus, setOrganizationFocus] = React.useState<string | null>(null);
   const { files } = apis;
   const { summaries, attentionBySession, activeSessions } = useSidebarCatalog();
   const allSummaries = summaries;
@@ -617,13 +622,14 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
 
   const handleCreate = React.useCallback(async (projectId: string | null) => {
     try {
+      if (projectId === null && apis.conversationOrganization && organizationRef.current) { organizationRef.current.newConversation(); return; }
       await startThreadFromNavigation({ directory: projects.find(project => project.id === projectId)?.path });
       if (mobileVariant) setSessionSwitcherOpen(false);
       onRequestClose?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, projects]);
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, projects, apis.conversationOrganization]);
 
   const toggleSelection = React.useCallback((session: SessionSummary) => {
     setSelectedSessionIds((current) => {
@@ -1194,8 +1200,9 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left typography-ui-label font-medium text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <Icon name="chat-new" className="size-4 shrink-0" />
-            <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
+            <span className="truncate">{organizationFocus ? t('organization.newIn', { name: organizationFocus }) : t('sessions.sidebar.header.actions.newSession')}</span>
           </button>
+          {apis.conversationOrganization && <OrganizationCreateMenu onCreate={botId => organizationRef.current?.newConversation(botId)} />}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1228,7 +1235,8 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-56 overflow-y-auto">
-              <DropdownMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
+              {apis.conversationOrganization && <DropdownMenuItem onClick={() => organizationRef.current?.newGroup()}><Icon name="folder-add" className="size-4" />{t('organization.newGroupMenu')}</DropdownMenuItem>}
+              <DropdownMenuItem onClick={() => apis.conversationOrganization ? organizationRef.current?.addProject() : workspaceEvents.requestDirectoryDialog()}>
                 <Icon name="folder-add" className="size-4" />
                 {t('sessions.sidebar.header.actions.addProject')}
               </DropdownMenuItem>
@@ -1274,7 +1282,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={toggleRecentSection}>
                 <Icon name={showRecentSection ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
-                {t('sessions.sidebar.header.displayMode.showRecent')}
+                {t(apis.conversationOrganization ? 'organization.showUncategorized' : 'sessions.sidebar.header.displayMode.showRecent')}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={toggleStickyZoneHeaders}>
                 <Icon name={stickyZoneHeaders ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
@@ -1293,7 +1301,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
           </DropdownMenu>
         </div>
 
-        <div className="shrink-0 px-2.5 pb-2">
+        {!compact && <div className="shrink-0 px-2.5 pb-2">
           <button
             type="button"
             onClick={handleOpenScheduledTasks}
@@ -1303,13 +1311,13 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             <Icon name="calendar-schedule" className="size-4 shrink-0" />
             <span className="truncate">{t('tasksHub.title')}</span>
           </button>
-        </div>
+        </div>}
 
         {searchOpen ? (
           <div className="shrink-0 px-2.5 pb-2 pt-0.5">
             <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
-              {query ? (
-                <span>{visibleCount === 1
+              {query && !apis.conversationOrganization ? (
+              <span>{visibleCount === 1
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: visibleCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: visibleCount })}</span>
               ) : <span />}
@@ -1346,7 +1354,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
           </div>
         ) : null}
 
-        {apis.conversationOrganization ? <ConversationOrganizationTree query={query} flat={sessionGroupingMode === 'flat'} sortOrder={projectSortOrder} showRoot={showRecentSection} stickyHeaders={stickyZoneHeaders} expansion={organizationExpansion} selectionMode={selectionMode} onExitSelection={exitSelectionMode} onNavigate={() => { if (mobileVariant) setSessionSwitcherOpen(false); onRequestClose?.(); }} /> : <>
+        {apis.conversationOrganization ? <ConversationOrganizationTree ref={organizationRef} viewKey={compact ? 'ide' : 'workbench'} query={query} onSearchReset={() => setQuery('')} onFocusChange={setOrganizationFocus} flat={sessionGroupingMode === 'flat'} sortOrder={projectSortOrder} showRoot={showRecentSection} stickyHeaders={stickyZoneHeaders} expansion={organizationExpansion} selectionMode={selectionMode} onExitSelection={exitSelectionMode} onNavigate={() => { if (mobileVariant) setSessionSwitcherOpen(false); onRequestClose?.(); }} /> : <>
         {/* Rows move, arrive and leave instead of jumping (sidebarMotion.tsx); a search replaces them at once. */}
         <FlipList containerRef={listRef} instantKey={query.trim()} layoutKey={listLayoutKey} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <div className="relative mb-1 flex min-h-8 items-center gap-1 rounded-md text-muted-foreground">
@@ -1523,11 +1531,12 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
       </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-48" finalFocus={() => !pendingMenuSearchRef.current}>
+        {apis.conversationOrganization && <ContextMenuItem onClick={() => organizationRef.current?.newGroup()}><Icon name="folder-add" className="size-4" />{t('organization.newGroupMenu')}</ContextMenuItem>}
         <ContextMenuItem onClick={() => void handleCreate(null)}>
           <Icon name="chat-new" className="size-4" />
           {t('sessions.sidebar.header.actions.newSession')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
+        <ContextMenuItem onClick={() => apis.conversationOrganization ? organizationRef.current?.addProject() : workspaceEvents.requestDirectoryDialog()}>
           <Icon name="folder-add" className="size-4" />
           {t('sessions.sidebar.header.actions.addProject')}
         </ContextMenuItem>
@@ -1545,11 +1554,11 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
           {t(selectionMode ? 'sessions.sidebar.header.actions.exitSelection' : 'sessions.sidebar.header.actions.selectSessions')}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={collapseAll} disabled={groups.length === 0 || Boolean(query.trim())}>
+        <ContextMenuItem onClick={collapseAll} disabled={!apis.conversationOrganization && groups.length === 0 || Boolean(query.trim())}>
           <Icon name="arrow-right-s" className="size-4" />
           {t('sessions.sidebar.header.displayMode.collapseAll')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={expandAll} disabled={groups.length === 0}>
+        <ContextMenuItem onClick={expandAll} disabled={!apis.conversationOrganization && groups.length === 0}>
           <Icon name="arrow-down-s" className="size-4" />
           {t('sessions.sidebar.header.displayMode.expandAll')}
         </ContextMenuItem>
