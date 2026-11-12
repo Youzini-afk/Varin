@@ -123,28 +123,28 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
     </React.Fragment>;
   };
 
-  return <nav className="flex h-full min-h-0 flex-col" aria-label={t('bot.sidebar.aria')}>
-    <div className="flex items-center gap-1 px-2.5 pb-2 pt-3">
-      {isMobile ? <div className="flex-1"><WorkbenchProfileSwitcher /></div> : null}
+  return <nav className="flex h-full min-h-0 min-w-0 flex-col" aria-label={t('bot.sidebar.aria')}>
+    <div className="bot-nav-toolbar">
+      {isMobile ? <div className="bot-nav-toolbar-profile"><WorkbenchProfileSwitcher /></div> : null}
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={cn(!isMobile && 'flex-1')}>
+          <span className="bot-nav-toolbar-new">
             <button type="button" disabled={!canStart || busy} onClick={() => { if (apis.conversationOrganization && conversationScope !== 'bots') organizationRef.current?.newConversation(selectedId ?? undefined); else onNewSession(); }}
-              className="flex h-[34px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[13.5px] text-foreground transition-colors hover:bg-interactive-hover disabled:opacity-50">
-              <Icon name="chat-new" className="size-4 shrink-0" /><span className="truncate">{selected && apis.conversationOrganization ? t('organization.newWithName', { name: selected.name }) : t('bot.session.new')}</span>
+              className="flex w-full items-center rounded-[9px] text-[13.5px] text-foreground transition-colors hover:bg-interactive-hover disabled:opacity-50">
+              <Icon name="chat-new" className="size-4 shrink-0" /><span className="min-w-0 text-left">{t('organization.newConversation')}</span>
             </button>
           </span>
         </TooltipTrigger>
         {!canStart && selected ? <TooltipContent side="bottom">{t('bot.session.newNeedsAwake', { name: selected.name })}</TooltipContent> : null}
       </Tooltip>
-      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" aria-label={t('bot.session.search')} aria-pressed={searching}
+      <Button variant="ghost" size="icon" className="bot-nav-toolbar-action text-muted-foreground" aria-label={t('bot.session.search')} aria-pressed={searching}
         onClick={() => { setSearching(value => !value); setQuery(''); }}>
         <Icon name="search" className="size-4" />
       </Button>
-      <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={busy} aria-label={t('tasksHub.refresh')} onClick={() => { onRefresh(); if (conversationScope !== 'bots') void refreshConversationOrganization(); }}>
+      <Button variant="ghost" size="icon" className="bot-nav-toolbar-action text-muted-foreground" disabled={busy} aria-label={t('tasksHub.refresh')} onClick={() => { onRefresh(); if (conversationScope !== 'bots') void refreshConversationOrganization(); }}>
         <Icon name="refresh" className="size-4" />
       </Button>
-      {conversationScope === 'bots' && <Button variant="ghost" size="icon" className="size-[34px] shrink-0 text-muted-foreground" disabled={!organization.ready || organization.pending} aria-label={t('bot.groups.create')} title={t('bot.groups.create')} onClick={() => setOrganizationDialog({ kind: 'create' })}>
+      {conversationScope === 'bots' && <Button variant="ghost" size="icon" className="bot-nav-toolbar-action text-muted-foreground" disabled={!organization.ready || organization.pending} aria-label={t('bot.groups.create')} title={t('bot.groups.create')} onClick={() => setOrganizationDialog({ kind: 'create' })}>
         <Icon name="folder-add" className="size-4" />
       </Button>}
     </div>

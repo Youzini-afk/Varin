@@ -154,6 +154,8 @@ when a person explicitly selects that action's scope.
 `ConversationOrganizationTree` is shared by the workbench, IDE picker, archive and Bot navigator.
 The workbench assembles the full sidebar, the IDE uses its compact picker, and the Bot navigator
 retains its assistant identity list with an explicit entry into shared conversations/work.
+The Bot navigator toolbar contracts button widths with the available space, then wraps
+controls when their minimum widths no longer fit; labels and icons retain their font and graphic sizes.
 `OrganizationRow` preserves the original avatar, attention, extension-decoration and highlight contracts.
 Recent reads use `kind: 'conversations', sort: 'recent'` so the Catalog orders across categories before
 pagination. Those pages never collect cached expanded category pages. Destination browsing uses

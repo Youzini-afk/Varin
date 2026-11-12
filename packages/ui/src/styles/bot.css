@@ -61,6 +61,16 @@
 .bot-mobile-title[data-open] .bot-mobile-title-caret { rotate: 180deg; }
 
 /* ── Sidebar (§3) ──────────────────────────────────────────────────────────────────────── */
+.bot-nav-toolbar {
+  display: flex; flex: none; flex-wrap: wrap; align-items: center;
+  gap: 4px; padding: 12px 10px 8px;
+}
+.bot-nav-toolbar-new, .bot-nav-toolbar-profile { flex: 1 1 max-content; min-width: 0; }
+.bot-nav-toolbar-new > button {
+  min-height: 34px; gap: 8px; padding-inline: 10px;
+}
+/* Keep 16px icons and vertical hit areas; horizontal padding contracts before wrapping. */
+.bot-nav-toolbar-action { flex: 1 0 28px; min-width: 28px; max-width: 34px; height: 34px; }
 .bot-nav-list { position: relative; }
 .bot-nav-row {
   position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
