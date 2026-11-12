@@ -101,6 +101,8 @@ const timelineScroller = (list: LegendListRef | null): HTMLElement | null => {
   return node && typeof node.scrollTop === 'number' ? node : null;
 };
 
+const NO_EXTENSION_PRESENTATION: ReadonlyMap<string, () => React.ReactNode> = new Map();
+
 const maxScrollTop = (node: HTMLElement): number => Math.max(0, node.scrollHeight - node.clientHeight);
 
 export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
@@ -155,6 +157,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const preview = React.useContext(ConversationPreviewContext);
   const messageRenderers = useWorkbenchMatchRenderers<{ cwd: string; entry: ChatSessionEntry; sessionId: string }>('message-renderer', VARIN_CONVERSATION_SLOTS.messages, !preview);
   const extensionPresentation = React.useMemo(() => {
+    if (preview || !messageRenderers.length) return NO_EXTENSION_PRESENTATION;
     const rendered = new Map<string, () => React.ReactNode>();
     if (!preview && messageRenderers.length) for (const entry of projection.visibleEntries) {
       const input = { cwd: props.cwd, entry, sessionId: props.sessionId };

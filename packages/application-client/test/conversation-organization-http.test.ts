@@ -79,3 +79,29 @@ it('does not silently interpret a legacy response as a requested mixed page', as
   try { await assert.rejects(createConversationOrganizationHttpAPI().read({ pageNodes: true }), { code: 'invalid_response' }); }
   finally { globalThis.fetch = original; }
 });
+
+it('shares the Thread observation connection and forwards scoped organization changes and resync', async () => {
+  const { createThreadsHttpAPI } = await import('../src/threads-http.js');
+  const { getThreadObservationBus } = await import('../src/thread-observation.js');
+  const threads = createThreadsHttpAPI(), original = threads.observe;
+  let listener!: Parameters<typeof threads.observe>[1]; let connections = 0;
+  threads.observe = (_cursor, receive, options) => new Promise<void>(resolve => {
+    connections++; listener = receive;
+    options?.onReady?.();
+    options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+  });
+  const controller = new AbortController();
+  const seen: import('../src/conversation-organization.js').ConversationOrganizationEvent[] = [];
+  const stop = getThreadObservationBus(threads).subscribe({ kinds: ['thread.updated'] }, () => {});
+  const observing = createConversationOrganizationHttpAPI().observe(0, event => seen.push(event), { signal: controller.signal });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(connections, 1);
+    assert.equal(seen[0] && 'stream' in seen[0] && seen[0].stream, 'resync');
+    seen.length = 0;
+    listener({ cursor: 1, subject: 'op', revision: 1, kind: 'operation.changed', data: {}, thread_id: 'a', branch_id: 'main' });
+    assert.equal(seen.length, 0);
+    listener({ cursor: 2, subject: 'navigation', revision: 2, kind: 'organization.changed', data: {}, thread_id: null, branch_id: null });
+    assert.equal(seen.length, 1);
+  } finally { controller.abort(); await observing; stop(); threads.observe = original; }
+});

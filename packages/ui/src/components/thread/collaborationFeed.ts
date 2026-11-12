@@ -1,4 +1,4 @@
-import type { ThreadIdentity, ThreadsAPI, ThreadQueuedExchange } from "@varin/application-client";
+import { getThreadObservationBus, type ThreadIdentity, type ThreadsAPI, type ThreadQueuedExchange } from "@varin/application-client";
 import type {
   FamilyMember,
   MessageFeedEntry,
@@ -67,7 +67,7 @@ export class CollaborationFeed {
   private latest = 0;
   private changingMessages = new Set<string>();
   private memberRequest?: Promise<void>;
-  private observation?: Promise<void>;
+  private stopObserving?: () => void;
   constructor(
     private api: ThreadsAPI,
     private identity: ThreadIdentity,
@@ -155,52 +155,34 @@ export class CollaborationFeed {
     });
   }
   async start() {
-    void this.observe();
+    void this.subscribeEvents();
     await this.refresh();
   }
   close() {
+    this.stopObserving?.(); this.stopObserving = undefined;
     this.controller.abort();
   }
-  private async observe() {
-    if (this.observation) return this.observation;
-    this.observation = (async () => {
-      while (!this.controller.signal.aborted) {
-        try {
-          await this.api.observe(
-            this.eventCursor,
-            (event) => {
-              if (this.controller.signal.aborted || "stream" in event) return;
-              this.eventCursor = Math.max(this.eventCursor ?? 0, event.cursor);
-              this.onEvent(event);
-            },
-            { signal: this.controller.signal },
-          );
-        } catch (error) {
-          if (!this.controller.signal.aborted)
-            this.publish({ error: failureText(error) });
-        }
-        if (this.controller.signal.aborted) return;
-        // Match the native conversation reader's reconnect cadence; no model polling.
-        await new Promise<void>((resolve) => {
-          const done = () => {
-            clearTimeout(timer);
-            this.controller.signal.removeEventListener("abort", done);
-            resolve();
-          };
-          const timer = setTimeout(done, 1_000);
-          this.controller.signal.addEventListener("abort", done, {
-            once: true,
-          });
-        });
-        if (!this.controller.signal.aborted) {
-          this.directoryDirty = true;
+  private subscribeEvents() {
+    if (this.stopObserving || this.controller.signal.aborted) return;
+    this.stopObserving = getThreadObservationBus(this.api).subscribe({kinds: [
+      'message.*', 'input.*', 'thread.created', 'thread.updated', 'thread.deleted',
+      'child.*', 'run.*', 'host_job.*', 'operation.code_exchange*', 'operation.terminal', 'operation.cancel*', 'execution.committed', 'delivery.*',
+    ]}, event => {
+      if (this.controller.signal.aborted) return;
+      if ('stream' in event) {
+        if (event.stream === 'resync') {
+          this.directoryDirty = true; this.feedDirty = true;
+          for (const id of this.messages.keys()) this.changingMessages.add(id);
           void this.refresh();
         }
+        return;
       }
-    })().finally(() => {
-      this.observation = undefined;
+      const related = (thread: unknown) => typeof thread === 'string' && (thread === this.identity.threadId || thread === this.value.rootThreadId || this.members.has(thread));
+      const message = event.kind.startsWith('message.') ? event.data as {senderThreadId?: string; targetThreadId?: string} : undefined;
+      if (!related(event.thread_id) && !related(message?.senderThreadId) && !related(message?.targetThreadId)) return;
+      this.eventCursor = Math.max(this.eventCursor ?? 0, event.cursor);
+      this.onEvent(event);
     });
-    return this.observation;
   }
   private onEvent(event: RuntimeEvent) {
     if (
@@ -299,7 +281,7 @@ export class CollaborationFeed {
     }
   };
   retry = () => {
-    void this.observe();
+    void this.subscribeEvents();
     this.directoryDirty = true;
     return this.refresh();
   };

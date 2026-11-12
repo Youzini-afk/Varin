@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getThreadObservationBus } from '@varin/application-client';
 import type { FileRecoveryOperation, FileRecoveryPath, FileRecoveryPoint, FileRecoveryRequest, FileRecoveryResult, FileRecoverySource, RecoveryConversation } from '@varin/extension-contract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -101,15 +101,14 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
   React.useEffect(() => {
     const threads = getRegisteredRuntimeAPIs()?.threads;
     if (!threads) return;
-    const abort = new AbortController();
     const ended = new Set<string>();
-    void threads.observe(null, event => {
-      if ('stream' in event || event.kind !== 'run.changed' || !current()) return;
+    return getThreadObservationBus(threads).subscribe({threadId: conversation.threadId, kinds: ['run.changed']}, event => {
+      if (!current()) return;
+      if ('stream' in event) { if (event.stream === 'resync') { ended.clear(); void load(); onChanged(); } return; }
       const run = event.data as { thread_id?: string; state?: string };
-      if (run.thread_id !== conversation.threadId || !['completed', 'cancelled', 'failed'].includes(run.state ?? '') || ended.has(event.subject)) return;
+      if (!['completed', 'cancelled', 'failed'].includes(run.state ?? '') || ended.has(event.subject)) return;
       ended.add(event.subject); void load(); onChanged();
-    }, { signal: abort.signal }).catch(() => {});
-    return () => abort.abort();
+    });
   }, [conversation.threadId, current, load, onChanged]);
   const inspect = async (point: FileRecoveryPoint, reference = point.before) => {
     if (inFlight.current) return;

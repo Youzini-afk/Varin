@@ -62,7 +62,7 @@ fn nested_body_credit_retains_the_original_pending_cancellation_and_terminal_own
             .values()
             .filter(|request| request.wire_lane.is_some())
             .count(),
-        KERNEL_REQUEST_WINDOW
+        2
     );
     release_request_credit(
         &active,

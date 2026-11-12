@@ -1,3 +1,4 @@
+import { assertRequestAccess } from './request-principal.js';
 import type { Express, RequestHandler } from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -9,6 +10,7 @@ export function registerThreadExportRoutes(app: Express, owners: ThreadExportOwn
     res.once('close', close);
     const stream = exportThreadConversation(owners, req.body, abort.signal);
     try {
+      if (typeof req.body?.threadId === 'string') await assertRequestAccess({ threads: [req.body.threadId] }, 'read');
       // Validate the full selected range before publishing a downloadable response.
       const first = await stream.next();
       if (abort.signal.aborted) return;
@@ -17,7 +19,7 @@ export function registerThreadExportRoutes(app: Express, owners: ThreadExportOwn
       res.setHeader('Cache-Control', 'no-store');
       await pipeline(Readable.from((async function* () { if (!first.done) yield first.value; yield* stream; })()), res, { signal: abort.signal });
     } catch (error) {
-      if (!res.headersSent && !res.destroyed) res.status(400).json({ error: error instanceof Error ? error.message : 'Conversation export failed' });
+      if (!res.headersSent && !res.destroyed) res.status(error && typeof error === 'object' && 'code' in error && error.code === 'forbidden' ? 403 : 400).json({ error: error instanceof Error ? error.message : 'Conversation export failed' });
       else if (!res.destroyed) res.destroy(error instanceof Error ? error : undefined);
     } finally { res.off('close', close); await stream.return(undefined); }
   });

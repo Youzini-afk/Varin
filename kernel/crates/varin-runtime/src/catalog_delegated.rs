@@ -285,6 +285,7 @@ pub(super) fn insert_initial(db: &Connection, child: &ChildTask, model_selection
             encode(&relation)?
         ],
     )?;
+    db.execute("UPDATE threads SET hidden_kind='code_retrieval' WHERE id=?1 AND EXISTS(SELECT 1 FROM operations WHERE id=?2 AND json_extract(body,'$.executor')='code_retrieval')", params![child.child_thread_id,child.operation_id])?;
     let execution = DelegatedExecution {
         name: child.name.clone(),
         execution_id: child.execution_id.clone(),

@@ -2,6 +2,7 @@ import { useI18n } from "@/lib/i18n";
 import React from "react";
 import {
   getRuntimeEndpointGeneration,
+  getThreadObservationBus,
   subscribeRuntimeEndpointChanged,
 } from "@varin/application-client";
 import type { ThreadUsage } from "@varin/protocol";
@@ -50,6 +51,7 @@ export function ThreadTokenUsage({
     }
     let alive = true;
     let dirty = false;
+    let observationUnavailable = false;
     let loading: Promise<void> | undefined;
     const controller = new AbortController();
     const current = () =>
@@ -66,7 +68,7 @@ export function ThreadTokenUsage({
             data.branchId !== identity.branchId
           )
             throw new Error(t("chat.usage.identityMismatch"));
-          if (current()) setView({ owner, data });
+          if (current()) setView({ owner, data, ...(observationUnavailable ? {error: t("chat.usage.disconnected")} : {}) });
         }
       })().finally(() => {
         loading = undefined;
@@ -83,27 +85,18 @@ export function ThreadTokenUsage({
               : t("chat.usage.unavailable"),
         }));
     };
-    void (async () => {
-      const first = await api.usage(identity, controller.signal);
+    const unsubscribe = getThreadObservationBus(api).subscribe({
+      threadId: identity.threadId, branchId: identity.branchId,
+      kinds: ['usage.updated', 'model.*', 'inference.*', 'run.*'],
+    }, event => {
       if (!current()) return;
-      if (
-        first.threadId !== identity.threadId ||
-        first.branchId !== identity.branchId
-      )
-        throw new Error(t("chat.usage.identityMismatch"));
-      setView({ owner, data: first });
-      await api.observe(
-        first.throughCursor,
-        (event) => {
-          if (current() && "cursor" in event && "kind" in event)
-            void read().catch(fail);
-        },
-        { signal: controller.signal },
-      );
-      if (current()) fail(new Error(t("chat.usage.disconnected")));
-    })().catch(fail);
+      if ('stream' in event && event.stream === 'resync') { observationUnavailable = event.reason === 'connection-lost'; if (observationUnavailable) fail(new Error(t('chat.usage.disconnected'))); }
+      void read().catch(fail);
+    });
+    void read().catch(fail);
     return () => {
       alive = false;
+      unsubscribe();
       controller.abort();
     };
   }, [active, api, owner, generation, identity, refresh, t]);

@@ -67,7 +67,7 @@ it('refreshes a Run ending while its usage read is pending, without accepting an
   const first = deferred<ThreadRunUsage[]>();
   const api = { ...navigationAPI, historyPage: vi.fn(), historyUsage: vi.fn().mockImplementationOnce(() => first.promise).mockResolvedValue([{ runId: 'run', throughId: '5', requests: [] }]) };
   const view = new ThreadHistoryWindow(api, identity), close = view.subscribe(() => {});
-  view.accept(snapshot(4, 5)); view.accept(snapshot(4, 5, 100));
+  view.accept({ ...snapshot(4, 5), activeRun: { id: 'run', state: 'generating' } } as ThreadSnapshot); view.accept({ ...snapshot(4, 5, 100), activeRun: null } as ThreadSnapshot);
   first.resolve([]); await tick(); await tick(); await tick();
   expect(api.historyUsage).toHaveBeenCalledTimes(2);
   expect(view.getSnapshot().usage[0]?.throughId).toBe('5'); close();
@@ -91,4 +91,20 @@ it('keeps the complete Run index independent of loaded bodies and loads an unloa
   view.accept(next);
   expect(view.getSnapshot().runs.map(run => run.runId)).toEqual(['run', 'next']);
   close();
+});
+
+it.each(['inference.settled', 'model.settled', 'model.interrupted'])('does not reread usage for unrelated cursors but refreshes a late scoped %s receipt', async kind => {
+  let emit!: Parameters<import('@varin/application-client').ThreadsAPI['observe']>[1];
+  const api = { ...navigationAPI, historyPage: vi.fn(), historyUsage: vi.fn(async () => []),
+    observe: async (_cursor: number | null, listener: typeof emit, { signal }: { signal: AbortSignal }) => {
+      emit = listener; await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+    } };
+  const view = new ThreadHistoryWindow(api, identity), stop = view.subscribe(() => {});
+  view.accept(snapshot(4, 5)); await tick();
+  for (let cursor = 6; cursor < 106; cursor++) view.accept(snapshot(4, 5, cursor));
+  expect(api.historyUsage).toHaveBeenCalledTimes(1);
+  emit({ cursor: 106, thread_id: 'other', branch_id: 'other', subject: 'inference', revision: 1, kind, data: kind.startsWith('inference.') ? { runId: 'run' } : { state: 'completed' } }); await tick();
+  expect(api.historyUsage).toHaveBeenCalledTimes(1);
+  emit({ cursor: 107, thread_id: identity.threadId, branch_id: identity.branchId, subject: 'inference', revision: 2, kind, data: kind.startsWith('inference.') ? { runId: 'run' } : { state: 'completed' } }); await tick();
+  expect(api.historyUsage).toHaveBeenCalledTimes(2); stop();
 });

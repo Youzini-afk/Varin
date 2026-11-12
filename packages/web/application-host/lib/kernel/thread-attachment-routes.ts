@@ -1,3 +1,4 @@
+import { assertRequestAccess } from './request-principal.js';
 import type { Express, RequestHandler } from 'express';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -23,6 +24,7 @@ export function registerThreadAttachmentRoutes(app: Express, owner: ThreadAttach
       try {
         const query = request.query as Record<string, unknown>;
         const selected = identity(query);
+        await assertRequestAccess({ threads: [selected.threadId] }, method === 'upload' ? 'write' : 'read');
         if (method === 'upload') {
           if (request.headers['content-type']?.split(';')[0] !== 'application/octet-stream') throw new HarnessServiceError('invalid-params', 'Send original attachment bytes as an octet stream');
           const byteLength = Number(string(query.byteLength));
@@ -37,7 +39,7 @@ export function registerThreadAttachmentRoutes(app: Express, owner: ThreadAttach
       } catch (error) {
         if (response.destroyed || controller.signal.aborted) return;
         if (response.headersSent) { response.destroy(); return; }
-        const code = error instanceof HarnessServiceError ? error.harnessCode : 'attachment-unavailable';
+        const code = error instanceof HarnessServiceError ? error.harnessCode : error && typeof error === 'object' && 'code' in error && error.code === 'forbidden' ? 'forbidden' : 'attachment-unavailable';
         response.status(code === 'forbidden' ? 403 : code === 'not-found' ? 404 : code === 'conflict' ? 409 : code === 'invalid-params' ? 400 : 503)
           .json({ code, error: error instanceof HarnessServiceError ? error.message : 'The original attachment owner is unavailable' });
       } finally { response.off('close', close); }

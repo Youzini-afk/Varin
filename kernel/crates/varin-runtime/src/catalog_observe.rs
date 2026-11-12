@@ -92,7 +92,7 @@ impl Catalog {
             let state = if kind == "run.accepted" { json!("accepted") }
                 else if kind == "run.changed" { original.get("state").cloned().unwrap_or(Value::Null) }
                 else { Value::Null };
-            Ok(Event { cursor, subject, revision, kind, data: json!({"state":state}) })
+            Ok(Event { thread_id: Some(thread_id.into()), branch_id: None, cursor, subject, revision, kind, data: json!({"state":state}) })
         }).collect()
     }
 

@@ -6,7 +6,7 @@ import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView, MessageFeedParams, MessageFeedPage } from '@varin/protocol';
 import type { FamilyList, FamilyListParams, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
-import type { PlanSnapshot, PlanMutationResult, ChildReportPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
+import type { PlanSnapshot, PlanMutationResult, ChildReportPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
 import type { HostJobSource, FollowupOccurrenceView, FollowupOccurrencesResult, FollowupPendingRegistration, FollowupRegistrationCancelResult, FollowupControlAction } from '@varin/protocol';
@@ -480,7 +480,7 @@ export interface ThreadSnapshot {
   /** Original Catalog terminal failure for the displayed Run; never inferred from missing output. */
   runFailure?: import('@varin/protocol').RunFailure | null;
   history: ThreadHistoryItem[];
-  historyPage: Pick<ThreadHistoryPage, 'head' | 'previous'>;
+  historyPage: Pick<ThreadHistoryPage, 'head' | 'previous'> & { afterHeadId?: string };
   inputs: QueuedInput[];
   operations: Operation[];
   followups: Followup[];
@@ -651,7 +651,10 @@ export interface ThreadsAPI {
   /** Secondary read; history bodies never wait for a whole Run's usage scan. */
   historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadRunUsage[]>;
   fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal): Promise<ThreadFileTarget>;
-  snapshot(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadSnapshot>;
+  inspectMany(threadIds: readonly string[], signal?: AbortSignal): Promise<ThreadSummary[]>;
+  /** Update the live SSE subscription without dropping in-flight provider deltas. Null selects all authorized progress. */
+  updateObservationInterests?(input: { observationId: string; threadIds: readonly string[] | null }, signal?: AbortSignal): Promise<void>;
+  snapshot(identity: ThreadIdentity, signal?: AbortSignal, options?: { afterHeadId?: string }): Promise<ThreadSnapshot>;
   contextInspection(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal): Promise<ThreadContextInspection>;
   /** Original execution usage on this branch, excluding child Threads and standalone utility work. */
   usage(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/protocol').ThreadUsage>;
@@ -683,7 +686,7 @@ export interface ThreadsAPI {
   events(cursor: number): Promise<RuntimeEvent[]>;
   /** Reconnect from the last durable cursor; progress is presentation-only. */
   /** null subscribes from now; used alongside an initial snapshot to capture live deltas during its reads. */
-  observe(cursor: number | null, listener: (event: RuntimeEvent | AgentRuntimeStreamEvent) => void, options: { signal: AbortSignal }): Promise<void>;
+  observe(cursor: number | null, listener: (event: import('./thread-observation.js').ThreadObservationEvent) => void, options: { signal: AbortSignal; threadIds?: readonly string[]; observationId?: string; onReady?: () => void }): Promise<void>;
 }
 
 /** Safe projection of source-owned failures; arbitrary upstream messages are never displayed. */

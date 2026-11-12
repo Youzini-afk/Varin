@@ -520,7 +520,7 @@ export const createUiAuth = ({
 }: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
   let jwtSecret = getOrCreateJwtSecret();
-  const sessionPrincipal = async (token: string | null): Promise<string | null> => {
+  const verifySessionPrincipal = async (token: string | null): Promise<string | null> => {
     if (!token) return null;
     try {
       const { payload } = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] });
@@ -529,6 +529,14 @@ export const createUiAuth = ({
       const id = payload.sub ?? (normalizedPassword ? await principals.ownerId() : null);
       return id ? principals.resolve(id) : null;
     } catch { return null; }
+  };
+  let requestSessions = new WeakMap<UiAuthRequest, Map<string | null, Promise<string | null>>>();
+  const sessionPrincipal = (token: string | null, req: UiAuthRequest): Promise<string | null> => {
+    let sessions = requestSessions.get(req);
+    if (!sessions) { sessions = new Map(); requestSessions.set(req, sessions); }
+    let result = sessions.get(token);
+    if (!result) { result = verifySessionPrincipal(token); sessions.set(token, result); }
+    return result;
   };
   const signSubject = async (principalId: string, ttlMs: number) => new SignJWT({ type: 'ui-session' })
     .setProtectedHeader({ alg: 'HS256' }).setSubject(principalId).setIssuedAt()
@@ -562,6 +570,21 @@ export const createUiAuth = ({
     return { token, expiresAt };
   };
 
+  let requestBearers = new WeakMap<UiAuthRequest, Map<string, Promise<ClientAuthResult | null>>>();
+  const authenticateBearerForRequest = (req: UiAuthRequest, token: string): Promise<ClientAuthResult | null> => {
+    let entries = requestBearers.get(req);
+    if (!entries) { entries = new Map(); requestBearers.set(req, entries); }
+    let result = entries.get(token);
+    if (!result) {
+      result = (async () => {
+        try { const value = await clientAuthController?.authenticateBearerToken?.(token, req); return value?.ok ? value : null; }
+        catch { return null; }
+      })();
+      entries.set(token, result);
+    }
+    return result;
+  };
+
   const authenticateUrlAuthToken = async (req: UiAuthRequest): Promise<ClientAuthResult | null> => {
     if (!canUseUrlAuthTokenForRequest(req)) return null;
     const token = getUrlAuthTokenFromRequest(req);
@@ -574,17 +597,14 @@ export const createUiAuth = ({
     if (entry.bearerToken) {
       // A URL grant cannot outlive revocation or acquire broader capabilities
       // than its original client. The bearer stays only in this short-lived map.
-      try {
-        const result = await clientAuthController?.authenticateBearerToken?.(entry.bearerToken, req);
-        return result?.ok ? result : null;
-      } catch { return null; }
+      return authenticateBearerForRequest(req, entry.bearerToken);
     }
-    const principalId = await sessionPrincipal(entry.sessionToken);
+    const principalId = await sessionPrincipal(entry.sessionToken, req);
     if (normalizedPassword && !principalId) return null;
     return { ok: true, session: true, sessionToken: entry.sessionToken, ...(principalId ? { principalId } : {}) };
   };
 
-  const authenticateClientRequest = async (
+  const authenticateClientRequestUncached = async (
     req: UiAuthRequest,
     { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
   ): Promise<ClientAuthResult | null> => {
@@ -596,15 +616,16 @@ export const createUiAuth = ({
     if (!token || typeof clientAuthController?.authenticateBearerToken !== 'function') {
       return null;
     }
-    try {
-      const result = await clientAuthController.authenticateBearerToken(token, req);
-      if (result?.ok) {
-        return result;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return authenticateBearerForRequest(req, token);
+  };
+
+  let requestClients = new WeakMap<UiAuthRequest, Map<boolean, Promise<ClientAuthResult | null>>>();
+  const authenticateClientRequest = (req: UiAuthRequest, { allowUrlToken = true }: { allowUrlToken?: boolean } = {}) => {
+    let clients = requestClients.get(req);
+    if (!clients) { clients = new Map(); requestClients.set(req, clients); }
+    let result = clients.get(allowUrlToken);
+    if (!result) { result = authenticateClientRequestUncached(req, { allowUrlToken }); clients.set(allowUrlToken, result); }
+    return result;
   };
 
   const clientSessionToken = (clientAuth: ClientAuthResult): string => {
@@ -629,10 +650,34 @@ export const createUiAuth = ({
     principalId: clientAuth.principalId ?? clientAuth.client?.principalId,
   });
 
+  type RequestAuthContext = ReturnType<typeof clientAuthContext> | null;
+  let requestAuth = new WeakMap<UiAuthRequest, Map<string, Promise<RequestAuthContext>>>();
+  const resolveRequestAuth = (req: UiAuthRequest,
+    { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
+  ): Promise<RequestAuthContext> => {
+    let entries = requestAuth.get(req);
+    if (!entries) { entries = new Map(); requestAuth.set(req, entries); }
+    const key = `${allowClientAuth}:${allowUrlToken}`;
+    let result = entries.get(key);
+    if (!result) {
+      result = (async () => {
+        const token = parseCookies(req.headers.cookie)[cookieName] ?? null;
+        const principalId = normalizedPassword || !requireClientAuth ? await sessionPrincipal(token, req) : null;
+        if (principalId) return { type: 'session', token: token!, principalId };
+        if (allowClientAuth) {
+          const client = await authenticateClientRequest(req, { allowUrlToken });
+          if (client) return clientAuthContext(client);
+        }
+        if (!normalizedPassword && !requireClientAuth && token) return { type: 'session', token, principalId: undefined };
+        return null;
+      })();
+      entries.set(key, result);
+    }
+    return result;
+  };
+
   const requirePrincipalAccess = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction): Promise<unknown> => {
-    const cookieToken = parseCookies(req.headers.cookie)[cookieName] ?? null;
-    const client = await authenticateClientRequest(req);
-    const subject = await sessionPrincipal(cookieToken) ?? client?.principalId ?? client?.client?.principalId;
+    const subject = (await resolveRequestAuth(req))?.principalId;
     if (typeof subject !== 'string' || await principals.isOwner(subject)) return next();
     const pathname = getRequestPathname(req);
     const privateResourceRoute = /^\/api\/threads\/(?:source|resources|research|computer|process|recovery)(?:\/|$)/.test(pathname);
@@ -641,6 +686,7 @@ export const createUiAuth = ({
     const conversationOrganization = req.method === 'POST'
       && /^\/api\/conversation-organization\/(?:read|entry|command|metadata|project)$/.test(pathname);
     const scoped = !privateResourceRoute && (pathname === '/api/varin/observations/ws' || pathname === '/api/threads' || pathname.startsWith('/api/threads/') || pathname.startsWith('/auth/')
+      || pathname.startsWith('/api/interactive-ui/')
       || conversationOrganization
       || /^\/api\/client-auth\/(?:clients|pairing\/(?:sessions|transports)|connection\/candidates)(?:\/|$)/.test(pathname)
       || /^\/api\/varin\/extensions\/v1\/(?:catalog|contracts\/query|host-state(?:\/wait)?|services\/(?:invoke|lease)|assets\/read|entrypoints\/read)$/.test(pathname));
@@ -707,33 +753,17 @@ export const createUiAuth = ({
     const resolveAuthContext = async (
       req: UiAuthRequest,
       res: UiAuthResponse | null,
-      { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
+      options: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
     ) => {
-      const cookies = parseCookies(req.headers.cookie);
-      if (!requireClientAuth && cookies[cookieName]) {
-        return { type: 'session', token: cookies[cookieName], principalId: await sessionPrincipal(cookies[cookieName]) ?? undefined };
-      }
-      if (allowClientAuth) {
-        const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
-        if (clientAuth) return clientAuthContext(clientAuth);
-      }
-      if (!requireClientAuth) {
-        if (!res) return null;
-        const token = await ensureSessionToken(req, res);
-        return { type: 'session', token, principalId: await sessionPrincipal(token) ?? undefined };
-      }
-      return null;
+      const context = await resolveRequestAuth(req, options);
+      if (context || requireClientAuth || !res) return context;
+      const token = await ensureSessionToken(req, res);
+      return { type: 'session', token, principalId: undefined };
     };
 
     const resolveWebSocketAuthContext = async (req: UiAuthRequest) => {
-      if (!requireClientAuth) {
-        const cookies = parseCookies(req.headers?.cookie);
-        if (cookies[cookieName]) {
-          return filterWebSocketPrincipal(req, { type: 'session', token: cookies[cookieName], principalId: await sessionPrincipal(cookies[cookieName]) ?? undefined });
-        }
-      }
-      const clientAuth = await authenticateClientRequest(req);
-      if (clientAuth) return filterWebSocketPrincipal(req, clientAuthContext(clientAuth));
+      const context = await resolveRequestAuth(req);
+      if (context) return filterWebSocketPrincipal(req, context);
       return requireClientAuth ? null : { type: 'anonymous', token: 'anonymous' };
     };
 
@@ -743,6 +773,7 @@ export const createUiAuth = ({
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
+      resolveRequestAuth,
       resolveWebSocketAuthContext,
       handleSessionStatus: async (req: UiAuthRequest, res: UiAuthResponse) => {
         if (requireClientAuth) {
@@ -833,6 +864,10 @@ export const createUiAuth = ({
   const rotateJwtSecret = (): void => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
+    requestSessions = new WeakMap();
+    requestClients = new WeakMap();
+    requestBearers = new WeakMap();
+    requestAuth = new WeakMap();
     clearUrlAuthTokens();
     rebuildPasskeyController();
   };
@@ -884,7 +919,7 @@ export const createUiAuth = ({
     }
   };
 
-  const isSessionValid = async (token: string | null): Promise<boolean> => Boolean(await sessionPrincipal(token));
+  const isSessionValid = async (token: string | null, req: UiAuthRequest): Promise<boolean> => Boolean(await sessionPrincipal(token, req));
 
   const issueSession = async (
     req: UiAuthRequest,
@@ -912,17 +947,7 @@ export const createUiAuth = ({
   };
 
   const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
-    if (req.method === 'OPTIONS') {
-      return requirePrincipalAccess(req, res, next);
-    }
-    const token = getTokenFromRequest(req);
-    if (await isSessionValid(token)) {
-      return requirePrincipalAccess(req, res, next);
-    }
-    const clientAuth = await authenticateClientRequest(req);
-    if (clientAuth) {
-      return requirePrincipalAccess(req, res, next);
-    }
+    if (req.method === 'OPTIONS' || await resolveRequestAuth(req)) return requirePrincipalAccess(req, res, next);
     clearSessionCookie(req, res);
     return respondUnauthorized(req, res);
   };
@@ -932,7 +957,7 @@ export const createUiAuth = ({
       return next();
     }
     const token = getTokenFromRequest(req);
-    if (await isSessionValid(token)) {
+    if (await isSessionValid(token, req)) {
       return next();
     }
     clearSessionCookie(req, res);
@@ -940,48 +965,20 @@ export const createUiAuth = ({
   };
 
   const handleSessionStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
-    const token = getTokenFromRequest(req);
-    if (await isSessionValid(token)) {
-      res.json({ authenticated: true, hostOwner: await principals.isOwner((await sessionPrincipal(token))!) });
-      return;
-    }
-    const clientAuth = await authenticateClientRequest(req);
-    if (clientAuth) {
-      const id = clientAuth.principalId ?? clientAuth.client?.principalId;
-      res.json({ authenticated: true, scope: 'client', hostOwner: typeof id === 'string' && await principals.isOwner(id) });
+    const context = await resolveRequestAuth(req);
+    if (context) {
+      res.json({ authenticated: true, ...(context.type === 'client' ? { scope: 'client' } : {}),
+        hostOwner: typeof context.principalId === 'string' && await principals.isOwner(context.principalId) });
       return;
     }
     clearSessionCookie(req, res);
     res.status(401).json({ authenticated: false, locked: true });
   };
-
-  const resolveAuthenticatedSessionToken = async (
-    req: UiAuthRequest,
-    { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
-  ): Promise<string | null> => {
-    const token = getTokenFromRequest(req);
-    if (await isSessionValid(token)) {
-      return token;
-    }
-    const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
-    return clientAuth ? clientSessionToken(clientAuth) : null;
-  };
-
-  const resolveAuthContext = async (
-    req: UiAuthRequest,
-    _res: UiAuthResponse | null,
-    { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
-  ) => {
-    const token = getTokenFromRequest(req);
-    if (await isSessionValid(token)) {
-      return { type: 'session', token, principalId: await sessionPrincipal(token) ?? undefined };
-    }
-    if (!allowClientAuth) return null;
-    const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
-    return clientAuth ? clientAuthContext(clientAuth) : null;
-  };
-
-  const resolveWebSocketAuthContext = async (req: UiAuthRequest) => filterWebSocketPrincipal(req, await resolveAuthContext(req, null));
+  const resolveAuthenticatedSessionToken = async (req: UiAuthRequest,
+    options: { allowUrlToken?: boolean } = {}): Promise<string | null> => (await resolveRequestAuth(req, options))?.token ?? null;
+  const resolveAuthContext = (req: UiAuthRequest, _res: UiAuthResponse | null,
+    options: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {}) => resolveRequestAuth(req, options);
+  const resolveWebSocketAuthContext = async (req: UiAuthRequest) => filterWebSocketPrincipal(req, await resolveRequestAuth(req));
 
   const handleUrlAuthToken = async (req: UiAuthRequest, res: UiAuthResponse) => {
     const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
@@ -991,7 +988,7 @@ export const createUiAuth = ({
     }
     // Preserve whether the grant came from a UI session or a bearer client.
     const cookieToken = getTokenFromRequest(req);
-    const bearerToken = await isSessionValid(cookieToken) ? undefined : getBearerTokenFromRequest(req) || undefined;
+    const bearerToken = await isSessionValid(cookieToken, req) ? undefined : getBearerTokenFromRequest(req) || undefined;
     res.setHeader('Cache-Control', 'no-store');
     return res.json(issueUrlAuthTokenForSession(sessionToken, bearerToken));
   };
@@ -1067,7 +1064,7 @@ export const createUiAuth = ({
   const handlePasskeyRegistrationOptions = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const label = typeof req.body?.label === 'string' ? req.body.label : '';
-      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      const principalId = await sessionPrincipal(getTokenFromRequest(req), req);
       if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
       const options = await passkeyController.beginRegistration(req, { label, principalId });
       res.json(options);
@@ -1128,7 +1125,7 @@ export const createUiAuth = ({
 
   const handlePasskeyList = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      const principalId = await sessionPrincipal(getTokenFromRequest(req), req);
       if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
       res.json({ passkeys: await passkeyController.listPasskeys(req, principalId) });
     } catch (error) {
@@ -1138,7 +1135,7 @@ export const createUiAuth = ({
 
   const handlePasskeyRevoke = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      const principalId = await sessionPrincipal(getTokenFromRequest(req), req);
       if (!principalId) throw Object.assign(new Error('Authenticated user required'), { statusCode: 401 });
       const result = await passkeyController.revokePasskey(req, req.params?.id, principalId);
       res.json(result);
@@ -1149,7 +1146,7 @@ export const createUiAuth = ({
 
   const handleResetAuth = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
-      const principalId = await sessionPrincipal(getTokenFromRequest(req));
+      const principalId = await sessionPrincipal(getTokenFromRequest(req), req);
       if (!principalId || !await principals.isOwner(principalId)) throw Object.assign(new Error('Host owner required'), { statusCode: 403 });
       const passkeyResult = await passkeyController.clearAllPasskeys();
       rotateJwtSecret();
@@ -1177,6 +1174,7 @@ export const createUiAuth = ({
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,
+    resolveRequestAuth,
     resolveWebSocketAuthContext,
     handleSessionStatus,
     handleSessionCreate,

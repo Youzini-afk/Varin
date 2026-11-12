@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import type { ThreadsAPI, ThreadIdentity } from '@varin/application-client';
-import type { FamilyMember, MessageFeedDispatch, MessageFeedEntry, MessageFeedReport, RuntimeEvent } from '@varin/protocol';
+import type { ThreadsAPI, ThreadIdentity, ThreadObservationEvent } from '@varin/application-client';
+import type { FamilyMember, MessageFeedDispatch, MessageFeedEntry, MessageFeedReport } from '@varin/protocol';
 import { CollaborationFeed } from './collaborationFeed';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
@@ -26,7 +26,7 @@ function fixture() {
   const records = [message(1), message(2), message(3)];
   const dispatches: MessageFeedDispatch[] = [];
   const reports: MessageFeedReport[] = [];
-  let listener: (event: RuntimeEvent) => void = () => {};
+  let listener: (event: ThreadObservationEvent) => void = () => {};
   const member = (id: string, current = true): FamilyMember => ({
     threadId: id,
     name: id,
@@ -80,7 +80,7 @@ function fixture() {
       await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }),
   };
-  return { api: api as unknown as ThreadsAPI, records, dispatches, reports, readers: api, emit: (event: RuntimeEvent) => listener(event) };
+  return { api: api as unknown as ThreadsAPI, records, dispatches, reports, readers: api, emit: (event: ThreadObservationEvent) => listener(event) };
 }
 it('keeps peer messages, prepended history and new pages in one ordered feed, while refreshing original delivery state', async () => {
   const f = fixture();
@@ -93,8 +93,8 @@ it('keeps peer messages, prepended history and new pages in one ordered feed, wh
   await feed.earlier();
   f.records.push(message(4), message(5), message(6));
   f.records[0]!.state = 'delivered';
-  f.emit({ cursor: 6, subject: 'message-6', revision: 1, kind: 'message.accepted', data: {} });
-  f.emit({ cursor: 7, subject: 'message-1', revision: 2, kind: 'message.delivered', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 6, subject: 'message-6', revision: 1, kind: 'message.accepted', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 7, subject: 'message-1', revision: 2, kind: 'message.delivered', data: {} });
   await vi.waitFor(() => expect(feed.getSnapshot().messages).toHaveLength(6));
   await vi.waitFor(() => expect(feed.getSnapshot().messages[0]!.state).toBe('delivered'));
   expect(f.readers.messages.get).toHaveBeenCalledWith(
@@ -169,10 +169,10 @@ it('merges original dispatches with messages, including dispatch-only delta page
   await feed.earlier();
   expect(feed.getSnapshot().items[0]).toMatchObject({ kind: 'dispatch', dispatch: { task: 'Original task 0', targetBranchId: 'original-worker-branch' } });
   f.dispatches.push(dispatch(4));
-  f.emit({ cursor: 4, subject: 'dispatch-4', revision: 1, kind: 'child.accepted', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 4, subject: 'dispatch-4', revision: 1, kind: 'child.accepted', data: {} });
   await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('dispatch:dispatch-4'));
   f.records.push(message(5));
-  f.emit({ cursor: 5, subject: 'message-5', revision: 1, kind: 'message.accepted', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 5, subject: 'message-5', revision: 1, kind: 'message.accepted', data: {} });
   await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('message:message-5'));
   expect(f.readers.messages.feed).toHaveBeenCalledWith(identity, { after: 4 }, expect.any(AbortSignal));
   expect(feed.getSnapshot().items.map(item => item.acceptedCursor)).toEqual([0, 1, 2, 3, 4, 5]);
@@ -190,7 +190,7 @@ it('reads new report-only pages on completion and retains separate replies from 
   await feed.earlier();
   expect(feed.getSnapshot().items[0]).toMatchObject({ kind: 'report', report: { text: 'Final reply 0' } });
   f.reports.push(report(4), report(5), report(6));
-  f.emit({ cursor: 6, subject: 'execution-6', revision: 2, kind: 'child.report_ready', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 6, subject: 'execution-6', revision: 2, kind: 'child.report_ready', data: {} });
   await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('report:execution-6'));
   expect(f.readers.messages.feed).toHaveBeenCalledWith(identity, { after: 5 }, expect.any(AbortSignal));
   expect(feed.getSnapshot().items.filter(item => item.kind === 'report').map(item => item.id)).toEqual([
@@ -212,7 +212,7 @@ it('keeps the actual terminal state when a member leaves the current directory',
       ? { ...page, members: page.members.map((member) => ({ ...member, current: false, state: 'completed' })) }
       : { ...page, members: page.members.filter((member) => member.threadId !== 'worker') };
   });
-  f.emit({ cursor: 9, subject: 'run-worker', revision: 2, kind: 'run.completed', data: {} });
+  f.emit({ thread_id: 'worker', branch_id: 'worker-branch', cursor: 9, subject: 'run-worker', revision: 2, kind: 'run.completed', data: {} });
   await vi.waitFor(() =>
     expect(feed.getSnapshot().members.find((member) => member.threadId === 'worker')?.detail).toMatchObject({
       current: false,
@@ -221,4 +221,22 @@ it('keeps the actual terminal state when a member leaves the current directory',
   );
   expect(feed.getSnapshot().messages).toHaveLength(2);
   feed.close();
+});
+
+it('ignores unrelated family events and reconciles retained delivery states on resync', async () => {
+  const f = fixture(), feed = new CollaborationFeed(f.api, identity);
+  try {
+    await feed.start();
+    const directoryReads = f.readers.family.list.mock.calls.length;
+    const feedReads = f.readers.messages.feed.mock.calls.length;
+    f.emit({thread_id: 'unrelated', branch_id: 'unrelated-branch', cursor: 10, subject: 'unrelated-run', revision: 1, kind: 'run.completed', data: {}});
+    f.emit({thread_id: 'worker', branch_id: 'worker-branch', cursor: 11, subject: 'worker', revision: 1, kind: 'thread.read', data: {}});
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(f.readers.family.list).toHaveBeenCalledTimes(directoryReads);
+    expect(f.readers.messages.feed).toHaveBeenCalledTimes(feedReads);
+    f.records[2]!.state = 'delivered';
+    f.emit({stream: 'resync', cursor: 11, reason: 'connection-restored'});
+    await vi.waitFor(() => expect(feed.getSnapshot().messages.find(value => value.messageId === 'message-3')?.state).toBe('delivered'));
+    expect(f.readers.family.list.mock.calls.length).toBeGreaterThan(directoryReads);
+  } finally { feed.close(); }
 });

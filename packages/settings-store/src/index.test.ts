@@ -115,3 +115,63 @@ describe('settings file store', () => {
     assert.equal((await fsPromises.stat(filePath)).mode & 0o777, 0o660);
   });
 });
+
+describe('shared settings read cache', () => {
+  it('serves independent parsed objects across sync/async instances without file I/O', async () => {
+    const { filePath, store } = await createStore();
+    await store.replace({ nested: { value: 1 } });
+    await new Promise(resolve => setTimeout(resolve, 10)); // Drain the atomic rename watch event.
+    let reads = 0, stats = 0;
+    const options = { filePath,
+      fsModule: { ...fs, readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => { reads++; return fs.readFileSync(...args); }) as typeof fs.readFileSync },
+      fsPromises: { ...fsPromises, readFile: ((...args: Parameters<typeof fsPromises.readFile>) => { reads++; return fsPromises.readFile(...args); }) as typeof fsPromises.readFile,
+        stat: ((...args: Parameters<typeof fsPromises.stat>) => { stats++; return fsPromises.stat(...args); }) as typeof fsPromises.stat } };
+    const first = createSettingsFileStore(options), second = createSettingsFileStore(options);
+    await first.read(); reads = 0;
+    for (let index = 0; index < 30; index++) {
+      const value = await first.read(); (value.nested as { value: number }).value = 99;
+      assert.deepEqual(second.readSync(), { nested: { value: 1 } });
+    }
+    assert.equal(reads, 0); assert.equal(stats, 0);
+  });
+
+  it('invalidates on another writer atomic replacement and reads fresh under a mutation lock', async () => {
+    const { filePath, store } = await createStore();
+    await store.replace({ before: true }); await store.read();
+    const changed = new Promise<void>(resolve => {
+      const watcher = fs.watch(path.dirname(filePath), (_event, filename) => {
+        if (String(filename) === path.basename(filePath)) { watcher.close(); resolve(); }
+      });
+    });
+    await fsPromises.writeFile(`${filePath}.external`, '{"external":1}');
+    await fsPromises.rename(`${filePath}.external`, filePath);
+    await changed;
+    assert.deepEqual(await store.read(), { external: 1 });
+    fs.writeFileSync(filePath, '{"external":2}');
+    await store.update(document => ({ ...document, local: 3 }));
+    assert.deepEqual(await store.read(), { external: 2, local: 3 });
+  });
+
+  it('falls back to file signatures when directory watching is unavailable', async () => {
+    const { filePath } = await createStore();
+    await fsPromises.writeFile(filePath, '{"v":1}');
+    const store = createSettingsFileStore({ filePath, fsModule: { readFileSync: fs.readFileSync, statSync: fs.statSync,
+      watch: (() => { throw new Error('Unsupported watch'); }) as typeof fs.watch } });
+    assert.deepEqual(await store.read(), { v: 1 });
+    await fsPromises.writeFile(filePath, '{"v":22}');
+    assert.deepEqual(store.readSync(), { v: 22 });
+    await fsPromises.writeFile(filePath, '{"v":333}');
+    assert.deepEqual(await store.read(), { v: 333 });
+  });
+});
+
+
+it('does not reuse a missing-file cache when a directory first becomes watchable', async () => {
+  const { filePath } = await createStore();
+  const nested = path.join(path.dirname(filePath), 'new-directory', 'settings.json');
+  const store = createSettingsFileStore({ filePath: nested });
+  assert.deepEqual(await store.read(), {});
+  await fsPromises.mkdir(path.dirname(nested));
+  await fsPromises.writeFile(nested, '{"created":true}');
+  assert.deepEqual(await store.read(), { created: true });
+});

@@ -1,3 +1,4 @@
+import { assertRequestAccess } from '../kernel/request-principal.js';
 import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, UiFragmentRegistrationInput, UiObservation, UiSelection, UiSourceIdentity, UiViewState } from '@varin/application-client';
 import type { InteractiveUiRuntime } from './runtime.js';
@@ -27,6 +28,7 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
     const viewRef = String(req.query.viewRef), token = String(req.query.token);
     try {
       if (typeof req.query.threadId !== 'string' || typeof req.query.branchId !== 'string') throw new UiContentError('Conversation identity is required');
+      await assertRequestAccess({ threads: [req.query.threadId] }, 'read');
       root = await runtime.target({ threadId: req.query.threadId, branchId: req.query.branchId });
       await runtime.validateViewScope(root, viewRef, { threadId: req.query.threadId, branchId: req.query.branchId });
       res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' }); res.flushHeaders();
@@ -36,7 +38,7 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
         if (!res.write(request ? `data: ${JSON.stringify(request)}\n\n` : ': heartbeat\n\n')) break;
       }
     } catch (error) {
-      if (!res.headersSent) res.status(error instanceof UiContentError ? error.status : 500).json({ message: 'View observation unavailable' });
+      if (!res.headersSent) res.status(error instanceof UiContentError ? error.status : error && typeof error === 'object' && 'code' in error && error.code === 'forbidden' ? 403 : 500).json({ message: 'View observation unavailable' });
     } finally { abort.abort(); if (root) runtime.disconnect(root, viewRef, token); if (!res.destroyed) res.end(); }
   });
   for (const [action, handle] of Object.entries(actions)) app.post(`/api/interactive-ui/${action}`, requireAuth, async (req, res) => {
@@ -45,12 +47,13 @@ export function registerInteractiveUiRoutes(app: Express, runtime: InteractiveUi
     try {
       const body = req.body as Record<string, unknown>;
       if (!body || typeof body !== 'object' || body.runtime !== 'agent' || typeof body.threadId !== 'string' || typeof body.branchId !== 'string') throw new UiContentError('Conversation identity is required');
+      await assertRequestAccess({ threads: [body.threadId] }, action === 'source' || action === 'selection' ? 'read' : 'write');
       const root = await runtime.target(body as unknown as ThreadIdentity);
       const viewRef = action === 'select' ? (body.observation as UiObservation | undefined)?.viewRef : action.startsWith('view/') && action !== 'view/attach' ? body.viewRef : undefined;
       if (typeof viewRef === 'string') await runtime.validateViewScope(root, viewRef, { threadId: body.threadId, branchId: body.branchId });
       const result = await handle(root, body, controller.signal);
       if (!res.destroyed) res.json(result);
-    } catch (error) { if (!res.destroyed) res.status(error instanceof UiContentError ? error.status : 500).json({ message: error instanceof UiContentError ? error.message : 'Interactive content is unavailable' }); }
+    } catch (error) { if (!res.destroyed) res.status(error instanceof UiContentError ? error.status : error && typeof error === 'object' && 'code' in error && error.code === 'forbidden' ? 403 : 500).json({ message: error instanceof UiContentError ? error.message : 'Interactive content is unavailable' }); }
     finally { res.removeListener('close', close); }
   });
 }

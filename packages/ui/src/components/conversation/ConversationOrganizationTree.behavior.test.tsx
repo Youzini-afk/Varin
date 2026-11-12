@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ConversationOrganizationSnapshot, ConversationOrganizationCommand, ConversationOrganizationEvent } from '@varin/application-client';
 import { ConversationOrganizationTree } from './ConversationOrganizationTree';
-import { useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization, submitOrganization } from '@/stores/useConversationOrganizationStore';
+import { useConversationOrganization, useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization, submitOrganization } from '@/stores/useConversationOrganizationStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { projectOrganization } from './organizationProjection';
@@ -25,7 +25,7 @@ vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', async () => { const { conversationOrganizationZhCN } = await import('@/lib/i18n/messages/conversation-organization'); return { useI18n: () => ({ t: (key: keyof typeof conversationOrganizationZhCN, params: Record<string, unknown> = {}) => Object.entries(params).reduce<string>((text, [name, value]) => text.replace(`{${name}}`, String(value)), conversationOrganizationZhCN[key] ?? key) }) }; });
 vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { conversationOrganization: { read: transport.read, command: transport.command, metadata: transport.metadata, observe: transport.observe }, bots: { list: async () => [] } }; return { useRuntimeAPIs: () => apis }; });
 vi.mock('@varin/application-client', async original => ({ ...await original<object>(), getRuntimeEndpointGeneration: () => transport.generation }));
-vi.mock('@/stores/useThreadStore', () => { const state = { get hostKey() { return String(transport.generation); }, threads: [], selectedIdentity: null, loadCatalog: async () => {} }; return { useThreadStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }) }; });
+vi.mock('@/stores/useThreadStore', () => { const state = { get hostKey() { return String(transport.generation); }, threads: [], selectedIdentity: null, loadCatalog: async () => {}, refreshThreads: async () => {} }; return { useThreadStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }) }; });
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (s: unknown) => unknown) => select({ projects: [{ id: 'project', path: '/project', label: 'Project' }] }) }));
 vi.mock('@/stores/useExternalAgentStore', () => { const state = { conversations: [], children: [], selectedId: null, refresh: async () => {} }; return { useExternalAgents: () => {}, useExternalAgentStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }) }; });
 vi.mock('@/lib/agent-runtime/threadNavigation', () => ({ startThreadFromNavigation: transport.create, openThreadFromNavigation: transport.open, openExternalConversationFromNavigation: transport.open }));
@@ -133,7 +133,7 @@ it('submits group dialog edits with parent versions and keeps an ambiguous key f
 it('refreshes another client’s move without opening or recreating the selected conversation', async () => {
   await render(); await click('Task'); transport.open.mockClear();
   snapshot = { ...snapshot, revision: 2, cursor: 2, conversations: snapshot.conversations.map(e => e.title === 'Child' ? { ...e, position: { ...e.position, explicit: true, inheritedFrom: null, containerId: 'work' } } : e) };
-  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 2, kind: 'organization', revision: 2, subject: '', data: null }); });
+  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 2, thread_id: null, branch_id: null, kind: 'organization.changed', revision: 2, subject: '', data: null }); });
   expect(container.querySelectorAll('button[title="Child"]')).toHaveLength(1); expect(transport.open).not.toHaveBeenCalled(); expect(transport.create).not.toHaveBeenCalled();
 });
 
@@ -272,7 +272,7 @@ it('undo restores inheritance using the original move receipt revision, never a 
   await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   const first = transport.command.mock.calls[0][0];
   snapshot = { ...snapshot, revision: 3, cursor: 3, conversations: snapshot.conversations.map(e => e.title === 'Child' ? { ...e, position: { ...e.position, revision: 3, containerId: null } } : e) };
-  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 3, kind: 'organization', revision: 3, subject: '', data: null }); });
+  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 3, thread_id: null, branch_id: null, kind: 'organization.changed', revision: 3, subject: '', data: null }); });
   // Recent can stop caching the old parent once the entry has moved elsewhere.
   await act(async () => useConversationOrganizationStore.setState(state => ({ snapshot: { ...state.snapshot!, containers: state.snapshot!.containers.filter(container => container.id !== 'project-node') } })));
   const { ConversationOrganizationError } = await import('@varin/application-client');
@@ -450,7 +450,7 @@ it('does not let a newer picker read cursor hide an earlier durable event affect
   await act(async () => loadOrganizationPage({ rootOnly: true, archived: 'include' }));
   expect(useConversationOrganizationStore.getState().snapshot?.cursor).toBe(10);
   snapshot = { ...snapshot, containers: [group('Visible', 0, null, 'Updated visible')] };
-  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 9, kind: 'organization', revision: 2, subject: '', data: null }); });
+  await act(async () => { for (const listener of transport.listeners) listener({ cursor: 9, thread_id: null, branch_id: null, kind: 'organization.changed', revision: 2, subject: '', data: null }); });
   expect(row('Updated visible')).toBeTruthy();
 });
 
@@ -598,4 +598,46 @@ it('settles an original in-flight navigation command after same-Host remount wit
   expect(useConversationOrganizationStore.getState().failed[originalCommand.key]).toEqual(originalCommand);
   transport.command.mockResolvedValueOnce({}); await click('检查结果');
   expect(transport.command.mock.calls[1][0]).toEqual(originalCommand);
+});
+
+it('ignores unrelated activity for manual pages and coalesces only already-loaded recent windows', async () => {
+  snapshot = { ...original(), containers: [group('A', 0)], conversations: [] };
+  mixedPages(); await render();
+  transport.read.mockClear();
+  const emitActivity = (cursor: number): ConversationOrganizationEvent => ({ cursor, subject: 'background-run', revision: cursor,
+    kind: 'run.changed', data: {}, thread_id: 'background-thread', branch_id: 'background-branch' });
+  await act(async () => { for (const listener of transport.listeners) listener(emitActivity(2)); });
+  expect(transport.read).not.toHaveBeenCalled();
+  await act(async () => loadOrganizationPage({ pageNodes: true, kind: 'conversations', sort: 'recent', recursive: true }));
+  transport.read.mockClear();
+  await act(async () => {
+    for (let cursor = 3; cursor < 33; cursor++) for (const listener of transport.listeners) listener(emitActivity(cursor));
+  });
+  expect(transport.read).toHaveBeenCalledTimes(1);
+  expect(transport.read.mock.calls[0]![0]).toMatchObject({ sort: 'recent' });
+  transport.read.mockClear();
+  await act(async () => {
+    for (let cursor = 34; cursor < 44; cursor++) for (const listener of transport.listeners) listener({ cursor, kind: 'organization.changed', revision: cursor,
+      subject: 'navigation', data: {}, thread_id: null, branch_id: null });
+  });
+  expect(transport.read).toHaveBeenCalledTimes(2); // Root and recent, not unopened groups or continuations.
+});
+
+it('recovers loaded windows on resync without creating another observation', async () => {
+  snapshot = { ...original(), containers: [group('A', 0)], conversations: [] }; mixedPages(); await render();
+  transport.read.mockClear();
+  await act(async () => { for (const listener of transport.listeners) listener({ stream: 'resync', cursor: 0, reason: 'kernel-restarted' }); });
+  expect(transport.read).toHaveBeenCalledTimes(1);
+  expect(transport.observe).toHaveBeenCalledTimes(1);
+});
+
+
+it('does not rerender lifecycle-only or unrelated field subscribers on organization writes', async () => {
+  let passiveRenders = 0, hostRenders = 0;
+  function Passive() { useConversationOrganization(); passiveRenders++; return null; }
+  function Host() { const host = useConversationOrganization(true, state => state.host); hostRenders++; return <span>{host}</span>; }
+  await act(async () => root.render(<><Passive /><Host /></>));
+  passiveRenders = 0; hostRenders = 0;
+  await act(async () => useConversationOrganizationStore.setState({ bots: [], error: 'Unrelated scope read failed', metadata: {} }));
+  expect(passiveRenders).toBe(0); expect(hostRenders).toBe(0);
 });

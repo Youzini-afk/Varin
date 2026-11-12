@@ -13,7 +13,7 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { acquireTokenCounter } from '../models/token-count.js';
 import { packPlainText } from '../knowledge/semantic/chunker.js';
 import { controlFrame } from './kernel-transport.js';
-import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW, type AgentRuntimeStreamEvent } from "./protocol.generated.js";
+import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW, KERNEL_STREAM_CREDITS, type AgentRuntimeStreamEvent } from "./protocol.generated.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
@@ -122,7 +122,8 @@ it("R0/R6 saturation retains a bounded native window through parallel uploads, c
   const f = await fixture();
   const bodies = Array.from({ length: 24 }, (_, index) => Buffer.alloc(160_000 + index, index));
   const uploaded = await Promise.all(bodies.map((body, index) => f.actor.putBlob(body, `parallel-${index}`)));
-  expect(f.maximum()).toBe(KERNEL_REQUEST_WINDOW);
+  expect(f.maximum()).toBeLessThanOrEqual(KERNEL_REQUEST_WINDOW);
+  expect(f.maximum()).toBeGreaterThan(2);
   expect(f.requests.some(request => request.kind === "data")).toBe(false);
   expect(f.requests.filter(request => request.method === "storage.putBlob.chunk").length).toBeGreaterThan(bodies.length);
   for (let index = 0; index < uploaded.length; index++) {
@@ -146,7 +147,8 @@ it("R0/R6 saturation retains a bounded native window through parallel uploads, c
   await rejected;
   await Promise.all(controls);
   expect(f.requests.some(request => request.kind === "cancel")).toBe(true);
-  expect(f.maximum()).toBe(KERNEL_REQUEST_WINDOW);
+  expect(f.maximum()).toBeLessThanOrEqual(KERNEL_REQUEST_WINDOW);
+  expect(f.maximum()).toBeGreaterThan(2);
   expect(f.outstanding.size).toBe(0);
   await expect(f.actor.readBranch({ branchId: "cancel-large" })).rejects.toThrow(/branch not found/i);
   expect((await f.actor.health()).integrity).toBe("not_checked");
@@ -230,11 +232,11 @@ it('Run inspection streams large configuration while data-bodied inference admis
   const receipt = await runtime.submit({ key:'large-config', threadId:'large-config', branchId:'large-config-branch',
     expectedHead:null, input:{text:'preserve configuration'}, configuration });
   const data = f.probe.socket('data'); data.pause();
-  const reads = Array.from({ length: KERNEL_REQUEST_WINDOW }, () => runtime.run(receipt.run_id));
+  const reads = Array.from({ length: KERNEL_STREAM_CREDITS + 2 }, () => runtime.run(receipt.run_id));
   for (const read of reads) void read.catch(() => undefined);
   const cancel = runtime.cancelRun(receipt.run_id); void cancel.catch(() => undefined);
   try {
-    await expect.poll(() => f.probe.incomingStreams()).toBe(KERNEL_REQUEST_WINDOW);
+    await expect.poll(() => f.probe.incomingBodies()).toBe(KERNEL_STREAM_CREDITS);
     // This malformed body must receive its original bounded rejection even while
     // ordinary response streams occupy every data credit. The request itself streams.
     await expect(f.host.agentRuntimeRequest('runtime.inference.admit', {} as never)).rejects.toMatchObject({

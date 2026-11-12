@@ -46,6 +46,9 @@ export class TransportFixture {
   socket(lane: 'control' | 'data'): Socket {
     return (this.transport as unknown as {control: Socket; data: Socket})[lane];
   }
+  incomingBodies(): number {
+    return [...(this.transport as unknown as {incoming: Map<string, {length?: number}>}).incoming.values()].filter(stream => stream.length !== undefined).length;
+  }
   incomingStreams(): number {
     return (this.transport as unknown as {incoming: Map<string, unknown>}).incoming.size;
   }

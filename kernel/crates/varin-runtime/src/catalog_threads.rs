@@ -53,6 +53,15 @@ pub struct ThreadRead {
     pub through_cursor: u64,
 }
 
+/// SQLite's built-in lower() is ASCII-only. Product search has always used Rust's Unicode
+/// lowercase semantics, so apply that predicate before expanding a matching directory row.
+pub(super) fn install_functions(db: &Connection) -> Result<()> {
+    db.create_scalar_function("varin_lower", 1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
+        |context| Ok(context.get::<String>(0)?.to_lowercase()))?;
+    Ok(())
+}
+
 pub(super) fn now_ms() -> Result<u64> {
     let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -69,7 +78,7 @@ pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str, initial_branch: &str
         let code = Uuid::new_v4().simple().to_string()[..8].to_uppercase();
         let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE agent_code=?1 COLLATE NOCASE UNION ALL SELECT 1 FROM retired_agent_codes WHERE code=?1 COLLATE NOCASE UNION ALL SELECT 1 FROM model_agents WHERE agent_code=?1 COLLATE NOCASE)", [&code], |r| r.get(0))?;
         if !used {
-            tx.execute("INSERT INTO threads(id,agent_code) VALUES(?1,?2)", params![thread_id,code])?;
+            tx.execute("INSERT INTO threads(id,agent_code,hidden_kind) VALUES(?1,?2,?3)", params![thread_id,code, matches!(domain,"summary"|"memory").then_some(domain)])?;
             super::identity::record(tx, thread_id, initial_branch, domain, bot_id)?;
             return Ok(());
         }
@@ -106,6 +115,29 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             "invalid Thread metadata; data was preserved".into(),
         ));
     }
+    Ok(())
+}
+/// One-time replacement for the product directory's repeated auxiliary-work probes.
+pub(super) fn upgrade_hidden(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE threads ADD COLUMN hidden_kind TEXT;
+        UPDATE threads SET hidden_kind=CASE
+        WHEN EXISTS(SELECT 1 FROM thread_creations c WHERE c.thread_id=threads.id AND c.domain='summary') THEN 'summary'
+        WHEN EXISTS(SELECT 1 FROM thread_creations c WHERE c.thread_id=threads.id AND c.domain='memory') THEN 'memory'
+        WHEN EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=threads.id AND json_extract(o.body,'$.executor')='code_retrieval') THEN 'code_retrieval'
+        WHEN EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=threads.id) THEN 'context_job'
+        WHEN EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=threads.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') THEN 'memory'
+        END;")?;
+    Ok(())
+}
+pub(super) fn check_legacy_hidden_format(db: &Connection) -> Result<()> {
+    let present: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('threads') WHERE name='hidden_kind')", [], |row|row.get(0))?;
+    if present { return Err(RuntimeError::Invalid("Legacy Catalog contains newer internal Thread classification; data was preserved".into())); }
+    Ok(())
+}
+pub(super) fn check_hidden_format(db: &Connection) -> Result<()> {
+    db.prepare("SELECT hidden_kind FROM threads")?;
+    let invalid: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE hidden_kind IS NOT NULL AND hidden_kind NOT IN ('summary','memory','code_retrieval','context_job'))", [], |r| r.get(0))?;
+    if invalid { return Err(RuntimeError::Invalid("invalid internal Thread kind; data was preserved".into())); }
     Ok(())
 }
 pub(super) fn require_available(db: &Connection, thread_id: &str) -> Result<()> {
@@ -150,16 +182,12 @@ pub(super) fn require_public(db:&Connection,thread:&str)->Result<()> {
 pub(super) fn record_activity(
     tx: &Transaction<'_>,
     subject: &str,
+    thread: Option<&str>,
     kind: &str,
     cursor: u64,
     data: &Value,
 ) -> Result<()> {
-    let thread: Option<String> = match kind {
-        "run.accepted" | "run.changed" | "run.cancel_requested" | "assistant.output" => tx.query_row("SELECT b.thread_id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE r.id=?1", [subject], |r| r.get(0)).optional()?,
-        "history.appended" => tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [subject], |r| r.get(0)).optional()?,
-        "permission.opened" | "question.opened" => tx.query_row("SELECT b.thread_id FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE o.id=?1", [subject], |r| r.get(0)).optional()?,
-        _ => None,
-    };
+    if !matches!(kind, "run.accepted" | "run.changed" | "run.cancel_requested" | "assistant.output" | "history.appended" | "permission.opened" | "question.opened") { return Ok(()); }
     if let Some(thread) = thread {
         let bot_entry: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM bot_thread_bindings WHERE thread_id=?1)", [&thread], |row|row.get(0))?;
         if bot_entry {
@@ -285,24 +313,18 @@ impl Catalog {
             ArchiveFilter::Include => 1,
             ArchiveFilter::Only => 2,
         };
-        let mut statement = self.db.prepare_cached("SELECT t.id,t.title FROM threads t WHERE (?2=0 OR t.principal_id IS NULL OR t.principal_id=?3) AND t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM thread_creations creation WHERE creation.thread_id=t.id AND creation.domain IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id")?;
-        let ids = statement
-            .query_map(params![archive, query.principal_id.is_some(), query.principal_id.as_ref().and_then(Option::as_deref)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
         let needle = query.query.as_deref().unwrap_or("").trim().to_lowercase();
-        let mut result = Vec::new();
-        for (id, title) in ids {
-            // Preserve Unicode case folding in the product search, but do not inspect unrelated
-            // branches, Runs or ownership ancestry for a Thread that cannot match the query.
-            if needle.is_empty()
-                || id.to_lowercase().contains(&needle)
-                || title.to_lowercase().contains(&needle)
-            {
-                result.push(self.inspect_thread(&id)?);
-            }
-        }
-        Ok(result)
+        inspect_selected(&self.db,
+            "(?2=0 OR t.principal_id IS NULL OR t.principal_id=?3) AND t.deleted_at_ms IS NULL AND t.hidden_kind IS NULL AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND (?4='' OR instr(varin_lower(t.id),?4)>0 OR instr(varin_lower(t.title),?4)>0)",
+            params![archive, query.principal_id.is_some(), query.principal_id.as_ref().and_then(Option::as_deref),needle])
     }
+    /// Navigation batch: hidden, deleted and absent rows are omitted so clients remove stale entries.
+    pub fn inspect_threads(&self, ids: &[String]) -> Result<Vec<Value>> {
+        inspect_selected(&self.db,
+            "t.id IN (SELECT value FROM json_each(?1)) AND t.deleted_at_ms IS NULL AND t.hidden_kind IS NULL",
+            [serde_json::to_string(ids)?])
+    }
+
     pub fn update_thread(&mut self, command: &ThreadUpdate) -> Result<Value> {
         let intent = json!({"kind":"thread.update","command":command});
         let tx = self.db.transaction()?;
@@ -428,71 +450,83 @@ impl Catalog {
 }
 
 pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
-    let mut summary = db.prepare_cached("SELECT title,revision,created_at_ms,updated_at_ms,pinned,archived,deleted_at_ms,activity_cursor,read_cursor,principal_id,agent_code FROM threads WHERE id=?1")?
-        .query_row([thread_id], |r| Ok(json!({
-            "title":r.get::<_,String>(0)?, "revision":read_number(r,1)?,
-            "created_at_ms":read_number(r,2)?, "updated_at_ms":read_number(r,3)?,
-            "pinned":r.get::<_,bool>(4)?, "archived":r.get::<_,bool>(5)?,
-            "deleted_at_ms":r.get::<_,Option<i64>>(6)?, "activity_cursor":read_number(r,7)?,
-            "read_cursor":read_number(r,8)?, "unread":read_number(r,7)?>read_number(r,8)?,
-            "principal_id":r.get::<_,Option<String>>(9)?, "agent_code":r.get::<_,String>(10)?
-        }))).optional()?.ok_or_else(|| RuntimeError::NotFound(thread_id.into()))?;
-    let mut statement =
-        db.prepare_cached("SELECT b.id,b.head,b.active_run,
-            (SELECT r.body FROM runs r WHERE r.branch_id=b.id ORDER BY r.rowid DESC LIMIT 1)
-            FROM branches b WHERE b.thread_id=?1
-            AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid")?;
-    let rows = statement.query_map([thread_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    })?;
-    let mut branches = Vec::new();
-    for row in rows {
-        let (branch_id, head, active_run_id, latest) = row?;
-        let latest_run = latest
-            .map(|raw| serde_json::from_str::<Run>(&raw))
-            .transpose()?;
-        branches.push(json!({"branch_id":branch_id,"head":head,"active_run_id":active_run_id,"latest_run":latest_run}));
-    }
-    // Scope is bound at Run admission, including queued Runs, and survives later context
-    // publication. Read only small checkpoint metadata; never hydrate prompt bodies here.
-    let mut scopes = db.prepare_cached(
-        "SELECT DISTINCT c.project_id FROM runs r JOIN branches b ON b.id=r.branch_id
-             LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id
-             WHERE b.thread_id=?1 ORDER BY c.project_id",
-    )?;
-    let observer_project_ids = scopes
-        .query_map([thread_id], |row| row.get::<_, Option<String>>(0))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    summary["main_branch_id"] = branches
-        .first()
-        .ok_or_else(|| RuntimeError::Invalid("Thread has no initial branch".into()))?["branch_id"]
-        .clone();
-    summary["thread_id"] = json!(thread_id);
-    let child: Option<(String, Option<String>)> = db.prepare_cached(
-        "SELECT json_extract(body,'$.parent_thread_id'), json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=?1")?.query_row(
-        [thread_id], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).optional()?;
-    summary["parent_thread_id"] = json!(child.as_ref().map(|(parent, _)| parent));
-    if let Some((_, Some(avatar))) = child { summary["avatar"] = json!(avatar); }
-    // Descriptive reads must remain usable for unknown legacy tombstones. This
-    // absence is not execution authority: thread_permitted propagates unavailable.
-    match bot::thread_bot(db, thread_id) {
-        Ok(bot) => summary["bot_id"] = json!(bot),
-        Err(RuntimeError::IdentityUnavailable(_)) => {
-            summary["bot_id"] = Value::Null;
-            summary["creation_identity_known"] = json!(false);
+    inspect_selected(db, "t.id=?1", [thread_id])?.into_iter().next()
+        .ok_or_else(|| RuntimeError::NotFound(thread_id.into()))
+}
+
+/// One SQL statement for any directory window. Branches, latest Runs, scope history and
+/// ancestry are joined/aggregated inside the same snapshot instead of N per-Thread calls.
+fn inspect_selected<P: rusqlite::Params>(db: &Connection, filter: &str, parameters: P) -> Result<Vec<Value>> {
+    let sql = format!(r#"WITH RECURSIVE selected AS (
+        SELECT t.* FROM threads t WHERE {filter}
+    ), latest_runs AS (
+        SELECT r.branch_id,r.body,row_number() OVER(PARTITION BY r.branch_id ORDER BY r.rowid DESC) AS position
+        FROM runs r JOIN branches b ON b.id=r.branch_id JOIN selected t ON t.id=b.thread_id
+    ), links AS NOT MATERIALIZED (
+        SELECT t.id, bot.bot_id, coalesce(
+            (SELECT json_extract(c.body,'$.parent_thread_id') FROM child_tasks c WHERE c.child_thread_id=t.id),
+            (SELECT source.thread_id FROM context_jobs c JOIN runs r ON r.id=c.run_id JOIN branches helper ON helper.id=r.branch_id JOIN branches source ON source.id=c.branch_id WHERE helper.thread_id=t.id)
+        ) AS parent,
+        (SELECT json_extract(o.body,'$.intent.scopeId') FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1' LIMIT 1) AS memory_scope,
+        coalesce(creation.identity_known,1) AS known
+        FROM threads t LEFT JOIN bot_thread_bindings bot ON bot.thread_id=t.id
+            LEFT JOIN thread_creations creation ON creation.thread_id=t.id
+    ), ancestry(root,id,path,cycle) AS (
+        SELECT id,id,json_array(id),0 FROM selected
+        UNION ALL SELECT a.root,l.parent,json_insert(a.path,'$[#]',l.parent),
+            EXISTS(SELECT 1 FROM json_each(a.path) WHERE value=l.parent)
+        FROM ancestry a JOIN links l ON l.id=a.id
+        WHERE NOT a.cycle AND l.bot_id IS NULL AND l.parent IS NOT NULL
+    ), terminal AS (
+        SELECT a.root,l.bot_id,l.memory_scope,l.known,a.cycle FROM ancestry a JOIN links l ON l.id=a.id
+        WHERE a.cycle OR l.bot_id IS NOT NULL OR l.parent IS NULL
+    )
+    SELECT t.id,t.title,t.revision,t.created_at_ms,t.updated_at_ms,t.pinned,t.archived,t.deleted_at_ms,
+        t.activity_cursor,t.read_cursor,t.principal_id,t.agent_code,
+        coalesce((SELECT mode FROM thread_title_state WHERE thread_id=t.id),'automatic'),
+        (SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=t.id),
+        (SELECT json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=t.id),
+        terminal.bot_id,terminal.memory_scope,terminal.known,terminal.cycle,
+        (SELECT json_group_array(json(branch)) FROM (
+            SELECT json_object('branch_id',b.id,'head',b.head,'active_run_id',b.active_run,'latest_run',
+                json(latest.body)) AS branch
+            FROM branches b LEFT JOIN latest_runs latest ON latest.branch_id=b.id AND latest.position=1 WHERE b.thread_id=t.id AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid)),
+        (SELECT json_group_array(project_id) FROM (SELECT DISTINCT c.project_id FROM runs r JOIN branches b ON b.id=r.branch_id
+            LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE b.thread_id=t.id ORDER BY c.project_id))
+        FROM selected t LEFT JOIN terminal ON terminal.root=t.id ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id"#);
+    let mut query = db.prepare_cached(&sql)?;
+    let rows = query.query_map(parameters, |r| Ok((
+        json!({"thread_id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"revision":read_number(r,2)?,
+            "created_at_ms":read_number(r,3)?,"updated_at_ms":read_number(r,4)?,"pinned":r.get::<_,bool>(5)?,
+            "archived":r.get::<_,bool>(6)?,"deleted_at_ms":r.get::<_,Option<i64>>(7)?,"activity_cursor":read_number(r,8)?,
+            "read_cursor":read_number(r,9)?,"unread":read_number(r,8)?>read_number(r,9)?,
+            "principal_id":r.get::<_,Option<String>>(10)?,"agent_code":r.get::<_,String>(11)?,
+            "title_mode":r.get::<_,String>(12)?,"parent_thread_id":r.get::<_,Option<String>>(13)?}),
+        r.get::<_,Option<String>>(14)?,r.get::<_,Option<String>>(15)?,r.get::<_,Option<String>>(16)?,
+        r.get::<_,Option<bool>>(17)?,r.get::<_,Option<bool>>(18)?,r.get::<_,String>(19)?,r.get::<_,String>(20)?
+    )))?;
+    rows.map(|row| {
+        let (mut summary,avatar,bot,scope,known,cycle,branches,projects) = row?;
+        if cycle == Some(true) { return Err(RuntimeError::Invalid("Bot execution ancestry is cyclic".into())); }
+        let bot = match (bot,scope) { (Some(bot),_) => Some(bot), (None,Some(scope)) => Some(scope.strip_prefix("bot:").filter(|id|!id.is_empty()).ok_or_else(||RuntimeError::Invalid("MemoryWork Bot identity is invalid".into()))?.to_owned()), _ => None };
+        if bot.is_none() && known == Some(false) { summary["creation_identity_known"] = json!(false); }
+        summary["bot_id"] = json!(bot);
+        if let Some(avatar) = avatar { summary["avatar"] = json!(avatar); }
+        let mut branches: Value = serde_json::from_str(&branches)?;
+        if let Some(items) = branches.as_array_mut() {
+            for branch in items {
+                if !branch["latest_run"].is_null() {
+                    let run: Run = serde_json::from_value(branch["latest_run"].take())?;
+                    branch["latest_run"] = serde_json::to_value(run)?;
+                }
+            }
         }
-        Err(error) => return Err(error),
-    }
-    summary["title_mode"] = serde_json::to_value(titles::mode(db,thread_id)?)?;
-    summary["branches"] = json!(branches);
-    summary["observer_project_ids"] = json!(observer_project_ids);
-    Ok(summary)
+        let first = branches.as_array().and_then(|items|items.first()).ok_or_else(||RuntimeError::Invalid("Thread has no initial branch".into()))?;
+        summary["main_branch_id"] = first["branch_id"].clone();
+        summary["branches"] = branches;
+        summary["observer_project_ids"] = serde_json::from_str(&projects)?;
+        Ok(summary)
+    }).collect()
 }
 
 #[cfg(test)]

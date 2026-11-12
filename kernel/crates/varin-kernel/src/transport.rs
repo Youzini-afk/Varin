@@ -1,10 +1,13 @@
 //! Private, authenticated local control and content connections. Stdio is bootstrap only.
 //! Body credits belong to streams; blocked content never owns the control writer.
 use crate::protocol::{read_frame, write_frame, MAX_FRAME_BYTES, PROTOCOL_VERSION};
+use crate::protocol_generated::{
+    KERNEL_INLINE_MAX_BYTES, KERNEL_REQUEST_WINDOW, KERNEL_STREAM_CREDITS,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     io,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -14,7 +17,9 @@ use std::{
 };
 use uuid::Uuid;
 
-const DATA_HEADER_BYTES: usize = 24; // stream UUID + monotonically increasing u64 sequence
+const DATA_HEADER_BYTES: usize = 25; // type + stream UUID + monotonically increasing u64 sequence
+const INLINE_HEADER_BYTES: usize = 9; // type + arrival sequence, also assigned to stream offers
+const INLINE_QUEUE_BYTES: usize = KERNEL_INLINE_MAX_BYTES * KERNEL_STREAM_CREDITS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Lane {
@@ -28,8 +33,8 @@ pub(crate) enum Incoming {
     Disconnected,
 }
 
-/// Only bounded identity/status contracts use direct control JSON. All other params/results
-/// use content streams, even when their current value happens to be small.
+/// Bounded control contracts remain independent of all content backpressure. Other messages
+/// use one inline data frame or, only when large, an acknowledged content stream.
 pub(crate) fn control_method(method: &str) -> bool {
     crate::protocol_generated::KERNEL_CONTROL_METHODS.contains(&method)
 }
@@ -241,6 +246,11 @@ struct Outgoing {
     ready: bool,
     aborting: bool,
     ending: bool,
+    started: bool,
+    encoding: bool,
+    settled: bool,
+    group: usize,
+    value: Option<Value>,
 }
 struct Received {
     meta: Value,
@@ -248,10 +258,24 @@ struct Received {
     bytes: Vec<u8>,
     sequence: u64,
     abort_sequence: Option<u64>,
+    arrival_sequence: u64,
 }
 struct Scheduler {
     streams: HashMap<Uuid, Outgoing>,
     order: VecDeque<Uuid>,
+    inline: VecDeque<Vec<u8>>,
+    inline_bytes: usize,
+    next_arrival: u64,
+}
+enum BodyJob {
+    Encode(Uuid, Value),
+    Decode(Uuid, Received),
+}
+#[derive(Default)]
+struct Arrivals {
+    last: u64,
+    pending: BTreeMap<u64, Vec<Incoming>>,
+    after: BTreeMap<u64, Vec<Incoming>>,
 }
 enum Control {
     Frame(Value),
@@ -268,12 +292,16 @@ struct Shared {
     response_lanes: Mutex<HashMap<String, Lane>>,
     epoch: String,
     chunk_bytes: usize,
+    body_jobs: mpsc::Sender<BodyJob>,
+    arrivals: Mutex<Arrivals>,
 }
 impl Shared {
     fn fail(&self, failure: Option<(&'static str, io::Error)>) {
         {
             let _scheduler = self.scheduled.lock().unwrap();
-            if self.stopped.swap(true, Ordering::AcqRel) { return; }
+            if self.stopped.swap(true, Ordering::AcqRel) {
+                return;
+            }
             self.changed.notify_all();
             let _ = self.incoming.send(Incoming::Disconnected);
         }
@@ -287,7 +315,8 @@ impl Shared {
                 .and_then(|inner| inner.downcast_ref::<ProtocolFailure>())
                 .map(|error| error.0);
             let _ = writeln!(
-                io::stderr().lock(), "[VarinKernelTransport] {}",
+                io::stderr().lock(),
+                "[VarinKernelTransport] {}",
                 json!({
                     "stage": stage, "kind": format!("{:?}", error.kind()),
                     "osError": error.raw_os_error(), "reason": reason,
@@ -329,6 +358,84 @@ impl Shared {
                 })
         }
     }
+    // The two sockets can deliver a cancellation before its inline request. Arrival sequence
+    // orders offers (not bodies), preserves input FIFO across inline/worker paths and retains
+    // an early cancel only until the corresponding offer. Late cancels need no tombstones.
+    fn arrive(&self, sequence: u64, events: Vec<Incoming>) -> io::Result<()> {
+        let mut arrivals = self.arrivals.lock().unwrap();
+        if sequence == 0
+            || sequence <= arrivals.last
+            || arrivals.pending.insert(sequence, events).is_some()
+        {
+            return Err(protocol_error("invalid content arrival sequence"));
+        }
+        loop {
+            let next = arrivals.last + 1;
+            let Some(events) = arrivals.pending.remove(&next) else {
+                break;
+            };
+            let mut events = events.into_iter();
+            // Register an inline request before applying a cancellation that overtook it.
+            if let Some(event) = events.next() {
+                self.incoming
+                    .send(event)
+                    .map_err(|_| io::ErrorKind::BrokenPipe)?;
+            }
+            if let Some(after) = arrivals.after.remove(&next) {
+                for event in after {
+                    self.incoming
+                        .send(event)
+                        .map_err(|_| io::ErrorKind::BrokenPipe)?;
+                }
+            }
+            for event in events {
+                self.incoming
+                    .send(event)
+                    .map_err(|_| io::ErrorKind::BrokenPipe)?;
+            }
+            arrivals.last = next;
+        }
+        Ok(())
+    }
+    fn after_arrival(&self, sequence: u64, event: Incoming) -> io::Result<()> {
+        let mut arrivals = self.arrivals.lock().unwrap();
+        if sequence == 0 {
+            return Err(protocol_error("invalid cancellation arrival"));
+        }
+        if sequence > arrivals.last {
+            arrivals.after.entry(sequence).or_default().push(event);
+        } else {
+            self.incoming
+                .send(event)
+                .map_err(|_| io::ErrorKind::BrokenPipe)?;
+        }
+        Ok(())
+    }
+    fn start_streams(&self) -> io::Result<()> {
+        let mut scheduler = self.scheduled.lock().unwrap();
+        let mut used = [0; 2];
+        for stream in scheduler.streams.values().filter(|stream| stream.started) {
+            used[stream.group] += 1;
+        }
+        // FIFO metadata admission; reverse bridge messages never compete for the credits
+        // of Host requests/responses that can themselves be waiting on that bridge.
+        let order = scheduler.order.iter().copied().collect::<Vec<_>>();
+        for id in order {
+            let stream = scheduler.streams.get_mut(&id).unwrap();
+            if stream.started || stream.aborting || used[stream.group] >= KERNEL_STREAM_CREDITS {
+                continue;
+            }
+            stream.started = true;
+            used[stream.group] += 1;
+            if let Some(value) = stream.value.take() {
+                stream.encoding = true;
+                self.body_jobs
+                    .send(BodyJob::Encode(id, value))
+                    .map_err(|_| io::ErrorKind::BrokenPipe)?;
+            }
+        }
+        Ok(())
+    }
     fn command(&self, kind: &str, id: Uuid, extra: Value) -> io::Result<()> {
         let mut value = json!({"v":PROTOCOL_VERSION,"kind":kind,"streamId":id.to_string(),"kernelEpoch":self.epoch});
         value
@@ -342,7 +449,6 @@ impl Shared {
 #[derive(Clone)]
 pub(crate) struct Sender {
     shared: Option<Arc<Shared>>,
-    encode: Option<mpsc::Sender<(Uuid, Value)>>,
     #[cfg(test)]
     fixture: Option<mpsc::SyncSender<Value>>,
 }
@@ -351,7 +457,6 @@ impl From<mpsc::SyncSender<Value>> for Sender {
     fn from(sender: mpsc::SyncSender<Value>) -> Self {
         Self {
             shared: None,
-            encode: None,
             fixture: Some(sender),
         }
     }
@@ -388,16 +493,43 @@ impl Sender {
         if self.lane(&value) == Lane::Control {
             return shared.enqueue_control(value);
         }
-        self.send_body(value).map(|_| ())
+        self.send_data(value).map(|_| ())
     }
-    fn send_body(&self, value: Value) -> Result<Uuid, mpsc::SendError<Value>> {
+    fn send_data(&self, value: Value) -> Result<Option<Uuid>, mpsc::SendError<Value>> {
         let shared = self.shared.as_ref().unwrap();
+        // Stop serializing as soon as the inline budget is exhausted. Large content is
+        // encoded by the CPU-sized body pool, never in the reader or Catalog actor.
+        if let Some(bytes) = inline_bytes(&value) {
+            let mut scheduler = shared.scheduled.lock().unwrap();
+            while !shared.stopped.load(Ordering::Acquire)
+                && (scheduler.inline_bytes + INLINE_HEADER_BYTES + bytes.len() > INLINE_QUEUE_BYTES
+                    || scheduler.inline.len() >= KERNEL_REQUEST_WINDOW)
+            {
+                scheduler = shared.changed.wait(scheduler).unwrap();
+            }
+            if shared.stopped.load(Ordering::Acquire) {
+                return Err(mpsc::SendError(value));
+            }
+            scheduler.next_arrival += 1;
+            let mut frame = Vec::with_capacity(INLINE_HEADER_BYTES + bytes.len());
+            frame.push(1);
+            frame.extend_from_slice(&scheduler.next_arrival.to_be_bytes());
+            frame.extend_from_slice(&bytes);
+            scheduler.inline_bytes += frame.len();
+            scheduler.inline.push_back(frame);
+            shared.changed.notify_all();
+            return Ok(None);
+        }
         if shared.stopped.load(Ordering::Acquire) {
             return Err(mpsc::SendError(value));
         }
         let id = Uuid::new_v4();
-        // Register before announcing/encoding: a receiver can stop even a queued body.
-        shared.scheduled.lock().unwrap().streams.insert(
+        let meta = identity(&value);
+        let mut scheduler = shared.scheduled.lock().unwrap();
+        scheduler.next_arrival += 1;
+        let sequence = scheduler.next_arrival;
+        let group = usize::from(value["kind"] != "response");
+        scheduler.streams.insert(
             id,
             Outgoing {
                 stream_id: id,
@@ -408,37 +540,48 @@ impl Sender {
                 ready: false,
                 aborting: false,
                 ending: false,
+                started: false,
+                encoding: false,
+                settled: false,
+                group,
+                value: Some(value),
             },
         );
+        scheduler.order.push_back(id);
+        drop(scheduler);
         if shared
             .command(
                 "transport-stream-open",
                 id,
-                json!({"identity":identity(&value)}),
+                json!({"identity":meta,"arrivalSequence":sequence}),
             )
             .is_err()
+            || shared.start_streams().is_err()
         {
-            return Err(mpsc::SendError(value));
+            shared.fail(None);
+            // SendError is a disconnect indication; no caller replays the owned body.
+            return Err(mpsc::SendError(Value::Null));
         }
-        self.encode
-            .as_ref()
-            .unwrap()
-            .send((id, value))
-            .map(|_| id)
-            .map_err(|error| mpsc::SendError(error.0 .1))
+        Ok(Some(id))
     }
-    /// Only the dedicated progress consumer waits here. The model worker coalesces pending
-    /// content independently. One outstanding batch per stream also preserves delivery order.
+    /// Small progress batches wait only for bounded queue space, not a remote round trip.
+    /// The one data writer preserves FIFO and alternates inline frames with stream chunks.
+    /// An exceptional large batch retains stream completion ordering before the next delta.
     pub(crate) fn send_progress(&self, value: Value) -> Result<(), mpsc::SendError<Value>> {
         #[cfg(test)]
         if let Some(fixture) = &self.fixture {
             return fixture.send(value);
         }
         let shared = self.shared.as_ref().unwrap();
-        let id = self.send_body(value)?;
+        let Some(id) = self.send_data(value)? else {
+            return Ok(());
+        };
         let mut scheduler = shared.scheduled.lock().unwrap();
         while !shared.stopped.load(Ordering::Acquire) && scheduler.streams.contains_key(&id) {
             scheduler = shared.changed.wait(scheduler).unwrap();
+        }
+        if shared.stopped.load(Ordering::Acquire) {
+            return Err(mpsc::SendError(Value::Null));
         }
         Ok(())
     }
@@ -455,6 +598,54 @@ impl Sender {
         }
         shared.enqueue_control(value)
     }
+}
+
+// serde's writer interface bounds both CPU work and allocation on the inline path.
+fn inline_bytes(value: &Value) -> Option<Vec<u8>> {
+    // serde scans strings for escaping before writing them. Classify unbounded bodies first
+    // with O(1) string lengths, so even one very large unescaped string stays off this thread.
+    fn exceeds(value: &Value, budget: &mut usize) -> bool {
+        let size = match value {
+            Value::String(text) => text.len() + 2,
+            Value::Array(_) | Value::Object(_) => 2,
+            _ => 1,
+        };
+        if size > *budget {
+            return true;
+        }
+        *budget -= size;
+        match value {
+            Value::Array(items) => items.iter().any(|item| exceeds(item, budget)),
+            Value::Object(fields) => fields.iter().any(|(key, value)| {
+                if key.len() + 3 > *budget {
+                    return true;
+                }
+                *budget -= key.len() + 3;
+                exceeds(value, budget)
+            }),
+            _ => false,
+        }
+    }
+    let mut remaining = KERNEL_INLINE_MAX_BYTES;
+    if exceeds(value, &mut remaining) {
+        return None;
+    }
+    struct Bounded(Vec<u8>);
+    impl io::Write for Bounded {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.0.len() + bytes.len() > KERNEL_INLINE_MAX_BYTES {
+                return Err(io::ErrorKind::WriteZero.into());
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut output = Bounded(Vec::new());
+    serde_json::to_writer(&mut output, value).ok()?;
+    Some(output.0)
 }
 
 pub(crate) struct Transport {
@@ -498,7 +689,7 @@ impl Transport {
         let data_read = data.try_clone()?;
         let (control_tx, control_rx) = mpsc::channel::<Control>();
         let (input_tx, input_rx) = mpsc::channel();
-        let (encode_tx, encode_rx) = mpsc::channel::<(Uuid, Value)>();
+        let (body_tx, body_rx) = mpsc::channel::<BodyJob>();
         let shared = Arc::new(Shared {
             stopped: AtomicBool::new(false),
             control: control_tx,
@@ -507,12 +698,17 @@ impl Transport {
             scheduled: Mutex::new(Scheduler {
                 streams: HashMap::new(),
                 order: VecDeque::new(),
+                inline: VecDeque::new(),
+                inline_bytes: 0,
+                next_arrival: 0,
             }),
             changed: Condvar::new(),
             received: Mutex::new(HashMap::new()),
             response_lanes: Mutex::new(HashMap::new()),
             epoch: epoch.clone(),
             chunk_bytes: bootstrap.chunk_bytes,
+            body_jobs: body_tx,
+            arrivals: Mutex::new(Arrivals::default()),
         });
         let writer = shared.clone();
         thread::spawn(move || {
@@ -529,48 +725,21 @@ impl Transport {
                 }
             }
         });
-        let encoder = shared.clone();
-        thread::spawn(move || {
-            for (id, value) in encode_rx {
-                if encoder
-                    .scheduled
-                    .lock()
-                    .unwrap()
-                    .streams
-                    .get(&id)
-                    .is_none_or(|stream| stream.aborting)
-                {
-                    continue;
-                }
-                let bytes = match serde_json::to_vec(&value) {
-                    Ok(bytes) => bytes,
-                    Err(_) => {
-                        encoder.fail(Some(("body-encode", io::ErrorKind::InvalidData.into())));
-                        break;
-                    }
+        let body_rx = Arc::new(Mutex::new(body_rx));
+        for _ in 0..thread::available_parallelism().map_or(1, |count| count.get()) {
+            let worker = shared.clone();
+            let jobs = body_rx.clone();
+            thread::spawn(move || loop {
+                let job = jobs.lock().unwrap().recv();
+                let Ok(job) = job else {
+                    break;
                 };
-                let length = bytes.len();
-                let mut scheduler = encoder.scheduled.lock().unwrap();
-                let Some(stream) = scheduler
-                    .streams
-                    .get_mut(&id)
-                    .filter(|stream| !stream.aborting)
-                else {
-                    continue;
-                };
-                stream.bytes = Some(bytes);
-                scheduler.order.push_back(id);
-                if let Err(error) =
-                    encoder.command("transport-stream-begin", id, json!({"byteLength":length}))
-                {
-                    drop(scheduler);
-                    encoder.fail(Some(("body-announce", error)));
+                if let Err(error) = run_body_job(job, &worker) {
+                    worker.fail(Some(("body-codec", error)));
                     break;
                 }
-                drop(scheduler);
-                encoder.changed.notify_all();
-            }
-        });
+            });
+        }
         let data_writer = shared.clone();
         thread::spawn(move || {
             if let Err(error) = write_data(data, &data_writer) {
@@ -592,7 +761,6 @@ impl Transport {
         Ok(Self {
             sender: Sender {
                 shared: Some(shared),
-                encode: Some(encode_tx),
                 #[cfg(test)]
                 fixture: None,
             },
@@ -605,10 +773,82 @@ impl Transport {
     }
 }
 
-fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
+fn run_body_job(job: BodyJob, shared: &Arc<Shared>) -> io::Result<()> {
+    match job {
+        BodyJob::Encode(id, value) => {
+            let cancelled = shared
+                .scheduled
+                .lock()
+                .unwrap()
+                .streams
+                .get(&id)
+                .is_none_or(|stream| stream.aborting);
+            let bytes = if cancelled {
+                None
+            } else {
+                Some(
+                    serde_json::to_vec(&value)
+                        .map_err(|_| protocol_error("body encoding failed"))?,
+                )
+            };
+            // Cancellation may settle the wire while the worker still owns the original
+            // body. Its stream credit is released only after this job actually relinquishes it.
+            drop(value);
+            let mut scheduler = shared.scheduled.lock().unwrap();
+            let Some(stream) = scheduler.streams.get_mut(&id) else {
+                return Ok(());
+            };
+            stream.encoding = false;
+            if stream.aborting {
+                if stream.settled {
+                    scheduler.streams.remove(&id);
+                }
+            } else if let Some(bytes) = bytes {
+                let length = bytes.len();
+                stream.bytes = Some(bytes);
+                shared.command("transport-stream-begin", id, json!({"byteLength":length}))?;
+            }
+            shared.changed.notify_all();
+            drop(scheduler);
+            shared.start_streams()?;
+        }
+        BodyJob::Decode(id, received) => {
+            let value: Value = serde_json::from_slice(&received.bytes)
+                .map_err(|_| protocol_error("invalid content JSON"))?;
+            if identity(&value) != received.meta {
+                return Err(protocol_error("content identity mismatch"));
+            }
+            shared
+                .incoming
+                .send(Incoming::Frame(value, Lane::Data))
+                .map_err(|_| io::ErrorKind::BrokenPipe)?;
+            // Credit includes hydration lifetime, not just the last socket read.
+            shared.command(
+                "transport-stream-ended",
+                id,
+                json!({"sequence":received.sequence}),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn read_control(mut input: impl io::Read, shared: &Arc<Shared>) -> io::Result<()> {
     while let Some(payload) = read_frame(&mut input)? {
-        let value: Value =
+        let mut value: Value =
             serde_json::from_slice(&payload).map_err(|_| protocol_error("invalid control JSON"))?;
+        if value["kind"] == "cancel" {
+            if let Some(sequence) = value
+                .as_object_mut()
+                .and_then(|fields| fields.remove("arrivalSequence"))
+            {
+                let sequence = sequence
+                    .as_u64()
+                    .ok_or_else(|| protocol_error("invalid cancellation arrival"))?;
+                shared.after_arrival(sequence, Incoming::Frame(value, Lane::Control))?;
+                continue;
+            }
+        }
         let kind = value["kind"].as_str().unwrap_or_default();
         if !kind.starts_with("transport-stream-") {
             if kind == "request" {
@@ -639,6 +879,9 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
         match kind {
             "transport-stream-open" => {
                 let meta = value["identity"].clone();
+                let arrival_sequence = value["arrivalSequence"]
+                    .as_u64()
+                    .ok_or_else(|| protocol_error("stream arrival required"))?;
                 if !meta.is_object() {
                     return Err(protocol_error("stream identity required"));
                 }
@@ -654,6 +897,7 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                             bytes: Vec::new(),
                             sequence: 0,
                             abort_sequence: None,
+                            arrival_sequence,
                         })),
                     )
                     .is_some()
@@ -668,10 +912,9 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                         request_id.into(),
                         response_lane(meta["method"].as_str().unwrap_or_default()),
                     );
-                    shared
-                        .incoming
-                        .send(Incoming::Open(meta))
-                        .map_err(|_| io::ErrorKind::BrokenPipe)?;
+                    shared.arrive(arrival_sequence, vec![Incoming::Open(meta)])?;
+                } else {
+                    shared.arrive(arrival_sequence, vec![])?;
                 }
             }
             "transport-stream-begin" => {
@@ -735,31 +978,17 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                     bytes: std::mem::take(&mut stream.bytes),
                     sequence: stream.sequence,
                     abort_sequence: None,
+                    arrival_sequence: stream.arrival_sequence,
                 };
                 if received.length != Some(received.bytes.len())
                     || value["sequence"].as_u64() != Some(received.sequence)
                 {
                     return Err(protocol_error("incomplete content stream"));
                 }
-                shared.command(
-                    "transport-stream-ended",
-                    id,
-                    json!({"sequence":received.sequence}),
-                )?;
-                // Hydration is never performed by the control reader or a domain owner.
-                let decoder = shared.clone();
-                thread::spawn(move || {
-                    let result = serde_json::from_slice::<Value>(&received.bytes);
-                    match result {
-                        Ok(value) if identity(&value) == received.meta => {
-                            let _ = decoder.incoming.send(Incoming::Frame(value, Lane::Data));
-                        }
-                        _ => decoder.fail(Some((
-                            "body-decode",
-                            protocol_error("content identity or JSON is invalid"),
-                        ))),
-                    }
-                });
+                shared
+                    .body_jobs
+                    .send(BodyJob::Decode(id, received))
+                    .map_err(|_| io::ErrorKind::BrokenPipe)?;
             }
             "transport-stream-abort" => {
                 let stream = shared
@@ -779,12 +1008,10 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                 received.abort_sequence = Some(sequence);
                 received.bytes.clear();
                 let meta = received.meta.clone();
+                let arrival_sequence = received.arrival_sequence;
                 let drained = sequence == received.sequence;
                 drop(received);
-                shared
-                    .incoming
-                    .send(Incoming::Abort(meta))
-                    .map_err(|_| io::ErrorKind::BrokenPipe)?;
+                shared.after_arrival(arrival_sequence, Incoming::Abort(meta))?;
                 if drained {
                     shared.received.lock().unwrap().remove(&id);
                     shared.command("transport-stream-aborted", id, json!({"sequence":sequence}))?;
@@ -801,6 +1028,7 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                 }
                 stream.aborting = true;
                 stream.bytes = None;
+                stream.value = None;
                 let sequence = stream.sequence;
                 scheduler.order.retain(|queued| *queued != id);
                 shared.command("transport-stream-abort", id, json!({"sequence":sequence}))?;
@@ -817,9 +1045,15 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                 {
                     return Err(protocol_error("invalid stream settlement"));
                 }
-                scheduler.streams.remove(&id);
+                if stream.encoding {
+                    scheduler.streams.get_mut(&id).unwrap().settled = true;
+                } else {
+                    scheduler.streams.remove(&id);
+                }
                 scheduler.order.retain(|queued| *queued != id);
                 shared.changed.notify_all();
+                drop(scheduler);
+                shared.start_streams()?;
             }
             _ => return Err(protocol_error("unknown transport command")),
         }
@@ -827,14 +1061,38 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
     Err(io::ErrorKind::UnexpectedEof.into())
 }
 
-fn read_data(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
+fn read_data(mut input: impl io::Read, shared: &Arc<Shared>) -> io::Result<()> {
     while let Some(payload) = read_frame(&mut input)? {
-        if payload.len() < DATA_HEADER_BYTES {
-            return Err(protocol_error("truncated data header"));
+        if payload.first() == Some(&1) {
+            if payload.len() < INLINE_HEADER_BYTES
+                || payload.len() - INLINE_HEADER_BYTES > KERNEL_INLINE_MAX_BYTES
+            {
+                return Err(protocol_error("invalid inline frame length"));
+            }
+            let sequence = u64::from_be_bytes(payload[1..INLINE_HEADER_BYTES].try_into().unwrap());
+            let value: Value = serde_json::from_slice(&payload[INLINE_HEADER_BYTES..])
+                .map_err(|_| protocol_error("invalid inline JSON"))?;
+            let mut events = Vec::new();
+            if value["kind"] == "request" {
+                let id = value["id"]
+                    .as_str()
+                    .ok_or_else(|| protocol_error("request identity required"))?;
+                shared.response_lanes.lock().unwrap().insert(
+                    id.into(),
+                    response_lane(value["method"].as_str().unwrap_or_default()),
+                );
+                events.push(Incoming::Open(identity(&value)));
+            }
+            events.push(Incoming::Frame(value, Lane::Data));
+            shared.arrive(sequence, events)?;
+            continue;
         }
-        let id = Uuid::from_slice(&payload[..16])
+        if payload.first() != Some(&0) || payload.len() < DATA_HEADER_BYTES {
+            return Err(protocol_error("invalid data frame type or header"));
+        }
+        let id = Uuid::from_slice(&payload[1..17])
             .map_err(|_| protocol_error("invalid data identity"))?;
-        let sequence = u64::from_be_bytes(payload[16..24].try_into().unwrap());
+        let sequence = u64::from_be_bytes(payload[17..25].try_into().unwrap());
         let stream = shared
             .received
             .lock()
@@ -873,7 +1131,8 @@ fn read_data(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
     Err(io::ErrorKind::UnexpectedEof.into())
 }
 
-fn write_data(mut output: Connection, shared: &Arc<Shared>) -> io::Result<()> {
+fn write_data(mut output: impl io::Write, shared: &Arc<Shared>) -> io::Result<()> {
+    let mut inline_turn = true;
     loop {
         let mut scheduler = shared.scheduled.lock().unwrap();
         let selected = loop {
@@ -895,11 +1154,24 @@ fn write_data(mut output: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                     break;
                 }
             }
+            if !scheduler.inline.is_empty() && (inline_turn || selected.is_none()) {
+                break None;
+            }
             if let Some(id) = selected {
-                break id;
+                break Some(id);
             }
             scheduler = shared.changed.wait(scheduler).unwrap();
         };
+        let Some(selected) = selected else {
+            let frame = scheduler.inline.pop_front().unwrap();
+            scheduler.inline_bytes -= frame.len();
+            shared.changed.notify_all();
+            drop(scheduler);
+            crate::protocol::write_encoded_frame(&mut output, &frame)?;
+            inline_turn = false;
+            continue;
+        };
+        inline_turn = true;
         let stream = scheduler.streams.get_mut(&selected).unwrap();
         if stream.offset == stream.bytes.as_ref().unwrap().len() {
             let sequence = stream.sequence;
@@ -917,6 +1189,7 @@ fn write_data(mut output: Connection, shared: &Arc<Shared>) -> io::Result<()> {
         let end = (stream.offset + shared.chunk_bytes).min(bytes.len());
         stream.sequence += 1;
         let mut chunk = Vec::with_capacity(DATA_HEADER_BYTES + end - stream.offset);
+        chunk.push(0);
         chunk.extend_from_slice(stream.stream_id.as_bytes());
         chunk.extend_from_slice(&stream.sequence.to_be_bytes());
         chunk.extend_from_slice(&bytes[stream.offset..end]);
@@ -926,3 +1199,7 @@ fn write_data(mut output: Connection, shared: &Arc<Shared>) -> io::Result<()> {
         crate::protocol::write_encoded_frame(&mut output, &chunk)?;
     }
 }
+
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;

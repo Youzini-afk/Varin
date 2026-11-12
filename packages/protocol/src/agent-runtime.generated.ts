@@ -1816,7 +1816,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 94; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = ({v: 95; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown})) | {v: 95; kind: 'runtime-event'; stream: 'resync'; cursor: number; kernelEpoch?: string; reason: string};
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3127,6 +3127,8 @@ export interface RuntimeEvent {
   revision: number;
   kind: string;
   data: unknown;
+  thread_id: string | null;
+  branch_id: string | null;
 }
 
 export interface KernelWorkingResultCandidate {
@@ -3834,3 +3836,29 @@ export interface ExecutionError {code:string;message:string;tool_name?:string;de
 export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};
 
 export interface ChildSourceAuthority { authority_id:string;resource_epoch:string }
+
+export interface ThreadViewParams {
+  threadId: string;
+  branchId: string;
+  historyLimit: number;
+  afterHeadId?: string;
+}
+
+export interface ThreadInspectManyParams {
+  threadIds: string[];
+}
+
+export interface OwnershipResolveParams {
+  threads?: string[];
+  runs?: string[];
+  operations?: string[];
+  inputs?: string[];
+}
+
+export interface ContextInspectionParams {
+  threadId: string;
+  branchId: string;
+  headId: string | null;
+}
+
+export interface OwnershipResolution { threads: Array<{id: string; principalId: string | null}>; runs: Array<{id: string; threadId: string}>; operations: Array<{id: string; runId: string}>; inputs: Array<{id: string; threadId: string}>; }

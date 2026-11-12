@@ -1,5 +1,5 @@
 import React from 'react';
-import { createUsageHttpAPI, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, getRuntimeApiBaseUrl, type ModelChannel, type ThreadIdentity } from '@varin/application-client';
+import { createUsageHttpAPI, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, getThreadObservationBus, subscribeRuntimeEndpointChanged, getRuntimeApiBaseUrl, type ModelChannel, type ThreadIdentity } from '@varin/application-client';
 import type { UsageSummary, UsageSummaryRow, UsageTokenCount } from '@varin/protocol';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -44,28 +44,28 @@ export function UsageSettingsPage() {
   const [inspect, setInspect] = React.useState<{ generation: number; identity: ThreadIdentity } | null>(null);
   React.useEffect(() => {
     if (!threadsApi) return;
-    const controller = new AbortController(); let alive = true, dirty = false, reading: Promise<void> | undefined;
+    const controller = new AbortController(); let alive = true, dirty = false, observationUnavailable = false, reading: Promise<void> | undefined;
     const current = () => alive && generation === getRuntimeEndpointGeneration();
     const fail = (error: unknown) => { if (current()) setView(previous => ({ ...(previous.owner === owner ? previous : { owner, channels: [] }), issue: error instanceof Error ? error.message : String(error) })); };
     const read = () => {
       dirty = true;
       if (!reading) reading = (async () => { while (dirty && current()) {
         dirty = false; const data = await usage.summary(window_.query, controller.signal);
-        if (current()) setView(previous => ({ ...previous, owner, data, issue: undefined }));
+        if (current()) setView(previous => ({ ...previous, owner, data, issue: observationUnavailable ? t('usage.disconnected') : undefined }));
       } })().finally(() => { reading = undefined; if (dirty && current()) void read().catch(fail); });
       return reading;
     };
     setSelectedDay(null); setExpanded(null);
-    void (async () => {
-      const [first, catalog] = await Promise.all([usage.summary(window_.query, controller.signal), models.read(controller.signal)]);
-      if (!current()) return;
-      setView({ owner, data: first, channels: catalog.channels, directoryUpdated: catalog.directory?.updatedAt });
-      await threadsApi.observe(first.throughCursor, event => {
-        if ('kind' in event && event.kind === 'usage.updated') void read().catch(fail);
-      }, { signal: controller.signal });
-      if (current()) fail(new Error(t('usage.disconnected')));
-    })().catch(fail);
-    return () => { alive = false; controller.abort(); };
+    const unsubscribe = getThreadObservationBus(threadsApi).subscribe({kinds: ['usage.updated']}, event => {
+      if ('stream' in event && event.stream === 'resync') { observationUnavailable = event.reason === 'connection-lost'; if (observationUnavailable) fail(new Error(t('usage.disconnected'))); }
+      void read().catch(fail);
+    });
+    void read().catch(fail);
+    void models.read(controller.signal).then(catalog => {
+      if (current()) setView(previous => ({...previous, owner, channels: catalog.channels, directoryUpdated: catalog.directory?.updatedAt}));
+    }, fail);
+    return () => { alive = false; unsubscribe(); controller.abort(); };
+
   }, [usage, models, threadsApi, generation, owner, window_, t]);
   React.useEffect(() => {
     const now = new Date();

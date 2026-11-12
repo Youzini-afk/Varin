@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import { getRuntimeEndpointGeneration, type ConversationOrganizationEntry, type ConversationOrganizationRef } from '@varin/application-client';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
@@ -7,7 +8,7 @@ import { organizationContainerPath } from '@/components/conversation/organizatio
 /** Open details read one original object, never drain the paged navigation tree. */
 export function useConversationOrganizationEntry(reference: ConversationOrganizationRef, active = true, includeLocation = false) {
   const api = useRuntimeAPIs().conversationOrganization;
-  const organization = useConversationOrganization(active);
+  const organization = useConversationOrganization(active, useShallow(state => ({ host: state.host, snapshot: state.snapshot, pages: state.pages })));
   const host = getRuntimeEndpointGeneration(), key = JSON.stringify([host, reference.kind, reference.id]);
   const [state, setState] = React.useState<{ key: string; entry?: ConversationOrganizationEntry; error?: string; loading: boolean }>();
   const cursor = organization.host === host ? organization.snapshot?.cursor : undefined;

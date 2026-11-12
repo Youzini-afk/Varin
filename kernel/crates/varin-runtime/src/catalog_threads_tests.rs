@@ -368,3 +368,41 @@ fn catalog_malformed_current_metadata_is_rejected_without_repair() {
         1
     );
 }
+
+#[test]
+fn format_97_to_98_materializes_every_legacy_internal_thread_rule_atomically() {
+    let mut db=Connection::open_in_memory().unwrap();
+    db.execute_batch("PRAGMA user_version=97;
+        CREATE TABLE threads(id TEXT PRIMARY KEY);
+        CREATE TABLE thread_creations(thread_id TEXT,domain TEXT);
+        CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT);
+        CREATE TABLE runs(id TEXT PRIMARY KEY,branch_id TEXT);
+        CREATE TABLE operations(id TEXT PRIMARY KEY,run_id TEXT,body TEXT);
+        CREATE TABLE child_tasks(id TEXT,child_thread_id TEXT);
+        CREATE TABLE context_jobs(run_id TEXT);
+        INSERT INTO threads VALUES('public'),('summary'),('memory'),('code'),('context'),('legacy-memory');
+        INSERT INTO thread_creations VALUES('summary','summary'),('memory','memory');
+        INSERT INTO branches VALUES('context-main','context'),('legacy-memory-main','legacy-memory');
+        INSERT INTO runs VALUES('context-run','context-main'),('memory-run','legacy-memory-main');
+        INSERT INTO context_jobs VALUES('context-run');
+        INSERT INTO operations VALUES('code-operation',NULL,'{\"executor\":\"code_retrieval\"}'),('memory-operation','memory-run','{\"intent\":{\"kind\":\"memory_work_v1\"}}');
+        INSERT INTO child_tasks VALUES('code-operation','code');
+    ").unwrap();
+    {
+        let tx=db.transaction().unwrap();
+        upgrade_hidden(&tx).unwrap();
+        // A failed overall conversion leaves both the marker and original schema untouched.
+    }
+    assert!(db.prepare("SELECT hidden_kind FROM threads").is_err());
+    assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),97);
+    let tx=db.transaction().unwrap();
+    upgrade_hidden(&tx).unwrap();tx.pragma_update(None,"user_version",98).unwrap();tx.commit().unwrap();
+    let rows=db.prepare("SELECT id,hidden_kind FROM threads ORDER BY id").unwrap().query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).unwrap().collect::<std::result::Result<std::collections::BTreeMap<_,_>,_>>().unwrap();
+    assert_eq!(rows["public"],None);
+    assert_eq!(rows["summary"].as_deref(),Some("summary"));
+    assert_eq!(rows["memory"].as_deref(),Some("memory"));
+    assert_eq!(rows["code"].as_deref(),Some("code_retrieval"));
+    assert_eq!(rows["context"].as_deref(),Some("context_job"));
+    assert_eq!(rows["legacy-memory"].as_deref(),Some("memory"));
+    check_hidden_format(&db).unwrap();
+}

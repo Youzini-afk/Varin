@@ -83,17 +83,6 @@ pub(super) fn assign_new(tx: &Transaction<'_>, id: &str, principal: Option<&str>
     )?;
     Ok(())
 }
-// Resolve only original Catalog relations, never an ID prefix or fields inside author output.
-// Colliding identities in different domains remain ambiguous and are withheld from observers.
-const SUBJECTS: &str = "SELECT id AS subject,id AS thread_id FROM threads
- UNION ALL SELECT id,thread_id FROM branches
- UNION ALL SELECT r.id,b.thread_id FROM runs r JOIN branches b ON b.id=r.branch_id
- UNION ALL SELECT o.id,b.thread_id FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id
- UNION ALL SELECT i.id,b.thread_id FROM input_queue i JOIN branches b ON b.id=i.branch_id
- UNION ALL SELECT m.id,b.thread_id FROM model_steps m JOIN runs r ON r.id=m.run_id JOIN branches b ON b.id=r.branch_id
- UNION ALL SELECT f.id,f.thread_id FROM followups f
- UNION ALL SELECT o.id,f.thread_id FROM followup_occurrences o JOIN followups f ON f.id=o.followup_id
- UNION ALL SELECT d.id,c.child_thread_id FROM delegated_executions d JOIN child_tasks c ON c.id=d.child_operation_id";
 impl Catalog {
     /// Called at Host authentication startup, not from user-selected request parameters.
     /// The first transaction records the migration policy. Later auth changes cannot claim public work.
@@ -157,10 +146,8 @@ impl Catalog {
         if let Some(principal) = principal {
             validate(principal)?;
         }
-        let sql = format!(
-            "SELECT e.cursor,e.subject,e.revision,e.kind,e.data FROM events e WHERE e.cursor>?1 AND (EXISTS(SELECT 1 FROM threads t WHERE (t.principal_id IS NULL OR t.principal_id=?3) AND t.id=(SELECT min(thread_id) FROM ({SUBJECTS}) subjects WHERE subjects.subject=e.subject HAVING count(DISTINCT thread_id)=1)) OR (e.kind='organization.changed' AND e.subject='organization:'||json_quote(?3) AND EXISTS(SELECT 1 FROM organization_spaces WHERE scope=json_quote(?3)))) ORDER BY e.cursor LIMIT ?2"
-        );
-        let mut query = self.db.prepare(&sql)?;
+        let sql = "SELECT e.cursor,e.subject,e.revision,e.kind,e.data,e.thread_id,e.branch_id FROM events e LEFT JOIN threads t ON t.id=e.thread_id WHERE e.cursor>?1 AND ((t.id IS NOT NULL AND (t.principal_id IS NULL OR t.principal_id=?3)) OR (e.kind='organization.changed' AND e.subject='organization:'||json_quote(?3) AND EXISTS(SELECT 1 FROM organization_spaces WHERE scope=json_quote(?3)))) ORDER BY e.cursor LIMIT ?2";
+        let mut query = self.db.prepare(sql)?;
         let mut result = Vec::new();
         for row in query.query_map(params![sql_number(cursor)?, limit, principal], |r| {
             Ok((
@@ -168,11 +155,12 @@ impl Catalog {
                 r.get::<_, String>(1)?,
                 read_number(r, 2)?,
                 r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
+                r.get::<_, String>(4)?, r.get::<_, Option<String>>(5)?, r.get::<_, Option<String>>(6)?,
             ))
         })? {
-            let (cursor, subject, revision, kind, data) = row?;
+            let (cursor, subject, revision, kind, data, thread_id, branch_id) = row?;
             result.push(Event {
+                thread_id, branch_id,
                 cursor,
                 subject,
                 revision,

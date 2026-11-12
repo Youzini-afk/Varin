@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -517,6 +517,44 @@ describe('stable UI user ownership', () => {
     try {
       const context = await auth.resolveAuthContext({ headers: { cookie: 'varin_ui_session=attacker-chosen' } }, createResponse());
       expect(context?.principalId).toBeUndefined();
+    } finally { auth.dispose(); }
+  });
+});
+
+
+describe('request-local authentication', () => {
+  it('shares bearer resolution across auth, owner gate and route context, but not across requests', async () => {
+    const authenticate = vi.fn(async () => ({ ok: true, principalId: 'alice', clientId: 'device' }));
+    const auth = (await loadCreateUiAuth())({ password: 'secret',
+      principals: { ownerId: async () => 'owner', resolve: async id => id, isOwner: async id => id === 'owner' },
+      clientAuthController: { authenticateBearerToken: authenticate } });
+    const req = { method: 'POST', originalUrl: '/api/threads/snapshot', headers: { authorization: 'Bearer client-token' } };
+    try {
+      const response = createResponse(), next = vi.fn();
+      await Promise.all([auth.requireAuth(req, response, next), auth.resolveAuthContext(req, response), auth.resolveRequestAuth(req)]);
+      await auth.requirePrincipalAccess(req, response, next);
+      await auth.resolveRequestAuth(req, { allowUrlToken: false });
+      expect(authenticate).toHaveBeenCalledTimes(1);
+      expect(next).toHaveBeenCalledTimes(2);
+      await auth.resolveRequestAuth({ ...req });
+      expect(authenticate).toHaveBeenCalledTimes(2);
+    } finally { auth.dispose(); }
+  });
+
+  it('verifies a signed session once despite repeated and simultaneous middleware', async () => {
+    const resolve = vi.fn(async (id: string) => id);
+    const auth = (await loadCreateUiAuth())({ password: 'request-cache-secret',
+      principals: { ownerId: async () => 'owner', resolve, isOwner: async id => id === 'owner' } });
+    try {
+      const login = createResponse();
+      await auth.handleSessionCreate({ headers: {}, body: { password: 'request-cache-secret' } }, login);
+      const cookie = String(login.getHeader('set-cookie')).split(';')[0]!;
+      const req = { method: 'POST', originalUrl: '/api/threads/snapshot', headers: { cookie } };
+      const response = createResponse();
+      await Promise.all([auth.requireAuth(req, response, () => {}), auth.resolveAuthContext(req, response), auth.requireSessionAuth(req, response, () => {})]);
+      await auth.handleSessionStatus(req, response);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(response.body).toEqual({ authenticated: true, hostOwner: true });
     } finally { auth.dispose(); }
   });
 });

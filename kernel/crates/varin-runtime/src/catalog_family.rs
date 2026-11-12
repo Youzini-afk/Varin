@@ -829,7 +829,7 @@ impl FamilyRead {
         }
         Ok((members,next))
     }
-    fn list_page_in(&self,db:&Connection, include_self: bool, query:FamilyListQuery, details: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+    pub(super) fn list_page_in(&self,db:&Connection, include_self: bool, query:FamilyListQuery, details: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let root = super::scheduling::thread_family(&db, &self.caller)?;
         let scope = query.scope.as_deref().unwrap_or("current");
         if !["current","history","all"].contains(&scope) || query.limit == Some(0) { return Err(RuntimeError::Invalid("invalid task directory query".into())); }

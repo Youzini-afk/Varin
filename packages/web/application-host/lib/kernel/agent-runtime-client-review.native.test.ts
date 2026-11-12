@@ -126,7 +126,7 @@ it('abort retains wire credit until receipt and cancels queued admission without
   const controller = new AbortController();
   const first = f.runtimeClient.status(controller.signal);
   const rejected = expect(first).rejects.toThrow(/cancelled/i);
-  const second = f.runtimeClient.status();
+  const remaining = Array.from({length: KERNEL_REQUEST_WINDOW - 1}, () => f.runtimeClient.status());
   await expect.poll(() => f.held.length).toBe(KERNEL_REQUEST_WINDOW);
   controller.abort();
   await rejected;
@@ -138,7 +138,7 @@ it('abort retains wire credit until receipt and cancels queued admission without
   await queuedRejected;
   expect(f.requests.filter(value => value.method === 'runtime.status')).toHaveLength(KERNEL_REQUEST_WINDOW);
   f.release();
-  await second;
+  await Promise.all(remaining);
   expect((await f.runtimeClient.status()).epoch).toBeGreaterThan(0);
 }, 30_000);
 

@@ -175,6 +175,8 @@ pub struct ModelStep {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Event {
+    pub thread_id: Option<String>,
+    pub branch_id: Option<String>,
     pub cursor: u64,
     pub subject: String,
     pub revision: u64,

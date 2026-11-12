@@ -98,7 +98,7 @@ it('rejects a late result after a new user message advances the branch', async (
 it('starts in the background from a durable completed Run without an open chat view', async () => {
   const f = fixture();
   await vi.waitFor(() => expect(f.runtime.status).toHaveBeenCalled());
-  f.emit({ cursor: 1, subject: f.run.id, revision: 2, kind: 'run.changed', data: f.run });
+  f.emit({ thread_id: f.run.thread_id, branch_id: f.run.branch_id, cursor: 1, subject: f.run.id, revision: 2, kind: 'run.changed', data: f.run });
   await vi.waitFor(() => expect(f.generate).toHaveBeenCalledOnce());
   await f.service.close();
 });
@@ -108,11 +108,11 @@ it('keeps same-turn historical progress from cancelling a suggestion, but cancel
   f.generate.mockImplementationOnce(input => new Promise((_resolve, reject) => input.signal!.addEventListener('abort', () => reject(input.signal!.reason), { once: true })));
   const work = f.service.read(identity, f.run.id, 'answer');
   await vi.waitFor(() => expect(f.generate).toHaveBeenCalledOnce());
-  f.emit({ cursor: 1, subject: f.run.id, revision: 1, kind: 'run.changed', data: { ...f.run, state: 'generating' } });
+  f.emit({ thread_id: f.run.thread_id, branch_id: f.run.branch_id, cursor: 1, subject: f.run.id, revision: 1, kind: 'run.changed', data: { ...f.run, state: 'generating' } });
   await vi.waitFor(() => expect(f.runtime.events).toHaveBeenCalled());
   expect(f.generate.mock.calls[0]![0].signal!.aborted).toBe(false);
   vi.mocked(f.runtime.run).mockResolvedValue({ ...f.run, id: 'run:next', state: 'accepted' });
-  f.emit({ cursor: 2, subject: 'run:next', revision: 1, kind: 'run.accepted', data: { input_id: 'new-user' } });
+  f.emit({ thread_id: f.run.thread_id, branch_id: f.run.branch_id, cursor: 2, subject: 'run:next', revision: 1, kind: 'run.accepted', data: { input_id: 'new-user' } });
   expect(await work).toEqual({ status: 'stale' });
   expect(f.generate.mock.calls[0]![0].signal!.aborted).toBe(true);
   await f.service.close();
@@ -168,7 +168,7 @@ it.each([
 ])('catches up suggestion events from $after when wake $first precedes status $status', async ({ first, status, after }) => {
   let ready!: (status: { eventCursor: number }) => void;
   const f = fixture(() => new Promise(resolve => { ready = resolve; }));
-  const completed: RuntimeEvent = { cursor: first || 1, subject: f.run.id, revision: 1, kind: 'run.changed', data: f.run };
+  const completed: RuntimeEvent = { thread_id: f.run.thread_id, branch_id: f.run.branch_id, cursor: first || 1, subject: f.run.id, revision: 1, kind: 'run.changed', data: f.run };
   vi.mocked(f.runtime.events).mockImplementation(async cursor => [completed,
     ...(status > completed.cursor ? [{ ...completed, cursor: status, kind: 'unrelated' }] : [])].filter(event => event.cursor > cursor));
   try {

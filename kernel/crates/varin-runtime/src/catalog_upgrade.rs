@@ -9,6 +9,8 @@ struct Upgrade {
 }
 
 const UPGRADES: &[Upgrade] = &[
+    Upgrade { from: 98, to: 99, convert: |tx, _| event_scope::upgrade(tx) },
+    Upgrade { from: 97, to: 98, convert: |tx, _| threads::upgrade_hidden(tx) },
     // The original directory omitted readable unowned native conversations. Ask the
     // Settings-backed initializer to fill missing placements without changing owners,
     // existing positions, container identities or original command receipts.
@@ -79,7 +81,7 @@ pub(super) fn supports(mut version: i64) -> bool {
 /// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
 /// valid asset or, worse, relabel a different layout without running its converter.
 pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
-    if matches!(version, 81 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97) {
+    if version == 81 || version >= 83 {
         return context_observations::check_format(db);
     }
     let present: bool = db.query_row(
@@ -98,7 +100,7 @@ pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> 
 /// Environment queue entries (including Zone2 captures) intentionally have a
 /// different representation and are not evidence of a missing history index.
 pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
-    if !matches!(version, 82 | 83 | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97) {
+    if version < 82 {
         return Ok(());
     }
     let missing: bool = db.query_row(
@@ -281,3 +283,23 @@ fn apply_before_commit(
 #[cfg(test)]
 #[path = "catalog_upgrade_tests.rs"]
 mod tests;
+
+
+/// Downgrade only test assets initialized at today's format before exercising an older
+/// released layout. Production preflight must continue rejecting relabeled mixed schemas.
+#[cfg(test)]
+pub(crate) fn remove_read_views_for_legacy_fixture(db: &Connection) {
+    let has_column = |table: &str, column: &str| -> bool {
+        db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+            params![table,column], |row| row.get(0)).unwrap()
+    };
+    if has_column("events", "thread_id") {
+        db.execute_batch("DROP INDEX IF EXISTS events_thread_cursor; ALTER TABLE events DROP COLUMN thread_id;").unwrap();
+    }
+    if has_column("events", "branch_id") {
+        db.execute_batch("ALTER TABLE events DROP COLUMN branch_id;").unwrap();
+    }
+    if has_column("threads", "hidden_kind") {
+        db.execute_batch("ALTER TABLE threads DROP COLUMN hidden_kind;").unwrap();
+    }
+}

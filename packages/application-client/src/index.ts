@@ -84,3 +84,5 @@ export * from './project-git.js';
 export * from './git-integration.js';
 
 export * from './github-http.js';
+
+export * from './thread-observation.js';

@@ -408,7 +408,7 @@ function artifactConversationFixture() {
     launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } });
   const submit = vi.fn(async (input: ThreadSubmit) => ({ thread_id: input.threadId, branch_id: input.branchId,
     run_id: 'run:submitted', input_id: 'input:submitted', cursor: 1 }));
-  const api: ThreadsAPI = { conversationTree: unused, treePreview: unused, attachments: { upload: unused, read: unused }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused,
+  const api: ThreadsAPI = { inspectMany: unused, conversationTree: unused, treePreview: unused, attachments: { upload: unused, read: unused }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused,
     materials: f.materials, research: f.api,
     contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,

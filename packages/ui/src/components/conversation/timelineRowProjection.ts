@@ -52,6 +52,10 @@ export function projectTimelineRow(block: ChatTimelineBlock, source: ChatTimelin
   for (const id of ids) for (const child of children.get(id) ?? []) ids.add(child);
   const toolExecutions: ConversationPresentation['toolExecutions'] = {};
   const uiCards: NonNullable<ConversationPresentation['uiCards']> = {};
+  const uiEmbeds: NonNullable<ConversationPresentation['uiEmbeds']> = {};
+  const entryIds = new Set(group?.entries.map(entry => entry.id) ?? []);
+  if (liveAssistant) entryIds.add(liveAssistant.id);
+  for (const [key, placement] of Object.entries(context.uiEmbeds ?? {})) if (entryIds.has(placement.sourceEntryId)) uiEmbeds[key] = placement;
   const results = new Map<string, NonNullable<ReturnType<typeof source.resultByCallId.get>>>();
   for (const id of ids) {
     if (context.toolExecutions[id]) toolExecutions[id] = context.toolExecutions[id]!;
@@ -68,6 +72,7 @@ export function projectTimelineRow(block: ChatTimelineBlock, source: ChatTimelin
   const projection = previous?.projection.liveAssistant === liveAssistant && previous?.projection.resultByCallId === resultByCallId
     ? previous.projection : { liveAssistant, resultByCallId };
   const next = { ...context,
+    uiEmbeds: sameRecord(previous?.presentation.uiEmbeds, uiEmbeds) ? previous!.presentation.uiEmbeds : uiEmbeds,
     toolExecutions: sameRecord(previous?.presentation.toolExecutions, toolExecutions) ? previous!.presentation.toolExecutions : toolExecutions,
     uiCards: sameRecord(previous?.presentation.uiCards, uiCards) ? previous!.presentation.uiCards : uiCards,
   };

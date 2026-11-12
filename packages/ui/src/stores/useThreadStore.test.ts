@@ -25,11 +25,12 @@ const settle = async () => { await new Promise(resolve => setTimeout(resolve, 0)
 function apiFixture() {
   const listeners: Array<Parameters<ThreadsAPI['observe']>[1]> = [];
   const list = vi.fn(async () => [summary()]);
-  const api = { list, create: vi.fn(async () => identity), update: vi.fn(async () => summary({ revision: 2, title: 'Renamed' })),
+  const inspectMany = vi.fn(async (ids: readonly string[]) => [summary()].filter(thread => ids.includes(thread.thread_id)));
+  const api = { list, inspectMany, create: vi.fn(async () => identity), update: vi.fn(async () => summary({ revision: 2, title: 'Renamed' })),
     delete: vi.fn(async () => summary({ deleted_at_ms: 10 })), markRead: vi.fn(async () => summary({ read_cursor: 4, unread: false })),
     observe: vi.fn(async (_cursor: number, listener: Parameters<ThreadsAPI['observe']>[1], { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => { listeners.push(listener); signal.addEventListener('abort', () => resolve(), { once: true }); })),
   } as unknown as ThreadsAPI;
-  return { api, list, listeners };
+  return { api, list, inspectMany, listeners };
 }
 beforeEach(() => { endpoint.url = 'https://host-a'; endpoint.generation += 1; useThreadDraftStore.setState({ drafts: {} }); });
 afterEach(() => { cleanup?.(); cleanup = undefined; });
@@ -45,8 +46,8 @@ it('opens the canonical branch from native catalog and keeps pin/archive/read wr
 });
 it('invalidates catalog on original events and never turns a failed refresh into an empty success', async () => {
   const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
-  f.list.mockRejectedValueOnce(new Error('catalog offline'));
-  f.listeners[0]({ cursor: 5, subject: identity.threadId, revision: 2, kind: 'thread.updated', data: {} });
+  f.inspectMany.mockRejectedValueOnce(new Error('catalog offline'));
+  f.listeners[0]({ thread_id: identity.threadId, branch_id: identity.branchId, cursor: 5, subject: identity.threadId, revision: 2, kind: 'thread.updated', data: {} });
   await settle();
   expect(useThreadStore.getState().threads[0].title).toBe('A');
   expect(useThreadStore.getState().catalogError).toBe('catalog offline');
@@ -89,8 +90,8 @@ it('keeps a newer activity/read position when an old idempotent metadata receipt
   const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
   const receipt = deferred<ThreadSummary>(); vi.mocked(f.api.update).mockImplementationOnce(() => receipt.promise);
   const update = useThreadStore.getState().updateThread(identity.threadId, { title: 'Renamed' });
-  f.list.mockResolvedValue([summary({ title: 'Newer', revision: 3, activity_cursor: 12, read_cursor: 10, updated_at_ms: 100 })]);
-  f.listeners[0]({ cursor: 12, subject: identity.threadId, revision: 3, kind: 'thread.updated', data: {} }); await settle();
+  f.inspectMany.mockResolvedValue([summary({ title: 'Newer', revision: 3, activity_cursor: 12, read_cursor: 10, updated_at_ms: 100 })]);
+  f.listeners[0]({ thread_id: identity.threadId, branch_id: identity.branchId, cursor: 12, subject: identity.threadId, revision: 3, kind: 'thread.updated', data: {} }); await settle();
   receipt.resolve(summary({ title: 'Renamed', revision: 2, activity_cursor: 5, read_cursor: 4 })); await update;
   expect(useThreadStore.getState().threads[0]).toMatchObject({ title: 'Newer', revision: 3, activity_cursor: 12, read_cursor: 10, unread: true, updated_at_ms: 100 });
 });
@@ -211,7 +212,8 @@ it('ignores a pre-creation catalog absence but retains authoritative removal on 
   const draft = useThreadStore.getState().openDraft();
   const beforeCreation = deferred<ThreadSummary[]>();
   const afterCreation = deferred<ThreadSummary[]>();
-  f.list.mockImplementationOnce(() => beforeCreation.promise).mockImplementationOnce(() => afterCreation.promise);
+  f.list.mockImplementationOnce(() => beforeCreation.promise);
+  f.inspectMany.mockImplementationOnce(() => afterCreation.promise);
   const refreshing = useThreadStore.getState().loadCatalog();
   try {
     await useThreadStore.getState().materializeDraft(draft, { waitForCatalog: false });
@@ -220,12 +222,12 @@ it('ignores a pre-creation catalog absence but retains authoritative removal on 
     expect(useThreadStore.getState().threads).toEqual([]);
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
     expect(useThreadStore.getState().selectedDraftKey).toBeNull();
-    afterCreation.resolve([summary()]); await refreshing;
+    afterCreation.resolve([summary()]); await refreshing; await settle();
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
     f.list.mockResolvedValueOnce([]);
     await useThreadStore.getState().loadCatalog();
     expect(useThreadStore.getState().selectedIdentity).toBeNull();
-  } finally { beforeCreation.resolve([]); afterCreation.resolve([summary()]); await refreshing; }
+  } finally { beforeCreation.resolve([]); afterCreation.resolve([summary()]); await refreshing; await settle(); }
 });
 
 it('does not supersede newer pending navigation when creation returns', async () => {
@@ -238,7 +240,7 @@ it('does not supersede newer pending navigation when creation returns', async ()
   const newerIdentity = { ...identity, threadId: 'thread-b', branchId: 'main-b' };
   const newerThread = summary({ thread_id: newerIdentity.threadId, main_branch_id: newerIdentity.branchId,
     branches: [{ branch_id: newerIdentity.branchId, head: null, active_run_id: null, latest_run: null }] });
-  f.list.mockImplementationOnce(() => catalog.promise).mockResolvedValue([newerThread]);
+  f.inspectMany.mockImplementationOnce(() => catalog.promise).mockImplementation(async ids => ids.includes(newerIdentity.threadId) ? [newerThread] : [summary()]);
   const selecting = useThreadStore.getState().selectThread(newerIdentity);
   try {
     creation.resolve(identity); await creating;
@@ -317,4 +319,47 @@ it('retains the original classification and source intent across a lost creation
   await useThreadStore.getState().materializeDraft(key);
   expect(vi.mocked(f.api.create).mock.calls).toEqual([[key, { organization: { containerId: 'release' } }], [key, { organization: { containerId: 'release' } }]]);
   expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'project', sourceSelection: { path: '/remote/project', resourceOwner: { hostId: 'remote' } } });
+});
+
+it('batches only dirty scoped Threads, preserves unrelated rows, and never lists on ordinary events', async () => {
+  const f = apiFixture();
+  const other = summary({ thread_id: 'thread-b', title: 'Background', updated_at_ms: 2 });
+  f.list.mockResolvedValue([summary(), other]);
+  cleanup = bindThreadStore(f.api); await settle();
+  const retained = useThreadStore.getState().threads.find(thread => thread.thread_id === identity.threadId);
+  f.inspectMany.mockResolvedValue([other]);
+  for (let cursor = 10; cursor < 40; cursor++) f.listeners[0]!({ cursor, subject: 'background-run', revision: cursor,
+    kind: 'run.changed', data: {}, thread_id: 'thread-b', branch_id: 'background-branch' });
+  await settle();
+  expect(f.list).toHaveBeenCalledTimes(1);
+  expect(f.inspectMany).toHaveBeenCalledExactlyOnceWith(['thread-b']);
+  expect(useThreadStore.getState().threads.find(thread => thread.thread_id === identity.threadId)).toBe(retained);
+  f.listeners[0]!({ cursor: 50, subject: 'organization', revision: 2, kind: 'organization.changed', data: {}, thread_id: null, branch_id: null });
+  f.listeners[0]!({ cursor: 51, subject: 'op', revision: 2, kind: 'operation.progress', data: {}, thread_id: 'thread-b', branch_id: 'background-branch' });
+  await settle();
+  expect(f.inspectMany).toHaveBeenCalledTimes(1);
+});
+
+it('patches archive/deletion membership and performs a full read only for resync', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  f.inspectMany.mockResolvedValueOnce([summary({ pinned: true, archived: true, updated_at_ms: 50 })]);
+  f.listeners[0]!({ cursor: 10, subject: identity.threadId, revision: 2, kind: 'thread.updated', data: {}, thread_id: identity.threadId, branch_id: null });
+  await settle(); expect(useThreadStore.getState().threads[0]).toMatchObject({ archived: true, pinned: true });
+  await useThreadStore.getState().selectThread(identity);
+  f.inspectMany.mockResolvedValueOnce([]);
+  f.listeners[0]!({ cursor: 11, subject: identity.threadId, revision: 3, kind: 'thread.deleted', data: {}, thread_id: identity.threadId, branch_id: null });
+  await settle(); expect(useThreadStore.getState().threads).toEqual([]); expect(useThreadStore.getState().selectedIdentity).toBeNull();
+  f.listeners[0]!({ stream: 'resync', cursor: 0, reason: 'kernel-restarted' });
+  await settle(); expect(f.list).toHaveBeenCalledTimes(2); expect(useThreadStore.getState().threads).toHaveLength(1);
+});
+
+it('merges another event arriving during inspection with exactly one trailing batch', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const first = deferred<ThreadSummary[]>(); f.inspectMany.mockImplementationOnce(() => first.promise);
+  const changed = (cursor: number) => ({ cursor, subject: identity.threadId, revision: cursor, kind: 'thread.updated', data: {}, thread_id: identity.threadId, branch_id: null });
+  f.listeners[0]!(changed(10)); await settle();
+  for (let cursor = 11; cursor < 20; cursor++) f.listeners[0]!(changed(cursor));
+  expect(f.inspectMany).toHaveBeenCalledTimes(1);
+  first.resolve([summary()]); await settle();
+  expect(f.inspectMany).toHaveBeenCalledTimes(2); expect(f.list).toHaveBeenCalledTimes(1);
 });
