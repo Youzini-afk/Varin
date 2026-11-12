@@ -1,7 +1,6 @@
 .organization-row { position: relative; display: flex; align-items: center; min-height: 34px; gap: 4px; border-radius: var(--radius-md); padding: 0 6px; color: var(--muted-foreground); transition: color var(--motion-dur-snap) var(--motion-ease-snap), background var(--motion-dur-snap) var(--motion-ease-snap); }
 .organization-row:hover, .organization-row:focus-within, .organization-row:has([data-popup-open]), [data-popup-open] > .organization-row { background: var(--interactive-hover); color: var(--foreground); }
 .organization-row[data-current=true], .organization-row[aria-selected=true] { background: var(--interactive-selection); color: var(--foreground); }
-.organization-row[data-selection-arriving] { background: transparent; }
 .organization-row:focus-visible { outline: 2px solid var(--interactive-focus-ring); outline-offset: -2px; }
 .organization-row-main { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; min-height: 34px; text-align: left; }
 .organization-row[data-container=true] .organization-row-main { font-weight: 500; }

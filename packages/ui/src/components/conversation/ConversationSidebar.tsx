@@ -470,8 +470,6 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const externalSessionId = useExternalAgentStore(state => state.selectedId);
   const currentSessionId = externalSessionId ?? nativeSessionId;
   const listRef = React.useRef<HTMLDivElement | null>(null);
-  useSelectionGlide(listRef, currentSessionId);
-  useHoverPill(listRef);
   const catalogLoaded = useThreadStore(state => state.catalogLoaded);
   const catalogLoading = useThreadStore(state => state.catalogLoading);
   const lastError = useThreadStore(state => state.catalogError);
@@ -602,6 +600,8 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     treeExpansion.groups, treeExpansion.sessions,
     groups.map(group => [group.id, forestLayout(group.forest)]),
   ]);
+  useSelectionGlide(listRef, currentSessionId, JSON.stringify([listLayoutKey, query.trim(), !!apis.conversationOrganization]));
+  useHoverPill(listRef);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
     // The conversation leaves against the move through the list, and the title follows it.

@@ -44,6 +44,7 @@ export function placeInstantly(element: HTMLElement, change: () => void): void {
 export interface SlidingPill {
   readonly element: HTMLElement;
   readonly visible: boolean;
+  readonly active: boolean;
   /**
    * Move to `y` along the list (and take the given box at once). It slides on glide when it was
    * already showing at full motion and `animate` is set, or when it is still sliding; otherwise it
@@ -66,6 +67,7 @@ export function createSlidingPill(root: HTMLElement, className: string): Sliding
   return {
     element,
     get visible() { return visible; },
+    get active() { return driver.active; },
     moveTo: ({ y, left, width, height }, animate) => {
       if (left !== undefined) element.style.left = `${left}px`;
       if (width !== undefined) element.style.width = `${width}px`;

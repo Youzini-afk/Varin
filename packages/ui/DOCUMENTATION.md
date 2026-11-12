@@ -157,6 +157,8 @@ retains its assistant identity list with an explicit entry into shared conversat
 The Bot navigator toolbar contracts button widths with the available space, then wraps
 controls when their minimum widths no longer fit; labels and icons retain their font and graphic sizes.
 `OrganizationRow` preserves the original avatar, attention, extension-decoration and highlight contracts.
+Active conversation highlighting uses one persistent sliding pill and the settings navigation's spring;
+row backgrounds remain responsible for multi-selection rather than taking over after each slide.
 Recent reads use `kind: 'conversations', sort: 'recent'` so the Catalog orders across categories before
 pagination. Those pages never collect cached expanded category pages. Destination browsing uses
 `kind: 'containers'`, so conversation rows do not consume its page slots. Optional activity timestamps

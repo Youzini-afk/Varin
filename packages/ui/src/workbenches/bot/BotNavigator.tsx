@@ -76,8 +76,6 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   const selected = bots?.find(bot => bot.id === selectedId) ?? null;
   const canStart = Boolean(selected && !selected.archived && !selected.deletion && (selected.activity?.state ?? 'awake') === 'awake');
   const currentRow = current ? rowId(current) : null;
-  useSelectionGlide(list, currentRow);
-  useHoverPill(list);
   const needle = query.trim().toLocaleLowerCase();
   const shownSessions = sessions?.filter(session => !needle || sessionTitle(session).toLocaleLowerCase().includes(needle))
     .sort((a, b) => Number(b.thread.pinned) - Number(a.thread.pinned)) ?? null;
@@ -85,6 +83,9 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   const matchingGroups = new Set(organization.value.groups.filter(group => group.name.toLocaleLowerCase().includes(needle)).flatMap(group => group.botIds));
   const shownBots = bots?.filter(bot => bot.archived === showArchived && (!needle || bot.name.toLocaleLowerCase().includes(needle)
     || matchingGroups.has(bot.id) || bot.id === selectedId && !!shownSessions?.length)) ?? [];
+  const listLayoutKey = JSON.stringify([conversationScope, selectedId, shownBots.map(bot => bot.id), shownSessions?.map(session => [rowId(session.identity), session.branches.map(rowId), session.thread.archived]), folded, searchFolded, !!needle, organization.value.revision]);
+  useSelectionGlide(list, currentRow, listLayoutKey);
+  useHoverPill(list);
   const titleCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
     const title = sessionTitle(session);

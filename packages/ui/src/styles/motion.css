@@ -321,7 +321,7 @@
 
 /*
  * Sidebar (components/conversation/FlipList.tsx, sidebarHighlights.ts). The selection colour
- * travels between rows as one copy and hands back to the row; one hover
+ * stays on one spring-driven pill between rows; one hover
  * highlight follows the pointer instead of each row lighting up alone.
  */
 .sidebar-selection,
@@ -332,8 +332,14 @@
   border-radius: var(--radius-md, 6px);
   pointer-events: none;
 }
-.sidebar-selection { background: var(--interactive-selection); }
-[data-sidebar-row][data-selection-arriving] { background-color: transparent; }
+.sidebar-selection {
+  background: var(--interactive-selection);
+  transition: left var(--motion-dur-glide) var(--motion-ease-glide), width var(--motion-dur-glide) var(--motion-ease-glide),
+    height var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.sidebar-selection[data-hidden] { opacity: 0; }
+.sidebar-selection[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+[data-sidebar-selection] [data-sidebar-row][data-current] { background-color: transparent; }
 .sidebar-hover {
   width: var(--hover-width, 0);
   height: var(--hover-height, 0);
@@ -343,6 +349,7 @@
     height var(--motion-dur-snap) var(--motion-ease-snap), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .sidebar-hover[data-hidden] { opacity: 0; }
+[data-sidebar-hover]:has([data-sidebar-row][data-current]:hover) > .sidebar-hover { opacity: 0; }
 .sidebar-hover[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
 [data-sidebar-hover] [data-sidebar-row]:not([data-current], [data-popup-open]):hover { background-color: transparent; }
 @media (hover: none) {

@@ -1,112 +1,84 @@
 import React from 'react';
-import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
-import { documentMotionLevel } from '@/lib/motion/preference';
-import { boxWithin, placeInstantly, type Box } from '@/lib/motion/slidingPill';
-import { springAtRest, stepSpring, tokenSpring, type SpringState } from '@/lib/motion/spring';
+import { requestAfterFrame, type FrameHandle } from '@/lib/motion/frame';
+import { boxWithin, createSlidingPill, placeInstantly, type Box, type SlidingPill } from '@/lib/motion/slidingPill';
 
 /** Highlights for the sidebar list (see FlipList.tsx for its rows). */
 const rowFor = (root: HTMLElement, id: string | null): HTMLElement | null => (
-  id ? [...root.querySelectorAll<HTMLElement>('[data-sidebar-row]')].find(row => row.getAttribute('data-sidebar-row') === id) ?? null : null
+  id ? [...root.querySelectorAll<HTMLElement>('[data-sidebar-row]')].find(row => row.getAttribute('data-sidebar-row') === id && !row.closest('[data-flip-ghost], [inert]')) ?? null : null
 );
-/** Draw one frame with transitions off, so a background handed between layers does not fade. */
-const withoutTransition = (element: HTMLElement, change: () => void): void => {
-  element.style.transition = 'none';
-  change();
-  void element.offsetWidth;
-  element.style.transition = '';
-};
 
 /**
- * The selection moves between rows. A copy of the selection colour travels on
- * the glide spring from the previous row to the live position of the new one,
- * carrying its velocity when the selection changes again mid-way, then hands
- * back to the row. With no previous row (a new or a draft session) the row's
- * colour fades in place. Reduced motion keeps the fade only.
+ * One persistent selection, using the settings navigation's glide spring.
+ * Retargeting keeps its current position and velocity; rows never take over
+ * painting the active background. Follow moving row geometry after frame writes.
  */
-export function useSelectionGlide(container: React.RefObject<HTMLElement | null>, currentId: string | null): void {
+export function useSelectionGlide(container: React.RefObject<HTMLElement | null>, currentId: string | null, layoutKey = ''): void {
   const state = React.useRef<{
     id: string | null;
-    ghost: HTMLElement | null;
+    root: HTMLElement | null;
+    pill: SlidingPill | null;
     target: HTMLElement | null;
-    springs: Record<keyof Box, SpringState> | null;
+    goal: Box | null;
+    resize: ResizeObserver | null;
     frame: FrameHandle | null;
-    last: number | null;
-  }>({ id: currentId, ghost: null, target: null, springs: null, frame: null, last: null });
+  }>({ id: currentId, root: null, pill: null, target: null, goal: null, resize: null, frame: null });
 
-  React.useLayoutEffect(() => () => {
+  const release = React.useCallback(() => {
     const current = state.current;
     current.frame?.cancel();
-    current.ghost?.remove();
-    current.target?.removeAttribute('data-selection-arriving');
+    current.resize?.disconnect();
+    current.pill?.dispose();
+    current.root?.removeAttribute('data-sidebar-selection');
+    Object.assign(current, { root: null, pill: null, target: null, goal: null, resize: null, frame: null });
+  }, []);
+  React.useLayoutEffect(() => release, [release]);
+
+  const sync = React.useCallback(function syncSelection() {
+    const current = state.current;
+    const { root, pill } = current;
+    if (!root || !pill) return;
+    const target = rowFor(root, current.id);
+    if (target !== current.target) {
+      if (current.target) current.resize?.unobserve(current.target);
+      current.target = target;
+      if (target) current.resize?.observe(target);
+    }
+    const goal = target ? boxWithin(target, root) : null;
+    if (!goal?.height) {
+      current.frame?.cancel();
+      current.frame = null;
+      current.goal = null;
+      pill.hide();
+      return;
+    }
+    const previous = current.goal;
+    if (!pill.visible || !previous || (Object.keys(goal) as Array<keyof Box>).some(key => goal[key] !== previous[key])) {
+      const move = () => pill.moveTo({ y: goal.top, left: goal.left, width: goal.width, height: goal.height }, true);
+      if (pill.visible) move();
+      else placeInstantly(pill.element, move);
+      current.goal = goal;
+    }
+    if (pill.active && !current.frame) current.frame = requestAfterFrame(() => { current.frame = null; syncSelection(); });
   }, []);
 
+  // Also reconcile rows arriving or being replaced while the selected identity stays the same.
   React.useLayoutEffect(() => {
     const root = container.current;
     const current = state.current;
-    const previous = current.id;
     current.id = currentId;
-    if (!root || previous === currentId) return;
-    const leaving = rowFor(root, previous);
-    const arriving = rowFor(root, currentId);
-    const land = () => {
-      current.frame?.cancel();
-      current.frame = null;
-      current.last = null;
-      current.springs = null;
-      current.ghost?.remove();
-      current.ghost = null;
-      const row = current.target;
-      current.target = null;
-      if (row?.isConnected) withoutTransition(row, () => row.removeAttribute('data-selection-arriving'));
-    };
-    if (current.target && current.target !== arriving) current.target.removeAttribute('data-selection-arriving');
-    if (!arriving || documentMotionLevel() !== 'full' || typeof requestAnimationFrame !== 'function') { land(); return; }
-    const from = current.springs
-      ? null
-      : leaving ? boxWithin(leaving, root) : null;
-    if (!current.springs && !from) { land(); return; }
-    if (from) {
-      current.springs = {
-        top: { position: from.top, velocity: 0 }, left: { position: from.left, velocity: 0 },
-        width: { position: from.width, velocity: 0 }, height: { position: from.height, velocity: 0 },
-      };
-      const ghost = document.createElement('span');
-      ghost.className = 'sidebar-selection';
-      ghost.setAttribute('aria-hidden', 'true');
-      root.prepend(ghost);
-      current.ghost = ghost;
-      // The old row's colour is now the copy's; it must not fade out on top of it.
-      if (leaving) withoutTransition(leaving, () => undefined);
-    }
-    current.target = arriving;
-    withoutTransition(arriving, () => arriving.setAttribute('data-selection-arriving', ''));
-    const spring = tokenSpring('glide');
-    const paint = () => {
-      const springs = current.springs!;
-      Object.assign(current.ghost!.style, {
-        transform: `translate(${springs.left.position}px, ${springs.top.position}px)`,
-        width: `${springs.width.position}px`, height: `${springs.height.position}px`,
-      });
-    };
-    const tick = (time: number) => {
-      const row = current.target;
-      if (!row?.isConnected || !current.springs || !current.ghost) { land(); return; }
-      const seconds = current.last === null ? 1 / 60 : (time - current.last) / 1000;
-      current.last = time;
-      const goal = boxWithin(row, root);
-      let resting = true;
-      for (const key of ['top', 'left', 'width', 'height'] as const) {
-        const next = stepSpring(current.springs[key], goal[key], spring, seconds);
-        current.springs[key] = next;
-        if (!springAtRest(next, goal[key], 0.5, 8)) resting = false;
+    if (current.root !== root) {
+      release();
+      if (!root) return;
+      current.root = root;
+      current.pill = createSlidingPill(root, 'sidebar-selection');
+      root.setAttribute('data-sidebar-selection', '');
+      if (typeof ResizeObserver !== 'undefined') {
+        current.resize = new ResizeObserver(sync);
+        current.resize.observe(root);
       }
-      paint();
-      if (resting) { land(); return; }
-      current.frame = requestFrame(tick);
-    };
-    paint();
-    if (!current.frame) current.frame = requestFrame(tick);
-  }, [container, currentId]);
+    }
+    sync();
+  }, [container, currentId, layoutKey, release, sync]);
 }
 
 /**
