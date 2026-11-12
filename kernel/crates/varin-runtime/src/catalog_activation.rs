@@ -569,7 +569,6 @@ pub struct RootCapture {
     history: Value,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
-    tool_catalog: Option<IngressToolCatalog>,
 }
 pub enum RequestActivationPreparation {
     Root(RootCapture),
@@ -590,8 +589,6 @@ pub enum PreparedRequestActivation {
         prepared: delegated::PreparedChildContinuation,
     },
 }
-/// Supplied by the executable owner, not a second persisted capability directory.
-pub type IngressToolCatalog = fn(Option<&context::ContextScope>) -> Vec<crate::execution::ToolSchema>;
 
 impl RequestActivationPreparation {
     pub fn input_id(&self) -> &str {
@@ -623,12 +620,8 @@ impl RequestActivationPreparation {
                     history,
                     content,
                     publication,
-                    tool_catalog,
                 } = capture;
                 content.load_history_payload(&history)?;
-                let tools = tool_catalog.map(|catalog| {
-                    catalog(checkpoint.as_ref().and_then(|checkpoint| checkpoint.scope.as_ref()))
-                });
                 let checkpoint_id = checkpoint.as_ref().map(|c| c.id.clone());
                 let context = checkpoint.map(context::CheckpointRead::load).transpose()?;
                 let mut selection = launch.selection.clone();
@@ -639,9 +632,6 @@ impl RequestActivationPreparation {
                     {
                         source.environment_run_id = Some(run.id.clone());
                     }
-                }
-                if let Some(tools) = tools {
-                    selection.refresh_base_tools(&content, &tools)?;
                 }
                 if let Some(resources) = context.as_ref().and_then(|c| c.resources.as_ref()) {
                     if followups::normalized_source(resources.source.clone(), &run.id)
@@ -703,13 +693,6 @@ pub enum RequestActivationAdmission {
     Stale,
 }
 impl Catalog {
-    /// Install the executable owner's current builtin declarations before sharing
-    /// this Catalog. Every new root ingress capture uses the same owner, regardless
-    /// of which event-driven reconciliation pass finds it.
-    pub fn with_ingress_tool_catalog(mut self, catalog: IngressToolCatalog) -> Self {
-        self.ingress_tool_catalog = Some(catalog);
-        self
-    }
     /// Small queue/owner capture only. Payload hydration and launch rebasing happen on the worker.
     pub fn capture_request_activations(&mut self) -> Result<Vec<RequestActivationPreparation>> {
         let (candidates, failure) = self.capture_activation_batch()?;
@@ -904,7 +887,6 @@ impl Catalog {
                         history: serde_json::from_str(&history)?,
                         content: self.content.clone(),
                         publication: self.content.begin_publication(),
-                        tool_catalog: self.ingress_tool_catalog,
                     }));
                 }
                 Ok(())

@@ -272,6 +272,8 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0, withExt
           return structuredClone(launch);
         case 'runtime.run.start':
           if (startGate) await startGate;
+          launch.selection.extension_bindings = (params.extensionBindings as LiveExtensionToolBinding[]).map(value => value.binding);
+          if (launch.extension_admission) launch.extension_admission.state = 'prepared';
           run.state = 'executing';
           return { runId: 'run', epoch: 1 };
         case 'runtime.tools.select':
@@ -356,7 +358,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0, withExt
     },
   };
 }
-it.each([false, true])('same-Run continuation restores an unavailable exact extension owner without manual retry (credentials: %s)', async credentials => {
+it.each([false, true])('same-Run continuation prepares current extensions when the previous live owners are gone (credentials: %s)', async credentials => {
   const released: string[] = [], original = contribution('chosen', '1', released), f = setup([original]);
   const start = () => credentials
     ? f.runtime.startRunWithCredentialOwner('run', {} as ExistingHostCredentialOwner)
@@ -364,16 +366,16 @@ it.each([false, true])('same-Run continuation restores an unavailable exact exte
   await start();
   const first = f.requests.find(request => request.method === 'runtime.run.start')!.params;
   f.loseExtensionOwners();
-  const restored = contribution('chosen', '1', released);
+  const restored = contribution('chosen', '2', released);
   restored.generation++;
   restored.lease.binding.generation++;
   f.prepareExtensions([restored]);
   await start();
   const starts = f.requests.filter(request => request.method === 'runtime.run.start');
   expect(starts).toHaveLength(2);
-  expect(f.preparedBindings).toEqual([[], [original.binding]]);
+  expect(f.preparedBindings).toEqual([[], []]);
   expect(f.closeScope).toHaveBeenCalledOnce();
-  expect(starts[1]!.params).toMatchObject({ runId: 'run', extensionBindings: [{ binding: original.binding, generation: 2 }] });
+  expect(starts[1]!.params).toMatchObject({ runId: 'run', extensionBindings: [{ binding: restored.binding, generation: 2 }] });
   expect((starts[1]!.params.extensionBindings as LiveExtensionToolBinding[])[0]!.ownerId)
     .not.toBe((first.extensionBindings as LiveExtensionToolBinding[])[0]!.ownerId);
   // A later continuation can reuse the repaired owner without another cold preparation.
@@ -381,19 +383,19 @@ it.each([false, true])('same-Run continuation restores an unavailable exact exte
   expect(f.preparedBindings).toHaveLength(2);
 });
 
-it('an unavailable exact implementation remains a preparation failure instead of replacing or omitting its tool', async () => {
+it('a failed current-directory preparation retains the previous directory and can be retried', async () => {
   const original = contribution('chosen', '1', []), f = setup([original]);
   await f.runtime.startRun('run');
   f.loseExtensionOwners();
   const failure = new HostBindingRestoreError('tool', 'implementation_unavailable', original.binding.providerKey);
   f.prepareExtensions([], failure);
   await expect(f.runtime.startRun('run')).rejects.toBe(failure);
-  expect(f.preparedBindings).toEqual([[], [original.binding]]);
+  expect(f.preparedBindings).toEqual([[], []]);
   expect(f.requests.filter(request => request.method === 'runtime.run.start')).toHaveLength(1);
   expect(f.launch.selection.extension_bindings).toEqual([original.binding]);
   f.prepareExtensions([contribution('chosen', '1', [])]);
   await f.runtime.startRun('run');
-  expect(f.preparedBindings).toEqual([[], [original.binding], [original.binding]]);
+  expect(f.preparedBindings).toEqual([[], [], []]);
 });
 
 it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted services and derives MCP once before exact same-Run restore', async trigger => {
@@ -447,7 +449,7 @@ it('first Run starts without slow contributions; concurrent ready completions an
   expect(
     f.requests.find((r) => r.method === 'runtime.run.start')?.params
       .extensionBindings,
-  ).toBeUndefined();
+  ).toEqual([]);
   const pendingA = a.promise.then((lease) => f.publish('A@1', lease)),
     pendingB = b.promise.then((lease) => f.publish('B@1', lease));
   const publication = deferred<void>();
@@ -715,7 +717,7 @@ it('ordinary service routing uses the admitted Run scope instead of a later acti
   }
 });
 
-it.each([false, true])('automatic root prepares the complete current directory once, then restores it exactly (credentials: %s)', async credentials => {
+it.each([false, true])('automatic root admits current extensions together with start and rediscovers them on cold preparation (credentials: %s)', async credentials => {
   const old = contribution('previous', 'old', []), current = contribution('newly-enabled', 'current', []), f = setup([current]);
   f.launch.selection.extension_bindings = [old.binding];
   f.launch.extension_admission = { state: 'pending' };
@@ -724,20 +726,17 @@ it.each([false, true])('automatic root prepares the complete current directory o
     : f.runtime.startRun('run');
   await start();
   expect(f.preparedBindings).toEqual([[]]);
-  expect(f.preparedScopes[0]!.restoreExact).toBeUndefined();
-  const prepareIndex = f.requests.findIndex(request => request.method === 'runtime.launch.extensions.prepare');
-  expect(f.requests[prepareIndex]!.params.bindings).toEqual([current.binding]);
-  expect(prepareIndex).toBeLessThan(f.requests.findIndex(request => request.method === 'runtime.run.start'));
+  expect(f.requests.find(request => request.method === 'runtime.run.start')!.params.extensionBindings)
+    .toEqual([expect.objectContaining({ binding: current.binding })]);
   expect(f.launch.extension_admission).toEqual({ state: 'prepared' });
   f.loseExtensionOwners();
   await start();
-  expect(f.preparedBindings).toEqual([[], [current.binding]]);
-  expect(f.preparedScopes[1]!.restoreExact).toBe(true);
+  expect(f.preparedBindings).toEqual([[], []]);
   const added = contribution('added', 'current', []);
   await f.publish('added@1', added);
   f.prepareExtensions([current, added]); f.loseExtensionOwners();
   await start();
-  expect(f.preparedBindings[2]).toEqual([added.binding, current.binding]);
+  expect(f.preparedBindings[2]).toEqual([]);
 });
 
 it('pending admission discards a prior empty scope and commits the newly enabled current directory', async () => {
@@ -749,32 +748,31 @@ it('pending admission discards a prior empty scope and commits the newly enabled
   await f.runtime.startRun('run');
   expect(f.closeScope).toHaveBeenCalledOnce();
   expect(f.preparedBindings).toEqual([[], []]);
-  expect(f.preparedScopes[1]!.restoreExact).toBeUndefined();
-  expect(f.requests.filter(request => request.method === 'runtime.launch.extensions.prepare').map(request => request.params.bindings)).toEqual([[current.binding]]);
+  expect(f.requests.filter(request => request.method === 'runtime.run.start').at(-1)!.params.extensionBindings)
+    .toEqual([expect.objectContaining({ binding: current.binding })]);
 });
 
-it.each([false, true])('an automatic empty current directory commits before start, with or without an extension owner (%s)', async withOwner => {
+it.each([false, true])('an automatic empty current directory is admitted with start, with or without an extension owner (%s)', async withOwner => {
   const f = setup([], 0, withOwner);
   f.launch.extension_admission = { state: 'pending' };
   await f.runtime.startRun('run');
-  const commit = f.requests.findIndex(request => request.method === 'runtime.launch.extensions.prepare');
-  expect(f.requests[commit]!.params.bindings).toEqual([]);
-  expect(commit).toBeLessThan(f.requests.findIndex(request => request.method === 'runtime.run.start'));
-  // A reconstructed Host must request explicit empty restoration, not fresh discovery.
+  expect(f.requests.find(request => request.method === 'runtime.run.start')!.params.extensionBindings).toEqual([]);
+  // A reconstructed Host prepares its current directory, even if the previous one was empty.
   if (withOwner) f.release();
   const restored = setup([], 0, withOwner);
   restored.launch.extension_admission = { state: 'prepared' };
   await restored.runtime.startRun('run');
-  expect(restored.preparedScopes.map(value => value.restoreExact)).toEqual(withOwner ? [true] : []);
+  expect(restored.preparedScopes).toHaveLength(withOwner ? 1 : 0);
   expect(restored.requests.some(request => request.method === 'runtime.launch.extensions.prepare')).toBe(false);
 });
 
-it.each(['pending', 'prepared'] as const)('a nonempty %s directory cannot silently disappear without its Host owner', async state => {
+it.each(['pending', 'prepared'] as const)('a root uses its current empty extension directory when no extension owner is configured (%s)', async state => {
   const f = setup([], 0, false);
   f.launch.extension_admission = { state };
   f.launch.selection.extension_bindings = [contribution('previous', 'old', []).binding];
-  await expect(f.runtime.startRun('run')).rejects.toThrow('Saved extension tools require their original Host owner');
-  expect(f.requests.some(request => request.method === 'runtime.launch.extensions.prepare' || request.method === 'runtime.run.start')).toBe(false);
+  await f.runtime.startRun('run');
+  expect(f.requests.find(request => request.method === 'runtime.run.start')!.params.extensionBindings).toEqual([]);
+  expect(f.launch.selection.extension_bindings).toEqual([]);
 });
 
 it('automatic current-snapshot preparation failure does not commit or start the Run', async () => {

@@ -472,12 +472,6 @@ impl RunAssembly {
                 .selection
                 .tools;
             declarations = child_tool_bindings::retain(declarations, admitted);
-        } else if let Some(launch) = &saved_launch {
-            // Admission owns the names. New rounds can refresh those declarations,
-            // but binding must not add capabilities omitted by the original selection.
-            declarations.retain(|declaration| {
-                launch.selection.tools.iter().any(|tool| tool.name == declaration.schema.name)
-            });
         }
         if !host_authority && !is_context_job { declarations.clear(); }
         if !host_authority && p.mcp_binding.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host MCP servers".into())); }
@@ -613,12 +607,13 @@ impl RunAssembly {
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .prepare_launch_selection(selection);
             let prepared = preparation.load().map_err(domain)?;
-            runtime
+            let launch = runtime
                 .catalog()
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                 .admit_launch(&p.run_id, prepared, true)
                 .map_err(domain)?;
+            start.binding.tool_schema_generation = launch.metadata.selection.tool_schema_generation;
         }
         check_cancelled()?;
         start.tools = if !is_context_job && !is_child {

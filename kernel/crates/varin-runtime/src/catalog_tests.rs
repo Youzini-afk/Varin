@@ -1712,15 +1712,12 @@ fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
         "connection_identity",
         "model",
         "configuration_generation",
-        "tool_schema_generation",
-        "tools",
         "source",
     ] {
         let mut changed = serde_json::to_value(&selection).unwrap();
         match field {
             "connection_identity" | "model" => changed[field] = json!("changed"),
-            "configuration_generation" | "tool_schema_generation" => changed[field] = json!(2),
-            "tools" => changed[field][0]["schema"] = json!({"type":"string"}),
+            "configuration_generation" => changed[field] = json!(2),
             "source" => changed[field]["revision"] = json!(6),
             _ => unreachable!(),
         }
@@ -1747,7 +1744,12 @@ fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
     assert!(reopened.requires_rebind);
     assert_eq!(reopened.selection, selection);
     assert_eq!(db.pending_launches().unwrap().len(), 1);
-    let rebound = db.bind_launch(&receipt.run_id, selection).unwrap();
+    let mut current = selection;
+    current.tools[0].description = "Current executable declaration after upgrade".into();
+    let rebound = db.bind_launch(&receipt.run_id, current.clone()).unwrap();
+    assert_eq!(rebound.selection.tools, current.tools);
+    assert_eq!(rebound.selection.tool_schema_generation, current.tool_schema_generation + 1);
+    assert_eq!(db.bind_launch(&receipt.run_id, current).unwrap(), rebound);
     assert!(!rebound.requires_rebind);
     assert_eq!(rebound.revision, first.revision + 1);
     assert_eq!(rebound.bound_epoch, Some(db.epoch()));

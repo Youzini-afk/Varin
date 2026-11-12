@@ -1528,13 +1528,11 @@ fn existing_work_new_root_prepares_current_extension_without_rewriting_previous_
     let db = Mutex::new(f.db);
     reconcile(&db).unwrap();
     super::super::activation::reconcile(&db).unwrap();
-    let mut db = db.into_inner().unwrap();
+    let db = db.into_inner().unwrap();
     let current_run = db.calendar_occurrence(&occurrence.id).unwrap().run_id.unwrap();
     assert_ne!(current_run, original_run);
     let pending = db.launch_intent(&current_run).unwrap().unwrap();
     assert_eq!(pending.extension_admission.as_ref().unwrap().state, launches::ExtensionAdmissionState::Pending);
-    assert!(db.bind_launch(&current_run, pending.selection.clone()).unwrap_err().to_string()
-        .contains("current extension directory is not prepared"));
     let request: RequestBinding = serde_json::from_value(json!({"resource_activations":[],"resource_checkpoint_id":null,
         "connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,
         "configuration_generation":1,"tool_schema_generation":1,"tools":[],"instruction_sources":[],"memory_checkpoint":null,

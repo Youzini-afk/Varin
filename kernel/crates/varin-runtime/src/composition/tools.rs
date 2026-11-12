@@ -224,7 +224,7 @@ fn selected(
     if !schemas.iter().any(|schema| {
         schema.name == call.name
             && schema.version == call.schema_version
-            && context.tools.contains(schema)
+            && context.tools.iter().any(|original| original.name == schema.name && original.version == schema.version)
     }) {
         return Err(ExecutionError::new(
             "stale_tool_schema",
@@ -517,6 +517,12 @@ mod tests {
             source: None,
         };
         let cancelled = CancellationToken::default();
+        let mut current = declaration("first");
+        current.schema.description = "Current executable's description".into();
+        let restored = ToolDirectory::assemble(vec![current]).unwrap();
+        let restored = restored.freeze(restored.schemas()).unwrap().unwrap();
+        assert!(restored.bind_call(&call, &context, &CancellationToken::default()).unwrap()
+            .prepare(&CancellationToken::default()).is_ok());
         assert!(first
             .clone()
             .bind_call(&call, &context, &cancelled)

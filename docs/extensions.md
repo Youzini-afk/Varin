@@ -255,15 +255,14 @@ Rust Agent 通过 [CompositionRegistry 及 resolver](../kernel/crates/varin-runt
 revision，并冻结一次已受理 model exchange 使用的精确 schema/implementation 集合。
 普通替换允许 pin 完成，撤权使后续使用失效。Rust 进程内使用 typed call，不人为多走 JSON RPC。
 
-日程、消息和 follow-up 在已结束普通工作上受理新 root 时，Catalog 明确记录 extension admission 为
-pending。原 Host 按与普通新用户轮相同的当前配置、路由及授权发现工具，前一轮实现目录不构成新的
-必需能力清单。已禁用、未配置或不适用于原 Source 的工具沿原准备 owner 记录不可用，不阻断其它工具；
-两轮之间新启用的工具可以进入新目录。Agent.tools、Source 和 principal 仍是独立约束，发现不扩大授权。
+普通 root 的新建、队列、日程和恢复共用当前目录准备：Host 根据当前配置、路由及授权发现扩展工具，
+内核组装当前内置声明，并在绑定 launch 的同一事务提交完整目录，包括明确的空目录。
+此前执行过或准备失败不妨碍下一次准备使用新版声明；上一轮的实现、工具名称和空目录不构成永久清单。
+Agent.tools、Source 和 principal 继续表达各自的实际选择和权限。
 
-原 launch preparation 事务一次性提交当前完整目录和 prepared，空目录也须明确提交；完成前不能绑定或
-执行。没有 Host 工具 owner 的空目录执行沿同一准备入口提交 []，不在 bind 时隐式跳过 pending。
-同 key、已准备 Run、delegated continuation 和旧库记录保留原绑定语义。恢复先重建已提交的精确目录，
-不依赖可选的当前配置发现成功；之后配置、路由与启用变化仍走原 closed-boundary 候选更新，不重放旧调用。
+历史请求保留当时的工具、参数和结果；新目录用于后续执行，恢复不重发旧模型请求或重做已有回执的操作。
+当前目录准备失败时保留原记录，供原 owner 重试。运行中的配置变化继续走已有的 closed-boundary 候选更新。
+派发子任务的明确能力选择及 context job 的固定配方仍由各自准备入口管理。
 
 Varin Host tool service 的同一 manifest `tool` descriptor 用于发现、激活、SDK inspect 和 Host schema
 编译。[Extension tool owner](../packages/web/application-host/lib/kernel/extension-tool-owner.ts) 把精确实现

@@ -2068,7 +2068,7 @@ impl<
         }
         let mut pending_tools = pending
             .as_ref()
-            .map(|(snapshot, _)| self.tools.freeze(&snapshot.view.binding.tools))
+            .map(|_| self.tools.freeze(&input.binding.tools))
             .transpose()?
             .flatten();
         let mut pending_model: Option<Arc<dyn ModelProvider>> = None;

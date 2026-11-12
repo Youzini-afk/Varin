@@ -86,19 +86,16 @@ representation. Do not add parallel old-format execution/read paths or a second 
 - Operation business outcome/effect and `executor_stopped` are independent. Cancellation intent,
   reader abort, output completion and missing occupancy do not prove an external executor stopped.
   Late receipts keep the original executor epoch and cannot settle replacement work.
-- A model request pins its actual provider/tool/context bindings. Normal retirement permits retained
-  exchanges to finish; revocation rejects/cancels them. Recovery uses the saved composition and
-  artifact identities instead of silently applying current routing.
-  A new root round activated by Calendar, a message or a follow-up resolves its inherited builtin
-  names against the executable owner's current declarations before admission, just like a new user
-  round. It preserves Agent/source/principal/model ownership and marks extension admission Pending.
-  The original Host discovers the current enabled directory with ordinary new-request semantics;
-  unavailable individual tools are not inherited as mandatory requirements. The existing launch
-  transaction commits the complete resulting directory, including empty, as Prepared before binding
-  or execution. A kernel-only empty directory must use that same explicit preparation owner.
-  Prepared Runs, receipt retries, old launches and delegated continuations keep their exact bindings.
-  Exact restoration does not depend on optional current discovery. Later relevant Host changes retain
-  the ordinary closed-boundary tool-update path, without a new permanent capability ceiling.
+- A model request retains its actual provider/tool/context bindings and original receipts. Recovery
+  never resends a dispatched request or repeats an effect to replace missing acknowledgement.
+  Ordinary root assembly prepares the executable's current builtins and the Host's current enabled
+  extension directory for new, queued and recovered Runs. Binding commits this complete composition,
+  including empty, independently of the retained Agent/source/principal/model identity. Historical
+  declarations and tool-name lists do not become permanent limits on subsequent requests; explicit
+  Agent and Source selections still apply. Existing request snapshots and results are unchanged.
+  Delegated capabilities and context-job recipes retain their separate admission owners. Within a
+  running process, relevant Host changes use the existing closed-boundary tool-update path, and
+  retained endpoints keep their normal retirement and revocation semantics.
 - Branch history has one writer. Background summary, memory and planning work uses separate admitted
   identities. A Wait releases active execution while retaining the dependency/continuation; cancelling
   observation does not cancel the observed Job or withdraw an independent follow-up definition.

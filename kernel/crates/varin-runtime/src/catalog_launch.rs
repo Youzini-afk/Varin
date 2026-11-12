@@ -937,7 +937,7 @@ impl Catalog {
     }
 
     /// Standalone Catalog convenience; concurrent owners use prepare_launch_selection/admit_launch.
-    /// Store the selected plan before starting a worker. Retries can only rebind the same plan.
+    /// Execution identity stays selected; root assembly supplies the current tool composition.
     /// Durable intent is not proof of authorization or worker liveness.
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn bind_launch(
@@ -971,7 +971,11 @@ impl Catalog {
                 "launch belongs to a previous owner".into(),
             ));
         }
-        let selection = prepared.selection;
+        let mut selection = prepared.selection;
+        // Root assembly prepares the current directory, including after a restart.
+        // Delegated capabilities and context-job recipes have their own owners.
+        let current_tools = bound && !self.is_context_job(run_id)?
+            && self.require_child_launch(run_id)?.is_none();
         let tx = self.db.transaction()?;
         let mut run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
@@ -991,11 +995,16 @@ impl Catalog {
         let previous: Option<LaunchMetadata> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {
             Some(mut intent) => {
-                if bound && intent.extension_admission.as_ref().is_some_and(ExtensionAdmission::pending) {
+                if bound && !current_tools && intent.extension_admission.as_ref().is_some_and(ExtensionAdmission::pending) {
                     return Err(RuntimeError::Conflict("current extension directory is not prepared".into()));
                 }
-                if intent.selection != selection {
-                    let original = serde_json::to_value(&intent.selection)?;
+                let mut expected = if current_tools {
+                    intent.selection.with_tool_composition(&selection)
+                } else {
+                    intent.selection.clone()
+                };
+                if expected != selection {
+                    let original = serde_json::to_value(&expected)?;
                     let candidate = serde_json::to_value(&selection)?;
                     let changed = original.as_object().expect("launch metadata is an object")
                         .iter().filter(|(key, value)| candidate.get(*key) != Some(*value))
@@ -1004,9 +1013,26 @@ impl Catalog {
                         "launch selection changed ({changed}); rebind must preserve its frozen identity"
                     )));
                 }
-                if !bound
+                // The Catalog owns the counter. Retrying an identical directory
+                // after a lost acknowledgement returns its existing generation.
+                expected.tool_schema_generation = intent.selection.tool_schema_generation;
+                let tools_changed = expected != intent.selection;
+                if tools_changed {
+                    if selection.tool_schema_generation != intent.selection.tool_schema_generation {
+                        return Err(RuntimeError::Conflict("tool directory changed during preparation".into()));
+                    }
+                    selection.tool_schema_generation = intent.selection.tool_schema_generation.checked_add(1)
+                        .ok_or_else(|| RuntimeError::Invalid("tool generation exhausted".into()))?;
+                    intent.selection = selection;
+                }
+                let extensions_prepared = current_tools && intent.extension_admission.as_ref()
+                    .is_some_and(ExtensionAdmission::pending);
+                if extensions_prepared {
+                    intent.extension_admission.as_mut().expect("pending admission checked").state = ExtensionAdmissionState::Prepared;
+                }
+                if !tools_changed && !extensions_prepared && (!bound
                     || (intent.bound_epoch == Some(self.epoch)
-                        && intent.preparation_failure.is_none())
+                        && intent.preparation_failure.is_none()))
                 {
                     intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
                     drop(tx);

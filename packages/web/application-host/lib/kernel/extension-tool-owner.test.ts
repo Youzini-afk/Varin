@@ -586,7 +586,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     // Reconstruct the saved exact A while current routing points to B. Only subsequent
     // new candidate preparation follows B; recovery never silently rewrites the old binding.
     const recovered = await createExtensionTools(options)(
-      { runId: 'recovered', threadId: 'thread', branchId: 'history-branch', source: null, restoreExact: true },
+      { runId: 'recovered', threadId: 'thread', branchId: 'history-branch', source: null },
       [scope.initial[0]!.binding],
       new AbortController().signal,
     );
@@ -852,7 +852,7 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
     await expect(prepare({ ...input, runId: 'pending' }, [], new AbortController().signal))
       .rejects.toThrow(currentFailure?.message ?? 'extension_tool_catalog_unavailable');
     const readsBeforeRestore = currentReads;
-    const recovered = await prepare({ ...input, runId: 'recovered', restoreExact: true }, [saved], recovery.signal);
+    const recovered = await prepare({ ...input, runId: 'recovered' }, [saved], recovery.signal);
     scopes.push(recovered); leases.push(...recovered.initial);
     expect(currentReads).toBe(readsBeforeRestore);
     expect(recovered.initial.map(lease => lease.binding)).toEqual([saved]);
@@ -913,24 +913,7 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
   }
 });
 
-it('explicit empty directory needs no current configuration or discovery snapshot', async () => {
-  const state = vi.fn(async () => { throw new Error('current discovery unavailable'); });
-  const prepareConfiguration = vi.fn(async () => { throw new Error('current settings unavailable'); });
-  const prepare = createExtensionTools({ runtime: { state, subscribe: () => () => {} } as unknown as ApplicationExtensionRuntime,
-    kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }), prepareConfiguration });
-  const input = { runId: 'empty', threadId: 'thread', branchId: 'history', source: null, restoreExact: true };
-  const scope = await prepare(input, [], new AbortController().signal);
-  try {
-    expect(scope.initial).toEqual([]);
-    expect(state).not.toHaveBeenCalled();
-    expect(prepareConfiguration).not.toHaveBeenCalled();
-  } finally { scope.close(); }
-  const aborted = new AbortController(); aborted.abort(new Error('preparation cancelled'));
-  await expect(prepare(input, [], aborted.signal)).rejects.toThrow('preparation cancelled');
-});
-
-
-it('new roots discover current enabled tools after an empty or disabled prior directory, while prepared roots restore exactly', async () => {
+it('roots prepare current enabled tools after an empty or disabled prior directory, while explicit retained bindings restore their implementation', async () => {
   const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tool-current-directory-'));
   const runtime = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: '0.9.44',
@@ -974,21 +957,12 @@ it('new roots discover current enabled tools after an empty or disabled prior di
     enabled.clear();
     const disabled = await open({ ...input, runId: 'disabled-next-root' });
     expect(disabled.initial).toEqual([]); disabled.close();
-    const exact = await open({ ...input, runId: 'original-root', restoreExact: true }, saved);
+    const exact = await open({ ...input, runId: 'original-root' }, saved);
     expect(exact.initial.map(value => value.binding)).toEqual(saved); exact.close();
     enabled.add('varin.script.run');
-    // A committed empty initial directory stays empty at restoration, but ordinary
-    // live candidates remain enabled at subsequent closed publication boundaries.
-    const restoredEmpty = await open({ ...input, runId: 'empty-original', restoreExact: true });
-    expect(restoredEmpty.initial).toEqual([]);
-    const published: string[] = [], publishedRun = observedEvent();
-    restoredEmpty.start(async (_slot, lease) => {
-      if (!lease) return;
-      published.push(lease.binding.serviceId); leases.push(lease);
-      if (lease.binding.serviceId === 'varin.script.run') publishedRun.resolve();
-    });
-    await publishedRun.promise;
-    expect(published).toContain('varin.script.run');
+    const restoredEmpty = await open({ ...input, runId: 'empty-original' });
+    expect(restoredEmpty.initial.map(value => value.binding.serviceId)).toEqual(['varin.script.run']);
+    restoredEmpty.close();
     const next = await open({ ...input, runId: 'new-current-root' });
     expect(next.initial.map(value => value.binding.serviceId)).toEqual(['varin.script.run']); next.close();
     const sourceless = await open({ ...input, runId: 'sourceless-root', source: null });

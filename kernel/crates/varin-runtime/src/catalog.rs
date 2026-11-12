@@ -259,7 +259,6 @@ fn initialize_metadata(
 /// across model, extension or tool execution is forbidden: all methods are bounded local transactions.
 /// Its database is separate from the replaceable system-kernel cache and is never recreated on error.
 pub struct Catalog {
-    ingress_tool_catalog: Option<activation::IngressToolCatalog>,
     db: Connection,
     content: crate::content::ContentStore,
     resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
@@ -315,7 +314,6 @@ impl Catalog {
         }
         let epoch = initialize_metadata(&mut db, if version == 0 { 0 } else { FORMAT }, &content)?;
         let mut this = Self {
-            ingress_tool_catalog: None,
             db,
             content,
             resource_admission,

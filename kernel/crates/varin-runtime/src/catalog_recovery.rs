@@ -155,7 +155,6 @@ impl ExecutionPreparation {
 
 struct ModelRecoveryPreparation {
     active_model: Option<super::models::RunModelSelection>,
-    active_tool_composition: Option<Value>,
     step: ModelStep,
     output: Value,
     calls: Vec<ToolCall>,
@@ -324,6 +323,15 @@ impl RecoveryPreparation {
             .and_then(|agent| agent.tools.as_deref());
         let request_tools = crate::tool_disclosure::request_tools(
             &self.execution.binding.tools, self.goal.is_some(), allowed_tools);
+        if let Some(launch) = &self.launch {
+            let current: Vec<ToolSchema> = serde_json::from_value(
+                self.execution.content.load(&launch.selection.tools_ref)?)?;
+            if current != self.execution.binding.tools
+                || launch.selection.tool_schema_generation != self.execution.binding.tool_schema_generation
+            {
+                return Err(RuntimeError::Conflict("execution tools differ from the current launch directory".into()));
+            }
+        }
         let recovery = match &self.kind {
             RecoveryKind::None | RecoveryKind::Policy => None,
             RecoveryKind::Undispatched { step, checkpoint } => {
@@ -552,20 +560,7 @@ impl RecoveryPreparation {
                     })
                     .transpose()?
                     .unwrap_or(false);
-                let tools_changed = snapshot.view.binding.tools != request_tools
-                    || snapshot.view.binding.tool_schema_generation
-                        != binding.tool_schema_generation;
-                let activated_tools = match &model.active_tool_composition {
-                    Some(reference) => {
-                        let selected: super::tools::ToolComposition =
-                            serde_json::from_value(self.execution.content.load(reference)?)?;
-                        selected.generation == binding.tool_schema_generation
-                            && selected.tools == binding.tools
-                    }
-                    None => false,
-                };
-                if (tools_changed && (model.committed != model.calls.len() || !activated_tools))
-                    || (model_changed && (model.committed != model.calls.len() || !activated_model))
+                if model_changed && (model.committed != model.calls.len() || !activated_model)
                 {
                     return Err(RuntimeError::Conflict(
                         "completed exchange belongs to another frozen launch binding".into(),
@@ -1377,8 +1372,6 @@ impl Catalog {
             None
         };
         Ok(ModelRecoveryPreparation {
-            active_tool_composition: database.query_row("SELECT json_extract(data,'$.composition') FROM events WHERE subject=?1 AND kind='run.tools_activated' ORDER BY cursor DESC LIMIT 1",
-                [run_id],|row|row.get::<_,String>(0)).optional()?.map(|value|serde_json::from_str(&value)).transpose()?,
             active_model: {
                 let id: Option<String> = database.query_row("SELECT id FROM model_selections WHERE run_id=?1 AND active=1",[run_id],|row|row.get(0)).optional()?;
                 id.map(|id|record(database,"model_selections",&id)).transpose()?

@@ -357,19 +357,16 @@ export class AgentRuntimeClient {
     // ContextJobs own a frozen tool-free plan, including pure text runs. Current
     // extension routing cannot add capabilities or block their original recovery.
     if (launch?.selection.policy.name === 'context_compaction') return [];
+    const child = await this.childExecutionForRun(runId, signal);
     const saved = launch?.selection.extension_bindings ?? [];
-    const required = pending ? [] : saved;
+    const required = child ? saved : [];
     if (!this.prepareExtensionOwner) {
-      if (saved.length)
+      if (required.length)
         throw new Error(
           'Saved extension tools require their original Host owner',
         );
-      if (pending) await this.kernel.agentRuntimeRequest(
-        'runtime.launch.extensions.prepare', { runId, bindings: [] }, signal,
-      );
       return [];
     }
-    const child = await this.childExecutionForRun(runId, signal);
     if (child && !required.length) return [];
     const admittedScope = await this.kernel.agentRuntimeRequest<
       RunContextScope | null,
@@ -378,8 +375,7 @@ export class AgentRuntimeClient {
     const projectId = admittedScope?.projectId;
     const scope = await this.prepareExtensionOwner(
       { runId, threadId: run.thread_id, branchId: run.branch_id, source: launch?.selection.source ?? null,
-        workFocus: launch?.selection.agent?.workFocus ?? 'general', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}),
-        ...(launch?.extension_admission?.state === 'prepared' ? { restoreExact: true } : {}) },
+        workFocus: launch?.selection.agent?.workFocus ?? 'general', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
       required,
       AbortSignal.any([signal, state.controller.signal]),
     );
@@ -401,7 +397,9 @@ export class AgentRuntimeClient {
           live,
         );
       }
-      if (initial.length || pending)
+      // Root assembly commits the complete current directory with the launch.
+      // Only delegated capabilities need the separate original-selection admission.
+      if (child && initial.length)
         await this.kernel.agentRuntimeRequest(
           'runtime.launch.extensions.prepare',
           { runId, bindings: initial.map((e) => e.binding) },
@@ -2019,7 +2017,7 @@ export class AgentRuntimeClient {
           'runtime.run.start',
           {
             runId,
-            ...(extensionBindings.length ? { extensionBindings } : {}),
+            extensionBindings,
             ...(policyBinding ? { policyBinding } : {}),
             ...(driverBinding ? { driverBinding } : {}),
             ...(mcpBinding ? { mcpBinding } : {}),
@@ -2072,7 +2070,7 @@ export class AgentRuntimeClient {
           'runtime.run.start',
           {
             runId,
-            ...(extensionBindings.length ? { extensionBindings } : {}),
+            extensionBindings,
             credentialScope,
             ...(policyBinding ? { policyBinding } : {}),
             ...(driverBinding ? { driverBinding } : {}),

@@ -205,15 +205,22 @@ fn hybrid_file_read_can_be_selected_without_granting_a_source() {
 }
 
 #[test]
-fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch() {
-    use varin_runtime::catalog::{calendar, context::ContextProposal, launches::{ExtensionAdmissionState, LaunchSelection}};
+fn calendar_and_failed_queued_rounds_use_current_builtins_without_rewriting_prior_launch() {
+    use varin_runtime::catalog::{calendar, context::ContextProposal, launches::{LaunchSelection, SourceSelection}};
     use varin_runtime::{Catalog, RunState, SubmitInput};
 
-    let fixed_branch = serde_json::from_value(json!({
+    let fixed_branch: SourceSelection = serde_json::from_value(json!({
         "resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"workspace",
         "mode":"fixed_branch","branch_id":"files","revision":0,"live_root":null,
     })).unwrap();
-    for source in [None, Some(fixed_branch)] {
+    let live_root: SourceSelection = serde_json::from_value(json!({
+        "resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"workspace",
+        "mode":"live_root","branch_id":null,"revision":null,
+        "live_root":{"hostId":"host","rootId":"root","canonicalRoot":"/fixture"},
+    })).unwrap();
+    let cases = [None, Some(fixed_branch), Some(live_root)].into_iter()
+        .flat_map(|source| [false, true].map(move |queued| (source.clone(), queued)));
+    for (source, inherited_queue) in cases {
         let root = std::env::temp_dir().join(format!("calendar-launch-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
         catalog
@@ -262,6 +269,15 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
                 .unwrap();
         }
         let original = catalog.launch_intent(&previous.run_id).unwrap().unwrap();
+        let queued = inherited_queue.then(|| {
+            let receipt = catalog.enqueue_input(&varin_runtime::catalog::inputs::EnqueueInput {
+                key: "queued-round".into(), thread_id: "thread:calendar".into(), branch_id: "branch:calendar".into(),
+                mode: varin_runtime::InputMode::Boundary,
+                input: json!("Queued work retained across an upgrade"), configuration: None,
+            }).unwrap();
+            catalog.fail_launch(&receipt.run_id, "preparation_failed").unwrap();
+            receipt.run_id
+        });
         let definition = serde_json::from_value(json!({"taskId":"calendar","assetRevision":"1","assetKind":"gui",
         "name":"Continue original work","enabled":false,"timezone":"UTC","rule":{"kind":"daily","times":["09:00"]},
         "missedPolicy":"skip","target":{"kind":"existing_work","threadId":"thread:calendar","branchId":"branch:calendar"},
@@ -279,12 +295,10 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
         let occurrence = catalog
             .run_calendar_now(&definition.id, definition.revision, "scheduled-round")
             .unwrap();
-        let runtime = Arc::new(RunSupervisor::new(
-            catalog.with_ingress_tool_catalog(crate::run_tools::ingress_schemas),
-        ));
+        let runtime = Arc::new(RunSupervisor::new(catalog));
         calendar::reconcile(&runtime.catalog()).unwrap();
-        // Follow-up reconciliation also activates queued ingress; it must not bypass
-        // the executable catalogue when it wins the race with the message wake pass.
+        // Either reconciliation pass may find the work; current declarations are
+        // prepared once by assembly after activation, including a failed queued Run.
         varin_runtime::catalog::followups::reconcile(&runtime.catalog()).unwrap();
         runtime.reconcile_message_requests().unwrap();
         let run = {
@@ -294,27 +308,19 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
             catalog.run(occurrence.run_id.as_ref().unwrap()).unwrap()
         };
         assert_ne!(run.id, previous.run_id);
-        // The production Host commits current extension discovery before run.start.
-        // This kernel-only fixture has no extension tools, but empty is still an
-        // explicit preparation result, not permission for assembly to skip Pending.
-        let preparation = {
-            let owner = runtime.catalog();
-            let mut catalog = owner.lock().unwrap();
-            let pending = catalog.launch_intent(&run.id).unwrap().unwrap();
-            assert_eq!(pending.extension_admission.unwrap().state, ExtensionAdmissionState::Pending);
-            assert!(catalog.bind_launch(&run.id, pending.selection).unwrap_err().to_string()
-                .contains("current extension directory is not prepared"));
-            catalog.prepare_extensions_change(&run.id, vec![]).unwrap()
-        };
-        let prepared = preparation.load().unwrap();
-        let read = runtime.catalog().lock().unwrap().admit_launch_change(prepared).unwrap();
-        assert_eq!(read.load().unwrap().extension_admission.unwrap().state, ExtensionAdmissionState::Prepared);
+        if let Some(queued) = queued { assert_eq!(run.id, queued); }
         let (assembly, _frames) = assembly(runtime.clone());
         let mut params = json!({"runId":run.id});
         if let Some(source) = &source {
-            params["toolBinding"] = json!({"resourceOwner":{"kind":"local"},"grantId":"calendar-source","runId":run.id,"threadId":run.thread_id,
-            "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"sourceMode":"fixed_branch",
-            "fileSource":{"branchId":source.branch_id,"revision":source.revision},"enabledTools":["file_list"]});
+            let mut binding = json!({"resourceOwner":{"kind":"local"},"grantId":"calendar-source","runId":run.id,"threadId":run.thread_id,
+                "workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"sourceMode":source.mode,
+                "enabledTools":["file_list"]});
+            if let Some(root) = &source.live_root {
+                binding["liveRoot"] = serde_json::to_value(root).unwrap();
+                binding["rootId"] = json!(root.root_id);
+            }
+            else { binding["fileSource"] = json!({"branchId":source.branch_id,"revision":source.revision}); }
+            params["toolBinding"] = binding;
         }
         let params = RunPreparation::new(serde_json::from_value(params).unwrap(), &run).unwrap();
         let PreparedLaunch::Start(start) = assembly
@@ -323,14 +329,13 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
         else {
             panic!("Run start required")
         };
-        assert!(!start
+        assert!(start
             .binding
             .tools
             .iter()
             .any(|tool| tool.name == "tool_describe"));
         let mut expected = original.selection.clone();
         expected.tools = crate::run_tools::builtin_schemas(&enabled, true, true, false);
-        expected.tools.retain(|tool| tool.name != "tool_describe");
         assert_eq!(start.binding.tools, expected.tools);
         let owner = runtime.catalog();
         let mut catalog = owner.lock().unwrap();
@@ -338,22 +343,8 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
             catalog.launch_intent(&previous.run_id).unwrap().unwrap(),
             original
         );
-        assert_eq!(
-            catalog.launch_intent(&run.id).unwrap().unwrap().selection,
-            expected
-        );
-        let mut replacement = expected.clone();
-        replacement
-            .tools
-            .iter_mut()
-            .find(|tool| tool.name == "file_read")
-            .unwrap()
-            .description = "Changed after admission".into();
-        assert!(catalog
-            .bind_launch(&run.id, replacement)
-            .unwrap_err()
-            .to_string()
-            .contains("rebind must preserve its frozen identity"));
+        expected.tool_schema_generation = start.binding.tool_schema_generation;
+        assert_eq!(catalog.launch_intent(&run.id).unwrap().unwrap().selection, expected);
         assert_eq!(
             catalog
                 .run_calendar_now(&definition.id, definition.revision, "scheduled-round")
@@ -361,7 +352,14 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
                 .id,
             occurrence.id
         );
-        for state in [RunState::Preparing, RunState::Runnable, RunState::Completed] {
+        let states = if inherited_queue {
+            assert_eq!(catalog.run(&run.id).unwrap().state, RunState::Runnable);
+            let head = catalog.head(&run.branch_id).unwrap();
+            let delivery = catalog.prepare_input_delivery(&run.id, catalog.epoch(), head.as_deref()).unwrap().load().unwrap();
+            assert!(catalog.admit_input_delivery(delivery).unwrap().is_some());
+            vec![RunState::Completed]
+        } else { vec![RunState::Preparing, RunState::Runnable, RunState::Completed] };
+        for state in states {
             let current = catalog.run(&run.id).unwrap();
             let epoch = catalog.epoch();
             catalog
@@ -392,7 +390,7 @@ fn calendar_new_round_refreshes_selected_builtins_without_rewriting_prior_launch
                 .selection,
             original.selection
         );
-        assert_eq!(reopened.history("branch:calendar").unwrap().len(), 2);
+        assert_eq!(reopened.history("branch:calendar").unwrap().len(), 2 + usize::from(inherited_queue));
         drop(reopened);
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -169,12 +169,12 @@ it('cold-restores a real saved script service without replay, and rechecks the o
     expect(processAdmissions).toEqual([original]);
     await fs.rm(path.join(root, 'original'), { recursive: true });
     // A new automatic root discovers today's configured directory after the old release is removed.
-    // Neither an accepted original nor a delegated child's exact binding gets this rebind.
+    // Explicitly restoring a retained invocation or a delegated binding keeps its original owner.
     const automatic = await preparer({ ...run, runId: 'automatic-root' }, [], new AbortController().signal);
     scopes.push(automatic);
     expect(automatic.initial.map(value => value.binding.serviceId)).toEqual([saved.serviceId]);
     expect(automatic.initial[0]!.binding.configurationIdentity).toBe((await resolveScriptNodeBinding()).configuration_identity);
-    for (const fixed of [false, true]) await expect(preparer({ ...run, runId: `original-${fixed}`, fixed, restoreExact: true },
+    for (const fixed of [false, true]) await expect(preparer({ ...run, runId: `original-${fixed}`, fixed },
       [saved], new AbortController().signal)).rejects.toThrow(`extension_tool_configuration_unavailable:${saved.serviceId}`);
     expect(processAdmissions).toEqual([original]);
   } finally {

@@ -1694,6 +1694,9 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
         request_binding.tools = crate::tool_disclosure::request_tools(&request_binding.tools, false, None);
         let run_id = original_input.run_id.clone();
         let epoch = original_input.owner_generation;
+        let original_launch = crate::catalog::launches::LaunchSelection::from_binding(
+            &original_input.binding, DefaultAgentPolicy.identity(), None);
+        db.lock().unwrap().bind_launch(&run_id, original_launch.clone()).unwrap();
         let snapshot = RequestSnapshot {
             view: RequestView {
                 request_id: "saved-first".into(),
@@ -1819,6 +1822,13 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
         }
         drop(db);
         let db = fixture.catalog();
+        let mut current_launch = original_launch;
+        current_launch.tools[0].description = "Reader supplied by the current executable".into();
+        let rebound = db.lock().unwrap().bind_launch(&run_id, current_launch).unwrap();
+        original_input.binding.tools = rebound.selection.tools;
+        original_input.binding.tool_schema_generation = rebound.selection.tool_schema_generation;
+        assert_eq!(db.lock().unwrap().model_step("saved-first").unwrap().request["view"]["binding"]["tools"],
+            serde_json::to_value(&snapshot.view.binding.tools).unwrap());
         let prepared = db.lock().unwrap().prepare_recovered_execution(
             &run_id,
             original_input.binding,
