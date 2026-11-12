@@ -206,15 +206,15 @@ it('returns safe 400 and revision-conflict 409 errors without exposing an upstre
   const f = fixture();
   const control = { ...identity, goalId: goal.id, expectedRevision: 0, action: 'complete' as const };
   const privatePrompt = 'PRIVATE OBJECTIVE: never expose this provider prompt';
-  for (const [prefix, status, code] of [
-    ['operation error: damaged body: ', 400, 'operation-error'],
-    ['operation error: conflict: Goal revision changed: ', 409, 'thread-conflict'],
+  for (const [prefix, status, code, message] of [
+    ['operation error: damaged body: ', 400, 'operation-error', 'Thread request failed (400)'],
+    ['operation error: conflict: Goal revision changed: ', 409, 'thread-conflict', 'The conversation state changed while this request was in progress (409).'],
   ] as const) {
     f.facts.writeError = new KernelClientError({ code: 'operation-error', message: `${prefix}${privatePrompt}` });
     const response = await f.request('/api/threads/goal/control', control);
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual({ code, error: 'Thread request could not be completed' });
-    await expect(f.api.goals.control(control)).rejects.toMatchObject({ status, code, message: `Thread request failed (${status})` });
+    await expect(f.api.goals.control(control)).rejects.toMatchObject({ status, code, message });
   }
 });
 
