@@ -63,7 +63,7 @@ it('forwards mixed pagination without reducing limits and rejects invalid or unk
   };
   try {
     const api = createConversationOrganizationHttpAPI();
-    const query = { pageNodes: true, kind: 'conversations' as const, sort: 'recent' as const, excludeBotConversations: true, recursive: true, limit: 100000, cursor: 'original-cursor' };
+    const query = { pageNodes: true, kind: 'conversations' as const, sort: 'recent' as const, excludeBotConversations: true, conversationTree: { parent: { kind: 'native' as const, id: 'parent' } }, recursive: true, limit: 100000, cursor: 'original-cursor' };
     assert.deepEqual((await api.read(query)).items, []);
     assert.deepEqual(queries, [query]);
     for (const bad of [{ pageNodes: 'true' }, { pageNodes: null }, { page_nodes: true }, { principalId: 'other' }, { projectNames: { fake: 'Injected' } }, { limit: 0 }, { recursive: 1 }, { kind: 'unknown' }, { sort: 'unknown' }, { kind: ['containers'] }, { sort: ['recent'] }]) {

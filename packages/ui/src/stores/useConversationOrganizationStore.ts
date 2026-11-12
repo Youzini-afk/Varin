@@ -47,15 +47,22 @@ export function mergeOrganizationSnapshots(snapshots: ConversationOrganizationSn
 }
 const mergePages = (pages: Record<string, OrganizationPage>) => mergeOrganizationSnapshots(Object.values(pages).flatMap(page => page.snapshot ?? []));
 /** A view uses only its own page membership, never another search/picker's cached results. */
-export function organizationViewSnapshot(pages: Record<string, OrganizationPage>, query: ConversationOrganizationQuery, expanded: (id: string) => boolean): ConversationOrganizationSnapshot | null {
+export function organizationViewSnapshot(pages: Record<string, OrganizationPage>, query: ConversationOrganizationQuery, expanded: (object: { kind: 'container' | 'native' | 'external'; id: string }) => boolean): ConversationOrganizationSnapshot | null {
   const snapshots: ConversationOrganizationSnapshot[] = [];
   const visited = new Set<string>();
   const collect = (scope: ConversationOrganizationQuery) => {
     const key = organizationQueryKey(scope); if (visited.has(key)) return; visited.add(key);
     const snapshot = pages[key]?.snapshot; if (!snapshot) return; snapshots.push(snapshot);
+    if (scope.conversationTree) {
+      // Retain already loaded descendants while folding; reads are started only by opened rows.
+      for (const entry of snapshot.conversations) if (entry.hasChildren) {
+        collect({ ...scope, conversationTree: { parent: entry.conversation } });
+      }
+      return;
+    }
     if (query.query || query.kind === 'conversations') return;
     const memberIds = snapshot.items ? new Set(snapshot.items.filter(item => item.kind === 'container').map(item => item.id)) : null;
-    for (const container of snapshot.containers) if ((!memberIds || memberIds.has(container.id)) && expanded(container.id)) {
+    for (const container of snapshot.containers) if ((!memberIds || memberIds.has(container.id)) && expanded({ kind: 'container', id: container.id })) {
       collect({ pageNodes: true, containerId: container.id, archived: query.archived, ...(query.botId ? { botId: query.botId } : {}), ...(query.excludeBotConversations ? { excludeBotConversations: true } : {}) });
     }
   };

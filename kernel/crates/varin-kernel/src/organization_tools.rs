@@ -482,6 +482,7 @@ impl Tools {
             kind: None,
             sort: None,
             exclude_bot_conversations: None,
+            conversation_tree: None,
             container_id: input
                 .container
                 .as_deref()

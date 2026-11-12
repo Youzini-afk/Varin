@@ -6,6 +6,21 @@ export type OrganizationNode = {
   container?: ConversationOrganizationContainer; conversation?: ConversationOrganizationEntry;
   children: OrganizationNode[];
 };
+/** Recent task ancestry follows dispatch, independently of explicit category moves. */
+export function projectRecentConversations(snapshot: ConversationOrganizationSnapshot, options: { archived?: boolean; botId?: string; excludeBotConversations?: boolean } = {}): OrganizationNode[] {
+  const nodes = new Map<string, OrganizationNode>();
+  snapshot.conversations.forEach((entry, order) => {
+    if (options.excludeBotConversations && entry.origin.directBotId || entry.archived !== Boolean(options.archived) || options.botId && entry.origin.botId !== options.botId && entry.origin.directBotId !== options.botId) return;
+    const key = organizationObjectKey(entry.conversation);
+    nodes.set(key, { key, object: entry.conversation, parentId: entry.position.containerId, order, conversation: entry, children: [] });
+  });
+  const roots: OrganizationNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.conversation!.origin.conversation;
+    (parent && nodes.get(organizationObjectKey(parent))?.children || roots).push(node);
+  }
+  return roots;
+}
 /** Navigation inheritance does not modify execution ancestry. Explicit children become independent rows. */
 export function projectOrganization(snapshot: ConversationOrganizationSnapshot, options: { query?: string; botId?: string; archived?: boolean; flat?: boolean; excludeBotConversations?: boolean } = {}): OrganizationNode[] {
   const containers = new Map<string, OrganizationNode>();

@@ -21,6 +21,8 @@ export interface ConversationOrganizationEntry {
   revision: number; position: ConversationOrganizationPosition;
   /** Supplied by activity-sorted reads; classification pagination is independent of activity. */
   updatedAtMs?: number;
+  /** Whether this tree scope has visible child tasks; children have their own page. */
+  hasChildren?: boolean;
   origin: { botId: string | null; conversation: ConversationOrganizationRef | null; directBotId: string | null };
   path: string[];
 }
@@ -29,6 +31,8 @@ export interface ConversationOrganizationQuery {
   pageNodes?: boolean;
   kind?: 'containers' | 'conversations'; sort?: 'manual' | 'recent';
   excludeBotConversations?: boolean;
+  /** Present for a task tree: omitted parent selects roots, otherwise direct children. */
+  conversationTree?: { parent?: ConversationOrganizationRef };
   containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string;
   botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string;
 }
@@ -94,7 +98,7 @@ export function parseConversationOrganizationQuery(value: unknown): Conversation
   const invalid = (): never => { throw new ConversationOrganizationError('invalid_request', 'Invalid conversation directory query'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const query = value as Record<string, unknown>;
-  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes', 'kind', 'sort', 'excludeBotConversations'];
+  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes', 'kind', 'sort', 'excludeBotConversations', 'conversationTree'];
   if (Object.keys(query).some(key => !allowed.includes(key))) invalid();
   for (const field of ['pageNodes', 'rootOnly', 'recursive', 'excludeBotConversations']) if (query[field] !== undefined && typeof query[field] !== 'boolean') invalid();
   if (query.containerId !== undefined && query.containerId !== null && (typeof query.containerId !== 'string' || !query.containerId.trim())) invalid();
@@ -104,6 +108,16 @@ export function parseConversationOrganizationQuery(value: unknown): Conversation
   if (query.kind !== undefined && query.kind !== 'containers' && query.kind !== 'conversations') invalid();
   if (query.sort !== undefined && query.sort !== 'manual' && query.sort !== 'recent') invalid();
   if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || Number(query.limit) < 1)) invalid();
+  if (query.conversationTree !== undefined) {
+    const tree = query.conversationTree;
+    if (!tree || typeof tree !== 'object' || Array.isArray(tree) || Object.keys(tree).some(key => key !== 'parent')) invalid();
+    const parent = (tree as { parent?: unknown }).parent;
+    if (parent !== undefined) {
+      if (!parent || typeof parent !== 'object' || Array.isArray(parent)) invalid();
+      const ref = parent as Record<string, unknown>;
+      if (Object.keys(ref).some(key => key !== 'kind' && key !== 'id') || !['native', 'external'].includes(String(ref.kind)) || typeof ref.id !== 'string' || !ref.id.trim()) invalid();
+    }
+  }
   return query as ConversationOrganizationQuery;
 }
 
@@ -126,6 +140,7 @@ export function parseConversationOrganizationSnapshot(value: unknown): Conversat
   for (const raw of conversations) {
     const c = record(raw); reference(c.conversation); number(c.revision);
     if (c.updatedAtMs !== undefined) number(c.updatedAtMs);
+    if (c.hasChildren !== undefined && typeof c.hasChildren !== 'boolean') invalid();
     if (typeof c.title !== 'string' || typeof c.archived !== 'boolean' || typeof c.pinned !== 'boolean' || !Array.isArray(c.path) || c.path.some(id => typeof id !== 'string')) invalid();
     const position = record(c.position); reference(position.conversation); nullable(position.containerId);
     for (const field of ['revision', 'order']) number(position[field]);

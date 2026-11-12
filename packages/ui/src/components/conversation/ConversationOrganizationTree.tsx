@@ -1,7 +1,7 @@
 import React from 'react';
 import { DndContext, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, useDraggable, useDroppable, DragOverlay, pointerWithin, closestCenter, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
-import type { ConversationOrganizationObject, ConversationOrganizationOperation, ConversationOrganizationQuery } from '@varin/application-client';
+import type { ConversationOrganizationObject, ConversationOrganizationOperation, ConversationOrganizationQuery, ConversationOrganizationRef } from '@varin/application-client';
 import { useConversationOrganization, useConversationOrganizationStore, submitOrganizationMetadata, submitOrganization, refreshConversationOrganization, loadOrganizationPage, readOrganizationActionScope, organizationQueryKey, organizationViewSnapshot } from '@/stores/useConversationOrganizationStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -10,7 +10,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useOrganizationNavigation } from '@/hooks/useOrganizationNavigation';
 import { useConversationOrganizationEntry } from '@/hooks/useConversationOrganizationEntry';
 import { startThreadFromNavigation, openThreadFromNavigation, openExternalConversationFromNavigation } from '@/lib/agent-runtime/threadNavigation';
-import { projectOrganization, organizationObjectKey, organizationContainerPath, nearestOrganizationProject, organizationDropAllowed, type OrganizationNode } from './organizationProjection';
+import { projectOrganization, projectRecentConversations, organizationObjectKey, organizationContainerPath, nearestOrganizationProject, organizationDropAllowed, type OrganizationNode } from './organizationProjection';
 import { useSidebarCatalog } from './sidebarCatalog';
 import { sortConversationSessionWorkspaceProjects } from './sessionPresentation';
 import { OrganizationRow } from './OrganizationRow';
@@ -120,15 +120,16 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   }, [botId, setPreference]);
   const namedSnapshot = React.useMemo(() => snapshot ? { ...snapshot, containers: snapshot.containers.map(c => c.kind === 'project' ? { ...c, name: projects.find(p => p.id === c.projectId)?.label || projects.find(p => p.id === c.projectId)?.path.split(/[\\/]/).filter(Boolean).at(-1) || t('organization.projectUnavailable') } : c) } : null, [snapshot, projects, t]);
   React.useEffect(() => { onFocusChange?.(namedSnapshot?.containers.find(container => container.id === preference.focus)?.name ?? null); }, [preference.focus, namedSnapshot, onFocusChange]);
-  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}), ...(botId ? { botId } : {}), ...(recent ? { kind: 'conversations', sort: 'recent', recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !recent ? { rootOnly: true } : {}) }), [archived, botId, query, recent, excludeBotConversations]);
+  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}), ...(botId ? { botId } : {}), ...(recent ? { kind: 'conversations', sort: 'recent', recursive: true, conversationTree: {} } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !recent ? { rootOnly: true } : {}) }), [archived, botId, query, recent, excludeBotConversations]);
+  const conversationQuery = React.useCallback((parent: ConversationOrganizationRef): ConversationOrganizationQuery => ({ ...scopeQuery, conversationTree: { parent } }), [scopeQuery]);
   const containerQuery = React.useCallback((containerId: string): ConversationOrganizationQuery => ({ pageNodes: true, containerId, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}), ...(botId ? { botId } : {}) }), [archived, botId, excludeBotConversations]);
   const viewQuery = React.useMemo(() => preference.focus && !query.trim() ? containerQuery(preference.focus) : scopeQuery, [preference.focus, query, containerQuery, scopeQuery]);
   React.useEffect(() => { void loadOrganizationPage(viewQuery); }, [viewQuery, state.host]);
-  const visibleSnapshot = React.useMemo(() => organizationViewSnapshot(state.pages, viewQuery, id => preference.expanded[organizationObjectKey({ kind: 'container', id })] === true), [state.pages, viewQuery, preference.expanded]);
+  const visibleSnapshot = React.useMemo(() => organizationViewSnapshot(state.pages, viewQuery, object => !!query.trim() || preference.expanded[organizationObjectKey(object)] === true), [state.pages, viewQuery, preference.expanded, query]);
   const namedVisibleSnapshot = React.useMemo(() => visibleSnapshot ? { ...visibleSnapshot, containers: visibleSnapshot.containers.map(c => namedSnapshot?.containers.find(named => named.id === c.id) ?? c) } : null, [visibleSnapshot, namedSnapshot]);
   const roots = React.useMemo<OrganizationNode[]>(() => {
     if (!namedVisibleSnapshot) return [];
-    if (recent) return namedVisibleSnapshot.conversations.filter(entry => !excludeBotConversations || !entry.origin.directBotId).map(conversation => ({ key: organizationObjectKey(conversation.conversation), object: conversation.conversation, parentId: conversation.position.containerId, order: conversation.position.order, conversation, children: [] }));
+    if (recent) return projectRecentConversations(namedVisibleSnapshot, { archived, botId, excludeBotConversations });
     const projected = projectOrganization(namedVisibleSnapshot, { query, archived, botId, flat, excludeBotConversations });
     const projectOrder = new Map(sortConversationSessionWorkspaceProjects(projects, sortOrder).map((project, index) => [project.id, index]));
     const sort = (items: OrganizationNode[]): OrganizationNode[] => {
@@ -142,9 +143,6 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
     };
     return sort(projected.filter(node => showRoot || query.trim() || node.container));
   }, [namedVisibleSnapshot, recent, query, archived, botId, flat, projects, sortOrder, showRoot, excludeBotConversations]);
-  const listLayoutKey = JSON.stringify([roots.map(node => node.key), preference.expanded, preference.focus, recent, snapshot?.revision, query]);
-  useSelectionGlide(list, selectedObject ? organizationObjectKey(selectedObject) : null, listLayoutKey);
-  useHoverPill(list);
   const expandedRevision = React.useRef(0);
   React.useEffect(() => {
     if (!snapshot || !expansion || expansion.revision === expandedRevision.current) return;
@@ -157,11 +155,20 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   const walk = (items: OrganizationNode[]) => { for (const node of items) { nodes.set(node.key, node); walk(node.children); } }; walk(roots);
   const focused = preference.focus ? nodes.get(organizationObjectKey({ kind: 'container', id: preference.focus })) : null;
   const shown = focused && !query.trim() ? focused.children : roots;
+  const listLayoutKey = JSON.stringify([[...nodes.keys()], preference.expanded, preference.focus, recent, snapshot?.revision, query]);
+  useSelectionGlide(list, selectedObject ? organizationObjectKey(selectedObject) : null, listLayoutKey);
+  useHoverPill(list);
   const openedContainers: string[] = [];
-  const collectOpened = (items: OrganizationNode[]) => { for (const node of items) if (preference.expanded[node.key]) { if (node.container) openedContainers.push(node.container.id); collectOpened(node.children); } };
-  if (!query.trim() && !recent) { if (preference.focus) openedContainers.push(preference.focus); collectOpened(shown); }
-  const openedKey = JSON.stringify(openedContainers);
-  React.useEffect(() => { for (const id of JSON.parse(openedKey) as string[]) void loadOrganizationPage(containerQuery(id)); }, [openedKey, containerQuery, state.host]);
+  const openedConversations: ConversationOrganizationRef[] = [];
+  const collectOpened = (items: OrganizationNode[]) => { for (const node of items) if (query.trim() || preference.expanded[node.key]) { if (node.container) openedContainers.push(node.container.id); if (recent && node.conversation?.hasChildren) openedConversations.push(node.conversation.conversation); collectOpened(node.children); } };
+  if (recent) collectOpened(shown);
+  else if (!query.trim()) { if (preference.focus) openedContainers.push(preference.focus); collectOpened(shown); }
+  const openedKey = JSON.stringify({ containers: openedContainers, conversations: openedConversations });
+  React.useEffect(() => {
+    const opened = JSON.parse(openedKey) as { containers: string[]; conversations: ConversationOrganizationRef[] };
+    for (const id of opened.containers) void loadOrganizationPage(containerQuery(id));
+    for (const parent of opened.conversations) void loadOrganizationPage(conversationQuery(parent));
+  }, [openedKey, containerQuery, conversationQuery, state.host]);
   const pageControls = (pageQuery: ConversationOrganizationQuery): React.ReactNode => {
     const page = state.pages[organizationQueryKey(pageQuery)];
     return <>{page?.loading && <p role="status" className="px-2 py-1 typography-micro text-muted-foreground">{t('common.loading')}</p>}{page?.error && <p role="alert" className="px-2 typography-micro text-destructive">{page.error}<Button variant="ghost" size="sm" onClick={() => act(refreshConversationOrganization)}>{t('common.retry')}</Button></p>}{page?.snapshot?.nextCursor && <Button variant="ghost" size="sm" onClick={() => act(() => loadOrganizationPage(pageQuery, true))}>{t('organization.loadMore')}</Button>}</>;
@@ -389,13 +396,13 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
       {!recent && <DropTarget id={`before:${node.key}`} line disabled={!reorderable} drop={{ parentId: node.parentId, before: node.object, label: t('organization.moveBefore', { name: title }) }} />}
       <DragRow node={node} pending={pendingObjects.has(node.key)} expanded={expanded}>{handle => <><DropTarget id={`inside:${node.key}`} disabled={!!query.trim() || !container || !canDrop(container.id)} drop={{ parentId: container?.id ?? node.parentId, before: null, label: t('organization.moveInside', { name: container ? title : t('organization.category') }) }}>
         <ContextMenu><ContextMenuTrigger asChild><div className={cn(stickyHeaders && container && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm')}>
-          <OrganizationRow id={node.key} title={title} icon={rowIcon} origin={entry && <ConversationOrigin origin={entry.origin} />} active={active} container={!!container} recent={recent} expanded={expanded} expandable={!!(node.children.length || container)} selected={selection.has(node.key)} selecting={selection.size > 0 || selectionMode}
-            busy={busy} waiting={waiting} attention={attention} pinned={entry?.pinned} path={entry && (recent || flat || query.trim()) ? [pathLabel, originatingTitle].filter(Boolean).join(' · ') : undefined} time={updated === undefined ? undefined : formatSessionCompactDateLabel(updated)} summary={summaryByKey.get(node.key)} onOpen={open} onToggle={toggle} onSelect={() => selectNode(node)}
+          <OrganizationRow id={node.key} title={title} icon={rowIcon} origin={entry && <ConversationOrigin origin={entry.origin} />} active={active} container={!!container} recent={recent} expanded={expanded} expandable={!!(node.children.length || container || entry?.hasChildren)} selected={selection.has(node.key)} selecting={selection.size > 0 || selectionMode}
+            busy={busy} waiting={waiting} attention={attention} pinned={entry?.pinned} path={entry && (recent || flat || query.trim()) ? [pathLabel, !recent && originatingTitle].filter(Boolean).join(' · ') : undefined} time={updated === undefined ? undefined : formatSessionCompactDateLabel(updated)} summary={summaryByKey.get(node.key)} onOpen={open} onToggle={toggle} onSelect={() => selectNode(node)}
             onKeyDown={event => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter') open(); if (event.key === 'ArrowRight' && !expanded || event.key === 'ArrowLeft' && expanded) { event.preventDefault(); toggle(); } if (event.key === ' ' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); selectNode(node); } if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); const rows = [...(list.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])].filter(row => !row.closest('[inert]')); rows[rows.indexOf(event.currentTarget) + (event.key === 'ArrowDown' ? 1 : -1)]?.focus(); } }}
             actions={<>{!recent && handle}{container && <button type="button" className="organization-icon-button organization-row-new" aria-label={t('organization.newIn', { name: title })} onClick={() => newConversation(container.id)}><Icon name="add" className="size-3.5" /></button>}{project && <ProjectActionsButton projectRef={{ id: project.id, path: project.path, resourceOwner: project.source?.resourceOwner, source: project.source, versionedWorkspace: project.versionedWorkspace }} directory={project.path} allowMobile menuTrigger={<button type="button" className="organization-icon-button" aria-label={t('sessions.sidebar.project.actions.projectMenu')}><Icon name="play" className="size-3.5" /></button>} />}<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={t('organization.actions', { name: title })} className="organization-icon-button organization-row-more"><Icon name="more" className="size-3.5" /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="min-w-48">{menuItems(false)}</DropdownMenuContent></DropdownMenu></>} />
         </div></ContextMenuTrigger><ContextMenuContent className="min-w-48">{menuItems(true)}</ContextMenuContent></ContextMenu>
       </DropTarget>
-      {!recent && (node.children.length > 0 || container) && <div className="organization-fold" style={{ gridTemplateRows: expanded ? '1fr' : '0fr', opacity: expanded ? 1 : 0 }} inert={!expanded}><div className="min-h-0 overflow-hidden"><div role="group" className={container ? 'organization-children' : 'organization-task-children'}>{node.children.map(render)}{container && expanded && !query.trim() && pageControls(containerQuery(container.id))}{container && <DropTarget id={`end:${node.key}`} line disabled={!canDrop(container.id)} drop={{ reorder: true, parentId: container.id, before: null, label: t('organization.moveEnd', { name: title }) }} />}</div></div></div>}
+      {(node.children.length > 0 || container || entry?.hasChildren) && <div className="organization-fold" style={{ gridTemplateRows: expanded ? '1fr' : '0fr', opacity: expanded ? 1 : 0 }} inert={!expanded}><div className="min-h-0 overflow-hidden"><div role="group" className={container ? 'organization-children' : 'organization-task-children'}>{node.children.map(render)}{recent && entry?.hasChildren && expanded && pageControls(conversationQuery(entry.conversation))}{container && expanded && !query.trim() && pageControls(containerQuery(container.id))}{container && <DropTarget id={`end:${node.key}`} line disabled={!canDrop(container.id)} drop={{ reorder: true, parentId: container.id, before: null, label: t('organization.moveEnd', { name: title }) }} />}</div></div></div>}
       </>}</DragRow>
     </React.Fragment>;
   };

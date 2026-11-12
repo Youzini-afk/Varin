@@ -2139,6 +2139,51 @@ fn work_directory_excludes_direct_bot_chats_before_pagination_and_retains_dispat
     assert_eq!(delegated.origin.bot_id.as_deref(), Some("bot"));
     assert!(second.next_cursor.is_none());
     assert_eq!(f.db.organization_snapshot(None, OrganizationQuery::default()).unwrap().conversations.len(), 3);
+    let tree = f.db.organization_snapshot(None, OrganizationQuery {
+        kind: Some("conversations".into()), sort: Some("recent".into()), exclude_bot_conversations: Some(true),
+        conversation_tree: Some(ConversationTreeQuery::default()), ..Default::default()
+    }).unwrap();
+    assert_eq!(tree.conversations.len(), 2);
+    assert!(tree.conversations.iter().any(|entry| entry.conversation.id() == child.child_thread_id));
+}
+
+#[test]
+fn recent_task_tree_pages_parents_and_children_separately_and_keeps_real_dispatch_ancestry() {
+    let mut f = child_fixture::Fixture::new();
+    let child = f.accept();
+    f.db.create_thread("standalone", "standalone-main").unwrap();
+    public_group(&mut f.db, "moved-category");
+    public_move(&mut f.db, "move-child", &child.child_thread_id, Some("moved-category"));
+    let db = Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    for (thread, updated, title) in [("thread:parent", 10, "Parent"), (&child.child_thread_id, 90, "Needle child"), ("standalone", 50, "Standalone")] {
+        db.execute("UPDATE threads SET updated_at_ms=?2,title=?3 WHERE id=?1", rusqlite::params![thread, updated, title]).unwrap();
+    }
+    let query = OrganizationQuery {
+        page_nodes: true, kind: Some("conversations".into()), sort: Some("recent".into()),
+        conversation_tree: Some(ConversationTreeQuery::default()), limit: Some(1), ..Default::default()
+    };
+    let first = f.db.organization_snapshot(None, query.clone()).unwrap();
+    assert_eq!(first.conversations.len(), 1);
+    assert_eq!(first.conversations[0].conversation.id(), "thread:parent");
+    assert_eq!(first.conversations[0].updated_at_ms, Some(90));
+    assert_eq!(first.conversations[0].has_children, Some(true));
+    let next = f.db.organization_snapshot(None, OrganizationQuery { cursor: first.next_cursor.clone(), ..query.clone() }).unwrap();
+    assert_eq!(next.conversations[0].conversation.id(), "standalone");
+    assert!(next.next_cursor.is_none());
+    let children = OrganizationQuery { conversation_tree: Some(ConversationTreeQuery { parent: Some(native("thread:parent")) }), ..query.clone() };
+    let child_page = f.db.organization_snapshot(None, children.clone()).unwrap();
+    assert_eq!(child_page.conversations.len(), 1);
+    assert_eq!(child_page.conversations[0].conversation.id(), child.child_thread_id);
+    assert!(child_page.conversations[0].position.explicit);
+    assert_eq!(child_page.conversations[0].has_children, Some(false));
+    assert!(child_page.next_cursor.is_none());
+    let searched = f.db.organization_snapshot(None, OrganizationQuery { query: Some("Needle".into()), ..query.clone() }).unwrap();
+    assert_eq!(searched.conversations[0].conversation.id(), "thread:parent");
+    assert_eq!(f.db.organization_snapshot(None, OrganizationQuery { query: Some("Needle".into()), ..children }).unwrap().conversations[0].conversation.id(), child.child_thread_id);
+    db.execute("UPDATE threads SET archived=1 WHERE id='thread:parent'", []).unwrap();
+    let orphan = f.db.organization_snapshot(None, query).unwrap();
+    assert_eq!(orphan.conversations[0].conversation.id(), child.child_thread_id);
+    assert_eq!(orphan.conversations[0].has_children, Some(false));
 }
 
 #[test]

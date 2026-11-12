@@ -161,8 +161,13 @@ Active conversation highlighting uses one persistent sliding pill and the settin
 row backgrounds remain responsible for multi-selection rather than taking over after each slide.
 Recent rows reserve one trailing slot for the timestamp and more button. One fades out before the other fades in on
 hover, keyboard focus or an open menu; only the button itself gains a quiet hover/open background.
-Recent reads use `kind: 'conversations', sort: 'recent'` so the Catalog orders across categories before
-pagination. Those pages never collect cached expanded category pages. Destination browsing uses
+Recent reads use `kind: 'conversations', sort: 'recent', conversationTree: {}` to page root tasks across
+categories. The Catalog uses descendant activity for each family's recent order. Expanding a task reads
+`conversationTree: { parent }` with its own sibling pagination and `hasChildren` hints. Display ancestry
+comes from dispatch provenance even after an explicit category move; unavailable parents leave visible
+tasks at the root. Task branches start collapsed and reuse the Host/view's persisted expansion choices.
+Only opened branches start reads; cached descendants stay mounted while folding. Search retains matching
+ancestry without overwriting those choices. Recent pages never collect cached category pages. Destination browsing uses
 `kind: 'containers'`, so conversation rows do not consume its page slots. Optional activity timestamps
 participate only in recent-page continuations; normal directory cursors remain independent of activity.
 Workbench and IDE queries set `excludeBotConversations` before pagination, including search, archive

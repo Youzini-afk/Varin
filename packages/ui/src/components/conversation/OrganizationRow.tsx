@@ -28,10 +28,10 @@ export function OrganizationRow({ id, title, icon, origin, active, container, ex
     data-container={container || undefined} data-recent={recent || undefined} aria-expanded={expandable ? expanded : undefined}
     aria-selected={selected || !!active} onKeyDown={onKeyDown}
     className={cn('organization-row group/organization corner-continuous', (active || selected) && 'bg-interactive-selection text-foreground')}>
-    {!recent && <button type="button" className="organization-chevron" aria-expanded={expandable ? expanded : undefined}
+    <button type="button" className="organization-chevron" aria-expanded={expandable ? expanded : undefined}
       aria-label={t(expanded ? 'organization.collapse' : 'organization.expand', { name: title })} disabled={!expandable} onClick={onToggle}>
       <Icon name="arrow-right-s" className={cn('size-3 transition-transform duration-[var(--motion-dur-glide)] ease-[var(--motion-ease-glide)]', expanded && 'rotate-90', !expandable && 'invisible')} />
-    </button>}
+    </button>
     {selecting && <button type="button" role="checkbox" aria-checked={selected} aria-label={t('organization.selectName', { name: title })} className="organization-icon-button size-5" onClick={onSelect}><Icon name={selected ? 'checkbox' : 'checkbox-blank'} className="size-3.5" /></button>}
     <button type="button" className="organization-row-main typography-ui-label" title={title} aria-current={active ? 'page' : undefined} onClick={selecting ? onSelect : onOpen}>
       <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>

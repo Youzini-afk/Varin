@@ -74,6 +74,8 @@ pub struct ConversationEntry {
     pub revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_children: Option<bool>,
     pub position: Position,
     pub origin: Origin,
     pub path: Vec<String>,
@@ -87,6 +89,8 @@ pub struct OrganizationQuery {
     pub sort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_bot_conversations: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_tree: Option<ConversationTreeQuery>,
     pub container_id: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub page_nodes: bool,
@@ -103,6 +107,11 @@ pub struct OrganizationQuery {
     pub archived: Option<String>,
     pub limit: Option<u64>,
     pub cursor: Option<String>,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConversationTreeQuery {
+    pub parent: Option<ConversationRef>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1316,6 +1325,7 @@ pub(super) fn conversation(
         pinned,
         revision,
         updated_at_ms: None,
+        has_children: None,
         path: path(db, &scope, p.container_id.as_deref())?,
         position: p,
         origin: origin(db, principal, r)?,
@@ -1517,11 +1527,51 @@ impl DirectoryMetadata {
             pinned,
             revision,
             updated_at_ms: None,
+            has_children: None,
             position,
             path,
             origin,
         })
     }
+}
+/// Page task siblings, independently of their classification positions. Descendant
+/// activity and search hits belong to their visible ancestor, not another root row.
+fn conversation_tree_scope(
+    entries: Vec<ConversationEntry>,
+    tree: &ConversationTreeQuery,
+    search: Option<&str>,
+    recent: bool,
+) -> Result<Vec<ConversationEntry>> {
+    let indices = entries.iter().enumerate().map(|(i, entry)| (entry.conversation.clone(), i)).collect::<BTreeMap<_, _>>();
+    let parents = entries.iter().map(|entry| entry.origin.conversation.as_ref().and_then(|parent| indices.get(parent)).copied()).collect::<Vec<_>>();
+    let requested_parent = tree.parent.as_ref().and_then(|parent| indices.get(parent)).copied();
+    if tree.parent.is_some() && requested_parent.is_none() { return Ok(Vec::new()); }
+    let mut remaining = vec![0usize; entries.len()];
+    for parent in parents.iter().flatten() { remaining[*parent] += 1; }
+    let mut pending = remaining.iter().enumerate().filter_map(|(i, count)| (*count == 0).then_some(i)).collect::<Vec<_>>();
+    let mut latest = entries.iter().map(|entry| entry.updated_at_ms).collect::<Vec<_>>();
+    let mut matches = entries.iter().map(|entry| search.is_none_or(|query| entry.title.to_lowercase().contains(query))).collect::<Vec<_>>();
+    let mut visited = 0;
+    while let Some(index) = pending.pop() {
+        visited += 1;
+        if let Some(parent) = parents[index] {
+            latest[parent] = latest[parent].max(latest[index]);
+            matches[parent] |= matches[index];
+            remaining[parent] -= 1;
+            if remaining[parent] == 0 { pending.push(parent); }
+        }
+    }
+    if visited != entries.len() { return Err(RuntimeError::Invalid("origin ancestry cycle".into())); }
+    let mut has_children = vec![false; entries.len()];
+    for (index, parent) in parents.iter().enumerate() {
+        if matches[index] { if let Some(parent) = parent { has_children[*parent] = true; } }
+    }
+    Ok(entries.into_iter().enumerate().filter_map(|(index, mut entry)| {
+        if parents[index] != requested_parent || !matches[index] { return None; }
+        entry.has_children = Some(has_children[index]);
+        if recent { entry.updated_at_ms = latest[index]; }
+        Some(entry)
+    }).collect())
 }
 fn snapshot(
     db: &Connection,
@@ -1638,7 +1688,7 @@ fn snapshot(
         } else if query.root_only && !query.recursive && entry.position.container_id.is_some() {
             continue;
         }
-        if let Some(search) = &search {
+        if let Some(search) = search.as_ref().filter(|_| query.conversation_tree.is_none()) {
             if !entry.title.to_lowercase().contains(search)
                 && (query.page_nodes
                     || !entry.path.iter().any(|id| {
@@ -1652,6 +1702,9 @@ fn snapshot(
             }
         }
         entries.push(entry);
+    }
+    if let Some(tree) = &query.conversation_tree {
+        entries = conversation_tree_scope(entries, tree, search.as_deref(), recent)?;
     }
     entries.sort_by(|a, b| {
         if recent {

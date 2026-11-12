@@ -465,6 +465,39 @@ it('keeps a Bot-matching container page visible before its matching child page i
   expect(row('Bot child')).toBeTruthy();
 });
 
+it('keeps recent tasks under their dispatch parent, loads children on expansion and remembers both fold choices', async () => {
+  const parent = { ...task('Parent', 0), hasChildren: true };
+  const child = { ...task('Child', 0, 'another-category'), hasChildren: true, origin: { botId: null, directBotId: null, conversation: parent.conversation } };
+  const grandchild = { ...task('Grandchild', 1, 'another-category'), hasChildren: false, origin: { botId: null, directBotId: null, conversation: child.conversation } };
+  const standalone = { ...task('Standalone', 2), hasChildren: false };
+  transport.read.mockImplementation(async (query: import('@varin/application-client').ConversationOrganizationQuery = {}) => {
+    const entries = !query.conversationTree ? [] : query.conversationTree.parent?.id === 'Parent' ? [child] : query.conversationTree.parent?.id === 'Child' ? [grandchild] : [parent, standalone];
+    return { ...original(), containers: [], conversations: entries, items: entries.map(entry => entry.conversation), nextCursor: null };
+  });
+  await render(); await click('最近');
+  expect(row('Parent').getAttribute('aria-expanded')).toBe('false');
+  expect(row('Child')).toBeUndefined();
+  expect(transport.read.mock.calls.some(([query]) => query.conversationTree?.parent)).toBe(false);
+  await toggle('Parent');
+  expect(row('Child').closest('.organization-task-children')).not.toBeNull();
+  expect(row('Child').closest('[inert]')).toBeNull();
+  expect(row('Child').getAttribute('aria-expanded')).toBe('false');
+  expect(row('Grandchild')).toBeUndefined();
+  await toggle('Child');
+  expect(row('Grandchild').closest('[inert]')).toBeNull();
+  await act(async () => root.render(null)); await render();
+  expect(row('Parent').getAttribute('aria-expanded')).toBe('true');
+  expect(row('Child').getAttribute('aria-expanded')).toBe('true');
+  expect(row('Grandchild').closest('[inert]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="收起 Parent"]')!.click());
+  await act(async () => root.render(null)); await render();
+  expect(row('Parent').getAttribute('aria-expanded')).toBe('false');
+  expect(row('Grandchild').closest('[inert]')).not.toBeNull();
+  await toggle('Parent');
+  expect(row('Child').getAttribute('aria-expanded')).toBe('true');
+  expect(row('Grandchild').closest('[inert]')).toBeNull();
+});
+
 it('uses the owner’s recent page order without leaking expanded category pages, and retains display choices on remount', async () => {
   const folder = group('Work', 0);
   const first = { ...task('Recent first', 1, 'Work'), updatedAtMs: 20 };
