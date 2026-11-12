@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { expect, it, vi } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRestoreError } from '@varin/extension-host';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
@@ -27,6 +27,12 @@ import type { KernelClient } from './kernel-client.js';
 import { createComputerRuntime } from './computer-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './nested-tool-owner.js';
 import { createToolFamilySettings } from './tool-family-settings.js';
+
+function observedEvent() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 // Real bundles, file catalogs and broker processes use the suite's shared timeout.
 it('installed SDK declaration reaches shared bridge, compiled schemas, validated model/policy scope and real material adapter', async () => {
@@ -782,14 +788,32 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
   const leases: Awaited<ReturnType<typeof retainExtensionTool>>[] = [];
   const listeners = new Set<() => void>();
   const selectedId = 'varin.script.close', omittedId = 'varin.script.run';
-  let currentFailure: Error | undefined, currentReads = 0, staleReads = 0;
+  let currentFailure: Error | undefined, currentReads = 0;
   let deferFailure = false, releaseFailure: (() => void) | undefined;
+  let observeCurrentRead: (() => void) | undefined, observeStaleRead: (() => void) | undefined;
+  const selectedStarted = observedEvent(), releaseSelected = observedEvent();
+  const recovery = new AbortController();
+  let selectedWork: ReturnType<typeof runtime.prepareService> | undefined;
+  let unobservePreparation: (() => void) | undefined;
   const readState = runtime.state.bind(runtime);
   const stateObserver = vi.spyOn(runtime, 'state').mockImplementation(async () => {
     const state = await readState();
-    if (!state.routing.authoritative) staleReads++;
+    if (!state.routing.authoritative) observeStaleRead?.();
     return state;
   });
+  let closing: Promise<void> | undefined;
+  const close = () => closing ??= (async () => {
+    for (const scope of scopes) scope.close();
+    recovery.abort(); releaseFailure?.(); releaseSelected.resolve();
+    await selectedWork?.catch(() => undefined);
+    unobservePreparation?.();
+    for (const lease of leases) lease.lease.release();
+    stateObserver.mockRestore();
+    try { await runtime.stop(); } finally { await fs.rm(root, { recursive: true, force: true }); }
+  })();
+  // A missing publication must still fail under the original test budget and
+  // release the broker/gates even when Vitest times out outside this function.
+  onTestFinished(close);
   const input = { runId: 'original', threadId: 'thread', branchId: 'history', source: {
     resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace',
     mode: 'materialized' as const, branch_id: 'source', revision: 1, live_root: null,
@@ -807,6 +831,7 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
       prepareConfiguration: async (_run, required) => {
         if (!required.length) {
           currentReads++;
+          observeCurrentRead?.();
           if (currentFailure) {
             const originalError = currentFailure;
             if (deferFailure) await new Promise<void>(resolve => { releaseFailure = resolve; });
@@ -827,17 +852,37 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
     await expect(prepare({ ...input, runId: 'pending' }, [], new AbortController().signal))
       .rejects.toThrow(currentFailure?.message ?? 'extension_tool_catalog_unavailable');
     const readsBeforeRestore = currentReads;
-    const recovered = await prepare({ ...input, runId: 'recovered', restoreExact: true }, [saved], new AbortController().signal);
+    const recovered = await prepare({ ...input, runId: 'recovered', restoreExact: true }, [saved], recovery.signal);
     scopes.push(recovered); leases.push(...recovered.initial);
     expect(currentReads).toBe(readsBeforeRestore);
     expect(recovered.initial.map(lease => lease.binding)).toEqual([saved]);
     expect(recovered.initial[0]!.lease.available(saved.tool)).toBe(true);
-    const publications: string[] = [], previousReads = currentReads, previousStaleReads = staleReads;
+    const publications = new Map<string, Awaited<ReturnType<typeof retainExtensionTool>>>();
+    const publishedSelected = observedEvent(), publishedOmitted = observedEvent();
+    const currentRead = observedEvent(), staleRead = observedEvent();
+    observeCurrentRead = currentRead.resolve; observeStaleRead = staleRead.resolve;
+    // Hold one real candidate at its preparation boundary. The restored directory
+    // and an unrelated candidate must remain usable while that work is pending.
+    const prepareService = runtime.prepareService.bind(runtime);
+    const preparationObserver = vi.spyOn(runtime, 'prepareService').mockImplementation((request, options) => {
+      if (unavailable === 'settings' && typeof request === 'object' && request !== null
+        && 'serviceId' in request && request.serviceId === selectedId) {
+        selectedStarted.resolve();
+        return selectedWork = releaseSelected.promise.then(() => prepareService(request, options));
+      }
+      return prepareService(request, options);
+    });
+    unobservePreparation = () => preparationObserver.mockRestore();
     deferFailure = unavailable === 'settings while refresh rejects';
-    recovered.start(async (_slot, lease) => { if (lease) { publications.push(lease.binding.serviceId); leases.push(lease); } });
-    await expect.poll(() => currentReads).toBeGreaterThan(previousReads);
-    if (unavailable === 'routing') await expect.poll(() => staleReads).toBeGreaterThan(previousStaleReads);
-    expect(publications).toEqual([]);
+    recovered.start(async (_slot, lease) => {
+      if (!lease) return;
+      publications.set(lease.binding.serviceId, lease); leases.push(lease);
+      if (lease.binding.serviceId === selectedId) publishedSelected.resolve();
+      if (lease.binding.serviceId === omittedId) publishedOmitted.resolve();
+    });
+    await currentRead.promise;
+    if (unavailable === 'routing') await staleRead.promise;
+    expect(publications.size).toBe(0);
     currentFailure = undefined;
     if (unavailable === 'routing') await fs.writeFile(routingPath, routingBytes);
     for (const listener of listeners) listener();
@@ -846,20 +891,25 @@ it.each(['settings', 'routing', 'settings while refresh rejects'] as const)('exa
     // the rejected snapshot or alter the saved directory.
     releaseFailure?.();
     // Current discovery resumes through the existing live subscription, without a fence.
-    try {
-      await expect.poll(() => publications).toContain(selectedId);
-      await expect.poll(() => publications).toContain(omittedId);
-    } catch (error) {
-      console.error('Exact extension directory refresh evidence', {
-        unavailable, currentReads, staleReads, publications, prepared: recovered.inspect(),
-      });
-      throw error;
+    if (unavailable === 'settings') {
+      await Promise.all([selectedStarted.promise, publishedOmitted.promise]);
+      expect(publications.has(selectedId)).toBe(false);
+      expect(recovered.inspect()).toContainEqual(expect.objectContaining({ serviceId: selectedId, status: 'preparing' }));
+      expect(recovered.initial.map(lease => lease.binding)).toEqual([saved]);
+      expect(recovered.initial[0]!.lease.available(saved.tool)).toBe(true);
+      releaseSelected.resolve();
+    }
+    // Real broker/catalog preparation has no one-second contract. Observe its
+    // actual publication, under the unchanged suite-wide test budget.
+    await Promise.all([publishedSelected.promise, publishedOmitted.promise]);
+    expect([...publications.keys()].sort()).toEqual([selectedId, omittedId].sort());
+    expect(publications.get(selectedId)!.binding).toEqual(saved);
+    for (const [serviceId, lease] of publications) {
+      expect(lease.lease.available(lease.binding.tool)).toBe(true);
+      expect(recovered.inspect()).toContainEqual(expect.objectContaining({ serviceId, status: 'ready', prepared: lease.binding }));
     }
   } finally {
-    for (const scope of scopes) scope.close();
-    for (const lease of leases) lease.lease.release();
-    stateObserver.mockRestore();
-    await runtime.stop(); await fs.rm(root, { recursive: true, force: true });
+    await close();
   }
 });
 
@@ -888,6 +938,13 @@ it('new roots discover current enabled tools after an empty or disabled prior di
   const scopes: Awaited<ReturnType<ReturnType<typeof createExtensionTools>>>[] = [];
   const leases: Awaited<ReturnType<typeof retainExtensionTool>>[] = [];
   const listeners = new Set<() => void>();
+  let closing: Promise<void> | undefined;
+  const close = () => closing ??= (async () => {
+    for (const scope of scopes) scope.close();
+    for (const lease of leases) lease.lease.release();
+    try { await runtime.stop(); } finally { await fs.rm(root, { recursive: true, force: true }); }
+  })();
+  onTestFinished(close);
   const enabled = new Set<string>();
   const settings = createToolFamilySettings(SCRIPT_TOOL_DECLARATIONS, async () => ({
     global: { harness: { tools: Object.fromEntries(SCRIPT_TOOL_DECLARATIONS.map(value => [value.tool!.name, enabled.has(value.id)])) } },
@@ -924,9 +981,14 @@ it('new roots discover current enabled tools after an empty or disabled prior di
     // live candidates remain enabled at subsequent closed publication boundaries.
     const restoredEmpty = await open({ ...input, runId: 'empty-original', restoreExact: true });
     expect(restoredEmpty.initial).toEqual([]);
-    const published: string[] = [];
-    restoredEmpty.start(async (_slot, lease) => { if (lease) { published.push(lease.binding.serviceId); leases.push(lease); } });
-    await expect.poll(() => published).toContain('varin.script.run');
+    const published: string[] = [], publishedRun = observedEvent();
+    restoredEmpty.start(async (_slot, lease) => {
+      if (!lease) return;
+      published.push(lease.binding.serviceId); leases.push(lease);
+      if (lease.binding.serviceId === 'varin.script.run') publishedRun.resolve();
+    });
+    await publishedRun.promise;
+    expect(published).toContain('varin.script.run');
     const next = await open({ ...input, runId: 'new-current-root' });
     expect(next.initial.map(value => value.binding.serviceId)).toEqual(['varin.script.run']); next.close();
     const sourceless = await open({ ...input, runId: 'sourceless-root', source: null });
@@ -938,8 +1000,6 @@ it('new roots discover current enabled tools after an empty or disabled prior di
     frozenEmpty.start(async () => { throw new Error('A delegated empty directory must remain frozen'); });
     for (const listener of listeners) listener();
   } finally {
-    for (const scope of scopes) scope.close();
-    for (const lease of leases) lease.lease.release();
-    await runtime.stop(); await fs.rm(root, { recursive: true, force: true });
+    await close();
   }
 });
