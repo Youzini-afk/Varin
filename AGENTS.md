@@ -1,75 +1,81 @@
 # Varin contributor guide
 
-Start with [docs/architecture.md](docs/architecture.md), [docs/development.md](docs/development.md)
-and the nearest module README/DOCUMENTATION. Code, types, schemas, tests and package scripts define
-executable behavior; docs explain responsibility and intent. Git retains historical designs and delivery
-records. Correct stale prose rather than appending another contradictory update.
+[docs/architecture.md](docs/architecture.md), [docs/development.md](docs/development.md) and the module
+README/DOCUMENTATION files describe the system. Code, types, schemas, tests and package scripts are the
+executable truth; docs explain responsibility and intent, and Git holds history. When prose and code
+disagree, the code is current and the prose needs fixing.
 
-Keep long-lived docs focused on the current system, its constraints and non-obvious rationale. Active
-designs and plans may remain while work is underway; distinguish proposals from implemented behavior.
-When they have served their purpose, fold useful rationale into current docs and remove the process
-documents. Git preserves their history.
+This guide covers what changes rarely: what the system is, which boundaries actually matter, and where
+costs come from. Current contracts and support limits live in the domain docs under [docs/](docs/README.md);
+exact values live in code. How to get a given change done is your call.
 
-## Product and ownership
+## The system
 
-- Varin is an independent workspace and harness. All changes happen in this repository; other
-  projects' checkouts beside it are read-only references.
-- The Rust Agent runtime is the conversation execution owner, using native Thread/branch identities
-  and Catalog for Varin execution. External harnesses own their native loops; their product bindings,
-  admissions and observations remain in the same Rust Catalog, without synthetic native Runs.
-  Embedded Pi runtime packages and the former worker transport are retired. Do not reintroduce
-  a parallel conversation owner or import another harness's private stores as native conversations.
-- Preserve existing provider/auth, remote/pairing/relay, allowed-directory, external-access audit,
-  session/history/queue and platform capabilities when changing their owner. Preserve LICENSE and
-  THIRD_PARTY_NOTICES obligations independently of documentation cleanup.
-- `application-client` owns framework-neutral RuntimeAPIs/DTOs/failures; `ui` owns React, projections,
-  Document Registry and editor groups. Privileged work belongs to trusted owners, never renderers.
-- `web` owns the Application Host. Electron embeds it and adds the native shell; mobile connects to it.
-  Do not introduce a second Electron backend. Runtime, protocol and extension packages retain their
-  named process/contract boundaries in [architecture](docs/architecture.md).
-- Rust is the production authority for transferred storage, file, materialization, process and compute
-  resources. The Agent Catalog additionally owns native execution. No parallel TS writer or fallback
-  authority may be reintroduced. KnowledgeStore retains its separate documented domain.
+Varin is an independent workspace and agent harness. Work happens in this repository; checkouts of other
+projects beside it are read-only references.
 
-## Invariants
+- The Rust Agent runtime owns native conversation execution: Thread, branch, Run, request and Operation live
+  in its Catalog. [External harnesses](docs/external-agents.md) keep their own loops; Varin records their
+  bindings and observations in the same Catalog without inventing native Runs. The embedded Pi runtime and
+  the old worker transport are retired.
+- `web` is the Application Host and the only backend. Electron embeds it and adds the native shell; mobile
+  and remote clients connect to it. `application-client` holds framework-neutral APIs and DTOs; `ui` holds
+  React, projections, the Document Registry and editor groups.
+- Rust also owns storage, files, materialization, processes and compute. KnowledgeStore is a separate domain.
+  Each piece of state has one writer; a second TS writer or fallback authority would split the truth.
+- DocumentsAPI carries text content, FilesAPI browsing/binary/CRUD, WorkspaceAPI project/tree/Git/upload.
+  Shell selection, work focus, source identity, execution placement and navigation project are independent
+  concepts that are easy to conflate; [resources](docs/resources.md) describes what each currently supports.
+- Trust differs by source. Renderers, remote clients, extensions, model tool arguments, project content and
+  network responses are untrusted to varying degrees. The Host and the Rust kernel are one trusted build
+  talking over an authenticated private channel whose types are generated from
+  [the kernel protocol schema](kernel/protocol/schema.json).
 
-- Workbench shell selection and work focus are independent. Presentation does not own runtime identity,
-  documents, terminals or durable execution. Publish a prepared candidate only at its actual commit boundary.
-- DocumentsAPI is the text-content path; FilesAPI is browse/binary/CRUD; WorkspaceAPI is project/tree/Git/upload.
-  Desktop/Web use the shared Monaco path; mobile/embedded CodeMirror adapters share the same content/save owner.
-- Source identity, execution placement and navigation project are distinct. FixedBranch commands lazily
-  prepare an owned execution view; subsequent file tools follow that same view while retaining the baseline.
-  Workspace MCP still requires its explicit execution source. ManagedSources do not imply arbitrary multi-parent automatic merging.
-  These are current support boundaries, not speculative permanent restrictions.
-- Cancellation intent, effect outcome and actual executor stop are different. HTTP abort or rejected
-  observation does not release original readers, writers, assignments or source cleanup responsibility.
-- Missing, empty, invalid, stale, unavailable, failed, conflicting and unknown states stay distinct.
-  Failed or superseded preparation leaves the previous valid generation authoritative.
-- Internal schemas may evolve freely. The original storage owner upgrades supported existing generations
-  automatically before normal execution; business code uses the current representation afterward.
-  Commit converted records and their format marker together, preserve user identities and original receipts,
-  and never replay dispatched effects during conversion. Reject unknown/newer/malformed stores without
-  overwriting assets. Workspace files, Git, historical conversation data and external config remain assets.
-- Do not invent hard limits without a concrete protocol/platform/safety/data/resource reason. Defaults,
-  warnings, budgets and hard rejection are different contracts.
-- Keep filesystem, network, credential, shell and process behavior in the proper trusted owner. Validate
-  process/network input. Never log credentials, prompt bodies, bearer/pairing data or file contents.
+## Boundaries that matter
 
-## Changes and verification
+- **Security.** Privileged work stays in trusted owners, never in renderers. Untrusted input is checked where
+  it enters. Holding someone else's Thread or Run ID is not authority to act on it. Credentials, prompt
+  bodies, bearer/pairing data and file contents stay out of logs.
+- **User data.** Workspaces, Git, conversation history and external config are the user's assets. Storage
+  owners upgrade older formats in place, committing converted records together with the format marker,
+  and leave unknown or newer stores untouched. A crash may lose the last commits; it should not corrupt
+  data or leave a reference to content that was never written. A prepared candidate becomes visible only
+  when it commits; a failed or superseded preparation leaves the previous valid generation in place.
+- **Execution.** A cancel request, an observer going away and an executor actually stopping are different
+  events. Resources stay owned until really released, and an effect with unknown outcome is not replayed
+  automatically, since that could repeat something the user did not ask for twice.
+- **Capabilities.** Moving code between owners should not quietly drop provider/auth, remote/pairing/relay,
+  allowed-directory, audit, queue or platform behavior. LICENSE and THIRD_PARTY_NOTICES obligations stand
+  regardless of doc cleanup.
 
-Inspect the implementation, actual consumers and focused tests before changing behavior. Use the nearest
-package.json for commands. Select checks by the failure class: local behavior, shared consumers, native
-resources, target packaging or actual performance. Do not repeat broad checks that cannot change the decision.
+## Costs and tendencies
 
-Tests should exercise product behavior, not source text, CSS classes, enum copies or DTOs constructed in the
-test itself. New tests are not mandatory for every prose/presentation/type edit. Remove obsolete/redundant
-checks without one-for-one replacement. Installed-product smoke stays focused on working startup/capabilities;
-detailed failure combinations belong with their owner.
+What users experience (streaming, responsiveness, correctness, consistency across devices, recovery after a
+disconnect) is the measure of a change. The rest is engineering judgment.
 
-Name modules and APIs for responsibility, not migration labels. Keep current main engineering docs in Chinese
-and existing source-adjacent/package documentation in its established language. Do not create a parallel
-bilingual copy, permanent cleanup log, complex documentation governance or project-local workflow Skill.
+Some costs in this system are easy to underestimate. A Host-to-Rust call is a cross-process round trip.
+File locks, fsync and rewrites cost milliseconds, more on Windows. A single SQLite connection or actor
+thread serializes everything behind it. An event that fans out to many observers multiplies whatever each
+observer does in response.
 
-Preserve unrelated user edits and avoid destructive Git operations. Keep coherent phases reviewable, commit
-and push authorized completed work, and report exactly what did and did not run. Publication, deployment,
-and credential changes need their own authority.
+Defensive layers tend to accumulate: the same value validated at several layers, authorization that reads
+files on every request, generic scans of request bodies, observers that refetch everything whenever
+anything changes. Each looks harmless alone, and together they make a system slow without making it safer.
+A check that protects against no real input or failure is usually better deleted than kept; a check at a
+real trust boundary is worth keeping. Hard limits likewise need a concrete protocol, platform, safety or
+resource reason; defaults, warnings and budgets are often the better tool.
+[docs/performance.md](docs/performance.md) has more on costs and how to measure them.
+
+## Working here
+
+- Main engineering docs are in Chinese; source-adjacent docs keep their existing language. Docs describe the
+  current system and age at different speeds: this guide rarely changes, domain and module docs change with
+  their features, and numbers, method lists and constants are best linked to the code rather than copied.
+  The doc nearest the changed code is the natural one to update in the same change. Finished design plans
+  fold into the domain docs and are deleted. Parallel bilingual copies, permanent cleanup logs and doc
+  governance add weight without value.
+- Name modules and APIs after their responsibility, not after the migration that produced them.
+- Pick verification that could actually change your conclusion, and report what ran and what did not.
+  Tests are most useful when they observe product behavior, not source text or DTOs built inside the test.
+- Leave unrelated user edits alone and avoid destructive Git operations. Commit and push when authorized;
+  publishing, deployment and credential changes need their own explicit authority.
