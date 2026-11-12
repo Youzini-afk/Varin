@@ -931,6 +931,10 @@ fn chat_reasoning_aliases_emit_once_but_keep_the_original_replay_fields() {
     assert_eq!(output.iter().filter_map(|event| match event {
         ProviderEvent::ReasoningDelta { text, .. } => Some(text.as_str()), _ => None,
     }).collect::<String>(), "think more");
+    assert_eq!(output.iter().filter_map(|event| match event {
+        ProviderEvent::ReasoningDelta { text, .. } => Some(("thinking", text.as_str())),
+        ProviderEvent::TextDelta { text, .. } => Some(("text", text.as_str())), _ => None,
+    }).collect::<Vec<_>>(), vec![("thinking", "think"), ("thinking", " more"), ("text", "answer")]);
     let mut replay = view(chat::FAMILY);
     replay.history = output.into_iter().filter_map(|event| match event {
         ProviderEvent::ItemCompleted { item } => Some(Arc::new(ConversationItem {
@@ -941,6 +945,34 @@ fn chat_reasoning_aliases_emit_once_but_keep_the_original_replay_fields() {
     let body = provider.serialize(&replay, None).unwrap().to_value();
     assert_eq!(body["messages"][0]["reasoning_content"], "think");
     assert_eq!(body["messages"][0]["reasoning"], "think more");
+}
+
+#[test]
+fn chat_empty_opening_does_not_reserve_text_order_and_empty_usage_trailer_finishes() {
+    let p = chat::ChatProvider::new(chat_connection(vec![
+        json!({"id":"response","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}),
+        json!({"id":"response","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":null}]}),
+        json!({"id":"response","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}),
+        json!({"id":"response","choices":[{"index":0,"delta":{"content":null,"reasoning_content":""},"finish_reason":null}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}),
+        json!({"id":"response","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}),
+    ], true));
+    let (result, events) = generate(&p, chat::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    assert_eq!(events.iter().filter_map(|event| match event {
+        ProviderEvent::ReasoningDelta { text, .. } => Some(("thinking", text.as_str())),
+        ProviderEvent::TextDelta { text, .. } => Some(("text", text.as_str())), _ => None,
+    }).collect::<Vec<_>>(), vec![("thinking", "think"), ("text", "answer")]);
+    assert!(events.iter().any(|event| matches!(event, ProviderEvent::Usage { receipt } if receipt.output_tokens == Some(5))));
+    assert!(events.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { .. })));
+    for tail in [
+        json!({"id":"response","choices":[{"index":0,"delta":{"content":"extra"},"finish_reason":null}]}),
+        json!({"id":"response","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}),
+    ] {
+        let p = chat::ChatProvider::new(chat_connection(vec![
+            json!({"id":"response","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}), tail,
+        ], true));
+        assert_eq!(generate(&p, chat::FAMILY).0.unwrap_err().code, "invalid_event_order");
+    }
 }
 
 #[test]

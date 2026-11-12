@@ -418,6 +418,17 @@ struct StreamState {
     finish: Option<FinishReason>,
     done: bool,
 }
+fn finish_reason(reason: &str, mistral: bool) -> Result<FinishReason, ModelFailure> {
+    Ok(match reason {
+        "stop" => FinishReason::Stop,
+        "tool_calls" => FinishReason::ToolCalls,
+        "length" => FinishReason::Length,
+        "model_length" if mistral => FinishReason::Length,
+        "error" if mistral => return Err(failure("provider_error", "Mistral reported generation failure")),
+        "content_filter" => FinishReason::ContentFilter,
+        _ => return Err(failure("unsupported_stop_reason", "unknown Chat finish reason")),
+    })
+}
 impl StreamState {
     fn mistral_content(
         &mut self,
@@ -717,6 +728,19 @@ impl StreamState {
                 .as_object()
                 .ok_or_else(|| failure("invalid_provider_event", "Chat chunk lacks delta"))?;
             if self.finish.is_some() {
+                // A usage trailer may retain an empty choice. It has no new
+                // generation content and must not invalidate a finished answer.
+                let empty = delta.iter().all(|(key, value)| value.is_null() || match key.as_str() {
+                    "role" => value == "assistant",
+                    "content" | "refusal" | "reasoning_content" | "reasoning" => value.as_str() == Some(""),
+                    "tool_calls" | "reasoning_details" => value.as_array().is_some_and(Vec::is_empty),
+                    _ => false,
+                });
+                if empty {
+                    let repeated = choice["finish_reason"].as_str()
+                        .map(|reason| finish_reason(reason, self.mistral)).transpose()?;
+                    if choice["finish_reason"].is_null() || repeated == self.finish { continue; }
+                }
                 return Err(failure(
                     "invalid_event_order",
                     "Chat content follows finish_reason",
@@ -726,7 +750,11 @@ impl StreamState {
             // both wire originals, but expose a single public stream per chunk.
             let public_reasoning = ["reasoning_content", "reasoning"].into_iter()
                 .find(|key| delta.get(*key).and_then(Value::as_str).is_some_and(|text| !text.is_empty()));
-            for (key, value) in delta {
+            let reasoning = |key: &str| matches!(key, "reasoning_content" | "reasoning" | "reasoning_details");
+            // Object key order is not output order. Public reasoning in a mixed
+            // chunk precedes its text, while the original fields remain intact.
+            for (key, value) in delta.iter().filter(|(key, _)| reasoning(key))
+                .chain(delta.iter().filter(|(key, _)| !reasoning(key))) {
                 match key.as_str() {
                     "role" => {
                         if value != "assistant" {
@@ -751,6 +779,9 @@ impl StreamState {
                         let mut combined = field.as_str().unwrap_or("").to_owned();
                         combined.push_str(text);
                         *field = json!(combined);
+                        // Role-only opening chunks commonly include content:"".
+                        // They must not reserve the answer's position before thinking.
+                        if text.is_empty() { continue; }
                         if key == "content" || key == "refusal" {
                             emit_event(
                                 emit,
@@ -934,25 +965,7 @@ impl StreamState {
                 }
             }
             if let Some(reason) = choice["finish_reason"].as_str() {
-                self.finish = Some(match reason {
-                    "stop" => FinishReason::Stop,
-                    "tool_calls" => FinishReason::ToolCalls,
-                    "length" => FinishReason::Length,
-                    "model_length" if self.mistral => FinishReason::Length,
-                    "error" if self.mistral => {
-                        return Err(failure(
-                            "provider_error",
-                            "Mistral reported generation failure",
-                        ));
-                    }
-                    "content_filter" => FinishReason::ContentFilter,
-                    _ => {
-                        return Err(failure(
-                            "unsupported_stop_reason",
-                            "unknown Chat finish reason",
-                        ));
-                    }
-                });
+                self.finish = Some(finish_reason(reason, self.mistral)?);
             }
         }
         Ok(false)
